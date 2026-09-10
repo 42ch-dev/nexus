@@ -100,9 +100,12 @@ fn map_host_error(e: &nexus_agent_host::HostError) -> NexusApiError {
             field: "operation".into(),
             reason: e.to_string(),
         },
-        "policy_denied" => NexusApiError::Forbidden {
+        "policy_denied" | "owner_workspace_mismatch" => NexusApiError::Forbidden {
             resource: "agent_host".into(),
             reason: e.to_string(),
+        },
+        "cleanup_unconfirmed" => NexusApiError::ServiceUnavailable {
+            message: e.to_string(),
         },
         _ => NexusApiError::Internal {
             code: "AGENT_HOST_ERROR".into(),
@@ -263,7 +266,7 @@ pub async fn create_session(
             )
             .await?;
         let host = get_host(&state)?;
-        let cwd = session_cwd_path(&req);
+        let cwd = session_cwd_path(&req, &state);
         let key = ActorSessionRegistry::key_for(
             &req.provider_id,
             &cwd,
@@ -271,7 +274,7 @@ pub async fn create_session(
             req.mode.clone(),
             &ctx,
         )?;
-        let host_req = host_create_request(&req);
+        let host_req = host_create_request(&req, &state, &ctx.owner_creator_id);
         let host_for_create = Arc::clone(&host);
         let session = state
             .actor_sessions()
@@ -300,7 +303,8 @@ pub async fn create_session(
     }
 
     let host = get_host(&state)?;
-    let host_req = host_create_request(&req);
+    let owner_creator_id = require_creator(&state)?;
+    let host_req = host_create_request(&req, &state, &owner_creator_id);
     let model = req.model.clone();
 
     let session = host
@@ -319,24 +323,45 @@ pub async fn create_session(
     )))
 }
 
-fn session_cwd_path(req: &CreateSessionRequest) -> std::path::PathBuf {
-    req.cwd.as_ref().map_or_else(
-        || std::path::PathBuf::from("/tmp"),
-        std::path::PathBuf::from,
-    )
+fn session_cwd_path(req: &CreateSessionRequest, state: &WorkspaceState) -> std::path::PathBuf {
+    req.cwd
+        .as_ref()
+        .map_or_else(|| verified_workspace_root(state), std::path::PathBuf::from)
 }
 
-/// Legacy host request: empty MCP list and `metadata: null`.
+/// Resolve the canonical Creator workspace root from verified state.
+///
+/// The active workspace path is the trusted boundary for Host sessions; the
+/// request body never supplies the workspace root.
+fn verified_workspace_root(state: &WorkspaceState) -> std::path::PathBuf {
+    state
+        .workspace_path()
+        .map_or_else(|| state.nexus_home().clone(), std::path::PathBuf::from)
+}
+
+/// Build the Host create request with verified owner metadata.
+///
+/// `owner_creator_id` comes from existing verified admission (the active
+/// Creator at request time, or the admitted Character's owner) — never from
+/// request-body assertions. The canonical workspace root is the active
+/// workspace path.
 fn host_create_request(
     req: &CreateSessionRequest,
+    state: &WorkspaceState,
+    owner_creator_id: &str,
 ) -> nexus_agent_host::capability::CreateSessionRequest {
     nexus_agent_host::capability::CreateSessionRequest {
         provider_id: nexus_agent_host::ProviderId::new(&req.provider_id),
-        cwd: session_cwd_path(req),
+        cwd: session_cwd_path(req, state),
         model: req.model.clone(),
         mode: req.mode.clone(),
         mcp_servers: vec![],
         metadata: serde_json::Value::Null,
+        owner: nexus_agent_host::capability::model::SessionOwner {
+            creator_id: owner_creator_id.to_string(),
+            workspace_root: verified_workspace_root(state),
+            orchestration_run_id: None,
+        },
     }
 }
 
@@ -745,6 +770,7 @@ pub async fn execute_operation(
                 content: vec![
                     nexus_agent_host::capability::model::HostContentBlock::Text { text: content },
                 ],
+                permission_scope: None,
             };
             let stream = host.exec(sid.clone(), host_op).await.map_err(|e| {
                 if snapshot.is_some() {
@@ -2031,8 +2057,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn legacy_create_request_bytes_omit_actor_pair() {
+    #[tokio::test]
+    async fn legacy_create_request_uses_verified_owner_without_actor_pair() {
         let req: CreateSessionRequest = serde_json::from_value(serde_json::json!({
             "provider_id": "claude-native",
             "cwd": "/tmp"
@@ -2040,13 +2066,15 @@ mod tests {
         .expect("legacy body");
         assert!(req.actor_ref.is_none());
         assert!(req.viewpoint.is_none());
-        let host_req = host_create_request(&req);
+
+        let state = state_with_host().await;
+        let host_req = host_create_request(&req, &state, "ctr_verified");
         assert!(host_req.metadata.is_null());
         assert!(host_req.mcp_servers.is_empty());
-        let host_json = serde_json::to_string(&host_req).expect("host json");
+        assert_eq!(host_req.owner.creator_id, "ctr_verified");
         assert_eq!(
-            host_json,
-            r#"{"provider_id":"claude-native","cwd":"/tmp","model":null,"mode":null,"mcp_servers":[],"metadata":null}"#
+            host_req.owner.workspace_root,
+            verified_workspace_root(&state)
         );
     }
 
@@ -2518,6 +2546,8 @@ mod tests {
                 active_op_id: None,
                 negotiated_capabilities:
                     nexus_agent_host::capability::model::CapabilityDescriptor::native_cli_limited(),
+                owner: request.owner,
+                process_identity: None,
             };
             self.sessions
                 .lock()

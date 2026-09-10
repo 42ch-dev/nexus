@@ -56,7 +56,6 @@ pub enum DegradedSubsystem {
     Db,
     Sync,
     Engine,
-    WorkerMgr,
     AcpRegistry,
 }
 
@@ -72,8 +71,6 @@ pub struct SubsystemHealth {
     pub sync: Option<SubsystemHealthEntry>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub engine: Option<SubsystemHealthEntry>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub worker_mgr: Option<SubsystemHealthEntry>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub acp_registry: Option<SubsystemHealthEntry>,
 }

@@ -133,9 +133,13 @@ impl LocalSetBridge {
                             info!("LocalSet bridge thread started");
 
                             while let Some(Some(request)) = request_rx.recv().await {
-                                // Execute the !Send future on the LocalSet
+                                // A long-lived connection must not monopolize the bridge:
+                                // schedule each request on the LocalSet so later operations
+                                // can drive that connection concurrently.
                                 let future = (request.future_factory)();
-                                future.await;
+                                tokio::task::spawn_local(async move {
+                                    future.await;
+                                });
                             }
 
                             info!("LocalSet bridge thread shutting down");
@@ -423,6 +427,30 @@ mod tests {
         for result in results {
             assert!((0..6).contains(&result) && result % 2 == 0);
         }
+    }
+
+    /// A persistent bridge task must not prevent later operations from running.
+    #[tokio::test]
+    async fn bridge_long_lived_request_does_not_block_follow_up() {
+        let bridge = LocalSetBridge::new();
+        let persistent_bridge = bridge.clone();
+        let persistent = tokio::spawn(async move {
+            persistent_bridge
+                .execute(|| Box::pin(std::future::pending::<()>()))
+                .await
+        });
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            bridge.execute(|| Box::pin(async { 42 })),
+        )
+        .await
+        .expect("follow-up request must not be blocked")
+        .expect("bridge execute");
+        assert_eq!(result, 42);
+
+        persistent.abort();
     }
 
     /// Test: Bridge handles shutdown while request is in-flight.

@@ -564,6 +564,7 @@ async fn findings_routing_hints_all_executors() {
 /// Helper: PATCH a finding's status and return either the updated DTO or
 /// the resulting `NexusApiError`. Used by the V1.49 lifecycle tests so they
 /// can assert both happy paths (Ok) and rejection paths (Err).
+#[allow(clippy::result_large_err)] // test helper returning the API error for assertion; boxing would obscure failure diffs
 async fn patch_status(
     state: &WorkspaceState,
     work_id: &str,
@@ -771,6 +772,7 @@ const fn empty_patch() -> UpdateFindingRequest {
 
 /// Helper: PATCH a finding with an arbitrary request body, returning either
 /// the updated DTO or the resulting `NexusApiError`.
+#[allow(clippy::result_large_err)] // test helper returning the API error for assertion; boxing would obscure failure diffs
 async fn patch_req(
     state: &WorkspaceState,
     work_id: &str,

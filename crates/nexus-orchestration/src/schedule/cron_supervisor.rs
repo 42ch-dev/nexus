@@ -162,6 +162,7 @@ pub async fn evaluate_cron_fires(
     pool: &SqlitePool,
     workspace_dir: Option<&Path>,
     now: DateTime<Utc>,
+    binding_provider: Option<&str>,
 ) -> CronFireSummary {
     let rows = match nexus_local_db::works::list_works_with_schedule_json(pool).await {
         Ok(r) => r,
@@ -177,7 +178,15 @@ pub async fn evaluate_cron_fires(
     let mut summary = CronFireSummary::default();
     let works_scanned = rows.len();
     for row in &rows {
-        evaluate_work(pool, workspace_dir, row, now, &mut summary).await;
+        evaluate_work(
+            pool,
+            workspace_dir,
+            row,
+            now,
+            binding_provider,
+            &mut summary,
+        )
+        .await;
     }
 
     info!(
@@ -199,6 +208,7 @@ async fn evaluate_work(
     workspace_dir: Option<&Path>,
     row: &nexus_local_db::works::WorkCronRow,
     now: DateTime<Utc>,
+    binding_provider: Option<&str>,
     summary: &mut CronFireSummary,
 ) {
     let config: CronConfig = match serde_json::from_str(&row.schedule_json) {
@@ -241,6 +251,7 @@ async fn evaluate_work(
             tz,
             now,
             gate,
+            binding_provider,
             summary,
         )
         .await;
@@ -303,6 +314,7 @@ async fn try_fire_role(
     tz: Tz,
     now: DateTime<Utc>,
     gate: Option<&'static str>,
+    binding_provider: Option<&str>,
     summary: &mut CronFireSummary,
 ) {
     let Some(role) = role else {
@@ -388,6 +400,47 @@ async fn try_fire_role(
             let backoff_ms: u64 = 100;
 
             let mut enqueue_ok: Option<String> = None;
+            // N-9: derive the complete binding map for the role's preset
+            // from the configured default provider. A preset with prompt
+            // roles and no provider refuses the fire (never a drive-enabled
+            // row with an empty binding map); a preset with no prompt roles
+            // accepts an empty map.
+            let bindings = if let Some(provider_id) = binding_provider {
+                if let Some(bindings) =
+                    crate::preset::default_bindings_for_preset(preset_id, provider_id)
+                {
+                    bindings
+                } else {
+                    warn!(
+                        work_id = %row.work_id, role = role_name, preset_id,
+                        "cron-supervisor: preset not resolvable; skipping fire"
+                    );
+                    summary.skipped_gated += 1;
+                    return;
+                }
+            } else {
+                let caps = crate::capability::CapabilityRegistry::with_builtins();
+                if let Ok(loaded) = crate::preset::load_embedded_preset(preset_id, &caps) {
+                    let roles = crate::preset::required_prompt_roles(&loaded);
+                    if !roles.is_empty() {
+                        warn!(
+                            work_id = %row.work_id, role = role_name, preset_id,
+                            "cron-supervisor: preset requires prompt roles but no \
+                             binding provider is configured; skipping fire"
+                        );
+                        summary.skipped_gated += 1;
+                        return;
+                    }
+                    std::collections::HashMap::new()
+                } else {
+                    warn!(
+                        work_id = %row.work_id, role = role_name, preset_id,
+                        "cron-supervisor: preset not resolvable; skipping fire"
+                    );
+                    summary.skipped_gated += 1;
+                    return;
+                }
+            };
             for attempt in 1..=max_attempts {
                 match crate::auto_chain::enqueue_cron_schedule(
                     pool,
@@ -395,6 +448,7 @@ async fn try_fire_role(
                     &row.work_id,
                     preset_id,
                     role_name,
+                    bindings.clone(),
                 )
                 .await
                 {

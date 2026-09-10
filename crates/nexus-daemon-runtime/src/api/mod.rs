@@ -293,11 +293,10 @@ fn reading_routes() -> Router<WorkspaceState> {
 /// `GET /v1/daemon/memory/fragments` to close the review/fragment loop.
 fn memory_routes() -> Router<WorkspaceState> {
     Router::new()
-        // Memory pending review
-        .route(
-            "/v1/daemon/memory/pending-review",
-            post(handlers::memory::create_pending_review),
-        )
+        // Memory pending review. M-005: the creator-scope POST
+        // (`create_pending_review`) was removed — no CLI producer exists;
+        // the review pipeline (`memory_pipeline.rs`) and the list/count/
+        // dismiss CLI commands consume the table via the remaining routes.
         .route(
             "/v1/daemon/memory/pending-review",
             get(handlers::memory::list_pending_reviews),

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT concurrency_kind as \"concurrency_kind!\" FROM creator_schedules WHERE schedule_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "concurrency_kind!",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c4628ad10920e89e2f93971f4e3a1fab3b520dd9c4ea78b79f088696cd5ae13b"
+}

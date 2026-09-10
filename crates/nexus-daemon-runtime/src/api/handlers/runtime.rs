@@ -109,17 +109,6 @@ pub async fn daemon_status(State(state): State<WorkspaceState>) -> Json<DaemonSt
             active_workers: None,
             cache_age_ms: None,
         }),
-        worker_mgr: Some(SubsystemHealthEntry {
-            status: if state.worker_manager().is_some() {
-                HealthStatus::Up
-            } else {
-                HealthStatus::Down
-            },
-            last_check_ms: Some(0),
-            active_sessions: None,
-            active_workers: None,
-            cache_age_ms: None,
-        }),
         acp_registry: Some(SubsystemHealthEntry {
             status: if state.capability_registry().is_some() {
                 HealthStatus::Up

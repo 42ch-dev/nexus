@@ -270,6 +270,28 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
         )
     });
 
+    // N-10/N-14: internal-execution input projection — the research,
+    // novel-brainstorm, and novel-review-master presets reference these
+    // keys in their enter-action vars and prompt templates. Strict-mode
+    // template rendering fails on MISSING keys, so every key a preset
+    // references must be present (empty string is fine — the preset's
+    // `{{#if …}}` guards omit the section). The auto-chain/cron/review-
+    // master insertion paths build input through this function, so a
+    // missing key would make the drive loop fail at the first state and
+    // cancel the run — never a driven run with real provider progress.
+    for key in [
+        "references_dir",
+        "output_dir",
+        "topic",
+        "open_findings",
+        "vibe",
+    ] {
+        map.as_object_mut().map(|o| {
+            o.entry(key.to_string())
+                .or_insert_with(|| serde_json::Value::String(String::new()))
+        });
+    }
+
     map
 }
 
@@ -368,6 +390,7 @@ pub fn build_schedule_for_stage(
         input: Some(preset_input),
         force_gates: false,
         reason: None,
+        agent_bindings: None,
     })
 }
 

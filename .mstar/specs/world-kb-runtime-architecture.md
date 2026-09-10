@@ -92,18 +92,18 @@ Retire work-entry-only job semantics in V1.40; keep wire `BlockType` from contra
 
 V1.51 T-A P0 closes `R-V150KBED-01` by swapping the V1.50 heuristic
 (`block_type_guess='character'` for every capitalized noun phrase) for an
-LLM-driven extraction pathway. The new `nexus.llm.extract` capability
+LLM-driven extraction pathway. The `nexus.llm.extract` capability
 ([llm-extract.md](../specs/llm-extract.md)) is a sibling to `judge.llm`: both
-reuse the V1.32 LLM worker pool via `WorkerHandleProvider`, but
+use the injected `PromptExecutor` and daemon Host plane, while
 `nexus.llm.extract` emits `Vec<KbCandidate>` carrying LLM-judged `block_type`,
 `canonical_name`, `confidence`, and a verbatim `source_quote`.
 
 ```text
 novel-review-master (terminal) → supervisor hook
   → quality_loop::extract_kb_candidates_for_review(pool, sched, ws, registry)
-     ├─ registry + worker available → LlmExtractTask → nexus.llm.extract
-     │     → Vec<KbCandidate> with block_type/confidence/source_quote
-     └─ no worker / WorkerUnavailable → heuristic fallback (V1.50 behavior)
+     ├─ PromptExecutor available → LlmExtractTask → nexus.llm.extract
+     │     → run-scoped Host prompt → Vec<KbCandidate>
+     └─ typed unavailable → heuristic fallback (V1.50 behavior)
   → insert_pending_with_llm / insert_pending → kb_extract_jobs (pending)
   → creator world kb adopt <id> (surfaces confidence + source_quote)
 ```

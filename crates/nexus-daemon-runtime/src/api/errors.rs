@@ -139,6 +139,24 @@ pub enum NexusApiError {
     #[error("{message}")]
     ConflictCoded { code: String, message: String },
 
+    /// HTTP 409 with a stable public product code AND structured details
+    /// (A4 wait-conflict envelope: `{session_id, status, current_wait_id}`).
+    #[error("{message}")]
+    ConflictCodedDetails {
+        code: String,
+        message: String,
+        details: serde_json::Value,
+    },
+
+    /// HTTP 422 with a stable public product code AND structured details
+    /// (A4 missing/malformed wait token: `{field, reason}`).
+    #[error("{message}")]
+    BadRequestCodedDetails {
+        code: String,
+        message: String,
+        details: serde_json::Value,
+    },
+
     /// Resource locked by another process (e.g., `runtime_lock_holder`)
     /// DF-60 §4: HTTP 423 Locked
     #[error("Locked: {reason}")]
@@ -253,6 +271,7 @@ impl NexusApiError {
             Self::Uninitialized
             | Self::Conflict(_)
             | Self::ConflictCoded { .. }
+            | Self::ConflictCodedDetails { .. }
             | Self::StrategyConflict { .. }
             | Self::OutlineConflict { .. }
             | Self::WorldKbConflict { .. } => StatusCode::CONFLICT,
@@ -261,7 +280,8 @@ impl NexusApiError {
                 StatusCode::BAD_REQUEST
             }
             Self::ServiceUnavailable { .. } => StatusCode::SERVICE_UNAVAILABLE,
-            Self::PresetGatesFailed { .. }
+            Self::BadRequestCodedDetails { .. }
+            | Self::PresetGatesFailed { .. }
             | Self::StrategyValidationFailed { .. }
             | Self::OutlineValidationFailed { .. }
             | Self::WorldKbValidationFailed { .. }
@@ -353,7 +373,10 @@ impl NexusApiError {
                     _ => "bad_request",
                 }
             }
-            Self::PeerToolDenied { code, .. } | Self::ConflictCoded { code, .. } => code.as_str(),
+            Self::PeerToolDenied { code, .. }
+            | Self::ConflictCoded { code, .. }
+            | Self::ConflictCodedDetails { code, .. }
+            | Self::BadRequestCodedDetails { code, .. } => code.as_str(),
             Self::StrategyConflict { .. } => "strategy_conflict",
             Self::StrategyValidationFailed { .. } => "strategy_validation_failed",
             Self::OutlineConflict { .. } => "outline_conflict",
@@ -388,7 +411,9 @@ impl NexusApiError {
             | Self::StrategyValidationFailed { details }
             | Self::OutlineValidationFailed { details }
             | Self::WorldKbValidationFailed { details }
-            | Self::InputValidationFailed { details } => Some(details.clone()),
+            | Self::InputValidationFailed { details }
+            | Self::ConflictCodedDetails { details, .. }
+            | Self::BadRequestCodedDetails { details, .. } => Some(details.clone()),
             Self::StrategyConflict {
                 current_revision,
                 node_id,

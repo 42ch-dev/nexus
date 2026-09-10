@@ -7,7 +7,8 @@
   "type": "object",
   "required": ["signal"],
   "properties": {
-    "signal": { "type": "string", "description": "Signal action: pause, resume, cancel." }
+    "signal": { "type": "string", "description": "Signal action: pause, resume, cancel, start, advance, continue." },
+    "wait_id": { "type": "string", "description": "Exact durable wait token for continue (A4). Required for signal=continue; ignored for other signals." }
   },
   "additionalProperties": false
 }

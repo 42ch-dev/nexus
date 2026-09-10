@@ -29,6 +29,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use nexus_orchestration::schedule::supervisor::ScheduleRunStarter;
 use sqlx::SqlitePool;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
@@ -104,6 +105,8 @@ pub fn spawn_stale_findings_watcher(
     pool: SqlitePool,
     shutdown_notify: Arc<Notify>,
     config: StaleFindingsWatcherConfig,
+    binding_provider: Option<String>,
+    schedule_starter: Option<Arc<dyn ScheduleRunStarter>>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         tracing::info!(
@@ -121,7 +124,13 @@ pub fn spawn_stale_findings_watcher(
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    run_one_sweep(&pool, config.threshold_seconds).await;
+                    run_one_sweep(
+                        &pool,
+                        config.threshold_seconds,
+                        binding_provider.as_deref(),
+                        schedule_starter.as_deref(),
+                    )
+                    .await;
                 }
                 () = shutdown_notify.notified() => {
                     tracing::info!("stale-findings watcher: shutdown received, exiting");
@@ -140,7 +149,12 @@ pub fn spawn_stale_findings_watcher(
 /// `auto_review_master_on_timeout = true`, enqueue a `novel-review-master`
 /// schedule (T4 opt-in). The default flag value is `false` so no schedule
 /// is ever created without explicit opt-in (AC3).
-pub async fn run_one_sweep(pool: &SqlitePool, threshold_seconds: i64) {
+pub async fn run_one_sweep(
+    pool: &SqlitePool,
+    threshold_seconds: i64,
+    binding_provider: Option<&str>,
+    schedule_starter: Option<&dyn ScheduleRunStarter>,
+) {
     let now_epoch = current_epoch_seconds();
 
     match nexus_local_db::findings::list_all_stale_open_findings(pool, now_epoch, threshold_seconds)
@@ -169,7 +183,14 @@ pub async fn run_one_sweep(pool: &SqlitePool, threshold_seconds: i64) {
                     "stale open finding past master-decision timeout"
                 );
 
-                maybe_enqueue_review_master(pool, &row.creator_id, &row.work_id).await;
+                maybe_enqueue_review_master(
+                    pool,
+                    &row.creator_id,
+                    &row.work_id,
+                    binding_provider,
+                    schedule_starter,
+                )
+                .await;
             }
         }
         Err(e) => {
@@ -193,7 +214,13 @@ pub async fn run_one_sweep(pool: &SqlitePool, threshold_seconds: i64) {
 /// must never crash the sweep loop. A missing Work, a Work with the flag
 /// disabled, and a successful enqueue all return silently from the caller's
 /// perspective; observability is via `tracing` only.
-async fn maybe_enqueue_review_master(pool: &SqlitePool, creator_id: &str, work_id: &str) {
+async fn maybe_enqueue_review_master(
+    pool: &SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+    binding_provider: Option<&str>,
+    schedule_starter: Option<&dyn ScheduleRunStarter>,
+) {
     let work = match nexus_local_db::works::get_work(pool, creator_id, work_id).await {
         Ok(Some(w)) => w,
         Ok(None) => {
@@ -225,8 +252,39 @@ async fn maybe_enqueue_review_master(pool: &SqlitePool, creator_id: &str, work_i
         return;
     }
 
-    match nexus_orchestration::auto_chain::enqueue_review_master_schedule(pool, creator_id, work_id)
-        .await
+    // N-9: derive the complete binding map for `novel-review-master` from
+    // the configured default provider. The preset's graphs issue prompts
+    // (`acp.prompt` + `judge.llm`), so a missing provider refuses the
+    // enqueue — never a drive-enabled row with an empty binding map.
+    let bindings = if let Some(provider_id) = binding_provider {
+        if let Some(bindings) = nexus_orchestration::preset::default_bindings_for_preset(
+            "novel-review-master",
+            provider_id,
+        ) {
+            bindings
+        } else {
+            tracing::warn!(
+                creator_id,
+                work_id,
+                "stale-findings: novel-review-master preset not resolvable; \
+                 refusing to publish a drive-enabled row"
+            );
+            return;
+        }
+    } else {
+        tracing::warn!(
+            creator_id,
+            work_id,
+            "stale-findings: no binding provider configured; \
+             refusing to publish a drive-enabled novel-review-master row"
+        );
+        return;
+    };
+
+    match nexus_orchestration::auto_chain::enqueue_review_master_schedule(
+        pool, creator_id, work_id, bindings,
+    )
+    .await
     {
         Ok(schedule_id) => {
             tracing::info!(
@@ -235,6 +293,33 @@ async fn maybe_enqueue_review_master(pool: &SqlitePool, creator_id: &str, work_i
                 schedule_id = %schedule_id,
                 "stale-findings: enqueued novel-review-master (opt-in)"
             );
+            // N-11: guaranteed post-commit coordinator handoff — the
+            // review-master row is admitted through the SAME production
+            // starter as every other insertion branch. A starter failure is
+            // explicit (logged at error level); the row stays pending for a
+            // later tick / explicit start, never silently unhanded.
+            if let Some(starter) = schedule_starter {
+                match starter.start(&schedule_id).await {
+                    Ok(_sid) => {
+                        tracing::info!(
+                            creator_id,
+                            work_id,
+                            schedule_id = %schedule_id,
+                            "stale-findings: review-master admitted via daemon starter"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            error = %e,
+                            creator_id,
+                            work_id,
+                            schedule_id = %schedule_id,
+                            "stale-findings: review-master starter handoff failed; \
+                             row stays pending for a later tick / explicit start"
+                        );
+                    }
+                }
+            }
         }
         Err(e) => {
             tracing::error!(

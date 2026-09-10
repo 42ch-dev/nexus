@@ -19,7 +19,6 @@
 //! - Error code surface (`POLICY_BLOCKED`, `NOT_SUPPORTED`, FORBIDDEN, `INVALID_INPUT`)
 //! - Audit log on every invocation path
 //! - `stage_metadata` sub-field allowlist
-//! - Worker upcall equivalence (HTTP and worker hit same dispatch)
 
 #![allow(clippy::unwrap_used)]
 
@@ -364,66 +363,6 @@ async fn error_code_policy_blocked_surface_in_assemble() {
     assert_eq!(err.error_code(), "policy_blocked");
 }
 
-#[tokio::test]
-async fn worker_upcall_surfaces_forbidden_error_code() {
-    let ctx = test_ctx().await;
-    let other_ctx = test_ctx_other_creator().await;
-    let work_id = seed_work(&ctx.state).await;
-
-    let result = HostToolExecutor::dispatch_from_worker(
-        "nexus.work.get",
-        &json!({ "work_id": work_id }),
-        "req-002",
-        &other_ctx.state,
-    )
-    .await;
-
-    assert!(!result.grant);
-    let err = result.error.expect("worker error should be present");
-    assert_eq!(
-        err.code, "forbidden",
-        "Worker error code must surface FORBIDDEN"
-    );
-}
-
-#[tokio::test]
-async fn worker_upcall_surfaces_policy_blocked_error_code() {
-    let ctx = test_ctx().await;
-    let result = HostToolExecutor::dispatch_from_worker(
-        "nexus.context.assemble",
-        &json!({ "requires_platform": true }),
-        "req-003",
-        &ctx.state,
-    )
-    .await;
-
-    assert!(!result.grant);
-    let err = result.error.expect("worker error should be present");
-    assert_eq!(
-        err.code, "policy_blocked",
-        "Worker error code must surface POLICY_BLOCKED"
-    );
-}
-
-#[tokio::test]
-async fn worker_upcall_surfaces_not_supported_error_code() {
-    let ctx = test_ctx().await;
-    let result = HostToolExecutor::dispatch_from_worker(
-        "nexus.unknown.tool",
-        &json!({}),
-        "req-004",
-        &ctx.state,
-    )
-    .await;
-
-    assert!(!result.grant);
-    let err = result.error.expect("worker error should be present");
-    assert_eq!(
-        err.code, "not_supported",
-        "Worker error code must surface NOT_SUPPORTED"
-    );
-}
-
 // ─── Fix wave 2: Audit log on every invocation path ─────────────────────────
 
 #[tokio::test]
@@ -570,63 +509,4 @@ async fn stage_metadata_rejects_non_object() {
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert_eq!(err.error_code(), "invalid_input");
-}
-
-// ─── Fix wave 2: Worker upcall path equivalence ─────────────────────────────
-
-#[tokio::test]
-async fn worker_upcall_whoami_equivalent_to_http() {
-    let ctx = test_ctx().await;
-
-    let http_result =
-        HostToolExecutor::execute(&make_request("nexus.context.whoami", json!({})), &ctx.state)
-            .await
-            .expect("HTTP execute");
-
-    let worker_result = HostToolExecutor::dispatch_from_worker(
-        "nexus.context.whoami",
-        &json!({}),
-        "req-eq-001",
-        &ctx.state,
-    )
-    .await;
-
-    assert!(worker_result.grant);
-    assert_eq!(worker_result.request_id, "req-eq-001");
-    let output = worker_result.output.expect("worker should have output");
-    assert_eq!(
-        output, http_result,
-        "HTTP and worker must produce same result"
-    );
-}
-
-#[tokio::test]
-async fn worker_upcall_schedule_status_equivalent_to_http() {
-    let ctx = test_ctx().await;
-    let work_id = seed_work(&ctx.state).await;
-
-    let http_result = HostToolExecutor::execute(
-        &make_request(
-            "nexus.orchestration.schedule_status",
-            json!({ "work_id": work_id }),
-        ),
-        &ctx.state,
-    )
-    .await
-    .expect("HTTP execute");
-
-    let worker_result = HostToolExecutor::dispatch_from_worker(
-        "nexus.orchestration.schedule_status",
-        &json!({ "work_id": work_id }),
-        "req-eq-002",
-        &ctx.state,
-    )
-    .await;
-
-    assert!(worker_result.grant);
-    let output = worker_result.output.expect("worker output");
-    assert_eq!(
-        output, http_result,
-        "HTTP and worker must produce same result"
-    );
 }

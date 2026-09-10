@@ -9,6 +9,7 @@ use crate::capability::CapabilityRegistry;
 use crate::preset::manifest::{
     ContextUpdateOp, ExitWhen, InitialAction, InnerGraph, NextTarget, PresetManifest,
 };
+use crate::run_state::PresetSourceIdentity;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -46,6 +47,12 @@ pub struct LoadedPreset {
     /// Role definitions for multi-agent presets (WS-E T6).
     /// Empty = single-agent mode (backward compatible).
     pub roles: Vec<crate::preset::manifest::PresetRoleDefinition>,
+    /// Content-addressed preset source identity (A2/A7).
+    ///
+    /// `Some` when the loader knows the source (embedded or directory
+    /// bundle); `None` for raw-YAML loads (`load_preset_from_str`) where the
+    /// caller must supply the identity before starting a v1 run.
+    pub source_identity: Option<PresetSourceIdentity>,
 }
 
 impl std::fmt::Debug for LoadedPreset {
@@ -248,8 +255,16 @@ pub fn load_preset_from_str_with_limits(
     // 3. Build outer graph per §8.2 mapping table.
     let outer_graph = build_outer_graph(&manifest);
 
-    // 4. Build inner graphs per §8.2 mapping table.
-    let inner_graphs = build_inner_graphs(&manifest);
+    // 4. Build inner graphs per §8.2 mapping table. The production prompt
+    // executor and per-run cancellation tokens are wired at graph build time
+    // (A1); `None`/empty keeps loader-only/test construction executor-free.
+    let inner_graphs = build_inner_graphs(
+        &manifest,
+        &manifest.preset.id,
+        None,
+        None,
+        std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+    );
 
     // 5. Extract output bindings from manifest.
     let output_bindings = extract_output_bindings(&manifest);
@@ -278,6 +293,7 @@ pub fn load_preset_from_str_with_limits(
             })
             .collect(),
         roles: manifest.roles.clone(),
+        source_identity: None,
         manifest,
     })
 }
@@ -333,7 +349,140 @@ pub fn load_preset(
         tracing::warn!(path = %d.path, message = %d.message, category = ?d.category, "A3 loader warning");
     }
 
-    load_preset_from_str(&yaml, caps)
+    let mut loaded = load_preset_from_str(&yaml, caps)?;
+    // A directory bundle knows its source identity (A2/A7): content hash
+    // over the manifest + every referenced asset, with a canonicalized root.
+    loaded.source_identity = Some(preset_source_identity(
+        &loaded.manifest,
+        Some(bundle_root),
+        None,
+    )?);
+    Ok(loaded)
+}
+
+/// Compute the content-addressed [`PresetSourceIdentity`] (A2/A7).
+///
+/// The content hash is over the manifest **and** every referenced asset
+/// (`template_file`, `prompt_file`, `system_prompt_file` in capability args, and
+/// role `system_prompt_file`) — not the YAML hash alone — so a changed
+/// template invalidates the identity and recovery refuses to fall back to
+/// current bytes.
+///
+/// For a directory bundle, referenced asset files are read from the
+/// **canonicalized** `bundle_root`; each path is validated as a safe
+/// relative path before joining. For an embedded preset they are read from
+/// the compiled-in embedded directory. A missing referenced asset is an
+/// **error** (never hashed as empty) — the identity must be exact.
+///
+/// # Errors
+/// Returns [`PresetLoadError`] if a referenced asset cannot be read, is an
+/// unsafe path, or neither `bundle_root` nor `embedded_id` is provided.
+pub fn preset_source_identity(
+    manifest: &PresetManifest,
+    bundle_root: Option<&Path>,
+    embedded_id: Option<&str>,
+) -> Result<PresetSourceIdentity, PresetLoadError> {
+    // Hash the manifest YAML first.
+    let manifest_yaml = serde_yaml::to_string(manifest).map_err(PresetLoadError::from)?;
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(manifest_yaml.as_bytes());
+
+    // Canonicalize the directory root so the stored identity is stable and
+    // symlink-consistent (A2/A7).
+    let canonical_root = match bundle_root {
+        Some(root) => Some(
+            root.canonicalize()
+                .map_err(|e| PresetLoadError::Validation {
+                    len: 1,
+                    problems: vec![ValidationProblem {
+                        path: "preset_source_identity".to_string(),
+                        error: format!("failed to canonicalize bundle root: {e}"),
+                    }],
+                })?,
+        ),
+        None => None,
+    };
+
+    // Fold in every referenced asset's bytes (deterministic order). Uses the
+    // same collector as the asset validation surface so the identity covers
+    // template_file, prompt_file, system_prompt_file in capability args, and
+    // role system_prompt_file (Important 6).
+    let mut asset_paths: Vec<String> = super::validation::collect_asset_file_references(manifest)
+        .into_iter()
+        .map(|(_, rel)| rel)
+        .collect();
+    asset_paths.sort_unstable();
+    asset_paths.dedup();
+
+    for rel in &asset_paths {
+        // Enforce safe relative paths before joining (A2/A7).
+        if let Err(reason) = assert_template_file_safe(rel) {
+            return Err(PresetLoadError::Validation {
+                len: 1,
+                problems: vec![ValidationProblem {
+                    path: format!("asset {rel}"),
+                    error: format!("unsafe referenced asset path: {reason}"),
+                }],
+            });
+        }
+        hasher.update(rel.as_bytes());
+        hasher.update(&[0u8]);
+        let bytes = if let Some(root) = &canonical_root {
+            match std::fs::read(root.join(rel)) {
+                Ok(b) => b,
+                Err(e) => {
+                    return Err(PresetLoadError::Validation {
+                        len: 1,
+                        problems: vec![ValidationProblem {
+                            path: format!("asset {rel}"),
+                            error: format!("failed to read referenced asset: {e}"),
+                        }],
+                    });
+                }
+            }
+        } else if let Some(id) = embedded_id {
+            crate::preset::read_embedded_template(id, rel)
+                .ok_or_else(|| PresetLoadError::Validation {
+                    len: 1,
+                    problems: vec![ValidationProblem {
+                        path: format!("asset {rel}"),
+                        error: format!(
+                            "referenced asset '{rel}' is missing from embedded preset '{id}'"
+                        ),
+                    }],
+                })?
+                .into_bytes()
+        } else {
+            return Err(PresetLoadError::Validation {
+                len: 1,
+                problems: vec![ValidationProblem {
+                    path: "preset_source_identity".to_string(),
+                    error: "neither bundle_root nor embedded_id provided".to_string(),
+                }],
+            });
+        };
+        hasher.update(&bytes);
+    }
+
+    let mut content_hash = [0u8; 32];
+    content_hash.copy_from_slice(hasher.finalize().as_bytes());
+
+    Ok(match (canonical_root, embedded_id) {
+        (Some(root), _) => PresetSourceIdentity::Directory { root, content_hash },
+        (None, Some(id)) => PresetSourceIdentity::Embedded {
+            preset_id: id.to_string(),
+            content_hash,
+        },
+        (None, None) => {
+            return Err(PresetLoadError::Validation {
+                len: 1,
+                problems: vec![ValidationProblem {
+                    path: "preset_source_identity".to_string(),
+                    error: "neither bundle_root nor embedded_id provided".to_string(),
+                }],
+            });
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1110,17 +1259,37 @@ fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
 ///
 /// `daemon_tool_dispatch` is passed by value because it's cloned into each
 /// composite task that contains `HostTool` enter actions.
-#[allow(clippy::needless_pass_by_value)]
+///
+/// `prompt_executor` / `session_cancels` (A1): the production prompt executor
+/// and per-run coordinator cancellation tokens are wired into every inner
+/// graph `acp_prompt` node at wired-graph build time — the loader-only
+/// graphs stay executor-free for validation/test construction.
+#[allow(clippy::needless_pass_by_value, clippy::implicit_hasher)]
 pub fn build_wired_outer_graph(
     loaded: &LoadedPreset,
     engine: &Arc<dyn crate::engine::OrchestrationEngine>,
     caps: &Arc<CapabilityRegistry>,
     daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
+    prompt_executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+    session_cancels: std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    >,
 ) -> graph_flow::Graph {
     use crate::tasks::StateCompositeTask;
     use std::collections::HashMap;
 
     let graph = graph_flow::Graph::new(&loaded.id);
+
+    // A1: rebuild the inner graphs with the production prompt executor and
+    // cancellation tokens wired into every `acp_prompt` node. Template files
+    // resolve to actual content from the frozen source identity (N-7).
+    let inner_graphs = build_inner_graphs(
+        &loaded.manifest,
+        &loaded.id,
+        loaded.source_identity.as_ref(),
+        prompt_executor,
+        session_cancels,
+    );
 
     // V1.52 T-B P1: pre-compute incoming labeled edge counts for merge nodes.
     // W-2 (v1.179 QC fix round 2): production wiring shares the exact scan
@@ -1184,7 +1353,7 @@ pub fn build_wired_outer_graph(
             .with_expected_incoming(incoming)
             .with_converge_predecessors(preds)
             .with_engine(engine.clone())
-            .with_inner_graphs(loaded.inner_graphs.clone())
+            .with_inner_graphs(inner_graphs.clone())
             .with_output_bindings(loaded.output_bindings.clone())
             .with_registry(caps.clone());
 
@@ -1238,16 +1407,31 @@ fn extract_output_bindings(manifest: &PresetManifest) -> HashMap<String, String>
 
 /// Build inner graphs per §8.2.
 ///
-/// `inner_graphs.<name>.nodes[].kind=acp_prompt` → `AcpPromptTask` (stub in T3,
-/// full in T4).
+/// `inner_graphs.<name>.nodes[].kind=acp_prompt` → `AcpPromptTask`.
 /// `inner_graphs.<name>.nodes[].depends_on` → `add_edge`.
 ///
 /// ## WS-E T5: agent field propagation
 ///
 /// Each node's `agent` field (if present) is stored in `InnerGraphNodeTask::agent_ref`.
-/// At runtime, the engine resolves agent refs to `session_ids` and stores them
-/// in context as `_session_routes`, which `InnerGraphNodeTask::run()` uses for routing.
-fn build_inner_graphs(manifest: &PresetManifest) -> HashMap<String, Arc<graph_flow::Graph>> {
+/// At runtime the engine seeds the trusted child `_session_id` context value,
+/// which `InnerGraphNodeTask::resolve_session_id` uses as the durable run
+/// identity for the Host prompt route.
+///
+/// ## A1: prompt executor wiring
+///
+/// The production `PromptExecutor` and the per-run coordinator cancellation
+/// tokens are wired into every `acp_prompt` node so graph prompt execution
+/// goes through the Host plane — never an echo/worker fallback.
+#[allow(clippy::implicit_hasher, clippy::needless_pass_by_value)] // DefaultHasher inner-graph map; owned executor/cancels args mirror the wired-graph API
+fn build_inner_graphs(
+    manifest: &PresetManifest,
+    preset_id: &str,
+    source_identity: Option<&crate::run_state::PresetSourceIdentity>,
+    prompt_executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+    session_cancels: std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    >,
+) -> HashMap<String, Arc<graph_flow::Graph>> {
     use crate::preset::manifest::GraphNodeKind;
     use crate::tasks::InnerGraphNodeTask;
 
@@ -1261,9 +1445,29 @@ fn build_inner_graphs(manifest: &PresetManifest) -> HashMap<String, Arc<graph_fl
                 // Determine kind (currently only acp_prompt supported).
                 let task = match node.kind {
                     GraphNodeKind::AcpPrompt => {
-                        InnerGraphNodeTask::new(&node.id)
-                            // WS-E T5: store agent ref for runtime resolution
-                            .with_agent_ref(node.agent.clone().unwrap_or_default())
+                        // Resolve the template_file to ACTUAL content at build
+                        // time (N-7): the Host must receive the rendered
+                        // prompt, never the raw bundle-relative path. Embedded
+                        // presets read from the compiled-in bundle; directory
+                        // presets read from their resolved root. A missing
+                        // template fails closed (the node refuses at runtime
+                        // with a typed error rather than prompting with a path).
+                        let template = node
+                            .template_file
+                            .as_deref()
+                            .and_then(|path| match source_identity {
+                                Some(crate::run_state::PresetSourceIdentity::Embedded {
+                                    preset_id: pid,
+                                    ..
+                                }) => crate::preset::read_embedded_template(pid, path),
+                                Some(crate::run_state::PresetSourceIdentity::Directory {
+                                    root,
+                                    ..
+                                }) => std::fs::read_to_string(root.join(path)).ok(),
+                                None => crate::preset::read_embedded_template(preset_id, path),
+                            })
+                            .unwrap_or_default();
+                        let mut task = InnerGraphNodeTask::new(&node.id)
                             // Tool policy from node (parse from string)
                             .with_tool_policy(
                                 node.tool_policy
@@ -1271,8 +1475,18 @@ fn build_inner_graphs(manifest: &PresetManifest) -> HashMap<String, Arc<graph_fl
                                     .and_then(|s| std::str::FromStr::from_str(s.as_str()).ok())
                                     .unwrap_or(crate::tasks::ToolPolicy::AutoGrantReadOnly),
                             )
-                            // Template file path (will be resolved at runtime)
-                            .with_template(node.template_file.clone().unwrap_or_default())
+                            // Resolved template content (rendered at runtime)
+                            .with_template(template)
+                            // A1: production prompt executor + cancellation tokens
+                            .with_prompt_executor(prompt_executor.clone())
+                            .with_session_cancels(session_cancels.clone());
+                        // I-003: preserve agent absence as `None` so the
+                        // executor selects the `default` role binding; never
+                        // synthesize `Some("")`.
+                        if let Some(agent_ref) = &node.agent {
+                            task = task.with_agent_ref(agent_ref.clone());
+                        }
+                        task
                     }
                 };
                 graph.add_task(std::sync::Arc::new(task));
@@ -1713,6 +1927,13 @@ states:
         ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
             unimplemented!()
         }
+        async fn attach_existing_child_session(
+            &self,
+            _: &str,
+            _: std::sync::Arc<graph_flow::Graph>,
+        ) -> Result<Option<crate::engine::SessionId>, crate::engine::EngineError> {
+            unimplemented!("wiring test must not execute engine steps")
+        }
         async fn start_session_with_preset(
             &self,
             _: &LoadedPreset,
@@ -1725,8 +1946,23 @@ states:
         ) -> Result<graph_flow::Context, crate::engine::EngineError> {
             unimplemented!()
         }
+        async fn get_current_task_id(
+            &self,
+            _: &crate::engine::SessionId,
+        ) -> Result<Option<String>, crate::engine::EngineError> {
+            unimplemented!("wiring test must not query session cursors")
+        }
         async fn has_runner(&self, _: &crate::engine::SessionId) -> bool {
             unimplemented!("wiring test must not query runner existence")
+        }
+        async fn recover_sessions(&self, _: Vec<crate::engine::SessionSummary>) {
+            unimplemented!("wiring test must not recover sessions")
+        }
+        async fn ensure_recovered_runner(
+            &self,
+            _: &crate::engine::SessionId,
+        ) -> Result<(), crate::engine::EngineError> {
+            unimplemented!("wiring test must not reattach runners")
         }
         async fn start_session_with_preset_for_creator(
             &self,
@@ -1774,7 +2010,14 @@ states:
         let loaded = load_preset_from_str(yaml, &caps).expect("implicit labeled-edge merge loads");
 
         let engine: Arc<dyn crate::engine::OrchestrationEngine> = Arc::new(UnreachableEngine);
-        let graph = build_wired_outer_graph(&loaded, &engine, &Arc::new(caps), None);
+        let graph = build_wired_outer_graph(
+            &loaded,
+            &engine,
+            &Arc::new(caps),
+            None,
+            None,
+            std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        );
 
         let task = graph
             .get_task("m")

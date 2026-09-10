@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO core_context_versions\n           (schedule_id, version, payload_kind, content,\n            derivation_kind, derivation_detail,\n            created_at, created_by_kind, created_by_user_id)\n         VALUES (?, 0, 'text', ?, 'seed', ?, ?, 'user', ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "4de718d56fcc4705caf0c8e9c0645b58143a77531ae5217ed92299b5a972f3a5"
+}

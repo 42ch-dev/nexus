@@ -77,6 +77,7 @@ pub fn spawn_cron_supervisor(
     supervisor: Arc<ScheduleSupervisor>,
     shutdown_notify: Arc<Notify>,
     config: CronSupervisorConfig,
+    binding_provider: Option<String>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         tracing::info!(
@@ -92,7 +93,7 @@ pub fn spawn_cron_supervisor(
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    run_one_tick(&pool, &workspace_dir, &supervisor).await;
+                    run_one_tick(&pool, &workspace_dir, &supervisor, binding_provider.as_deref()).await;
                 }
                 () = shutdown_notify.notified() => {
                     tracing::info!("cron-supervisor task: shutdown received, exiting");
@@ -114,10 +115,12 @@ pub async fn run_one_tick(
     pool: &SqlitePool,
     workspace_dir: &Path,
     supervisor: &ScheduleSupervisor,
+    binding_provider: Option<&str>,
 ) {
     let now = chrono::Utc::now();
     // Step 1: evaluate per-Work crons → enqueue pending schedules.
-    let summary = cron_eval::evaluate_cron_fires(pool, Some(workspace_dir), now).await;
+    let summary =
+        cron_eval::evaluate_cron_fires(pool, Some(workspace_dir), now, binding_provider).await;
     // Step 2: admit due pending schedules (including any just enqueued).
     // `tick_clocked` filters by `scheduled_at <= now` (cron schedules have no
     // `scheduled_at`, so they are on-demand-admissible).

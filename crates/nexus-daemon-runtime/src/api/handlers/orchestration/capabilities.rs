@@ -156,7 +156,7 @@ mod tests {
     #[tokio::test]
     async fn list_capabilities_marks_builtins_builtin() {
         let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
-        let mut state =
+        let state =
             crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         let registry = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
         state.set_capability_registry(
@@ -185,11 +185,14 @@ mod tests {
         let scan_dir = tmp_root.path().join("capabilities");
 
         let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
-        let mut state =
+        let state =
             crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         let deps = nexus_orchestration::CapabilityRuntimeDeps {
             pool: None,
-            worker_provider: None,
+            prompt_executor: None,
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
             daemon_tool_dispatch: None,
             cdn_config: None,
         };

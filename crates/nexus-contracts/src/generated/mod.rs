@@ -203,6 +203,7 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("CapabilityInfo", 1),
     ("ListCapabilitiesQuery", 2),
     ("ListCapabilitiesResponse", 2),
+    ("ExecutionProjection", 1),
     ("ListSessionsQuery", 2),
     ("ListSessionsResponse", 2),
     ("SessionDetailResponse", 1),

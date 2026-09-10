@@ -63,6 +63,11 @@ fn launch_spec() -> LaunchSpec {
         model: None,
         mode: None,
         mcp_servers: vec![],
+        owner: nexus_agent_host::capability::model::SessionOwner {
+            creator_id: "ctr_test".to_string(),
+            workspace_root: PathBuf::from("/tmp"),
+            orchestration_run_id: None,
+        },
     }
 }
 
@@ -72,6 +77,7 @@ fn prompt_op() -> HostOperation {
         content: vec![HostContentBlock::Text {
             text: "hello".to_string(),
         }],
+        permission_scope: None,
     }
 }
 

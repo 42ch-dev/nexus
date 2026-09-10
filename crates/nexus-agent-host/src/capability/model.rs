@@ -24,6 +24,22 @@ pub enum ProtocolKind {
     NativeCli,
 }
 
+/// Narrowing permission scope for a Host prompt operation (A1).
+///
+/// Intersected with Host configuration per operation; a provider unable to
+/// honor a requested scope refuses `not_supported` rather than silently
+/// discarding the policy. `None` preserves the standalone Host/Character
+/// policy and never means unrestricted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptPermissionScope {
+    /// Read-only tools allowed.
+    pub allow_read: bool,
+    /// Write tools allowed.
+    pub allow_write: bool,
+    /// Destructive tools allowed.
+    pub allow_destructive: bool,
+}
+
 /// Host operation — only execution-scoped variants.
 ///
 /// Cancel flows through `HostFacade::cancel()` / `ProviderAdapter::cancel()`.
@@ -37,6 +53,10 @@ pub enum HostOperation {
         op_id: HostOperationId,
         /// Content blocks comprising the prompt.
         content: Vec<HostContentBlock>,
+        /// Narrowing permission scope (A1). `None` preserves the standalone
+        /// Host/Character policy; a provider unable to honor a requested
+        /// scope refuses `not_supported`.
+        permission_scope: Option<PromptPermissionScope>,
     },
     /// Switch the model for the current session.
     SetModel {
@@ -208,6 +228,10 @@ pub enum FinishReason {
     MaxTurnRequests,
     /// Agent refused the request.
     Refusal,
+    /// The turn was cancelled by the client (I-004). Typed non-success:
+    /// never mapped to `EndTurn`/succeeded for workflow or Character
+    /// consumers.
+    Cancelled,
 }
 
 /// Operation failed event payload (terminal).
@@ -261,6 +285,22 @@ pub struct HostStartConfig {
     pub timeouts: crate::config::TimeoutConfig,
 }
 
+/// Verified owner metadata bound to a Host session.
+///
+/// Constructed by Host/Character admission from existing verified scope
+/// (never from request-body assertions). The canonical workspace cwd is
+/// validated against this owner before any subprocess spawn.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionOwner {
+    /// The verified Creator ID that owns this session.
+    pub creator_id: String,
+    /// Canonical workspace root of the Creator (absolute path).
+    pub workspace_root: PathBuf,
+    /// Optional orchestration run ID (set by the trusted orchestration
+    /// adapter; `None` for standalone Character/public Host sessions).
+    pub orchestration_run_id: Option<String>,
+}
+
 /// Request to create a new managed session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateSessionRequest {
@@ -276,6 +316,8 @@ pub struct CreateSessionRequest {
     pub mcp_servers: Vec<McpServerConfig>,
     /// Additional metadata (opaque to host).
     pub metadata: serde_json::Value,
+    /// Verified owner metadata (Creator + canonical workspace).
+    pub owner: SessionOwner,
 }
 
 /// MCP server configuration.
@@ -504,6 +546,8 @@ pub struct LaunchSpec {
     pub mode: Option<String>,
     /// MCP server configurations.
     pub mcp_servers: Vec<McpServerConfig>,
+    /// Verified owner metadata (Creator + canonical workspace).
+    pub owner: SessionOwner,
 }
 
 /// Handle to a managed provider session.
@@ -515,6 +559,26 @@ pub struct ManagedSessionHandle {
     pub session_id: HostSessionId,
     /// Negotiated capabilities for this session.
     pub capabilities: CapabilityDescriptor,
+    /// Opaque owned-process identity (PID + platform birth + owned group)
+    /// captured at launch (A5). `None` when the platform cannot establish a
+    /// birth token; cleanup must then be reported unconfirmed. Never a
+    /// transport handle — the daemon persists this fingerprint only.
+    pub process_identity: Option<OwnedProcessIdentity>,
+}
+
+/// Opaque owned-process identity (A5) — PID plus process-birth and group.
+///
+/// Never identified by PID alone. Mirrors the durable
+/// `nexus_orchestration::run_state::OwnedProcessIdentity` shape so the daemon
+/// can persist the fingerprint without importing provider crates.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OwnedProcessIdentity {
+    /// Process id.
+    pub pid: u32,
+    /// Platform process-birth identity (e.g. start time) for reuse detection.
+    pub process_birth: Option<String>,
+    /// Owned process-group identity for tree cleanup.
+    pub group_id: Option<String>,
 }
 
 /// Host-level health report.
@@ -539,6 +603,9 @@ pub struct HostSession {
     pub capabilities: CapabilityDescriptor,
     /// Session state.
     pub state: SessionState,
+    /// Opaque owned-process identity (PID + birth + group) captured at
+    /// launch (A5). `None` when the platform cannot establish a birth token.
+    pub process_identity: Option<OwnedProcessIdentity>,
 }
 
 /// Session state in the host state machine.

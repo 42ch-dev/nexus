@@ -560,6 +560,7 @@ impl ProviderAdapter for DshNativeProvider {
             provider_id: self.provider_id.clone(),
             session_id: host_session_id,
             capabilities: CapabilityDescriptor::dsh_limited(),
+            process_identity: None,
         })
     }
 
@@ -571,13 +572,25 @@ impl ProviderAdapter for DshNativeProvider {
         session: &ManagedSessionHandle,
         op: crate::capability::model::HostOperation,
     ) -> HostResult<HostEventStream> {
-        let crate::capability::model::HostOperation::Prompt { op_id, content } = op else {
+        let crate::capability::model::HostOperation::Prompt {
+            op_id,
+            content,
+            permission_scope,
+        } = op
+        else {
             return Err(HostError::capability_unsupported(
                 self.provider_id.clone(),
                 "non-prompt operation",
                 "Native CLI provider only supports Prompt operations",
             ));
         };
+        if permission_scope.is_some() {
+            return Err(HostError::capability_unsupported(
+                self.provider_id.clone(),
+                "prompt permission scope",
+                "Native CLI provider cannot enforce workflow permission scope",
+            ));
+        }
 
         // Build prompt text from content blocks.
         let prompt_text: String = content
@@ -706,6 +719,11 @@ mod tests {
             cwd: std::path::PathBuf::from("/tmp"),
             model: None,
             mode: None,
+            owner: crate::capability::model::SessionOwner {
+                creator_id: "ctr_test".to_string(),
+                workspace_root: std::path::PathBuf::from("/tmp"),
+                orchestration_run_id: None,
+            },
             mcp_servers: vec![],
         }
     }
@@ -748,6 +766,7 @@ mod tests {
                     content: vec![HostContentBlock::Text {
                         text: text.to_string(),
                     }],
+                    permission_scope: None,
                 },
             )
             .await
@@ -901,6 +920,7 @@ mod tests {
                 HostOperation::Prompt {
                     op_id: HostOperationId::new(),
                     content: vec![],
+                    permission_scope: None,
                 },
             )
             .await;
@@ -918,6 +938,7 @@ mod tests {
             provider_id: ProviderId::new("dsh-native"),
             session_id: HostSessionId::new(),
             capabilities: CapabilityDescriptor::dsh_limited(),
+            process_identity: None,
         };
 
         let result = provider
@@ -928,6 +949,7 @@ mod tests {
                     content: vec![HostContentBlock::Text {
                         text: "hi".to_string(),
                     }],
+                    permission_scope: None,
                 },
             )
             .await;
@@ -975,6 +997,7 @@ mod tests {
                     content: vec![HostContentBlock::Text {
                         text: "hi".to_string(),
                     }],
+                    permission_scope: None,
                 },
             )
             .await;
@@ -1148,6 +1171,7 @@ mod tests {
                     content: vec![HostContentBlock::Text {
                         text: "hi".to_string(),
                     }],
+                    permission_scope: None,
                 },
             )
             .await

@@ -22,7 +22,7 @@
     },
     "finish_reason": {
       "type": ["string", "null"],
-      "enum": ["end_turn", "max_tokens", "max_turn_requests", "refusal", null]
+      "enum": ["end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled", null]
     },
     "capture": {
       "$ref": "https://nexus42.invalid/schemas/daemon-api/agent-host/character-run-capture-outcome.schema.json"

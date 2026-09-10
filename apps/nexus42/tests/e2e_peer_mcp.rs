@@ -18,8 +18,7 @@
 //! the peer tool with advertised schemas verbatim + builtin `nexus.*`
 //! rows + ≥1 user capability (one catalog) → `tools/call` with
 //! schema-valid args → `structured_content` matches the advertised
-//! output schema. Supplementary: scripted `agent_tool_request` for the
-//! same id through the worker spine.
+//! output schema.
 //!
 //! Journey B (honest refusals): (i) never-admitted id ⇒
 //! `METHOD_NOT_FOUND`; (ii) default-deny config variant (allowlist
@@ -57,7 +56,6 @@ use ed25519_dalek::SigningKey;
 use futures_util::future::BoxFuture;
 use nexus_daemon_runtime::api::auth_middleware::DaemonApiConfig;
 use nexus_daemon_runtime::api::create_router;
-use nexus_daemon_runtime::api::handlers::host_tool_executor::HostToolExecutor;
 use nexus_daemon_runtime::connect::{
     daemon_manifest, peer_tool_table, spawn_accept_loop, ws_config, PeerResponderOptions,
     PeerSessionManager, PeerToolsConfig, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES,
@@ -85,7 +83,7 @@ use tokio::task::JoinHandle;
 
 /// Fixed seeds — `0xc0+` host / `0xd0+` peers keep this binary's
 /// process-global table disjoint from the other `connect-client` test
-/// binaries (`0x40+` `peer_tool.rs`, `0x50+` `worker_spine_peer.rs`).
+/// binaries (`0x40+` `peer_tool.rs`).
 const fn seed_host() -> [u8; 32] {
     [0xc0; 32]
 }
@@ -185,7 +183,10 @@ impl E2eDaemon {
         let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         let deps = CapabilityRuntimeDeps {
             pool: None,
-            worker_provider: None,
+            prompt_executor: None,
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
             daemon_tool_dispatch: None,
             cdn_config: None,
         };
@@ -733,55 +734,6 @@ async fn journey_a_acp_agent_via_new_session_closes() {
         "spawned command is the nexus42 binary"
     );
     assert_eq!(evidence.spawned_args, vec!["mcp", "serve"]);
-
-    teardown(server, &[peer_id]);
-}
-
-// ── Supplementary: worker spine leg (scripted agent_tool_request) ────────
-
-#[tokio::test]
-#[serial(e2e_peer_mcp)]
-async fn journey_a_worker_spine_leg_dispatches_same_id() {
-    clear_peer_table();
-    let peer_id = peer_id_of(seed_peer(3));
-    let server = E2eDaemon::start(
-        vec![TOOL_ID.to_owned()],
-        vec![peer_id.clone()],
-        HashMap::from([(peer_id.clone(), pubkey(seed_peer(3)))]),
-        false,
-    )
-    .await;
-
-    let adapter = dial(server.ws_addr, seed_peer(3), TOOL_ID)
-        .await
-        .expect("dial succeeds");
-    adapter.register_tool_handler(TOOL_ID, echo_handler());
-    assert!(
-        wait_until(
-            || peer_tool_table().get(TOOL_ID).is_some(),
-            Duration::from_secs(5)
-        )
-        .await,
-        "admitted"
-    );
-
-    let (_tmp, root, db_path) = test_utils::create_test_workspace().await;
-    let state = WorkspaceState::new_for_testing(root, db_path, None).await;
-    let result = HostToolExecutor::dispatch_from_worker(
-        TOOL_ID,
-        &json!({ "msg": "from worker" }),
-        "req-e2e-ws",
-        &state,
-    )
-    .await;
-    assert_eq!(result.request_id, "req-e2e-ws");
-    assert!(result.grant, "worker leg grants: {result:?}");
-    assert_eq!(
-        result.output,
-        Some(json!({ "echo": { "msg": "from worker" } })),
-        "spoke result passes through verbatim"
-    );
-    assert!(result.error.is_none());
 
     teardown(server, &[peer_id]);
 }

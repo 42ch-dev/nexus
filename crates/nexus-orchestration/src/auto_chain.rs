@@ -1313,6 +1313,105 @@ fn promote_outlines_in(
     Ok(total)
 }
 
+/// Persist the durable core-context version-0 record for an internally
+/// inserted schedule (N-3).
+///
+/// The public add path seeds through `CoreContextManager::apply_seed`; the
+/// internal auto-chain/cron/review-master insertions run inside their own
+/// transactions and must ALSO leave a durable version record before the row
+/// can be admitted — a version-0 pointer with no `core_context_versions`
+/// row is a pre-seed row and admission refuses it. Mirrors `apply_seed`'s
+/// SQL (version 0, `seed` derivation) so the pointer and the record agree.
+///
+/// # Errors
+/// Returns [`AutoChainError::Database`] if the insert or pointer update fails.
+pub async fn seed_core_context_version(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    schedule_id: &str,
+    seed_text: &str,
+) -> Result<(), AutoChainError> {
+    let now = chrono::Utc::now().timestamp();
+    let payload = serde_json::json!({ "kind": "text", "body": seed_text });
+    let content_bytes = serde_json::to_vec(&payload).map_err(|e| {
+        AutoChainError::Database(nexus_local_db::LocalDbError::from(sqlx::Error::Protocol(
+            format!("serialize core-context seed: {e}"),
+        )))
+    })?;
+    let derivation = serde_json::json!({ "kind": "seed", "raw": seed_text });
+    let derivation_bytes = serde_json::to_vec(&derivation).map_err(|e| {
+        AutoChainError::Database(nexus_local_db::LocalDbError::from(sqlx::Error::Protocol(
+            format!("serialize core-context derivation: {e}"),
+        )))
+    })?;
+    sqlx::query(
+        "INSERT INTO core_context_versions
+           (schedule_id, version, payload_kind, content,
+            derivation_kind, derivation_detail,
+            created_at, created_by_kind, created_by_user_id)
+         VALUES (?, 0, 'text', ?, 'seed', ?, ?, 'system', NULL)",
+    )
+    .bind(schedule_id)
+    .bind(content_bytes)
+    .bind(derivation_bytes)
+    .bind(now)
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| AutoChainError::Database(nexus_local_db::LocalDbError::from(e)))?;
+    sqlx::query(
+        "UPDATE creator_schedules
+         SET current_core_context_version = 0, updated_at = ?
+         WHERE schedule_id = ?",
+    )
+    .bind(now)
+    .bind(schedule_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| AutoChainError::Database(nexus_local_db::LocalDbError::from(e)))?;
+    Ok(())
+}
+
+fn enqueue_descriptor_json(
+    creator_id: &str,
+    work_id: &str,
+    preset_id: &str,
+    preset_version: i64,
+    input: serde_json::Map<String, serde_json::Value>,
+    agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
+) -> Result<Vec<u8>, AutoChainError> {
+    // N-5/N-5b/N-15: stamp the REAL content-addressed source identity
+    // (manifest + referenced template bytes) — never a zero placeholder.
+    // Admission validates the stored identity against the current load and
+    // builds the runner from the frozen identity, so a changed/shadowed
+    // preset can never run under a zero-hash durable descriptor. An
+    // unresolvable (non-embedded/unknown) preset REJECTS the insertion
+    // before any row is published — a drive-enabled row is never emitted
+    // with a placeholder identity.
+    let source = crate::preset::embedded_source_identity(preset_id).ok_or_else(|| {
+        AutoChainError::InvalidState(format!(
+            "preset '{preset_id}' has no embedded source identity; \
+             refusing to publish a drive-enabled row"
+        ))
+    })?;
+    let descriptor = crate::run_state::RunDescriptorV1 {
+        creator_id: creator_id.to_string(),
+        work_id: if work_id.is_empty() {
+            None
+        } else {
+            Some(work_id.to_string())
+        },
+        workspace_root: std::path::PathBuf::new(),
+        preset_id: preset_id.to_string(),
+        preset_version: u32::try_from(preset_version).unwrap_or(1),
+        source,
+        input,
+        agent_bindings,
+        parent_session_id: None,
+        graph_name: None,
+    };
+    serde_json::to_vec(&descriptor)
+        .map_err(|e| AutoChainError::InvalidState(format!("descriptor serialization failed: {e}")))
+}
+
 /// Enqueue a new auto-chain schedule and update the Work checkpoint.
 ///
 /// This is the single shared path for:
@@ -1326,6 +1425,13 @@ fn promote_outlines_in(
 ///
 /// Returns `AutoChainError::InvalidState` if no schedule mapping exists for the
 /// given stage. Returns `AutoChainError::Database` if any DB operation fails.
+///
+/// # Panics
+///
+/// Panics if the transaction is committed on a source-run conflict where
+/// `source_run_id` unexpectedly becomes `None` (the conflict arm is guarded by
+/// `source_run_id.is_some()`).
+#[allow(clippy::too_many_arguments, clippy::implicit_hasher)] // one coherent enqueue path; DefaultHasher bindings are fine at this boundary
 pub async fn enqueue_auto_chain_schedule(
     pool: &SqlitePool,
     creator_id: &str,
@@ -1334,9 +1440,168 @@ pub async fn enqueue_auto_chain_schedule(
     chapter: Option<i32>,
     volume: Option<i32>,
     work: &WorkRecord,
+    agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
+    source_run_id: Option<&str>,
+) -> Result<String, AutoChainError> {
+    // I-9: the schedule INSERT and the Work driver-pointer update commit in
+    // ONE transaction so a concurrent tick can never observe a partial
+    // Work-pointer/schedule state. The runtime lock is acquired after
+    // commit (it is a separate resource, not part of the schedule row).
+    let mut tx = nexus_local_db::begin_immediate(pool)
+        .await
+        .map_err(AutoChainError::Database)?;
+
+    match enqueue_auto_chain_schedule_in_tx(
+        &mut tx,
+        pool,
+        creator_id,
+        work_id,
+        stage,
+        chapter,
+        volume,
+        work,
+        agent_bindings,
+        source_run_id,
+    )
+    .await
+    {
+        Ok(schedule_id) => {
+            tx.commit().await.map_err(|e| {
+                tracing::error!(error = %e, "auto-chain: failed to commit schedule+driver");
+                AutoChainError::Database(nexus_local_db::LocalDbError::from(e))
+            })?;
+            acquire_auto_chain_runtime_lock(pool, creator_id, work_id, &schedule_id).await;
+            tracing::info!(
+                work_id = %work_id,
+                schedule_id = %schedule_id,
+                stage = %stage,
+                chapter = chapter.unwrap_or(0),
+                "auto-chain: enqueued next step"
+            );
+            Ok(schedule_id)
+        }
+        Err(e) if source_run_id.is_some() && is_source_run_conflict(&e) => {
+            // T3 (A3): a duplicate terminal callback / restart already
+            // created the child for this source run. Roll back (the child
+            // INSERT failed) and load the already-created child — never
+            // mint a second schedule.
+            drop(tx);
+            let source_run_id = source_run_id.expect("guarded by is_some");
+            let existing: Option<String> = sqlx::query_scalar(
+                "SELECT schedule_id FROM creator_schedules WHERE source_run_id = ?",
+            )
+            .bind(source_run_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(nexus_local_db::LocalDbError::from)?;
+            existing.map_or_else(
+                || Err(e),
+                |schedule_id| {
+                    tracing::info!(
+                        work_id = %work_id,
+                        schedule_id = %schedule_id,
+                        source_run_id,
+                        "auto-chain: duplicate terminal callback loaded existing child"
+                    );
+                    Ok(schedule_id)
+                },
+            )
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// True when `e` is a UNIQUE violation on the `source_run_id` partial index.
+///
+/// `pub(crate)` so the supervisor's atomic settlement path
+/// (`settle_and_chain_atomic`) can load the already-created child on a
+/// duplicate terminal callback instead of minting a second schedule.
+pub(crate) fn is_source_run_conflict(e: &AutoChainError) -> bool {
+    matches!(
+        e,
+        AutoChainError::Database(nexus_local_db::LocalDbError::Sqlx(
+            sqlx::Error::Database(db)
+        )) if db.is_unique_violation()
+            && (db.constraint().unwrap_or_default().contains("creator_schedules_by_source_run")
+                || db.message().contains("creator_schedules.source_run_id"))
+    )
+}
+
+/// Acquire the daemon runtime lock for an auto-chain schedule (V1.42 P0 T3).
+///
+/// Best-effort: a lock failure is logged and does not fail the enqueue (the
+/// schedule was already committed; auto-chain skips locked Works at tick).
+async fn acquire_auto_chain_runtime_lock(
+    pool: &SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+    schedule_id: &str,
+) {
+    // V1.42 P0 (T3): Acquire runtime lock for this schedule.
+    // Holder format: `daemon:schedule:<schedule_id>`.
+    let holder = nexus_local_db::runtime_lock::schedule_holder(schedule_id);
+    let ttl = nexus_local_db::runtime_lock::ttl_from_env();
+    match nexus_local_db::acquire_runtime_lock(
+        pool, creator_id, work_id, &holder, ttl, true, // force_stale=true for daemon
+    )
+    .await
+    {
+        Ok(nexus_local_db::AcquireResult::Acquired { .. }) => {}
+        Ok(nexus_local_db::AcquireResult::Locked {
+            holder: existing, ..
+        }) => {
+            tracing::warn!(
+                work_id = %work_id,
+                schedule_id = %schedule_id,
+                existing_holder = %existing,
+                "runtime_lock: could not acquire for auto-chain (locked by another process)"
+            );
+            // Continue — auto-chain will skip if Work is locked at next tick.
+        }
+        Err(e) => {
+            tracing::warn!(
+                work_id = %work_id,
+                schedule_id = %schedule_id,
+                error = %e,
+                "runtime_lock: failed to acquire for auto-chain"
+            );
+            // Non-fatal — the schedule was already enqueued.
+        }
+    }
+}
+
+/// Insert the auto-chain child schedule + seed + Work driver-pointer update
+/// inside an OPEN transaction (T3, A3).
+///
+/// This is the shared body of [`enqueue_auto_chain_schedule`] and the
+/// supervisor's atomic terminal settlement (`settle_and_chain_atomic`): the
+/// caller owns the transaction so the child INSERT, the Work driver-pointer
+/// update, and (in the settlement path) the source schedule's terminal
+/// status flip commit together. `source_run_id` is internal provenance
+/// (A3): the terminal source run that created this child, keyed by the
+/// partial unique index `creator_schedules_by_source_run`.
+///
+/// # Errors
+/// Returns [`AutoChainError::Database`] if any DB operation fails. A UNIQUE
+/// violation on `source_run_id` is surfaced to the caller, which loads the
+/// already-created child (never mints a second schedule).
+#[allow(clippy::too_many_arguments, clippy::implicit_hasher)] // mirrors enqueue_auto_chain_schedule; DefaultHasher bindings are fine at this boundary
+pub async fn enqueue_auto_chain_schedule_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    pool: &SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+    stage: &str,
+    chapter: Option<i32>,
+    volume: Option<i32>,
+    work: &WorkRecord,
+    agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
+    source_run_id: Option<&str>,
 ) -> Result<String, AutoChainError> {
     // V1.48 P1 (overlay §2 Consumer): render the open-findings prompt
-    // block when the produce stage targets a selected chapter.
+    // block when the produce stage targets a selected chapter. The DAO
+    // reads through the pool (the findings table is not part of the
+    // settlement transaction).
     let open_findings_block =
         compute_open_findings_block_for_produce(pool, creator_id, work_id, stage, chapter).await;
 
@@ -1368,13 +1633,37 @@ pub async fn enqueue_auto_chain_schedule(
     // SAFETY: dynamic SQL — auto-chain schedule insert with derived params.
     // R-V139P5-S4: read preset_version from the manifest mapping instead of
     // hard-coding 1. Keep in sync with embedded-presets/*/preset.yaml `version:`.
+    // A3 admission cutover: an auto-chain-created schedule is drive-enabled
+    // (`driven_v1`).
+
     let preset_version = preset_version_for_id(&schedule_req.preset_id);
+    // N-5: freeze the ACTUAL structured input the builder prepared
+    // (work_id, stage, chapter, research artifacts, open_findings_block,
+    // volume, …) plus the schedule's agent bindings into the durable
+    // descriptor — never an empty map. Admission reconstructs the run
+    // input from this descriptor, so the first step renders real variables.
+    let input = schedule_req
+        .input
+        .as_ref()
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+    // N-15: resolve and persist the REAL source identity or reject before
+    // row publication — never a zero-hash placeholder.
+    let descriptor = enqueue_descriptor_json(
+        creator_id,
+        work_id,
+        &schedule_req.preset_id,
+        preset_version,
+        input,
+        agent_bindings,
+    )?;
     sqlx::query(
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
             concurrency_kind, current_core_context_version, label,
-            created_at, updated_at, work_id)
-           VALUES (?, ?, ?, ?, 'pending', 'serial', 0, ?, ?, ?, ?)",
+            created_at, updated_at, work_id, execution_policy,
+            execution_descriptor_json, source_run_id)
+           VALUES (?, ?, ?, ?, 'pending', 'serial', 0, ?, ?, ?, ?, 'driven_v1', ?, ?)",
     )
     .bind(&schedule_id)
     .bind(creator_id)
@@ -1384,55 +1673,34 @@ pub async fn enqueue_auto_chain_schedule(
     .bind(now_ts)
     .bind(now_ts)
     .bind(work_id)
-    .execute(pool)
+    .bind(descriptor)
+    .bind(source_run_id)
+    .execute(&mut **tx)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "auto-chain: failed to insert schedule");
         AutoChainError::Database(nexus_local_db::LocalDbError::from(e))
     })?;
 
-    // Update the Work checkpoint to point at the new driver schedule.
-    set_driver(pool, creator_id, work_id, &schedule_id, stage).await?;
+    // N-3: the row is not admissible until its core-context version record
+    // is durable. Seed version 0 from the prepared seed (the same text the
+    // public add path would persist) inside the SAME transaction.
+    let seed_text = schedule_req.seed.as_deref().unwrap_or_default().to_string();
+    seed_core_context_version(tx, &schedule_id, &seed_text).await?;
 
-    // V1.42 P0 (T3): Acquire runtime lock for this schedule.
-    // Holder format: `daemon:schedule:<schedule_id>`.
-    let holder = nexus_local_db::runtime_lock::schedule_holder(&schedule_id);
-    let ttl = nexus_local_db::runtime_lock::ttl_from_env();
-    match nexus_local_db::acquire_runtime_lock(
-        pool, creator_id, work_id, &holder, ttl, true, // force_stale=true for daemon
-    )
-    .await
-    {
-        Ok(nexus_local_db::AcquireResult::Acquired { .. }) => {}
-        Ok(nexus_local_db::AcquireResult::Locked {
-            holder: existing, ..
-        }) => {
-            tracing::warn!(
-                work_id = %work_id,
-                schedule_id = %schedule_id,
-                existing_holder = %existing,
-                "runtime_lock: could not acquire for auto-chain (locked by another process)"
-            );
-            // Continue — auto-chain will skip if Work is locked at next tick.
-        }
-        Err(e) => {
-            tracing::warn!(
-                work_id = %work_id,
-                schedule_id = %schedule_id,
-                error = %e,
-                "runtime_lock: failed to acquire for auto-chain"
-            );
-            // Non-fatal — the schedule was already enqueued.
-        }
-    }
-
-    tracing::info!(
-        work_id = %work_id,
-        schedule_id = %schedule_id,
-        stage = %stage,
-        chapter = chapter.unwrap_or(0),
-        "auto-chain: enqueued next step"
-    );
+    // Update the Work checkpoint to point at the new driver schedule —
+    // atomically with the schedule row (I-9).
+    let now = chrono::Utc::now().to_rfc3339();
+    let patch = WorkPatch {
+        current_stage: Some(stage.to_string()),
+        stage_status: Some("active".to_string()),
+        driver_schedule_id: Some(Some(schedule_id.clone())),
+        auto_chain_interrupted: Some(false),
+        ..Default::default()
+    };
+    works::patch_work_tx(tx, creator_id, work_id, &patch, &now)
+        .await
+        .map_err(AutoChainError::from)?;
 
     Ok(schedule_id)
 }
@@ -1509,10 +1777,12 @@ fn preset_version_for_id(preset_id: &str) -> i64 {
 /// # Errors
 ///
 /// Returns `AutoChainError::Database` if the schedule INSERT fails.
+#[allow(clippy::implicit_hasher)] // DefaultHasher bindings fine at enqueue boundary
 pub async fn enqueue_review_master_schedule(
     pool: &SqlitePool,
     creator_id: &str,
     work_id: &str,
+    agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
 ) -> Result<String, AutoChainError> {
     // R-V147P0-05 (hotfix H-1): append a per-process monotonic counter suffix
     // (mirrors `ACH_COUNTER` / R-V139P0-W-B) so two enqueues in the same
@@ -1532,12 +1802,51 @@ pub async fn enqueue_review_master_schedule(
     // SAFETY: dynamic SQL — review-master schedule insert with derived params.
     // Matches the `enqueue_auto_chain_schedule` pattern (runtime sqlx is the
     // established convention in this crate; see auto_chain.rs:354-355).
+    // A3 admission cutover: drive-enabled (`driven_v1`). N-5: the frozen
+    // descriptor carries the work_id input so admission reconstructs the
+    // run with its work identity.
+    //
+    // N-10/N-14: `novel-review-master` references `work_id`, `work_ref`,
+    // `topic`, `open_findings`, `world_id`, and `body_path` in its
+    // enter-action vars. Strict-mode template rendering fails on MISSING
+    // keys, so every referenced key must be present (empty string is fine —
+    // the preset's `{{#if …}}` guards omit the section). The caller
+    // (stale-findings watcher) has only the Work record, so unpopulated
+    // keys default to empty strings here.
+    let mut input = serde_json::Map::new();
+    input.insert("work_id".to_string(), serde_json::json!(work_id));
+    for key in [
+        "work_ref",
+        "topic",
+        "open_findings",
+        "world_id",
+        "body_path",
+        "creator_id",
+    ] {
+        input.insert(key.to_string(), serde_json::Value::String(String::new()));
+    }
+    // N-15: resolve and persist the REAL source identity or reject before
+    // row publication — never a zero-hash placeholder.
+    let descriptor = enqueue_descriptor_json(
+        creator_id,
+        work_id,
+        "novel-review-master",
+        preset_version,
+        input,
+        agent_bindings,
+    )?;
+    // N-3: the row is not admissible until its core-context version record
+    // is durable. Insert + seed commit in ONE transaction.
+    let mut tx = nexus_local_db::begin_immediate(pool)
+        .await
+        .map_err(AutoChainError::Database)?;
     sqlx::query(
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
             concurrency_kind, current_core_context_version, label,
-            created_at, updated_at, work_id)
-           VALUES (?, ?, 'novel-review-master', ?, 'pending', 'serial', 0, ?, ?, ?, ?)",
+            created_at, updated_at, work_id, execution_policy,
+            execution_descriptor_json)
+           VALUES (?, ?, 'novel-review-master', ?, 'pending', 'serial', 0, ?, ?, ?, ?, 'driven_v1', ?)",
     )
     .bind(&schedule_id)
     .bind(creator_id)
@@ -1546,10 +1855,16 @@ pub async fn enqueue_review_master_schedule(
     .bind(now_ts)
     .bind(now_ts)
     .bind(work_id)
-    .execute(pool)
+    .bind(descriptor)
+    .execute(&mut *tx)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, work_id, "stale-findings: failed to insert review-master schedule");
+        AutoChainError::Database(nexus_local_db::LocalDbError::from(e))
+    })?;
+    seed_core_context_version(&mut tx, &schedule_id, "").await?;
+    tx.commit().await.map_err(|e| {
+        tracing::error!(error = %e, work_id, "stale-findings: failed to commit review-master schedule");
         AutoChainError::Database(nexus_local_db::LocalDbError::from(e))
     })?;
 
@@ -1580,12 +1895,14 @@ pub async fn enqueue_review_master_schedule(
 /// # Errors
 ///
 /// Returns `AutoChainError::Database` if the schedule INSERT fails.
+#[allow(clippy::implicit_hasher)] // DefaultHasher bindings fine at enqueue boundary
 pub async fn enqueue_cron_schedule(
     pool: &SqlitePool,
     creator_id: &str,
     work_id: &str,
     preset_id: &str,
     role: &str,
+    agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
 ) -> Result<String, AutoChainError> {
     // CRON prefix + timestamp + per-process counter (collision-resistant,
     // mirrors `ACH_COUNTER` / `RVM_COUNTER`). Two roles firing in the same
@@ -1603,12 +1920,51 @@ pub async fn enqueue_cron_schedule(
     // SAFETY: dynamic SQL — cron-triggered schedule insert with derived params.
     // Matches the `enqueue_review_master_schedule` pattern (runtime sqlx is the
     // established convention in this crate; see auto_chain.rs:354-355).
+    // A3 admission cutover: drive-enabled (`driven_v1`). N-5: the frozen
+    // descriptor carries the work_id input so admission reconstructs the
+    // run with its work identity.
+    //
+    // N-10/N-14: the cron presets (`novel-brainstorm` / `novel-write`)
+    // reference `work_id`, `work_ref`, `topic`, and `open_findings` in
+    // their enter-action vars. Strict-mode template rendering fails on
+    // MISSING keys, so every referenced key must be present (empty string
+    // is fine — the preset's `{{#if …}}` guards omit the section). The
+    // caller (cron supervisor) has only the WorkCronRow projection, so the
+    // unpopulated keys default to empty strings here.
+    let mut input = serde_json::Map::new();
+    input.insert("work_id".to_string(), serde_json::json!(work_id));
+    for key in [
+        "work_ref",
+        "topic",
+        "open_findings",
+        "vibe",
+        "chapter",
+        "chapter_label",
+    ] {
+        input.insert(key.to_string(), serde_json::Value::String(String::new()));
+    }
+    // N-15: resolve and persist the REAL source identity or reject before
+    // row publication — never a zero-hash placeholder.
+    let descriptor = enqueue_descriptor_json(
+        creator_id,
+        work_id,
+        preset_id,
+        preset_version,
+        input,
+        agent_bindings,
+    )?;
+    // N-3: the row is not admissible until its core-context version record
+    // is durable. Insert + seed commit in ONE transaction.
+    let mut tx = nexus_local_db::begin_immediate(pool)
+        .await
+        .map_err(AutoChainError::Database)?;
     sqlx::query(
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
             concurrency_kind, current_core_context_version, label,
-            created_at, updated_at, work_id)
-           VALUES (?, ?, ?, ?, 'pending', 'serial', 0, ?, ?, ?, ?)",
+            created_at, updated_at, work_id, execution_policy,
+            execution_descriptor_json)
+           VALUES (?, ?, ?, ?, 'pending', 'serial', 0, ?, ?, ?, ?, 'driven_v1', ?)",
     )
     .bind(&schedule_id)
     .bind(creator_id)
@@ -1618,10 +1974,16 @@ pub async fn enqueue_cron_schedule(
     .bind(now_ts)
     .bind(now_ts)
     .bind(work_id)
-    .execute(pool)
+    .bind(descriptor)
+    .execute(&mut *tx)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, work_id, preset_id, "cron-supervisor: failed to insert cron-triggered schedule");
+        AutoChainError::Database(nexus_local_db::LocalDbError::from(e))
+    })?;
+    seed_core_context_version(&mut tx, &schedule_id, "").await?;
+    tx.commit().await.map_err(|e| {
+        tracing::error!(error = %e, work_id, preset_id, "cron-supervisor: failed to commit cron-triggered schedule");
         AutoChainError::Database(nexus_local_db::LocalDbError::from(e))
     })?;
 
@@ -1900,7 +2262,15 @@ mod tests {
             .unwrap();
 
         let sid = enqueue_auto_chain_schedule(
-            &pool, "ctr_test", "wrk_test", "research", None, None, &work,
+            &pool,
+            "ctr_test",
+            "wrk_test",
+            "research",
+            None,
+            None,
+            &work,
+            std::collections::HashMap::new(),
+            None,
         )
         .await
         .unwrap();
@@ -1961,6 +2331,8 @@ mod tests {
             None,
             None,
             &work,
+            std::collections::HashMap::new(),
+            None,
         )
         .await;
 
@@ -2002,12 +2374,22 @@ mod tests {
 
         // Fire two enqueues back-to-back. Even if both land in the same ms
         // granule, the counter suffix must keep the PKs distinct.
-        let sid_a = enqueue_review_master_schedule(&pool, "ctr_test", "wrk_test")
-            .await
-            .expect("first RVM enqueue must succeed");
-        let sid_b = enqueue_review_master_schedule(&pool, "ctr_test", "wrk_test")
-            .await
-            .expect("second RVM enqueue must succeed even in the same ms");
+        let sid_a = enqueue_review_master_schedule(
+            &pool,
+            "ctr_test",
+            "wrk_test",
+            std::collections::HashMap::new(),
+        )
+        .await
+        .expect("first RVM enqueue must succeed");
+        let sid_b = enqueue_review_master_schedule(
+            &pool,
+            "ctr_test",
+            "wrk_test",
+            std::collections::HashMap::new(),
+        )
+        .await
+        .expect("second RVM enqueue must succeed even in the same ms");
 
         assert!(
             sid_a != sid_b,

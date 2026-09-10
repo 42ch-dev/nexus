@@ -673,12 +673,11 @@ export interface NexusClient {
    */
   createFork(worldId: string, request: CreateForkRequest): Promise<CreateForkResponse>;
 
-  // ── Creator Memory review-loop (V1.78) ─────────────────────────────────────
+  // ── Creator Memory review-loop (V1.78; producer retired V1.186) ─────────────
   // All memory endpoints are creator-scoped: the daemon rejects a `creator_id`
   // that does not match the active creator in config.toml with 403. The UI is
-  // review/consume-only — `createPendingReview` stays CLI/producer-only (the
-  // session-end capture pipeline owns `POST .../memory/pending-review`), mirroring
-  // V1.77's `createFinding` CLI-only decision (compass D-UX LOCKED).
+  // consume-only. V1.186 removed the obsolete session-capture producer and its
+  // POST route; retained GET/count/DELETE methods expose compatible stored rows.
   /**
    * `GET /v1/daemon/narrative/worlds` — workspace-scoped world list for the
    * active creator. Returns every Work-backed world (including zero-fragment

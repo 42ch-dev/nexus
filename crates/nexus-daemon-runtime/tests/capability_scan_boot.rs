@@ -78,11 +78,14 @@ fn write_capability_dir(root: &Path, name: &str) {
 /// resolved path.
 async fn server_with_scan(scan_dir: &Path) -> (TestTempRoot, TestServer, WorkspaceState) {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
-    let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
     let deps = CapabilityRuntimeDeps {
         pool: None,
-        worker_provider: None,
+        prompt_executor: None,
+        session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
         daemon_tool_dispatch: None,
         cdn_config: None,
     };
@@ -162,7 +165,10 @@ async fn boot_never_fails_on_bad_or_missing_capabilities_dir() {
 
     let deps = CapabilityRuntimeDeps {
         pool: None,
-        worker_provider: None,
+        prompt_executor: None,
+        session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
         daemon_tool_dispatch: None,
         cdn_config: None,
     };

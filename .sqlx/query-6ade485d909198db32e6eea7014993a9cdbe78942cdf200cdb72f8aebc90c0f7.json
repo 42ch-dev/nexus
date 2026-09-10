@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE creator_schedules\n             SET execution_descriptor_json = ?\n             WHERE schedule_id = ? AND execution_descriptor_json IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "6ade485d909198db32e6eea7014993a9cdbe78942cdf200cdb72f8aebc90c0f7"
+}

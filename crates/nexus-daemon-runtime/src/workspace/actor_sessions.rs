@@ -1286,6 +1286,11 @@ mod tests {
             mode: None,
             mcp_servers: vec![],
             metadata: serde_json::Value::Null,
+            owner: nexus_agent_host::capability::model::SessionOwner {
+                creator_id: "ctr_test".to_string(),
+                workspace_root: PathBuf::from("/tmp"),
+                orchestration_run_id: None,
+            },
         }
     }
 
@@ -1377,6 +1382,8 @@ mod tests {
                 created_at: chrono::Utc::now(),
                 active_op_id: None,
                 negotiated_capabilities: CapabilityDescriptor::native_cli_limited(),
+                owner: request.owner,
+                process_identity: None,
             };
             self.sessions
                 .lock()

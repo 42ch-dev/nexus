@@ -135,18 +135,62 @@ struct ResearchScheduleFixture {
 }
 
 impl ResearchScheduleFixture {
+    /// Insert the research schedule row as a genuine `driven_v1` row under the
+    /// V1.186 execution-policy contract — the same shape the internal
+    /// insertion paths persist (see `auto_chain::enqueue_descriptor_json`):
+    /// `execution_policy='driven_v1'`, a frozen `RunDescriptorV1` stamped with
+    /// the research preset's embedded source identity + version, and the
+    /// durable version-0 core-context record — all in one transaction so a
+    /// concurrent tick can never observe a partially seeded drive-enabled row.
     async fn insert(self, pool: &SqlitePool) {
         let now = chrono::Utc::now().timestamp();
+
+        // N-5/N-15: freeze the ACTUAL structured input the stage builder would
+        // seed for this research schedule (work_id, fl_e_stage, creative_brief,
+        // inspiration_log, work_ref, …) — never an empty map. Built via
+        // `build_schedule_for_stage` so the frozen input matches the canonical
+        // request a stage advance would produce.
+        let fields = research_work_fields(self.work_id, "fixture");
+        let input: serde_json::Map<String, serde_json::Value> =
+            build_schedule_for_stage("research", self.creator_id, &fields)
+                .and_then(|req| req.input)
+                .and_then(|v| v.as_object().cloned())
+                .unwrap_or_default();
+        // N-7: resolve and stamp the REAL content-addressed source identity
+        // (manifest + referenced template bytes) — never a zero placeholder.
+        let source = nexus_orchestration::preset::embedded_source_identity("research")
+            .expect("research preset must carry an embedded source identity");
+        let descriptor = nexus_orchestration::run_state::RunDescriptorV1 {
+            creator_id: self.creator_id.to_string(),
+            work_id: Some(self.work_id.to_string()),
+            workspace_root: std::path::PathBuf::new(),
+            preset_id: "research".to_string(),
+            preset_version: RESEARCH_PRESET_VERSION,
+            source,
+            input: input.clone(),
+            agent_bindings: std::collections::HashMap::new(),
+            parent_session_id: None,
+            graph_name: None,
+        };
+        let descriptor_bytes =
+            serde_json::to_vec(&descriptor).expect("research fixture descriptor must serialize");
+
+        // C-2/N-3: the schedule row and its durable version-0 core-context
+        // record commit in ONE transaction.
+        let mut tx = nexus_local_db::begin_immediate(pool)
+            .await
+            .expect("research fixture: begin immediate tx");
         // SAFETY: test-only — DML helper inserting a research schedule row
-        // with the preset_version that matches
+        // with the preset_version + embedded source identity that match
         // embedded-presets/research/preset.yaml. Schema reference: see the
         // struct doc comment above.
         sqlx::query(
             r"INSERT INTO creator_schedules
                (schedule_id, creator_id, preset_id, preset_version, status,
                 concurrency_kind, current_core_context_version,
-                label, created_at, updated_at, work_id)
-               VALUES (?, ?, 'research', ?, ?, 'serial', 0, ?, ?, ?, ?)",
+                label, created_at, updated_at, work_id, execution_policy,
+                execution_descriptor_json)
+               VALUES (?, ?, 'research', ?, ?, 'serial', 0, ?, ?, ?, ?, 'driven_v1', ?)",
         )
         .bind(self.schedule_id)
         .bind(self.creator_id)
@@ -156,9 +200,21 @@ impl ResearchScheduleFixture {
         .bind(now)
         .bind(now)
         .bind(self.work_id)
-        .execute(pool)
+        .bind(descriptor_bytes)
+        .execute(&mut *tx)
         .await
         .unwrap_or_else(|e| panic!("ResearchScheduleFixture::insert failed: {e}"));
+
+        // N-3: the row is not admissible until its version-0 core-context
+        // record is durable (the row's `current_core_context_version` stays 0).
+        let seed_text = serde_json::to_string(&input).unwrap_or_default();
+        auto_chain::seed_core_context_version(&mut tx, self.schedule_id, &seed_text)
+            .await
+            .expect("research fixture: seed core-context version 0");
+
+        tx.commit()
+            .await
+            .expect("research fixture: commit schedule + core-context seed");
     }
 }
 
@@ -376,14 +432,20 @@ async fn research_schedule_request_preset_input_contract() {
         "inspiration_log seeded",
     );
 
-    // `references_dir` / `output_dir` are intentionally absent from the seed:
-    // they are resolved at session-run time from the Work workspace, not
-    // stored on the schedule row. This documents the boundary between the
+    // `references_dir` / `output_dir` are runtime-resolved from the Work
+    // workspace, so their VALUES are NOT seeded here (the schedule-row seed
+    // leaves them empty). N-10/N-14: `build_preset_input` guarantees every key
+    // a preset references is present — strict-mode template rendering fails on
+    // MISSING keys — so the research preset's runtime-resolved keys are seeded
+    // as empty strings, not omitted. This documents the boundary between the
     // hermetic schedule-row contract and the runtime ACP-dependent paths.
     assert!(
-        input.get("references_dir").is_none() && input.get("output_dir").is_none(),
-        "references_dir/output_dir are runtime-resolved, not schedule-row seed fields",
+        input.get("references_dir").is_some() && input.get("output_dir").is_some(),
+        "references_dir/output_dir are present as empty-string seed keys \
+         (values resolved at session-run time from the Work workspace)",
     );
+    assert_eq!(input["references_dir"], "", "references_dir seeded empty");
+    assert_eq!(input["output_dir"], "", "output_dir seeded empty");
 }
 
 // ── T2: supervisor tick drives research schedule boot → running ─────────────

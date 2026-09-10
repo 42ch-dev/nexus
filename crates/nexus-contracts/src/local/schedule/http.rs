@@ -54,6 +54,21 @@ pub struct AddScheduleRequest {
     /// Audit reason for `force_gates` (required when `force_gates` is `true`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Role → provider binding map (A1, v1.186 P2 T1). Frozen at admission
+    /// into the run descriptor; graph node `agent` selects the role key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_bindings: Option<std::collections::HashMap<String, AgentBindingDto>>,
+}
+
+/// Role → provider binding (A1) — wire form of
+/// [`nexus_orchestration::run_state::AgentBinding`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentBindingDto {
+    /// Provider id.
+    pub provider_id: String,
+    /// Optional model id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,6 +122,14 @@ pub struct ScheduleSummary {
     pub creator_id: String,
     pub preset_id: String,
     pub status: String,
+    /// Execution policy (A3): `legacy_inert`, `driven_v1`, or `system_inert`.
+    pub execution_policy: String,
+    /// The owned run session ID, when the schedule has been admitted (A3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_session_id: Option<String>,
+    /// Shared durable execution projection (A2/A7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<crate::local::orchestration::http::ExecutionProjection>,
     pub label: Option<String>,
     pub current_core_context_version: u32,
     pub created_at: String,
@@ -187,12 +210,19 @@ pub struct CoreContextHistoryEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignalScheduleRequest {
     pub signal: String,
+    /// Exact durable wait token for `continue` (A4). Required for
+    /// `signal: "continue"`; ignored/absent for other signals.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignalScheduleResponse {
     pub schedule_id: String,
     pub status: String,
+    /// Current durable wait id after the signal (null when not waiting).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_wait_id: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -311,6 +341,7 @@ mod tests {
             input: None,
             force_gates: false,
             reason: None,
+            agent_bindings: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         let back: AddScheduleRequest = serde_json::from_str(&json).unwrap();
@@ -338,6 +369,7 @@ mod tests {
             input: Some(input),
             force_gates: false,
             reason: None,
+            agent_bindings: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         let back: AddScheduleRequest = serde_json::from_str(&json).unwrap();
@@ -357,6 +389,7 @@ mod tests {
             input: None,
             force_gates: true,
             reason: Some("testing override".to_string()),
+            agent_bindings: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         let back: AddScheduleRequest = serde_json::from_str(&json).unwrap();
@@ -377,6 +410,7 @@ mod tests {
             input: None,
             force_gates: false,
             reason: None,
+            agent_bindings: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("\"scheduled_at\":\"253402300799\""));
@@ -388,10 +422,25 @@ mod tests {
     fn signal_schedule_request_roundtrip() {
         let req = SignalScheduleRequest {
             signal: "pause".to_string(),
+            wait_id: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         let back: SignalScheduleRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(back.signal, "pause");
+        assert!(back.wait_id.is_none());
+    }
+
+    #[test]
+    fn signal_schedule_request_continue_roundtrip() {
+        let req = SignalScheduleRequest {
+            signal: "continue".to_string(),
+            wait_id: Some("w-123".to_string()),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("\"wait_id\":\"w-123\""));
+        let back: SignalScheduleRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.signal, "continue");
+        assert_eq!(back.wait_id.as_deref(), Some("w-123"));
     }
 
     #[test]

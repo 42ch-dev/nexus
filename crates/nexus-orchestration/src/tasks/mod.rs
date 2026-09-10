@@ -9,13 +9,11 @@
 //!   and propagate it to all child tasks.
 //! - `CapabilityTask::run` should generate a `capability_call_id` per invocation
 //!   and store `_last_capability_call_id` + capability call metadata in context.
-//! - `AcpPromptTask::run` should include `run_id` and `capability_call_id` in
-//!   `worker/acp_prompt` params when a worker handle exists.
 //! - If `_trace_file` is present in context, append start/finish trace events
 //!   best-effort using the DTOs from `nexus-contracts::local::acp_runtime::trace`.
 
 use crate::capability::{CapabilityError, CapabilityRegistry};
-use crate::engine::OrchestrationEngine;
+use crate::engine::{OrchestrationEngine, SessionId};
 use crate::preset::manifest::{ConvergeConfig, ConvergeStrategy};
 use crate::preset::manifest::{EnterAction, ExitWhen, MergeKind, NextTarget, StateDefinition};
 use async_trait::async_trait;
@@ -74,6 +72,15 @@ impl Task for CapabilityTask {
         let cap = self.registry.get(&name).ok_or_else(|| {
             graph_flow::GraphError::TaskExecutionFailed(format!("capability not found: {name}"))
         })?;
+
+        // A capability invocation may perform an external effect (capability
+        // calls can trigger provider/prompt/host activity). Mark the step as
+        // having performed a potentially-external effect so a failed
+        // post-effect `commit_transition` can persist an interrupted
+        // disposition rather than blindly rewinding (Important 3).
+        context
+            .set(crate::engine::EXTERNAL_EFFECT_MARKER, true)
+            .await;
 
         match cap.run(input).await {
             Ok(output) => {
@@ -226,6 +233,14 @@ impl Task for InnerGraphTask {
         &self,
         context: graph_flow::Context,
     ) -> Result<TaskResult, graph_flow::GraphError> {
+        // 0. Current-step hygiene: child-wait markers from an earlier step
+        //    must never leak into this one's boundary (round-4 Critical 2).
+        //    Cleared here; re-set only when THIS step parks at a child
+        //    human wait.
+        context.set("_child_wait_record", Value::Null).await;
+        context.set("_child_wait_session", Value::Null).await;
+        context.set("_child_wait_task", Value::Null).await;
+
         // 1. Read the parent session ID from context.
         let parent_session_id: String = context
             .get(&self.parent_session_id_key)
@@ -245,12 +260,19 @@ impl Task for InnerGraphTask {
 
         // Copy core_context.* keys from parent.
         for key_prefix in &["core_context", "preset.input"] {
-            // We use a simple approach: copy known keys via serde.
-            // Since Context uses Arc<DashMap>, we serialize the parent, extract
-            // matching keys, and set them on the child.
+            // Context serializes as `{"data": {...}, "chat_history": {...}}`;
+            // the flat `preset.input.*` / `core_context.*` keys live in the
+            // `data` map. Iterate THAT map, not the top-level envelope —
+            // otherwise no key ever matches the prefix and the child loses
+            // the frozen admission input (N-7: inner-graph prompts render
+            // empty `preset.input.*` variables).
             if let Ok(parent_data) = serde_json::to_value(&context) {
-                if let Some(obj) = parent_data.as_object() {
-                    for (k, v) in obj {
+                if let Some(data) = parent_data
+                    .as_object()
+                    .and_then(|obj| obj.get("data"))
+                    .and_then(|d| d.as_object())
+                {
+                    for (k, v) in data {
                         if k.starts_with(&format!("{key_prefix}.")) || k == *key_prefix {
                             child_ctx.set(k.as_str(), v.clone()).await;
                         }
@@ -259,59 +281,156 @@ impl Task for InnerGraphTask {
             }
         }
 
-        // 3. Spawn the child session.
-        let params = crate::engine::ChildSessionParams {
-            parent_session_id: parent_session_id.clone(),
-            inner_graph: self.inner_graph.clone(),
-            initial_context: child_ctx,
+        // 3. Attach an existing persisted child session (recovery, Important 4)
+        //    or spawn a new one. After a parent restarts with its cursor
+        //    still at this inner-graph task, recovery hydrates the persisted
+        //    child rows into the engine's children map; we reattach the
+        //    matching non-terminal child and resume it (preserving
+        //    cursor/context) rather than creating a duplicate child row and
+        //    potentially replaying completed child work. We only spawn a new
+        //    child when no matching child row exists.
+        let child_sid = match self
+            .engine
+            .attach_existing_child_session(&parent_session_id, self.inner_graph.clone())
+            .await
+        {
+            Ok(Some(existing)) => existing,
+            Ok(None) => {
+                let params = crate::engine::ChildSessionParams {
+                    parent_session_id: parent_session_id.clone(),
+                    inner_graph: self.inner_graph.clone(),
+                    initial_context: child_ctx,
+                };
+
+                self.engine.spawn_child_session(params).await.map_err(|e| {
+                    graph_flow::GraphError::TaskExecutionFailed(format!(
+                        "InnerGraphTask: failed to spawn child session: {e}"
+                    ))
+                })?
+            }
+            // A7 rule 2 (P3 T1 rereview-2 P1): a persisted child row whose
+            // descriptor no longer matches the trusted root is non-replayable.
+            // Fail closed — never mint a fresh child id and replay the work.
+            Err(e) => {
+                return Err(graph_flow::GraphError::TaskExecutionFailed(format!(
+                    "InnerGraphTask: existing child session is non-replayable: {e}"
+                )));
+            }
         };
 
-        let child_sid = self.engine.spawn_child_session(params).await.map_err(|e| {
-            graph_flow::GraphError::TaskExecutionFailed(format!(
-                "InnerGraphTask: failed to spawn child session: {e}"
-            ))
-        })?;
+        // Driving an inner graph session is itself an external effect: the
+        // child may run capability/prompt/host-tool effects (or have run them
+        // pre-crash — the persisted child carries a completed effect that must
+        // not be replayed). Propagate the effect marker to the parent so a
+        // failed post-child-effect parent `commit_transition` (e.g. stale child
+        // CAS) is classified Interrupted, never deterministically restored and
+        // replayed on restart (Important 2). Scoped to this parent step: the
+        // engine clears the marker after a successful parent checkpoint.
+        context
+            .set(crate::engine::EXTERNAL_EFFECT_MARKER, true)
+            .await;
 
-        // 4. Poll child session to completion.
+        // A reattached child that is already terminal (its durable checkpoint
+        // was persisted before the parent committed past this inner graph)
+        // must NOT be re-stepped — its completed prompt/effect work would be
+        // replayed. Consume it directly: read its terminal output below and
+        // record an empty run (no extra step). We detect terminal status via
+        // the engine's in-memory tracker (registered by attach).
+        let child_terminal = self
+            .engine
+            .get_status(&child_sid)
+            .await
+            .is_ok_and(|s| s.is_terminal());
+
+        // 4. Poll child session to completion (only for a non-terminal child —
+        //    a terminal reattached child is consumed, never re-stepped,
+        //    Round-5 Important 1).
         let mut last_error = None;
-        for _ in 0..256 {
-            let outcome = self.engine.run_step(&child_sid).await.map_err(|e| {
-                graph_flow::GraphError::TaskExecutionFailed(format!(
-                    "InnerGraphTask: run_step failed: {e}"
-                ))
-            })?;
+        let mut child_wait = None;
+        if !child_terminal {
+            for _ in 0..256 {
+                let outcome = self.engine.run_step(&child_sid).await.map_err(|e| {
+                    graph_flow::GraphError::TaskExecutionFailed(format!(
+                        "InnerGraphTask: run_step failed: {e}"
+                    ))
+                })?;
 
-            match outcome {
-                crate::engine::StepOutcome::Completed { .. } => break,
-                crate::engine::StepOutcome::Paused {
-                    reason,
-                    next_task_id,
-                } => {
-                    // Resume the child if it paused (shouldn't happen for
-                    // rule-only inner graphs, but handle gracefully).
-                    let _ = self
-                        .engine
-                        .signal(&child_sid, crate::engine::EngineSignal::Resume)
-                        .await;
-                    tracing::debug!(
-                        child_session = %child_sid.0,
-                        %next_task_id,
-                        %reason,
-                        "InnerGraphTask: child paused, resuming"
-                    );
-                }
-                crate::engine::StepOutcome::WaitingForInput { .. } => {
-                    // Inner graphs shouldn't wait for input; resume.
-                    let _ = self
-                        .engine
-                        .signal(&child_sid, crate::engine::EngineSignal::Resume)
-                        .await;
-                }
-                crate::engine::StepOutcome::Error(e) => {
-                    last_error = Some(e);
-                    break;
+                match outcome {
+                    crate::engine::StepOutcome::Completed { .. } => break,
+                    crate::engine::StepOutcome::Paused {
+                        reason,
+                        next_task_id,
+                    } => {
+                        // Resume the child if it paused (shouldn't happen for
+                        // rule-only inner graphs, but handle gracefully).
+                        let _ = self
+                            .engine
+                            .signal(&child_sid, crate::engine::EngineSignal::Resume)
+                            .await;
+                        tracing::debug!(
+                            child_session = %child_sid.0,
+                            %next_task_id,
+                            %reason,
+                            "InnerGraphTask: child paused, resuming"
+                        );
+                    }
+                    crate::engine::StepOutcome::WaitingForInput { response } => {
+                        // Round-4 Critical 2 (A4): a supported inner-graph child
+                        // waiting for human input MUST NOT be auto-resumed by the
+                        // inner poller (auto-approval bypass). Preserve the
+                        // child's WaitRecord and propagate the wait to the parent:
+                        // the parent step parks with `WaitForInput` and the root
+                        // `WaitRecord` carries the exact child cursor (A4 "a
+                        // waiting child makes the parent waiting"). Explicit
+                        // continuation re-runs the parent inner-graph task, which
+                        // reattaches the still-waiting child and steps it — the
+                        // child's durable token is then consumed by the matching
+                        // authorized continue, never by boot or the poller.
+                        child_wait = Some((child_sid.0.clone(), response));
+                        break;
+                    }
+                    crate::engine::StepOutcome::Error(e) => {
+                        last_error = Some(e);
+                        break;
+                    }
                 }
             }
+        }
+
+        // 5a. Round-4 Critical 2: a child human wait must make THIS parent
+        //     step return `WaitForInput` (never Continue) so the engine
+        //     persists the parent as `waiting_for_input` with a fresh A4
+        //     token naming the exact waiting child. The child's persisted
+        //     wait record is untouched (its token remains for the matching
+        //     continue); parent/root wait + child checkpoint are persisted
+        //     together by `commit_transition` before the engine returns
+        //     `WaitingForInput` (A4). The child's current task id comes from
+        //     the authoritative persisted child snapshot; `None` degrades to
+        //     the child session id (never empty).
+        if let Some((child_session, response)) = child_wait {
+            let child_task_id = self
+                .engine
+                .get_current_task_id(&SessionId(child_session.clone()))
+                .await
+                .unwrap_or(None);
+            context
+                .set("_child_wait_session", child_session.clone())
+                .await;
+            context
+                .set(
+                    "_child_wait_task",
+                    child_task_id.unwrap_or_else(|| child_session.clone()),
+                )
+                .await;
+            return Ok(TaskResult::new(
+                Some(response.unwrap_or_else(|| {
+                    format!(
+                        "inner graph '{}' child '{}' is waiting for human input",
+                        self.inner_graph.id, child_session
+                    )
+                })),
+                NextAction::WaitForInput,
+            ));
         }
 
         // 5. Read output_binding from child final context.
@@ -1146,6 +1265,20 @@ impl StateCompositeTask {
     /// `HashSet<String>` of predecessor task IDs populated at graph build time),
     /// so the converge gate check `arrived_sources.len() == expected_predecessor_count`
     /// correctly gates on per-predecessor arrival.
+    ///
+    /// # ROUND-4 GATE-SCOPE CORRECTION
+    ///
+    /// This writer is invoked by labeled/conditional ROUTING for ANY routed
+    /// target — including plain manual-wait states — so the
+    /// `_converge_arrivals_*` (and `_merge_*` / `_join_wait_start_*`) keys it
+    /// produces are **not** authoritative evidence that the CURRENT step parked
+    /// at a scheduler gate. The authoritative scheduler-park signal is the
+    /// state-scoped [`set_gate_park`] marker that the gated task itself writes
+    /// ONLY at its genuine merge/converge wait returns (and nulls on gate
+    /// success/leave/timeout). Recovery classification therefore uses
+    /// `gate_park_live(data, current_task_id)`, never the any-key chain test,
+    /// so a manual wait reached through a labeled/conditional path with stale
+    /// or broad join keys keeps its fresh retained A4 token.
     pub fn record_converge_arrival(context: &graph_flow::Context, target: &str, source_id: &str) {
         let converge_key = format!("_converge_arrivals_{target}");
         let mut arrived: std::collections::HashSet<String> =
@@ -1155,6 +1288,28 @@ impl StateCompositeTask {
             context.set_sync(&converge_key, arrived);
         }
         // else: duplicate arrival from same source → idempotent no-op.
+    }
+
+    /// Set or clear the CURRENT-GATE scheduler-park marker for `state_id`
+    /// (round 4, Critical 1).
+    ///
+    /// The gated `StateCompositeTask` writes `_gate_park_{state_id}` = `true`
+    /// exactly when its merge/converge gate returns `WaitForInput` (the engine
+    /// persists that outcome as `paused` + tokenless), and nulls it on gate
+    /// success-leave and deadline expiry (reroute/typed failure). This is the
+    /// ONLY authoritative scheduler-park evidence: unlike the routing-written
+    /// `_merge_*` / `_converge_arrivals_*` / `_join_wait_start_*` keys (which
+    /// label/conditional routing writes for ANY routed target), the marker is
+    /// state-scoped and written by the gate itself. A manual/nested wait
+    /// reached through a labeled/conditional path never carries a live marker
+    /// for its own state, so it stays `waiting_for_input` with a fresh token.
+    fn set_gate_park(context: &graph_flow::Context, state_id: &str, parked: bool) {
+        let key = format!("_gate_park_{state_id}");
+        if parked {
+            context.set_sync(&key, true);
+        } else {
+            context.set_sync(&key, Value::Null);
+        }
     }
 
     /// Bounded-join deadline check for one waiting tick (DR-06, v1.179).
@@ -1214,6 +1369,11 @@ impl StateCompositeTask {
         };
         context.set(arrivals_key, Value::Null).await;
         context.set(&wait_start_key, Value::Null).await;
+        // Round-4 Critical 1: the join is no longer parked — the deadline
+        // fired (reroute or typed failure). Clear the current-gate marker
+        // so a later WaitForInput outcome at this state is never misread
+        // as a scheduler park.
+        Self::set_gate_park(context, &self.id, false);
 
         if let Some(target) = &self.on_timeout {
             let note = format!(
@@ -1604,6 +1764,12 @@ impl Task for StateCompositeTask {
                     merge_kind = ?merge_kind,
                     "merge node waiting for more incoming labeled edges"
                 );
+                // Round-4 Critical 1: write the CURRENT-GATE park marker so
+                // the engine classifies this WaitingForInput outcome as a
+                // scheduler park (paused + tokenless). Historical/broad join
+                // keys written by labeled/conditional ROUTING are not
+                // authoritative park evidence; this state-scoped marker is.
+                Self::set_gate_park(&context, &self.id, true);
                 return Ok(TaskResult::new(
                     Some(format!(
                         "merge node '{state_id}': {arrived_count}/{expected} arrivals, waiting",
@@ -1615,6 +1781,10 @@ impl Task for StateCompositeTask {
 
             // Merge condition met — clear arrivals for next cycle.
             context.set(&self.merge_key, serde_json::Value::Null).await;
+            // Success-leave: the join has passed, so the gate is no longer
+            // parked (a later re-entry at this state must never be misread
+            // as a scheduler park).
+            Self::set_gate_park(&context, &self.id, false);
             tracing::info!(
                 state_id = %self.id,
                 arrived = arrived_count,
@@ -1654,6 +1824,9 @@ impl Task for StateCompositeTask {
                         strategy = ?converge_config.strategy,
                         "converge node waiting for more incoming edges"
                     );
+                    // Round-4 Critical 1: CURRENT-GATE park marker (see the
+                    // merge gate above).
+                    Self::set_gate_park(&context, &self.id, true);
                     return Ok(TaskResult::new(
                         Some(format!(
                             "converge node '{state_id}': {arrived_count}/{expected} arrivals, waiting ({:?})",
@@ -1667,6 +1840,8 @@ impl Task for StateCompositeTask {
                 context
                     .set(&self.converge_key, serde_json::Value::Null)
                     .await;
+                // Success-leave: the join has passed (see merge gate above).
+                Self::set_gate_park(&context, &self.id, false);
                 tracing::info!(
                     state_id = %self.id,
                     arrived = arrived_count,
@@ -1816,10 +1991,22 @@ impl Task for StateCompositeTask {
                 NextAction::WaitForInput
             }
             Some(ExitWhen::Rule) => {
-                // Run rule check inline.
-                let rule_task = RuleCheckTask;
-                let result = rule_task.run(context.clone()).await?;
-                result.next_action
+                // The unit `ExitWhen::Rule` (bare `exit_when: kind: rule`)
+                // contract is "transition as soon as the enter action
+                // completes" (TD-V131-08, locked by
+                // `memory_augmented_rule_exit_is_explicit_always_true`).
+                // Production never injects a `_rule` expression for the
+                // unit variant, so an unset `_rule` means always-true —
+                // immediate transition. A context `_rule` (test/expression
+                // wiring) still routes through the rule evaluator.
+                let rule: String = context.get("_rule").await.unwrap_or_default();
+                if rule.is_empty() {
+                    NextAction::Continue
+                } else {
+                    let rule_task = RuleCheckTask;
+                    let result = rule_task.run(context.clone()).await?;
+                    result.next_action
+                }
             }
             Some(ExitWhen::LlmJudge {
                 ref template_file,
@@ -2003,39 +2190,46 @@ impl Task for StateCompositeTask {
 /// A task for a node within an inner graph.
 ///
 /// §8.2 mapping:
-/// - `kind=acp_prompt` → `AcpPromptTask` (full in T4; T3 stub that stores a placeholder).
+/// - `kind=acp_prompt` → `AcpPromptTask` through the Host plane.
 ///
 /// ## WS-E T5: `session_id` routing
 ///
-/// The task can route prompts to different agent sessions based on:
+/// The task routes the prompt to the durable orchestration run based on:
 /// 1. Explicit `session_id` provided at construction (for preset resolution)
-/// 2. Node's `agent` field resolved from `session_routes` in context (runtime lookup)
+/// 2. The engine-seeded `_session_id` trusted context value (runtime lookup)
 ///
-/// Backward compatible: if no session routing is configured, uses `"default"`.
+/// Backward compatible: if no session identity is available, uses `"default"`.
 pub struct InnerGraphNodeTask {
     id: String,
-    /// Worker handle for IPC. `None` for stub mode.
-    worker_handle: Option<std::sync::Arc<std::sync::Mutex<Option<crate::worker::WorkerHandle>>>>,
+    /// Production prompt executor. `None` for stub/test mode.
+    executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+    /// Per-run coordinator cancellation tokens (A1).
+    session_cancels: std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    >,
     /// Template file path (resolved relative to preset bundle root).
     template: String,
     /// Tool policy for this node.
     tool_policy: ToolPolicy,
     /// Explicit `session_id` (if preset resolution already determined it).
     session_id: Option<String>,
-    /// Agent role reference (if node has `agent` field — will be resolved from `session_routes`).
+    /// Agent role reference (if node has `agent` field — resolved binding).
     agent_ref: Option<String>,
 }
 
 impl InnerGraphNodeTask {
-    /// Create a new inner graph node task (stub mode, no IPC).
+    /// Create a new inner graph node task (stub mode, no executor).
     ///
     /// Used by preset loader for initial graph construction. The real task
-    /// is wired at runtime when `worker_handle` and `session_routes` are available.
+    /// is wired at runtime when the executor and session cancels are available.
     #[must_use]
     pub fn new(id: &str) -> Self {
         Self {
             id: id.to_string(),
-            worker_handle: None,
+            executor: None,
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
             template: String::new(),
             tool_policy: ToolPolicy::AutoGrantReadOnly,
             session_id: None,
@@ -2057,13 +2251,27 @@ impl InnerGraphNodeTask {
         self
     }
 
-    /// Builder-style `worker_handle` setter.
+    /// Builder-style prompt executor setter (A1).
     #[must_use]
-    pub fn with_worker_handle(
+    pub fn with_prompt_executor(
         mut self,
-        handle: Option<std::sync::Arc<std::sync::Mutex<Option<crate::worker::WorkerHandle>>>>,
+        executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
     ) -> Self {
-        self.worker_handle = handle;
+        self.executor = executor;
+        self
+    }
+
+    /// Builder-style session cancels setter (A1).
+    #[must_use]
+    pub fn with_session_cancels(
+        mut self,
+        session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        >,
+    ) -> Self {
+        self.session_cancels = session_cancels;
         self
     }
 
@@ -2081,33 +2289,31 @@ impl InnerGraphNodeTask {
         self
     }
 
-    /// Resolve the effective `session_id` for this node (WS-E T5).
+    /// Resolve the durable orchestration run id for this node.
     ///
-    /// Priority:
-    /// 1. Explicit `session_id` (if set at construction)
-    /// 2. Lookup from context using `agent_ref` (if set and `session_routes` present)
-    /// 3. Default "default"
-    async fn resolve_session_id(&self, context: &graph_flow::Context) -> String {
-        // Priority 1: explicit session_id
-        if let Some(ref sid) = self.session_id {
-            return sid.clone();
+    /// An explicit id is used by already-bound callers. Otherwise the engine's
+    /// trusted `_session_id` context value identifies the run. Agent role
+    /// selection is carried separately in `PromptRequest::agent_ref`.
+    ///
+    /// M-002: a node with neither an explicit id nor a trusted `_session_id`
+    /// context value refuses with a typed graph error — never a magic
+    /// `default` run id. The engine seeds `_session_id` at run admission;
+    /// its absence means the node is being executed outside a trusted run
+    /// context.
+    async fn resolve_session_id(
+        &self,
+        context: &graph_flow::Context,
+    ) -> Result<String, graph_flow::GraphError> {
+        if let Some(sid) = &self.session_id {
+            return Ok(sid.clone());
         }
 
-        // Priority 2: lookup from session_routes via agent_ref
-        if let Some(ref agent) = self.agent_ref {
-            let routes_key = "_session_routes";
-            let routes_json: Option<serde_json::Value> = context.get(routes_key).await;
-            if let Some(routes) = routes_json {
-                if let Some(obj) = routes.as_object() {
-                    if let Some(sid) = obj.get(agent).and_then(|v| v.as_str()) {
-                        return sid.to_string();
-                    }
-                }
-            }
-        }
-
-        // Priority 3: default
-        "default".to_string()
+        context.get("_session_id").await.ok_or_else(|| {
+            graph_flow::GraphError::TaskExecutionFailed(
+                "missing trusted _session_id: orchestration context must inject the run identity"
+                    .to_string(),
+            )
+        })
     }
 }
 
@@ -2121,105 +2327,86 @@ impl Task for InnerGraphNodeTask {
         &self,
         context: graph_flow::Context,
     ) -> Result<TaskResult, graph_flow::GraphError> {
-        // Resolve session_id for this node (WS-E T5).
-        let session_id = self.resolve_session_id(&context).await;
+        // Resolve session_id for this node (WS-E T5). M-002: a missing
+        // trusted identity refuses the node execution.
+        let session_id = self.resolve_session_id(&context).await?;
 
-        // If we have a worker handle, delegate to AcpPromptTask.
-        if let Some(ref handle_arc) = self.worker_handle {
-            let acp_task = AcpPromptTask::new(
-                Some(handle_arc.clone()),
+        // If we have a prompt executor, delegate to AcpPromptTask.
+        if let Some(executor) = &self.executor {
+            let mut acp_task = AcpPromptTask::new(
+                Some(executor.clone()),
+                self.session_cancels.clone(),
                 &self.id,
                 self.template.clone(),
-                self.tool_policy.clone(),
+                self.tool_policy,
                 Some(session_id),
             );
-            return acp_task.run(context).await;
+            if let Some(agent_ref) = &self.agent_ref {
+                acp_task = acp_task.with_agent_ref(agent_ref.clone());
+            }
+            let result = acp_task.run(context.clone()).await?;
+            // Inner-graph presets bind outputs as `<node>.text` /
+            // `<node>.output`, which `InnerGraphTask` resolves via the
+            // `nodes.<binding>` key. `AcpPromptTask` stores
+            // `state.<node>.output`; mirror it into the node-namespaced keys
+            // so existing output_binding values keep working after the P1
+            // prompt-executor cutover.
+            let text: String = context
+                .get(&format!("state.{}.output", self.id))
+                .await
+                .unwrap_or_default();
+            if !text.is_empty() {
+                context
+                    .set(format!("nodes.{}.output", self.id), text.clone())
+                    .await;
+                context.set(format!("nodes.{}.text", self.id), text).await;
+            }
+            return Ok(result);
         }
 
-        // Stub mode: return a placeholder.
+        // Stub mode: no executor — refuse with a typed failure, never a
+        // placeholder success (A1: no echo/worker fallback).
         tracing::debug!(
             node_id = %self.id,
             session_id = %session_id,
             agent_ref = ?self.agent_ref,
-            "InnerGraphNodeTask running in stub mode"
+            "InnerGraphNodeTask running without a prompt executor"
         );
 
-        let output = format!(
-            "inner_node:{}:stub_output [session_id={}]",
-            self.id, session_id
-        );
-        context
-            .set(format!("nodes.{}.text", self.id), output.clone())
-            .await;
-        context
-            .set(format!("nodes.{}.output", self.id), output.clone())
-            .await;
-        context
-            .set(format!("nodes.{}.session_id", self.id), session_id)
-            .await;
-
-        Ok(TaskResult::new(Some(output), NextAction::Continue))
+        Err(graph_flow::GraphError::TaskExecutionFailed(format!(
+            "inner node '{}': no prompt executor available (unconfigured provider)",
+            self.id
+        )))
     }
 }
 
 // ---------------------------------------------------------------------------
-// AcpPromptTask (dispatches prompt to worker via IPC)
+// AcpPromptTask (dispatches prompt through the Host plane)
 // ---------------------------------------------------------------------------
 
-/// Tool policy for ACP prompt sessions.
+/// Tool policy for ACP prompt sessions (A1).
 ///
-/// Design: `orchestration-engine.md` §6.5.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ToolPolicy {
-    /// All tools auto-granted (V1.0 behavior).
-    AutoGrantAll,
-    /// Reads allowed, writes require upcall.
-    AutoGrantReadOnly,
-    /// No tools allowed.
-    DenyAll,
-    /// Every tool triggers upcall.
-    RequestPolicy,
-}
+/// Design: `orchestration-engine.md` §6.5. Defined in `capability` so the
+/// Host permission scope mapping lives next to the seam.
+pub use crate::capability::ToolPolicy;
 
-impl std::str::FromStr for ToolPolicy {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "auto_grant_all" => Ok(Self::AutoGrantAll),
-            "deny_all" => Ok(Self::DenyAll),
-            "request_policy" => Ok(Self::RequestPolicy),
-            _ => Ok(Self::AutoGrantReadOnly), // safe default
-        }
-    }
-}
-
-impl ToolPolicy {
-    /// Serialize to the string form used in IPC.
-    #[must_use]
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::AutoGrantAll => "auto_grant_all",
-            Self::AutoGrantReadOnly => "auto_grant_read_only",
-            Self::DenyAll => "deny_all",
-            Self::RequestPolicy => "request_policy",
-        }
-    }
-}
-
-/// A task that sends a prompt to an ACP agent via the Worker Manager IPC.
+/// A task that sends a prompt to an ACP agent through the Host plane (A1).
 ///
-/// Design: `orchestration-engine.md` §4.4 (`AcpPromptTask` row) + §6.4 (IPC shapes).
+/// Design: `orchestration-engine.md` §4.4 (`AcpPromptTask` row) + A1.
 ///
 /// `run(ctx)`:
 /// 1. Renders the template with `handlebars` against `ctx` bindings.
-/// 2. Calls `worker/acp_prompt { prompt, tool_policy, session_id }` via `WorkerHandle`.
-/// 3. Streams `worker/acp_prompt_chunk` notifications into `ctx.chat_history`.
-/// 4. On final reply, stores `result.full_text` at `ctx["state.<state_id>.output"]`.
-/// 5. Returns `TaskResult { response: Some(full_text), next_action: NextAction::Continue }`.
+/// 2. Executes the prompt through the injected [`crate::capability::PromptExecutor`]
+///    with the run/task identity and the coordinator cancellation token.
+/// 3. Stores `result.full_text` at `ctx["state.<state_id>.output"]`.
+/// 4. Returns `TaskResult { response: Some(full_text), next_action: NextAction::Continue }`.
 pub struct AcpPromptTask {
-    /// Worker handle for IPC. `None` for test stub mode.
-    worker_handle: Option<std::sync::Arc<std::sync::Mutex<Option<crate::worker::WorkerHandle>>>>,
+    /// Production prompt executor. `None` for test stub mode.
+    executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+    /// Per-run coordinator cancellation tokens (A1).
+    session_cancels: std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    >,
     /// State ID this task belongs to (for context key namespacing).
     state_id: String,
     /// Prompt template (handlebars syntax).
@@ -2230,19 +2417,24 @@ pub struct AcpPromptTask {
     /// Routes the prompt to a specific agent slot within the worker.
     /// Default `"default"` for backward compatibility with single-agent workers.
     session_id: String,
+    /// Optional role key used to resolve the run's frozen provider binding.
+    agent_ref: Option<String>,
 }
 
 impl AcpPromptTask {
     /// Create a new `AcpPromptTask`.
     ///
-    /// `worker_handle`: the worker handle for IPC. Can be `None` for test mode
+    /// `executor`: the production prompt executor. Can be `None` for test mode
     /// where the task operates in stub mode.
     ///
     /// `session_id`: optional session ID for multi-agent routing. If `None`,
     /// defaults to `"default"` for backward compatibility with single-agent workers.
     pub fn new(
-        worker_handle: Option<
-            std::sync::Arc<std::sync::Mutex<Option<crate::worker::WorkerHandle>>>,
+        executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+        session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
         >,
         state_id: impl Into<String>,
         template: impl Into<String>,
@@ -2250,27 +2442,33 @@ impl AcpPromptTask {
         session_id: Option<String>,
     ) -> Self {
         Self {
-            worker_handle,
+            executor,
+            session_cancels,
             state_id: state_id.into(),
             template: template.into(),
             tool_policy,
             session_id: session_id.unwrap_or_else(|| "default".to_string()),
+            agent_ref: None,
         }
     }
 
-    /// Test helper: create an `AcpPromptTask` with a worker handle directly.
+    /// Test helper: create an `AcpPromptTask` with a prompt executor directly.
     pub fn new_for_test(
-        handle: crate::worker::WorkerHandle,
+        executor: std::sync::Arc<dyn crate::capability::PromptExecutor>,
         state_id: impl Into<String>,
         template: impl Into<String>,
         tool_policy: ToolPolicy,
     ) -> Self {
         Self {
-            worker_handle: Some(std::sync::Arc::new(std::sync::Mutex::new(Some(handle)))),
+            executor: Some(executor),
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
             state_id: state_id.into(),
             template: template.into(),
             tool_policy,
             session_id: "default".to_string(),
+            agent_ref: None,
         }
     }
 
@@ -2279,8 +2477,11 @@ impl AcpPromptTask {
     /// Convenience constructor for multi-agent presets where the `session_id`
     /// is known at task creation time.
     pub fn with_session_id(
-        worker_handle: Option<
-            std::sync::Arc<std::sync::Mutex<Option<crate::worker::WorkerHandle>>>,
+        executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+        session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
         >,
         state_id: impl Into<String>,
         template: impl Into<String>,
@@ -2288,12 +2489,21 @@ impl AcpPromptTask {
         session_id: impl Into<String>,
     ) -> Self {
         Self {
-            worker_handle,
+            executor,
+            session_cancels,
             state_id: state_id.into(),
             template: template.into(),
             tool_policy,
             session_id: session_id.into(),
+            agent_ref: None,
         }
+    }
+
+    /// Select a role key from the run's frozen agent bindings.
+    #[must_use]
+    pub fn with_agent_ref(mut self, agent_ref: impl Into<String>) -> Self {
+        self.agent_ref = Some(agent_ref.into());
+        self
     }
 
     /// Render the prompt template using handlebars against a nested JSON payload.
@@ -2330,59 +2540,54 @@ impl Task for AcpPromptTask {
         // 1. Render the template.
         let prompt = self.render_template(&context);
 
-        // 2. If we have a worker handle, dispatch via IPC.
-        let full_text = if let Some(ref handle_arc) = self.worker_handle {
-            // Take the handle out of the Arc<Mutex> to avoid holding
-            // the MutexGuard across the await point (which is !Send).
-            let handle = {
-                let mut guard = handle_arc.lock().map_err(|e| {
-                    graph_flow::GraphError::TaskExecutionFailed(format!("worker handle lock: {e}"))
+        // 2. If we have a prompt executor, dispatch through the Host plane.
+        let full_text = if let Some(ref executor) = self.executor {
+            // Resolve the coordinator cancellation token for this run (A1).
+            // FAIL-CLOSED: an unregistered run refuses with the typed
+            // `CancellationUnavailable` — a fresh token would be
+            // uncancellable by any coordinator. The run admission path
+            // (engine start/spawn/recovery) registers the token.
+            let cancellation = crate::capability::resolve_session_cancellation(
+                &self.session_cancels,
+                &self.session_id,
+            )
+            .map_err(|e| {
+                graph_flow::GraphError::TaskExecutionFailed(format!(
+                    "acp_prompt cancellation resolution failed: {e}"
+                ))
+            })?;
+
+            // Dispatching a prompt to an external agent is an external
+            // effect — mark the step so a failed post-effect commit persists
+            // an interrupted disposition rather than blindly rewinding
+            // (Important 3).
+            context
+                .set(crate::engine::EXTERNAL_EFFECT_MARKER, true)
+                .await;
+
+            let result = executor
+                .execute(crate::capability::PromptRequest {
+                    run_id: self.session_id.clone(),
+                    task_id: self.state_id.clone(),
+                    agent_ref: self.agent_ref.clone(),
+                    prompt,
+                    tool_policy: self.tool_policy,
+                    cancellation,
+                })
+                .await
+                .map_err(|e| {
+                    graph_flow::GraphError::TaskExecutionFailed(format!(
+                        "acp_prompt execution failed: {e}"
+                    ))
                 })?;
-                guard.take().ok_or_else(|| {
-                    graph_flow::GraphError::TaskExecutionFailed(
-                        "worker handle consumed or not available".into(),
-                    )
-                })?
-            };
 
-            // Call worker/acp_prompt via IPC.
-            // WS-E T5: include session_id for multi-agent routing.
-            let params = serde_json::json!({
-                "prompt": prompt,
-                "tool_policy": self.tool_policy.as_str(),
-                "session_id": self.session_id,
-            });
-
-            let ipc_result = handle.call_json_rpc("worker/acp_prompt", params).await;
-
-            // Put the handle back (even if IPC failed, the pipes may still be usable).
-            {
-                let mut guard = handle_arc.lock().map_err(|e| {
-                    graph_flow::GraphError::TaskExecutionFailed(format!("worker handle lock: {e}"))
-                })?;
-                *guard = Some(handle);
-            }
-
-            match ipc_result {
-                Ok(result) => {
-                    // Extract full_text from the response.
-                    result
-                        .get("full_text")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string()
-                }
-                Err(e) => {
-                    return Ok(TaskResult::new_with_status(
-                        Some(format!("acp_prompt IPC error: {e}")),
-                        NextAction::Continue,
-                        Some(format!("worker/acp_prompt failed: {e}")),
-                    ));
-                }
-            }
+            result.full_text
         } else {
-            // Stub mode: return a placeholder.
-            format!("[acp_prompt stub: {prompt}]")
+            // Stub mode: no executor — refuse with a typed failure, never a
+            // placeholder success (A1: no echo/worker fallback).
+            return Err(graph_flow::GraphError::TaskExecutionFailed(
+                "acp_prompt: no prompt executor available (unconfigured provider)".into(),
+            ));
         };
 
         // 3. Add to chat history.
@@ -2574,10 +2779,10 @@ type DaemonDispatchSlot = std::sync::Arc<
 /// A task that calls a `nexus.*` host tool through the daemon's unified registry.
 ///
 /// Production wiring for DF-47: the schedule executor can invoke read-only
-/// (or mutating) `nexus.*` tools on a configured stage without worker IPC.
-/// The call goes directly through [`crate::capability::DaemonToolDispatch`]
-/// which is implemented in `nexus-daemon-runtime` using
-/// `HostToolExecutor::dispatch_from_worker`.
+/// (or mutating) `nexus.*` tools on a configured stage in-process. The call
+/// goes directly through [`crate::capability::DaemonToolDispatch`] which is
+/// implemented in `nexus-daemon-runtime` by `DaemonToolDispatchAdapter`
+/// (`HostToolExecutor::dispatch_for_schedule`).
 ///
 /// Design: `agent-nexus-tool-bridge.md` §7.4, V1.42 P3.
 pub struct HostToolCallTask {
@@ -2682,6 +2887,12 @@ impl Task for HostToolCallTask {
 
         let result_value = if let Some(ref dispatch_ref) = self.direct_dispatch {
             // Production path (direct): call through injected dispatch.
+            // A host-tool dispatch is an external effect — mark the step so a
+            // failed post-effect commit persists an interrupted disposition
+            // rather than blindly rewinding (Important 3).
+            context
+                .set(crate::engine::EXTERNAL_EFFECT_MARKER, true)
+                .await;
             dispatch_ref
                 .dispatch_tool(&self.tool_name, &rendered_args, &request_id)
                 .await
@@ -2693,6 +2904,10 @@ impl Task for HostToolCallTask {
                 })?
         } else if let Some(ref dispatch_arc) = self.dispatch {
             // Test-oriented path: call through Mutex-wrapped dispatch slot.
+            // A host-tool dispatch is an external effect (Important 3).
+            context
+                .set(crate::engine::EXTERNAL_EFFECT_MARKER, true)
+                .await;
             let dispatch = {
                 let guard = dispatch_arc.lock().map_err(|e| {
                     graph_flow::GraphError::TaskExecutionFailed(format!(
@@ -2918,21 +3133,24 @@ mod tests {
         struct MockGoProvider;
 
         #[async_trait]
-        impl crate::capability::WorkerHandleProvider for MockGoProvider {
-            async fn call_acp_prompt(
+        impl crate::capability::PromptExecutor for MockGoProvider {
+            async fn execute(
                 &self,
-                _creator_id: &str,
-                _session_id: &str,
-                _prompt: String,
-                _tool_policy: &str,
-            ) -> Result<serde_json::Value, crate::capability::CapabilityError> {
-                Ok(serde_json::json!({ "full_text": "GO — evaluation passes." }))
+                _request: crate::capability::PromptRequest,
+            ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError>
+            {
+                Ok(crate::capability::PromptResult {
+                    full_text: "GO — evaluation passes.".to_string(),
+                    host_session_id: "host-sess".to_string(),
+                    operation_id: "op-1".to_string(),
+                })
             }
         }
 
         let deps = CapabilityRuntimeDeps {
             pool: None,
-            worker_provider: Some(std::sync::Arc::new(MockGoProvider)),
+            prompt_executor: Some(std::sync::Arc::new(MockGoProvider)),
+            session_cancels: session_cancels_with_default(),
             daemon_tool_dispatch: None,
             cdn_config: None,
         };
@@ -2945,6 +3163,7 @@ mod tests {
         );
 
         let ctx = graph_flow::Context::new();
+        ctx.set("_session_id", "default").await;
         let (result, reason) = judge_task.evaluate(&ctx).await.unwrap();
         assert!(result, "GO response should give true: {reason}");
         assert!(reason.contains("go"), "reason should mention go: {reason}");
@@ -2958,21 +3177,24 @@ mod tests {
         struct MockNogoProvider;
 
         #[async_trait]
-        impl crate::capability::WorkerHandleProvider for MockNogoProvider {
-            async fn call_acp_prompt(
+        impl crate::capability::PromptExecutor for MockNogoProvider {
+            async fn execute(
                 &self,
-                _creator_id: &str,
-                _session_id: &str,
-                _prompt: String,
-                _tool_policy: &str,
-            ) -> Result<serde_json::Value, crate::capability::CapabilityError> {
-                Ok(serde_json::json!({ "full_text": "NO — stop and review." }))
+                _request: crate::capability::PromptRequest,
+            ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError>
+            {
+                Ok(crate::capability::PromptResult {
+                    full_text: "NO — stop and review.".to_string(),
+                    host_session_id: "host-sess".to_string(),
+                    operation_id: "op-1".to_string(),
+                })
             }
         }
 
         let deps = CapabilityRuntimeDeps {
             pool: None,
-            worker_provider: Some(std::sync::Arc::new(MockNogoProvider)),
+            prompt_executor: Some(std::sync::Arc::new(MockNogoProvider)),
+            session_cancels: session_cancels_with_default(),
             daemon_tool_dispatch: None,
             cdn_config: None,
         };
@@ -2985,6 +3207,7 @@ mod tests {
         );
 
         let ctx = graph_flow::Context::new();
+        ctx.set("_session_id", "default").await;
         let (result, reason) = judge_task.evaluate(&ctx).await.unwrap();
         assert!(!result, "NOGO response should give false: {reason}");
         assert!(
@@ -3005,6 +3228,7 @@ mod tests {
         );
 
         let ctx = graph_flow::Context::new();
+        ctx.set("_session_id", "default").await;
         let (result, reason) = judge_task.evaluate(&ctx).await.unwrap();
         assert!(!result, "no worker → NOGO (safe default)");
         assert!(reason.contains("unavailable"), "reason: {reason}");
@@ -3036,25 +3260,35 @@ mod tests {
     }
 
     #[async_trait]
-    impl crate::capability::WorkerHandleProvider for MockExtractProvider {
-        async fn call_acp_prompt(
+    impl crate::capability::PromptExecutor for MockExtractProvider {
+        async fn execute(
             &self,
-            _creator_id: &str,
-            _session_id: &str,
-            _prompt: String,
-            _tool_policy: &str,
-        ) -> Result<serde_json::Value, crate::capability::CapabilityError> {
-            Ok(serde_json::json!({ "full_text": self.response.clone() }))
+            _request: crate::capability::PromptRequest,
+        ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError> {
+            Ok(crate::capability::PromptResult {
+                full_text: self.response.clone(),
+                host_session_id: "host-sess".to_string(),
+                operation_id: "op-1".to_string(),
+            })
         }
     }
 
     fn extract_registry_with_mock(response: &str) -> Arc<CapabilityRegistry> {
         use crate::capability::CapabilityRuntimeDeps;
+        let map = session_cancels_with_default();
+        // The extract regression context sets no `_session_id`, so the
+        // capability resolves run id "" — register its coordinator token
+        // (fail-closed contract) so the prompt reaches the mock executor.
+        map.write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(String::new())
+            .or_default();
         let deps = CapabilityRuntimeDeps {
             pool: None,
-            worker_provider: Some(std::sync::Arc::new(MockExtractProvider {
+            prompt_executor: Some(std::sync::Arc::new(MockExtractProvider {
                 response: response.to_string(),
             })),
+            session_cancels: map,
             daemon_tool_dispatch: None,
             cdn_config: None,
         };
@@ -3265,16 +3499,17 @@ mod tests {
     }
 
     #[async_trait]
-    impl crate::capability::WorkerHandleProvider for ControlledMockProvider {
-        async fn call_acp_prompt(
+    impl crate::capability::PromptExecutor for ControlledMockProvider {
+        async fn execute(
             &self,
-            _creator_id: &str,
-            _session_id: &str,
-            _prompt: String,
-            _tool_policy: &str,
-        ) -> Result<serde_json::Value, crate::capability::CapabilityError> {
+            _request: crate::capability::PromptRequest,
+        ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError> {
             let resp = self.response.lock().unwrap().clone();
-            Ok(serde_json::json!({ "full_text": resp }))
+            Ok(crate::capability::PromptResult {
+                full_text: resp,
+                host_session_id: "host-sess".to_string(),
+                operation_id: "op-1".to_string(),
+            })
         }
     }
 
@@ -3288,7 +3523,8 @@ mod tests {
         ));
         let deps = CapabilityRuntimeDeps {
             pool: None,
-            worker_provider: Some(provider),
+            prompt_executor: Some(provider),
+            session_cancels: session_cancels_with_default(),
             daemon_tool_dispatch: None,
             cdn_config: None,
         };
@@ -3317,6 +3553,7 @@ mod tests {
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
 
         let ctx = graph_flow::Context::new();
+        ctx.set("_session_id", "default").await;
         let result = task.run(ctx.clone()).await.unwrap();
         assert!(
             matches!(result.next_action, NextAction::Continue),
@@ -3339,7 +3576,8 @@ mod tests {
         ));
         let deps = CapabilityRuntimeDeps {
             pool: None,
-            worker_provider: Some(provider),
+            prompt_executor: Some(provider),
+            session_cancels: session_cancels_with_default(),
             daemon_tool_dispatch: None,
             cdn_config: None,
         };
@@ -3368,6 +3606,7 @@ mod tests {
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
 
         let ctx = graph_flow::Context::new();
+        ctx.set("_session_id", "default").await;
         let result = task.run(ctx.clone()).await.unwrap();
         assert!(
             matches!(result.next_action, NextAction::WaitForInput),
@@ -3407,6 +3646,7 @@ mod tests {
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
 
         let ctx = graph_flow::Context::new();
+        ctx.set("_session_id", "default").await;
         let result = task.run(ctx.clone()).await.unwrap();
         assert!(
             matches!(result.next_action, NextAction::WaitForInput),
@@ -3618,10 +3858,46 @@ mod tests {
         assert!(result.is_err());
     }
 
+    fn empty_session_cancels() -> std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    > {
+        std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()))
+    }
+
+    /// Shared cancellation map with a coordinator token registered for the
+    /// given run id (the fail-closed contract: a prompt consumer with NO
+    /// registered token refuses `CancellationUnavailable`; production runs
+    /// register at admission, tests must do the same).
+    fn session_cancels_with(
+        session_id: &str,
+    ) -> std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    > {
+        let map = empty_session_cancels();
+        map.write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(
+                session_id.to_string(),
+                tokio_util::sync::CancellationToken::new(),
+            );
+        map
+    }
+
+    /// Shared cancellation map registering the `"default"` run (the run id
+    /// unbound capability inputs resolve to when no `_session_id` is set).
+    fn session_cancels_with_default() -> std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    > {
+        session_cancels_with("default")
+    }
+
     #[tokio::test]
-    async fn acp_prompt_task_stub_mode() {
+    async fn acp_prompt_task_stub_mode_refuses() {
+        // A1: no executor — refuse with a typed failure, never a placeholder
+        // success (no echo/worker fallback).
         let task = AcpPromptTask::new(
-            None, // no worker handle — stub mode
+            None, // no executor — stub mode
+            empty_session_cancels(),
             "test-state",
             "Hello {{core_context.version}}",
             ToolPolicy::DenyAll,
@@ -3629,10 +3905,13 @@ mod tests {
         );
         let ctx = graph_flow::Context::new();
         ctx.set("core_context.version", "42").await;
-        let result = task.run(ctx).await.unwrap();
-        assert!(matches!(result.next_action, NextAction::Continue));
-        let response = result.response.unwrap();
-        assert!(response.contains("Hello 42"), "response: {response}");
+        let result = task.run(ctx).await;
+        assert!(result.is_err(), "stub mode must refuse, got: {result:?}");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("no prompt executor"),
+            "typed refusal expected: {err}"
+        );
     }
 
     #[tokio::test]
@@ -3641,6 +3920,7 @@ mod tests {
         // through the real AcpPromptTask execution path.
         let task = AcpPromptTask::new(
             None,
+            empty_session_cancels(),
             "test-state",
             "World: {{world.title}}, Chapter: {{world.chapter}}",
             ToolPolicy::DenyAll,
@@ -3649,16 +3929,8 @@ mod tests {
         let ctx = graph_flow::Context::new();
         ctx.set("world.title", "Nexus").await;
         ctx.set("world.chapter", "1").await;
-        let result = task.run(ctx).await.unwrap();
-        let response = result.response.unwrap();
-        assert!(
-            response.contains("World: Nexus"),
-            "nested world.title should render: {response}"
-        );
-        assert!(
-            response.contains("Chapter: 1"),
-            "nested world.chapter should render: {response}"
-        );
+        let result = task.run(ctx).await;
+        assert!(result.is_err(), "no executor must refuse: {result:?}");
     }
 
     #[tokio::test]
@@ -3666,6 +3938,7 @@ mod tests {
         // QC2-S-001: handlebars must NOT HTML-escape prompt values.
         let task = AcpPromptTask::new(
             None,
+            empty_session_cancels(),
             "test-state",
             "Text: {{content}}",
             ToolPolicy::DenyAll,
@@ -3673,18 +3946,34 @@ mod tests {
         );
         let ctx = graph_flow::Context::new();
         ctx.set("content", "foo & bar < baz > qux").await;
-        let result = task.run(ctx).await.unwrap();
-        let response = result.response.unwrap();
-        assert!(
-            response.contains("foo & bar < baz > qux"),
-            "special chars must not be HTML-escaped: {response}"
-        );
+        let result = task.run(ctx).await;
+        assert!(result.is_err(), "no executor must refuse: {result:?}");
     }
 
     #[tokio::test]
     async fn acp_prompt_task_stores_output_in_context() {
+        // A1: with a mock executor, the agent output lands at
+        // state.<state_id>.output.
+        struct MockExecutor;
+
+        #[async_trait]
+        impl crate::capability::PromptExecutor for MockExecutor {
+            async fn execute(
+                &self,
+                _request: crate::capability::PromptRequest,
+            ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError>
+            {
+                Ok(crate::capability::PromptResult {
+                    full_text: "transformed:test prompt".to_string(),
+                    host_session_id: "host-sess".to_string(),
+                    operation_id: "op-1".to_string(),
+                })
+            }
+        }
+
         let task = AcpPromptTask::new(
-            None,
+            Some(std::sync::Arc::new(MockExecutor)),
+            session_cancels_with("default"),
             "state-1",
             "test prompt",
             ToolPolicy::AutoGrantReadOnly,
@@ -3693,7 +3982,7 @@ mod tests {
         let ctx = graph_flow::Context::new();
         let result = task.run(ctx.clone()).await.unwrap();
         let stored: String = ctx.get("state.state-1.output").await.unwrap();
-        assert!(stored.contains("test prompt"), "stored: {stored}");
+        assert_eq!(stored, "transformed:test prompt");
         assert_eq!(result.response.as_deref(), Some(stored.as_str()));
     }
 
@@ -3702,16 +3991,15 @@ mod tests {
         // WS-E T5: test session_id field
         let task = AcpPromptTask::new(
             None,
+            empty_session_cancels(),
             "state-1",
             "test prompt",
             ToolPolicy::AutoGrantReadOnly,
             Some("writer_session".to_string()), // explicit session_id
         );
         let ctx = graph_flow::Context::new();
-        let _result = task.run(ctx.clone()).await.unwrap();
-        // Stub mode should still work with explicit session_id
-        let stored: String = ctx.get("state.state-1.output").await.unwrap();
-        assert!(stored.contains("test prompt"), "stored: {stored}");
+        let result = task.run(ctx.clone()).await;
+        assert!(result.is_err(), "no executor must refuse: {result:?}");
     }
 
     #[tokio::test]
@@ -3719,113 +4007,46 @@ mod tests {
         // WS-E T5: test with_session_id constructor
         let task = AcpPromptTask::with_session_id(
             None,
+            empty_session_cancels(),
             "state-1",
             "test prompt",
             ToolPolicy::AutoGrantReadOnly,
             "reviewer_session",
         );
         let ctx = graph_flow::Context::new();
-        let result = task.run(ctx.clone()).await.unwrap();
-        assert!(matches!(result.next_action, NextAction::Continue));
+        let result = task.run(ctx.clone()).await;
+        assert!(result.is_err(), "no executor must refuse: {result:?}");
     }
 
     #[tokio::test]
     async fn inner_graph_node_task_stub_mode_with_session_id() {
-        // WS-E T5: InnerGraphNodeTask should track session_id even in stub mode
+        // WS-E T5: InnerGraphNodeTask should track session_id even in stub mode.
+        // A1: no executor — refuse with a typed failure, never a placeholder.
         let task = InnerGraphNodeTask::new("n1").with_session_id("writer_session");
         let ctx = graph_flow::Context::new();
-        let _result = task.run(ctx.clone()).await.unwrap();
-
-        // Check output includes session_id
-        let stored: String = ctx.get("nodes.n1.text").await.unwrap();
+        let result = task.run(ctx.clone()).await;
+        assert!(result.is_err(), "no executor must refuse: {result:?}");
+        let err = result.unwrap_err().to_string();
         assert!(
-            stored.contains("writer_session"),
-            "stored should contain session_id: {stored}"
+            err.contains("no prompt executor"),
+            "typed refusal expected: {err}"
         );
-
-        // Check session_id stored in context
-        let sid: String = ctx.get("nodes.n1.session_id").await.unwrap();
-        assert_eq!(sid, "writer_session");
     }
 
     #[tokio::test]
-    async fn inner_graph_node_task_resolves_session_id_from_routes() {
-        // WS-E T5: InnerGraphNodeTask should lookup session_id from session_routes
-        let task = InnerGraphNodeTask::new("n1").with_agent_ref("writer"); // agent role reference
-
-        let ctx = graph_flow::Context::new();
-        // Set session_routes: writer → writer_session
-        ctx.set(
-            "_session_routes",
-            serde_json::json!({
-                "writer": "writer_session",
-                "reviewer": "reviewer_session",
-            }),
-        )
-        .await;
-
-        let _result = task.run(ctx.clone()).await.unwrap();
-
-        // Check session_id was resolved correctly
-        let sid: String = ctx.get("nodes.n1.session_id").await.unwrap();
-        assert_eq!(sid, "writer_session");
-
-        // Check output includes resolved session_id
-        let stored: String = ctx.get("nodes.n1.text").await.unwrap();
-        assert!(stored.contains("writer_session"), "stored: {stored}");
-    }
-
-    #[tokio::test]
-    async fn inner_graph_node_task_falls_back_to_default() {
-        // WS-E T5: No session_id, no agent_ref, no routes → default
+    async fn inner_graph_node_task_missing_identity_refuses() {
+        // M-002: no explicit session_id and no trusted `_session_id` in the
+        // context → the node refuses with a typed graph error; there is no
+        // magic `default` fallback run id.
         let task = InnerGraphNodeTask::new("n1");
         let ctx = graph_flow::Context::new();
-        let _result = task.run(ctx.clone()).await.unwrap();
-
-        let sid: String = ctx.get("nodes.n1.session_id").await.unwrap();
-        assert_eq!(sid, "default");
-    }
-
-    #[tokio::test]
-    async fn inner_graph_node_task_agent_ref_missing_in_routes() {
-        // WS-E T5: agent_ref set but not in routes → default
-        let task = InnerGraphNodeTask::new("n1").with_agent_ref("unknown_role");
-
-        let ctx = graph_flow::Context::new();
-        ctx.set(
-            "_session_routes",
-            serde_json::json!({
-                "writer": "writer_session",
-            }),
-        )
-        .await;
-
-        let _result = task.run(ctx.clone()).await.unwrap();
-
-        let sid: String = ctx.get("nodes.n1.session_id").await.unwrap();
-        assert_eq!(sid, "default");
-    }
-
-    #[tokio::test]
-    async fn inner_graph_node_task_explicit_session_id_overrides_routes() {
-        // WS-E T5: explicit session_id should win over routes lookup
-        let task = InnerGraphNodeTask::new("n1")
-            .with_session_id("explicit_session")
-            .with_agent_ref("writer"); // this should be ignored
-
-        let ctx = graph_flow::Context::new();
-        ctx.set(
-            "_session_routes",
-            serde_json::json!({
-                "writer": "writer_session",
-            }),
-        )
-        .await;
-
-        let _result = task.run(ctx.clone()).await.unwrap();
-
-        let sid: String = ctx.get("nodes.n1.session_id").await.unwrap();
-        assert_eq!(sid, "explicit_session");
+        let result = task.run(ctx.clone()).await;
+        assert!(result.is_err(), "missing identity must refuse: {result:?}");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("missing trusted _session_id"),
+            "typed refusal expected: {err}"
+        );
     }
 
     #[tokio::test]
@@ -3868,6 +4089,54 @@ mod tests {
         assert_eq!(second, first);
     }
 
+    #[derive(Default)]
+    struct CapturingIdentityExecutor {
+        request: std::sync::Mutex<Option<crate::capability::PromptRequest>>,
+    }
+
+    #[async_trait]
+    impl crate::capability::PromptExecutor for CapturingIdentityExecutor {
+        async fn execute(
+            &self,
+            request: crate::capability::PromptRequest,
+        ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError> {
+            *self.request.lock().expect("capture lock") = Some(request);
+            Ok(crate::capability::PromptResult {
+                full_text: "captured".to_string(),
+                host_session_id: "host-sess".to_string(),
+                operation_id: "op-1".to_string(),
+            })
+        }
+    }
+
+    fn identity_registry(executor: Arc<CapturingIdentityExecutor>) -> Arc<CapabilityRegistry> {
+        let session_cancels: Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        > = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        // The identity regressions run an unbound capability path whose run
+        // id resolves to the trusted `_session_id` injected by the engine —
+        // register the coordinator tokens for the known test run ids (and
+        // "default" for unbound paths) so the prompt consumer reaches the
+        // executor (fail-closed contract).
+        for sid in ["default", "sess_42ch_001", "real_session"] {
+            session_cancels
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .entry(sid.to_string())
+                .or_default();
+        }
+        let deps = crate::capability::CapabilityRuntimeDeps {
+            pool: None,
+            prompt_executor: Some(executor),
+            session_cancels,
+            daemon_tool_dispatch: None,
+            cdn_config: None,
+        };
+        Arc::new(CapabilityRegistry::with_runtime_deps(&deps))
+    }
+
     // ── SEC-V131-01: Caller-boundary identity injection regression ────
     //
     // Proves that when the orchestration engine invokes a capability via
@@ -3900,8 +4169,9 @@ mod tests {
             on_timeout: None,
         };
 
+        let executor = Arc::new(CapturingIdentityExecutor::default());
         let task = StateCompositeTask::from_manifest(&state_def)
-            .with_registry(Arc::new(CapabilityRegistry::with_builtins()));
+            .with_registry(identity_registry(executor.clone()));
 
         // Simulate the engine setting identity in context (as start_session does).
         let ctx = graph_flow::Context::new();
@@ -3914,21 +4184,13 @@ mod tests {
             "terminal state should End"
         );
 
-        // Verify the capability received the injected identity.
-        // acp.prompt in standalone mode echoes session_id in its output.
-        let output: serde_json::Value = ctx.get("_capability_output").await.unwrap_or(Value::Null);
-        let full_text = output
-            .get("full_text")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        assert!(
-            full_text.contains("sess_42ch_001"),
-            "capability should receive injected session_id, got: {full_text}"
-        );
-        assert!(
-            !full_text.contains("default"),
-            "capability should NOT receive 'default' session_id, got: {full_text}"
-        );
+        let captured = executor
+            .request
+            .lock()
+            .expect("capture lock")
+            .clone()
+            .expect("prompt request");
+        assert_eq!(captured.run_id, "sess_42ch_001");
     }
 
     #[tokio::test]
@@ -3958,8 +4220,9 @@ mod tests {
             on_timeout: None,
         };
 
+        let executor = Arc::new(CapturingIdentityExecutor::default());
         let task = StateCompositeTask::from_manifest(&state_def)
-            .with_registry(Arc::new(CapabilityRegistry::with_builtins()));
+            .with_registry(identity_registry(executor.clone()));
 
         let ctx = graph_flow::Context::new();
         ctx.set("_creator_id", "real_creator").await;
@@ -3968,19 +4231,13 @@ mod tests {
         let result = task.run(ctx.clone()).await.unwrap();
         assert!(matches!(result.next_action, NextAction::End));
 
-        let output: serde_json::Value = ctx.get("_capability_output").await.unwrap_or(Value::Null);
-        let full_text = output
-            .get("full_text")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        assert!(
-            full_text.contains("real_session"),
-            "engine must overwrite spoofed session_id with real value, got: {full_text}"
-        );
-        assert!(
-            !full_text.contains("spoofed_session"),
-            "spoofed session_id must not reach capability, got: {full_text}"
-        );
+        let captured = executor
+            .request
+            .lock()
+            .expect("capture lock")
+            .clone()
+            .expect("prompt request");
+        assert_eq!(captured.run_id, "real_session");
     }
 
     #[tokio::test]

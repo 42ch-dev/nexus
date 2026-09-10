@@ -7,50 +7,91 @@
 
 use axum::http::StatusCode;
 use axum_test::TestServer;
-use nexus_contracts::local::orchestration::http::CreateSessionRequest;
+use nexus_agent_host::config::{AgentHostConfig, ProviderConfig};
+use nexus_contracts::local::orchestration::http::{CreateSessionRequest, SessionAgentBindingDto};
 use nexus_daemon_runtime::api;
 use nexus_daemon_runtime::api::auth_middleware::DaemonApiConfig;
 use nexus_daemon_runtime::workspace::WorkspaceState;
-use nexus_orchestration::{GraphFlowEngine, OrchestrationEngine};
 use serde_json::Value;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+const TEST_BINDING_PROVIDER: &str = "test-provider";
+
+fn bindings_for_preset(
+    preset_id: &str,
+    nexus_home: &Path,
+) -> HashMap<String, SessionAgentBindingDto> {
+    let registry = std::sync::Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
+    let loaded = nexus_orchestration::preset::resolve_preset(preset_id, nexus_home, &registry)
+        .unwrap_or_else(|e| panic!("resolve preset {preset_id}: {e}"));
+    nexus_orchestration::preset::required_prompt_roles(&loaded)
+        .into_iter()
+        .map(|role| {
+            (
+                role,
+                SessionAgentBindingDto {
+                    provider_id: TEST_BINDING_PROVIDER.to_string(),
+                    model: None,
+                },
+            )
+        })
+        .collect()
+}
 
 struct TestCtx {
     server: TestServer,
+    nexus_home: PathBuf,
 }
 
 async fn sessions_ctx() -> TestCtx {
     let (tmp, nexus_home, db_path) =
         nexus_daemon_runtime::test_utils::create_test_workspace().await;
+    let nexus_home_for_ctx = nexus_home.clone();
 
     let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
-    let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
-    let registry = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
-    let engine = Arc::new(GraphFlowEngine::new_with_storage(
-        storage,
-        nexus_orchestration::CapabilityRegistryHolder::with_registry(registry.clone()),
-    ));
-    state.set_engine(engine as Arc<dyn OrchestrationEngine>);
-    state.set_capability_registry(
-        nexus_orchestration::CapabilityRegistryHolder::with_registry(registry),
-    );
+    // Mirror boot/lazy-attach: enabled default binding provider + full bundle.
+    state.set_agent_host_config(AgentHostConfig {
+        providers: vec![ProviderConfig {
+            id: TEST_BINDING_PROVIDER.to_string(),
+            protocol: "native_cli".to_string(),
+            command: Some("mock".to_string()),
+            args: vec![],
+            env: HashMap::new(),
+            enabled: true,
+        }],
+        ..AgentHostConfig::default()
+    });
+    state
+        .publish_creator_runtime_bundle()
+        .await
+        .expect("publish creator runtime bundle");
 
     std::mem::forget(tmp);
 
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app).expect("failed to create test server");
-    TestCtx { server }
+    TestCtx {
+        server,
+        nexus_home: nexus_home_for_ctx,
+    }
 }
 
 // axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
 #[allow(clippy::future_not_send)]
-async fn create_session(server: &TestServer, creator_id: &str, preset_id: &str) -> String {
+async fn create_session(
+    server: &TestServer,
+    nexus_home: &Path,
+    creator_id: &str,
+    preset_id: &str,
+) -> String {
     let req = CreateSessionRequest {
         creator_id: creator_id.to_string(),
         preset_id: preset_id.to_string(),
         seed: None,
+        agent_bindings: Some(bindings_for_preset(preset_id, nexus_home)),
     };
     let resp = server
         .post("/v1/daemon/orchestration/sessions")
@@ -64,8 +105,14 @@ async fn create_session(server: &TestServer, creator_id: &str, preset_id: &str) 
 #[tokio::test]
 async fn sessions_list_sort_by_preset_id_ascending() {
     let ctx = sessions_ctx().await;
-    let sid_a = create_session(&ctx.server, "ctr_session", "memory-augmented").await;
-    let sid_b = create_session(&ctx.server, "ctr_session", "novel-writing").await;
+    let sid_a = create_session(
+        &ctx.server,
+        &ctx.nexus_home,
+        "ctr_session",
+        "memory-augmented",
+    )
+    .await;
+    let sid_b = create_session(&ctx.server, &ctx.nexus_home, "ctr_session", "novel-writing").await;
 
     let resp = ctx
         .server
@@ -84,7 +131,13 @@ async fn sessions_list_sort_by_preset_id_ascending() {
 #[tokio::test]
 async fn sessions_list_invalid_sort_key_returns_session_sort_invalid() {
     let ctx = sessions_ctx().await;
-    let _ = create_session(&ctx.server, "ctr_session", "memory-augmented").await;
+    let _ = create_session(
+        &ctx.server,
+        &ctx.nexus_home,
+        "ctr_session",
+        "memory-augmented",
+    )
+    .await;
 
     let resp = ctx
         .server

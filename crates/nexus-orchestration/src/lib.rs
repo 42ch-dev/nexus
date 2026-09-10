@@ -1,4 +1,4 @@
-//! nexus-orchestration — engine adapter, capability registry, worker manager.
+//! nexus-orchestration — engine adapter, capability registry, graph executor.
 //! Authoritative design: `.mstar/specs/orchestration-engine.md`.
 
 pub mod auto_chain;
@@ -19,6 +19,7 @@ pub mod resume_rules;
 pub mod review_report;
 pub mod rules_history;
 pub mod rules_layers;
+pub mod run_state;
 pub mod schedule;
 pub mod scheduler;
 pub mod skill_link;
@@ -31,19 +32,25 @@ pub mod system_preset;
 pub mod system_preset_dir;
 pub mod tasks;
 pub mod user_preset_dir;
-pub mod worker;
 
 pub use capability::{
     Capability, CapabilityError, CapabilityRegistry, CapabilityRegistryHolder,
-    CapabilityRuntimeDeps, WorkerHandleProvider,
+    CapabilityRuntimeDeps, PromptExecutor, PromptPermissionScope, PromptRequest, PromptResult,
+    ToolPolicy,
 };
-pub use engine::{ChildSessionParams, EngineError, GraphFlowEngine, OrchestrationEngine};
+pub use engine::{
+    ChildSessionParams, EngineError, GraphFlowEngine, OrchestrationEngine, SessionId,
+};
 pub use preset::resolve_preset;
+pub use run_state::{
+    AgentBinding, ChildCheckpoint, OwnedProcessIdentity, PresetSourceIdentity, PromptAttempt,
+    PromptPhase, RunCheckpoint, RunDescriptorV1, RunFailure, RunRecord, RunStateV1, WaitKind,
+    WaitRecord, WorkflowStateStore,
+};
 pub use scheduler::{ClockSource, MockClock, Scheduler, SystemClock};
 pub use stage_gates::{
     build_preset_input, build_stage_schedule_label, preset_for_stage, WorkFields,
 };
-pub use worker::WorkerManager;
 
 use std::path::Path;
 

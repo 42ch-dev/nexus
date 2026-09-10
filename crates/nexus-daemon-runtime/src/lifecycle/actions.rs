@@ -118,7 +118,6 @@ impl ActionContext {
 /// - Open `SQLite` pool + run migrations (subsystem task)
 /// - Initialize sync outbox reader (subsystem task)
 /// - Instantiate `OrchestrationEngine` (stub, subsystem task)
-/// - Start Worker Manager (stub, subsystem task)
 ///
 /// Each subsystem is a tokio task that dispatches `SubsystemUp` or
 /// `SubsystemFailed` on completion.
@@ -302,7 +301,7 @@ pub fn enter_stopping(ctx: &Arc<ActionContext>) {
     let grace_ms = ctx.shutdown_grace_ms();
 
     // Spawn shutdown tasks for each subsystem in reverse dependency order.
-    // Order: Engine → WorkerMgr → Sync → Db → HTTP (reverse of startup).
+    // Order: Engine → Sync → Db → HTTP (reverse of startup).
     let subsystems = ctx.subsystems.clone();
     let lc = ctx.lifecycle();
 
@@ -314,7 +313,6 @@ pub fn enter_stopping(ctx: &Arc<ActionContext>) {
         // Reverse order shutdown.
         let shutdown_order = [
             SubsystemKind::Engine,
-            SubsystemKind::WorkerMgr,
             SubsystemKind::Sync,
             SubsystemKind::Db,
             SubsystemKind::Http,

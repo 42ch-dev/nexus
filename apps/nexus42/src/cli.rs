@@ -9,10 +9,10 @@ use crate::commands::connect::ConnectCommand;
 #[cfg(feature = "connect-client")]
 use crate::commands::mcp::McpCommand;
 use crate::commands::{
-    acp::AcpCommand, acp_worker::AcpWorkerArgs, capability::CapabilityCommand,
-    compute::ComputeCommand, creator::CreatorCommand, daemon::DaemonCommand,
-    daemon_run::DaemonRunArgs, desktop::DesktopCommand, host_call::HostCallArgs, ops::OpsCommand,
-    platform::PlatformCommand, preset::PresetCommand, sync::SyncCommand, system::SystemCommand,
+    acp::AcpCommand, capability::CapabilityCommand, compute::ComputeCommand,
+    creator::CreatorCommand, daemon::DaemonCommand, daemon_run::DaemonRunArgs,
+    desktop::DesktopCommand, host_call::HostCallArgs, ops::OpsCommand, platform::PlatformCommand,
+    preset::PresetCommand, sync::SyncCommand, system::SystemCommand,
 };
 use clap::{Parser, Subcommand};
 
@@ -95,6 +95,13 @@ impl Cli {
         {
             false
         }
+    }
+
+    /// Commands whose stdout is machine-readable data (`--json`, MCP stdio):
+    /// tracing must be routed to stderr so diagnostics never corrupt it.
+    #[must_use]
+    pub const fn is_data_output(&self) -> bool {
+        matches!(&self.command, Some(Commands::Ops { .. })) || self.is_mcp_serve()
     }
 }
 
@@ -209,10 +216,6 @@ pub enum Commands {
         command: SyncCommand,
     },
 
-    /// Hidden: ACP worker subprocess entry point (daemon-managed)
-    #[command(hide = true)]
-    AcpWorker(AcpWorkerArgs),
-
     /// Hidden: Internal daemon-run entry point (self-spawned by daemon start)
     #[command(hide = true)]
     DaemonRun(DaemonRunArgs),
@@ -222,7 +225,7 @@ pub enum Commands {
     ///
     /// Hidden from `--help`: the V1.35 command-surface lock fixes the
     /// visible top-level groups to `creator|daemon|acp|platform|system`;
-    /// this is a machine-invoked child entry point like `acp-worker`.
+    /// this is a machine-invoked child entry point.
     #[cfg(feature = "connect-client")]
     #[command(hide = true)]
     Mcp {

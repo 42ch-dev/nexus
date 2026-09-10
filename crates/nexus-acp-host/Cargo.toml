@@ -31,6 +31,7 @@ which = "7"
 # Unix signal handling for graceful shutdown (only on Unix platforms)
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.28", features = ["signal", "process"] }
+sysinfo = { version = "0.30", default-features = false }
 
 # V1.174 P1 T1 (AR-75 C-1): marker feature gating the first-class nexus
 # MCP stdio wiring (`src/mcp.rs`). No extra dependencies — the surface

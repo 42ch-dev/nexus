@@ -232,7 +232,14 @@ async fn restart_mid_chain_resumes_without_re_executing_completed_edges() {
     // `recover_sessions` → `reconstruct_runner`; the test preset is not
     // embedded, so the test wires the graph itself).
     let engine_ref: Arc<dyn OrchestrationEngine> = engine2.clone();
-    let wired = build_wired_outer_graph(&loaded, &engine_ref, &caps, Some(dispatch.clone()));
+    let wired = build_wired_outer_graph(
+        &loaded,
+        &engine_ref,
+        &caps,
+        Some(dispatch.clone()),
+        None,
+        engine2.shared_state().session_cancels.clone(),
+    );
     let runner = Arc::new(graph_flow::FlowRunner::new(
         Arc::new(wired),
         storage2.clone(),
@@ -264,7 +271,7 @@ async fn restart_mid_chain_resumes_without_re_executing_completed_edges() {
         ..PresetRunConfig::default()
     };
     let decisions =
-        resume_driven_sessions(engine2.as_ref(), &storage2, &[summary], &config, None).await;
+        resume_driven_sessions(engine2.as_ref(), &storage2, None, &[summary], &config, None).await;
     assert_eq!(decisions.len(), 1, "exactly one recovered session");
     match &decisions[0] {
         ResumeDecision::ReDriven {
@@ -562,7 +569,14 @@ async fn inspect_after_interrupt_is_side_effect_free_and_resume_matches_baseline
     // ---- Phase 2: boot resume AFTER the inspect passes ----
     let (engine2, storage2) = build_engine(&pool, dispatch.clone());
     let engine_ref: Arc<dyn OrchestrationEngine> = engine2.clone();
-    let wired = build_wired_outer_graph(&loaded, &engine_ref, &caps, Some(dispatch.clone()));
+    let wired = build_wired_outer_graph(
+        &loaded,
+        &engine_ref,
+        &caps,
+        Some(dispatch.clone()),
+        None,
+        engine2.shared_state().session_cancels.clone(),
+    );
     let runner = Arc::new(graph_flow::FlowRunner::new(
         Arc::new(wired),
         storage2.clone(),
@@ -592,7 +606,7 @@ async fn inspect_after_interrupt_is_side_effect_free_and_resume_matches_baseline
         ..PresetRunConfig::default()
     };
     let decisions =
-        resume_driven_sessions(engine2.as_ref(), &storage2, &[summary], &config, None).await;
+        resume_driven_sessions(engine2.as_ref(), &storage2, None, &[summary], &config, None).await;
     assert_eq!(decisions.len(), 1, "exactly one recovered session");
     match &decisions[0] {
         ResumeDecision::ReDriven {
@@ -701,6 +715,7 @@ async fn resume_skips_typed_failed_and_non_class_sessions() {
     let decisions = resume_driven_sessions(
         engine.as_ref(),
         &storage,
+        None,
         &summaries,
         &PresetRunConfig::default(),
         None,

@@ -347,7 +347,10 @@ mod tests {
     fn test_deps() -> CapabilityRuntimeDeps {
         CapabilityRuntimeDeps {
             pool: None,
-            worker_provider: None,
+            prompt_executor: None,
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
             daemon_tool_dispatch: None,
             cdn_config: None,
         }

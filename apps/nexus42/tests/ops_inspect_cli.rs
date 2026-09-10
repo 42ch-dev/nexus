@@ -14,7 +14,9 @@
 //! Run with: `cargo test -p nexus42 --test ops_inspect_cli`
 
 use assert_cmd::Command;
+use nexus_orchestration::run_state::{PresetSourceIdentity, RunDescriptorV1};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 
@@ -59,6 +61,12 @@ struct SeedRow<'a> {
     context: &'a [u8],
     /// Persisted `updated_at` (unix seconds); the list view orders by this.
     updated_at: i64,
+    /// Execution version (`0` legacy v0 row; `>=1` v1 authoritative row).
+    execution_version: i64,
+    /// State revision (`0` on v0 rows).
+    state_revision: i64,
+    /// Serialized `RunStateV1` blob for v1 rows (`None` on v0 rows).
+    run_state_json: Option<Vec<u8>>,
 }
 
 impl<'a> SeedRow<'a> {
@@ -76,16 +84,21 @@ impl<'a> SeedRow<'a> {
             current_task_id,
             context,
             updated_at: 1_756_990_300,
+            execution_version: 0,
+            state_revision: 0,
+            run_state_json: None,
         }
     }
 }
 
 async fn seed_session(pool: &sqlx::SqlitePool, row: &SeedRow<'_>) {
+    let descriptor = (row.execution_version == 1).then(|| run_descriptor(row.preset_id));
     sqlx::query(
         "INSERT INTO orchestration_sessions
             (session_id, creator_id, preset_id, preset_version, status,
-             current_task_id, context_json, created_at, updated_at)
-         VALUES (?, ?, ?, 3, ?, ?, ?, 1_756_990_000, ?)",
+             current_task_id, context_json, created_at, updated_at,
+             execution_version, state_revision, run_state_json, run_descriptor_json)
+         VALUES (?, ?, ?, 3, ?, ?, ?, 1_756_990_000, ?, ?, ?, ?, ?)",
     )
     .bind(row.session_id)
     .bind(CREATOR)
@@ -94,9 +107,51 @@ async fn seed_session(pool: &sqlx::SqlitePool, row: &SeedRow<'_>) {
     .bind(row.current_task_id)
     .bind(row.context)
     .bind(row.updated_at)
+    .bind(row.execution_version)
+    .bind(row.state_revision)
+    .bind(row.run_state_json.clone())
+    .bind(descriptor)
     .execute(pool)
     .await
     .expect("seed session");
+}
+
+/// Serialized durable v1 run state (A2 `RunStateV1`), used by the v1 seeds.
+fn run_state(step_in_flight: Option<&str>, cancel_requested: bool, wait: bool) -> Vec<u8> {
+    serde_json::json!({
+        "wait": wait.then(|| serde_json::json!({
+            "wait_id": "wait-tok-1",
+            "task_id": "task_7",
+            "child_session_id": null,
+            "child_task_id": null,
+            "kind": "manual",
+        })),
+        "step_in_flight": step_in_flight,
+        "in_flight": null,
+        "failure": null,
+        "cancel_requested": cancel_requested,
+    })
+    .to_string()
+    .into_bytes()
+}
+
+fn run_descriptor(preset_id: &str) -> Vec<u8> {
+    serde_json::to_vec(&RunDescriptorV1 {
+        creator_id: CREATOR.to_string(),
+        work_id: None,
+        workspace_root: PathBuf::from("/tmp/nexus42-inspect"),
+        preset_id: preset_id.to_string(),
+        preset_version: 3,
+        source: PresetSourceIdentity::Embedded {
+            preset_id: preset_id.to_string(),
+            content_hash: [0; 32],
+        },
+        input: serde_json::Map::new(),
+        agent_bindings: HashMap::new(),
+        parent_session_id: None,
+        graph_name: None,
+    })
+    .expect("serialize descriptor")
 }
 
 fn run_async<F: Future>(fut: F) -> F::Output {
@@ -111,7 +166,8 @@ fn run_async<F: Future>(fut: F) -> F::Output {
 fn chain_context() -> Vec<u8> {
     json!({"data": {
         "_converge_arrivals_j1": ["src-a"],
-        "_join_wait_start_j1": 1_756_990_100
+        "_join_wait_start_j1": 1_756_990_100,
+        "_gate_park_task_9": true
     }})
     .to_string()
     .into_bytes()
@@ -126,6 +182,77 @@ fn failed_context() -> Vec<u8> {
     }})
     .to_string()
     .into_bytes()
+}
+
+/// tri-QC P1-C: a human wait whose frozen source no longer verifies is
+/// preserved but must not advertise `continue`; the typed reason is exposed.
+#[test]
+fn inspect_v1_human_wait_with_unreconstructable_source_degrades_actions() {
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    let plain = json!({"data": {"_creator_id": CREATOR}})
+        .to_string()
+        .into_bytes();
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        seed_session(
+            &pool,
+            &SeedRow {
+                session_id: "ses_wait_bad_source",
+                preset_id: "preset_x",
+                status: "waiting_for_input",
+                current_task_id: Some("task_7"),
+                context: &plain,
+                updated_at: 1_756_990_300,
+                execution_version: 1,
+                state_revision: 4,
+                run_state_json: Some(run_state(None, false, true)),
+            },
+        )
+        .await;
+        // Valid-shape descriptor whose frozen version no longer matches.
+        let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+        let loaded = nexus_orchestration::preset::load_embedded_preset("memory-augmented", &caps)
+            .expect("embedded preset");
+        let descriptor = serde_json::json!({
+            "creator_id": CREATOR,
+            "work_id": null,
+            "workspace_root": "/tmp",
+            "preset_id": "memory-augmented",
+            "preset_version": loaded.version + 1,
+            "source": loaded.source_identity.clone().expect("source identity"),
+            "input": {},
+            "agent_bindings": {},
+            "parent_session_id": null,
+            "graph_name": null
+        });
+        sqlx::query(
+            "UPDATE orchestration_sessions SET run_descriptor_json = ? WHERE session_id = ?",
+        )
+        .bind(serde_json::to_vec(&descriptor).expect("descriptor json"))
+        .bind("ses_wait_bad_source")
+        .execute(&pool)
+        .await
+        .expect("seed mismatched descriptor");
+        pool.close().await;
+    });
+
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "ses_wait_bad_source", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+    assert_eq!(parsed["recovery_class"], json!("human_wait"));
+    assert_eq!(parsed["wait_id"], json!("wait-tok-1"));
+    assert_eq!(
+        parsed["allowed_actions"],
+        json!(["cancel", "new_run"]),
+        "an unreconstructable source must not offer continue"
+    );
+    assert_eq!(parsed["reason_code"], json!("reconstruction_unavailable"));
 }
 
 #[test]
@@ -684,6 +811,9 @@ fn inspect_list_is_bounded_to_latest_200_and_reports_honest_total() {
                     current_task_id: None,
                     context: &chain_context(),
                     updated_at: 1_756_990_000 + i,
+                    execution_version: 0,
+                    state_revision: 0,
+                    run_state_json: None,
                 },
             )
             .await;
@@ -930,4 +1060,1035 @@ fn inspect_list_shape_anomaly_and_corrupt_pin_context_readable_flag() {
         corrupt_row["resumable"]["rule"],
         json!("context_unreadable")
     );
+}
+
+// ---------------------------------------------------------------------------
+// v1.186 P0 Task 2 — canonical A7 recovery class on the real binary.
+// ---------------------------------------------------------------------------
+#[test]
+fn inspect_v1_interrupted_wins_over_old_join_keys_and_never_retries() {
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    // v1 running row whose durable state carries an in-flight step mark,
+    // plus live converge/merge join keys in context — A7 rule 3: in-flight
+    // wins over old join keys; never auto-retried.
+    let ctx = chain_context();
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        seed_session(
+            &pool,
+            &SeedRow::new("ses_crash", "preset_chain", "running", Some("task_9"), &ctx),
+        )
+        .await;
+        sqlx::query::<sqlx::Sqlite>(
+            "UPDATE orchestration_sessions
+                SET execution_version = 1, state_revision = 7, run_state_json = ?,
+                    run_descriptor_json = ?
+              WHERE session_id = 'ses_crash'",
+        )
+        .bind(run_state(Some("task_9"), false, false))
+        .bind(run_descriptor("preset_chain"))
+        .execute(&pool)
+        .await
+        .expect("promote to v1");
+        pool.close().await;
+    });
+
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "ses_crash", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+    assert_eq!(parsed["execution_version"], json!(1));
+    assert_eq!(parsed["state_revision"], json!(7));
+    assert_eq!(parsed["recovery_class"], json!("interrupted"));
+    assert_eq!(
+        parsed["live_join_keys"],
+        json!(["_converge_arrivals_j1", "_join_wait_start_j1"]),
+        "old join keys are preserved but must not override the interrupted class"
+    );
+    // Truthful projection: the durable interrupted evidence controls the
+    // verdict — the legacy context-key cascade (which would say 'yes') is
+    // only the v0 projection and must not hide v1 interrupted work.
+    assert_eq!(parsed["resumable"]["verdict"], json!("no"));
+    assert_eq!(parsed["resumable"]["rule"], json!("interrupted"));
+    assert_eq!(parsed["resumable"]["runner_check"], json!("not_applicable"));
+    let list_output = nexus42(home.path())
+        .args(["ops", "inspect", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let list: Value = serde_json::from_slice(&list_output).expect("valid list json");
+    assert_eq!(
+        list["total"],
+        json!(1),
+        "interrupted rows count toward the honest list total"
+    );
+    let listed = list["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .find(|row| row["session_id"] == "ses_crash")
+        .expect("interrupted run remains visible in list mode");
+    assert_eq!(listed["recovery_class"], "interrupted");
+}
+
+#[test]
+fn inspect_v1_human_wait_stays_distinct_and_preserves_wait_token() {
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    let plain = json!({"data": {"_creator_id": CREATOR}})
+        .to_string()
+        .into_bytes();
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        seed_session(
+            &pool,
+            &SeedRow {
+                session_id: "ses_wait",
+                preset_id: "preset_x",
+                status: "waiting_for_input",
+                current_task_id: Some("task_7"),
+                context: &plain,
+                updated_at: 1_756_990_300,
+                execution_version: 1,
+                state_revision: 4,
+                run_state_json: Some(run_state(None, false, true)),
+            },
+        )
+        .await;
+        // A v1 human wait carries a frozen descriptor; the shared projection
+        // only offers `continue` when that source still verifies (P1-C).
+        let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+        let loaded = nexus_orchestration::preset::load_embedded_preset("memory-augmented", &caps)
+            .expect("embedded preset");
+        let descriptor = serde_json::json!({
+            "creator_id": CREATOR,
+            "work_id": null,
+            "workspace_root": "/tmp",
+            "preset_id": "memory-augmented",
+            "preset_version": loaded.version,
+            "source": loaded.source_identity.clone().expect("source identity"),
+            "input": {},
+            "agent_bindings": {},
+            "parent_session_id": null,
+            "graph_name": null
+        });
+        sqlx::query(
+            "UPDATE orchestration_sessions SET run_descriptor_json = ? WHERE session_id = ?",
+        )
+        .bind(serde_json::to_vec(&descriptor).expect("descriptor json"))
+        .bind("ses_wait")
+        .execute(&pool)
+        .await
+        .expect("seed reconstructable descriptor");
+        pool.close().await;
+    });
+
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "ses_wait", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+    assert_eq!(parsed["recovery_class"], json!("human_wait"));
+    assert_eq!(parsed["wait_id"], json!("wait-tok-1"));
+    assert_eq!(parsed["db_status"], json!("waiting_for_input"));
+    assert_eq!(
+        parsed["allowed_actions"],
+        json!(["continue", "cancel"]),
+        "human_wait offers exactly continue/cancel (tri-QC P1-B)"
+    );
+    // Legacy resumable verdict stays a hard no for the human wait.
+    assert_eq!(parsed["resumable"]["verdict"], json!("no"));
+}
+
+#[test]
+fn inspect_v1_tokenless_wait_with_old_join_keys_stays_human_wait() {
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    let old_join = json!({"data": {
+        "_converge_arrivals_old": ["a"],
+        "_join_wait_start_old": 1
+    }})
+    .to_string()
+    .into_bytes();
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        seed_session(
+            &pool,
+            &SeedRow {
+                session_id: "ses_tokenless_wait",
+                preset_id: "preset_x",
+                status: "waiting_for_input",
+                current_task_id: Some("manual_wait"),
+                context: &old_join,
+                updated_at: 1_756_990_300,
+                execution_version: 1,
+                state_revision: 4,
+                run_state_json: Some(run_state(None, false, false)),
+            },
+        )
+        .await;
+        pool.close().await;
+    });
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "ses_tokenless_wait", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+    assert_eq!(parsed["recovery_class"], "human_wait");
+    assert_eq!(parsed["resumable"]["verdict"], "no");
+}
+
+#[test]
+fn inspect_v1_corrupt_descriptor_is_unreadable_in_detail_and_list() {
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        seed_session(
+            &pool,
+            &SeedRow {
+                session_id: "ses_bad_descriptor",
+                preset_id: "preset_x",
+                status: "running",
+                current_task_id: Some("task_9"),
+                context: &chain_context(),
+                updated_at: 1_756_990_300,
+                execution_version: 1,
+                state_revision: 4,
+                run_state_json: Some(run_state(None, false, false)),
+            },
+        )
+        .await;
+        sqlx::query(
+            "UPDATE orchestration_sessions SET run_descriptor_json = ? WHERE session_id = ?",
+        )
+        .bind(b"not-json".as_slice())
+        .bind("ses_bad_descriptor")
+        .execute(&pool)
+        .await
+        .expect("corrupt descriptor");
+        pool.close().await;
+    });
+
+    let detail = nexus42(home.path())
+        .args(["ops", "inspect", "ses_bad_descriptor", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let detail: Value = serde_json::from_slice(&detail).expect("detail json");
+    assert_eq!(detail["recovery_class"], "unreadable");
+
+    let list = nexus42(home.path())
+        .args(["ops", "inspect", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let list: Value = serde_json::from_slice(&list).expect("list json");
+    let row = list["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .find(|row| row["session_id"] == "ses_bad_descriptor")
+        .expect("corrupt descriptor row listed");
+    assert_eq!(row["recovery_class"], "unreadable");
+}
+
+#[test]
+fn inspect_v1_corrupt_state_is_unreadable_non_replayable() {
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        seed_session(
+            &pool,
+            &SeedRow::new("ses_badblob", "preset_x", "running", Some("t1"), b"{}"),
+        )
+        .await;
+        sqlx::query::<sqlx::Sqlite>(
+            "UPDATE orchestration_sessions
+                SET execution_version = 1, state_revision = 2, run_state_json = ?
+              WHERE session_id = 'ses_badblob'",
+        )
+        .bind(b"not-json-at-all".as_slice())
+        .execute(&pool)
+        .await
+        .expect("corrupt v1 blob");
+        pool.close().await;
+    });
+
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "ses_badblob", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+    assert_eq!(parsed["recovery_class"], json!("unreadable"));
+    assert!(parsed.get("wait_id").is_none());
+}
+
+#[test]
+fn inspect_v1_completed_is_terminal_without_live_runner() {
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        // v1 authoritative completed row with an unresolved cancel_requested
+        // mark — terminal still wins over interrupted evidence (A7 rule 1).
+        seed_session(
+            &pool,
+            &SeedRow {
+                session_id: "ses_done",
+                preset_id: "preset_x",
+                status: "completed",
+                current_task_id: None,
+                context: b"{}",
+                updated_at: 1_756_990_300,
+                execution_version: 1,
+                state_revision: 9,
+                run_state_json: Some(run_state(None, true, false)),
+            },
+        )
+        .await;
+        pool.close().await;
+    });
+
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "ses_done", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+    assert_eq!(parsed["recovery_class"], json!("terminal"));
+    assert_eq!(parsed["db_status"], json!("completed"));
+    assert_eq!(parsed["resumable"]["verdict"], json!("no"));
+    assert_eq!(parsed["resumable"]["rule"], json!("terminal_status"));
+
+    // Terminal lookup works without a live engine runner: the human view
+    // must also render the terminal class.
+    let human = nexus42(home.path())
+        .args(["ops", "inspect", "ses_done"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let human = String::from_utf8(human).unwrap();
+    assert!(human.contains("recovery_class: terminal"), "{human}");
+    assert!(human.contains("status:         completed"), "{human}");
+}
+
+#[test]
+fn inspect_v1_legacy_v0_chain_row_is_legacy_unverified() {
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    let ctx = chain_context();
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        seed_session(
+            &pool,
+            &SeedRow::new(
+                "ses_legacy",
+                "preset_chain",
+                "running",
+                Some("task_9"),
+                &ctx,
+            ),
+        )
+        .await;
+        pool.close().await;
+    });
+
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "ses_legacy", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+    assert_eq!(parsed["execution_version"], json!(0));
+    assert_eq!(parsed["recovery_class"], json!("legacy_unverified"));
+    assert!(parsed.get("wait_id").is_none());
+    // The shipped conservative legacy classifier still projects resumability.
+    assert_eq!(parsed["resumable"]["verdict"], json!("yes"));
+    assert_eq!(parsed["resumable"]["rule"], json!("chain_class_no_failure"));
+}
+
+#[test]
+#[allow(clippy::too_many_lines)] // CLI inspect list-mode regression covering all recovery classes in one test
+fn inspect_v1_list_mode_recovery_classes_and_read_only() {
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    let chain = chain_context();
+    let plain = json!({"data": {"_creator_id": CREATOR}})
+        .to_string()
+        .into_bytes();
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        // v1 converge/merge chain (running, live join keys).
+        seed_session(
+            &pool,
+            &SeedRow {
+                session_id: "ses_chain",
+                preset_id: "preset_chain",
+                status: "running",
+                current_task_id: Some("task_9"),
+                context: &chain,
+                updated_at: 1_756_990_400,
+                execution_version: 1,
+                state_revision: 3,
+                run_state_json: Some(run_state(None, false, false)),
+            },
+        )
+        .await;
+        // v1 human wait.
+        seed_session(
+            &pool,
+            &SeedRow {
+                session_id: "ses_wait",
+                preset_id: "preset_x",
+                status: "waiting_for_input",
+                current_task_id: Some("task_7"),
+                context: &plain,
+                updated_at: 1_756_990_300,
+                execution_version: 1,
+                state_revision: 4,
+                run_state_json: Some(run_state(None, false, true)),
+            },
+        )
+        .await;
+        // A v1 human wait carries a frozen descriptor; the shared projection
+        // only offers `continue` when that source still verifies (P1-C).
+        let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+        let loaded = nexus_orchestration::preset::load_embedded_preset("memory-augmented", &caps)
+            .expect("embedded preset");
+        let descriptor = serde_json::json!({
+            "creator_id": CREATOR,
+            "work_id": null,
+            "workspace_root": "/tmp",
+            "preset_id": "memory-augmented",
+            "preset_version": loaded.version,
+            "source": loaded.source_identity.clone().expect("source identity"),
+            "input": {},
+            "agent_bindings": {},
+            "parent_session_id": null,
+            "graph_name": null
+        });
+        sqlx::query(
+            "UPDATE orchestration_sessions SET run_descriptor_json = ? WHERE session_id = ?",
+        )
+        .bind(serde_json::to_vec(&descriptor).expect("descriptor json"))
+        .bind("ses_wait")
+        .execute(&pool)
+        .await
+        .expect("seed reconstructable descriptor");
+        pool.close().await;
+    });
+
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+    let rows = parsed["rows"].as_array().expect("rows array");
+    let chain_row = rows
+        .iter()
+        .find(|r| r["session_id"] == "ses_chain")
+        .expect("chain row listed");
+    assert_eq!(chain_row["recovery_class"], json!("converge_merge"));
+    assert_eq!(chain_row["resumable"]["verdict"], json!("yes"));
+    let wait_row = rows
+        .iter()
+        .find(|r| r["session_id"] == "ses_wait")
+        .expect("wait row listed");
+    assert_eq!(wait_row["recovery_class"], json!("human_wait"));
+    assert_eq!(wait_row["wait_id"], json!("wait-tok-1"));
+    assert_eq!(wait_row["resumable"]["verdict"], json!("no"));
+
+    // Read-only proof for the v1 projection path: rows + db bytes unchanged.
+    let rows_before = run_async(async {
+        let pool = nexus_local_db::open_pool_read_only(&db_path)
+            .await
+            .expect("ro pool");
+        let rows: Vec<(String, i64, Option<Vec<u8>>)> = sqlx::query_as(
+            "SELECT session_id, execution_version, run_state_json
+             FROM orchestration_sessions ORDER BY session_id",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("snapshot rows");
+        pool.close().await;
+        rows
+    });
+    let bytes_before = std::fs::read(&db_path).expect("db bytes before");
+
+    nexus42(home.path())
+        .args(["ops", "inspect", "--json"])
+        .assert()
+        .success();
+    nexus42(home.path())
+        .args(["ops", "inspect", "ses_chain", "--json"])
+        .assert()
+        .success();
+
+    let rows_after = run_async(async {
+        let pool = nexus_local_db::open_pool_read_only(&db_path)
+            .await
+            .expect("ro pool");
+        let rows: Vec<(String, i64, Option<Vec<u8>>)> = sqlx::query_as(
+            "SELECT session_id, execution_version, run_state_json
+             FROM orchestration_sessions ORDER BY session_id",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("snapshot rows");
+        pool.close().await;
+        rows
+    });
+    let bytes_after = std::fs::read(&db_path).expect("db bytes after");
+    assert_eq!(rows_before, rows_after, "inspect must not mutate rows");
+    assert_eq!(
+        bytes_before, bytes_after,
+        "inspect must not write the db file"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// v1.186 P0 T2 fix round 1 — L2 review findings.
+// ---------------------------------------------------------------------------
+
+/// Promote a seeded row to v1 with a given state/descriptor, or set an
+/// arbitrary `execution_version` (negative/forward) without state.
+async fn set_v1_metadata(
+    pool: &sqlx::SqlitePool,
+    session_id: &str,
+    execution_version: i64,
+    run_state_json: Option<&[u8]>,
+) {
+    let descriptor = run_descriptor("p");
+    sqlx::query::<sqlx::Sqlite>(
+        "UPDATE orchestration_sessions
+            SET execution_version = ?, state_revision = 5,
+                run_state_json = ?, run_descriptor_json = ?
+          WHERE session_id = ?",
+    )
+    .bind(execution_version)
+    .bind(run_state_json)
+    .bind(descriptor)
+    .bind(session_id)
+    .execute(pool)
+    .await
+    .expect("set v1 metadata");
+}
+
+#[test]
+fn inspect_v1_terminal_wins_with_absent_state_blob() {
+    // Critical 1: a v1 row with NO run_state_json (absent durable state) or
+    // a corrupt blob must still classify Terminal for authoritative
+    // completed/failed/cancelled (A7 rule 1 beats rule 2).
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        for (id, status) in [
+            ("ses_done_absent", "completed"),
+            ("ses_failed_absent", "failed"),
+            ("ses_cancelled_absent", "cancelled"),
+        ] {
+            seed_session(&pool, &SeedRow::new(id, "preset_x", status, None, b"{}")).await;
+        }
+        for (id, status) in [
+            ("ses_done_corrupt", "completed"),
+            ("ses_failed_corrupt", "failed"),
+            ("ses_cancelled_corrupt", "cancelled"),
+        ] {
+            seed_session(&pool, &SeedRow::new(id, "preset_x", status, None, b"{}")).await;
+        }
+        for (id, state) in [
+            ("ses_done_absent", None),
+            ("ses_failed_absent", None),
+            ("ses_cancelled_absent", None),
+            ("ses_done_corrupt", Some(b"not-json".as_slice())),
+            ("ses_failed_corrupt", Some(b"not-json".as_slice())),
+            ("ses_cancelled_corrupt", Some(b"not-json".as_slice())),
+        ] {
+            set_v1_metadata(&pool, id, 1, state).await;
+        }
+        pool.close().await;
+    });
+
+    for id in [
+        "ses_done_absent",
+        "ses_failed_absent",
+        "ses_cancelled_absent",
+        "ses_done_corrupt",
+        "ses_failed_corrupt",
+        "ses_cancelled_corrupt",
+    ] {
+        let output = nexus42(home.path())
+            .args(["ops", "inspect", id, "--json"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+        assert_eq!(
+            parsed["recovery_class"],
+            json!("terminal"),
+            "{id} must stay terminal even with absent/corrupt durable state"
+        );
+        assert_eq!(parsed["resumable"]["verdict"], json!("no"));
+        assert_eq!(parsed["resumable"]["rule"], json!("terminal_status"));
+        assert!(
+            parsed.get("wait_id").is_none(),
+            "terminal rows must not expose a wait token: {parsed}"
+        );
+    }
+}
+
+#[test]
+fn inspect_v1_structurally_corrupt_state_is_unreadable_in_list_and_detail() {
+    // Critical 3 + 2: JSON-valid but not deserializable as RunStateV1
+    // (`{"cancel_requested":"false"}` — string where bool required) must be
+    // Unreadable in BOTH modes; list must not label it SafeBoundary/
+    // HumanWait/ConvergeMerge. Also proves list/detail parity through the
+    // single canonical classifier.
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    let structural = br#"{"cancel_requested":"false"}"#;
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        seed_session(
+            &pool,
+            &SeedRow::new("ses_struct", "preset_x", "running", Some("task_1"), b"{}"),
+        )
+        .await;
+        set_v1_metadata(&pool, "ses_struct", 1, Some(structural)).await;
+        pool.close().await;
+    });
+
+    // Detail.
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "ses_struct", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let detail: Value = serde_json::from_slice(&output).expect("valid json");
+    assert_eq!(detail["recovery_class"], json!("unreadable"));
+    assert_eq!(detail["resumable"]["verdict"], json!("unknown"));
+    assert_eq!(
+        detail["resumable"]["rule"],
+        json!("unreadable_metadata"),
+        "v1 corrupt metadata must carry the explicit non-replayable metadata reason"
+    );
+    assert!(detail.get("wait_id").is_none());
+
+    // List: same row must agree (single classifier, structural validation).
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+    let rows = parsed["rows"].as_array().expect("rows array");
+    let row = rows
+        .iter()
+        .find(|r| r["session_id"] == "ses_struct")
+        .expect("row listed");
+    assert_eq!(
+        row["recovery_class"],
+        json!("unreadable"),
+        "list must not coerce structurally corrupt RunStateV1 evidence: {row}"
+    );
+    assert_eq!(row["resumable"]["verdict"], json!("unknown"));
+    assert_eq!(
+        row["resumable"]["rule"],
+        json!("unreadable_metadata"),
+        "detail and list must name the same unreadable-metadata rule"
+    );
+    assert!(row.get("wait_id").is_none());
+}
+
+#[test]
+fn inspect_v1_unsupported_execution_versions_are_unreadable() {
+    // Important 2 (detail + list): negative and forward (>= 2) execution
+    // versions are unsupported — never coerced to legacy_unverified or v1.
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    let state = run_state(None, false, false);
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        for (id, version) in [("ses_neg", -1), ("ses_fwd", 2), ("ses_fwd99", 99)] {
+            let ctx = json!({"data": {"_creator_id": CREATOR}})
+                .to_string()
+                .into_bytes();
+            seed_session(
+                &pool,
+                &SeedRow::new(id, "preset_x", "running", Some("task_1"), &ctx),
+            )
+            .await;
+            // Even a structurally valid state blob must not salvage an
+            // unsupported version.
+            set_v1_metadata(&pool, id, version, Some(&state)).await;
+        }
+        pool.close().await;
+    });
+
+    for id in ["ses_neg", "ses_fwd", "ses_fwd99"] {
+        let output = nexus42(home.path())
+            .args(["ops", "inspect", id, "--json"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let detail: Value = serde_json::from_slice(&output).expect("valid json");
+        assert_eq!(
+            detail["recovery_class"],
+            json!("unreadable"),
+            "{id} (execution_version) must be unreadable, not coerced"
+        );
+        assert_eq!(detail["resumable"]["verdict"], json!("unknown"));
+        assert!(
+            detail.get("wait_id").is_none(),
+            "unsupported versions must not expose a wait token"
+        );
+    }
+
+    // List mode must agree (bounded to non-terminal rows; both are running).
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+    let rows = parsed["rows"].as_array().expect("rows array");
+    for id in ["ses_neg", "ses_fwd", "ses_fwd99"] {
+        let row = rows
+            .iter()
+            .find(|r| r["session_id"] == id)
+            .expect("row listed");
+        assert_eq!(
+            row["recovery_class"],
+            json!("unreadable"),
+            "list must agree {id} is unreadable: {row}"
+        );
+    }
+}
+
+#[test]
+fn inspect_v1_human_wait_token_beats_old_join_keys() {
+    // Important 1: a durable A4 wait token beats old scheduler join keys —
+    // the row classifies HumanWait (not ConvergeMerge) and stays `no`.
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    let chain = chain_context();
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        seed_session(
+            &pool,
+            &SeedRow {
+                session_id: "ses_wait_joins",
+                preset_id: "preset_chain",
+                status: "waiting_for_input",
+                current_task_id: Some("task_7"),
+                context: &chain,
+                updated_at: 1_756_990_300,
+                execution_version: 1,
+                state_revision: 4,
+                run_state_json: Some(run_state(None, false, true)),
+            },
+        )
+        .await;
+        pool.close().await;
+    });
+
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "ses_wait_joins", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+    assert_eq!(
+        parsed["live_join_keys"],
+        json!(["_converge_arrivals_j1", "_join_wait_start_j1"]),
+        "old join keys are preserved"
+    );
+    assert_eq!(
+        parsed["recovery_class"],
+        json!("human_wait"),
+        "the durable wait token must beat old scheduler join keys"
+    );
+    assert_eq!(parsed["wait_id"], json!("wait-tok-1"));
+    assert_eq!(parsed["resumable"]["verdict"], json!("no"));
+    assert_eq!(parsed["resumable"]["rule"], json!("human_wait"));
+}
+
+#[test]
+fn inspect_v0_stray_state_bytes_stay_legacy_no_wait_id() {
+    // Important 4: a v0 row with stray/ambiguous durable bytes must NOT be
+    // interpreted through v1 wait semantics — no wait_id, legacy_unverified.
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    let wait_state = run_state(None, false, true); // carries wait-tok-1
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        seed_session(
+            &pool,
+            &SeedRow::new("ses_v0_stray", "preset_x", "running", Some("task_1"), b"{}"),
+        )
+        .await;
+        set_v1_metadata(&pool, "ses_v0_stray", 0, Some(&wait_state)).await;
+        pool.close().await;
+    });
+
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "ses_v0_stray", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+    assert_eq!(parsed["execution_version"], json!(0));
+    assert_eq!(parsed["recovery_class"], json!("legacy_unverified"));
+    assert!(
+        parsed.get("wait_id").is_none(),
+        "v0 stray state bytes must never emit a v1 wait token: {parsed}"
+    );
+}
+
+#[test]
+fn inspect_list_human_output_names_recovery_class() {
+    // Important 5: the human (non-JSON) list must name `recovery_class` per
+    // row, just like JSON list and detail do.
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    let chain = chain_context();
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        seed_session(
+            &pool,
+            &SeedRow {
+                session_id: "ses_chain",
+                preset_id: "preset_chain",
+                status: "running",
+                current_task_id: Some("task_9"),
+                context: &chain,
+                updated_at: 1_756_990_400,
+                execution_version: 1,
+                state_revision: 3,
+                run_state_json: Some(run_state(None, false, false)),
+            },
+        )
+        .await;
+        seed_session(
+            &pool,
+            &SeedRow::new("ses_legacy", "preset_x", "running", Some("task_1"), &chain),
+        )
+        .await;
+        pool.close().await;
+    });
+
+    let output = nexus42(home.path())
+        .args(["ops", "inspect"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8(output).unwrap();
+    let chain_line = text
+        .lines()
+        .find(|l| l.starts_with("ses_chain"))
+        .expect("chain row line");
+    assert!(
+        chain_line.contains("converge_merge"),
+        "human list row must name recovery_class, got: {chain_line}"
+    );
+    let legacy_line = text
+        .lines()
+        .find(|l| l.starts_with("ses_legacy"))
+        .expect("legacy row line");
+    assert!(
+        legacy_line.contains("legacy_unverified"),
+        "human list row must name recovery_class, got: {legacy_line}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// v1.186 P0 T2 fix round 2 — unreadable-metadata reason + wait_id gating.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn inspect_v1_corrupt_metadata_with_readable_context_is_unreadable_metadata() {
+    // Review round-2 Important: a v1 row whose context_json is perfectly
+    // readable (`{}`) but whose durable run-state metadata is structurally
+    // invalid must NOT be mapped to the legacy `context_unreadable` wording —
+    // the explanation must name the non-replayable v1 metadata explicitly,
+    // and the rule must be `unreadable_metadata`.
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    let structural = br#"{"cancel_requested":"false"}"#;
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        // Readable `{}` context: no `data` object, but that is irrelevant —
+        // the v1 metadata governs, and it is corrupt.
+        seed_session(
+            &pool,
+            &SeedRow::new("ses_meta", "preset_x", "running", Some("task_1"), b"{}"),
+        )
+        .await;
+        set_v1_metadata(&pool, "ses_meta", 1, Some(structural)).await;
+        pool.close().await;
+    });
+
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "ses_meta", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+    assert_eq!(parsed["recovery_class"], json!("unreadable"));
+    assert_eq!(parsed["resumable"]["verdict"], json!("unknown"));
+    assert_eq!(
+        parsed["resumable"]["rule"],
+        json!("unreadable_metadata"),
+        "corrupt v1 metadata must not be labelled context_unreadable: {parsed}"
+    );
+    let explanation = parsed["resumable"]["explanation"].as_str().unwrap();
+    assert!(
+        explanation.contains("metadata") && explanation.contains("non-replayable"),
+        "explanation must name the explicit non-replayable metadata reason: {explanation}"
+    );
+    assert!(
+        !explanation.contains("context unreadable"),
+        "readable context must not be labelled context-unreadable: {explanation}"
+    );
+    assert!(
+        parsed.get("wait_id").is_none(),
+        "unreadable rows must not expose a wait token"
+    );
+
+    // Human view mirrors the explicit metadata wording.
+    let human = nexus42(home.path())
+        .args(["ops", "inspect", "ses_meta"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let human = String::from_utf8(human).unwrap();
+    let resumable = human
+        .lines()
+        .find(|l| l.starts_with("resumable:"))
+        .expect("resumable line");
+    assert!(
+        resumable.contains("metadata") && resumable.contains("non-replayable"),
+        "human resumable line must name the metadata reason, got: {resumable}"
+    );
+}
+
+#[test]
+fn inspect_v1_terminal_with_stale_wait_bytes_has_no_wait_id() {
+    // Review round-2 Minor: wait_id is exposed ONLY when the canonical class
+    // is human_wait. A terminal row carrying stale wait bytes (the durable
+    // state still holds an old wait token) must not advertise a usable wait
+    // token — the class is terminal and the row must not suggest resume.
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        // completed + wait-bearing run state (stale bytes).
+        seed_session(
+            &pool,
+            &SeedRow {
+                session_id: "ses_done_wait",
+                preset_id: "preset_x",
+                status: "completed",
+                current_task_id: None,
+                context: b"{}",
+                updated_at: 1_756_990_300,
+                execution_version: 1,
+                state_revision: 9,
+                run_state_json: Some(run_state(None, false, true)),
+            },
+        )
+        .await;
+        // cancelled + wait-bearing run state (stale bytes).
+        seed_session(
+            &pool,
+            &SeedRow {
+                session_id: "ses_cancelled_wait",
+                preset_id: "preset_x",
+                status: "cancelled",
+                current_task_id: None,
+                context: b"{}",
+                updated_at: 1_756_990_300,
+                execution_version: 1,
+                state_revision: 9,
+                run_state_json: Some(run_state(None, false, true)),
+            },
+        )
+        .await;
+        pool.close().await;
+    });
+
+    for id in ["ses_done_wait", "ses_cancelled_wait"] {
+        let output = nexus42(home.path())
+            .args(["ops", "inspect", id, "--json"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+        assert_eq!(parsed["recovery_class"], json!("terminal"), "{id}");
+        assert_eq!(parsed["resumable"]["verdict"], json!("no"), "{id}");
+        assert_eq!(
+            parsed["resumable"]["rule"],
+            json!("terminal_status"),
+            "{id}"
+        );
+        assert!(
+            parsed.get("wait_id").is_none(),
+            "terminal rows must not advertise a wait token even with stale \
+             wait bytes: {parsed}"
+        );
+    }
 }

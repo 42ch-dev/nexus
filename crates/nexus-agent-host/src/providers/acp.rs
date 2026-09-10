@@ -17,10 +17,14 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use tokio::sync::RwLock;
 
-use nexus_acp_host::{AcpPermissionOutcome, AcpSdkAdapter, AcpStreamUpdate, NexusAcpClient};
+use nexus_acp_host::{
+    AcpPermissionOutcome, AcpSdkAdapter, AcpStreamUpdate, AgentSpawner, ManagedAcpProcess,
+    NexusAcpClient,
+};
 use nexus_contracts::local::acp::{
     NexusConfigOption, NexusConfigOptionCategory, NexusContentBlock, NexusInitializeRequest,
-    NexusNewSessionRequest, NexusPromptRequest, NexusSessionId, NexusSetConfigOptionRequest,
+    NexusNewSessionRequest, NexusPromptRequest, NexusSessionCreated, NexusSessionId,
+    NexusSetConfigOptionRequest,
 };
 
 use crate::capability::model::{
@@ -30,20 +34,29 @@ use crate::capability::model::{
     ToolCallEvent, ToolCallUpdateEvent,
 };
 use crate::capability::risk::{AutoToolRiskClassifier, ToolRiskClassifier};
-use crate::config::TimeoutConfig;
+use crate::config::{ProviderConfig, TimeoutConfig};
 use crate::error::{HostError, HostResult};
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
 use crate::policy::permission::{HostPermissionResolver, PermissionOutcome};
 use crate::ProviderAdapter;
 
 /// Internal state tracked per active ACP session.
-#[derive(Debug)]
-struct AcpSessionState {
+struct ConnectedAcpSession {
+    /// The SDK client bound to this session's owned subprocess.
+    client: Arc<AcpSdkAdapter>,
+    /// The exact owned child process for this Host session.
+    process: ManagedAcpProcess,
     /// The ACP session ID (from the SDK).
     acp_session_id: NexusSessionId,
     /// Configuration options exposed by the agent at session creation.
     /// Used for dynamic model switching via `set_config_option`.
     config_options: Option<Vec<NexusConfigOption>>,
+    /// Active narrowing permission scope for the current operation (A1).
+    /// The permission handler reads this per tool call; the Host enforces
+    /// one active op per session, so the single slot is race-free.
+    active_permission_scope: std::sync::Arc<
+        tokio::sync::RwLock<Option<crate::capability::model::PromptPermissionScope>>,
+    >,
     /// Map of active operation IDs to their cancel signal.
     /// Wave 1 enforces one op per session; this field supports future multi-op.
     #[allow(dead_code)]
@@ -52,71 +65,322 @@ struct AcpSessionState {
 
 /// ACP provider adapter.
 ///
-/// Wraps an [`AcpSdkAdapter`] and implements the [`ProviderAdapter`] trait.
-/// Each instance is bound to a single provider ID and manages session state
-/// through the ACP SDK lifecycle.
+/// Wraps a generic configured ACP launch recipe (`ProviderConfig {
+/// protocol = "acp", command, args, env }`) and implements the
+/// [`ProviderAdapter`] trait. The provider registers a **recipe only** at
+/// construction — no client, no subprocess, no download. Each Host session
+/// lazily spawns its own owned ACP child (bound to the verified Creator
+/// workspace cwd) on first `launch`; distinct Host sessions/Creators never
+/// share a process lifetime.
 pub struct AcpProvider {
     /// Provider ID for this adapter.
     provider_id: ProviderId,
     /// Display name for this provider.
     display_name: String,
-    /// The underlying ACP SDK adapter.
-    client: Arc<AcpSdkAdapter>,
-    /// Active sessions: host session ID → ACP session state.
-    sessions: Arc<RwLock<HashMap<HostSessionId, AcpSessionState>>>,
+    /// The configured launch recipe (command/args/env). No process at boot.
+    recipe: ProviderConfig,
+    /// Active sessions: host session ID → connected ACP session.
+    sessions: Arc<RwLock<HashMap<HostSessionId, ConnectedAcpSession>>>,
     /// Timeout configuration for stage-level enforcement.
     timeouts: TimeoutConfig,
+    /// Permission resolver used to evaluate ACP permission requests.
+    permission_resolver: HostPermissionResolver,
 }
 
 impl AcpProvider {
-    /// Create a new ACP provider adapter.
+    /// Create a new ACP provider adapter from a generic launch recipe.
     ///
-    /// The `client` should already have an established connection
-    /// (via `AcpSdkAdapter::with_connection`). The `permission_resolver`
-    /// is used to evaluate ACP permission requests against policy.
+    /// Validates protocol/enabled/nonempty command and stores the recipe
+    /// only — no client/process is spawned at boot or catalog load. The
+    /// first `launch` for a Host session lazily spawns the owned child.
     ///
-    /// This constructor awaits the permission handler registration so
-    /// the provider is ready to use immediately upon return (QC2 F-005,
-    /// QC3 F-003: no spawn-without-await race).
-    pub async fn new(
-        provider_id: ProviderId,
-        display_name: String,
-        client: AcpSdkAdapter,
+    /// # Errors
+    ///
+    /// Returns `HostError` when the config is not an enabled ACP provider
+    /// with a nonempty launch command.
+    pub fn from_config(
+        config: ProviderConfig,
         timeouts: TimeoutConfig,
         permission_resolver: HostPermissionResolver,
-    ) -> Self {
-        // Wire up the permission handler on the SDK adapter.
-        // The handler evaluates each tool permission request by:
-        // 1. Classifying the tool risk using AutoToolRiskClassifier
-        // 2. Resolving the permission via HostPermissionResolver
-        let pid = provider_id.clone();
-        let classifier = AutoToolRiskClassifier::new();
-
-        let handler: Arc<dyn Fn(&str) -> AcpPermissionOutcome + Send + Sync> =
-            Arc::new(move |tool_name: &str| {
-                let risk = classifier.classify_or_default(tool_name);
-                let outcome =
-                    permission_resolver.resolve(ProtocolKind::Acp, &pid.0, tool_name, Some(risk));
-                match outcome {
-                    PermissionOutcome::Allow => AcpPermissionOutcome::Approve,
-                    // In non-interactive host context, Ask defaults to Deny.
-                    // Interactive prompting will be added in a future release.
-                    PermissionOutcome::Ask | PermissionOutcome::Deny => AcpPermissionOutcome::Deny,
-                }
-            });
-
-        // Await the handler registration — the provider is not usable until
-        // the handler is installed (QC2 F-005, QC3 F-003).
-        let client_arc = Arc::new(client);
-        client_arc.set_permission_handler(handler).await;
-
-        Self {
+    ) -> HostResult<Self> {
+        if config.protocol != "acp" {
+            return Err(HostError::internal(format!(
+                "provider '{}' is not an ACP provider (protocol '{}')",
+                config.id, config.protocol
+            )));
+        }
+        if !config.enabled {
+            return Err(HostError::provider_unavailable(
+                config.id,
+                "provider is disabled",
+            ));
+        }
+        if config.command.as_deref().is_none_or(str::is_empty) {
+            return Err(HostError::internal(format!(
+                "provider '{}' has no launch command",
+                config.id
+            )));
+        }
+        let provider_id = ProviderId::new(&config.id);
+        let display_name = config.id.clone();
+        Ok(Self {
             provider_id,
             display_name,
-            client: client_arc,
+            recipe: config,
             sessions: Arc::new(RwLock::new(HashMap::new())),
             timeouts,
+            permission_resolver,
+        })
+    }
+
+    /// Build the permission handler closure for a session's SDK adapter.
+    ///
+    /// The handler intersects the active operation's narrowing permission
+    /// scope (A1) with the Host permission resolver: a scope can narrow but
+    /// never elevate Host configuration. `None` scope preserves the
+    /// standalone Host/Character policy.
+    fn build_permission_handler(
+        &self,
+        active_permission_scope: std::sync::Arc<
+            tokio::sync::RwLock<Option<crate::capability::model::PromptPermissionScope>>,
+        >,
+    ) -> Arc<dyn Fn(&str) -> AcpPermissionOutcome + Send + Sync> {
+        let pid = self.provider_id.clone();
+        let classifier = AutoToolRiskClassifier::new();
+        let resolver = self.permission_resolver.clone();
+        Arc::new(move |tool_name: &str| {
+            let risk = classifier.classify_or_default(tool_name);
+            // A1: the orchestration scope narrows the Host configuration —
+            // a tool outside the requested scope is denied before the
+            // resolver is consulted (the scope can never elevate). The scope
+            // read must NEVER fail open: if the lock cannot be acquired the
+            // active scope could be a narrowing policy in force, so the tool
+            // is denied rather than approved with no scope applied.
+            let scope = match active_permission_scope.try_read() {
+                Ok(guard) => *guard,
+                Err(_) => return AcpPermissionOutcome::Deny,
+            };
+            if let Some(scope) = scope {
+                let allowed = match risk {
+                    crate::capability::risk::ToolRisk::Read => scope.allow_read,
+                    crate::capability::risk::ToolRisk::Write => scope.allow_write,
+                    crate::capability::risk::ToolRisk::Destructive => scope.allow_destructive,
+                };
+                if !allowed {
+                    return AcpPermissionOutcome::Deny;
+                }
+            }
+            let outcome = resolver.resolve(ProtocolKind::Acp, &pid.0, tool_name, Some(risk));
+            match outcome {
+                PermissionOutcome::Allow => AcpPermissionOutcome::Approve,
+                // In non-interactive host context, Ask defaults to Deny.
+                // Interactive prompting will be added in a future release.
+                PermissionOutcome::Ask | PermissionOutcome::Deny => AcpPermissionOutcome::Deny,
+            }
+        })
+    }
+
+    /// Lazily spawn the owned ACP child for a session and connect the SDK.
+    ///
+    /// Spawns the recipe command/args/env in the validated Creator workspace
+    /// cwd (never the daemon cwd), wires the permission handler, performs the
+    /// initialize handshake, and creates the ACP session. The exact owned
+    /// child is stored in the session state for bounded cancel/shutdown/reap.
+    #[allow(clippy::too_many_lines)] // sequential spawn/handshake/session setup; splitting obscures the single connection path
+    async fn connect_session(
+        &self,
+        spec: &crate::capability::model::LaunchSpec,
+    ) -> HostResult<ConnectedAcpSession> {
+        let launch_dur = self.timeouts.launch_duration();
+
+        // Defense in depth: the cwd must belong to the verified Creator
+        // workspace (HostManager already validated; re-check the canonical
+        // cwd here so a profile switch can never retarget a session).
+        let owner_workspace = crate::config::validate_workspace_path(&spec.owner.workspace_root)?;
+        let cwd = crate::config::validate_workspace_path_under(&spec.cwd, &owner_workspace)?;
+
+        let command = self.recipe.command.clone().unwrap_or_default();
+        let args: Vec<&str> = self.recipe.args.iter().map(String::as_str).collect();
+        let env: Vec<(&str, &str)> = self
+            .recipe
+            .env
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+
+        let spawner = AgentSpawner::new(cwd.clone());
+        let (child, stdin, stdout) =
+            spawner.spawn_with_env(&command, &args, &env).map_err(|e| {
+                HostError::launch_failed(
+                    self.provider_id.clone(),
+                    "ACP process spawn failed",
+                    Some(e.to_string()),
+                )
+            })?;
+
+        let agent_path = std::path::PathBuf::from(&command);
+        // Capture the process birth identity immediately after spawn, before
+        // the child can exit during initialize/session negotiation.
+        let mut owned_process =
+            ManagedAcpProcess::new(self.provider_id.0.clone(), child, agent_path.clone());
+        let client =
+            AcpSdkAdapter::with_connection(self.provider_id.0.clone(), agent_path, stdin, stdout);
+
+        // Await the handler registration — the provider is not usable until
+        // the handler is installed (QC2 F-005, QC3 F-003). The handler reads
+        // the active per-operation permission scope from the session slot
+        // (A1); the slot is created before the client so the closure can
+        // capture it, and stored into the session on success.
+        let active_permission_scope: std::sync::Arc<
+            tokio::sync::RwLock<Option<crate::capability::model::PromptPermissionScope>>,
+        > = std::sync::Arc::new(tokio::sync::RwLock::new(None));
+        let client_arc = Arc::new(client);
+        client_arc
+            .set_permission_handler(self.build_permission_handler(active_permission_scope.clone()))
+            .await;
+
+        // Any handshake failure below must run the owned teardown/reap
+        // sequence (A5): dropping a plain Child is not an awaited process-tree
+        // reap. `child` stays borrowed during the handshake for EOF watch and
+        // is consumed into `ManagedAcpProcess` only on success or teardown.
+        let session_result: HostResult<NexusSessionCreated> = async {
+            // The SDK connection is established asynchronously by
+            // `with_connection`; wait (bounded by the launch timeout) for it
+            // before issuing the initialize handshake.
+            let connected = tokio::time::timeout(launch_dur, async {
+                loop {
+                    if client_arc.is_connected().await {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await;
+            if connected.is_err() {
+                return Err(HostError::launch_failed(
+                    self.provider_id.clone(),
+                    "ACP SDK connection not established within launch timeout",
+                    None,
+                ));
+            }
+
+            // Initialize handshake with launch timeout, watching for child
+            // exit (EOF/crash is a launch failure, never a timeout).
+            let init_request = NexusInitializeRequest::new().client_info(
+                nexus_contracts::local::acp::NexusAgentInfo {
+                    name: "nexus42".to_string(),
+                    title: Some("Nexus Agent Host".to_string()),
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                },
+            );
+            let init_result = tokio::select! {
+                biased;
+                result = tokio::time::timeout(launch_dur, client_arc.initialize(init_request)) => {
+                    result
+                        .map_err(|_| {
+                            HostError::timeout(
+                                "launch",
+                                format!(
+                                    "ACP initialize handshake timed out after {}ms",
+                                    self.timeouts.launch_ms
+                                ),
+                            )
+                            .with_provider(self.provider_id.clone())
+                        })?
+                        .map_err(|e| {
+                            HostError::launch_failed(
+                                self.provider_id.clone(),
+                                "ACP initialize handshake failed",
+                                Some(e.to_string()),
+                            )
+                        })?
+                }
+                status = owned_process.wait() => {
+                    return Err(HostError::launch_failed(
+                        self.provider_id.clone(),
+                        "ACP process exited during initialize handshake",
+                        Some(status.map_or_else(|e| e.to_string(), |status| status.to_string())),
+                    ));
+                }
+            };
+            let _ = init_result;
+
+            // Create the ACP session with session timeout, watching for child
+            // exit.
+            let acp_request = NexusNewSessionRequest::new(cwd);
+            tokio::select! {
+                biased;
+                result = tokio::time::timeout(
+                    self.timeouts.session_duration(),
+                    client_arc.create_session(acp_request),
+                ) => {
+                    result
+                        .map_err(|_| {
+                            HostError::timeout(
+                                "launch",
+                                format!(
+                                    "ACP session creation timed out after {}ms",
+                                    self.timeouts.session_ms
+                                ),
+                            )
+                            .with_provider(self.provider_id.clone())
+                        })?
+                        .map_err(|e| {
+                            HostError::launch_failed(
+                                self.provider_id.clone(),
+                                "ACP session creation failed",
+                                Some(e.to_string()),
+                            )
+                        })
+                }
+                status = owned_process.wait() => {
+                    Err(HostError::launch_failed(
+                        self.provider_id.clone(),
+                        "ACP process exited during session creation",
+                        Some(status.map_or_else(|e| e.to_string(), |status| status.to_string())),
+                    ))
+                }
+            }
         }
+        .await;
+
+        let session_created = match session_result {
+            Ok(created) => created,
+            Err(error) => {
+                match owned_process
+                    .terminate(self.timeouts.shutdown_duration())
+                    .await
+                {
+                    Ok(()) => return Err(error),
+                    Err(reap_err) => {
+                        // The caller must distinguish a cleanly torn-down
+                        // failed launch from an unconfirmed live process
+                        // (L2 Issue 4): a failed reap becomes the returned
+                        // typed error, never hidden behind the original
+                        // launch error.
+                        tracing::warn!(
+                            provider_id = %self.provider_id,
+                            error = %reap_err,
+                            "launch failure left owned ACP process unconfirmed reaped"
+                        );
+                        return Err(HostError::cleanup_unconfirmed(format!(
+                            "launch of '{}' failed ({error}) and owned ACP process cleanup is unconfirmed: {reap_err}",
+                            self.provider_id
+                        ))
+                        .with_provider(self.provider_id.clone()));
+                    }
+                }
+            }
+        };
+
+        Ok(ConnectedAcpSession {
+            client: client_arc,
+            process: owned_process,
+            acp_session_id: session_created.session_id,
+            config_options: session_created.config_options,
+            active_permission_scope,
+            active_ops: HashMap::new(),
+        })
     }
 
     /// Convert host content blocks to ACP content blocks.
@@ -166,6 +430,7 @@ impl AcpProvider {
     }
 
     /// Convert an `AcpStreamUpdate` to a `HostEvent`.
+    #[allow(clippy::too_many_lines)] // exhaustive per-variant event mapping; a helper per variant would add noise
     fn stream_update_to_event(
         update: AcpStreamUpdate,
         session_id: &HostSessionId,
@@ -211,25 +476,69 @@ impl AcpProvider {
                 stop_reason: reason,
                 ..
             } => {
-                let finish = match reason {
+                // Refusal, resource limits and cancellation are typed
+                // non-success for Host consumers (A5 / I-004): a caller
+                // must never persist refusal, limit exhaustion or a
+                // cancelled turn as successful workflow output. Only a
+                // genuine EndTurn is OpFinished success.
+                match reason {
+                    nexus_contracts::local::acp::NexusStopReason::EndTurn => {
+                        HostEvent::OpFinished(OperationFinishedEvent {
+                            session_id: session_id.clone(),
+                            op_id: op_id.clone(),
+                            reason: FinishReason::EndTurn,
+                        })
+                    }
+                    nexus_contracts::local::acp::NexusStopReason::Cancelled => {
+                        // I-004: an acknowledged Cancelled is typed
+                        // non-success — never EndTurn/succeeded. The
+                        // operation-level cancel path (HostFacade::cancel)
+                        // drives the actual cancellation; this event lets
+                        // consumers distinguish a cancelled turn from a
+                        // completed one.
+                        HostEvent::OpFinished(OperationFinishedEvent {
+                            session_id: session_id.clone(),
+                            op_id: op_id.clone(),
+                            reason: FinishReason::Cancelled,
+                        })
+                    }
+                    nexus_contracts::local::acp::NexusStopReason::Refusal => {
+                        HostEvent::OpFailed(OperationFailedEvent {
+                            session_id: session_id.clone(),
+                            op_id: op_id.clone(),
+                            error_category: "refusal".to_string(),
+                            error_message: "agent refused the request".to_string(),
+                        })
+                    }
                     nexus_contracts::local::acp::NexusStopReason::MaxTokens => {
-                        FinishReason::MaxTokens
+                        HostEvent::OpFailed(OperationFailedEvent {
+                            session_id: session_id.clone(),
+                            op_id: op_id.clone(),
+                            error_category: "max_tokens".to_string(),
+                            error_message: "agent reached the maximum token limit".to_string(),
+                        })
                     }
                     nexus_contracts::local::acp::NexusStopReason::MaxTurnRequests => {
-                        FinishReason::MaxTurnRequests
+                        HostEvent::OpFailed(OperationFailedEvent {
+                            session_id: session_id.clone(),
+                            op_id: op_id.clone(),
+                            error_category: "max_turn_requests".to_string(),
+                            error_message: "agent reached the maximum turn request limit"
+                                .to_string(),
+                        })
                     }
-                    nexus_contracts::local::acp::NexusStopReason::Refusal => FinishReason::Refusal,
-                    nexus_contracts::local::acp::NexusStopReason::EndTurn
-                    | nexus_contracts::local::acp::NexusStopReason::Cancelled => {
-                        FinishReason::EndTurn
-                    }
-                };
-                HostEvent::OpFinished(OperationFinishedEvent {
-                    session_id: session_id.clone(),
-                    op_id: op_id.clone(),
-                    reason: finish,
-                })
+                }
             }
+            AcpStreamUpdate::Failed {
+                error_category,
+                error_message,
+                ..
+            } => HostEvent::OpFailed(OperationFailedEvent {
+                session_id: session_id.clone(),
+                op_id: op_id.clone(),
+                error_category,
+                error_message,
+            }),
             AcpStreamUpdate::PermissionResult {
                 tool_name,
                 approved,
@@ -257,29 +566,26 @@ impl AcpProvider {
         session: &ManagedSessionHandle,
         mode: String,
     ) -> HostResult<HostEventStream> {
-        let acp_session_id = {
+        let (client, acp_session_id) = {
             let sessions = self.sessions.read().await;
-            sessions
-                .get(&session.session_id)
-                .map(|s| s.acp_session_id.clone())
-                .ok_or_else(|| {
-                    HostError::internal(format!(
-                        "session {} not found in ACP provider",
-                        session.session_id
-                    ))
-                })?
+            let state = sessions.get(&session.session_id).ok_or_else(|| {
+                HostError::internal(format!(
+                    "session {} not found in ACP provider",
+                    session.session_id
+                ))
+            })?;
+            let out = (Arc::clone(&state.client), state.acp_session_id.clone());
+            drop(sessions); // release read guard before awaiting client RPC
+            out
         };
 
-        self.client
-            .set_mode(acp_session_id, mode)
-            .await
-            .map_err(|e| {
-                HostError::capability_unsupported(
-                    self.provider_id.clone(),
-                    "set_mode",
-                    format!("ACP set_mode failed: {e}"),
-                )
-            })?;
+        client.set_mode(acp_session_id, mode).await.map_err(|e| {
+            HostError::capability_unsupported(
+                self.provider_id.clone(),
+                "set_mode",
+                format!("ACP set_mode failed: {e}"),
+            )
+        })?;
 
         // Emit a single OpFinished event to signal success.
         let op_id = HostOperationId::new();
@@ -305,7 +611,7 @@ impl AcpProvider {
         session: &ManagedSessionHandle,
         model: String,
     ) -> HostResult<HostEventStream> {
-        let (acp_session_id, model_config_id) = {
+        let (client, acp_session_id, model_config_id) = {
             let sessions = self.sessions.read().await;
             let state = sessions.get(&session.session_id).ok_or_else(|| {
                 HostError::internal(format!(
@@ -325,9 +631,13 @@ impl AcpProvider {
                 })
             });
 
-            let result = (state.acp_session_id.clone(), config_id);
-            drop(sessions);
-            result
+            let out = (
+                Arc::clone(&state.client),
+                state.acp_session_id.clone(),
+                config_id,
+            );
+            drop(sessions); // release read guard before awaiting client RPC
+            out
         };
 
         let Some(config_id) = model_config_id else {
@@ -341,7 +651,7 @@ impl AcpProvider {
         // Attempt to set the model config option
         let request = NexusSetConfigOptionRequest::new(acp_session_id, config_id, model);
 
-        match self.client.set_config_option(request).await {
+        match client.set_config_option(request).await {
             Ok(_) => {
                 // Emit a single OpFinished event to signal success.
                 let op_id = HostOperationId::new();
@@ -406,91 +716,86 @@ impl ProviderAdapter for AcpProvider {
         &self,
         _request: crate::capability::model::ProbeRequest,
     ) -> HostResult<ProviderHealth> {
-        // Attempt an initialize handshake to verify the agent is responsive.
-        let init_request = NexusInitializeRequest::new().client_info(
-            nexus_contracts::local::acp::NexusAgentInfo {
-                name: "nexus42".to_string(),
-                title: Some("Nexus Agent Host".to_string()),
-                version: env!("CARGO_PKG_VERSION").to_string(),
-            },
-        );
-
+        // M-006: probe is a recipe-availability check only — resolve the
+        // launch command on PATH (bounded by the launch timeout), never a
+        // real spawn. A probe must not fabricate an owner/workspace and
+        // spawn an owned child just to tear it down: that would execute
+        // the agent binary outside any trusted Creator context.
+        let command = self.recipe.command.clone().unwrap_or_default();
+        let provider_id = self.provider_id.clone();
         let launch_dur = self.timeouts.launch_duration();
 
-        match tokio::time::timeout(launch_dur, self.client.initialize(init_request)).await {
-            Ok(Ok(_)) => Ok(ProviderHealth {
-                provider_id: self.provider_id.clone(),
+        let result = tokio::time::timeout(
+            launch_dur,
+            tokio::task::spawn_blocking(move || which::which(&command)),
+        )
+        .await
+        .map_err(|_| {
+            HostError::timeout(
+                "probe",
+                format!(
+                    "command lookup timed out after {}ms",
+                    self.timeouts.launch_ms
+                ),
+            )
+            .with_provider(self.provider_id.clone())
+        })?;
+
+        let health = match result {
+            Ok(Ok(resolved_path)) => ProviderHealth {
+                provider_id,
                 available: true,
                 latency_ms: None,
-                message: None,
-            }),
-            Ok(Err(e)) => Ok(ProviderHealth {
-                provider_id: self.provider_id.clone(),
-                available: false,
-                latency_ms: None,
-                message: Some(format!("probe failed: {e}")),
-            }),
-            Err(_) => Ok(ProviderHealth {
-                provider_id: self.provider_id.clone(),
+                message: Some(resolved_path.to_string_lossy().into_owned()),
+            },
+            _ => ProviderHealth {
+                provider_id,
                 available: false,
                 latency_ms: None,
                 message: Some(format!(
-                    "probe timed out after {}ms",
-                    self.timeouts.launch_ms
+                    "command '{}' not found on PATH",
+                    self.recipe.command.as_deref().unwrap_or("")
                 )),
-            }),
-        }
+            },
+        };
+        Ok(health)
     }
 
     async fn launch(
         &self,
         spec: crate::capability::model::LaunchSpec,
     ) -> HostResult<ManagedSessionHandle> {
-        let launch_dur = self.timeouts.launch_duration();
+        // Lazy per-session spawn: the owned ACP child is created here, on
+        // first use for this Host session — never at boot/catalog load.
+        let connected = self.connect_session(&spec).await?;
 
-        // Create ACP session with launch timeout
-        let acp_request = NexusNewSessionRequest::new(spec.cwd);
-
-        let session_created =
-            tokio::time::timeout(launch_dur, self.client.create_session(acp_request))
-                .await
-                .map_err(|_| {
-                    HostError::timeout(
-                        "launch",
-                        format!(
-                            "ACP session creation timed out after {}ms",
-                            self.timeouts.launch_ms
-                        ),
-                    )
-                    .with_provider(self.provider_id.clone())
-                })?
-                .map_err(|e| {
-                    HostError::launch_failed(
-                        self.provider_id.clone(),
-                        "ACP session creation failed",
-                        Some(e.to_string()),
-                    )
-                })?;
+        // Capture the opaque owned-process identity (A5): PID + platform
+        // birth token + owned group id. The birth token is re-validated
+        // before every signal; a missing token means cleanup must be
+        // reported unconfirmed. No transport handle crosses this boundary.
+        let process_identity =
+            connected
+                .process
+                .birth()
+                .map(|birth| crate::capability::model::OwnedProcessIdentity {
+                    pid: birth.pid,
+                    process_birth: Some(birth.start_tick.to_string()),
+                    group_id: Some(birth.pid.to_string()),
+                });
 
         let host_session_id = HostSessionId::new();
 
         // Track the session
         {
             let mut sessions = self.sessions.write().await;
-            sessions.insert(
-                host_session_id.clone(),
-                AcpSessionState {
-                    acp_session_id: session_created.session_id,
-                    config_options: session_created.config_options,
-                    active_ops: HashMap::new(),
-                },
-            );
+            sessions.insert(host_session_id.clone(), connected);
         }
 
         Ok(ManagedSessionHandle {
             provider_id: self.provider_id.clone(),
             session_id: host_session_id,
             capabilities: CapabilityDescriptor::acp_full(),
+            process_identity,
         })
     }
 
@@ -502,8 +807,12 @@ impl ProviderAdapter for AcpProvider {
         session: &ManagedSessionHandle,
         op: crate::capability::model::HostOperation,
     ) -> HostResult<HostEventStream> {
-        let (op_id, content_blocks) = match op {
-            crate::capability::model::HostOperation::Prompt { op_id, content } => (op_id, content),
+        let (op_id, content_blocks, permission_scope) = match op {
+            crate::capability::model::HostOperation::Prompt {
+                op_id,
+                content,
+                permission_scope,
+            } => (op_id, content, permission_scope),
             crate::capability::model::HostOperation::SetMode { mode } => {
                 return self.handle_set_mode(session, mode).await;
             }
@@ -512,11 +821,15 @@ impl ProviderAdapter for AcpProvider {
             }
         };
 
-        // Look up the ACP session ID
-        let acp_session_id = {
+        // Look up the connected ACP session (client + ACP session ID)
+        let (client, acp_session_id, active_permission_scope) = {
             let sessions = self.sessions.read().await;
             match sessions.get(&session.session_id) {
-                Some(s) => s.acp_session_id.clone(),
+                Some(s) => (
+                    Arc::clone(&s.client),
+                    s.acp_session_id.clone(),
+                    s.active_permission_scope.clone(),
+                ),
                 None => {
                     // Session not found — emit OpStarted+OpFailed stream so the
                     // session state machine transitions back to Ready (QC3 F-001).
@@ -530,6 +843,13 @@ impl ProviderAdapter for AcpProvider {
             }
         };
 
+        // A1: install the active per-operation permission scope before the
+        // prompt streams; the permission handler reads it per tool call.
+        // The Host enforces one active op per session, so the single slot is
+        // race-free. The scope is cleared when the stream ends (terminal
+        // event or error) so a later serial prompt starts from `None`.
+        *active_permission_scope.write().await = permission_scope;
+
         // Build the prompt request — clone acp_session_id for potential cancel.
         let acp_sid_for_cancel = acp_session_id.clone();
         let prompt_request = NexusPromptRequest {
@@ -540,8 +860,7 @@ impl ProviderAdapter for AcpProvider {
         // Start streaming with prompt_ms timeout for the initial stream setup
         let prompt_dur = self.timeouts.prompt_duration();
 
-        let rx = match tokio::time::timeout(prompt_dur, self.client.stream_prompt(prompt_request))
-            .await
+        let rx = match tokio::time::timeout(prompt_dur, client.stream_prompt(prompt_request)).await
         {
             Ok(Ok(receiver)) => receiver,
             Ok(Err(e)) => {
@@ -562,7 +881,9 @@ impl ProviderAdapter for AcpProvider {
             }
             Err(_) => {
                 // Timeout on stream setup — best-effort cancel the orphaned ACP
-                // session before emitting OpFailed (QC3 F-002).
+                // session before emitting OpFailed (QC3 F-002). The cancel is
+                // bounded independently so a stalled control connection can
+                // never block the promised terminal failure (L2 Issue 3).
                 tracing::warn!(
                     provider_id = %self.provider_id,
                     session_id = %session.session_id,
@@ -570,11 +891,22 @@ impl ProviderAdapter for AcpProvider {
                     timeout_ms = self.timeouts.prompt_ms,
                     "stream_prompt setup timed out, sending best-effort cancel"
                 );
-                if let Err(cancel_err) = self.client.cancel(acp_sid_for_cancel).await {
-                    tracing::warn!(
-                        error = %cancel_err,
-                        "Best-effort cancel failed on stream setup timeout"
-                    );
+                match tokio::time::timeout(
+                    self.timeouts.shutdown_duration(),
+                    client.cancel(acp_sid_for_cancel),
+                )
+                .await
+                {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(cancel_err)) => {
+                        tracing::warn!(
+                            error = %cancel_err,
+                            "Best-effort cancel failed on stream setup timeout"
+                        );
+                    }
+                    Err(_) => {
+                        tracing::warn!("Best-effort cancel timed out on stream setup timeout");
+                    }
                 }
                 return Ok(Self::make_error_stream(
                     session.session_id.clone(),
@@ -588,28 +920,10 @@ impl ProviderAdapter for AcpProvider {
             }
         };
 
-        // Convert the mpsc::Receiver into a futures Stream of HostEvent
         let session_id = session.session_id.clone();
-        let op_id_for_stream = op_id.clone();
-        let prompt_dur_for_stream = prompt_dur;
-        let provider_id_for_stream = self.provider_id.clone();
-
-        // Clones for the timeout fallback closure (inner_stream closure
-        // consumes session_id and op_id_for_stream via move).
-        let session_id_for_timeout = session_id.clone();
-        let op_id_for_timeout = op_id_for_stream.clone();
-
-        // Clone client and ACP session ID for best-effort cancel on streaming
-        // timeout (QC3 F-002).
-        let client_for_cancel = Arc::clone(&self.client);
-        let acp_sid_for_stream_cancel = acp_sid_for_cancel;
-
-        // First emit OpStarted, then forward the stream with a cumulative
-        // streaming timeout (QC2 F-001). The timeout budget covers the entire
-        // execute duration from stream start; if no event arrives within the
-        // remaining budget, we emit OpFailed and end the stream.
+        let shutdown_dur = self.timeouts.shutdown_duration();
         let started = futures_util::stream::once({
-            let op_id = op_id_for_stream.clone();
+            let op_id = op_id.clone();
             let session_id = session_id.clone();
             async move {
                 Ok(HostEvent::OpStarted(OperationStartedEvent {
@@ -619,60 +933,115 @@ impl ProviderAdapter for AcpProvider {
             }
         });
 
-        let inner_stream = tokio_stream::wrappers::ReceiverStream::new(rx).map(move |update| {
-            let sid = session_id.clone();
-            let oid = op_id_for_stream.clone();
-            Ok(Self::stream_update_to_event(update, &sid, &oid))
-        });
+        // Yield exactly one terminal event. A closed ACP channel is failure,
+        // and a receive timeout cancels the remote operation before ending.
+        let updates = futures_util::stream::unfold(
+            Some((
+                rx,
+                client,
+                acp_sid_for_cancel,
+                session_id,
+                op_id,
+                self.provider_id.clone(),
+                prompt_dur,
+                shutdown_dur,
+                active_permission_scope,
+            )),
+            |state| async move {
+                let (
+                    mut rx,
+                    client,
+                    acp_sid,
+                    session_id,
+                    op_id,
+                    provider_id,
+                    dur,
+                    cancel_dur,
+                    scope,
+                ) = state?;
 
-        // Wrap with a cumulative timeout: if the stream produces no event
-        // within `prompt_dur` from this point, abort with OpFailed.
-        // Use tokio_stream::StreamExt::timeout (not futures_util) for per-item
-        // deadline enforcement (QC2 F-001).
-        //
-        // On streaming timeout, send a best-effort ACP cancel to avoid
-        // orphaned sessions (QC3 F-002). We use .then() to await the cancel
-        // before yielding the terminal OpFailed.
-        let timeout_stream = tokio_stream::StreamExt::timeout(inner_stream, prompt_dur_for_stream)
-            .then(move |result| {
-                let client = client_for_cancel.clone();
-                let acp_sid = acp_sid_for_stream_cancel.clone();
-                let sid = session_id_for_timeout.clone();
-                let oid = op_id_for_timeout.clone();
-                let provider_id = provider_id_for_stream.clone();
-                let dur = prompt_dur_for_stream;
-
-                async move {
-                    if let Ok(event) = result {
-                        event
-                    } else {
-                        // Elapsed — no event arrived within the budget.
-                        // Best-effort cancel the orphaned ACP session (QC3 F-002).
+                match tokio::time::timeout(dur, rx.recv()).await {
+                    Ok(Some(update)) => {
+                        let event = Self::stream_update_to_event(update, &session_id, &op_id);
+                        let terminal =
+                            matches!(event, HostEvent::OpFinished(_) | HostEvent::OpFailed(_));
+                        if terminal {
+                            // A1: clear the active per-operation scope so a
+                            // later serial prompt starts from `None`.
+                            *scope.write().await = None;
+                        }
+                        let next = if terminal {
+                            None
+                        } else {
+                            Some((
+                                rx,
+                                client,
+                                acp_sid,
+                                session_id,
+                                op_id,
+                                provider_id,
+                                dur,
+                                cancel_dur,
+                                scope,
+                            ))
+                        };
+                        Some((Ok(event), next))
+                    }
+                    Ok(None) => {
+                        *scope.write().await = None;
+                        Some((
+                            Ok(HostEvent::OpFailed(OperationFailedEvent {
+                                session_id,
+                                op_id,
+                                error_category: "protocol_eof".to_string(),
+                                error_message: "ACP prompt stream closed without a stop reason"
+                                    .to_string(),
+                            })),
+                            None,
+                        ))
+                    }
+                    Err(_) => {
                         tracing::warn!(
                             provider_id = %provider_id,
-                            session_id = %sid,
-                            "Streaming timed out: no event within prompt_ms budget, sending best-effort cancel"
+                            session_id = %session_id,
+                            "ACP prompt stream timed out; sending best-effort cancel"
                         );
-                        if let Err(cancel_err) = client.cancel(acp_sid).await {
-                            tracing::warn!(
-                                error = %cancel_err,
-                                "Best-effort cancel failed on streaming timeout"
-                            );
+                        // Bound the best-effort cancel by the configured
+                        // shutdown deadline (A5: TimeoutConfig.shutdown_ms),
+                        // never a hard-coded value: a stalled control
+                        // connection must not block the promised terminal
+                        // OpFailed beyond the configured bound.
+                        match tokio::time::timeout(cancel_dur, client.cancel(acp_sid)).await {
+                            Ok(Ok(_)) => {}
+                            Ok(Err(cancel_err)) => {
+                                tracing::warn!(
+                                    error = %cancel_err,
+                                    "Best-effort cancel failed on streaming timeout"
+                                );
+                            }
+                            Err(_) => {
+                                tracing::warn!("Best-effort cancel timed out on streaming timeout");
+                            }
                         }
-                        Ok(HostEvent::OpFailed(OperationFailedEvent {
-                            session_id: sid,
-                            op_id: oid,
-                            error_category: "streaming_timeout".to_string(),
-                            error_message: format!(
-                                "streaming timed out: no event within {}ms budget",
-                                dur.as_millis()
-                            ),
-                        }))
+                        *scope.write().await = None;
+                        Some((
+                            Ok(HostEvent::OpFailed(OperationFailedEvent {
+                                session_id,
+                                op_id,
+                                error_category: "streaming_timeout".to_string(),
+                                error_message: format!(
+                                    "streaming timed out: no event within {}ms budget",
+                                    dur.as_millis()
+                                ),
+                            })),
+                            None,
+                        ))
                     }
                 }
-            });
+            },
+        );
 
-        let stream = started.chain(timeout_stream).boxed();
+        let stream = started.chain(updates).boxed();
 
         Ok(stream)
     }
@@ -682,20 +1051,20 @@ impl ProviderAdapter for AcpProvider {
         session: &ManagedSessionHandle,
         _op_id: HostOperationId,
     ) -> HostResult<()> {
-        let acp_session_id = {
+        let (client, acp_session_id) = {
             let sessions = self.sessions.read().await;
-            sessions
-                .get(&session.session_id)
-                .map(|s| s.acp_session_id.clone())
-                .ok_or_else(|| {
-                    HostError::internal(format!(
-                        "session {} not found for cancel",
-                        session.session_id
-                    ))
-                })?
+            let state = sessions.get(&session.session_id).ok_or_else(|| {
+                HostError::internal(format!(
+                    "session {} not found for cancel",
+                    session.session_id
+                ))
+            })?;
+            let out = (Arc::clone(&state.client), state.acp_session_id.clone());
+            drop(sessions); // release read guard before awaiting client RPC
+            out
         };
 
-        self.client
+        client
             .cancel(acp_session_id)
             .await
             .map_err(|e| HostError::protocol_error("cancel failed", Some(e.to_string())))?;
@@ -704,18 +1073,93 @@ impl ProviderAdapter for AcpProvider {
     }
 
     async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()> {
-        // Remove the session from tracking. The ACP SDK adapter handles
-        // the underlying session cleanup when dropped.
+        // Cooperative cancel/drain phase, bounded independently (A5): a
+        // stalled control connection must not consume the whole shutdown
+        // budget and skip owned process-tree termination. On timeout or
+        // error, we still proceed to the owned cleanup phase and report
+        // unconfirmed cancellation.
+        let shutdown_dur = self.timeouts.shutdown_duration();
         {
-            let mut sessions = self.sessions.write().await;
-            sessions.remove(&session.session_id);
+            let connected = {
+                let sessions = self.sessions.read().await;
+                match sessions.get(&session.session_id) {
+                    Some(s) => (Arc::clone(&s.client), s.acp_session_id.clone()),
+                    None => {
+                        // No provider session — nothing to reap.
+                        return Ok(());
+                    }
+                }
+            };
+            let cancel_result =
+                tokio::time::timeout(shutdown_dur, connected.0.cancel(connected.1)).await;
+            match cancel_result {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => {
+                    tracing::warn!(
+                        session_id = %session.session_id,
+                        provider_id = %self.provider_id,
+                        error = %e,
+                        "cooperative ACP cancel failed; proceeding to owned process-tree cleanup"
+                    );
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        session_id = %session.session_id,
+                        provider_id = %self.provider_id,
+                        "cooperative ACP cancel timed out; proceeding to owned process-tree cleanup"
+                    );
+                }
+            }
         }
-        tracing::info!(
-            session_id = %session.session_id,
-            provider_id = %self.provider_id,
-            "ACP session removed from provider"
-        );
-        Ok(())
+
+        // Take ownership of the exact connected session and run the owned
+        // process-tree termination/reap. On success the session entry is
+        // removed; on unconfirmed cleanup the entry is RETAINED in the
+        // registry so a later ownership-safe retry can complete (L2
+        // Issue 3) and the failure is a typed error, never a clean stop.
+        let connected = {
+            let mut sessions = self.sessions.write().await;
+            sessions.remove(&session.session_id)
+        };
+        let Some(mut connected) = connected else {
+            tracing::warn!(
+                session_id = %session.session_id,
+                provider_id = %self.provider_id,
+                "ACP session not found for shutdown; nothing to reap"
+            );
+            return Ok(());
+        };
+
+        match connected.process.shutdown(shutdown_dur).await {
+            Ok(()) => {
+                tracing::info!(
+                    session_id = %session.session_id,
+                    provider_id = %self.provider_id,
+                    "ACP session shutdown complete (owned process tree reaped)"
+                );
+                Ok(())
+            }
+            Err(e) => {
+                tracing::warn!(
+                    session_id = %session.session_id,
+                    provider_id = %self.provider_id,
+                    error = %e,
+                    "ACP owned process-tree shutdown unconfirmed"
+                );
+                // Retain the connected session for later ownership-safe
+                // cleanup retry (the process handle must stay owned).
+                self.sessions
+                    .write()
+                    .await
+                    .insert(session.session_id.clone(), connected);
+                Err(HostError::cleanup_unconfirmed(format!(
+                    "ACP session {} cleanup unconfirmed: {e}",
+                    session.session_id
+                ))
+                .with_provider(self.provider_id.clone())
+                .with_session(session.session_id.clone()))
+            }
+        }
     }
 
     fn capabilities(&self) -> CapabilityDescriptor {
@@ -1037,5 +1481,99 @@ mod tests {
             PermissionOutcome::Deny,
             "ACP without policy must default to Deny (no hang)"
         );
+    }
+
+    #[tokio::test]
+    async fn permission_scope_lock_contention_denies() {
+        use crate::capability::model::PromptPermissionScope;
+        use crate::config::PolicyConfig;
+
+        let mut policy = nexus_acp_host::policy::PermissionPolicy::new();
+        policy.grant_agent("test-acp", "file_read");
+        let provider = AcpProvider::from_config(
+            acp_config("test-acp", Some("mock-acp"), true),
+            TimeoutConfig::default(),
+            HostPermissionResolver::with_acp_policy(&PolicyConfig::default(), policy),
+        )
+        .expect("valid recipe");
+        let active_scope = Arc::new(tokio::sync::RwLock::new(Some(PromptPermissionScope {
+            allow_read: true,
+            allow_write: false,
+            allow_destructive: false,
+        })));
+        let handler = provider.build_permission_handler(active_scope.clone());
+
+        assert_eq!(handler("file_read"), AcpPermissionOutcome::Approve);
+        let _guard = active_scope.write().await;
+        assert_eq!(
+            handler("file_read"),
+            AcpPermissionOutcome::Deny,
+            "an unreadable narrowing scope must fail closed"
+        );
+    }
+
+    // ── Recipe-based construction (A5) ─────────────────────────────────
+
+    fn acp_config(id: &str, command: Option<&str>, enabled: bool) -> ProviderConfig {
+        ProviderConfig {
+            id: id.to_string(),
+            protocol: "acp".to_string(),
+            command: command.map(str::to_string),
+            args: vec![],
+            env: std::collections::HashMap::new(),
+            enabled,
+        }
+    }
+
+    #[test]
+    fn from_config_accepts_enabled_acp_recipe() {
+        let provider = AcpProvider::from_config(
+            acp_config("test-acp", Some("mock-acp"), true),
+            TimeoutConfig::default(),
+            HostPermissionResolver::new_native_only(&crate::config::PolicyConfig::default()),
+        )
+        .expect("valid recipe accepted");
+        assert_eq!(provider.provider_id.0, "test-acp");
+        assert_eq!(provider.display_name, "test-acp");
+        // Recipe only — no client/process at construction.
+        assert!(provider.sessions.try_read().unwrap().is_empty());
+    }
+
+    #[test]
+    fn from_config_rejects_disabled_provider() {
+        let err = AcpProvider::from_config(
+            acp_config("test-acp", Some("mock-acp"), false),
+            TimeoutConfig::default(),
+            HostPermissionResolver::new_native_only(&crate::config::PolicyConfig::default()),
+        )
+        .err()
+        .expect("disabled provider refused");
+        assert_eq!(err.category(), "provider_unavailable");
+    }
+
+    #[test]
+    fn from_config_rejects_missing_command() {
+        let err = AcpProvider::from_config(
+            acp_config("test-acp", None, true),
+            TimeoutConfig::default(),
+            HostPermissionResolver::new_native_only(&crate::config::PolicyConfig::default()),
+        )
+        .err()
+        .expect("missing command refused");
+        assert_eq!(err.category(), "internal_host_error");
+    }
+
+    #[test]
+    fn from_config_rejects_non_acp_protocol() {
+        let mut config = acp_config("test-acp", Some("mock-acp"), true);
+        config.protocol = "native_cli".to_string();
+        let err = AcpProvider::from_config(
+            config,
+            TimeoutConfig::default(),
+            HostPermissionResolver::new_native_only(&crate::config::PolicyConfig::default()),
+        )
+        .err()
+        .expect("non-acp protocol refused");
+        assert_eq!(err.category(), "internal_host_error");
     }
 }

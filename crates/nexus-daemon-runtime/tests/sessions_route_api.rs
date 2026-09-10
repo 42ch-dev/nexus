@@ -8,7 +8,8 @@
 
 use axum::http::StatusCode;
 use axum_test::TestServer;
-use nexus_contracts::local::orchestration::http::CreateSessionRequest;
+use nexus_agent_host::config::{AgentHostConfig, ProviderConfig};
+use nexus_contracts::local::orchestration::http::{CreateSessionRequest, SessionAgentBindingDto};
 use nexus_daemon_runtime::api;
 use nexus_daemon_runtime::api::auth_middleware::DaemonApiConfig;
 use nexus_daemon_runtime::test_utils;
@@ -16,41 +17,87 @@ use nexus_daemon_runtime::workspace::WorkspaceState;
 use nexus_orchestration::{GraphFlowEngine, OrchestrationEngine};
 use serde_json::Value;
 use serial_test::serial;
+use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
+
+const TEST_BINDING_PROVIDER: &str = "test-provider";
+
+fn bindings_for_preset(
+    preset_id: &str,
+    nexus_home: &Path,
+) -> HashMap<String, SessionAgentBindingDto> {
+    let registry = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
+    let loaded = nexus_orchestration::preset::resolve_preset(preset_id, nexus_home, &registry)
+        .unwrap_or_else(|e| panic!("resolve preset {preset_id}: {e}"));
+    nexus_orchestration::preset::required_prompt_roles(&loaded)
+        .into_iter()
+        .map(|role| {
+            (
+                role,
+                SessionAgentBindingDto {
+                    provider_id: TEST_BINDING_PROVIDER.to_string(),
+                    model: None,
+                },
+            )
+        })
+        .collect()
+}
 
 struct EngineCtx {
     _tmp: test_utils::TestTempRoot,
     server: TestServer,
+    pool: sqlx::SqlitePool,
+    nexus_home: std::path::PathBuf,
 }
 
 async fn test_server_with_engine() -> EngineCtx {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    let nexus_home_for_ctx = nexus_home.clone();
     let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
-    let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
-    let registry = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
-    let engine = Arc::new(GraphFlowEngine::new_with_storage(
-        storage,
-        nexus_orchestration::CapabilityRegistryHolder::with_registry(registry.clone()),
-    ));
-    state.set_engine(engine as Arc<dyn OrchestrationEngine>);
-    state.set_capability_registry(
-        nexus_orchestration::CapabilityRegistryHolder::with_registry(registry),
-    );
+    // Mirror boot/lazy-attach: enabled default binding provider + full bundle.
+    state.set_agent_host_config(AgentHostConfig {
+        providers: vec![ProviderConfig {
+            id: TEST_BINDING_PROVIDER.to_string(),
+            protocol: "native_cli".to_string(),
+            command: Some("mock".to_string()),
+            args: vec![],
+            env: HashMap::new(),
+            enabled: true,
+        }],
+        ..AgentHostConfig::default()
+    });
+    state
+        .publish_creator_runtime_bundle()
+        .await
+        .expect("publish creator runtime bundle");
 
+    let pool = state.pool().expect("workspace pool").clone();
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app).expect("failed to create test server");
-    EngineCtx { _tmp: tmp, server }
+    EngineCtx {
+        _tmp: tmp,
+        server,
+        pool,
+        nexus_home: nexus_home_for_ctx,
+    }
 }
 
 // axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
 #[allow(clippy::future_not_send)]
-async fn create_session(server: &TestServer, creator_id: &str, preset_id: &str) -> String {
+async fn create_session(
+    server: &TestServer,
+    nexus_home: &Path,
+    creator_id: &str,
+    preset_id: &str,
+) -> String {
     let req = CreateSessionRequest {
         creator_id: creator_id.to_string(),
         preset_id: preset_id.to_string(),
         seed: None,
+        agent_bindings: Some(bindings_for_preset(preset_id, nexus_home)),
     };
     let resp = server
         .post("/v1/daemon/orchestration/sessions")
@@ -85,7 +132,13 @@ async fn list_sessions_hits_handler_not_framework_404() {
 #[serial]
 async fn get_session_by_id_hits_handler_not_framework_404() {
     let ctx = test_server_with_engine().await;
-    let session_id = create_session(&ctx.server, "test_creator", "novel-writing").await;
+    let session_id = create_session(
+        &ctx.server,
+        &ctx.nexus_home,
+        "test_creator",
+        "novel-writing",
+    )
+    .await;
 
     let resp = ctx
         .server
@@ -101,6 +154,35 @@ async fn get_session_by_id_hits_handler_not_framework_404() {
     let body: Value = resp.json();
     assert_eq!(body["session"]["sessionId"], session_id);
     assert_eq!(body["session"]["presetId"], "novel-writing");
+}
+
+#[tokio::test]
+#[serial]
+async fn get_session_reads_persisted_terminal_after_runtime_restart() {
+    let ctx = test_server_with_engine().await;
+    sqlx::query(
+        "INSERT INTO orchestration_sessions
+            (session_id, creator_id, preset_id, preset_version, status,
+             current_task_id, context_json, created_at, updated_at,
+             execution_version, state_revision)
+         VALUES (?, ?, ?, 3, 'completed', NULL, '{}', 1, 2, 1, 4)",
+    )
+    .bind("persisted-terminal")
+    .bind("test_creator")
+    .bind("novel-writing")
+    .execute(&ctx.pool)
+    .await
+    .expect("seed persisted terminal");
+
+    let resp = ctx
+        .server
+        .get("/v1/daemon/orchestration/sessions/persisted-terminal")
+        .await;
+    resp.assert_status(StatusCode::OK);
+    let body: Value = resp.json();
+    assert_eq!(body["session"]["sessionId"], "persisted-terminal");
+    assert_eq!(body["session"]["status"], "completed");
+    assert_eq!(body["session"]["creatorId"], "test_creator");
 }
 
 #[tokio::test]
@@ -149,7 +231,7 @@ async fn sessions_without_active_creator_returns_409_not_404() {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     std::fs::write(nexus_home.join("config.toml"), "").expect("clear active creator config");
 
-    let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let registry = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
     let engine = Arc::new(GraphFlowEngine::new_with_storage(

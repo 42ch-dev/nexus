@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 /// Subsystem identifier for health tracking and event payloads.
 ///
-/// Note: `Http`, `Db`, `Engine`, `WorkerMgr` are mandatory;
+/// Note: `Http`, `Db`, `Engine` are mandatory;
 /// `Sync`, `AcpRegistry` are optional (not required for `Running` transition).
 /// `Sync` retained for backward-compatible health reporting (always Down on local daemon).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -16,7 +16,6 @@ pub enum SubsystemKind {
     Db,
     Sync,
     Engine,
-    WorkerMgr,
     AcpRegistry,
     AgentHost,
 }
@@ -25,7 +24,7 @@ impl SubsystemKind {
     /// Returns all mandatory subsystems (required for `Running` transition).
     #[must_use]
     pub const fn mandatory() -> &'static [Self] {
-        &[Self::Http, Self::Db, Self::Engine, Self::WorkerMgr]
+        &[Self::Http, Self::Db, Self::Engine]
     }
 
     /// Returns true if this subsystem is mandatory.

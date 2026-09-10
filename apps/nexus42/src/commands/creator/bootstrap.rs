@@ -323,6 +323,7 @@ pub async fn handle_bootstrap(args: BootstrapArgs, config: &CliConfig) -> Result
             input: Some(init_input),
             force_gates,
             reason: reason.clone(),
+            agent_bindings: None,
         };
 
         match client
@@ -355,6 +356,7 @@ pub async fn handle_bootstrap(args: BootstrapArgs, config: &CliConfig) -> Result
             input: None,
             force_gates: false,
             reason: None,
+            agent_bindings: None,
         };
 
         match client
@@ -414,6 +416,7 @@ pub async fn handle_bootstrap(args: BootstrapArgs, config: &CliConfig) -> Result
             input: Some(novel_input),
             force_gates,
             reason: reason.clone(),
+            agent_bindings: None,
         };
 
         match client

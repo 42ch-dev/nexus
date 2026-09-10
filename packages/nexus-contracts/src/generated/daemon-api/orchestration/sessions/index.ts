@@ -4,6 +4,7 @@
  * Generator: json-schema-to-typescript (tooling/codegen/src/ts-gen.ts)
  */
 
+export type { ExecutionProjection } from './execution-projection';
 export type { ListSessionsQuery } from './list-sessions-query';
 export type { ListSessionsResponse } from './list-sessions-response';
 export type { SessionDetailResponse } from './session-detail-response';

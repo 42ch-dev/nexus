@@ -402,43 +402,51 @@ pub struct StatigLifecycle {
 impl StatigLifecycle {
     /// Create a lifecycle with real subsystems.
     ///
-    /// This constructor creates a state machine ready for production use.
-    /// The machine starts in `Starting` state and processes events immediately.
+    /// This constructor wires the subsystem `ActionContext` into the HSM so
+    /// `Starting.entry` actually spawns the subsystem startup tasks (HTTP,
+    /// DB, agent-host, ...) and dispatches `SubsystemUp`/`SubsystemFailed`
+    /// from their results. Two-phase init breaks the circular dependency
+    /// between the lifecycle shell and the action context: build the shell
+    /// first, then construct the context referencing it, then set the
+    /// machine (with that context) into the shell before the first
+    /// `dispatch`.
     ///
-    /// Note: For production use in main.rs. Tests should use `new_for_test()`.
+    /// Returns `Arc<Self>` because the `ActionContext` holds a
+    /// `Arc<StatigLifecycle>` for event dispatch.
     ///
-    /// ## Circular Dependency Note
+    /// Tests should use `new_for_test()` (no subsystem tasks spawned).
     ///
-    /// Full subsystem integration (`ActionContext` with lifecycle reference) requires
-    /// two-phase initialization. For now, we create the machine without context,
-    /// which means entry actions will log but not spawn subsystem tasks.
-    /// This is acceptable because:
-    /// 1. The machine processes events correctly (QC2-C2 fix)
-    /// 2. Subsystems can be started manually or via a follow-up refactoring
-    ///
-    /// See: QC2-C2 critical finding — machine must be `Some()` to avoid dropping first dispatch.
-    #[must_use]
-    pub fn new_with_subsystems(
-        _subsystems: Vec<Arc<dyn SubsystemBootstrap>>,
-        _shutdown_grace_ms: u64,
-    ) -> Self {
-        // Create shared state mirrors first
+    /// Note: this replaces the previous test-mode behaviour where
+    /// `new_with_subsystems` ignored its subsystem list entirely
+    /// (`Starting.entry: no context (test mode) — subsystems not spawned`),
+    /// which left the agent-host manager never started and every configured
+    /// provider permanently `available:false` / "host not started".
+    pub async fn new_with_subsystems(
+        subsystems: Vec<Arc<dyn SubsystemBootstrap>>,
+        shutdown_grace_ms: u64,
+    ) -> Arc<Self> {
+        // Create shared state mirrors first.
         let (transition_tx, _) = broadcast::channel(16);
         let current_state = Arc::new(std::sync::Mutex::new(LifecycleState::Starting));
         let exit_code = Arc::new(std::sync::Mutex::new(None));
 
-        // Create the actual state machine (not a placeholder).
-        // Without context, entry actions run in test mode (log only, no subsystem spawning).
-        // This fixes QC2-C2: machine is Some(), so dispatch() doesn't drop first event.
-        let daemon_hsm = DaemonHsm::default();
-        let machine = Arc::new(Mutex::new(Some(daemon_hsm.state_machine())));
-
-        Self {
-            machine,
+        // Phase 1: build the shell with an empty machine slot.
+        let lifecycle = Arc::new(Self {
+            machine: Arc::new(Mutex::new(None)),
             transition_tx,
             current_state,
             exit_code,
-        }
+        });
+
+        // Phase 2: construct the action context referencing the shell, then
+        // set the machine (wired with that context) into the slot.
+        let context = ActionContext::new(Arc::clone(&lifecycle), subsystems, shutdown_grace_ms);
+        let daemon_hsm = DaemonHsm::with_context(Arc::new(context));
+        let mut machine = lifecycle.machine.lock().await;
+        *machine = Some(daemon_hsm.state_machine());
+        drop(machine);
+
+        lifecycle
     }
 
     /// Create a lifecycle for testing (no subsystem tasks spawned).

@@ -39,6 +39,19 @@
     "input": {
       "description": "Structured input context for the preset (key-value pairs)."
     },
+    "agent_bindings": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["provider_id"],
+        "properties": {
+          "provider_id": { "type": "string" },
+          "model": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "description": "Role to provider binding map (A1). Frozen at admission into the run descriptor."
+    },
     "force_gates": {
       "type": "boolean",
       "description": "When true, bypass preset gate evaluation. Requires reason."

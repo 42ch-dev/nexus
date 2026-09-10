@@ -1,19 +1,20 @@
-//! Cross-caller E2E test harness — V1.57 P3
+//! Cross-caller E2E test harness — V1.57 P3 (worker leg removed V1.186 P1 T3)
 //!
-//! Verifies dispatch equivalence across all 3 caller entry points
-//! (CLI/HTTP, Worker, Schedule) for all 18 shipped `nexus.*` host tool IDs.
+//! Verifies dispatch equivalence across the retained caller entry points
+//! (CLI/HTTP, Schedule) for all shipped `nexus.*` host tool IDs.
 //!
 //! # Coverage
 //!
-//! - 18 `nexus.*` IDs × 3 caller paths = 54 invocation cases.
-//! - Output equivalence: same `(ID, input)` → same result (success/failure) across all 3 paths.
-//! - Admission gate equivalence: a request rejected on one path is rejected on all 3 paths.
-//! - Unknown tool rejection: `NOT_SUPPORTED` consistent across all 3 paths.
+//! - `nexus.*` IDs × 2 caller paths = 2×N invocation cases.
+//! - Output equivalence: same `(ID, input)` → same result (success/failure) across both paths.
+//! - Admission gate equivalence: a request rejected on one path is rejected on both paths.
+//! - Unknown tool rejection: `NOT_SUPPORTED` consistent across both paths.
 //!
 //! # Reconciliation
 //!
-//! The plan stub estimated 35 IDs but the actual `capability::Registry` has
-//! 18 `nexus.*` host tools. Updated from 105 to 54 cases.
+//! V1.186 P1 T3 deleted the worker `agent_tool_request` upcall lane
+//! (`dispatch_from_worker`) with the `acp-worker` child; HTTP/CLI and
+//! Schedule remain the production callers of `HostToolExecutor`.
 
 #![allow(clippy::unwrap_used)]
 
@@ -122,12 +123,6 @@ fn err_code_from_execute(r: &Result<serde_json::Value, NexusApiError>) -> Option
     r.as_ref().err().map(|e| e.error_code().to_string())
 }
 
-fn err_code_from_worker(
-    r: &nexus_daemon_runtime::api::handlers::host_tool_executor::WorkerToolResult,
-) -> Option<String> {
-    r.error.as_ref().map(|e| e.code.clone())
-}
-
 fn err_code_from_schedule(r: &Result<serde_json::Value, NexusApiError>) -> Option<String> {
     r.as_ref().err().map(|e| e.error_code().to_string())
 }
@@ -139,7 +134,6 @@ fn err_code_from_schedule(r: &Result<serde_json::Value, NexusApiError>) -> Optio
 fn assert_outputs_equivalent(
     tool_id: &str,
     http: &serde_json::Value,
-    worker: &serde_json::Value,
     schedule: &serde_json::Value,
 ) {
     // Compare non-deterministic fields that may drift between near-simultaneous
@@ -154,21 +148,16 @@ fn assert_outputs_equivalent(
         "correlation_id",
         "trace_timestamp",
         // V1.59 P0: parent_request_id is caller-path-specific by design
-        // (HTTP, Worker, Schedule each pass a different request_id).
+        // (HTTP and Schedule each pass a different request_id).
         "parent_request_id",
         // V1.59 P0: runtime.health uptime may drift between near-instant calls.
         "uptime_seconds",
     ];
 
-    // Check all 3 have the same top-level keys
+    // Check both have the same top-level keys
     let http_keys: std::collections::BTreeSet<_> = http.as_object().unwrap().keys().collect();
-    let worker_keys: std::collections::BTreeSet<_> = worker.as_object().unwrap().keys().collect();
     let schedule_keys: std::collections::BTreeSet<_> =
         schedule.as_object().unwrap().keys().collect();
-    assert_eq!(
-        http_keys, worker_keys,
-        "{tool_id}: HTTP ⇔ Worker key mismatch"
-    );
     assert_eq!(
         http_keys, schedule_keys,
         "{tool_id}: HTTP ⇔ Schedule key mismatch"
@@ -179,20 +168,16 @@ fn assert_outputs_equivalent(
             continue; // Allow drift for non-deterministic fields.
         }
         assert_eq!(
-            http[key], worker[key],
-            "{tool_id}: HTTP ⇔ Worker value mismatch for key '{key}'"
-        );
-        assert_eq!(
             http[key], schedule[key],
             "{tool_id}: HTTP ⇔ Schedule value mismatch for key '{key}'"
         );
     }
 }
 
-// ─── T2: Unknown tool rejection — all 3 paths ────────────────────────────
+// ─── T2: Unknown tool rejection — both paths ──────────────────────────────
 
 #[tokio::test]
-async fn unknown_tool_rejected_on_all_3_paths() {
+async fn unknown_tool_rejected_on_all_paths() {
     let ctx = test_ctx().await;
 
     let req = ToolExecuteRequest {
@@ -203,13 +188,6 @@ async fn unknown_tool_rejected_on_all_3_paths() {
         caller_kind: None,
     };
     let http_result = HostToolExecutor::execute(&req, &ctx.state).await;
-    let worker_result = HostToolExecutor::dispatch_from_worker(
-        "nexus.nonexistent.tool",
-        &json!({}),
-        "req-unknown",
-        &ctx.state,
-    )
-    .await;
     let schedule_result = HostToolExecutor::dispatch_for_schedule(
         "nexus.nonexistent.tool",
         &json!({}),
@@ -223,10 +201,6 @@ async fn unknown_tool_rejected_on_all_3_paths() {
         Some("not_supported")
     );
     assert_eq!(
-        err_code_from_worker(&worker_result).as_deref(),
-        Some("not_supported")
-    );
-    assert_eq!(
         err_code_from_schedule(&schedule_result).as_deref(),
         Some("not_supported")
     );
@@ -235,14 +209,14 @@ async fn unknown_tool_rejected_on_all_3_paths() {
 // ─── T2: Entire registry admission equivalence check ─────────────────────
 
 /// For every registered `nexus.*` host tool ID, verify the admission-gate
-/// result is equivalent across all 3 caller paths.
+/// result is equivalent across the caller paths.
 ///
 /// This verifies that the tool IS registered (not `NOT_SUPPORTED`) through
 /// each path. It does NOT require handler success — many handlers need
 /// seeded DB state. Instead it verifies that the error code (success or
 /// handler-level failure like `INVALID_INPUT`) is consistent.
 #[tokio::test]
-async fn all_18_ids_admission_equivalent_across_3_paths() {
+async fn all_ids_admission_equivalent_across_paths() {
     let ctx = test_ctx().await;
 
     for &tool_id in NEXUS_TOOL_IDS {
@@ -260,14 +234,6 @@ async fn all_18_ids_admission_equivalent_across_3_paths() {
         )
         .await;
 
-        let worker = HostToolExecutor::dispatch_from_worker(
-            tool_id,
-            &params,
-            &format!("req-{tool_id}-worker"),
-            &ctx.state,
-        )
-        .await;
-
         let schedule = HostToolExecutor::dispatch_for_schedule(
             tool_id,
             &params,
@@ -277,7 +243,6 @@ async fn all_18_ids_admission_equivalent_across_3_paths() {
         .await;
 
         let http_err = err_code_from_execute(&http);
-        let worker_err = err_code_from_worker(&worker);
         let sched_err = err_code_from_schedule(&schedule);
 
         // NOT_SUPPORTED must NOT appear for any registered tool
@@ -287,31 +252,25 @@ async fn all_18_ids_admission_equivalent_across_3_paths() {
             "{tool_id}: HTTP path must not return NOT_SUPPORTED for registered tool"
         );
         assert_ne!(
-            worker_err.as_deref(),
-            Some("not_supported"),
-            "{tool_id}: Worker path must not return NOT_SUPPORTED for registered tool"
-        );
-        assert_ne!(
             sched_err.as_deref(),
             Some("not_supported"),
             "{tool_id}: Schedule path must not return NOT_SUPPORTED for registered tool"
         );
 
-        // All 3 paths must produce the same error code (or all success)
+        // Both paths must produce the same error code (or all success)
         assert!(
-            !(http_err != worker_err || http_err != sched_err),
-            "{tool_id}: dispatch mismatch across 3 paths — \
-             HTTP={http_err:?}, Worker={worker_err:?}, Schedule={sched_err:?}"
+            http_err == sched_err,
+            "{tool_id}: dispatch mismatch across paths — \
+             HTTP={http_err:?}, Schedule={sched_err:?}"
         );
 
-        // If all succeeded, output must be structurally equivalent.
+        // If both succeeded, output must be structurally equivalent.
         // Timestamp fields (e.g. context.assemble's `assembled_at`) may differ
         // between calls — check non-timestamp fields only.
         if http_err.is_none() {
             let http_v = http.as_ref().unwrap();
-            let worker_v = worker.output.as_ref().unwrap();
             let schedule_v = schedule.as_ref().unwrap();
-            assert_outputs_equivalent(tool_id, http_v, worker_v, schedule_v);
+            assert_outputs_equivalent(tool_id, http_v, schedule_v);
         }
     }
 }
@@ -319,7 +278,7 @@ async fn all_18_ids_admission_equivalent_across_3_paths() {
 // ─── T2: Context-based tools (no DB seed needed) ─────────────────────────
 
 #[tokio::test]
-async fn whoami_equivalent_all_3_paths() {
+async fn whoami_equivalent_all_paths() {
     let ctx = test_ctx().await;
     let http_v = HostToolExecutor::execute(
         &ToolExecuteRequest {
@@ -333,15 +292,6 @@ async fn whoami_equivalent_all_3_paths() {
     )
     .await
     .expect("HTTP whoami");
-    let worker_r = HostToolExecutor::dispatch_from_worker(
-        "nexus.context.whoami",
-        &json!({}),
-        "req-whoami-worker",
-        &ctx.state,
-    )
-    .await;
-    assert!(worker_r.grant);
-    let worker_v = worker_r.output.unwrap();
     let schedule_v = HostToolExecutor::dispatch_for_schedule(
         "nexus.context.whoami",
         &json!({}),
@@ -351,12 +301,11 @@ async fn whoami_equivalent_all_3_paths() {
     .await
     .expect("Schedule whoami");
 
-    assert_eq!(http_v["creator_id"], worker_v["creator_id"]);
     assert_eq!(http_v["creator_id"], schedule_v["creator_id"]);
 }
 
 #[tokio::test]
-async fn workspace_info_equivalent_all_3_paths() {
+async fn workspace_info_equivalent_all_paths() {
     let ctx = test_ctx().await;
     let http_v = HostToolExecutor::execute(
         &ToolExecuteRequest {
@@ -370,15 +319,6 @@ async fn workspace_info_equivalent_all_3_paths() {
     )
     .await
     .expect("HTTP workspace.info");
-    let worker_r = HostToolExecutor::dispatch_from_worker(
-        "nexus.workspace.info",
-        &json!({}),
-        "req-wsi-worker",
-        &ctx.state,
-    )
-    .await;
-    assert!(worker_r.grant);
-    let worker_v = worker_r.output.unwrap();
     let schedule_v = HostToolExecutor::dispatch_for_schedule(
         "nexus.workspace.info",
         &json!({}),
@@ -388,16 +328,14 @@ async fn workspace_info_equivalent_all_3_paths() {
     .await
     .expect("Schedule workspace.info");
 
-    assert_eq!(http_v["creator_id"], worker_v["creator_id"]);
     assert_eq!(http_v["creator_id"], schedule_v["creator_id"]);
-    assert_eq!(http_v["workspace_slug"], worker_v["workspace_slug"]);
     assert_eq!(http_v["workspace_slug"], schedule_v["workspace_slug"]);
 }
 
 // ─── T2: Seeded-ID tests ─────────────────────────────────────────────────
 
 #[tokio::test]
-async fn work_get_equivalent_all_3_paths() {
+async fn work_get_equivalent_all_paths() {
     let ctx = test_ctx().await;
     let work_id = seed_work(&ctx.state).await;
     let params = json!({"work_id": work_id});
@@ -414,15 +352,6 @@ async fn work_get_equivalent_all_3_paths() {
     )
     .await
     .expect("HTTP work.get");
-    let worker_r = HostToolExecutor::dispatch_from_worker(
-        "nexus.work.get",
-        &params,
-        "req-wg-worker",
-        &ctx.state,
-    )
-    .await;
-    assert!(worker_r.grant);
-    let worker_v = worker_r.output.unwrap();
     let schedule_v = HostToolExecutor::dispatch_for_schedule(
         "nexus.work.get",
         &params,
@@ -432,13 +361,12 @@ async fn work_get_equivalent_all_3_paths() {
     .await
     .expect("Schedule work.get");
 
-    assert_eq!(http_v["work_id"], worker_v["work_id"]);
     assert_eq!(http_v["work_id"], schedule_v["work_id"]);
     assert_eq!(http_v["work_id"], work_id);
 }
 
 #[tokio::test]
-async fn daemon_health_equivalent_all_3_paths() {
+async fn daemon_health_equivalent_all_paths() {
     let ctx = test_ctx().await;
     let http_v = HostToolExecutor::execute(
         &ToolExecuteRequest {
@@ -452,15 +380,6 @@ async fn daemon_health_equivalent_all_3_paths() {
     )
     .await
     .expect("HTTP daemon.health");
-    let worker_r = HostToolExecutor::dispatch_from_worker(
-        "nexus.observability.daemon.health",
-        &json!({}),
-        "req-dh-worker",
-        &ctx.state,
-    )
-    .await;
-    assert!(worker_r.grant);
-    let worker_v = worker_r.output.unwrap();
     let schedule_v = HostToolExecutor::dispatch_for_schedule(
         "nexus.observability.daemon.health",
         &json!({}),
@@ -470,12 +389,11 @@ async fn daemon_health_equivalent_all_3_paths() {
     .await
     .expect("Schedule daemon.health");
 
-    assert_eq!(http_v["status"], worker_v["status"]);
     assert_eq!(http_v["status"], schedule_v["status"]);
 }
 
 #[tokio::test]
-async fn registry_refresh_equivalent_all_3_paths() {
+async fn registry_refresh_equivalent_all_paths() {
     let ctx = test_ctx().await;
     let http_v = HostToolExecutor::execute(
         &ToolExecuteRequest {
@@ -489,15 +407,6 @@ async fn registry_refresh_equivalent_all_3_paths() {
     )
     .await
     .expect("HTTP registry.refresh");
-    let worker_r = HostToolExecutor::dispatch_from_worker(
-        "nexus.registry.refresh",
-        &json!({}),
-        "req-rr-worker",
-        &ctx.state,
-    )
-    .await;
-    assert!(worker_r.grant);
-    let worker_v = worker_r.output.unwrap();
     let schedule_v = HostToolExecutor::dispatch_for_schedule(
         "nexus.registry.refresh",
         &json!({}),
@@ -507,14 +416,13 @@ async fn registry_refresh_equivalent_all_3_paths() {
     .await
     .expect("Schedule registry.refresh");
 
-    assert_eq!(http_v["source"], worker_v["source"]);
     assert_eq!(http_v["source"], schedule_v["source"]);
 }
 
-// ─── T2: NOT_SUPPORTED for unregistered IDs — all 3 paths ────────────────
+// ─── T2: NOT_SUPPORTED for unregistered IDs — both paths ────────────────
 
 #[tokio::test]
-async fn not_supported_equivalence_all_3_paths() {
+async fn not_supported_equivalence_all_paths() {
     let ctx = test_ctx().await;
     for unknown_id in [
         "nexus.nonexistent.tool",
@@ -529,9 +437,6 @@ async fn not_supported_equivalence_all_3_paths() {
             caller_kind: None,
         };
         let http = HostToolExecutor::execute(&req, &ctx.state).await;
-        let worker =
-            HostToolExecutor::dispatch_from_worker(unknown_id, &json!({}), "req-ns", &ctx.state)
-                .await;
         let schedule = HostToolExecutor::dispatch_for_schedule(
             unknown_id,
             &json!({}),
@@ -544,11 +449,6 @@ async fn not_supported_equivalence_all_3_paths() {
             err_code_from_execute(&http).as_deref(),
             Some("not_supported"),
             "{unknown_id}: HTTP"
-        );
-        assert_eq!(
-            err_code_from_worker(&worker).as_deref(),
-            Some("not_supported"),
-            "{unknown_id}: Worker"
         );
         assert_eq!(
             err_code_from_schedule(&schedule).as_deref(),

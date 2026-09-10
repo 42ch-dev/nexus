@@ -20,7 +20,9 @@
 
 use axum::http::StatusCode;
 use axum_test::TestServer;
+use nexus_agent_host::config::{AgentHostConfig, ProviderConfig};
 use nexus_contracts::local::schedule::http::AddScheduleRequest;
+use nexus_contracts::local::schedule::http::AgentBindingDto;
 use nexus_daemon_runtime::api;
 use nexus_daemon_runtime::api::auth_middleware::DaemonApiConfig;
 use nexus_daemon_runtime::test_utils;
@@ -28,16 +30,49 @@ use nexus_daemon_runtime::test_utils::TestTempRoot;
 use nexus_daemon_runtime::workspace::WorkspaceState;
 use nexus_local_db::list_force_gates_audit;
 use nexus_local_db::works::{self, WorkRecord};
-use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
 use serde_json::{json, Value};
 use serial_test::serial;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+
+const TEST_BINDING_PROVIDER: &str = "test-provider";
+/// Far-future Unix timestamp — defers immediate admission so FL-E contract
+/// tests observe `pending` while the coordinator remains wired for other paths.
+const FAR_FUTURE_SCHEDULED_AT: &str = "253402300799";
+
+fn bindings_for_preset(preset_id: &str, nexus_home: &Path) -> HashMap<String, AgentBindingDto> {
+    let registry = std::sync::Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
+    let loaded = nexus_orchestration::preset::resolve_preset(preset_id, nexus_home, &registry)
+        .unwrap_or_else(|e| panic!("resolve preset {preset_id}: {e}"));
+    nexus_orchestration::preset::required_prompt_roles(&loaded)
+        .into_iter()
+        .map(|role| {
+            (
+                role,
+                AgentBindingDto {
+                    provider_id: TEST_BINDING_PROVIDER.to_string(),
+                    model: None,
+                },
+            )
+        })
+        .collect()
+}
+
+fn schedule_request(ctx: &TestCtx, mut req: AddScheduleRequest) -> AddScheduleRequest {
+    if req.agent_bindings.is_none() {
+        req.agent_bindings = Some(bindings_for_preset(&req.preset_id, &ctx.nexus_home));
+    }
+    if req.scheduled_at.is_none() && !req.force_gates {
+        req.scheduled_at = Some(FAR_FUTURE_SCHEDULED_AT.to_string());
+    }
+    req
+}
 
 struct TestCtx {
     _tmp: TestTempRoot,
     server: TestServer,
     db_path: PathBuf,
+    nexus_home: PathBuf,
 }
 
 async fn test_ctx() -> TestCtx {
@@ -46,18 +81,22 @@ async fn test_ctx() -> TestCtx {
     let mut state =
         WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
 
-    // Wire a schedule supervisor using a separate pool to the same DB.
-    // This mirrors how boot.rs creates the schedule supervisor.
-    let db_url = format!("sqlite:{}?mode=rw", db_path.display());
-    let schedule_pool = Arc::new(sqlx::SqlitePool::connect(&db_url).await.unwrap());
-    let supervisor = Arc::new(ScheduleSupervisor::new(schedule_pool));
-    state.set_schedule_supervisor(supervisor);
-
-    // Wire a capability registry so preset gates are evaluated.
-    let registry = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
-    state.set_capability_registry(
-        nexus_orchestration::CapabilityRegistryHolder::with_registry(registry),
-    );
+    // Mirror boot/lazy-attach: enabled default binding provider + full bundle.
+    state.set_agent_host_config(AgentHostConfig {
+        providers: vec![ProviderConfig {
+            id: TEST_BINDING_PROVIDER.to_string(),
+            protocol: "native_cli".to_string(),
+            command: Some("mock".to_string()),
+            args: vec![],
+            env: HashMap::new(),
+            enabled: true,
+        }],
+        ..AgentHostConfig::default()
+    });
+    state
+        .publish_creator_runtime_bundle()
+        .await
+        .expect("publish creator runtime bundle");
 
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
@@ -66,6 +105,7 @@ async fn test_ctx() -> TestCtx {
         _tmp: tmp,
         server,
         db_path,
+        nexus_home,
     }
 }
 
@@ -137,13 +177,14 @@ async fn schedule_create_with_correct_dto_shape() {
         scheduled_at: None,
         input: None,
         force_gates: false,
+        agent_bindings: None,
         reason: None,
     };
 
     let resp = ctx
         .server
         .post("/v1/daemon/orchestration/schedules")
-        .json(&req)
+        .json(&schedule_request(&ctx, req))
         .await;
     resp.assert_status(StatusCode::CREATED);
 
@@ -204,13 +245,14 @@ async fn schedule_create_seeds_core_context_from_preset_input() {
         scheduled_at: None,
         input: None,
         force_gates: false,
+        agent_bindings: None,
         reason: None,
     };
 
     let resp = ctx
         .server
         .post("/v1/daemon/orchestration/schedules")
-        .json(&req)
+        .json(&schedule_request(&ctx, req))
         .await;
     resp.assert_status(StatusCode::CREATED);
 
@@ -253,6 +295,7 @@ async fn schedule_list_isolation_by_creator() {
         scheduled_at: None,
         input: None,
         force_gates: false,
+        agent_bindings: None,
         reason: None,
     };
     let req_b = AddScheduleRequest {
@@ -265,20 +308,21 @@ async fn schedule_list_isolation_by_creator() {
         scheduled_at: None,
         input: None,
         force_gates: false,
+        agent_bindings: None,
         reason: None,
     };
 
     let resp_a = ctx
         .server
         .post("/v1/daemon/orchestration/schedules")
-        .json(&req_a)
+        .json(&schedule_request(&ctx, req_a))
         .await;
     resp_a.assert_status(StatusCode::CREATED);
 
     let resp_b = ctx
         .server
         .post("/v1/daemon/orchestration/schedules")
-        .json(&req_b)
+        .json(&schedule_request(&ctx, req_b))
         .await;
     resp_b.assert_status(StatusCode::CREATED);
 
@@ -320,13 +364,14 @@ async fn schedule_create_without_seed_no_core_context() {
         scheduled_at: None,
         input: None,
         force_gates: false,
+        agent_bindings: None,
         reason: None,
     };
 
     let resp = ctx
         .server
         .post("/v1/daemon/orchestration/schedules")
-        .json(&req)
+        .json(&schedule_request(&ctx, req))
         .await;
     resp.assert_status(StatusCode::CREATED);
 
@@ -378,6 +423,7 @@ async fn schedule_with_empty_creator_id_is_isolated_from_legitimate_creators() {
         scheduled_at: None,
         input: None,
         force_gates: false,
+        agent_bindings: None,
         reason: None,
     };
     let resp_empty = ctx
@@ -400,12 +446,13 @@ async fn schedule_with_empty_creator_id_is_isolated_from_legitimate_creators() {
         scheduled_at: None,
         input: None,
         force_gates: false,
+        agent_bindings: None,
         reason: None,
     };
     let resp_real = ctx
         .server
         .post("/v1/daemon/orchestration/schedules")
-        .json(&req_real)
+        .json(&schedule_request(&ctx, req_real))
         .await;
     resp_real.assert_status(StatusCode::CREATED);
 
@@ -460,12 +507,13 @@ async fn gated_preset_without_work_id_is_rejected() {
         scheduled_at: None,
         input: None, // no work_id via input
         force_gates: false,
+        agent_bindings: None,
         reason: None,
     };
     let resp = ctx
         .server
         .post("/v1/daemon/orchestration/schedules")
-        .json(&req)
+        .json(&schedule_request(&ctx, req))
         .await;
     resp.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
 }
@@ -484,7 +532,7 @@ async fn gated_preset_without_work_id_is_rejected() {
 // `axum_test`'s AutoFuture is not `Send`; this helper only runs inside
 // current-thread `#[tokio::test]` bodies, so the future need not be `Send`.
 #[allow(clippy::future_not_send)]
-async fn create_schedule_with_label(server: &TestServer, creator_id: &str, label: &str) {
+async fn create_schedule_with_label(ctx: &TestCtx, creator_id: &str, label: &str) {
     let req = AddScheduleRequest {
         creator_id: creator_id.to_string(),
         preset_id: "memory-augmented".to_string(),
@@ -495,11 +543,13 @@ async fn create_schedule_with_label(server: &TestServer, creator_id: &str, label
         scheduled_at: None,
         input: None,
         force_gates: false,
+        agent_bindings: None,
         reason: None,
     };
-    let resp = server
+    let resp = ctx
+        .server
         .post("/v1/daemon/orchestration/schedules")
-        .json(&req)
+        .json(&schedule_request(ctx, req))
         .await;
     resp.assert_status(StatusCode::CREATED);
 }
@@ -508,9 +558,9 @@ async fn create_schedule_with_label(server: &TestServer, creator_id: &str, label
 #[serial]
 async fn schedule_list_sort_by_label_ascending() {
     let ctx = test_ctx().await;
-    create_schedule_with_label(&ctx.server, "ctr_sort", "Beta").await;
-    create_schedule_with_label(&ctx.server, "ctr_sort", "Alpha").await;
-    create_schedule_with_label(&ctx.server, "ctr_sort", "Charlie").await;
+    create_schedule_with_label(&ctx, "ctr_sort", "Beta").await;
+    create_schedule_with_label(&ctx, "ctr_sort", "Alpha").await;
+    create_schedule_with_label(&ctx, "ctr_sort", "Charlie").await;
 
     let resp = ctx
         .server
@@ -530,9 +580,9 @@ async fn schedule_list_sort_by_label_ascending() {
 #[serial]
 async fn schedule_list_sort_descending_and_pagination() {
     let ctx = test_ctx().await;
-    create_schedule_with_label(&ctx.server, "ctr_sort2", "Alpha").await;
-    create_schedule_with_label(&ctx.server, "ctr_sort2", "Beta").await;
-    create_schedule_with_label(&ctx.server, "ctr_sort2", "Charlie").await;
+    create_schedule_with_label(&ctx, "ctr_sort2", "Alpha").await;
+    create_schedule_with_label(&ctx, "ctr_sort2", "Beta").await;
+    create_schedule_with_label(&ctx, "ctr_sort2", "Charlie").await;
 
     let resp = ctx
         .server
@@ -565,7 +615,7 @@ async fn schedule_list_sort_descending_and_pagination() {
 #[serial]
 async fn schedule_list_invalid_sort_key_returns_schedule_sort_invalid() {
     let ctx = test_ctx().await;
-    create_schedule_with_label(&ctx.server, "ctr_sort3", "Alpha").await;
+    create_schedule_with_label(&ctx, "ctr_sort3", "Alpha").await;
 
     let resp = ctx
         .server
@@ -597,13 +647,14 @@ async fn force_gates_writes_audit_row() {
             "work_ref": "audit-novel"
         })),
         force_gates: true,
+        agent_bindings: None,
         reason: Some("testing emergency override".to_string()),
     };
 
     let resp = ctx
         .server
         .post("/v1/daemon/orchestration/schedules")
-        .json(&req)
+        .json(&schedule_request(&ctx, req))
         .await;
     resp.assert_status(StatusCode::CREATED);
 
@@ -651,13 +702,14 @@ async fn force_gates_without_reason_is_rejected() {
         scheduled_at: None,
         input: None,
         force_gates: true,
+        agent_bindings: None,
         reason: Some(String::new()), // empty reason
     };
 
     let resp = ctx
         .server
         .post("/v1/daemon/orchestration/schedules")
-        .json(&req)
+        .json(&schedule_request(&ctx, req))
         .await;
     resp.assert_status(StatusCode::BAD_REQUEST);
 }
@@ -698,13 +750,14 @@ async fn gate_failure_returns_422_with_structured_body() {
             "work_ref": "gate-novel"
         })),
         force_gates: false,
+        agent_bindings: None,
         reason: None,
     };
 
     let resp = ctx
         .server
         .post("/v1/daemon/orchestration/schedules")
-        .json(&req)
+        .json(&schedule_request(&ctx, req))
         .await;
 
     let status = resp.status_code();
@@ -759,13 +812,14 @@ async fn force_gates_with_long_reason_rejected() {
         scheduled_at: None,
         input: None,
         force_gates: true,
+        agent_bindings: None,
         reason: Some(long_reason),
     };
 
     let resp = ctx
         .server
         .post("/v1/daemon/orchestration/schedules")
-        .json(&req)
+        .json(&schedule_request(&ctx, req))
         .await;
     resp.assert_status(StatusCode::BAD_REQUEST);
 }
@@ -786,13 +840,14 @@ async fn force_gates_with_ansi_in_reason_rejected() {
         scheduled_at: None,
         input: None,
         force_gates: true,
+        agent_bindings: None,
         reason: Some("ok \x1b[31mred\x1b[0m text".to_string()),
     };
 
     let resp = ctx
         .server
         .post("/v1/daemon/orchestration/schedules")
-        .json(&req)
+        .json(&schedule_request(&ctx, req))
         .await;
     resp.assert_status(StatusCode::BAD_REQUEST);
 }

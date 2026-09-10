@@ -443,6 +443,15 @@ pub enum AcpStreamUpdate {
         /// Why the agent stopped generating.
         stop_reason: NexusStopReason,
     },
+    /// Prompt streaming failed before a normal stop reason.
+    Failed {
+        /// The session ID whose prompt failed.
+        session_id: String,
+        /// Stable failure category for host mapping.
+        error_category: String,
+        /// Human-readable protocol or transport failure.
+        error_message: String,
+    },
     /// Permission request was evaluated and responded to.
     ///
     /// Emitted for observability: the permission was already handled by the
@@ -582,6 +591,11 @@ pub struct AcpSdkAdapter {
     /// The ACP SDK connection (wrapped for thread-safe access).
     /// This is `Some` after `with_connection()` is called.
     connection: Arc<RwLock<Option<SdkConnection>>>,
+    /// Connection handle used by control-plane notifications such as cancel.
+    ///
+    /// Kept outside `connection` so cancellation cannot deadlock behind a
+    /// streaming prompt that mutably owns the active SDK session.
+    control_connection: Arc<RwLock<Option<ConnectionTo<Agent>>>>,
     /// Handle to the connection setup task (must be joined during cleanup).
     setup_task: Option<tokio::task::JoinHandle<()>>,
     /// Permission evaluation callback, set by the host layer.
@@ -592,12 +606,14 @@ pub struct AcpSdkAdapter {
     /// selects the matching `PermissionOption` from the request.
     /// If `None`, all permission requests are cancelled (safe default).
     permission_handler: Arc<RwLock<Option<PermissionHandlerFn>>>,
-    /// Receiver for permission result events produced by the SDK's
-    /// `on_receive_request` handler. These events are merged into the
-    /// `stream_prompt` output so the host layer receives `PermissionResult`
-    /// updates alongside `TextDelta` and `Stopped`.
-    permission_events_rx:
-        Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Receiver<AcpStreamUpdate>>>>,
+    /// Broadcast of permission result events produced by the SDK's
+    /// `on_receive_request` handler.
+    ///
+    /// Every `stream_prompt` operation subscribes at its start and forwards
+    /// `PermissionResult` updates into its own output channel, so permission
+    /// results are routed per active operation and remain observable across
+    /// serial prompts on the same session (never one-shot per adapter).
+    permission_events_tx: Arc<tokio::sync::broadcast::Sender<AcpStreamUpdate>>,
 }
 
 impl AcpSdkAdapter {
@@ -629,14 +645,16 @@ impl AcpSdkAdapter {
     /// Use [`with_connection()`] to establish the actual SDK connection.
     #[must_use]
     pub fn new(agent_id: &str, agent_path: PathBuf) -> Self {
+        let (permission_events_tx, _) = tokio::sync::broadcast::channel(64);
         Self {
             agent_path,
             agent_id: agent_id.to_string(),
             bridge: LocalSetBridge::new(),
             connection: Arc::new(RwLock::new(None)),
+            control_connection: Arc::new(RwLock::new(None)),
             setup_task: None,
             permission_handler: Arc::new(RwLock::new(None)),
-            permission_events_rx: Arc::new(tokio::sync::Mutex::new(None)),
+            permission_events_tx: Arc::new(permission_events_tx),
         }
     }
 
@@ -657,9 +675,10 @@ impl AcpSdkAdapter {
     ) -> Self {
         let bridge = LocalSetBridge::new();
         let connection = Arc::new(RwLock::new(None));
+        let control_connection = Arc::new(RwLock::new(None));
         let permission_handler: Arc<RwLock<Option<PermissionHandlerFn>>> =
             Arc::new(RwLock::new(None));
-        let (permission_events_tx, permission_events_rx) = tokio::sync::mpsc::channel(16);
+        let (permission_events_tx, _) = tokio::sync::broadcast::channel(64);
 
         tracing::info!(
             agent_id = %agent_id,
@@ -667,9 +686,10 @@ impl AcpSdkAdapter {
         );
 
         let connection_clone = connection.clone();
+        let control_connection_clone = control_connection.clone();
         let agent_id_for_log = agent_id.clone();
         let permission_handler_clone = permission_handler.clone();
-        let permission_events_for_handler = permission_events_tx;
+        let permission_events_for_handler = permission_events_tx.clone();
 
         let bridge_clone = bridge.clone();
         let setup_task = tokio::spawn(async move {
@@ -733,7 +753,7 @@ impl AcpSdkAdapter {
                                     "Permission response sent"
                                 );
 
-                                let _ = perm_events.try_send(AcpStreamUpdate::PermissionResult {
+                                let _ = perm_events.send(AcpStreamUpdate::PermissionResult {
                                     session_id: request.session_id.to_string(),
                                     tool_name: tool_name.clone(),
                                     approved: matches!(outcome, AcpPermissionOutcome::Approve),
@@ -746,9 +766,14 @@ impl AcpSdkAdapter {
                         );
 
                         let connection_for_callback = connection_clone.clone();
+                        let control_connection_for_callback = control_connection_clone.clone();
                         let agent_id_for_connect = agent_id.clone();
                         let connect_result = builder
                             .connect_with(transport, async move |cx| {
+                                {
+                                    let mut control = control_connection_for_callback.write().await;
+                                    *control = Some(cx.clone());
+                                }
                                 let mut guard = connection_for_callback.write().await;
                                 *guard = Some(SdkConnection {
                                     connection: cx,
@@ -794,9 +819,10 @@ impl AcpSdkAdapter {
             agent_id,
             bridge,
             connection,
+            control_connection,
             setup_task: Some(setup_task),
             permission_handler,
-            permission_events_rx: Arc::new(tokio::sync::Mutex::new(Some(permission_events_rx))),
+            permission_events_tx: Arc::new(permission_events_tx),
         }
     }
 
@@ -804,6 +830,15 @@ impl AcpSdkAdapter {
     #[must_use]
     pub fn agent_path(&self) -> &Path {
         &self.agent_path
+    }
+
+    /// Whether the SDK connection has been established.
+    ///
+    /// `with_connection` spawns the connection setup asynchronously; callers
+    /// that need the connection immediately (e.g. a lazy session spawn) poll
+    /// this with a bounded deadline before issuing requests.
+    pub async fn is_connected(&self) -> bool {
+        self.connection.read().await.is_some()
     }
 
     /// Return the agent ID.
@@ -1328,11 +1363,10 @@ impl NexusAcpClient for AcpSdkAdapter {
     ) -> impl Future<Output = AcpResult<tokio::sync::mpsc::Receiver<AcpStreamUpdate>>> + Send {
         let connection = self.connection.clone();
         let bridge = self.bridge.clone();
-        let permission_events_rx = self.permission_events_rx.clone();
+        let permission_events_tx = self.permission_events_tx.clone();
 
         async move {
             let session_id_str = request.session_id.0.clone();
-
             let prompt_text = request
                 .prompt
                 .iter()
@@ -1345,79 +1379,56 @@ impl NexusAcpClient for AcpSdkAdapter {
                 .collect::<Vec<_>>()
                 .join("\n");
 
-            // Channel with capacity 64 — enough to buffer several text chunks
-            // without blocking the SDK dispatch loop.
             let (tx, rx) = tokio::sync::mpsc::channel(64);
             let tx_for_perm = tx.clone();
-
-            // Create a done signal so the permission-forwarding task knows
-            // when the prompt streaming has finished and it should stop
-            // keeping the output channel alive.
+            let tx_for_error = tx.clone();
+            let stream_session_id = session_id_str.clone();
             let (done_tx, mut done_rx) = tokio::sync::oneshot::channel::<()>();
 
-            bridge
-                .execute(move || {
-                    let connection = connection.clone();
-
-                    Box::pin(Self::run_stream_prompt(
-                        connection,
-                        session_id_str,
-                        prompt_text,
-                        tx,
-                    ))
-                })
-                .await
-                .and_then(|r| r)?;
-
-            // Spawn a task that forwards permission events from the SDK's
-            // `on_receive_request` handler into the stream output channel.
-            // Permission events arrive on a separate channel because the
-            // SDK's `on_receive_request` handler runs on the dispatch loop,
-            // not inside the `read_update()` streaming loop.
-            //
-            // When the `done_rx` signal fires (prompt streaming finished),
-            // the task drops `tx_for_perm` so the output channel can close
-            // after the final `Stopped` event is consumed.
+            // Subscribe to the adapter-wide permission broadcast for THIS
+            // operation. Each stream_prompt gets its own subscription, so
+            // permission results route per active operation and remain
+            // observable across serial prompts on the same session.
+            let mut permission_rx = permission_events_tx.subscribe();
             tokio::spawn(async move {
-                // Take the receiver out of the Mutex — only one task can own it.
-                let mut perm_rx_guard = permission_events_rx.lock().await;
-                let Some(perm_rx) = perm_rx_guard.take() else {
-                    tracing::debug!("No permission events receiver available");
-                    // Drop tx_for_perm immediately since there's nothing to forward
-                    drop(tx_for_perm);
-                    return;
-                };
-                drop(perm_rx_guard);
-
-                // Forward permission events until the channel closes or
-                // the prompt streaming finishes.
-                let mut rx = perm_rx;
                 loop {
                     tokio::select! {
-                        Some(update) = rx.recv() => {
+                        Ok(update) = permission_rx.recv() => {
                             if tx_for_perm.send(update).await.is_err() {
-                                // Channel closed — the consumer has dropped the receiver.
                                 break;
                             }
                         }
-                        _ = &mut done_rx => {
-                            // Prompt streaming finished — stop forwarding and
-                            // drop our sender so the output channel can close.
-                            break;
-                        }
-                        else => {
-                            // Both channels closed
-                            break;
-                        }
+                        _ = &mut done_rx => break,
+                        else => break,
                     }
                 }
-                // Explicitly drop tx_for_perm to release the output channel
-                drop(tx_for_perm);
             });
 
-            // Signal the forwarding task that streaming is done.
-            // The bridge has already completed, so the prompt has finished.
-            let _ = done_tx.send(());
+            tokio::spawn(async move {
+                let result = bridge
+                    .execute(move || {
+                        let connection = connection.clone();
+                        Box::pin(Self::run_stream_prompt(
+                            connection,
+                            session_id_str,
+                            prompt_text,
+                            tx,
+                        ))
+                    })
+                    .await
+                    .and_then(|result| result);
+
+                if let Err(error) = result {
+                    let _ = tx_for_error
+                        .send(AcpStreamUpdate::Failed {
+                            session_id: stream_session_id,
+                            error_category: "protocol_error".to_string(),
+                            error_message: error.to_string(),
+                        })
+                        .await;
+                }
+                let _ = done_tx.send(());
+            });
 
             Ok(rx)
         }
@@ -1427,14 +1438,14 @@ impl NexusAcpClient for AcpSdkAdapter {
         &self,
         session_id: NexusSessionId,
     ) -> impl Future<Output = AcpResult<NexusCancelResult>> + Send {
-        let connection = self.connection.clone();
+        let control_connection = self.control_connection.clone();
         let bridge = self.bridge.clone();
         let agent_id = self.agent_id.clone();
 
         async move {
             bridge
                 .execute(move || {
-                    let connection = connection.clone();
+                    let control_connection = control_connection.clone();
 
                     Box::pin(async move {
                         let session_id_str = session_id.0.clone();
@@ -1445,11 +1456,16 @@ impl NexusAcpClient for AcpSdkAdapter {
                             "Sending cancel notification to agent"
                         );
 
-                        // Send the CancelNotification via raw JSON-RPC
                         let notification =
                             CancelNotification::new(SessionId::new(session_id_str.clone()));
-
-                        let connection_handle = Self::get_connection_handle(&connection).await?;
+                        let connection_handle = control_connection
+                            .read()
+                            .await
+                            .as_ref()
+                            .cloned()
+                            .ok_or_else(|| {
+                            crate::AcpError::connection_failed("Connection not established")
+                        })?;
                         connection_handle
                             .send_notification_to(Agent, notification)
                             .map_err(|e| crate::AcpError::sdk(&e))?;

@@ -9,8 +9,8 @@ use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::{Parser, Subcommand};
 use nexus_contracts::local::schedule::http::{
-    AddScheduleRequest, AddScheduleResponse, CoreContextHistoryResponse, CoreContextResponse,
-    DeleteScheduleResponse, EditCoreContextRequest, EditCoreContextResponse,
+    AddScheduleRequest, AddScheduleResponse, AgentBindingDto, CoreContextHistoryResponse,
+    CoreContextResponse, DeleteScheduleResponse, EditCoreContextRequest, EditCoreContextResponse,
     InspectScheduleResponse, ListSchedulesQuery, ListSchedulesResponse, ScheduleConcurrencyRequest,
     SignalScheduleRequest, SignalScheduleResponse,
 };
@@ -167,6 +167,16 @@ pub enum ScheduleCommand {
         id: String,
     },
 
+    /// Continue a schedule past a human wait with the exact durable wait token (A4)
+    Continue {
+        /// Schedule ID to continue
+        id: String,
+
+        /// Exact durable wait token from the wait record
+        #[arg(long)]
+        wait_id: String,
+    },
+
     /// Show creator's schedule timeline
     Timeline {
         /// Creator ID
@@ -199,6 +209,7 @@ struct ScheduleCli {
 /// - Daemon API calls fail
 /// - Invalid schedule parameters
 /// - CLI configuration cannot be loaded/saved
+#[allow(clippy::too_many_lines)] // one CLI command dispatch covering many subcommands; splitting adds indirection
 pub async fn run(cmd: ScheduleCommand, config: &CliConfig) -> Result<()> {
     let client = crate::api::DaemonClient::from_config(config)?;
 
@@ -212,10 +223,39 @@ pub async fn run(cmd: ScheduleCommand, config: &CliConfig) -> Result<()> {
             parallel_with,
             parallel_any,
             scheduled_at,
-            model: _,
-            role: _,
-            agent_ref: _,
+            model,
+            role,
+            agent_ref,
         } => {
+            // I-5: fold `--model`/`--role` into the agent_bindings map
+            // (role:provider[:model] format), then parse repeatable
+            // `--agent-ref ROLE:AGENT_ID[:MODEL]` entries.
+            let mut bindings: std::collections::HashMap<String, AgentBindingDto> =
+                std::collections::HashMap::new();
+            if let Some(role_id) = role {
+                bindings.insert(
+                    role_id,
+                    AgentBindingDto {
+                        provider_id: model.clone().unwrap_or_default(),
+                        model: None,
+                    },
+                );
+            }
+            for entry in &agent_ref {
+                let parts: Vec<&str> = entry.split(':').collect();
+                if parts.len() < 2 || parts[0].is_empty() || parts[1].is_empty() {
+                    return Err(crate::errors::CliError::Other(format!(
+                        "invalid --agent-ref '{entry}': expected ROLE:AGENT_ID[:MODEL]"
+                    )));
+                }
+                bindings.insert(
+                    parts[0].to_string(),
+                    AgentBindingDto {
+                        provider_id: parts[1].to_string(),
+                        model: parts.get(2).map(|m| (*m).to_string()),
+                    },
+                );
+            }
             add_schedule(
                 &client,
                 AddScheduleParams {
@@ -227,6 +267,11 @@ pub async fn run(cmd: ScheduleCommand, config: &CliConfig) -> Result<()> {
                     parallel_with,
                     parallel_any,
                     scheduled_at,
+                    agent_bindings: if bindings.is_empty() {
+                        None
+                    } else {
+                        Some(bindings)
+                    },
                 },
             )
             .await
@@ -265,6 +310,9 @@ pub async fn run(cmd: ScheduleCommand, config: &CliConfig) -> Result<()> {
         ScheduleCommand::Resume { id } => signal_schedule_cmd(&client, &id, "resume").await,
         ScheduleCommand::Cancel { id } => signal_schedule_cmd(&client, &id, "cancel").await,
         ScheduleCommand::Advance { id } => signal_schedule_cmd(&client, &id, "advance").await,
+        ScheduleCommand::Continue { id, wait_id } => {
+            signal_schedule_cmd_with_wait(&client, &id, "continue", Some(&wait_id)).await
+        }
         ScheduleCommand::Timeline { creator, days } => timeline(&client, &creator, days).await,
     }
 }
@@ -283,6 +331,7 @@ struct AddScheduleParams<'a> {
     parallel_with: Option<String>,
     parallel_any: bool,
     scheduled_at: Option<String>,
+    agent_bindings: Option<std::collections::HashMap<String, AgentBindingDto>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -299,6 +348,7 @@ async fn add_schedule(
         parallel_with,
         parallel_any,
         scheduled_at,
+        agent_bindings,
     } = params;
 
     let concurrency = if parallel_any {
@@ -333,6 +383,7 @@ async fn add_schedule(
         input: None,
         force_gates: false,
         reason: None,
+        agent_bindings,
     };
 
     let resp: AddScheduleResponse = client.post(SCHEDULE_BASE, &body).await?;
@@ -430,19 +481,24 @@ async fn list_schedules(
     }
 
     println!(
-        "{:<25} {:<15} {:<12} {:<10} {:<6} {}",
-        "SCHEDULE_ID", "CREATOR", "PRESET", "STATUS", "CTX_V", "LABEL"
+        "{:<25} {:<15} {:<12} {:<10} {:<6} {:<14} {}",
+        "SCHEDULE_ID", "CREATOR", "PRESET", "STATUS", "CTX_V", "RECOVERY", "LABEL"
     );
-    println!("{}", "-".repeat(85));
+    println!("{}", "-".repeat(100));
     for s in &resp.items {
         let label = s.label.as_deref().unwrap_or("-");
+        let recovery = s
+            .execution
+            .as_ref()
+            .map_or("-", |execution| execution.recovery_class.as_str());
         println!(
-            "{:<25} {:<15} {:<12} {:<10} {:<6} {}",
+            "{:<25} {:<15} {:<12} {:<10} {:<6} {:<14} {}",
             s.schedule_id,
             s.creator_id,
             s.preset_id,
             s.status,
             s.current_core_context_version,
+            recovery,
             label,
         );
     }
@@ -464,6 +520,20 @@ async fn inspect_schedule(client: &crate::api::DaemonClient, id: &str) -> Result
     println!("label:          {}", s.label.as_deref().unwrap_or("-"));
     println!("created_at:     {}", s.created_at);
     println!("updated_at:     {}", s.updated_at);
+    println!("execution_policy: {}", s.execution_policy);
+    if let Some(sid) = &s.current_session_id {
+        println!("current_session_id: {sid}");
+    }
+    if let Some(execution) = &s.execution {
+        println!("recovery_class: {}", execution.recovery_class);
+        if let Some(reason) = &execution.reason_code {
+            println!("reason_code:    {reason}");
+        }
+        if let Some(wait) = &execution.wait {
+            println!("wait_id:        {}", wait.wait_id);
+        }
+        println!("allowed_actions: {}", execution.allowed_actions.join(", "));
+    }
     if !resp.depends_on.is_empty() {
         println!("depends_on:     {}", resp.depends_on.join(", "));
     }
@@ -522,13 +592,26 @@ async fn signal_schedule_cmd(
     id: &str,
     signal: &str,
 ) -> Result<()> {
+    signal_schedule_cmd_with_wait(client, id, signal, None).await
+}
+
+async fn signal_schedule_cmd_with_wait(
+    client: &crate::api::DaemonClient,
+    id: &str,
+    signal: &str,
+    wait_id: Option<&str>,
+) -> Result<()> {
     let path = format!("{SCHEDULE_BASE}/{id}/signal");
     let body = SignalScheduleRequest {
         signal: signal.to_string(),
+        wait_id: wait_id.map(str::to_string),
     };
     let resp: SignalScheduleResponse = client.post(&path, &body).await?;
 
     println!("schedule {id}: {} → {}", signal, resp.status);
+    if let Some(wait_id) = &resp.current_wait_id {
+        println!("current_wait_id: {wait_id}");
+    }
     Ok(())
 }
 
@@ -857,6 +940,26 @@ mod tests {
                 assert_eq!(id, "SCH001");
             }
             other => panic!("expected Advance, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn continue_command_parses() {
+        let cmd = ScheduleCli::try_parse_from([
+            "schedule",
+            "continue",
+            "SCH001",
+            "--wait-id",
+            "w-abc-123",
+        ])
+        .expect("parse command");
+
+        match cmd.command {
+            ScheduleCommand::Continue { id, wait_id } => {
+                assert_eq!(id, "SCH001");
+                assert_eq!(wait_id, "w-abc-123");
+            }
+            other => panic!("expected Continue, got: {other:?}"),
         }
     }
 

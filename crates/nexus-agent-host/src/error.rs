@@ -45,6 +45,23 @@ pub enum HostError {
         message: String,
     },
 
+    /// Session cwd does not belong to the verified Creator workspace.
+    OwnerWorkspaceMismatch {
+        provider_id: Option<ProviderId>,
+        message: String,
+    },
+
+    /// Owned process cleanup could not be confirmed reaped/quiescent.
+    ///
+    /// The exact owned process tree was not confirmed terminated within the
+    /// bounded window. The session must remain visibly interrupted (never
+    /// cleanly stopped) until ownership-safe reconciliation.
+    CleanupUnconfirmed {
+        provider_id: Option<ProviderId>,
+        session_id: Option<HostSessionId>,
+        message: String,
+    },
+
     /// Stage-level timeout exceeded.
     OperationTimeout {
         provider_id: Option<ProviderId>,
@@ -129,6 +146,25 @@ impl HostError {
         }
     }
 
+    /// Create an owner-workspace-mismatch error.
+    #[must_use]
+    pub fn owner_workspace_mismatch(message: impl fmt::Display) -> Self {
+        Self::OwnerWorkspaceMismatch {
+            provider_id: None,
+            message: message.to_string(),
+        }
+    }
+
+    /// Create a cleanup-unconfirmed error.
+    #[must_use]
+    pub fn cleanup_unconfirmed(message: impl fmt::Display) -> Self {
+        Self::CleanupUnconfirmed {
+            provider_id: None,
+            session_id: None,
+            message: message.to_string(),
+        }
+    }
+
     /// Create an operation-timeout error.
     #[must_use]
     pub fn timeout(stage: impl fmt::Display, message: impl fmt::Display) -> Self {
@@ -191,6 +227,12 @@ impl HostError {
             Self::PolicyDenied {
                 provider_id: pid, ..
             }
+            | Self::OwnerWorkspaceMismatch {
+                provider_id: pid, ..
+            }
+            | Self::CleanupUnconfirmed {
+                provider_id: pid, ..
+            }
             | Self::OperationTimeout {
                 provider_id: pid, ..
             }
@@ -209,6 +251,9 @@ impl HostError {
     pub const fn with_session(mut self, session_id: HostSessionId) -> Self {
         match &mut self {
             Self::PolicyDenied {
+                session_id: sid, ..
+            }
+            | Self::CleanupUnconfirmed {
                 session_id: sid, ..
             }
             | Self::OperationTimeout {
@@ -249,6 +294,8 @@ impl HostError {
             Self::LaunchFailed { .. } => "launch_failed",
             Self::CapabilityUnsupported { .. } => "capability_unsupported",
             Self::PolicyDenied { .. } => "policy_denied",
+            Self::OwnerWorkspaceMismatch { .. } => "owner_workspace_mismatch",
+            Self::CleanupUnconfirmed { .. } => "cleanup_unconfirmed",
             Self::OperationTimeout { .. } => "operation_timeout",
             Self::OperationCancelled { .. } => "operation_cancelled",
             Self::ProviderProtocolError { .. } => "provider_protocol_error",
@@ -289,6 +336,12 @@ impl fmt::Display for HostError {
             }
             Self::PolicyDenied { message, .. } => {
                 write!(f, "policy denied: {message}")
+            }
+            Self::OwnerWorkspaceMismatch { message, .. } => {
+                write!(f, "owner workspace mismatch: {message}")
+            }
+            Self::CleanupUnconfirmed { message, .. } => {
+                write!(f, "cleanup unconfirmed: {message}")
             }
             Self::OperationTimeout { stage, message, .. } => {
                 write!(f, "timeout [{stage}]: {message}")

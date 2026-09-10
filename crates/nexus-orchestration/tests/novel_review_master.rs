@@ -144,33 +144,43 @@ fn write_workspace_with_chapter(body_text: &str) -> (tempfile::TempDir, String) 
     (dir, body_rel.to_string())
 }
 
-/// Mock worker that returns a fixed LLM extraction payload with a non-character
+/// Mock executor that returns a fixed LLM extraction payload with a non-character
 /// `block_type` (scene/location) so the test proves the LLM pathway — not the
 /// `character`-defaulting heuristic — produced the candidate.
 struct MockLlmExtractWorker;
 
 #[async_trait::async_trait]
-impl nexus_orchestration::capability::WorkerHandleProvider for MockLlmExtractWorker {
-    async fn call_acp_prompt(
+impl nexus_orchestration::capability::PromptExecutor for MockLlmExtractWorker {
+    async fn execute(
         &self,
-        _creator_id: &str,
-        _session_id: &str,
-        _prompt: String,
-        _tool_policy: &str,
-    ) -> Result<serde_json::Value, nexus_orchestration::capability::CapabilityError> {
-        Ok(serde_json::json!({
-            "full_text": "{\"candidates\":[
+        _request: nexus_orchestration::capability::PromptRequest,
+    ) -> Result<
+        nexus_orchestration::capability::PromptResult,
+        nexus_orchestration::capability::CapabilityError,
+    > {
+        Ok(nexus_orchestration::capability::PromptResult {
+            full_text: "{\"candidates\":[
                 {\"canonical_name\":\"Lin Xia\",\"block_type\":\"character\",\"summary\":\"A warrior\",\"confidence\":0.95,\"source_quote\":\"Lin Xia drew her blade at the Azure Gate.\"},
                 {\"canonical_name\":\"Azure Gate\",\"block_type\":\"scene\",\"summary\":\"The eastern gate\",\"confidence\":0.88,\"source_quote\":\"the Azure Gate groaned open\"}
-            ]}"
-        }))
+            ]}".to_string(),
+            host_session_id: "host-sess".to_string(),
+            operation_id: "op-1".to_string(),
+        })
     }
 }
 
 fn registry_with_mock_worker() -> CapabilityRegistry {
+    // A1: prompt consumers resolve their coordinator cancellation token from
+    // this map and fail closed when none is registered. The review-time hook
+    // runs outside a preset session, so register the ids it can use.
+    let mut cancels = std::collections::HashMap::new();
+    for id in ["sch_v151_llm", "", "review-master"] {
+        cancels.insert(id.to_string(), tokio_util::sync::CancellationToken::new());
+    }
     let deps = CapabilityRuntimeDeps {
         pool: None,
-        worker_provider: Some(std::sync::Arc::new(MockLlmExtractWorker)),
+        prompt_executor: Some(std::sync::Arc::new(MockLlmExtractWorker)),
+        session_cancels: std::sync::Arc::new(std::sync::RwLock::new(cancels)),
         daemon_tool_dispatch: None,
         cdn_config: None,
     };

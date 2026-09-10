@@ -17,31 +17,90 @@ use nexus_contracts::local::orchestration::http::{
 };
 use nexus_contracts::PaginationInfo;
 use nexus_orchestration::engine::{EngineSignal, SessionStatus};
+use nexus_orchestration::run_state::WorkflowStateStore;
+use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
+use std::sync::Arc;
 
 /// `POST /v1/daemon/orchestration/sessions` — create a new session from a preset.
 pub async fn create_session(
     State(state): State<WorkspaceState>,
     Json(body): Json<CreateSessionRequest>,
 ) -> Result<(StatusCode, Json<CreateSessionResponse>), NexusApiError> {
-    let engine = state
+    // I-4: a session POST requires a complete Creator-DB runtime bundle
+    // (engine + coordinator). Tier-0 in-memory user runs are never created —
+    // the daemon must have a creator DB (boot or lazy attach) before a
+    // public session can be driven.
+    //
+    // I-5/N-4: `CreateSessionRequest.agentBindings` (camelCase) carries the
+    // role → provider binding map; the coordinator freezes it into the run
+    // descriptor and refuses unknown role/provider references before
+    // enqueue. Absent bindings behave as an empty map (the `default` role
+    // must then be bound by the preset's own admission path).
+    let coordinator = state
+        .run_coordinator()
+        .ok_or_else(|| NexusApiError::service_unavailable("run coordinator not configured"))?;
+    let _engine = state
         .engine()
         .ok_or_else(|| NexusApiError::service_unavailable("engine not available"))?;
+    let caps = state
+        .capability_registry_holder()
+        .ok_or_else(|| NexusApiError::service_unavailable("capability registry not available"))?;
 
-    // Load the preset by ID.
-    let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
-    let loaded = nexus_orchestration::preset::load_embedded_preset(&body.preset_id, &caps)
-        .map_err(|e| NexusApiError::BadRequest {
-            code: "preset_load_failed".into(),
-            message: format!("failed to load preset '{}': {}", body.preset_id, e),
-        })?;
-
-    // Start session with the loaded preset.
-    let session_id = engine
-        .start_session_with_preset_for_creator(&loaded, &body.creator_id)
+    // I-4: resolve via the shared public resolver (embedded, user, and
+    // system directory presets) — not `load_embedded_preset` only. The
+    // coordinator's `start_session` freezes the supplied seed/input and
+    // agent bindings into the v1 admission path and drives the run —
+    // mandatory, never optional. Unknown role/provider references are
+    // refused before enqueue (N-4).
+    let agent_bindings = body
+        .agent_bindings
+        .as_ref()
+        .map(|bindings| {
+            bindings
+                .iter()
+                .map(|(role, dto)| {
+                    (
+                        role.clone(),
+                        nexus_orchestration::run_state::AgentBinding {
+                            provider_id: dto.provider_id.clone(),
+                            model: dto.model.clone(),
+                        },
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let session_id = coordinator
+        .start_session(
+            &body.preset_id,
+            &body.creator_id,
+            body.seed.as_deref(),
+            agent_bindings,
+            state.nexus_home(),
+            &caps,
+            state.daemon_tool_dispatch(),
+            state.prompt_executor(),
+        )
         .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "ENGINE_ERROR".into(),
-            message: e.to_string(),
+        .map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("not eligible")
+                || msg.contains("system preset")
+                || msg.contains("unknown role")
+                || msg.contains("unknown provider")
+                || msg.contains("invalid agent binding")
+                || msg.contains("missing agent binding")
+            {
+                NexusApiError::BadRequest {
+                    code: "invalid_input".into(),
+                    message: msg,
+                }
+            } else {
+                NexusApiError::Internal {
+                    code: "RUN_CONTROL_ERROR".into(),
+                    message: msg,
+                }
+            }
         })?;
 
     Ok((
@@ -94,6 +153,8 @@ pub async fn list_sessions(
             preset_id: s.preset_id,
             status: session_status_to_str(&s.status),
             current_task_id: s.current_task_id,
+            failure_reason: None,
+            execution: None,
         })
         .collect();
 
@@ -144,6 +205,21 @@ pub async fn get_session(
         .ok_or_else(|| NexusApiError::service_unavailable("engine not available"))?;
 
     let sid = nexus_orchestration::engine::SessionId(session_id.clone());
+    // Shared durable execution projection (A2/A7): present for terminal rows
+    // with no live runner; a load error projects unreadable, never a
+    // fabricated class.
+    let execution = match state.pool() {
+        Some(pool) => Some(
+            crate::execution_projection::project_for_session(
+                pool,
+                Some(&session_id),
+                "driven_v1",
+                state.capability_registry().as_ref(),
+            )
+            .await,
+        ),
+        None => None,
+    };
     let sessions = engine
         .list_active(nexus_orchestration::engine::SessionFilter::default())
         .await
@@ -152,23 +228,92 @@ pub async fn get_session(
             message: e.to_string(),
         })?;
 
-    let session = sessions
-        .into_iter()
-        .find(|s| s.session_id == sid)
-        .ok_or_else(|| NexusApiError::NotFound(format!("session {session_id}")))?;
+    let session = if let Some(active) = sessions.into_iter().find(|s| s.session_id == sid) {
+        // The in-memory active summary is a fast path, but it is NOT the
+        // authoritative projection (Finding 2): after an unconfirmed cancel
+        // cleanup the durable row is `interrupted` while the in-memory
+        // summary may still say `running` (the engine updates the summary
+        // only after the durable write succeeds, and the first failed
+        // cancel returns the cleanup error before any summary flip). When a
+        // creator DB is present, cross-check the durable row and prefer it
+        // whenever it is terminal — the durable row is the SSOT.
+        let durable_terminal = match state.pool() {
+            Some(pool) => {
+                let storage = SqliteSessionStorage::new(Arc::new(pool.clone()));
+                match storage.get_checkpoint_row(&session_id).await {
+                    Ok(Some(row))
+                        if SessionStatus::from_db_str(&row.status)
+                            .is_some_and(|s| s.is_terminal()) =>
+                    {
+                        Some(row)
+                    }
+                    _ => None,
+                }
+            }
+            None => None,
+        };
+        if let Some(row) = durable_terminal {
+            let failure_reason = failure_reason_for(&row);
+            SessionSummary {
+                session_id: row.session_id,
+                creator_id: row.creator_id,
+                preset_id: row.preset_id,
+                status: row.status,
+                current_task_id: row.current_task_id,
+                failure_reason,
+                execution: execution.clone(),
+            }
+        } else {
+            SessionSummary {
+                session_id: active.session_id.0,
+                creator_id: active.creator_id,
+                preset_id: active.preset_id,
+                status: session_status_to_str(&active.status),
+                current_task_id: active.current_task_id,
+                failure_reason: None,
+                execution: execution.clone(),
+            }
+        }
+    } else {
+        let pool = state.pool_or_uninit()?;
+        let storage = SqliteSessionStorage::new(Arc::new(pool.clone()));
+        let row = storage
+            .get_checkpoint_row(&session_id)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "STORAGE_ERROR".into(),
+                message: e.to_string(),
+            })?
+            .ok_or_else(|| NexusApiError::NotFound(format!("session {session_id}")))?;
+        let failure_reason = failure_reason_for(&row);
+        SessionSummary {
+            session_id: row.session_id,
+            creator_id: row.creator_id,
+            preset_id: row.preset_id,
+            status: row.status,
+            current_task_id: row.current_task_id,
+            failure_reason,
+            execution: execution.clone(),
+        }
+    };
 
-    Ok(Json(GetSessionResponse {
-        session: SessionSummary {
-            session_id: session.session_id.0,
-            creator_id: session.creator_id,
-            preset_id: session.preset_id,
-            status: session_status_to_str(&session.status),
-            current_task_id: session.current_task_id,
-        },
-    }))
+    Ok(Json(GetSessionResponse { session }))
+}
+
+/// Actionable failure reason from the durable v1 run state (e.g. an
+/// unconfirmed cancel cleanup that left the run `interrupted`).
+fn failure_reason_for(row: &nexus_orchestration::storage::CheckpointRow) -> Option<String> {
+    row.run_state_json
+        .as_deref()
+        .and_then(|blob| {
+            serde_json::from_slice::<nexus_orchestration::run_state::RunStateV1>(blob).ok()
+        })
+        .and_then(|state| state.failure)
+        .map(|f| f.message)
 }
 
 /// `POST /v1/daemon/orchestration/sessions/{session_id}/signal`
+#[allow(clippy::too_many_lines)] // handler covers many signal variants + per-variant error mapping; splitting adds indirection
 pub async fn signal_session(
     State(state): State<WorkspaceState>,
     Path(session_id): Path<String>,
@@ -183,28 +328,203 @@ pub async fn signal_session(
         "resume" => EngineSignal::Resume,
         "cancel" => EngineSignal::Cancel,
         "advance" => EngineSignal::Advance,
+        "continue" => {
+            let wait_id =
+                body.wait_id
+                    .as_deref()
+                    .ok_or_else(|| NexusApiError::BadRequestCodedDetails {
+                        code: "invalid_input".into(),
+                        message: "continue requires the exact durable wait token".into(),
+                        details: serde_json::json!({
+                            "field": "waitId",
+                            "reason": "continue requires the exact durable wait token",
+                        }),
+                    })?;
+            EngineSignal::Continue {
+                wait_id: wait_id.to_string(),
+            }
+        }
         other => {
             return Err(NexusApiError::BadRequest {
                 code: "invalid_signal".into(),
                 message: format!(
-                    "invalid signal: '{other}' — expected pause|resume|cancel|advance"
+                    "invalid signal: '{other}' — expected pause|resume|cancel|advance|continue"
                 ),
             });
         }
     };
 
     let sid = nexus_orchestration::engine::SessionId(session_id);
-    engine.signal(&sid, signal).await.map_err(
-        |e: nexus_orchestration::engine::EngineError| match e {
+
+    // `continue` must route through the coordinator so the run is re-driven
+    // after the wait CAS (single-flight). Other signals go through the
+    // engine's revision-fenced transition path directly.
+    if body.signal == "continue" {
+        let coordinator = state
+            .run_coordinator()
+            .ok_or_else(|| NexusApiError::service_unavailable("run coordinator not configured"))?;
+        let wait_id =
+            body.wait_id
+                .as_deref()
+                .ok_or_else(|| NexusApiError::BadRequestCodedDetails {
+                    code: "invalid_input".into(),
+                    message: "continue requires the exact durable wait token".into(),
+                    details: serde_json::json!({
+                        "field": "waitId",
+                        "reason": "continue requires the exact durable wait token",
+                    }),
+                })?;
+        let result = coordinator
+            .signal_run(
+                &sid,
+                crate::preset_run::RunSignal::Continue {
+                    wait_id: wait_id.to_string(),
+                },
+            )
+            .await
+            .map_err(|e| match e {
+                crate::preset_run::RunControlError::WaitConflict {
+                    session_id,
+                    status,
+                    current_wait_id,
+                } => NexusApiError::ConflictCodedDetails {
+                    code: "workflow_wait_conflict".into(),
+                    message: format!(
+                        "wait conflict for {session_id}: current status {status}, current_wait_id {current_wait_id:?}"
+                    ),
+                    details: serde_json::json!({
+                        "session_id": session_id,
+                        "status": status,
+                        "current_wait_id": current_wait_id,
+                    }),
+                },
+                crate::preset_run::RunControlError::StateConflict(sid, msg) => {
+                    NexusApiError::ConflictCoded {
+                        code: "workflow_state_conflict".into(),
+                        message: format!("state conflict for {sid}: {msg}"),
+                    }
+                }
+                crate::preset_run::RunControlError::ReconstructionUnavailable {
+                    session_id,
+                    reason,
+                } => NexusApiError::ConflictCodedDetails {
+                    code: "reconstruction_unavailable".into(),
+                    message: format!(
+                        "cannot continue session {session_id}: {reason} — \
+                         human wait preserved, cancel-only"
+                    ),
+                    details: serde_json::json!({
+                        "session_id": session_id,
+                        "reason": reason,
+                        "allowed_actions": ["cancel", "new_run"],
+                    }),
+                },
+                crate::preset_run::RunControlError::ScheduleNotFound(sid) => {
+                    NexusApiError::NotFound(format!("session {sid} not found"))
+                }
+                other => NexusApiError::Internal {
+                    code: "RUN_CONTROL_ERROR".into(),
+                    message: other.to_string(),
+                },
+            })?;
+        return Ok((
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "signal": "continue",
+                "status": result.status,
+                "current_wait_id": result.current_wait_id,
+            })),
+        ));
+    }
+
+    let signal_result = engine.signal(&sid, signal).await;
+    if let Err(e) = signal_result {
+        return Err(match e {
             nexus_orchestration::engine::EngineError::SessionNotFound(_) => {
                 NexusApiError::NotFound("session not found".into())
+            }
+            nexus_orchestration::engine::EngineError::WaitConflict {
+                session_id,
+                status,
+                current_wait_id,
+            } => NexusApiError::ConflictCoded {
+                code: "workflow_wait_conflict".into(),
+                message: format!(
+                    "wait conflict for {session_id}: current status: {}, current_wait_id: {}",
+                    status.as_db_str(),
+                    current_wait_id.unwrap_or_else(|| "<none>".to_string())
+                ),
+            },
+            nexus_orchestration::engine::EngineError::TerminalState(sid) => {
+                NexusApiError::ConflictCoded {
+                    code: "workflow_state_conflict".into(),
+                    message: format!(
+                        "state conflict for {sid}: run is terminal or not in a signalable state"
+                    ),
+                }
+            }
+            // Finding 2: a CAS/revision loss is a linearized control race —
+            // the durable winner is safe, but the losing public operation
+            // must be an exact conflict response, never a 500. Reload the
+            // authoritative row and project the exact envelope.
+            nexus_orchestration::engine::EngineError::RevisionMismatch { session_id, .. } => {
+                let conflict = match state.pool() {
+                    Some(pool) => {
+                        let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
+                            std::sync::Arc::new(pool.clone()),
+                        );
+                        match store
+                            .load_run(&nexus_orchestration::engine::SessionId(session_id.clone()))
+                            .await
+                        {
+                            Ok(Some(record)) => {
+                                let state_blob = record.state.as_ref();
+                                let cancel_requested =
+                                    state_blob.is_some_and(|s| s.cancel_requested);
+                                if record.status
+                                    == nexus_orchestration::engine::SessionStatus::WaitingForInput
+                                    && !cancel_requested
+                                {
+                                    let current_wait_id = state_blob
+                                        .and_then(|s| s.wait.as_ref())
+                                        .map(|w| w.wait_id.clone());
+                                    NexusApiError::ConflictCoded {
+                                        code: "workflow_wait_conflict".into(),
+                                        message: format!(
+                                            "wait conflict for {session_id}: current status: {}, current_wait_id: {}",
+                                            record.status.as_db_str(),
+                                            current_wait_id.unwrap_or_else(|| "<none>".to_string())
+                                        ),
+                                    }
+                                } else {
+                                    NexusApiError::ConflictCoded {
+                                        code: "workflow_state_conflict".into(),
+                                        message: format!(
+                                            "state conflict for {session_id}: revision moved; current status is {}",
+                                            record.status.as_db_str()
+                                        ),
+                                    }
+                                }
+                            }
+                            _ => NexusApiError::ConflictCoded {
+                                code: "workflow_state_conflict".into(),
+                                message: format!("state conflict for {session_id}: revision moved"),
+                            },
+                        }
+                    }
+                    None => NexusApiError::ConflictCoded {
+                        code: "workflow_state_conflict".into(),
+                        message: format!("state conflict for {session_id}: revision moved"),
+                    },
+                };
+                conflict
             }
             other => NexusApiError::Internal {
                 code: "ENGINE_ERROR".into(),
                 message: other.to_string(),
             },
-        },
-    )?;
+        });
+    }
 
     Ok((
         StatusCode::ACCEPTED,
@@ -223,6 +543,8 @@ fn session_status_to_str(status: &SessionStatus) -> String {
         SessionStatus::WaitingForInput => "waiting_for_input".to_string(),
         SessionStatus::Completed => "completed".to_string(),
         SessionStatus::Failed => "failed".to_string(),
+        SessionStatus::Cancelled => "cancelled".to_string(),
+        SessionStatus::Interrupted => "interrupted".to_string(),
     }
 }
 
@@ -247,7 +569,7 @@ mod tests {
     #[tokio::test]
     async fn list_sessions_excludes_system_preset_sessions() {
         let (_tmp, nexus_home, db_path) = create_test_workspace().await;
-        let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
         let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
         let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
@@ -288,7 +610,7 @@ mod tests {
     #[tokio::test]
     async fn list_sessions_idle_daemon_yields_empty_list() {
         let (_tmp, nexus_home, db_path) = create_test_workspace().await;
-        let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
         let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
         let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
@@ -315,6 +637,515 @@ mod tests {
             body.items.is_empty(),
             "idle daemon (only _system.* sessions) must yield zero rows, got: {:?}",
             body.items.iter().map(|s| &s.preset_id).collect::<Vec<_>>()
+        );
+    }
+
+    /// Finding 2 (public projection): the durable row is the SSOT. When the
+    /// durable row is terminal (`interrupted`) but the in-memory summary is
+    /// stale non-terminal (`running`) — e.g. a durable write that succeeded
+    /// outside the engine's summary-update path — `get_session` must project
+    /// the authoritative durable status with the actionable cleanup reason,
+    /// never the stale in-memory `running`.
+    #[tokio::test]
+    async fn get_session_projects_durable_interrupted_after_failed_cleanup() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let pool = state.pool().expect("test pool").clone();
+        let sqlite = Arc::new(SqliteSessionStorage::new(Arc::new(pool.clone())));
+        let store: Arc<dyn nexus_orchestration::run_state::WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn graph_flow::SessionStorage> = sqlite.clone();
+
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        state.set_engine(Arc::new(engine));
+
+        // Start a v1 run (in-memory summary: `running`).
+        let engine = state.engine().expect("engine set");
+        let graph = manual_wait_graph("public-interrupted");
+        let session_id = engine
+            .start_session_with_graph("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // The durable row becomes `interrupted` with the actionable cleanup
+        // failure record — written directly through the store, as an
+        // unconfirmed cancel cleanup would (the engine's summary-update path
+        // is bypassed, leaving the in-memory summary stale `running`).
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        let interrupted_state = nexus_orchestration::run_state::RunStateV1 {
+            cancel_requested: true,
+            in_flight: None,
+            failure: Some(nexus_orchestration::run_state::RunFailure {
+                code: "cancel_cleanup_unconfirmed".to_string(),
+                message: "cancel cleanup unconfirmed for run 'x': shutdown timeout".to_string(),
+            }),
+            ..nexus_orchestration::run_state::RunStateV1::default()
+        };
+        store
+            .commit_transition(
+                &session_id,
+                record.state_revision,
+                nexus_orchestration::run_state::RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                nexus_orchestration::engine::SessionStatus::Interrupted,
+                &interrupted_state,
+            )
+            .await
+            .expect("durable interrupted write");
+
+        // The in-memory summary is stale `running` (the engine's signal path
+        // updates it only after a durable success through that path).
+        let in_memory = engine
+            .list_active(nexus_orchestration::engine::SessionFilter::default())
+            .await
+            .expect("list active");
+        assert!(
+            in_memory.iter().any(|s| s.status == SessionStatus::Running),
+            "in-memory summary is stale running (durable write bypassed the summary path)"
+        );
+
+        // The public projection must expose the durable `interrupted` status
+        // with the actionable reason — never the stale in-memory `running`.
+        let Json(body) = get_session(State(state), Path(session_id.0.clone()))
+            .await
+            .expect("get_session should succeed");
+        assert_eq!(body.session.status, "interrupted");
+        assert!(
+            body.session
+                .failure_reason
+                .as_deref()
+                .is_some_and(|r| r.contains("cancel cleanup unconfirmed")),
+            "public projection must carry the actionable cleanup reason, got: {:?}",
+            body.session.failure_reason
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // T2 fix round 3 — Finding 4: public Interrupted projection is
+    // exercised from the failed-cancel path
+    // ------------------------------------------------------------------
+
+    /// Scripted executor for the public-surface regression: the first
+    /// `finalize_run` fails (cleanup unconfirmed), later calls succeed.
+    struct ScriptedFailFirstExecutor {
+        calls: std::sync::atomic::AtomicU64,
+    }
+
+    impl ScriptedFailFirstExecutor {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                calls: std::sync::atomic::AtomicU64::new(0),
+            })
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl nexus_orchestration::capability::PromptExecutor for ScriptedFailFirstExecutor {
+        async fn execute(
+            &self,
+            _request: nexus_orchestration::capability::PromptRequest,
+        ) -> Result<
+            nexus_orchestration::capability::PromptResult,
+            nexus_orchestration::capability::CapabilityError,
+        > {
+            unreachable!("not used by the public cancel regression")
+        }
+
+        async fn finalize_run(
+            &self,
+            _run_id: &str,
+        ) -> Result<(), nexus_orchestration::capability::CapabilityError> {
+            let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if call == 0 {
+                Err(nexus_orchestration::capability::CapabilityError::Internal(
+                    "shutdown timeout".to_string(),
+                ))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    /// Store wrapper that makes EVERY `Interrupted` commit fail its revision
+    /// CAS (bounded-exhaustion): the engine's retry bound is exhausted and
+    /// the public result must be a conflict/error — never an apparent
+    /// successful cancellation.
+    struct InterruptedWriteExhaustingStore {
+        inner: Arc<dyn WorkflowStateStore>,
+        storage: Arc<dyn graph_flow::SessionStorage>,
+    }
+
+    impl InterruptedWriteExhaustingStore {
+        fn new(
+            inner: Arc<dyn WorkflowStateStore>,
+            storage: Arc<dyn graph_flow::SessionStorage>,
+        ) -> Self {
+            Self { inner, storage }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl WorkflowStateStore for InterruptedWriteExhaustingStore {
+        async fn load_run(
+            &self,
+            session_id: &nexus_orchestration::engine::SessionId,
+        ) -> Result<
+            Option<nexus_orchestration::run_state::RunRecord>,
+            nexus_orchestration::engine::EngineError,
+        > {
+            self.inner.load_run(session_id).await
+        }
+
+        async fn start_run(
+            &self,
+            session_id: &nexus_orchestration::engine::SessionId,
+            descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            next_state: &nexus_orchestration::run_state::RunStateV1,
+        ) -> Result<
+            nexus_orchestration::run_state::RunRecord,
+            nexus_orchestration::engine::EngineError,
+        > {
+            self.inner
+                .start_run(session_id, descriptor, checkpoint, next_state)
+                .await
+        }
+
+        async fn admit_schedule_run(
+            &self,
+            schedule_id: &str,
+            session_id: &nexus_orchestration::engine::SessionId,
+            descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            next_state: &nexus_orchestration::run_state::RunStateV1,
+            core_context_version: u32,
+            expected_core_context_version: u32,
+            admission_gate: Option<&nexus_orchestration::run_state::ScheduleAdmissionGate>,
+        ) -> Result<
+            nexus_orchestration::run_state::RunRecord,
+            nexus_orchestration::engine::EngineError,
+        > {
+            self.inner
+                .admit_schedule_run(
+                    schedule_id,
+                    session_id,
+                    descriptor,
+                    checkpoint,
+                    next_state,
+                    core_context_version,
+                    expected_core_context_version,
+                    admission_gate,
+                )
+                .await
+        }
+
+        async fn commit_transition(
+            &self,
+            session_id: &nexus_orchestration::engine::SessionId,
+            expected_revision: u64,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            next_status: nexus_orchestration::engine::SessionStatus,
+            next_state: &nexus_orchestration::run_state::RunStateV1,
+        ) -> Result<
+            nexus_orchestration::run_state::RunRecord,
+            nexus_orchestration::engine::EngineError,
+        > {
+            if next_status == nexus_orchestration::engine::SessionStatus::Interrupted {
+                // The competing transition wins the CAS first, every time:
+                // the engine's bounded retry exhausts and the public result
+                // must be a conflict/error, never successful cancellation.
+                let record = self
+                    .inner
+                    .load_run(session_id)
+                    .await?
+                    .expect("run exists at interrupted exhaustion gate");
+                let root = self
+                    .storage
+                    .get(&session_id.0)
+                    .await
+                    .expect("root session at interrupted exhaustion gate")
+                    .expect("root exists at interrupted exhaustion gate");
+                let mut competing_state = record.state.unwrap_or_default();
+                competing_state.cancel_requested = true;
+                self.inner
+                    .commit_transition(
+                        session_id,
+                        record.state_revision,
+                        nexus_orchestration::run_state::RunCheckpoint {
+                            root: &root,
+                            children: &[],
+                        },
+                        record.status.clone(),
+                        &competing_state,
+                    )
+                    .await
+                    .expect("competing transition wins the CAS");
+            }
+            self.inner
+                .commit_transition(
+                    session_id,
+                    expected_revision,
+                    checkpoint,
+                    next_status,
+                    next_state,
+                )
+                .await
+        }
+
+        async fn settle_cancelled(
+            &self,
+            session_id: &nexus_orchestration::engine::SessionId,
+            expected_revision: u64,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            next_state: &nexus_orchestration::run_state::RunStateV1,
+        ) -> Result<
+            nexus_orchestration::run_state::RunRecord,
+            nexus_orchestration::engine::EngineError,
+        > {
+            self.inner
+                .settle_cancelled(session_id, expected_revision, checkpoint, next_state)
+                .await
+        }
+
+        async fn restore_pre_step(
+            &self,
+            session_id: &nexus_orchestration::engine::SessionId,
+            expected_revision: u64,
+            pre_step: &graph_flow::Session,
+        ) -> Result<(), nexus_orchestration::engine::EngineError> {
+            self.inner
+                .restore_pre_step(session_id, expected_revision, pre_step)
+                .await
+        }
+
+        async fn mark_step_in_flight(
+            &self,
+            session_id: &nexus_orchestration::engine::SessionId,
+            expected_revision: u64,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            step_state: &nexus_orchestration::run_state::RunStateV1,
+        ) -> Result<(), nexus_orchestration::engine::EngineError> {
+            self.inner
+                .mark_step_in_flight(session_id, expected_revision, checkpoint, step_state)
+                .await
+        }
+
+        async fn persist_prompt_attempt(
+            &self,
+            session_id: &nexus_orchestration::engine::SessionId,
+            expected_revision: u64,
+            expected_step: Option<&str>,
+            expected_attempt_id: Option<&str>,
+            attempt: &nexus_orchestration::run_state::PromptAttempt,
+        ) -> Result<(), nexus_orchestration::engine::EngineError> {
+            self.inner
+                .persist_prompt_attempt(
+                    session_id,
+                    expected_revision,
+                    expected_step,
+                    expected_attempt_id,
+                    attempt,
+                )
+                .await
+        }
+
+        async fn clear_prompt_attempt(
+            &self,
+            session_id: &nexus_orchestration::engine::SessionId,
+            expected_revision: u64,
+            expected_step: Option<&str>,
+            attempt_id: &str,
+        ) -> Result<(), nexus_orchestration::engine::EngineError> {
+            self.inner
+                .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
+                .await
+        }
+
+        async fn load_children(
+            &self,
+            parent_session_id: &nexus_orchestration::engine::SessionId,
+        ) -> Result<
+            Vec<nexus_orchestration::run_state::RunRecord>,
+            nexus_orchestration::engine::EngineError,
+        > {
+            self.inner.load_children(parent_session_id).await
+        }
+    }
+
+    /// Production handler-level regression (Finding 4, round 3): a real v1
+    /// session, one injected cleanup failure, the first Cancel through the
+    /// production `signal_session` handler, then an immediate `get_session`
+    /// — the public projection must be `interrupted` with the actionable
+    /// failure reason, never a stale in-memory `running`.
+    #[tokio::test]
+    async fn get_session_projects_interrupted_after_first_failed_cancel() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let pool = state.pool().expect("test pool").clone();
+        let sqlite = Arc::new(SqliteSessionStorage::new(Arc::new(pool.clone())));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn graph_flow::SessionStorage> = sqlite.clone();
+
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        // Inject one cleanup failure: the first finalize_run fails.
+        let executor = ScriptedFailFirstExecutor::new();
+        let session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        engine.set_prompt_executor(executor.clone(), session_cancels.clone());
+        state.set_engine(Arc::new(engine));
+
+        // Start a real v1 session.
+        let engine = state.engine().expect("engine set");
+        let graph = manual_wait_graph("public-failed-cancel");
+        let session_id = engine
+            .start_session_with_graph("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // First Cancel through the production handler: the cleanup fails →
+        // the handler surfaces the engine error (the durable row is
+        // `interrupted` with the actionable reason).
+        let err = signal_session(
+            State(state.clone()),
+            Path(session_id.0.clone()),
+            Json(SignalSessionRequest {
+                signal: "cancel".to_string(),
+                wait_id: None,
+            }),
+        )
+        .await
+        .expect_err("first cancel must surface the unconfirmed cleanup");
+        assert!(
+            matches!(err, NexusApiError::Internal { .. }),
+            "the failed cancel surfaces the engine error, got {err:?}"
+        );
+
+        // Immediately perform the public GET: the projection must be
+        // `interrupted` with the actionable failure reason.
+        let Json(body) = get_session(State(state), Path(session_id.0.clone()))
+            .await
+            .expect("get_session should succeed");
+        assert_eq!(
+            body.session.status, "interrupted",
+            "the public projection must expose the durable interrupted status"
+        );
+        assert!(
+            body.session
+                .failure_reason
+                .as_deref()
+                .is_some_and(|r| r.contains("cancel cleanup unconfirmed")),
+            "the public projection must carry the actionable cleanup reason, got: {:?}",
+            body.session.failure_reason
+        );
+    }
+
+    /// Bounded interruption-write exhaustion proof (Finding 4, round 3):
+    /// when the `Interrupted` write can never win its revision CAS, the
+    /// engine's bounded retry exhausts and the public result is a conflict
+    /// (409) — never an apparent successful cancellation.
+    #[tokio::test]
+    async fn interrupted_write_exhaustion_is_conflict_never_successful_cancel() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let pool = state.pool().expect("test pool").clone();
+        let sqlite = Arc::new(SqliteSessionStorage::new(Arc::new(pool.clone())));
+        let real_store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn graph_flow::SessionStorage> = sqlite.clone();
+        let store: Arc<dyn WorkflowStateStore> = Arc::new(InterruptedWriteExhaustingStore::new(
+            real_store.clone(),
+            storage.clone(),
+        ));
+
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        // The first finalize fails (cleanup unconfirmed) — the Interrupted
+        // write then exhausts its bounded retry.
+        let executor = ScriptedFailFirstExecutor::new();
+        let session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        engine.set_prompt_executor(executor.clone(), session_cancels.clone());
+        state.set_engine(Arc::new(engine));
+
+        // Start a real v1 session.
+        let engine = state.engine().expect("engine set");
+        let graph = manual_wait_graph("public-exhaustion");
+        let session_id = engine
+            .start_session_with_graph("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // First Cancel: the Interrupted write exhausts its retry bound →
+        // the handler maps the revision loss to a 409 conflict — never a
+        // successful cancellation.
+        let err = signal_session(
+            State(state.clone()),
+            Path(session_id.0.clone()),
+            Json(SignalSessionRequest {
+                signal: "cancel".to_string(),
+                wait_id: None,
+            }),
+        )
+        .await
+        .expect_err("the exhausted interruption write must surface a conflict");
+        assert!(
+            matches!(err, NexusApiError::ConflictCoded { .. }),
+            "the exhausted interruption write is a 409 conflict, got {err:?}"
+        );
+
+        // The durable row is NOT cancelled — the run cannot appear
+        // successfully cancelled.
+        let record = real_store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_ne!(
+            record.status,
+            nexus_orchestration::engine::SessionStatus::Cancelled,
+            "the run must never appear successfully cancelled"
+        );
+        assert!(
+            record.state.as_ref().is_some_and(|s| s.cancel_requested),
+            "the durable cancel intent is present (the run stays actionable)"
         );
     }
 }

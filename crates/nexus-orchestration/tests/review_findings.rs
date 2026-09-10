@@ -125,7 +125,10 @@ async fn count_findings(pool: &SqlitePool, work_id: &str) -> i64 {
 #[tokio::test]
 async fn ac1_auto_chain_review_terminal_persists_finding() {
     let pool = test_pool().await;
-    let sup = Arc::new(ScheduleSupervisor::new(Arc::new(pool.clone())));
+    let sup = Arc::new(
+        ScheduleSupervisor::new(Arc::new(pool.clone()))
+            .with_binding_provider("test-provider".to_string()),
+    );
 
     // Work at review stage, chapter 2 of 5 — current_chapter reflects the
     // most recently finalized chapter (chapter 2 done, now reviewing).

@@ -99,7 +99,7 @@ The Daemon API is the **codegen-ready** internal contract between CLI, daemon, a
 | `GET /v1/daemon/creators`, `GET /v1/daemon/creators/{creator_id}`, `GET|PUT /v1/daemon/creators/active`, `POST /v1/daemon/creators/{creator_id}:logout` | Active | Local creator status/selection/logout only; registration remains CLI/cloud-line. |
 | `GET /v1/daemon/references` | Active | Local reference list via `nexus-local-db`; not `nexus-knowledge` persistence. |
 | `GET|POST /v1/daemon/kb/entries`, `GET|DELETE /v1/daemon/kb/entries/{entry_id}` | Active (`scope=work` only) | CLI local work KB file index; not World KB. See audit KCA-003 C2. |
-| `GET|POST /v1/daemon/memory/pending-review`, `GET /v1/daemon/memory/pending-review/count`, `DELETE /v1/daemon/memory/pending-review/{id}` | Active | Creator-memory pending review routes. |
+| `GET /v1/daemon/memory/pending-review`, `GET /v1/daemon/memory/pending-review/count`, `DELETE /v1/daemon/memory/pending-review/{id}` | Active (consume-only) | Creator-memory pending review routes; the obsolete session-capture POST producer was removed in V1.186. |
 | `GET|POST /v1/daemon/presets`, `POST /v1/daemon/presets:validate`, `POST /v1/daemon/presets/{id}:reload` | Active | Local preset management. |
 | `/v1/daemon/orchestration/*` | Active | Sessions, capabilities, presets, schedules, core-context, history, and signal routes registered in `orchestration_routes()`. |
 | `/v1/daemon/agent-host/*` | Active | Health, providers, sessions, operations, cancel, events SSE, and internal tool-executions routes. |

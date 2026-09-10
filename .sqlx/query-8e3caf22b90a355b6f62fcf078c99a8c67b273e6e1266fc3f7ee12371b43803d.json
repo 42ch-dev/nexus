@@ -1,0 +1,68 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT schedule_id as \"schedule_id!\", creator_id as \"creator_id!\",\n                    preset_id as \"preset_id!\", status as \"status!\",\n                    current_core_context_version as \"current_core_context_version!\",\n                    current_session_id, execution_policy as \"execution_policy!\",\n                    work_id, execution_descriptor_json\n             FROM creator_schedules WHERE schedule_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "schedule_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "creator_id!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "preset_id!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "status!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "current_core_context_version!",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "current_session_id",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "execution_policy!",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "work_id",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "execution_descriptor_json",
+        "ordinal": 8,
+        "type_info": "Blob"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "8e3caf22b90a355b6f62fcf078c99a8c67b273e6e1266fc3f7ee12371b43803d"
+}

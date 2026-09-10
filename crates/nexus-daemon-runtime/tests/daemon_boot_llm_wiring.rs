@@ -1,82 +1,92 @@
-//! V1.51 T-A P0 (QC3 F-001) — production wiring hermetic integration test.
+//! V1.186 P1 T2 — production prompt-executor wiring hermetic integration test.
 //!
-//! Proves the daemon boot's capability-registry construction (which switched
-//! from `CapabilityRegistry::with_builtins()` to
-//! `CapabilityRegistry::with_runtime_deps(&deps)`) makes `nexus.llm.extract`
-//! dispatch through a real `WorkerHandleProvider` in production-shaped boot,
+//! Proves the daemon boot's capability-registry construction
+//! (`CapabilityRegistry::with_runtime_deps(&deps)`) makes `nexus.llm.extract`
+//! dispatch through a real `PromptExecutor` in production-shaped boot,
 //! returning `Ok(candidates)` instead of `WorkerUnavailable`.
 //!
 //! ## What this test covers
 //!
-//! 1. **Wiring shape**: `CapabilityRuntimeDeps` with a `worker_provider` →
+//! 1. **Wiring shape**: `CapabilityRuntimeDeps` with a `prompt_executor` →
 //!    `CapabilityRegistry::with_runtime_deps` → `nexus.llm.extract` capability
-//!    has a provider (not `None`). Mirrors the exact construction shape that
-//!    `boot::run_daemon` uses after V1.51 T-A P0.
+//!    has an executor (not `None`). Mirrors the exact construction shape that
+//!    `boot::run_daemon` uses after V1.186 P1 T2.
 //!
-//! 2. **End-to-end IPC dispatch through `ProductionWorkerProvider`**: a real
-//!    echo-worker fixture is spawned into the shared `WorkerRegistry`, the
-//!    `ProductionWorkerProvider` dispatches `worker/acp_prompt` via IPC, the
-//!    capability parses the response, and returns `Ok(candidates)`.
+//! 2. **End-to-end dispatch through the prompt executor**: a mock
+//!    `PromptExecutor` returns a deterministic non-echo extraction response,
+//!    the capability parses the response, and returns `Ok(candidates)`.
 //!
-//! 3. **No-worker fallback still surfaces `WorkerUnavailable`**: when the
-//!    registry has no worker for the creator, the provider returns
-//!    `WorkerUnavailable`, which is the correct V1.50-compatible fallback
-//!    signal (the review-time hook maps this to the heuristic path).
+//! 3. **No-executor fallback still surfaces `WorkerUnavailable`**: when no
+//!    executor is injected, the capability returns `WorkerUnavailable`, which
+//!    is the correct no-provider signal (the review-time hook maps this to
+//!    the heuristic path).
 //!
-//! Design: `llm-extract.md` §5.1; QC3 F-001.
+//! Design: `llm-extract.md` §5.1; A1.
 
 #![allow(clippy::unwrap_used)]
 
 use std::sync::Arc;
 
-use nexus_daemon_runtime::worker_provider::ProductionWorkerProvider;
 use nexus_orchestration::capability::{
-    CapabilityError, CapabilityRegistry, CapabilityRuntimeDeps, WorkerHandleProvider,
-};
-use nexus_orchestration::worker::{
-    WorkerManager, WorkerManagerSpawner, WorkerRegistry, WorkerSpec,
+    CapabilityError, CapabilityRegistry, CapabilityRuntimeDeps, PromptExecutor, PromptRequest,
+    PromptResult,
 };
 use serde_json::json;
 
-/// Fixture path for the LLM-extract echo worker.
-const LLM_EXTRACT_FIXTURE: &str = "./tests/fixtures/llm-extract-echo-worker.sh";
+// ─── Mock executor (for pure wiring-shape test) ─────────────────────────────
 
-// ─── Mock provider (for pure wiring-shape test) ─────────────────────────────
-
-/// In-process mock provider returning a fixed extraction response. Mirrors the
-/// `MockLlmExtractWorker` pattern in `nexus-orchestration`'s
-/// `tests/novel_review_master.rs`. Used to prove the wiring shape without
-/// spawning a subprocess.
-struct MockLlmExtractWorker;
+/// In-process mock executor returning a fixed extraction response. Used to
+/// prove the wiring shape without spawning a subprocess.
+struct MockLlmExtractExecutor;
 
 #[async_trait::async_trait]
-impl WorkerHandleProvider for MockLlmExtractWorker {
-    async fn call_acp_prompt(
-        &self,
-        _creator_id: &str,
-        _session_id: &str,
-        _prompt: String,
-        _tool_policy: &str,
-    ) -> Result<serde_json::Value, CapabilityError> {
-        Ok(json!({
-            "full_text": "{\"candidates\":[{\"canonical_name\":\"Mock Character\",\"block_type\":\"character\",\"summary\":null,\"confidence\":0.8,\"source_quote\":\"mock quote\"}]}"
-        }))
+impl PromptExecutor for MockLlmExtractExecutor {
+    async fn execute(&self, _request: PromptRequest) -> Result<PromptResult, CapabilityError> {
+        Ok(PromptResult {
+            full_text: "{\"candidates\":[{\"canonical_name\":\"Mock Character\",\"block_type\":\"character\",\"summary\":null,\"confidence\":0.8,\"source_quote\":\"mock quote\"}]}".to_string(),
+            host_session_id: "host-sess".to_string(),
+            operation_id: "op-1".to_string(),
+        })
     }
+}
+
+fn empty_session_cancels() -> std::sync::Arc<
+    std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+> {
+    std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()))
+}
+
+/// Shared cancellation map with a coordinator token registered for
+/// `test_session` (the fail-closed contract: capability routes refuse with
+/// `CancellationUnavailable` when a run has no registered token; production
+/// registers at run admission).
+fn session_cancels_with_test_session() -> std::sync::Arc<
+    std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+> {
+    let map = empty_session_cancels();
+    map.write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(
+            "test_session".to_string(),
+            tokio_util::sync::CancellationToken::new(),
+        );
+    map
 }
 
 // ─── Test 1: with_runtime_deps wiring shape → nexus.llm.extract runs ────────
 
 /// Pure wiring-shape test: the exact `CapabilityRuntimeDeps` shape used by
-/// `boot::run_daemon` (after V1.51 T-A P0) produces a registry where
+/// `boot::run_daemon` (after V1.186 P1 T2) produces a registry where
 /// `nexus.llm.extract.run()` returns `Ok(candidates)` — NOT
-/// `WorkerUnavailable`. This is the minimal reproduction of the QC3 F-001
+/// `WorkerUnavailable`. This is the minimal reproduction of the A1
 /// acceptance criterion.
 #[tokio::test]
 async fn with_runtime_deps_wiring_makes_llm_extract_run() {
-    let provider: Arc<dyn WorkerHandleProvider> = Arc::new(MockLlmExtractWorker);
+    let executor: Arc<dyn PromptExecutor> = Arc::new(MockLlmExtractExecutor);
     let deps = CapabilityRuntimeDeps {
         pool: None,
-        worker_provider: Some(provider),
+        prompt_executor: Some(executor),
+        session_cancels: session_cancels_with_test_session(),
         daemon_tool_dispatch: None,
         cdn_config: None,
     };
@@ -101,91 +111,33 @@ async fn with_runtime_deps_wiring_makes_llm_extract_run() {
         .expect("output should have a candidates array");
     assert!(
         !candidates.is_empty(),
-        "candidates should be non-empty from mock provider"
+        "candidates should be non-empty from mock executor"
     );
     assert_eq!(candidates[0]["canonical_name"], "Mock Character");
     assert_eq!(candidates[0]["block_type"], "character");
 }
 
-// ─── Test 2: ProductionWorkerProvider dispatches via real IPC ───────────────
+// ─── Test 2: executor failure stays a typed failure ────────────────────────
 
-/// End-to-end IPC dispatch through `ProductionWorkerProvider`: a real
-/// echo-worker fixture is spawned into the shared `WorkerRegistry`, the
-/// provider dispatches `worker/acp_prompt` via JSON-RPC, the capability parses
-/// the response, and returns `Ok(candidates)`.
-///
-/// This proves the production wiring chain actually reaches a worker process:
-/// `boot::run_daemon` → `ProductionWorkerProvider` → `WorkerRegistry` →
-/// `WorkerHandle::call_json_rpc` → echo-worker fixture → parsed candidates.
+/// A failing executor surfaces its typed error — never a partial-output
+/// success (A1: only `MessageDelta` + `EndTurn` succeeds).
 #[tokio::test]
-async fn production_provider_dispatches_ipc_to_real_worker() {
-    let manager = Arc::new(tokio::sync::Mutex::new(WorkerManager::new()));
-    let spawner = WorkerManagerSpawner::new(manager);
-    let mut worker_registry = WorkerRegistry::new(4, spawner);
+async fn executor_failure_stays_typed_failure() {
+    struct FailingExecutor;
 
-    // Spawn the echo fixture for a test creator.
-    let spec = WorkerSpec::test_stub(LLM_EXTRACT_FIXTURE);
-    worker_registry
-        .get_or_spawn("test_creator", &spec)
-        .await
-        .expect("spawn echo fixture");
+    #[async_trait::async_trait]
+    impl PromptExecutor for FailingExecutor {
+        async fn execute(&self, _request: PromptRequest) -> Result<PromptResult, CapabilityError> {
+            Err(CapabilityError::TransientExternal(
+                "agent refused the request".to_string(),
+            ))
+        }
+    }
 
-    let shared_registry = Arc::new(tokio::sync::Mutex::new(worker_registry));
-    let provider = ProductionWorkerProvider::new(shared_registry);
     let deps = CapabilityRuntimeDeps {
         pool: None,
-        worker_provider: Some(Arc::new(provider)),
-        daemon_tool_dispatch: None,
-        cdn_config: None,
-    };
-    let registry = CapabilityRegistry::with_runtime_deps(&deps);
-
-    let cap = registry
-        .get("nexus.llm.extract")
-        .expect("nexus.llm.extract must be registered");
-
-    let input = json!({
-        "prompt": "extract entities from chapter",
-        "chapter_prose": "Lin Xia drew her blade and walked through the Azure Gate.",
-        "_creator_id": "test_creator",
-        "_session_id": "sess_ipc_1",
-    });
-    let result = cap.run(input).await;
-
-    let output = result.expect("run() should return Ok via real IPC dispatch");
-    let candidates = output
-        .get("candidates")
-        .and_then(|v| v.as_array())
-        .expect("output should have a candidates array");
-    assert!(
-        !candidates.is_empty(),
-        "candidates should be non-empty from echo fixture"
-    );
-    assert_eq!(candidates[0]["canonical_name"], "Lin Xia");
-    assert_eq!(candidates[0]["block_type"], "character");
-}
-
-// ─── Test 3: no-worker branch returns WorkerUnavailable (fallback signal) ───
-
-/// When the shared `WorkerRegistry` has no worker registered for the creator,
-/// `ProductionWorkerProvider` returns `WorkerUnavailable`. This is the correct
-/// V1.50-compatible no-worker signal: the review-time hook maps this to the
-/// heuristic extraction path (`quality_loop::extract_via_llm` → `Fallback`).
-///
-/// This is the SAME error code that `with_builtins()` produced unconditionally
-/// before V1.51 T-A P0 — but now it only surfaces when no worker is actually
-/// registered, not on every production call.
-#[tokio::test]
-async fn production_provider_returns_unavailable_without_worker() {
-    let manager = Arc::new(tokio::sync::Mutex::new(WorkerManager::new()));
-    let spawner = WorkerManagerSpawner::new(manager);
-    let worker_registry = WorkerRegistry::new(4, spawner);
-    let shared_registry = Arc::new(tokio::sync::Mutex::new(worker_registry));
-
-    let provider = ProductionWorkerProvider::new(shared_registry);
-    let deps = CapabilityRuntimeDeps {
-        pool: None,
-        worker_provider: Some(Arc::new(provider)),
+        prompt_executor: Some(Arc::new(FailingExecutor) as Arc<dyn PromptExecutor>),
+        session_cancels: session_cancels_with_test_session(),
         daemon_tool_dispatch: None,
         cdn_config: None,
     };
@@ -198,12 +150,52 @@ async fn production_provider_returns_unavailable_without_worker() {
     let input = json!({
         "prompt": "extract",
         "chapter_prose": "...",
-        "_creator_id": "creator_with_no_worker",
+        "_creator_id": "test_creator",
+        "_session_id": "test_session",
+    });
+    let result = cap.run(input).await;
+    assert!(
+        result.is_err(),
+        "executor failure must stay a typed failure"
+    );
+    match result.unwrap_err() {
+        CapabilityError::TransientExternal(msg) => {
+            assert!(msg.contains("refused"), "typed refusal: {msg}");
+        }
+        other => panic!("expected TransientExternal, got: {other:?}"),
+    }
+}
+
+// ─── Test 3: no-executor branch returns WorkerUnavailable (fallback signal) ─
+
+/// When no `PromptExecutor` is injected, the capability returns
+/// `WorkerUnavailable`. This is the correct no-provider signal: the
+/// review-time hook maps this to the heuristic extraction path
+/// (`quality_loop::extract_via_llm` → `Fallback`).
+#[tokio::test]
+async fn no_executor_returns_unavailable() {
+    let deps = CapabilityRuntimeDeps {
+        pool: None,
+        prompt_executor: None,
+        session_cancels: empty_session_cancels(),
+        daemon_tool_dispatch: None,
+        cdn_config: None,
+    };
+    let registry = CapabilityRegistry::with_runtime_deps(&deps);
+
+    let cap = registry
+        .get("nexus.llm.extract")
+        .expect("nexus.llm.extract must be registered");
+
+    let input = json!({
+        "prompt": "extract",
+        "chapter_prose": "...",
+        "_creator_id": "creator_with_no_executor",
         "_session_id": "sess_none",
     });
     let result = cap.run(input).await;
 
-    assert!(result.is_err(), "expected error when no worker registered");
+    assert!(result.is_err(), "expected error when no executor injected");
     match result.unwrap_err() {
         CapabilityError::WorkerUnavailable => {} // correct
         other => panic!("expected WorkerUnavailable, got: {other:?}"),
@@ -217,29 +209,15 @@ async fn production_provider_returns_unavailable_without_worker() {
 /// builtin set. This is a static contract check on the wiring.
 #[tokio::test]
 async fn with_runtime_deps_registers_all_llm_capabilities() {
-    let provider: Arc<dyn WorkerHandleProvider> = Arc::new(MockLlmExtractWorker);
+    let executor: Arc<dyn PromptExecutor> = Arc::new(MockLlmExtractExecutor);
     let deps = CapabilityRuntimeDeps {
         pool: None,
-        worker_provider: Some(provider),
+        prompt_executor: Some(executor),
+        session_cancels: empty_session_cancels(),
         daemon_tool_dispatch: None,
         cdn_config: None,
     };
     let registry = CapabilityRegistry::with_runtime_deps(&deps);
-
-    // 33 builtins: 21 V1.51 + essay.scaffold from V1.52 T-A P2 + game_bible.scaffold from V1.54 P1
-    // + script.scaffold from V1.55 P3 + nexus.game_bible.section_status.update from V1.56 P-last
-    // (R-V155P2-F002 closure) + nexus.reference.refresh from V1.58 P3 fix-wave
-    // + 5 V1.60 P0 DF-46 local-parity orchestration capabilities (world.state.query,
-    //   world.delta.propose, world.delta.apply, timeline.event.append, fork.create)
-    // + narrative.compute from V1.61 P3
-    // + script.section_status.update from V1.67 P2 (R-V160P1-QC1-W001).
-    // NOTE: when adding new builtins, update this count OR refactor to auto-derive
-    // from the catalog (see catalog_registry_invariant_all_ids_present for the pattern).
-    assert_eq!(
-        registry.len(),
-        33,
-        "registry should have 33 builtins (21 V1.51 + essay.scaffold V1.52 + game_bible.scaffold V1.54 P1 + script.scaffold V1.55 P3 + nexus.game_bible.section_status.update V1.56 P-last + nexus.reference.refresh V1.58 P3 + 5 V1.60 P0 DF-46 orchestration capabilities + narrative.compute V1.61 P3 + script.section_status.update V1.67 P2)"
-    );
 
     // LLM-backed caps must all be present.
     for name in [

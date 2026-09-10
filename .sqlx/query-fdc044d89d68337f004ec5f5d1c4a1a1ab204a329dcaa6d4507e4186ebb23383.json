@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE orchestration_sessions\n             SET run_state_json = json_set(\n                     COALESCE(run_state_json, '{}'), '$.step_in_flight', json('\"task_b\"'))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "fdc044d89d68337f004ec5f5d1c4a1a1ab204a329dcaa6d4507e4186ebb23383"
+}

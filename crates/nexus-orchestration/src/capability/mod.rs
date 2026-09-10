@@ -34,42 +34,197 @@ pub enum CapabilityError {
     AcpSessionLost,
     #[error("cancelled")]
     Cancelled,
+    #[error("run cancellation unavailable: {0}")]
+    CancellationUnavailable(String),
     #[error("forbidden: {0}")]
     Forbidden(String),
     #[error("internal error: {0}")]
     Internal(String),
 }
 
+/// Resolve a run's coordinator cancellation token from the shared per-run
+/// map (A1).
+///
+/// **Fail-closed**: a run with no registered token returns
+/// [`CapabilityError::CancellationUnavailable`]. Callers MUST never mint a
+/// fresh token — a token that no coordinator knows about can never be
+/// cancelled, so the prompt would execute without a cancellation path.
+/// Registration happens at run admission (engine start/spawn/recovery paths);
+/// the future P2 coordinator shares this map and the per-run admission lock.
+///
+/// # Errors
+/// Returns [`CapabilityError::CancellationUnavailable`] when `session_id` has
+/// no registered coordinator token, or [`CapabilityError::Internal`] when the
+/// shared map lock is poisoned.
+#[allow(clippy::implicit_hasher)] // DefaultHasher session-cancel map; hashing is not hot on this lookup path
+pub fn resolve_session_cancellation(
+    session_cancels: &std::sync::RwLock<
+        std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+    >,
+    session_id: &str,
+) -> Result<tokio_util::sync::CancellationToken, CapabilityError> {
+    let map = session_cancels
+        .read()
+        .map_err(|e| CapabilityError::Internal(format!("session cancels lock: {e}")))?;
+    map.get(session_id).cloned().ok_or_else(|| {
+        CapabilityError::CancellationUnavailable(format!(
+            "no coordinator cancellation token registered for run '{session_id}'"
+        ))
+    })
+}
+
 // ---------------------------------------------------------------------------
-// WorkerHandleProvider — injected LLM call seam (J0)
+// PromptExecutor — injected production prompt seam (A1)
 // ---------------------------------------------------------------------------
 
-/// Provider trait for capability-layer LLM calls via worker IPC.
+/// Tool permission policy for a prompt operation (A1).
 ///
-/// Injected into `JudgeLlm`, `ContextSummarize`, and `AcpPrompt` through
-/// the registry factory. When absent, capabilities operate in standalone/
-/// test mode with clear error messages.
-///
-/// Design: architect note C0/J0, `KbExtractWork::with_pool` pattern.
-#[async_trait]
-pub trait WorkerHandleProvider: Send + Sync {
-    /// Call `worker/acp_prompt` via IPC.
+/// Orchestration maps its existing policy to a narrowing [`PromptPermissionScope`]
+/// that the Host intersects with its own configuration per operation. The scope
+/// can narrow but never elevate Host configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolPolicy {
+    /// All tools auto-granted (V1.0 behavior).
+    AutoGrantAll,
+    /// Reads allowed, writes require upcall.
+    AutoGrantReadOnly,
+    /// No tools allowed.
+    DenyAll,
+    /// Every tool triggers upcall.
+    RequestPolicy,
+}
+
+impl std::str::FromStr for ToolPolicy {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "auto_grant_all" => Ok(Self::AutoGrantAll),
+            "deny_all" => Ok(Self::DenyAll),
+            "request_policy" => Ok(Self::RequestPolicy),
+            _ => Ok(Self::AutoGrantReadOnly), // safe default
+        }
+    }
+}
+
+impl ToolPolicy {
+    /// Serialize to the string form used in IPC.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::AutoGrantAll => "auto_grant_all",
+            Self::AutoGrantReadOnly => "auto_grant_read_only",
+            Self::DenyAll => "deny_all",
+            Self::RequestPolicy => "request_policy",
+        }
+    }
+
+    /// Map this orchestration policy to the narrowing Host permission scope (A1).
     ///
-    /// Returns the full JSON-RPC response value on success.
-    async fn call_acp_prompt(
-        &self,
-        creator_id: &str,
-        session_id: &str,
-        prompt: String,
-        tool_policy: &str,
-    ) -> Result<Value, CapabilityError>;
+    /// The scope is intersected with Host configuration per operation; it can
+    /// narrow but never elevate. `None` preserves the standalone Host/Character
+    /// policy and never means unrestricted.
+    #[must_use]
+    pub const fn permission_scope(&self) -> Option<PromptPermissionScope> {
+        match self {
+            Self::AutoGrantAll => Some(PromptPermissionScope {
+                allow_read: true,
+                allow_write: true,
+                allow_destructive: true,
+            }),
+            Self::AutoGrantReadOnly => Some(PromptPermissionScope {
+                allow_read: true,
+                allow_write: false,
+                allow_destructive: false,
+            }),
+            Self::DenyAll => Some(PromptPermissionScope {
+                allow_read: false,
+                allow_write: false,
+                allow_destructive: false,
+            }),
+            Self::RequestPolicy => None,
+        }
+    }
+}
+
+/// Narrowing permission scope for a Host prompt operation (A1).
+///
+/// Intersected with Host configuration per operation; a provider unable to
+/// honor a requested scope refuses `not_supported` rather than silently
+/// discarding the policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PromptPermissionScope {
+    /// Read-only tools allowed.
+    pub allow_read: bool,
+    /// Write tools allowed.
+    pub allow_write: bool,
+    /// Destructive tools allowed.
+    pub allow_destructive: bool,
+}
+
+/// Typed prompt request (A1).
+#[derive(Debug, Clone)]
+pub struct PromptRequest {
+    /// Trusted run identity.
+    pub run_id: String,
+    /// Task id the prompt belongs to.
+    pub task_id: String,
+    /// Optional agent role reference.
+    pub agent_ref: Option<String>,
+    /// The prompt text.
+    pub prompt: String,
+    /// Tool policy for this prompt.
+    pub tool_policy: ToolPolicy,
+    /// Coordinator cancellation token.
+    pub cancellation: tokio_util::sync::CancellationToken,
+}
+
+/// Typed prompt result (A1).
+///
+/// Non-EndTurn stop reasons are errors, never success fields.
+#[derive(Debug, Clone)]
+pub struct PromptResult {
+    /// Full message text collected from `MessageDelta` events.
+    pub full_text: String,
+    /// Host session id the prompt executed on.
+    pub host_session_id: String,
+    /// Host operation id that produced the result.
+    pub operation_id: String,
+}
+
+/// Provider trait for production prompt execution (A1).
+///
+/// Implemented by the daemon-owned `HostPromptExecutor` over the existing
+/// `HostFacade`. `nexus-orchestration` stays Host-agnostic: SDK/provider
+/// types never enter graph tasks. When absent, capabilities operate in
+/// standalone/test mode with clear error messages.
+#[async_trait]
+pub trait PromptExecutor: Send + Sync {
+    /// Execute one prompt through the Host plane.
+    ///
+    /// Returns the typed result on success, or a [`CapabilityError`] on
+    /// refusal/EOF/denial/timeout/cancellation — never a partial-output
+    /// success.
+    async fn execute(&self, request: PromptRequest) -> Result<PromptResult, CapabilityError>;
+
+    /// Finalize a run's owned Host sessions after the run reached a
+    /// confirmed terminal state (A5). Waits (bounded) for any in-flight
+    /// operation's cleanup to complete, then shuts down and evicts every
+    /// `(run, role)` session. Returns `Ok(())` only when cleanup is
+    /// confirmed; `Err` means cleanup-unconfirmed (the run must remain
+    /// non-terminal/actionable). Default no-op for non-Host executors.
+    async fn finalize_run(&self, _run_id: &str) -> Result<(), CapabilityError> {
+        Ok(())
+    }
 }
 
 /// Provider trait for daemon-side `nexus.*` tool dispatch (DF-47 production wiring).
 ///
-/// Implemented by `nexus-daemon-runtime` using `HostToolExecutor::dispatch_from_worker`.
+/// Implemented by `nexus-daemon-runtime`'s `DaemonToolDispatchAdapter`, which
+/// dispatches through `HostToolExecutor::dispatch_for_schedule` (the Schedule
+/// caller lane with `HostToolCallerKind::Schedule` audit differentiation).
 /// Injected into `HostToolCallTask` so the orchestration engine can invoke
-/// `nexus.*` tools on a schedule tick without worker IPC round-trip.
+/// `nexus.*` tools on a schedule tick in-process.
 ///
 /// Design: `agent-nexus-tool-bridge.md` §7.4, V1.42 P3.
 #[async_trait]
@@ -87,7 +242,7 @@ pub trait DaemonToolDispatch: Send + Sync {
 
 /// Runtime dependencies injected through `CapabilityRegistry::with_runtime_deps`.
 ///
-/// Groups pool and worker provider so daemon boot can construct a single
+/// Groups pool and prompt executor so daemon boot can construct a single
 /// struct and pass it to the registry factory.
 ///
 /// `Clone` (V1.176 P1, AR-92 #3): the hot-reload watcher retains a cloned
@@ -96,9 +251,14 @@ pub trait DaemonToolDispatch: Send + Sync {
 pub struct CapabilityRuntimeDeps {
     /// Pool for pool-backed capabilities (`kb.extract_work`, etc.).
     pub pool: Option<sqlx::SqlitePool>,
-    /// Worker handle provider for LLM-backed capabilities (`judge.llm`,
+    /// Production prompt executor for LLM-backed capabilities (`judge.llm`,
     /// `context.summarize`, `acp.prompt`, `nexus.llm.extract`).
-    pub worker_provider: Option<std::sync::Arc<dyn WorkerHandleProvider>>,
+    pub prompt_executor: Option<std::sync::Arc<dyn PromptExecutor>>,
+    /// Per-run coordinator cancellation tokens (A1) — the executor listens to
+    /// the token for the current run concurrently with the Host stream.
+    pub session_cancels: std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    >,
     /// Daemon-side tool dispatch for `nexus.*` tools (DF-47, V1.42 P3).
     pub daemon_tool_dispatch: Option<std::sync::Arc<dyn DaemonToolDispatch>>,
     /// CDN fetch config for `registry.refresh` (V1.57 P1 — constructor-injected).
@@ -179,8 +339,8 @@ impl CapabilityRegistry {
     /// Built-ins: `sync.pull`, `sync.push`, `outbox.flush`, `outbox.compact`,
     /// `workspace.open`, `workspace.commit`, `registry.refresh`,
     /// `creator.read_memory`, `creator.write_memory`, `creator.inject_prompt`,
-    /// `creator.write_brief`, `judge.rule`, `acp.prompt`, `acp.session_load`,
-    /// `judge.llm`, `context.summarize`, `kb.extract_work`,
+    /// `creator.write_brief`, `judge.rule`, `acp.prompt`, `judge.llm`,
+    /// `context.summarize`, `kb.extract_work`,
     /// `nexus.llm.extract`, `soul.experience.aggregate`,
     /// `narrative.compute`.
     ///
@@ -202,7 +362,6 @@ impl CapabilityRegistry {
             Box::new(builtins::CreatorWriteBrief::new()),
             Box::new(builtins::JudgeRule),
             Box::new(builtins::AcpPrompt::new()),
-            Box::new(builtins::AcpSessionLoad),
             Box::new(builtins::JudgeLlm::new()),
             Box::new(builtins::ContextSummarize::new()),
             Box::new(builtins::KbExtractWork::new()),
@@ -281,7 +440,6 @@ impl CapabilityRegistry {
             Box::new(builtins::CreatorWriteBrief::with_store(creator_store)),
             Box::new(builtins::JudgeRule),
             Box::new(builtins::AcpPrompt::new()),
-            Box::new(builtins::AcpSessionLoad),
             Box::new(builtins::JudgeLlm::new()),
             Box::new(builtins::ContextSummarize::new()),
             Box::new(builtins::KbExtractWork::with_pool(pool.clone())),
@@ -476,35 +634,39 @@ impl CapabilityRegistry {
                 builtins::KbExtractWork::with_pool(pool.clone())
             });
 
-        let judge_llm = deps
-            .worker_provider
-            .as_ref()
-            .map_or_else(builtins::JudgeLlm::new, |provider| {
-                builtins::JudgeLlm::with_worker_provider(provider.clone())
-            });
+        let judge_llm =
+            deps.prompt_executor
+                .as_ref()
+                .map_or_else(builtins::JudgeLlm::new, |executor| {
+                    builtins::JudgeLlm::with_prompt_executor(executor.clone())
+                        .with_session_cancels(deps.session_cancels.clone())
+                });
 
-        let context_summarize = deps
-            .worker_provider
-            .as_ref()
-            .map_or_else(builtins::ContextSummarize::new, |provider| {
-                builtins::ContextSummarize::with_worker_provider(provider.clone())
-            });
+        let context_summarize = deps.prompt_executor.as_ref().map_or_else(
+            builtins::ContextSummarize::new,
+            |executor| {
+                builtins::ContextSummarize::with_prompt_executor(executor.clone())
+                    .with_session_cancels(deps.session_cancels.clone())
+            },
+        );
 
-        // V1.51 T-A P0: nexus.llm.extract reuses the same worker pool as
+        // V1.51 T-A P0: nexus.llm.extract reuses the same prompt executor as
         // judge.llm / context.summarize / acp.prompt (compass §0.1 #7).
-        let llm_extract = deps
-            .worker_provider
-            .as_ref()
-            .map_or_else(builtins::LlmExtract::new, |provider| {
-                builtins::LlmExtract::with_worker_provider(provider.clone())
-            });
+        let llm_extract =
+            deps.prompt_executor
+                .as_ref()
+                .map_or_else(builtins::LlmExtract::new, |executor| {
+                    builtins::LlmExtract::with_prompt_executor(executor.clone())
+                        .with_session_cancels(deps.session_cancels.clone())
+                });
 
-        let acp_prompt = deps
-            .worker_provider
-            .as_ref()
-            .map_or_else(builtins::AcpPrompt::new, |provider| {
-                builtins::AcpPrompt::with_worker_provider(provider.clone())
-            });
+        let acp_prompt =
+            deps.prompt_executor
+                .as_ref()
+                .map_or_else(builtins::AcpPrompt::new, |executor| {
+                    builtins::AcpPrompt::with_prompt_executor(executor.clone())
+                        .with_session_cancels(deps.session_cancels.clone())
+                });
 
         // V1.57 P1: cdn_config is constructor-injected (no global state).
         let registry_refresh = deps
@@ -568,7 +730,6 @@ impl CapabilityRegistry {
             Box::new(creator_write_brief),
             Box::new(builtins::JudgeRule),
             Box::new(acp_prompt),
-            Box::new(builtins::AcpSessionLoad),
             Box::new(judge_llm),
             Box::new(context_summarize),
             Box::new(kb),
@@ -802,11 +963,10 @@ mod tests {
     use crate::capability::test_support::write_capability_dir;
 
     #[test]
-    fn registry_has_34_builtins() {
-        // 31 V1.60 + 1 narrative.compute (V1.61 P3) + 1 essay.draft_status.finalize (V1.63 P2)
-        // + 1 script.section_status.update (V1.67 P2 R-V160P1-QC1-W001) = 34.
+    fn registry_has_33_builtins() {
+        // V1.186 removed the obsolete `acp.session_load` placeholder from the prior 34.
         let reg = CapabilityRegistry::with_builtins();
-        assert_eq!(reg.len(), 34);
+        assert_eq!(reg.len(), 33);
     }
 
     #[test]
@@ -826,7 +986,6 @@ mod tests {
             "creator.write_brief",
             "judge.rule",
             "acp.prompt",
-            "acp.session_load",
             "judge.llm",
             "context.summarize",
             "kb.extract_work",
@@ -877,9 +1036,8 @@ mod tests {
     async fn registry_iter_returns_all() {
         let reg = CapabilityRegistry::with_builtins();
         let names: Vec<&str> = reg.iter().map(super::Capability::name).collect();
-        // 31 (V1.60) + 1 (V1.61 P3 narrative.compute) + 1 (V1.63 P2 essay.draft_status.finalize)
-        // + 1 (V1.67 P2 script.section_status.update).
-        assert_eq!(names.len(), 34);
+        // V1.186 removed the obsolete `acp.session_load` placeholder from the prior 34.
+        assert_eq!(names.len(), 33);
         assert!(names.contains(&"sync.pull"));
         assert!(names.contains(&"judge.rule"));
         assert!(names.contains(&"acp.prompt"));
@@ -911,7 +1069,10 @@ mod tests {
         write_capability_dir(tmp.path(), "demo.pull");
         let deps = CapabilityRuntimeDeps {
             pool: None,
-            worker_provider: None,
+            prompt_executor: None,
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
             daemon_tool_dispatch: None,
             cdn_config: None,
         };
@@ -954,7 +1115,10 @@ mod tests {
         write_capability_dir(tmp.path(), "sync.pull");
         let deps = CapabilityRuntimeDeps {
             pool: None,
-            worker_provider: None,
+            prompt_executor: None,
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
             daemon_tool_dispatch: None,
             cdn_config: None,
         };
@@ -984,7 +1148,10 @@ mod tests {
         write_capability_dir(tmp.path(), "demo.pull");
         let deps = CapabilityRuntimeDeps {
             pool: None,
-            worker_provider: None,
+            prompt_executor: None,
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
             daemon_tool_dispatch: None,
             cdn_config: None,
         };

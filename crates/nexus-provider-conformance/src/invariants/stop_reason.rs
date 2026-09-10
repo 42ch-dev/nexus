@@ -30,7 +30,8 @@ pub fn check(events: &[HostEvent]) -> Vec<ConformanceFinding> {
                     FinishReason::EndTurn
                     | FinishReason::MaxTokens
                     | FinishReason::MaxTurnRequests
-                    | FinishReason::Refusal => {}
+                    | FinishReason::Refusal
+                    | FinishReason::Cancelled => {}
                     _ => findings.push(ConformanceFinding {
                         invariant: InvariantId::StopReasonConsistency,
                         message: format!(
@@ -76,6 +77,7 @@ mod tests {
             op_finished(FinishReason::MaxTokens),
             op_finished(FinishReason::MaxTurnRequests),
             op_finished(FinishReason::Refusal),
+            op_finished(FinishReason::Cancelled),
         ];
         let findings = check(&events);
         assert!(findings.is_empty(), "expected no findings: {findings:?}");

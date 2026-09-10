@@ -10,9 +10,8 @@ use std::time::Duration;
 
 use crate::api;
 use crate::lifecycle::{Event, Lifecycle, StatigLifecycle, SubsystemKind};
-use crate::preset_run::{resume_driven_sessions, PresetRunConfig};
+use crate::preset_run::WorkflowRunCoordinator;
 use crate::tls;
-use crate::worker_provider::ProductionWorkerProvider;
 use crate::workspace::WorkspaceState;
 
 /// Return true if `host` resolves to a loopback address.
@@ -60,13 +59,13 @@ use nexus_orchestration::capability::watch::{
     digest_from_admitted, rebuild_registry_with_merge, scan_dir_digest, watch_loop_inner,
     DigestPoll, USER_CAP_WATCH_INTERVAL,
 };
-use nexus_orchestration::worker::{WorkerManagerSpawner, WorkerRegistry};
 use nexus_orchestration::{
     engine::{EngineSignal, OrchestrationEngine},
-    schedule::supervisor::ScheduleSupervisor,
+    run_state::WorkflowStateStore,
+    schedule::supervisor::{ScheduleRunStarter, ScheduleSupervisor, SupervisorError},
     storage::sqlite::SqliteSessionStorage,
     system_preset_dir, CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps,
-    GraphFlowEngine, WorkerManager,
+    GraphFlowEngine,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -203,7 +202,7 @@ fn log_scan_outcome(
 /// scan-nothing fallback, not a propagated error. The fallback points the
 /// scanner at a path that cannot exist, so the scan yields the empty
 /// outcome (missing-dir contract, AR-35).
-fn user_capabilities_scan_dir(state: &WorkspaceState) -> PathBuf {
+pub(crate) fn user_capabilities_scan_dir(state: &WorkspaceState) -> PathBuf {
     state.nexus_home().parent().map_or_else(
         || {
             tracing::warn!(
@@ -387,6 +386,65 @@ fn hot_rebuild_and_swap(
     outcome.admitted
 }
 
+/// WS2 R1 + A7: recover persisted non-terminal sessions into the in-memory
+/// tracker (runner reconstruction from the frozen source) and re-drive the
+/// eligible converge/merge class through the single coordinator owner.
+///
+/// Shared by the production boot path and the daemon-level restart helper
+/// so every restart runs the SAME A7 recovery order: each recovered session
+/// is classified by the durable v1 record (Terminal / Unreadable /
+/// Interrupted / `HumanWait` / `SafeBoundary` skip immediately; only
+/// `ConvergeMerge` is re-driven from its persisted position).
+///
+/// Runner reconstruction covers embedded AND user-directory presets through
+/// the frozen source identity (A7): a changed/missing source or corrupt
+/// child identity leaves the session runnerless (tracked-but-not-driven;
+/// on-demand reattachment is refused as `reconstruction_unavailable`).
+///
+/// The re-drive is bounded by `max_steps`, runs in the background so boot
+/// does not block, and is cancelled when `shutdown_notify` fires.
+///
+/// With a coordinator the work delegates to
+/// [`WorkflowRunCoordinator::recover_persisted`]; without one (Tier-0 boot
+/// with no Creator DB) only the engine-side tracker reconstruction runs —
+/// there is nothing to re-drive.
+#[allow(clippy::too_long_first_doc_paragraph)] // recovery ordering contract spans many invariants; compact phrasing is clearer than fragmenting
+pub async fn run_boot_recovery(
+    engine: &Arc<dyn OrchestrationEngine>,
+    sqlite_boot_storage: &Arc<SqliteSessionStorage>,
+    run_coordinator: Option<&Arc<WorkflowRunCoordinator>>,
+    shutdown_notify: Arc<tokio::sync::Notify>,
+) {
+    // Single production recovery seam (A7): reconstruct runners from the
+    // frozen source identity, classify every non-terminal session by the
+    // durable v1 record, and re-drive only the converge/merge class through
+    // the single coordinator owner. When no coordinator is wired (Tier-0
+    // boot without a Creator DB), the engine-side reconstruction still runs
+    // so recovered sessions are tracked; there is nothing to re-drive.
+    let Some(coordinator) = run_coordinator else {
+        match sqlite_boot_storage.list_non_terminal_sessions().await {
+            Ok(summaries) if !summaries.is_empty() => {
+                tracing::info!(
+                    "recovering {} persisted session(s) into in-memory tracker",
+                    summaries.len()
+                );
+                engine.recover_sessions(summaries).await;
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!("failed to recover persisted sessions: {}", e);
+            }
+        }
+        return;
+    };
+    let decisions = coordinator
+        .recover_persisted(sqlite_boot_storage, Some(shutdown_notify))
+        .await;
+    for d in &decisions {
+        tracing::info!(decision = ?d, "resume re-drive decision");
+    }
+}
+
 /// Run the daemon runtime to completion.
 ///
 /// This is the main daemon entry point, extracted from the former standalone daemon
@@ -461,6 +519,167 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     let mut state = WorkspaceState::initialize().await?;
     tracing::info!("Workspace state initialized");
 
+    // --- Section 2.5: Agent Host subsystem (constructed BEFORE the
+    // capability registry so the production HostPromptExecutor can be
+    // injected into `CapabilityRuntimeDeps::prompt_executor` — A1) ---
+    let agent_host_facade: Arc<dyn nexus_agent_host::HostFacade> = {
+        use nexus_agent_host::providers::native_cli::{
+            claude::ClaudeCliProvider, codex::CodexNativeProvider, dsh::DshNativeProvider,
+        };
+
+        let manager = nexus_agent_host::core::manager::HostManager::new();
+        // Probe CLI presence before registering. Providers whose CLI is
+        // absent from PATH are NOT registered, so `/providers` and the
+        // AgentPicker UI do not surface them — avoiding a false promise
+        // where the UI offers a session path that only fails at
+        // process-spawn time (greptile P1; supersedes the qc1 W-001
+        // deferral R-V1127P1-QC-W-001, now closed).
+        //
+        // `default_config()` is a pure constructor that does not panic;
+        // `which::which()` is a fast PATH lookup (~1ms). Both are safe
+        // to call unconditionally at boot.
+        let mut providers_registered = 0u32;
+
+        if which::which("codex").is_ok() {
+            manager
+                .register_provider(
+                    Arc::new(CodexNativeProvider::default_config()),
+                    nexus_agent_host::LaunchStrategy::NativeCli {
+                        command: "codex".to_string(),
+                        args: vec![],
+                        env: std::collections::HashMap::new(),
+                    },
+                )
+                .await;
+            providers_registered += 1;
+            tracing::info!(
+                provider = "codex-native",
+                "registered native agent provider"
+            );
+        } else {
+            tracing::warn!(
+                provider = "codex-native",
+                "CLI not found on PATH; skipping registration"
+            );
+        }
+
+        if which::which("claude").is_ok() {
+            manager
+                .register_provider(
+                    Arc::new(ClaudeCliProvider::default_config()),
+                    nexus_agent_host::LaunchStrategy::NativeCli {
+                        command: "claude".to_string(),
+                        args: vec![],
+                        env: std::collections::HashMap::new(),
+                    },
+                )
+                .await;
+            providers_registered += 1;
+            tracing::info!(
+                provider = "claude-native",
+                "registered native agent provider"
+            );
+        } else {
+            tracing::warn!(
+                provider = "claude-native",
+                "CLI not found on PATH; skipping registration"
+            );
+        }
+
+        // dsh-native (PD-4): bring-your-own runtime, same skip-if-missing
+        // rule as claude/codex. Discovery: PATH command `dsh-jsonrpc-agent`
+        // OR a non-empty `DSH_RUNTIME_BIN` env var (the SDK treats empty as
+        // absent).
+        //
+        // Runtime handoff (P2 plan T2): PATH-discovered → the resolved
+        // absolute path is handed to the provider as `Config::runtime_bin`;
+        // env-only → `runtime_bin` stays unset so the SDK's own resolution
+        // order 3 (`DSH_RUNTIME_BIN` from the parent environment) picks the
+        // binary (`resolve_runtime`: launch_args_override → runtime_bin →
+        // DSH_RUNTIME_BIN → RuntimeNotFound).
+        if let Ok(dsh_path) = which::which("dsh-jsonrpc-agent") {
+            manager
+                .register_provider(
+                    Arc::new(DshNativeProvider::with_runtime_bin(Some(
+                        dsh_path.to_string_lossy().into_owned(),
+                    ))),
+                    nexus_agent_host::LaunchStrategy::NativeCli {
+                        command: "dsh-jsonrpc-agent".to_string(),
+                        args: vec![],
+                        env: std::collections::HashMap::new(),
+                    },
+                )
+                .await;
+            providers_registered += 1;
+            tracing::info!(provider = "dsh-native", "registered native agent provider");
+        } else if std::env::var_os("DSH_RUNTIME_BIN").is_some_and(|value| !value.is_empty()) {
+            manager
+                .register_provider(
+                    Arc::new(DshNativeProvider::with_runtime_bin(None)),
+                    nexus_agent_host::LaunchStrategy::NativeCli {
+                        command: "dsh-jsonrpc-agent".to_string(),
+                        args: vec![],
+                        env: std::collections::HashMap::new(),
+                    },
+                )
+                .await;
+            providers_registered += 1;
+            tracing::info!(
+                provider = "dsh-native",
+                "registered native agent provider via DSH_RUNTIME_BIN"
+            );
+        } else {
+            tracing::warn!(
+                provider = "dsh-native",
+                "runtime not found on PATH (dsh-jsonrpc-agent) or DSH_RUNTIME_BIN; \
+                 skipping registration"
+            );
+        }
+
+        // Configured generic ACP providers (V1.186): register launch recipes
+        // only — no client/process at boot. The first Host session for a
+        // provider lazily spawns its owned ACP child bound to the verified
+        // Creator workspace cwd. Disabled/missing providers are refused at
+        // construction and never registered.
+        let host_config = state.agent_host_config();
+        for provider_config in &host_config.providers {
+            if provider_config.protocol != "acp" {
+                continue;
+            }
+            match nexus_agent_host::providers::acp::AcpProvider::from_config(
+                provider_config.clone(),
+                host_config.timeouts.clone(),
+                nexus_agent_host::HostPermissionResolver::new_native_only(&host_config.policy),
+            ) {
+                Ok(provider) => {
+                    let launch = nexus_agent_host::LaunchStrategy::Acp {
+                        command: provider_config.command.clone().unwrap_or_default(),
+                        args: provider_config.args.clone(),
+                        env: provider_config.env.clone(),
+                    };
+                    manager.register_provider(Arc::new(provider), launch).await;
+                    providers_registered += 1;
+                    tracing::info!(
+                        provider = %provider_config.id,
+                        "registered configured ACP provider (lazy session-scoped spawn)"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        provider = %provider_config.id,
+                        error = %e,
+                        "skipping configured ACP provider"
+                    );
+                }
+            }
+        }
+
+        tracing::info!(providers_registered, "agent provider registration complete");
+        Arc::new(manager)
+    };
+    state.set_agent_host(Arc::clone(&agent_host_facade));
+    tracing::info!("Agent host facade wired");
+
     // --- Section 3: Orchestration engine + worker manager ---
     // Tier-0 boot must succeed without a creator DB (AC-P0-1). Use in-memory
     // session storage until Profile attach opens the creator pool.
@@ -485,29 +704,6 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             )
         },
     );
-
-    // V1.51 T-A P0 (QC3 F-001): construct the shared worker registry BEFORE
-    // the capability registry so `ProductionWorkerProvider` can be injected
-    // into `CapabilityRegistry::with_runtime_deps`. The same registry is
-    // later shared with `WorkerMgrSubsystem` (see `create_subsystems`), so a
-    // worker spawned by the engine/preset-session path is visible to the
-    // capability-layer LLM dispatch path and vice versa.
-    //
-    // `pool: None` preserves the existing pool-less behavior of
-    // `with_builtins()` for `kb.extract_work` / `novel.project_scaffold` /
-    // `novel.chapter_transition` (they remain in placeholder mode — same as
-    // before this change). Only the worker_provider wiring changes, closing
-    // the V1.51 T-A P0 production gap where `nexus.llm.extract` (and the
-    // sibling LLM caps) returned `WorkerUnavailable` on every production call.
-    let shared_worker_registry: Arc<tokio::sync::Mutex<WorkerRegistry<WorkerManagerSpawner>>> = {
-        let manager = Arc::new(tokio::sync::Mutex::new(WorkerManager::new()));
-        let spawner = WorkerManagerSpawner::new(manager);
-        Arc::new(tokio::sync::Mutex::new(WorkerRegistry::new(
-            crate::lifecycle::subsystems::DEFAULT_MAX_WORKERS,
-            spawner,
-        )))
-    };
-    let worker_provider = ProductionWorkerProvider::new(shared_worker_registry.clone());
 
     // V1.61 P-last T1/T2/T3: build ONE daemon-wide `WasmEngine` + `ModuleCache`
     // and inject them into `narrative.compute` so module compilation happens
@@ -572,9 +768,41 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         }
     };
 
+    // A1 (V1.186 P1 T2): the production prompt executor is the daemon-owned
+    // HostPromptExecutor over the existing HostFacade. It resolves trusted
+    // frozen run metadata, persists the durable PromptAttempt intent before
+    // the external Host effect, drains MessageDelta and accepts only
+    // EndTurn. When no creator DB is present (Tier-0 boot), the executor is
+    // absent and LLM-backed capabilities return WorkerUnavailable.
+    let session_cancels: std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+    state.set_session_cancels(session_cancels.clone());
+    let prompt_executor: Option<
+        std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>,
+    > = sqlite_boot_storage.as_ref().map(|sqlite_storage| {
+        let workflow_store: Arc<dyn WorkflowStateStore> = sqlite_storage.clone();
+        let host_config = state.agent_host_config();
+        let executor: std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor> =
+            std::sync::Arc::new(crate::prompt_executor::HostPromptExecutor::new(
+                agent_host_facade.clone(),
+                workflow_store,
+                host_config.timeouts.clone(),
+            ));
+        executor
+    });
+
+    // N-13: when a Creator DB is already available at boot, the capability
+    // registry is built with the SAME pool the boot engine/coordinator/
+    // supervisor use — pool-backed capabilities (`kb.extract_work`,
+    // `narrative.compute`, creator memory store) are fully wired in the
+    // normal boot aggregate, never a pool-less placeholder. Tier-0 boot
+    // (no creator DB) keeps `pool: None` and defers the pool-backed
+    // registry to Profile attach (`publish_lazy_attach_bundle`).
     let runtime_deps = CapabilityRuntimeDeps {
-        pool: None,
-        worker_provider: Some(std::sync::Arc::new(worker_provider)),
+        pool: state.pool().cloned(),
+        prompt_executor: prompt_executor.clone(),
+        session_cancels: session_cancels.clone(),
         daemon_tool_dispatch: None,
         cdn_config,
     };
@@ -641,81 +869,110 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     state.set_daemon_tool_dispatch(tool_dispatch.clone());
     tracing::info!("Daemon tool dispatch adapter wired");
 
-    let mut concrete_engine =
-        GraphFlowEngine::new_with_storage(session_storage.clone(), capability_holder.clone());
+    // Critical 2: when a creator DB is present, wire the durable
+    // WorkflowStateStore (the SQLite adapter implements both SessionStorage
+    // and WorkflowStateStore) into the engine so real daemon sessions are v1
+    // runs (authoritative status/descriptor/state persisted via start_run /
+    // commit_transition). The workspace root is frozen into every v1
+    // descriptor. When no creator DB is present (Tier-0 boot), fall back to
+    // the in-memory engine (no v1 persistence).
+    let mut concrete_engine = sqlite_boot_storage.as_ref().map_or_else(
+        || GraphFlowEngine::new_with_storage(session_storage.clone(), capability_holder.clone()),
+        |sqlite_storage| {
+            let workflow_store: Arc<dyn WorkflowStateStore> = sqlite_storage.clone();
+            let workspace_root = state
+                .workspace_path()
+                .map(std::path::PathBuf::from)
+                .unwrap_or_default();
+            GraphFlowEngine::new_with_storage_and_workflow_store_and_workspace(
+                session_storage.clone(),
+                workflow_store,
+                capability_holder.clone(),
+                workspace_root,
+            )
+        },
+    );
 
     // DF-47 (V1.42 P3): wire the daemon tool dispatch into the engine so
     // HostTool enter actions in preset graphs can invoke nexus.* tools.
     concrete_engine.set_daemon_tool_dispatch(tool_dispatch.clone());
+    // A1 (V1.186 P1 T2): wire the production prompt executor + per-run
+    // cancellation tokens into the engine so inner graph `acp_prompt` nodes
+    // execute through the Host plane.
+    if let Some(executor) = &prompt_executor {
+        concrete_engine.set_prompt_executor(executor.clone(), session_cancels.clone());
+    }
+    // A2/A7: the engine resolves directory presets for source identity from
+    // the nexus home.
+    concrete_engine.set_nexus_home(state.nexus_home().clone());
+
+    let concrete_engine = Arc::new(concrete_engine);
+    let engine: Arc<dyn OrchestrationEngine> = concrete_engine.clone();
+
+    state.set_engine(engine);
+    state.set_capability_registry(capability_holder.clone());
+    tracing::info!("Orchestration engine wired");
+
+    // --- A3 (v1.186 P2 T1): the single public run coordinator ---
+    // One cancellation/join owner per (Creator DB, session) around the
+    // bounded `drive_preset_run` loop. Newly admitted creator runs and
+    // schedule admissions route through this coordinator; the schedule
+    // supervisor receives a Host-free `ScheduleRunStarter` seam over it.
+    // When no creator DB is present (Tier-0 boot), the coordinator is
+    // absent and pool-backed admission is deferred until Profile attach.
+    //
+    // I-1: the coordinator is constructed BEFORE boot recovery so every
+    // production drive — including recovery that is eligible to step —
+    // registers its owner in the coordinator's drives map. There is exactly
+    // ONE production drive-owner path per Creator DB + session.
+    let run_coordinator: Option<Arc<WorkflowRunCoordinator>> = match &sqlite_boot_storage {
+        Some(_) => {
+            let mut coordinator_builder = WorkflowRunCoordinator::new(
+                concrete_engine.clone(),
+                session_storage.clone(),
+                Arc::new(state.pool().expect("creator pool present").clone()),
+                session_cancels.clone(),
+            );
+            // N-4: attach the Host plane so admission validates provider
+            // references in agent bindings before enqueue.
+            if let Some(host) = state.agent_host() {
+                coordinator_builder = coordinator_builder.with_agent_host(host);
+            }
+            // C-3: the sanctioned default binding provider for explicit
+            // legacy starts — the same config source the supervisor's
+            // internal insertion paths use.
+            if let Some(provider_id) = state
+                .agent_host_config()
+                .providers
+                .iter()
+                .find(|p| p.enabled)
+                .map(|p| p.id.clone())
+            {
+                coordinator_builder = coordinator_builder.with_binding_provider(provider_id);
+            }
+            let coordinator = Arc::new(coordinator_builder);
+            state.set_run_coordinator(coordinator.clone());
+            if let Some(executor) = &prompt_executor {
+                state.set_prompt_executor(executor.clone());
+            }
+            Some(coordinator)
+        }
+        None => None,
+    };
 
     // WS2 R1: Recover persisted non-terminal sessions into in-memory tracker.
-    if let Some(sqlite_storage) = sqlite_boot_storage {
-        match sqlite_storage.list_non_terminal_sessions().await {
-            Ok(summaries) => {
-                if !summaries.is_empty() {
-                    tracing::info!(
-                        "recovering {} persisted session(s) into in-memory tracker",
-                        summaries.len()
-                    );
-                    concrete_engine.recover_sessions(summaries.clone()).await;
-
-                    // BL-04 slice (T2): resume re-drive — recovered
-                    // converge/merge chain sessions are re-driven from
-                    // their persisted position (completed edges are not
-                    // re-executed). Bounded by `max_steps` and cancellable
-                    // via a token aborted on `request_shutdown` (QC fix
-                    // wave 1, qc2 F-002 / qc3 F-001); runs in the
-                    // background so boot does not block on a long
-                    // re-drive. Only sessions whose runner was
-                    // reconstructed (embedded presets) are re-driven;
-                    // user-preset sessions that failed reconstruction
-                    // stay tracked-but-not-driven.
-                    let mut drivable = Vec::new();
-                    for s in &summaries {
-                        if concrete_engine.has_runner(&s.session_id).await {
-                            drivable.push(s.clone());
-                        }
-                    }
-                    if !drivable.is_empty() {
-                        let resume_engine = concrete_engine.clone();
-                        let resume_storage: Arc<dyn SessionStorage> = sqlite_storage.clone();
-                        // Abort the resume re-drive when the daemon shuts
-                        // down: `request_shutdown` broadcasts on
-                        // `shutdown_notify`, and `drive_preset_run` checks
-                        // the token before every step.
-                        let resume_cancel = tokio_util::sync::CancellationToken::new();
-                        {
-                            let resume_cancel = resume_cancel.clone();
-                            let shutdown_notify = state.shutdown_notify();
-                            tokio::spawn(async move {
-                                shutdown_notify.notified().await;
-                                resume_cancel.cancel();
-                            });
-                        }
-                        tokio::spawn(async move {
-                            let config = PresetRunConfig {
-                                resume_waiting: true,
-                                ..PresetRunConfig::default()
-                            };
-                            let decisions = resume_driven_sessions(
-                                &resume_engine,
-                                &resume_storage,
-                                &drivable,
-                                &config,
-                                Some(&resume_cancel),
-                            )
-                            .await;
-                            for d in &decisions {
-                                tracing::info!(decision = ?d, "resume re-drive decision");
-                            }
-                        });
-                    }
-                }
-            }
-            Err(e) => {
-                tracing::warn!("failed to recover persisted sessions: {}", e);
-            }
-        }
+    // Shared A7 recovery (runner reconstruction from frozen source + bounded
+    // converge/merge re-drive through the single coordinator owner) — the
+    // same production path the daemon-level restart helper invokes.
+    if let Some(sqlite_storage) = sqlite_boot_storage.clone() {
+        let engine_ref: Arc<dyn OrchestrationEngine> = concrete_engine.clone();
+        run_boot_recovery(
+            &engine_ref,
+            &sqlite_storage,
+            run_coordinator.as_ref(),
+            state.shutdown_notify(),
+        )
+        .await;
     }
 
     // --- WS-D: Discover and start system presets from directory ---
@@ -726,7 +983,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         Err(e) => tracing::warn!("failed to auto-create _system.maintenance: {}", e),
     }
 
-    let engine_ref: Arc<dyn OrchestrationEngine> = Arc::new(concrete_engine.clone());
+    let engine_ref: Arc<dyn OrchestrationEngine> = concrete_engine.clone();
     let scan_result = system_preset_dir::scan_system_presets(&system_presets_dir, &capabilities);
     for entry in &scan_result.presets {
         let graph = nexus_orchestration::preset::loader::build_wired_outer_graph(
@@ -734,6 +991,8 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             &engine_ref.clone(),
             &capabilities.clone(),
             Some(tool_dispatch.clone()),
+            prompt_executor.clone(),
+            session_cancels.clone(),
         );
         let graph = Arc::new(graph);
 
@@ -757,14 +1016,6 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             }
         }
     }
-
-    let engine: Arc<dyn OrchestrationEngine> = Arc::new(concrete_engine);
-    let workers = Arc::new(WorkerManager::new());
-
-    state.set_engine(engine);
-    state.set_worker_manager(workers);
-    state.set_capability_registry(capability_holder.clone());
-    tracing::info!("Orchestration engine wired");
 
     // --- V1.176 P1 (AR-91/AR-92): user-capability hot-reload watcher ---
     // One background task polls the scan directory every 1 s (poll + digest,
@@ -813,8 +1064,66 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         if let Some(reg) = supervisor_registry {
             schedule_supervisor_builder = schedule_supervisor_builder.with_capability_registry(reg);
         }
+        // N-9: the default binding provider for internal schedule insertion
+        // is the first enabled Host provider (config order). Auto-chain
+        // continuation rows built by this supervisor bind every effective
+        // prompt role to this provider so the admission binding-completeness
+        // gate passes.
+        let binding_provider = state
+            .agent_host_config()
+            .providers
+            .iter()
+            .find(|p| p.enabled)
+            .map(|p| p.id.clone());
+        if let Some(provider_id) = &binding_provider {
+            schedule_supervisor_builder =
+                schedule_supervisor_builder.with_binding_provider(provider_id.clone());
+        }
+        // A3 (v1.186 P2 T1): inject the daemon admission callback so `tick`
+        // admits `driven_v1` pending rows through the single-run owner
+        // (atomic schedule→session identity + drive) instead of a
+        // status-only `Running` flip. Legacy/system-inert rows are never
+        // passed to the starter.
+        if let Some(coordinator) = &run_coordinator {
+            let starter = DaemonScheduleRunStarter {
+                coordinator: coordinator.clone(),
+                pool: Arc::new(schedule_pool.clone()),
+                nexus_home: state.nexus_home().clone(),
+                caps: state.capability_registry_holder(),
+                daemon_tool_dispatch: state.daemon_tool_dispatch(),
+                prompt_executor: prompt_executor.clone(),
+            };
+            schedule_supervisor_builder =
+                schedule_supervisor_builder.with_schedule_starter(Arc::new(starter));
+        }
         let schedule_supervisor = Arc::new(schedule_supervisor_builder);
         state.set_schedule_supervisor(schedule_supervisor.clone());
+        // T3 (A3): the coordinator settles terminal runs through the
+        // supervisor. The supervisor is constructed AFTER the coordinator
+        // (it needs the coordinator's starter), so the handle is attached
+        // here once both exist.
+        if let Some(coordinator) = &run_coordinator {
+            coordinator.set_schedule_supervisor(schedule_supervisor.clone());
+        }
+
+        // T3 (A3): reconcile checkpoint-before-settlement loss — a durable
+        // terminal session whose schedule row is still `running` is settled
+        // from the durable status. MUST run BEFORE
+        // `resume_running_as_paused`: a terminal session's schedule must
+        // settle, not pause.
+        match schedule_supervisor.reconcile_terminal_schedules().await {
+            Ok(count) => {
+                if count > 0 {
+                    tracing::info!(
+                        "reconciled {} terminal schedule(s) from durable session status",
+                        count
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!("failed to reconcile terminal schedules on boot: {}", e);
+            }
+        }
 
         match schedule_supervisor
             .resume_running_as_paused("daemon_restart")
@@ -839,6 +1148,9 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         // the next step and enqueuing a new schedule.
         {
             let recovery_pool = &schedule_pool;
+            // N-11: the boot-recovery auto-chain rows get the SAME guaranteed
+            // post-commit starter handoff as the supervisor terminal path.
+            let recovery_starter = schedule_supervisor.schedule_starter_clone();
             match nexus_orchestration::auto_chain::find_resumable_works(recovery_pool).await {
                 Ok(resumable) => {
                     if !resumable.is_empty() {
@@ -890,6 +1202,8 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                                         next_stage,
                                         None,
                                         &latest,
+                                        binding_provider.as_deref(),
+                                        recovery_starter.as_deref(),
                                     )
                                     .await
                                     {
@@ -918,6 +1232,8 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                                         "produce",
                                         Some(*next_chapter),
                                         &latest,
+                                        binding_provider.as_deref(),
+                                        recovery_starter.as_deref(),
                                     )
                                     .await
                                     {
@@ -1025,6 +1341,13 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                 watcher_pool,
                 watcher_shutdown,
                 watcher_config,
+                binding_provider.clone(),
+                // N-11: the review-master rows the watcher enqueues get the
+                // SAME guaranteed post-commit starter handoff as every other
+                // production insertion branch.
+                state
+                    .schedule_supervisor()
+                    .and_then(|s| s.schedule_starter_clone()),
             );
         }
 
@@ -1052,6 +1375,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                 cron_supervisor,
                 cron_shutdown,
                 cron_config,
+                binding_provider.clone(),
             );
         }
 
@@ -1098,113 +1422,10 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         );
     }
 
-    // --- Section 5: Agent Host subsystem ---
-    let agent_host_facade: Arc<dyn nexus_agent_host::HostFacade> = {
-        use nexus_agent_host::providers::native_cli::{
-            claude::ClaudeCliProvider, codex::CodexNativeProvider, dsh::DshNativeProvider,
-        };
-
-        let manager = nexus_agent_host::core::manager::HostManager::new();
-        // Probe CLI presence before registering. Providers whose CLI is
-        // absent from PATH are NOT registered, so `/providers` and the
-        // AgentPicker UI do not surface them — avoiding a false promise
-        // where the UI offers a session path that only fails at
-        // process-spawn time (greptile P1; supersedes the qc1 W-001
-        // deferral R-V1127P1-QC-W-001, now closed).
-        //
-        // `default_config()` is a pure constructor that does not panic;
-        // `which::which()` is a fast PATH lookup (~1ms). Both are safe
-        // to call unconditionally at boot.
-        let mut providers_registered = 0u32;
-
-        if which::which("codex").is_ok() {
-            manager
-                .register_provider(Arc::new(CodexNativeProvider::default_config()))
-                .await;
-            providers_registered += 1;
-            tracing::info!(
-                provider = "codex-native",
-                "registered native agent provider"
-            );
-        } else {
-            tracing::warn!(
-                provider = "codex-native",
-                "CLI not found on PATH; skipping registration"
-            );
-        }
-
-        if which::which("claude").is_ok() {
-            manager
-                .register_provider(Arc::new(ClaudeCliProvider::default_config()))
-                .await;
-            providers_registered += 1;
-            tracing::info!(
-                provider = "claude-native",
-                "registered native agent provider"
-            );
-        } else {
-            tracing::warn!(
-                provider = "claude-native",
-                "CLI not found on PATH; skipping registration"
-            );
-        }
-
-        // dsh-native (PD-4): bring-your-own runtime, same skip-if-missing
-        // rule as claude/codex. Discovery: PATH command `dsh-jsonrpc-agent`
-        // OR a non-empty `DSH_RUNTIME_BIN` env var (the SDK treats empty as
-        // absent).
-        //
-        // Runtime handoff (P2 plan T2): PATH-discovered → the resolved
-        // absolute path is handed to the provider as `Config::runtime_bin`;
-        // env-only → `runtime_bin` stays unset so the SDK's own resolution
-        // order 3 (`DSH_RUNTIME_BIN` from the parent environment) picks the
-        // binary (`resolve_runtime`: launch_args_override → runtime_bin →
-        // DSH_RUNTIME_BIN → RuntimeNotFound).
-        if let Ok(dsh_path) = which::which("dsh-jsonrpc-agent") {
-            manager
-                .register_provider(Arc::new(DshNativeProvider::with_runtime_bin(Some(
-                    dsh_path.to_string_lossy().into_owned(),
-                ))))
-                .await;
-            providers_registered += 1;
-            tracing::info!(provider = "dsh-native", "registered native agent provider");
-        } else if std::env::var_os("DSH_RUNTIME_BIN").is_some_and(|value| !value.is_empty()) {
-            manager
-                .register_provider(Arc::new(DshNativeProvider::with_runtime_bin(None)))
-                .await;
-            providers_registered += 1;
-            tracing::info!(
-                provider = "dsh-native",
-                "registered native agent provider via DSH_RUNTIME_BIN"
-            );
-        } else {
-            tracing::warn!(
-                provider = "dsh-native",
-                "runtime not found on PATH (dsh-jsonrpc-agent) or DSH_RUNTIME_BIN; \
-                 skipping registration"
-            );
-        }
-
-        tracing::info!(
-            providers_registered,
-            "native agent provider registration complete"
-        );
-        Arc::new(manager)
-    };
-    state.set_agent_host(Arc::clone(&agent_host_facade));
-    tracing::info!("Agent host facade wired");
-
     // --- Section 6: Lifecycle HSM initialization ---
-    let subsystems = create_subsystems(
-        &state,
-        config.port,
-        agent_host_facade,
-        shared_worker_registry.clone(),
-    );
-    let lifecycle = Arc::new(StatigLifecycle::new_with_subsystems(
-        subsystems,
-        config.shutdown_grace_ms,
-    ));
+    let subsystems = create_subsystems(&state, config.port, agent_host_facade);
+    let lifecycle =
+        StatigLifecycle::new_with_subsystems(subsystems, config.shutdown_grace_ms).await;
 
     state.set_lifecycle(Arc::clone(&lifecycle));
     tracing::info!("Lifecycle HSM initialized");
@@ -1481,6 +1702,18 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         }
     }
 
+    // N-2: publish ONE immutable aggregate runtime bundle from the
+    // boot-wired slots BEFORE route readiness is exposed — a route can
+    // never observe a mixed/partial bundle. Tier-0 boot (no creator DB)
+    // has no coordinator/supervisor and defers the bundle to Profile
+    // attach (`ensure_creator_pool`).
+    if state.run_coordinator().is_some() {
+        state
+            .publish_boot_runtime_bundle()
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to publish boot runtime bundle: {e}"))?;
+    }
+
     let app = api::create_router(state, auth_config);
 
     // --- Section 10: Start lifecycle and spawn server ---
@@ -1606,13 +1839,28 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
 }
 
 /// Create subsystem bootstraps for lifecycle.
+/// Mandatory core subsystems (spec §5): every kind in
+/// [`crate::lifecycle::SubsystemKind::mandatory`] must be produced here or the
+/// production HSM can never reach `Running`.
+fn core_subsystems(
+    state: &WorkspaceState,
+    port: u16,
+) -> Vec<Arc<dyn crate::lifecycle::SubsystemBootstrap>> {
+    use crate::lifecycle::{DbSubsystem, EngineSubsystem, HttpSubsystem};
+    vec![
+        Arc::new(HttpSubsystem::new(port)),
+        Arc::new(DbSubsystem::new(state.database_path())),
+        // Engine is MANDATORY: without its Up the HSM never reaches Running.
+        Arc::new(EngineSubsystem::new()),
+    ]
+}
+
 fn create_subsystems(
     state: &WorkspaceState,
     port: u16,
     agent_host_facade: Arc<dyn nexus_agent_host::HostFacade>,
-    worker_registry: Arc<tokio::sync::Mutex<WorkerRegistry<WorkerManagerSpawner>>>,
 ) -> Vec<Arc<dyn crate::lifecycle::SubsystemBootstrap>> {
-    use crate::lifecycle::{AgentHostSubsystem, DbSubsystem, HttpSubsystem, WorkerMgrSubsystem};
+    use crate::lifecycle::AgentHostSubsystem;
 
     let nexus_home = state.nexus_home();
     let agent_host_config_path = nexus_home.join("agent-host").join("config.toml");
@@ -1620,14 +1868,7 @@ fn create_subsystems(
         .workspace_path()
         .map_or_else(|| nexus_home.clone(), std::path::PathBuf::from);
 
-    let mut subsystems: Vec<Arc<dyn crate::lifecycle::SubsystemBootstrap>> = vec![
-        Arc::new(HttpSubsystem::new(port)),
-        Arc::new(DbSubsystem::new(state.database_path())),
-        // V1.51 T-A P0 (QC3 F-001): share the same worker registry that
-        // backs `ProductionWorkerProvider` so workers spawned by either side
-        // are visible to the other.
-        Arc::new(WorkerMgrSubsystem::with_registry(worker_registry)),
-    ];
+    let mut subsystems = core_subsystems(state, port);
 
     // Agent Host is an optional subsystem — failure does not block daemon startup
     subsystems.push(Arc::new(AgentHostSubsystem::new(
@@ -1644,6 +1885,7 @@ fn create_subsystems(
 /// Delegates to the shared `auto_chain::enqueue_auto_chain_schedule` helper
 /// (Fix A / W-A) so that the ID-mint + INSERT + `set_driver` logic is not
 /// duplicated between the boot and supervisor paths.
+#[allow(clippy::too_many_arguments)] // one boot seam packing all enqueue inputs; grouping would add a throwaway struct
 async fn resume_auto_chain_work(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
@@ -1651,12 +1893,109 @@ async fn resume_auto_chain_work(
     stage: &str,
     chapter: Option<i32>,
     work: &nexus_local_db::works::WorkRecord,
+    binding_provider: Option<&str>,
+    schedule_starter: Option<&dyn ScheduleRunStarter>,
 ) -> Result<String, String> {
-    nexus_orchestration::auto_chain::enqueue_auto_chain_schedule(
-        pool, creator_id, work_id, stage, chapter, None, work,
+    // N-9: derive the complete binding map for the stage's preset from the
+    // configured default provider. A preset with prompt roles and no
+    // provider refuses the enqueue (never a drive-enabled row with an empty
+    // binding map); a preset with no prompt roles accepts an empty map.
+    let Some(preset_id) = nexus_orchestration::stage_gates::preset_for_stage(stage) else {
+        return Err(format!("no preset mapping for stage '{stage}'"));
+    };
+    let bindings = if let Some(provider_id) = binding_provider {
+        match nexus_orchestration::preset::default_bindings_for_preset(preset_id, provider_id) {
+            Some(bindings) => bindings,
+            None => {
+                return Err(format!(
+                    "preset '{preset_id}' not resolvable; refusing to publish a drive-enabled row"
+                ));
+            }
+        }
+    } else {
+        let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+        match nexus_orchestration::preset::load_embedded_preset(preset_id, &caps) {
+            Ok(loaded) => {
+                let roles = nexus_orchestration::preset::required_prompt_roles(&loaded);
+                if !roles.is_empty() {
+                    return Err(format!(
+                        "preset '{preset_id}' requires prompt roles but no binding \
+                         provider is configured; refusing to publish a drive-enabled row"
+                    ));
+                }
+                std::collections::HashMap::new()
+            }
+            Err(e) => {
+                return Err(format!(
+                    "preset '{preset_id}' not resolvable: {e}; refusing to publish a drive-enabled row"
+                ));
+            }
+        }
+    };
+    let schedule_id = nexus_orchestration::auto_chain::enqueue_auto_chain_schedule(
+        pool, creator_id, work_id, stage, chapter, None, work, bindings, None,
     )
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+
+    // N-11: guaranteed post-commit coordinator handoff — the boot-recovery
+    // auto-chain row is admitted through the SAME production starter as the
+    // supervisor terminal path. A starter failure is explicit (returned to
+    // the caller, which logs it); the row stays pending for a later tick /
+    // explicit start, never silently unhanded.
+    if let Some(starter) = schedule_starter {
+        starter
+            .start(&schedule_id)
+            .await
+            .map_err(|e| format!("starter handoff failed for {schedule_id}: {e}"))?;
+    }
+
+    Ok(schedule_id)
+}
+
+/// Host-free daemon admission callback (A3) — the `ScheduleRunStarter`
+/// implementation the daemon injects into the schedule supervisor.
+///
+/// `ScheduleSupervisor` lives in `nexus-orchestration` and must not couple
+/// to daemon internals; this adapter bridges the supervisor's `tick`
+/// admission to the daemon's single `WorkflowRunCoordinator`.
+///
+/// `pub(crate)` so the lazy Profile-attach bundle in `workspace/mod.rs`
+/// (I-3) can construct the same starter over the attached creator DB.
+pub(crate) struct DaemonScheduleRunStarter {
+    pub(crate) coordinator: Arc<WorkflowRunCoordinator>,
+    pub(crate) pool: Arc<sqlx::SqlitePool>,
+    pub(crate) nexus_home: std::path::PathBuf,
+    pub(crate) caps: Option<nexus_orchestration::CapabilityRegistryHolder>,
+    pub(crate) daemon_tool_dispatch:
+        Option<std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>,
+    pub(crate) prompt_executor:
+        Option<std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
+}
+
+#[async_trait::async_trait]
+impl ScheduleRunStarter for DaemonScheduleRunStarter {
+    async fn start(
+        &self,
+        schedule_id: &str,
+    ) -> Result<nexus_orchestration::SessionId, SupervisorError> {
+        let caps = self.caps.clone().ok_or_else(|| {
+            SupervisorError::Database(sqlx::Error::Protocol(
+                "capability registry unavailable for schedule admission".to_string(),
+            ))
+        })?;
+        self.coordinator
+            .admit_schedule(
+                schedule_id,
+                &self.pool,
+                &self.nexus_home,
+                &caps,
+                self.daemon_tool_dispatch.clone(),
+                self.prompt_executor.clone(),
+            )
+            .await
+            .map_err(|e| SupervisorError::Database(sqlx::Error::Protocol(e.to_string())))
+    }
 }
 
 #[cfg(test)]
@@ -1787,6 +2126,39 @@ mod tests {
         );
     }
 
+    /// The production subsystem list must cover every mandatory kind or the
+    /// HSM can never reach `Running` (T3 rereview P1-1).
+    #[tokio::test]
+    async fn core_subsystems_cover_every_mandatory_kind() {
+        use crate::lifecycle::SubsystemKind;
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let user_home = tmp.path();
+        let nexus_home = user_home.join(".nexus42");
+        std::fs::create_dir_all(&nexus_home).expect("create nexus_home");
+        let db_path = nexus_home.join("state.db");
+        let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+
+        let kinds: Vec<SubsystemKind> = core_subsystems(&state, 0)
+            .iter()
+            .map(|subsystem| subsystem.kind())
+            .collect();
+        for mandatory in SubsystemKind::mandatory() {
+            assert!(
+                kinds.contains(mandatory),
+                "mandatory subsystem {mandatory:?} missing from production core subsystems: {kinds:?}"
+            );
+        }
+        let mut unique = kinds.clone();
+        unique.sort_by_key(|kind| format!("{kind:?}"));
+        unique.dedup_by_key(|kind| format!("{kind:?}"));
+        assert_eq!(
+            unique.len(),
+            kinds.len(),
+            "core subsystems must not be duplicated: {kinds:?}"
+        );
+    }
+
     /// `user_capabilities_scan_dir` resolves the RAW-home capabilities dir
     /// (AR-35): `~/.nexus42/capabilities`, NOT the double-nested
     /// `<home>/.nexus42/.nexus42/capabilities` that would result from passing
@@ -1824,7 +2196,10 @@ mod tests {
     fn watcher_test_deps() -> CapabilityRuntimeDeps {
         CapabilityRuntimeDeps {
             pool: None,
-            worker_provider: None,
+            prompt_executor: None,
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
             daemon_tool_dispatch: None,
             cdn_config: None,
         }

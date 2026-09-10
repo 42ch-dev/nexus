@@ -76,11 +76,18 @@ impl ProviderCatalog {
                     source: DiscoverySource::Config,
                     trust: TrustLevel::Explicit,
                     capabilities: caps,
+                    // Truthful catalog: the recipe is registered but no
+                    // process has been spawned at catalog load. `available`
+                    // means "configured and enabled", never "a launch
+                    // succeeded" (agent-host.md §4 V1.186 lock).
                     health: ProviderHealth {
                         provider_id: pid.clone(),
                         available: true,
                         latency_ms: None,
-                        message: None,
+                        message: Some(
+                            "launch recipe registered; process spawns lazily per session"
+                                .to_string(),
+                        ),
                     },
                 });
                 seen_ids.insert(pid);

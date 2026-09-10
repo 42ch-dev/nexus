@@ -30,7 +30,7 @@ fn main() {
     // The MCP stdio child's stdout is the JSON-RPC transport — logging must
     // go to stderr there (AR-72), so the writer decision happens before
     // the subscriber is initialized.
-    init_logging(cli.verbose(), cli.is_mcp_serve());
+    init_logging(cli.verbose(), cli.is_data_output());
 
     // V1.101 Class B: enrich PATH *before* Tokio starts. GUI-launched desktop
     // sidecars inherit a minimal macOS PATH; `setenv` must not race concurrent
@@ -123,7 +123,6 @@ async fn async_main(cli: Cli) -> Result<()> {
         Some(Commands::Capability { command }) => {
             nexus42::commands::capability::run(command, &config, &output_format).await
         }
-        Some(Commands::AcpWorker(args)) => nexus42::commands::acp_worker::run(args).await,
         Some(Commands::DaemonRun(args)) => nexus42::commands::daemon_run::run(args).await,
         #[cfg(feature = "connect-client")]
         Some(Commands::Mcp { command }) => nexus42::commands::mcp::run(command, &config).await,

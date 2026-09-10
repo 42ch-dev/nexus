@@ -47,8 +47,8 @@ pub mod validation;
 
 pub use loader::{
     load_preset, load_preset_from_str, load_preset_from_str_with_limits,
-    loader_validate_manifest_compat, yaml_value_depth, LoadedPreset, PresetLoadError,
-    ValidationProblem, DEFAULT_MAX_YAML_DEPTH, DEFAULT_MAX_YAML_SIZE,
+    loader_validate_manifest_compat, preset_source_identity, yaml_value_depth, LoadedPreset,
+    PresetLoadError, ValidationProblem, DEFAULT_MAX_YAML_DEPTH, DEFAULT_MAX_YAML_SIZE,
 };
 pub use validation::{
     validate_assets_in_bundle, validate_path_safety, validate_preset_semantic, DiagnosticCategory,
@@ -108,7 +108,121 @@ pub fn load_embedded_preset(
             }],
         })?;
 
-    load_preset_from_str(yaml, caps)
+    let mut loaded = load_preset_from_str(yaml, caps)?;
+    // An embedded preset knows its source identity (A2/A7): content hash
+    // over the manifest + every referenced asset from the compiled-in tree.
+    loaded.source_identity = Some(loader::preset_source_identity(
+        &loaded.manifest,
+        None,
+        Some(id),
+    )?);
+    Ok(loaded)
+}
+
+/// Resolve the content-addressed source identity for an EMBEDDED preset
+/// (N-5/N-5b).
+///
+/// The internal insertion paths (auto-chain, cron, review-master) persist a
+/// frozen [`crate::run_state::RunDescriptorV1`] at enqueue time and must
+/// stamp the REAL content hash (manifest + referenced template bytes), not
+/// a zero placeholder — admission then validates the stored identity against
+/// the current load instead of discarding it. `None` when the preset is not
+/// embedded (directory presets are resolved by the caller with a bundle
+/// root).
+#[must_use]
+pub fn embedded_source_identity(preset_id: &str) -> Option<crate::run_state::PresetSourceIdentity> {
+    let caps = crate::capability::CapabilityRegistry::with_builtins();
+    load_embedded_preset(preset_id, &caps)
+        .ok()
+        .and_then(|loaded| loaded.source_identity)
+}
+
+/// Derive the complete effective prompt-role set for a loaded preset
+/// (N-4b/N-9).
+///
+/// Every `llm_judge` exit resolves the `default` role (the judge capability
+/// `judge.llm` binds `default` at prompt time), and every `acp_prompt` inner
+/// node resolves its `agent` field (or `default` when absent). A preset with
+/// NO prompt path yields an empty set — an empty binding map is then valid.
+///
+/// This is the single source of truth for both the admission
+/// binding-completeness validator and the daemon's internal binding
+/// builder (auto-chain/cron/review-master), so the two can never drift.
+#[must_use]
+pub fn required_prompt_roles(loaded: &LoadedPreset) -> std::collections::HashSet<String> {
+    use nexus_contracts::local::orchestration::preset::{EnterAction, ExitWhen, GraphNodeKind};
+
+    let mut required: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for state in &loaded.manifest.states {
+        if let Some(exit_when) = &state.exit_when {
+            if matches!(exit_when, ExitWhen::LlmJudge { .. }) {
+                // The judge capability (`judge.llm`) resolves the `default`
+                // role binding at prompt time.
+                required.insert("default".to_string());
+            }
+        }
+        for action in &state.enter {
+            if let EnterAction::InnerGraph { name } = action {
+                // The manifest's node list is the source of truth for
+                // agent references; the built graph mirrors it.
+                if let Some(ig) = loaded
+                    .manifest
+                    .inner_graphs
+                    .as_ref()
+                    .and_then(|igs| igs.get(name))
+                {
+                    for node in &ig.nodes {
+                        if matches!(node.kind, GraphNodeKind::AcpPrompt) {
+                            match &node.agent {
+                                Some(agent) => {
+                                    required.insert(agent.clone());
+                                }
+                                None => {
+                                    required.insert("default".to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    required
+}
+
+/// Build a complete binding map for an EMBEDDED preset using one provider id
+/// (N-9).
+///
+/// Every effective prompt role (including `default`) is bound to the given
+/// provider. Returns `None` when the preset cannot be resolved — the caller
+/// must then refuse or stay inert, never publish a drive-enabled row with an
+/// incomplete binding map.
+///
+/// The internal insertion paths (auto-chain, cron, review-master) use this
+/// to derive bindings consistent with the daemon's configured providers;
+/// the admission validator derives the SAME required-role set via
+/// [`required_prompt_roles`], so the two can never drift.
+#[must_use]
+pub fn default_bindings_for_preset(
+    preset_id: &str,
+    provider_id: &str,
+) -> Option<std::collections::HashMap<String, crate::run_state::AgentBinding>> {
+    let caps = crate::capability::CapabilityRegistry::with_builtins();
+    let loaded = load_embedded_preset(preset_id, &caps).ok()?;
+    let roles = required_prompt_roles(&loaded);
+    if roles.is_empty() {
+        return Some(std::collections::HashMap::new());
+    }
+    let binding = crate::run_state::AgentBinding {
+        provider_id: provider_id.to_string(),
+        model: None,
+    };
+    Some(
+        roles
+            .into_iter()
+            .map(|role| (role, binding.clone()))
+            .collect(),
+    )
 }
 
 // ---------------------------------------------------------------------------

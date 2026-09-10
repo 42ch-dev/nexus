@@ -42,8 +42,7 @@ use nexus_contracts::local::schedule::http::{
     UpdateWorkCronRequest, WorkCronResponse, WorkCronRoleDto, WorkCronRolesDto,
 };
 use nexus_contracts::local::schedule::{
-    CoreContextAuthor, CoreContextVersion, EditOp, Schedule, ScheduleConcurrency, ScheduleId,
-    ScheduleStatus,
+    CoreContextVersion, EditOp, Schedule, ScheduleConcurrency, ScheduleId, ScheduleStatus,
 };
 use nexus_contracts::PaginationInfo;
 use nexus_orchestration::preset_gates::{
@@ -254,19 +253,38 @@ pub async fn add_schedule(
         // Insert schedule row inside the same transaction.
         let schedule_id = format!("SCH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
         let now_ts = chrono::Utc::now().timestamp();
+        // A3 admission cutover: a new public schedule is drive-enabled
+        // (`driven_v1`); `_system.*` presets are always `system_inert`
+        // (C-4). The frozen execution descriptor (input/bindings/work_id)
+        // is persisted with the row (C-2/I-5).
+        let execution_policy = if body.preset_id.starts_with("_system.") {
+            "system_inert"
+        } else {
+            "driven_v1"
+        };
+        let (concurrency_kind, concurrency_whitelist, scheduled_at_ts) =
+            insert_concurrency_and_schedule(&body);
+        let descriptor = build_execution_descriptor(&state, &body, &work_id)?;
+        let descriptor_ref = descriptor.as_deref();
         sqlx::query!(
             "INSERT INTO creator_schedules \
              (schedule_id, creator_id, preset_id, preset_version, status, \
-              concurrency_kind, current_core_context_version, label, \
-              created_at, updated_at, work_id) \
-             VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?)",
+              concurrency_kind, concurrency_whitelist, current_core_context_version, label, \
+              created_at, updated_at, work_id, scheduled_at, execution_policy, \
+              execution_descriptor_json) \
+             VALUES (?, ?, ?, 1, 'paused', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)",
             schedule_id,
             body.creator_id,
             body.preset_id,
+            concurrency_kind,
+            concurrency_whitelist,
             body.label,
             now_ts,
             now_ts,
             work_id,
+            scheduled_at_ts,
+            execution_policy,
+            descriptor_ref,
         )
         .execute(&mut *tx)
         .await
@@ -274,6 +292,35 @@ pub async fn add_schedule(
             code: "DATABASE_ERROR".into(),
             message: format!("failed to create schedule: {e}"),
         })?;
+        if let Some(deps) = &body.depends_on {
+            for dep in deps {
+                let dep_str = dep.as_str();
+                sqlx::query!(
+                    "INSERT OR IGNORE INTO schedule_dependencies (schedule_id, depends_on) \
+                     VALUES (?, ?)",
+                    schedule_id,
+                    dep_str,
+                )
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    code: "DATABASE_ERROR".into(),
+                    message: format!("failed to insert schedule dependency: {e}"),
+                })?;
+            }
+        }
+
+        // N-3: persist the durable core-context version-0 seed record in
+        // the SAME transaction — a `driven_v1` row is never observable
+        // before its seed/version is durable, and a seed failure rolls the
+        // whole row back (no orphaned drive-enabled schedule).
+        seed_core_context_in_tx(
+            &mut tx,
+            &schedule_id,
+            &body.creator_id,
+            &effective_seed_text(&body),
+        )
+        .await?;
 
         tx.commit().await.map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".into(),
@@ -288,14 +335,17 @@ pub async fn add_schedule(
             "gate evaluation BYPASSED by --force-gates (audited)"
         );
 
-        // Seed core context if seed/input provided
-        let core_version = seed_core_context(&supervisor, &schedule_id, &body, &state).await?;
+        // I-10: the durable version-0 seed record committed with the row.
+        let core_version = 0u32;
+
+        // C-5: immediately admit the new row through the single coordinator.
+        let status = admit_new_schedule(&state, &supervisor, &schedule_id).await?;
 
         return Ok((
             StatusCode::CREATED,
             Json(AddScheduleResponse {
                 schedule_id,
-                status: "pending".to_string(),
+                status,
                 core_context_version: core_version,
             }),
         ));
@@ -438,19 +488,39 @@ pub async fn add_schedule(
                         let schedule_id =
                             format!("SCH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
                         let now_ts = chrono::Utc::now().timestamp();
+                        // A3 admission cutover: a new public schedule is
+                        // drive-enabled (`driven_v1`); `_system.*` presets
+                        // are always `system_inert` (C-4). The frozen
+                        // execution descriptor is persisted with the row
+                        // (C-2/I-5).
+                        let execution_policy = if body.preset_id.starts_with("_system.") {
+                            "system_inert"
+                        } else {
+                            "driven_v1"
+                        };
+                        let (concurrency_kind, concurrency_whitelist, scheduled_at_ts) =
+                            insert_concurrency_and_schedule(&body);
+                        let descriptor = build_execution_descriptor(&state, &body, work_id)?;
+                        let descriptor_ref = descriptor.as_deref();
                         sqlx::query!(
                             "INSERT INTO creator_schedules \
-                         (schedule_id, creator_id, preset_id, preset_version, status, \
-                          concurrency_kind, current_core_context_version, label, \
-                          created_at, updated_at, work_id) \
-                         VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?)",
+                             (schedule_id, creator_id, preset_id, preset_version, status, \
+                              concurrency_kind, concurrency_whitelist, current_core_context_version, label, \
+                              created_at, updated_at, work_id, scheduled_at, execution_policy, \
+                              execution_descriptor_json) \
+                             VALUES (?, ?, ?, 1, 'paused', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)",
                             schedule_id,
                             body.creator_id,
                             body.preset_id,
+                            concurrency_kind,
+                            concurrency_whitelist,
                             body.label,
                             now_ts,
                             now_ts,
                             work_id,
+                            scheduled_at_ts,
+                            execution_policy,
+                            descriptor_ref,
                         )
                         .execute(&mut *tx)
                         .await
@@ -458,20 +528,55 @@ pub async fn add_schedule(
                             code: "DATABASE_ERROR".into(),
                             message: format!("failed to create schedule: {e}"),
                         })?;
+                        if let Some(deps) = &body.depends_on {
+                            for dep in deps {
+                                let dep_str = dep.as_str();
+                                sqlx::query!(
+                                    "INSERT OR IGNORE INTO schedule_dependencies (schedule_id, depends_on) \
+                                     VALUES (?, ?)",
+                                    schedule_id,
+                                    dep_str,
+                                )
+                                .execute(&mut *tx)
+                                .await
+                                .map_err(|e| NexusApiError::Internal {
+                                    code: "DATABASE_ERROR".into(),
+                                    message: format!("failed to insert schedule dependency: {e}"),
+                                })?;
+                            }
+                        }
+
+                        // N-3: persist the durable core-context version-0
+                        // seed record in the SAME transaction — a
+                        // `driven_v1` row is never observable before its
+                        // seed/version is durable, and a seed failure rolls
+                        // the whole row back (no orphaned drive-enabled
+                        // schedule).
+                        seed_core_context_in_tx(
+                            &mut tx,
+                            &schedule_id,
+                            &body.creator_id,
+                            &effective_seed_text(&body),
+                        )
+                        .await?;
 
                         tx.commit().await.map_err(|e| NexusApiError::Internal {
                             code: "DATABASE_ERROR".into(),
                             message: format!("failed to commit schedule transaction: {e}"),
                         })?;
 
-                        let core_version =
-                            seed_core_context(&supervisor, &schedule_id, &body, &state).await?;
+                        // I-10: the durable version-0 seed record committed
+                        // with the row.
+                        let core_version = 0u32;
+
+                        // C-5: immediately admit the new row.
+                        let status = admit_new_schedule(&state, &supervisor, &schedule_id).await?;
 
                         return Ok((
                             StatusCode::CREATED,
                             Json(AddScheduleResponse {
                                 schedule_id,
-                                status: "pending".to_string(),
+                                status,
                                 core_context_version: core_version,
                             }),
                         ));
@@ -549,71 +654,324 @@ pub async fn add_schedule(
         terminated_at: None,
     };
 
-    supervisor.insert_pending(schedule).await.map_err(|e| {
-        if matches!(
-            e,
-            nexus_orchestration::schedule::supervisor::SupervisorError::DuplicateSchedule { .. }
-        ) {
-            NexusApiError::Conflict(format!("schedule already exists: {e}"))
-        } else {
-            NexusApiError::Internal {
-                code: "SCHEDULE_CREATE_ERROR".into(),
-                message: format!("failed to create schedule: {e}"),
+    // C-2/I-5/N-3: persist the frozen execution descriptor AND the durable
+    // core-context version-0 seed record with the row in ONE transaction
+    // (dependencies included) — a `driven_v1` row is never observable
+    // before its seed/version is durable, and a seed failure rolls the
+    // whole row back (no orphaned drive-enabled schedule).
+    let work_id = work_id_opt.clone().unwrap_or_default();
+    let descriptor = build_execution_descriptor(&state, &body, &work_id)?;
+    supervisor
+        .insert_pending_with_descriptor_and_seed(
+            schedule,
+            descriptor.as_deref(),
+            &effective_seed_text(&body),
+        )
+        .await
+        .map_err(|e| {
+            if matches!(
+                e,
+                nexus_orchestration::schedule::supervisor::SupervisorError::DuplicateSchedule { .. }
+            ) {
+                NexusApiError::Conflict(format!("schedule already exists: {e}"))
+            } else {
+                NexusApiError::Internal {
+                    code: "SCHEDULE_CREATE_ERROR".into(),
+                    message: format!("failed to create schedule: {e}"),
+                }
             }
-        }
-    })?;
+        })?;
 
-    let core_version = seed_core_context(&supervisor, &schedule_id, &body, &state).await?;
+    // I-10: the durable version-0 seed record committed with the row.
+    let core_version = 0u32;
+
+    // C-5: immediately admit the new row through the single coordinator.
+    let status = admit_new_schedule(&state, &supervisor, &schedule_id).await?;
 
     Ok((
         StatusCode::CREATED,
         Json(AddScheduleResponse {
             schedule_id,
-            status: "pending".to_string(),
+            status,
             core_context_version: core_version,
         }),
     ))
 }
 
-/// Seed core context v0 if seed or input is provided.
-async fn seed_core_context(
+/// Compute the effective seed text for a new schedule (I-10): the request
+/// `seed` text plus the structured `input` serialized as `preset.input=…`
+/// (the same derivation the old post-commit `apply_seed` used).
+fn effective_seed_text(body: &AddScheduleRequest) -> String {
+    match (&body.seed, &body.input) {
+        (Some(seed_text), Some(input)) => {
+            let input_json = serde_json::to_string(input).unwrap_or_default();
+            format!("{seed_text}\n---\npreset.input={input_json}")
+        }
+        (Some(seed_text), None) => seed_text.clone(),
+        (None, Some(input)) => {
+            let input_json = serde_json::to_string(input).unwrap_or_default();
+            format!("preset.input={input_json}")
+        }
+        (None, None) => String::new(),
+    }
+}
+
+/// Persist the durable core-context version-0 seed record INSIDE the
+/// schedule-insert transaction (N-3): a `driven_v1` row is never
+/// observable before its seed/version is durable, and a seed failure
+/// rolls the whole row back — no orphaned drive-enabled schedule. The
+/// public add path is user-initiated, so the record carries the user
+/// author (mirrors `CoreContextManager::apply_seed` with
+/// `CoreContextAuthor::User`).
+async fn seed_core_context_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    schedule_id: &str,
+    creator_id: &str,
+    seed_text: &str,
+) -> Result<(), NexusApiError> {
+    let now = chrono::Utc::now().timestamp();
+    let payload = serde_json::json!({ "kind": "text", "body": seed_text });
+    let content_bytes = serde_json::to_vec(&payload).map_err(|e| NexusApiError::Internal {
+        code: "CORE_CONTEXT_SEED_ERROR".into(),
+        message: format!("failed to serialize core-context seed: {e}"),
+    })?;
+    let derivation = serde_json::json!({ "kind": "seed", "raw": seed_text });
+    let derivation_bytes =
+        serde_json::to_vec(&derivation).map_err(|e| NexusApiError::Internal {
+            code: "CORE_CONTEXT_SEED_ERROR".into(),
+            message: format!("failed to serialize core-context derivation: {e}"),
+        })?;
+    sqlx::query!(
+        "INSERT INTO core_context_versions
+           (schedule_id, version, payload_kind, content,
+            derivation_kind, derivation_detail,
+            created_at, created_by_kind, created_by_user_id)
+         VALUES (?, 0, 'text', ?, 'seed', ?, ?, 'user', ?)",
+        schedule_id,
+        content_bytes,
+        derivation_bytes,
+        now,
+        creator_id
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "CORE_CONTEXT_SEED_ERROR".into(),
+        message: format!("failed to seed core context: {e}"),
+    })?;
+    Ok(())
+}
+
+fn insert_concurrency_and_schedule(
+    body: &AddScheduleRequest,
+) -> (String, Option<String>, Option<i64>) {
+    let (kind, whitelist) = match &body.concurrency {
+        None | Some(ScheduleConcurrencyRequest::Serial) => ("serial".to_string(), None),
+        Some(ScheduleConcurrencyRequest::ParallelAny) => ("parallel_any".to_string(), None),
+        Some(ScheduleConcurrencyRequest::ParallelWith { schedule_ids }) => (
+            "parallel_with".to_string(),
+            Some(serde_json::to_string(schedule_ids).unwrap_or_else(|_| "[]".to_string())),
+        ),
+    };
+    let scheduled_at = body
+        .scheduled_at
+        .as_ref()
+        .and_then(|s| s.parse::<i64>().ok());
+    (kind, whitelist, scheduled_at)
+}
+
+/// Build the frozen execution descriptor for a new schedule (I-5): the
+/// serialized [`nexus_orchestration::run_state::RunDescriptorV1`] carrying
+/// the schedule's `work_id`, structured input, and agent bindings. Persisted
+/// with the schedule row (C-2) so admission can freeze the complete
+/// payload into the initial checkpoint.
+///
+/// N-8: the descriptor is built from the SAME resolved preset admission
+/// will load — `resolve_preset` over the daemon's nexus home and
+/// capability registry — and stamps the REAL content-addressed source
+/// identity (manifest + referenced template bytes). A zero-hash `Embedded`
+/// fallback is never emitted: an unresolvable preset refuses the add
+/// before any row is inserted. `_system.*` presets are always
+/// `system_inert` and never admitted (C-4), so they carry no descriptor.
+fn build_execution_descriptor(
+    state: &WorkspaceState,
+    body: &AddScheduleRequest,
+    work_id: &str,
+) -> Result<Option<Vec<u8>>, NexusApiError> {
+    // `_system.*` presets are never admitted; no frozen descriptor is
+    // needed (and none can be resolved — they are not embedded).
+    if body.preset_id.starts_with("_system.") {
+        return Ok(None);
+    }
+    let registry = state
+        .capability_registry()
+        .ok_or_else(|| NexusApiError::Internal {
+            code: "CAPABILITY_REGISTRY_UNAVAILABLE".into(),
+            message: "capability registry unavailable; cannot freeze preset source identity".into(),
+        })?;
+    let loaded =
+        nexus_orchestration::preset::resolve_preset(&body.preset_id, state.nexus_home(), &registry)
+            .map_err(|e| NexusApiError::Internal {
+                code: "PRESET_LOAD_ERROR".into(),
+                message: format!(
+                    "failed to resolve preset '{}' for descriptor freeze: {e}",
+                    body.preset_id
+                ),
+            })?;
+    let source = loaded
+        .source_identity
+        .ok_or_else(|| NexusApiError::Internal {
+            code: "PRESET_SOURCE_IDENTITY_MISSING".into(),
+            message: format!(
+                "preset '{}' has no content-addressed source identity",
+                body.preset_id
+            ),
+        })?;
+    let input = body
+        .input
+        .as_ref()
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+    let agent_bindings = body
+        .agent_bindings
+        .as_ref()
+        .map(|bindings| {
+            bindings
+                .iter()
+                .map(|(role, dto)| {
+                    (
+                        role.clone(),
+                        nexus_orchestration::run_state::AgentBinding {
+                            provider_id: dto.provider_id.clone(),
+                            model: dto.model.clone(),
+                        },
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let descriptor = nexus_orchestration::run_state::RunDescriptorV1 {
+        creator_id: body.creator_id.clone(),
+        work_id: if work_id.is_empty() {
+            None
+        } else {
+            Some(work_id.to_string())
+        },
+        workspace_root: std::path::PathBuf::new(),
+        preset_id: body.preset_id.clone(),
+        preset_version: 1,
+        // N-5/N-5b/N-8: stamp the REAL content-addressed source identity
+        // (manifest + referenced template bytes) of the resolved preset —
+        // never a zero placeholder. Admission validates the stored identity
+        // against the current load and builds the runner from the frozen
+        // identity, so a changed/shadowed preset can never run under a
+        // zero-hash durable descriptor.
+        source,
+        input,
+        agent_bindings,
+        parent_session_id: None,
+        graph_name: None,
+    };
+    serde_json::to_vec(&descriptor)
+        .map(Some)
+        .map_err(|e| NexusApiError::Internal {
+            code: "DESCRIPTOR_SERIALIZE_ERROR".into(),
+            message: format!("failed to serialize execution descriptor: {e}"),
+        })
+}
+
+/// Admit a newly inserted schedule immediately (C-5): after the complete
+/// atomic insertion, invoke the same coordinator/starter for immediately
+/// eligible new public rows. Returns the actual persisted admission status
+/// projection — `"running"` when the coordinator admitted and drove the
+/// run, `"pending"` when the row is not yet eligible (`scheduled_at` in the
+/// future, dependency/concurrency blocked).
+async fn admit_new_schedule(
+    state: &WorkspaceState,
     supervisor: &Arc<nexus_orchestration::schedule::supervisor::ScheduleSupervisor>,
     schedule_id: &str,
-    body: &AddScheduleRequest,
-    _state: &WorkspaceState,
-) -> Result<u32, NexusApiError> {
-    if body.seed.is_some() || body.input.is_some() {
-        let mgr = supervisor.core_context_manager();
-        let sid = ScheduleId(schedule_id.to_string());
-
-        let effective_seed = match (&body.seed, &body.input) {
-            (Some(seed_text), Some(input)) => {
-                let input_json = serde_json::to_string(input).unwrap_or_default();
-                format!("{seed_text}\n---\npreset.input={input_json}")
-            }
-            (Some(seed_text), None) => seed_text.clone(),
-            (None, Some(input)) => {
-                let input_json = serde_json::to_string(input).unwrap_or_default();
-                format!("preset.input={input_json}")
-            }
-            (None, None) => unreachable!("checked outer condition"),
-        };
-
-        let _record = mgr
-            .apply_seed(
-                &sid,
-                &effective_seed,
-                CoreContextAuthor::User {
-                    id: body.creator_id.clone(),
-                },
+) -> Result<String, NexusApiError> {
+    // A scheduled_at in the future defers admission to the clocked tick.
+    let pool = supervisor.pool();
+    let scheduled_at: Option<i64> = sqlx::query_scalar!(
+        "SELECT scheduled_at FROM creator_schedules WHERE schedule_id = ?",
+        schedule_id
+    )
+    .fetch_one(&*pool)
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("database error reading scheduled_at: {e}"),
+    })?;
+    if let Some(at) = scheduled_at {
+        if at > chrono::Utc::now().timestamp() {
+            sqlx::query!(
+                "UPDATE creator_schedules SET status = 'pending' WHERE schedule_id = ? AND status = 'paused'",
+                schedule_id
             )
+            .execute(&*pool)
             .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "CORE_CONTEXT_SEED_ERROR".into(),
-                message: format!("failed to seed core context: {e}"),
-            })?;
+            .ok();
+            return Ok("pending".to_string());
+        }
     }
-    Ok(0)
+
+    // Route through the single coordinator/starter (C-5): the same
+    // admission path a tick would use, invoked immediately.
+    let coordinator = state
+        .run_coordinator()
+        .ok_or_else(|| NexusApiError::service_unavailable("run coordinator not configured"))?;
+    let caps = state
+        .capability_registry_holder()
+        .ok_or_else(|| NexusApiError::service_unavailable("capability registry not configured"))?;
+    match coordinator
+        .admit_schedule(
+            schedule_id,
+            &pool,
+            state.nexus_home(),
+            &caps,
+            state.daemon_tool_dispatch(),
+            state.prompt_executor(),
+        )
+        .await
+    {
+        Ok(_sid) => Ok("running".to_string()),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("not eligible") {
+                sqlx::query!(
+                    "UPDATE creator_schedules SET status = 'pending' WHERE schedule_id = ? AND status = 'paused'",
+                    schedule_id
+                )
+                .execute(&*pool)
+                .await
+                .ok();
+                tracing::debug!(
+                    schedule_id = schedule_id,
+                    error = msg.as_str(),
+                    "new schedule not immediately eligible; leaving pending"
+                );
+                Ok("pending".to_string())
+            } else if msg.contains("unknown role")
+                || msg.contains("unknown provider")
+                || msg.contains("invalid agent binding")
+                || msg.contains("missing agent binding")
+            {
+                // N-4/N-4b: invalid or incomplete binding references refuse
+                // the add loudly — the row stays paused and the caller sees
+                // a 400, never a silent pending admission.
+                Err(NexusApiError::BadRequest {
+                    code: "invalid_input".into(),
+                    message: msg,
+                })
+            } else {
+                Err(NexusApiError::Internal {
+                    code: "RUN_CONTROL_ERROR".into(),
+                    message: msg,
+                })
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -651,7 +1009,8 @@ pub async fn list_schedules(
     // conditionally at runtime. User inputs are bound as parameters; only
     // whitelisted column identifiers are interpolated into ORDER BY.
     let mut sql = String::from(
-        "SELECT schedule_id, creator_id, preset_id, status, label,
+        "SELECT schedule_id, creator_id, preset_id, status, execution_policy,
+                current_session_id, label,
                 current_core_context_version, created_at, updated_at
          FROM creator_schedules WHERE 1=1",
     );
@@ -732,10 +1091,21 @@ pub async fn list_schedules(
         message: format!("database error: {e}"),
     })?;
 
-    let items: Vec<ScheduleSummary> = rows
+    let mut items: Vec<ScheduleSummary> = rows
         .into_iter()
         .map(ListRow::into_summary)
         .collect::<Result<Vec<_>, _>>()?;
+    for summary in &mut items {
+        summary.execution = Some(
+            crate::execution_projection::project_for_session(
+                &pool,
+                summary.current_session_id.as_deref(),
+                &summary.execution_policy,
+                state.capability_registry().as_ref(),
+            )
+            .await,
+        );
+    }
 
     let has_more = u64::from(total) > u64::from(offset).saturating_add(u64::from(limit));
     let next_cursor = if has_more {
@@ -775,7 +1145,8 @@ pub async fn inspect_schedule(
     // reference with sufficient lifetime for the macro expansion. Could be converted in a
     // future pass by inlining the pool reference.
     let row = sqlx::query_as::<_, InspectRow>(
-        "SELECT schedule_id, creator_id, preset_id, status, label,
+        "SELECT schedule_id, creator_id, preset_id, status, execution_policy,
+                current_session_id, label,
                 current_core_context_version, created_at, updated_at,
                 concurrency_kind, concurrency_whitelist
          FROM creator_schedules WHERE schedule_id = ?",
@@ -809,8 +1180,19 @@ pub async fn inspect_schedule(
 
     let concurrency_kind = row.concurrency_kind.clone();
 
+    let mut summary = row.into_summary()?;
+    summary.execution = Some(
+        crate::execution_projection::project_for_session(
+            &pool,
+            summary.current_session_id.as_deref(),
+            &summary.execution_policy,
+            state.capability_registry().as_ref(),
+        )
+        .await,
+    );
+
     Ok(Json(InspectScheduleResponse {
-        schedule: row.into_summary()?,
+        schedule: summary,
         depends_on: deps,
         concurrency_kind,
     }))
@@ -1009,15 +1391,62 @@ pub async fn signal_schedule(
         )));
     }
 
-    let new_status = match body.signal.as_str() {
-        "start" => match current_status_str.as_str() {
-            "pending" => "running",
-            _ => {
-                return Err(NexusApiError::Conflict(format!(
-                    "cannot start schedule {schedule_id}: current status is {current_status_str}"
-                )));
-            }
-        },
+    match body.signal.as_str() {
+        "start" => {
+            // A3 (v1.186 P2 T1) + C-3: explicit public `schedule start` opts
+            // a never-started row in — pending, paused, or admission-only
+            // `Running` with no owned session. The coordinator cuts the
+            // policy over transactionally and atomically creates the owned
+            // v1 run + schedule→session identity, then drives it
+            // (single-flight). Legacy/system-inert rows are refused —
+            // `_system.*` cannot be opted in by a generic signal (A8).
+            let coordinator = state.run_coordinator().ok_or_else(|| {
+                NexusApiError::service_unavailable("run coordinator not configured")
+            })?;
+            let pool = supervisor.pool();
+            let caps = state.capability_registry_holder().ok_or_else(|| {
+                NexusApiError::service_unavailable("capability registry not configured")
+            })?;
+            let session_id = coordinator
+                .start_legacy_schedule(
+                    &schedule_id,
+                    &pool,
+                    state.nexus_home(),
+                    &caps,
+                    state.daemon_tool_dispatch(),
+                    state.prompt_executor(),
+                )
+                .await
+                .map_err(|e| {
+                    let msg = e.to_string();
+                    if msg.contains("not eligible")
+                        || msg.contains("execution_policy")
+                        || msg.contains("binding provider")
+                    {
+                        NexusApiError::Conflict(format!(
+                            "cannot start schedule {schedule_id}: {msg}"
+                        ))
+                    } else {
+                        NexusApiError::Internal {
+                            code: "RUN_CONTROL_ERROR".into(),
+                            message: msg,
+                        }
+                    }
+                })?;
+            tracing::info!(
+                schedule_id = %schedule_id,
+                session_id = %session_id.0,
+                "explicit schedule start admitted driven run"
+            );
+            Ok((
+                StatusCode::OK,
+                Json(SignalScheduleResponse {
+                    schedule_id,
+                    status: "running".to_string(),
+                    current_wait_id: None,
+                }),
+            ))
+        }
         "pause" => {
             // R1+R4: Use supervisor method for consistent DB + cache update
             let paused = supervisor.pause_schedule(&schedule_id).await.map_err(|e| {
@@ -1039,13 +1468,14 @@ pub async fn signal_schedule(
                 )));
             }
 
-            return Ok((
+            Ok((
                 StatusCode::OK,
                 Json(SignalScheduleResponse {
                     schedule_id,
                     status: "paused".to_string(),
+                    current_wait_id: None,
                 }),
-            ));
+            ))
         }
         "resume" => {
             // R3+R7: Smart resume — direct to Running if admitted, else Pending
@@ -1070,117 +1500,390 @@ pub async fn signal_schedule(
                 }
             })?;
 
-            return Ok((
+            Ok((
                 StatusCode::OK,
                 Json(SignalScheduleResponse {
                     schedule_id,
                     status: new_status,
+                    current_wait_id: None,
                 }),
-            ));
+            ))
         }
         "cancel" => match current_status_str.as_str() {
             "pending" | "running" | "paused" => {
-                // Use supervisor for consistent DB + running cache update.
-                // R1 fix: log pause error at warn! level instead of silently ignoring.
-                // The pause failure must NOT block the cancel operation — the
-                // schedule enters terminal state regardless.
-                if current_status_str == "running" {
-                    if let Err(e) = supervisor.pause_schedule(&schedule_id).await {
-                        tracing::warn!(
-                            "pause failed during cancel for schedule {}: {}; continuing with cancel",
-                            schedule_id,
-                            e
-                        );
-                    }
-                }
+                // A5: cancel must reach the active Host/ACP work through the
+                // coordinator — the engine's cancel path persists the
+                // durable cancel-intent fence, fires the run token, awaits
+                // bounded owned-Host teardown, and only then persists
+                // terminal `cancelled` (unconfirmed → `interrupted`). The
+                // schedule row is updated to match the run's terminal
+                // outcome.
+                //
+                // Fence (qc2 F-001): the terminal UPDATE is fenced on the
+                // SAME (status, current_session_id) pair observed in this
+                // snapshot. A concurrent `admit_schedule_run` that commits
+                // `running` + `current_session_id` between this snapshot and
+                // the write loses the fence (rows affected = 0) and the
+                // cancel returns the standard `workflow_state_conflict`
+                // envelope WITHOUT any status write — an admitted driver can
+                // never end up driving under a schedule that reads cancelled.
+                let snapshot = sqlx::query_as::<_, (String, Option<String>)>(
+                    "SELECT status, current_session_id FROM creator_schedules
+                     WHERE schedule_id = ?",
+                )
+                .bind(&schedule_id)
+                .fetch_optional(&*pool)
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    code: "DATABASE_ERROR".into(),
+                    message: format!("database error: {e}"),
+                })?;
+                // The row vanished between the top-of-handler read and here.
+                let (snapshot_status, snapshot_session) = snapshot.ok_or_else(|| {
+                    NexusApiError::NotFound(format!("schedule {schedule_id} not found"))
+                })?;
 
-                // SAFETY: runtime `sqlx::query` — same pool lifetime constraint as inspect_schedule above.
-                sqlx::query(
-                        "UPDATE creator_schedules SET status = 'cancelled', terminated_at = ?, updated_at = ?
-                         WHERE schedule_id = ?",
-                    )
-                    .bind(now)
-                    .bind(&schedule_id)
-                    .execute(&*pool)
-                    .await
-                    .map_err(|e| NexusApiError::Internal {
-                        code: "DATABASE_ERROR".into(),
-                        message: format!("database error: {e}"),
+                let terminal_status = if let Some(sid) = &snapshot_session {
+                    let coordinator = state.run_coordinator().ok_or_else(|| {
+                        NexusApiError::service_unavailable("run coordinator not configured")
                     })?;
+                    match coordinator
+                        .signal_run(
+                            &nexus_orchestration::engine::SessionId(sid.clone()),
+                            crate::preset_run::RunSignal::Cancel,
+                        )
+                        .await
+                    {
+                        Ok(result) => result.status,
+                        Err(crate::preset_run::RunControlError::StateConflict(sid, msg)) => {
+                            return Err(NexusApiError::ConflictCoded {
+                                code: "workflow_state_conflict".into(),
+                                message: format!("state conflict for {sid}: {msg}"),
+                            });
+                        }
+                        Err(crate::preset_run::RunControlError::WaitConflict {
+                            session_id,
+                            status,
+                            current_wait_id,
+                        }) => {
+                            return Err(NexusApiError::ConflictCoded {
+                                code: "workflow_wait_conflict".into(),
+                                message: format!(
+                                    "wait conflict for {session_id}: current status {status}, current_wait_id {current_wait_id:?}"
+                                ),
+                            });
+                        }
+                        Err(crate::preset_run::RunControlError::ScheduleNotFound(sid)) => {
+                            return Err(NexusApiError::NotFound(format!(
+                                "session {sid} not found"
+                            )));
+                        }
+                        Err(other) => {
+                            let msg = other.to_string();
+                            // A5 (qc2 F-002): the engine commits durable
+                            // `interrupted` BEFORE surfacing the unconfirmed
+                            // cleanup as an error. That is not a server
+                            // failure — report the persisted outcome so the
+                            // operator sees an unconfirmed stop, never a
+                            // fabricated success and never a 500 that hides
+                            // the durable truth.
+                            if msg.contains("cancel cleanup unconfirmed") {
+                                tracing::warn!(
+                                    schedule_id = %schedule_id,
+                                    session_id = %sid,
+                                    "schedule cancel: owned run cleanup unconfirmed; \
+                                     durable run is interrupted"
+                                );
+                                return Ok((
+                                    StatusCode::OK,
+                                    Json(SignalScheduleResponse {
+                                        schedule_id,
+                                        status: "interrupted".to_string(),
+                                        current_wait_id: None,
+                                    }),
+                                ));
+                            }
+                            return Err(NexusApiError::Internal {
+                                code: "RUN_CONTROL_ERROR".into(),
+                                message: msg,
+                            });
+                        }
+                    }
+                } else {
+                    "cancelled".to_string()
+                };
 
-                return Ok((
-                    StatusCode::OK,
-                    Json(SignalScheduleResponse {
-                        schedule_id,
-                        status: "cancelled".to_string(),
-                    }),
-                ));
-            }
-            _ => {
-                return Err(NexusApiError::Conflict(format!(
-                    "cannot cancel schedule {schedule_id}: current status is {current_status_str}"
-                )));
-            }
-        },
-        "advance" => {
-            // Advance is a pass-through signal for the session engine;
-            // confirm the schedule is running.
-            match current_status_str.as_str() {
-                "running" => {
+                // qc2 F-002: an unconfirmed cancel/cleanup (`interrupted`) is
+                // NOT a successful cancel. `creator_schedules.status` has no
+                // `interrupted` variant and `ScheduleRow::to_schedule` maps an
+                // unmapped string to `Pending` (re-runnable), so writing the
+                // run's `interrupted` status into the row would fabricate a
+                // re-runnable schedule. The row is left non-terminal; the
+                // response reports the durable run status and public inspect
+                // projects `execution.recovery_class: "interrupted"` from the
+                // session record.
+                if terminal_status == "interrupted" {
+                    tracing::warn!(
+                        schedule_id = %schedule_id,
+                        session_id = ?snapshot_session,
+                        "schedule cancel: owned run interrupted (unconfirmed cleanup); \
+                         schedule row left non-terminal"
+                    );
                     return Ok((
                         StatusCode::OK,
                         Json(SignalScheduleResponse {
                             schedule_id,
-                            status: "running".to_string(),
+                            status: terminal_status,
+                            current_wait_id: None,
                         }),
                     ));
                 }
-                _ => {
-                    return Err(NexusApiError::Conflict(format!(
-                        "cannot advance schedule {schedule_id}: current status is {current_status_str}"
-                    )));
+
+                // SAFETY: runtime `sqlx::query` — same pool lifetime constraint as inspect_schedule above.
+                // The fence predicate uses the OBSERVED pair: an admission
+                // that landed after the snapshot loses the fence and no
+                // status write happens (rows affected = 0 → conflict).
+                let fenced_rows = fenced_cancel_schedule_status(
+                    &pool,
+                    &schedule_id,
+                    &snapshot_status,
+                    snapshot_session.as_deref(),
+                    &terminal_status,
+                    now,
+                )
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    code: "DATABASE_ERROR".into(),
+                    message: format!("database error: {e}"),
+                })?;
+                if fenced_rows == 0 {
+                    // The row moved on between the snapshot and the write.
+                    // Two cases: (a) the run's own async settlement committed
+                    // the SAME terminal outcome first — the cancel already
+                    // succeeded, so report it (bounded retry: the settle may
+                    // still be in flight); (b) a concurrent admission claimed
+                    // the row — a genuine conflict, never a status write.
+                    if cancel_fence_loss_converged(
+                        &pool,
+                        &schedule_id,
+                        snapshot_session.as_deref(),
+                        &terminal_status,
+                    )
+                    .await
+                    {
+                        return Ok((
+                            StatusCode::OK,
+                            Json(SignalScheduleResponse {
+                                schedule_id,
+                                status: terminal_status,
+                                current_wait_id: None,
+                            }),
+                        ));
+                    }
+                    return Err(NexusApiError::ConflictCoded {
+                        code: "workflow_state_conflict".into(),
+                        message: format!(
+                            "cannot cancel schedule {schedule_id}: schedule state moved on \
+                             concurrently (observed status {snapshot_status}, \
+                             current_session_id {snapshot_session:?})"
+                        ),
+                    });
                 }
+
+                Ok((
+                    StatusCode::OK,
+                    Json(SignalScheduleResponse {
+                        schedule_id,
+                        status: terminal_status,
+                        current_wait_id: None,
+                    }),
+                ))
+            }
+            _ => Err(NexusApiError::Conflict(format!(
+                "cannot cancel schedule {schedule_id}: current status is {current_status_str}"
+            ))),
+        },
+        "advance" => {
+            // Advance is a pass-through signal for the session engine;
+            // confirm the schedule is running. When the schedule owns a
+            // session, the signal routes through the engine's
+            // revision-fenced transition path so a human wait is NEVER
+            // bypassed (A4: advance/resume/force-transition cannot bypass
+            // a human wait — the engine refuses with
+            // workflow_state_conflict).
+            match current_status_str.as_str() {
+                "running" => {
+                    let session_id = sqlx::query_scalar::<_, Option<String>>(
+                        "SELECT current_session_id FROM creator_schedules WHERE schedule_id = ?",
+                    )
+                    .bind(&schedule_id)
+                    .fetch_optional(&*pool)
+                    .await
+                    .map_err(|e| NexusApiError::Internal {
+                        code: "DATABASE_ERROR".into(),
+                        message: format!("database error: {e}"),
+                    })?
+                    .flatten();
+                    if let Some(sid) = session_id {
+                        let coordinator = state.run_coordinator().ok_or_else(|| {
+                            NexusApiError::service_unavailable("run coordinator not configured")
+                        })?;
+                        let result = coordinator
+                            .signal_run(
+                                &nexus_orchestration::engine::SessionId(sid),
+                                crate::preset_run::RunSignal::Resume,
+                            )
+                            .await
+                            .map_err(|e| match e {
+                                crate::preset_run::RunControlError::StateConflict(sid, msg) => {
+                                    NexusApiError::ConflictCoded {
+                                        code: "workflow_state_conflict".into(),
+                                        message: format!("state conflict for {sid}: {msg}"),
+                                    }
+                                }
+                                crate::preset_run::RunControlError::ScheduleNotFound(sid) => {
+                                    NexusApiError::NotFound(format!("session {sid} not found"))
+                                }
+                                other => NexusApiError::Internal {
+                                    code: "RUN_CONTROL_ERROR".into(),
+                                    message: other.to_string(),
+                                },
+                            })?;
+                        return Ok((
+                            StatusCode::OK,
+                            Json(SignalScheduleResponse {
+                                schedule_id,
+                                status: result.status,
+                                current_wait_id: result.current_wait_id,
+                            }),
+                        ));
+                    }
+                    Ok((
+                        StatusCode::OK,
+                        Json(SignalScheduleResponse {
+                            schedule_id,
+                            status: "running".to_string(),
+                            current_wait_id: None,
+                        }),
+                    ))
+                }
+                _ => Err(NexusApiError::Conflict(format!(
+                    "cannot advance schedule {schedule_id}: current status is {current_status_str}"
+                ))),
             }
         }
-        _ => {
-            return Err(NexusApiError::BadRequest {
-                code: "unknown_signal".into(),
-                message: format!(
-                    "unknown signal '{}'; expected start|pause|resume|cancel|advance",
-                    body.signal
-                ),
-            });
+        "continue" => {
+            // A4: authorized continuation of a human wait. The exact
+            // durable wait token is required; a stale/consumed/wrong token
+            // refuses with 409 workflow_wait_conflict and never starts a
+            // second driver. The coordinator routes the signal to the
+            // engine's revision-fenced wait CAS and re-drives the run.
+            let wait_id =
+                body.wait_id
+                    .as_deref()
+                    .ok_or_else(|| NexusApiError::BadRequestCodedDetails {
+                        code: "invalid_input".into(),
+                        message: "continue requires the exact durable wait token".into(),
+                        details: serde_json::json!({
+                            "field": "wait_id",
+                            "reason": "continue requires the exact durable wait token",
+                        }),
+                    })?;
+            let coordinator = state.run_coordinator().ok_or_else(|| {
+                NexusApiError::service_unavailable("run coordinator not configured")
+            })?;
+            let session_id = sqlx::query_scalar::<_, Option<String>>(
+                "SELECT current_session_id FROM creator_schedules WHERE schedule_id = ?",
+            )
+            .bind(&schedule_id)
+            .fetch_optional(&*pool)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: format!("database error: {e}"),
+            })?
+            .flatten()
+            .ok_or_else(|| {
+                NexusApiError::Conflict(format!(
+                    "cannot continue schedule {schedule_id}: no owned run"
+                ))
+            })?;
+            let result = coordinator
+                .signal_run(
+                    &nexus_orchestration::engine::SessionId(session_id),
+                    crate::preset_run::RunSignal::Continue {
+                        wait_id: wait_id.to_string(),
+                    },
+                )
+                .await
+                .map_err(|e| match e {
+                    crate::preset_run::RunControlError::WaitConflict {
+                        session_id,
+                        status,
+                        current_wait_id,
+                    } => {
+                        // A4 exact envelope: `{session_id, status,
+                        // current_wait_id}` in details.
+                        NexusApiError::ConflictCodedDetails {
+                            code: "workflow_wait_conflict".into(),
+                            message: format!(
+                                "wait conflict for {session_id}: current status {status}, current_wait_id {current_wait_id:?}"
+                            ),
+                            details: serde_json::json!({
+                                "session_id": session_id,
+                                "status": status,
+                                "current_wait_id": current_wait_id,
+                            }),
+                        }
+                    }
+                    crate::preset_run::RunControlError::StateConflict(sid, msg) => {
+                        NexusApiError::ConflictCoded {
+                            code: "workflow_state_conflict".into(),
+                            message: format!("state conflict for {sid}: {msg}"),
+                        }
+                    }
+                    crate::preset_run::RunControlError::ReconstructionUnavailable {
+                        session_id,
+                        reason,
+                    } => {
+                        NexusApiError::ConflictCodedDetails {
+                            code: "reconstruction_unavailable".into(),
+                            message: format!(
+                                "cannot continue schedule {schedule_id} (session {session_id}): \
+                                 {reason} — human wait preserved, cancel-only"
+                            ),
+                            details: serde_json::json!({
+                                "session_id": session_id,
+                                "reason": reason,
+                                "allowed_actions": ["cancel", "new_run"],
+                            }),
+                        }
+                    }
+                    crate::preset_run::RunControlError::ScheduleNotFound(sid) => {
+                        NexusApiError::NotFound(format!("session {sid} not found"))
+                    }
+                    other => NexusApiError::Internal {
+                        code: "RUN_CONTROL_ERROR".into(),
+                        message: other.to_string(),
+                    },
+                })?;
+            Ok((
+                StatusCode::OK,
+                Json(SignalScheduleResponse {
+                    schedule_id,
+                    status: result.status,
+                    current_wait_id: result.current_wait_id,
+                }),
+            ))
         }
-    };
-
-    // SAFETY: runtime `sqlx::query` — same pool lifetime constraint as inspect_schedule above.
-    sqlx::query(
-        "UPDATE creator_schedules SET status = ?, updated_at = ?
-         WHERE schedule_id = ?",
-    )
-    .bind(new_status)
-    .bind(now)
-    .bind(&schedule_id)
-    .execute(&*pool)
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".into(),
-        message: format!("database error: {e}"),
-    })?;
-
-    // After starting or resuming, trigger a supervisor tick to potentially
-    // start dependent schedules.
-    if new_status == "running" || new_status == "pending" {
-        let _ = supervisor.tick().await;
-    }
-
-    Ok((
-        StatusCode::OK,
-        Json(SignalScheduleResponse {
-            schedule_id,
-            status: new_status.to_string(),
+        _ => Err(NexusApiError::BadRequest {
+            code: "unknown_signal".into(),
+            message: format!(
+                "unknown signal '{}'; expected start|pause|resume|cancel|advance|continue",
+                body.signal
+            ),
         }),
-    ))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1373,7 +2076,8 @@ pub async fn edit_schedule(
 
     // Read back the summary with the fresh updated_at.
     let row = sqlx::query_as::<_, InspectRow>(
-        "SELECT schedule_id, creator_id, preset_id, status, label,
+        "SELECT schedule_id, creator_id, preset_id, status, execution_policy,
+                current_session_id, label,
                 current_core_context_version, created_at, updated_at,
                 concurrency_kind, concurrency_whitelist
          FROM creator_schedules WHERE schedule_id = ?",
@@ -1745,6 +2449,8 @@ struct ListRow {
     creator_id: String,
     preset_id: String,
     status: String,
+    execution_policy: String,
+    current_session_id: Option<String>,
     label: Option<String>,
     current_core_context_version: i64,
     created_at: i64,
@@ -1758,6 +2464,9 @@ impl ListRow {
             creator_id: self.creator_id,
             preset_id: self.preset_id,
             status: self.status,
+            execution_policy: self.execution_policy,
+            current_session_id: self.current_session_id,
+            execution: None,
             label: self.label,
             current_core_context_version: u32::try_from(self.current_core_context_version)
                 .map_err(|_| NexusApiError::Internal {
@@ -1779,6 +2488,8 @@ struct InspectRow {
     creator_id: String,
     preset_id: String,
     status: String,
+    execution_policy: String,
+    current_session_id: Option<String>,
     label: Option<String>,
     current_core_context_version: i64,
     created_at: i64,
@@ -1797,6 +2508,9 @@ impl InspectRow {
             creator_id: self.creator_id,
             preset_id: self.preset_id,
             status: self.status,
+            execution_policy: self.execution_policy,
+            current_session_id: self.current_session_id,
+            execution: None,
             label: self.label,
             current_core_context_version: u32::try_from(self.current_core_context_version)
                 .map_err(|_| NexusApiError::Internal {
@@ -1828,15 +2542,198 @@ struct HistoryRow {
 // Tests
 // ---------------------------------------------------------------------------
 
+/// Fenced terminal-status write for a schedule cancel (qc2 F-001).
+///
+/// The predicate pins the **observed** `(status, current_session_id)` pair
+/// from the handler's snapshot. A concurrent `admit_schedule_run` that
+/// commits `running` + `current_session_id` between the snapshot and this
+/// write makes the predicate fail, so zero rows are affected and the caller
+/// returns `workflow_state_conflict` **without** any status write — an
+/// admitted driver can never end up driving under a schedule that reads
+/// cancelled.
+///
+/// Returns the number of rows affected (0 = the fence was lost).
+/// Bounded convergence check after a lost cancel fence (A5 idempotence).
+///
+/// Returns `true` when the schedule row reaches the SAME terminal status for
+/// the SAME owned session this cancel targeted — i.e. the run's own async
+/// settlement (or a concurrent identical cancel) already committed our
+/// outcome, so the cancel is a success even though our fenced write lost.
+/// Any other state (a new admitted run, a foreign terminal, or no convergence
+/// within the bound) keeps the conflict.
+async fn cancel_fence_loss_converged(
+    pool: &sqlx::SqlitePool,
+    schedule_id: &str,
+    observed_session: Option<&str>,
+    terminal_status: &str,
+) -> bool {
+    for _ in 0..20 {
+        let row = sqlx::query!(
+            "SELECT status, current_session_id FROM creator_schedules WHERE schedule_id = ?",
+            schedule_id
+        )
+        .fetch_optional(pool)
+        .await;
+        if let Ok(Some(row)) = row {
+            let status = row.status;
+            let session = row.current_session_id;
+            if status == terminal_status && session.as_deref() == observed_session {
+                return true;
+            }
+            // A settled row with the same owned session but a different
+            // terminal status (e.g. completed-vs-cancel) is a genuine
+            // conflict: the run reached its own outcome.
+            if matches!(status.as_str(), "completed" | "failed" | "cancelled")
+                && session.as_deref() == observed_session
+            {
+                return false;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    false
+}
+
+async fn fenced_cancel_schedule_status(
+    pool: &sqlx::SqlitePool,
+    schedule_id: &str,
+    observed_status: &str,
+    observed_session_id: Option<&str>,
+    terminal_status: &str,
+    now: i64,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query!(
+        "UPDATE creator_schedules SET status = ?, terminated_at = ?, updated_at = ?
+         WHERE schedule_id = ? AND status = ? AND current_session_id IS ?",
+        terminal_status,
+        now,
+        now,
+        schedule_id,
+        observed_status,
+        observed_session_id
+    )
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// qc2 F-001: the cancel status write is fenced on the OBSERVED
+    /// `(status, current_session_id)` pair. An admission that commits an
+    /// owned session in the snapshot window must make the fence lose
+    /// (0 rows, no status write); the current pair must commit.
+    #[tokio::test]
+    async fn cancel_fence_loses_to_concurrent_admission_without_writing_status() {
+        let db = tempfile::NamedTempFile::new().expect("temp db");
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("migrate");
+        let now = chrono::Utc::now().timestamp();
+
+        // Admission-only historical shape: running, no owned session.
+        sqlx::query!(
+            "INSERT INTO creator_schedules
+               (schedule_id, creator_id, preset_id, preset_version, status,
+                concurrency_kind, current_core_context_version, created_at, updated_at)
+               VALUES ('SCH-FENCE', 'creator-1', 'memory-augmented', 1, 'running',
+                       'serial', 0, ?, ?)",
+            now,
+            now
+        )
+        .execute(&pool)
+        .await
+        .expect("seed schedule");
+        sqlx::query!(
+            "INSERT INTO orchestration_sessions
+               (session_id, creator_id, preset_id, preset_version, status,
+                context_json, created_at, updated_at)
+               VALUES ('sess-admitted', 'creator-1', 'memory-augmented', 1, 'running',
+                       X'00', ?, ?)",
+            now,
+            now
+        )
+        .execute(&pool)
+        .await
+        .expect("seed admitted session");
+
+        // Handler snapshot: (running, NULL).
+        let row = sqlx::query!(
+            "SELECT status, current_session_id FROM creator_schedules
+             WHERE schedule_id = 'SCH-FENCE'"
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("snapshot");
+        let observed_status = row.status;
+        let observed_session = row.current_session_id;
+
+        // Concurrent admission commits the owned session in the window.
+        sqlx::query!(
+            "UPDATE creator_schedules SET current_session_id = 'sess-admitted'
+             WHERE schedule_id = 'SCH-FENCE'"
+        )
+        .execute(&pool)
+        .await
+        .expect("concurrent admission");
+
+        let rows = fenced_cancel_schedule_status(
+            &pool,
+            "SCH-FENCE",
+            &observed_status,
+            observed_session.as_deref(),
+            "cancelled",
+            now,
+        )
+        .await
+        .expect("fenced write");
+        assert_eq!(rows, 0, "a stale observed pair must lose the fence");
+
+        let row = sqlx::query!(
+            "SELECT status, current_session_id FROM creator_schedules
+             WHERE schedule_id = 'SCH-FENCE'"
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("read back");
+        assert_eq!(
+            row.status, "running",
+            "a lost fence must not write a terminal status"
+        );
+        assert_eq!(row.current_session_id.as_deref(), Some("sess-admitted"));
+
+        // The current observed pair commits.
+        let rows = fenced_cancel_schedule_status(
+            &pool,
+            "SCH-FENCE",
+            "running",
+            Some("sess-admitted"),
+            "cancelled",
+            now,
+        )
+        .await
+        .expect("fenced write");
+        assert_eq!(rows, 1, "the current observed pair must commit");
+        let status: String = sqlx::query_scalar!(
+            "SELECT status as \"status!\" FROM creator_schedules WHERE schedule_id = 'SCH-FENCE'"
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("read back");
+        assert_eq!(status, "cancelled");
+    }
+
     #[test]
     fn signal_request_parse_valid_signals() {
-        for signal in &["pause", "resume", "cancel", "start", "advance"] {
+        for signal in &["pause", "resume", "cancel", "start", "advance", "continue"] {
             let req = SignalScheduleRequest {
                 signal: signal.to_string(),
+                wait_id: None,
             };
             let json = serde_json::to_string(&req).expect("SignalScheduleRequest should serialize");
             let back: SignalScheduleRequest =

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT scheduled_at FROM creator_schedules WHERE schedule_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "scheduled_at",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "f34fc4488a442b0ce50ab7c6f42ccef180ef515ac3c60e78eacc696ee694c034"
+}

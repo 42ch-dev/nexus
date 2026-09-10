@@ -18,7 +18,7 @@ use std::sync::Arc;
 pub async fn axum_app_with_ephemeral_engine() -> Router {
     let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
 
-    let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
     // Wire an ephemeral engine with in-memory storage.
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());

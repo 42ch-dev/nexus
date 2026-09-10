@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT execution_version FROM orchestration_sessions WHERE session_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "execution_version",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "10ab158edc57624e8dd5665977883f8abe6a7675b73e2879f7d4b3e47cd46d56"
+}

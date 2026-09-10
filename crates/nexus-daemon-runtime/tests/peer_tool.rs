@@ -2,17 +2,17 @@
 //!
 //! Drives the real accept loop over a real `TcpListener` on `127.0.0.1:0`
 //! with real spoke dialers, then exercises the single dispatch spine
-//! (worker `HostToolExecutor` + HTTP `POST …/tool-executions` + catalog
-//! `GET /v1/daemon/tools`) against admitted peer tools and user caps.
+//! (HTTP `POST …/tool-executions` + catalog `GET /v1/daemon/tools`) against
+//! admitted peer tools and user caps.
 //!
 //! `DoD` coverage:
 //! - admission matrix (grammar / reserved-ns / non-negotiated /
 //!   not-allowlisted / whole-manifest-invalid each refused with its named
 //!   refusal; valid manifest admits exact-id set with schemas verbatim);
 //! - default deny (empty allowlist ⇒ zero rows, table + catalog);
-//! - single-table proof (unknown peer id through worker spine, HTTP
-//!   tool-executions, AND catalog lookup all yield `not_supported` /
-//!   absence identically to unknown builtin);
+//! - single-table proof (unknown peer id through HTTP tool-executions AND
+//!   catalog lookup both yield `not_supported` / absence identically to
+//!   unknown builtin);
 //! - user-cap branch (≥1 scanned user cap dispatchable via
 //!   `POST …/tool-executions` with `run()` result; `nexus.*`-named and
 //!   `tools.*`-grammar user caps refused at catalog admission; builtin
@@ -171,7 +171,10 @@ async fn start_server(
     if let Some(dir) = scan_dir {
         let deps = CapabilityRuntimeDeps {
             pool: None,
-            worker_provider: None,
+            prompt_executor: None,
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
             daemon_tool_dispatch: None,
             cdn_config: None,
         };
@@ -571,13 +574,10 @@ async fn unknown_peer_id_is_not_supported_identically_to_unknown_builtin() {
         "admitted"
     );
 
-    // Worker spine: unknown peer id → not_supported (same as unknown builtin).
+    // HTTP spine: unknown peer id → not_supported (same as unknown builtin).
     let (status, body) = post_tool_execution(&server, "tools.t3.ghost", json!({})).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(
-        body["error"]["code"], "not_supported",
-        "worker spine: {body}"
-    );
+    assert_eq!(body["error"]["code"], "not_supported", "HTTP spine: {body}");
 
     // HTTP tool-executions: same.
     let (status2, body2) = post_tool_execution(&server, "tools.t3.ghost", json!({})).await;

@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/orchestration/sessions/execution-projection.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ExecutionProjection",
+  "description": "Shared durable execution projection (A2/A7): recovery class, current human wait, stable reason code and the legal operator actions. Present for schedules without a run (version/revision null, class from policy).",
+  "type": "object",
+  "required": ["recovery_class", "allowed_actions"],
+  "properties": {
+    "execution_version": { "type": ["integer", "null"], "description": "Durable execution version; null when no run exists." },
+    "state_revision": { "type": ["integer", "null"], "description": "Durable state revision; null when no run exists." },
+    "recovery_class": {
+      "type": "string",
+      "enum": ["terminal", "human_wait", "safe_boundary", "converge_merge", "interrupted", "legacy_inert", "system_inert", "legacy_unverified", "unreadable"],
+      "description": "Shared A7 recovery classification."
+    },
+    "wait": {
+      "type": ["object", "null"],
+      "description": "Current durable A4 human wait, if any.",
+      "required": ["wait_id", "task_id"],
+      "properties": {
+        "wait_id": { "type": "string" },
+        "task_id": { "type": "string" },
+        "child_session_id": { "type": ["string", "null"] },
+        "child_task_id": { "type": ["string", "null"] },
+        "kind": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "reason_code": { "type": ["string", "null"], "description": "Stable machine reason code for uncertain/terminal outcomes." },
+    "allowed_actions": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["start", "continue", "resume", "cancel", "new_run"] },
+      "description": "Legal operator actions in the current durable state."
+    }
+  },
+  "additionalProperties": false
+}

@@ -1271,6 +1271,8 @@ impl HostFacade for CountingHost {
             active_op_id: None,
             negotiated_capabilities:
                 nexus_agent_host::capability::model::CapabilityDescriptor::native_cli_limited(),
+            owner: request.owner,
+            process_identity: None,
         };
         self.sessions
             .lock()

@@ -8,7 +8,7 @@
 | **Document class** | Master |
 | **Normative scope** | Architecture boundaries, process model, subsystem responsibilities, pre-release constraints |
 | **Related** | [cli-spec.md](./cli-spec.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [agent-host.md](./agent-host.md) |
-| **Last reconciled** | 2026-09-04 — current Daemon API/runtime facts through V1.183, including V1.180–V1.182 checkpoint inspection and boot re-drive |
+| **Last reconciled** | 2026-09-07 — V1.183 facts plus **V1.186 product lock (Prepare, not shipped)** §20 (authoritative terminal/wait status; no surprise drive of never-started schedules) |
 
 ---
 
@@ -254,24 +254,26 @@ Daemon runtime is a **local supervisor**. It is **not** an ACP Agent or ACP Serv
 
 ---
 
-## V1.57 P1 Draft overlay: Host tool executor — 3-caller entry points
+## V1.57 P1 Draft overlay: Host tool executor — caller entry points
 
 **Status**: Draft (V1.57 P1)  
 
 ### Host tool dispatch topology
 
-The host tool executor (`host_tool_executor.rs`) provides three caller entry
+The host tool executor (`host_tool_executor.rs`) provides two caller entry
 points, all dispatching through the same `CapabilityRegistry::dispatch` path:
 
 | Entry point | Caller | Normalization | Dispatch |
 |-------------|--------|---------------|----------|
 | `HostToolExecutor::execute()` | CLI `host-call` + HTTP `POST /v1/daemon/agent-host/internal/tool-executions` | `ToolExecuteRequest` → admission pipeline | `CapabilityRegistry::dispatch` |
-| `HostToolExecutor::dispatch_from_worker()` | Worker `agent_tool_request` IPC | `{tool_name, args, request_id}` → `ToolExecuteRequest` | Same path |
 | `HostToolExecutor::dispatch_for_schedule()` | Schedule executor (in-process) | `{tool_name, args, request_id}` → `ToolExecuteRequest` with `HostToolCallerKind::Schedule` | Same path |
 
-All three entry points share a single admission pipeline (5 gates: allowlist,
-active creator, workspace bounds, permissions.toml, audit log) and dispatch
-through the same `CapabilityRegistry::dispatch(tool_id, input)` call.
+M-007: the worker `agent_tool_request` IPC lane (`dispatch_from_worker()`,
+`HostToolCallerKind::Worker`) was removed — the surviving dispatch lane is
+Schedule-only. All remaining entry points share a single admission pipeline
+(5 gates: allowlist, active creator, workspace bounds, permissions.toml,
+audit log) and dispatch through the same
+`CapabilityRegistry::dispatch(tool_id, input)` call.
 
 ### V1.57 P1 refactor
 
@@ -281,22 +283,21 @@ through the same `CapabilityRegistry::dispatch(tool_id, input)` call.
   registry-bound `host_tool_handlers` module
 - `CdnConfig` constructor-injected (no global `RwLock`)
 
-### V1.57 P3: Worker IPC allowlist — dynamic derivation
+### V1.57 P3: Tool allowlist — dynamic derivation
 
 **Status**: Shipped (V1.57 P3)
 
 The admission pipeline's Gate 1 (tool ID allowlist) now uses
 `CapabilityRegistry::lookup()` as its dynamic SSOT instead of the static
 `TOOL_ALLOWLIST` constant (see `host_tool_handlers.rs::admission_pipeline`).
-This means the worker `agent_tool_request` IPC path — which normalizes
-through `HostToolExecutor::dispatch_from_worker()` → `execute()` →
-`admission_pipeline()` — derives its allowlist from the same registry as
-CLI and HTTP entry points. All 18 shipped `nexus.*` host tool IDs are
-dispatchable via worker IPC; unknown IDs return `NOT_SUPPORTED`.
+This means the CLI/HTTP and schedule entry points — which normalize through
+`HostToolExecutor::execute()` / `dispatch_for_schedule()` →
+`admission_pipeline()` — derive their allowlist from the same registry as
+each other. All 18 shipped `nexus.*` host tool IDs are dispatchable via
+those lanes; unknown IDs return `NOT_SUPPORTED`.
 
 Cross-caller E2E test: `crates/nexus-daemon-runtime/tests/cross_caller_e2e.rs`
-verifies dispatch equivalence across all 3 caller paths for all 18 IDs
-(54 invocation cases).
+verifies dispatch equivalence across the caller paths for all 18 IDs.
 
 ## V1.58 P0 Draft overlay: .sqlx cache hygiene protocol (R-V156-PROCESS-01 + R-V156P1-CACHE-01)
 
@@ -616,7 +617,7 @@ The Vite dev origin (`http://localhost:5173`) is allowed unconditionally because
 
 | Condition | Outcome |
 |-----------|---------|
-| Request carries no `Origin` header | **Permitted** — non-browser clients (CLI `host-call`, `curl`, worker IPC, direct browser tab navigation to the daemon's own URL at `http://127.0.0.1:<port>`) do not send an `Origin` header. Same-origin browser requests also omit `Origin`. |
+| Request carries no `Origin` header | **Permitted** — non-browser clients (CLI `host-call`, `curl`, direct browser tab navigation to the daemon's own URL at `http://127.0.0.1:<port>`) do not send an `Origin` header. Same-origin browser requests also omit `Origin`. |
 | `Origin` header value is in the allowlist | **Permitted** — the request proceeds to auth middleware (§4.4.3) and the handler |
 | `Origin` header value is NOT in the allowlist | **Rejected** — `403 Forbidden` with a clear error message including the rejected origin value and a reference to `NEXUS_DAEMON_ALLOWED_ORIGINS` as the documented escape hatch |
 
@@ -634,7 +635,7 @@ Both layers derive their allowlist from the same configuration source. The middl
 
 The Origin gate is **independent of** and **applied before** the auth middleware (§4.4.3). The keyless-localhost mode (`NEXUS42_DAEMON_API_KEY` unset) remains the default (deprecation is a non-goal; see V1.86 compass §1). Before V1.86, a cross-origin browser request to `http://127.0.0.1:8420` passed both permissive CORS (all origins allowed) AND keyless-localhost auth (TCP connection is loopback). After V1.86, the Origin gate rejects the cross-origin request at the first layer — the auth middleware is never reached — because the malicious site's `Origin` (e.g., `https://evil.com`) is not in the allowlist.
 
-Non-browser clients (CLI, workers, `curl`) do not send an `Origin` header and pass the Origin gate, then proceed through auth as before.
+Non-browser clients (CLI, `curl`) do not send an `Origin` header and pass the Origin gate, then proceed through auth as before.
 
 #### 13.1.5 Observability
 
@@ -651,7 +652,7 @@ fs/* tools require an active workspace with defined bounds
 
 **Rationale:** the fs/* path guard (§13.3, §4.5 W-002) requires a workspace root to enforce the containment boundary. Without a workspace root there is no boundary to enforce and any filesystem path would pass. Deny-by-default is the safe primitive; a sandbox-dir fallback is YAGNI.
 
-**Caller audit:** all three host-tool caller entry points (CLI `host-call`, worker `agent_tool_request` IPC, schedule executor) require an active workspace context for legitimate fs/* usage. No legitimate no-workspace fs/* invocation path exists in the current architecture. This invariant is verified by grepping all `HostToolExecutor` call sites at the time of the fix and documented here so future callers respect it.
+**Caller audit:** all host-tool caller entry points (CLI `host-call`, schedule executor) require an active workspace context for legitimate fs/* usage. The worker `agent_tool_request` IPC lane was removed (M-007); no legitimate no-workspace fs/* invocation path exists in the current architecture. This invariant is verified by grepping all `HostToolExecutor` call sites at the time of the fix and documented here so future callers respect it.
 
 **Implementation contract:** the denial is in `admission_pipeline()` (`api/handlers/host_tool_handlers.rs`), before `execute_read_file` / `execute_write_file` run. The admission check is:
 ```rust
@@ -1177,3 +1178,18 @@ Implementation authorities:
 `crates/nexus-daemon-runtime/src/preset_run.rs`,
 `crates/nexus-daemon-runtime/src/boot.rs`, and
 `apps/nexus42/src/commands/ops.rs`.
+
+## 20. V1.186 product lock — truthful runs and bounded boot recovery
+
+**Status:** Prepare product lock; not shipped. Complements §19 (V1.180–V1.182 inspect/re-drive as implemented today).
+
+§19 remains an accurate description of **shipped** behavior: the persisted status column is diagnostic, checkpoint upserts do not advance it, and boot re-drive is converge/merge join-key class only.
+
+V1.186 runtime responsibilities (target behavior, not shipped):
+
+1. **Durable store and inspect.** `orchestration_sessions.status` is authoritative for versioned new-run records, with revision-fenced atomic status/checkpoint/metadata transitions; position saves never force running over newer terminal/wait state. Legacy/unreadable records are distinguished, not silently upgraded to success. Existing daemon-free `ops inspect` remains read-only and shares the recovery classifier with boot; public session lookup reads persisted terminals even without a live runner.
+2. **One coordinator, including lazy attach.** Public session creation and schedule admission enqueue the same bounded drive owner. Boot and lazy Creator-DB attach publish a matching storage/engine/coordinator bundle before readiness. User runs require a durable Creator DB; do not fall back to an in-memory user workflow. Descriptor/input/core seed and schedule→session association commit before enqueue. Repeated admission returns the same owned run, and terminal reconciliation does not duplicate auto-chain children.
+3. **Explicit cutover.** An additive schedule execution_policy defaults historical rows to legacy_inert; new user/cron/auto-chain admissions explicitly select driven_v1. Boot/tick/cron exclude legacy never-started pending/running/paused rows; missing session ID or creation time is not automatic opt-in. Explicit public schedule start revalidates and opts only that row in. `_system.maintenance` is system_inert, never queued for user Host work, and generic public start cannot opt it in.
+4. **Wait and cancellation.** Human wait_id and root/child checkpoint survive restart with no implicit approval. Token consumption and terminal/cancel races use one durable revision fence. Cancel reaches the actual Host operation independently of a long-running step lock, fences subsequent work and performs bounded owned-child cleanup. Only confirmed stop yields cancelled; unconfirmed cleanup stays interrupted. Wire errors and wait semantics are owned by [orchestration-engine.md](orchestration-engine.md) §15; Host process ownership by [agent-host.md](agent-host.md) §4.
+5. **Recovery before drive.** In-flight dispatch intent/uncertain effects take precedence over old join keys and are not replayed. Terminal rows do not run; waits stay waiting; shipped converge/merge deadlines retain downtime-aware bounded resume. Supported new embedded/user/system presets reconstruct existing IDs/cursors from frozen matching source/template identity with production dependencies. Changed/missing source or unsupported child identity refuses with an actionable reason, not an embedded fallback or fresh run. Checkpoint position is not an effects ledger; exactly-once arbitrary effects remain a non-goal.
+6. **Honest isolated live QA.** Nexus CLI home resolves through `HOME/.nexus42`; `NEXUS_HOME` in a recipe denotes that path, not a newly supported CLI environment override. All Nexus processes in QA must resolve the same temp config/DB tree; any runtime NEXUS42_HOME override must equal it. External omp gets a separate temporary HOME/XDG/profile and the admitted Creator workspace cwd through generic ProviderConfig `omp acp` argv. No user-global config/auth reads or writes; use auth already in the isolated profile or injected by the harness. Only installed live-provider output through public workflow admission proves live success; deterministic protocol processes prove races/failures/restarts.
