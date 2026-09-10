@@ -57,7 +57,7 @@ uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]
 # Unix signal handling for graceful sidecar shutdown (SIGTERM). V1.66 is macOS-only.
-nix = { version = "0.28", features = ["signal", "process"] }
+nix = { version = "0.31", features = ["signal", "process"] }
 
 [dev-dependencies]
 # Path-guard unit tests build temp workspace trees.
