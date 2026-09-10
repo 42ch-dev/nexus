@@ -148,7 +148,7 @@ hex = "0.4"
 # every Windows build with E0433 "cannot find crate" in lib code using them
 # on all platforms (works/cron.rs cron validation, auth/user_auth.rs base64,
 # creator/memory.rs tempfile, rules_runtime.rs dialoguer). Moved here.
-dialoguer = "0.11"
+dialoguer = "0.12"
 tempfile = "3"
 regex = "1"
 base64 = "0.22"
