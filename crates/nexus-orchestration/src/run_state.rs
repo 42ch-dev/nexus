@@ -213,6 +213,9 @@ pub struct RunRecord {
     pub descriptor: Option<RunDescriptorV1>,
     /// Durable run state (v1 rows only).
     pub state: Option<RunStateV1>,
+    /// Durable graph-flow session version (graph clock; distinct from the
+    /// workflow control CAS `state_revision`).
+    pub graph_version: u64,
 }
 
 /// Child checkpoint (A2) — carries the child session, status and run state.
@@ -330,6 +333,37 @@ pub trait WorkflowStateStore: Send + Sync {
         &self,
         session_id: &SessionId,
         expected_revision: u64,
+        checkpoint: RunCheckpoint<'_>,
+        next_status: SessionStatus,
+        next_state: &RunStateV1,
+    ) -> Result<RunRecord, EngineError> {
+        self.commit_transition_with_graph_fence(
+            session_id,
+            expected_revision,
+            None,
+            checkpoint,
+            next_status,
+            next_state,
+        )
+        .await
+    }
+
+    /// [`commit_transition`](Self::commit_transition) with an additional
+    /// graph-clock fence: when `expected_graph_version` is `Some`, the
+    /// commit CAS additionally requires the persisted `graph_version` to
+    /// equal it, so a graph-only writer that advanced the session clock
+    /// without the workflow revision cannot be overwritten by a stale
+    /// owner. Used by the failed-step settlement and anchored cleanup
+    /// paths, which must never rebase onto a winner of either clock.
+    ///
+    /// # Errors
+    /// Returns [`EngineError`] on storage failure or revision/graph
+    /// mismatch (both surface as ownership loss).
+    async fn commit_transition_with_graph_fence(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_graph_version: Option<u64>,
         checkpoint: RunCheckpoint<'_>,
         next_status: SessionStatus,
         next_state: &RunStateV1,

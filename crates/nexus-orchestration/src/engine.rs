@@ -207,6 +207,12 @@ pub enum EngineSignal {
     Pause,
     Resume,
     Cancel,
+    /// Failed-step cleanup cancel: reuse the cancel path but refuse to
+    /// rebase onto a newer workflow/graph revision (no reload-and-retry).
+    CancelAnchored {
+        expected_revision: u64,
+        expected_graph_version: u64,
+    },
     Advance,
     /// Authorized continuation of a human wait (A4). Carries the exact
     /// durable wait token; a stale/consumed/wrong token loses the CAS and
@@ -266,6 +272,9 @@ pub struct FailedStepWitness {
     /// Revision owned by this step attempt after `mark_step_in_flight`
     /// (or the pre-step revision when no in-flight marker was written).
     pub owned_revision: u64,
+    /// Graph clock owned at the witness anchor (`None` only for legacy
+    /// paths that predate the graph column — never fabricated).
+    pub owned_graph_version: Option<u64>,
     /// Durable status observed before the step began.
     pub pre_step_status: SessionStatus,
     /// Pre-step root checkpoint — the position/context before `runner.run`.
@@ -307,6 +316,7 @@ pub struct FailureSettlement {
     pub witness: Option<FailedStepWitness>,
     pub authoritative: FailurePersistenceDisposition,
     pub context: FailurePersistenceDisposition,
+    pub cleanup: FailurePersistenceDisposition,
 }
 
 /// Serializable settlement summary for drive outcomes (no `Session` clone).
@@ -315,6 +325,7 @@ pub struct FailureSettlementSummary {
     pub owned_revision: Option<u64>,
     pub authoritative: FailurePersistenceDisposition,
     pub context: FailurePersistenceDisposition,
+    pub cleanup: FailurePersistenceDisposition,
 }
 
 impl FailureSettlementSummary {
@@ -324,6 +335,7 @@ impl FailureSettlementSummary {
             owned_revision: settlement.witness.as_ref().map(|w| w.owned_revision),
             authoritative: settlement.authoritative,
             context: settlement.context,
+            cleanup: settlement.cleanup,
         }
     }
 }
@@ -852,9 +864,16 @@ impl EngineSharedState {
         session_id: &SessionId,
         signal: &EngineSignal,
     ) -> Result<SessionStatus, EngineError> {
+        let cancel_allow_rebase = !matches!(
+            signal,
+            EngineSignal::CancelAnchored {
+                expected_revision: _,
+                expected_graph_version: _,
+            }
+        );
         let target_status = match signal {
             EngineSignal::Pause => SessionStatus::Paused,
-            EngineSignal::Cancel => SessionStatus::Cancelled,
+            EngineSignal::Cancel | EngineSignal::CancelAnchored { .. } => SessionStatus::Cancelled,
             EngineSignal::Resume | EngineSignal::Advance | EngineSignal::Continue { .. } => {
                 SessionStatus::Running
             }
@@ -870,6 +889,21 @@ impl EngineSharedState {
             .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
         let expected_revision = record.state_revision;
 
+        if let EngineSignal::CancelAnchored {
+            expected_revision: anchor_revision,
+            expected_graph_version: anchor_graph,
+        } = *signal
+        {
+            if record.state_revision != anchor_revision || record.graph_version != anchor_graph {
+                return Err(EngineError::RevisionMismatch {
+                    session_id: session_id.0.clone(),
+                    expected: anchor_revision,
+                    found: record.state_revision,
+                });
+            }
+        }
+
+
         if record.status.is_terminal() {
             // A5 cleanup retry: an `Interrupted` run with a durable cancel
             // intent accepts a further `Cancel` as the bounded, owner-scoped
@@ -877,7 +911,10 @@ impl EngineSharedState {
             // the owned Host sessions may still be unconfirmed and must
             // remain reapeable. All other signals on a terminal run are
             // refused.
-            let interrupted_cancel_retry = matches!(signal, EngineSignal::Cancel)
+            let interrupted_cancel_retry = matches!(
+                signal,
+                EngineSignal::Cancel | EngineSignal::CancelAnchored { .. }
+            )
                 && record.status == SessionStatus::Interrupted
                 && record.state.as_ref().is_some_and(|s| s.cancel_requested);
             if !interrupted_cancel_retry {
@@ -890,14 +927,19 @@ impl EngineSharedState {
         // control winner. Every other signal — Continue included — is
         // refused with a state conflict and the wait is never consumed:
         // no new work is created while cancellation is in flight.
-        if next_state.cancel_requested && !matches!(signal, EngineSignal::Cancel) {
+        if next_state.cancel_requested
+            && !matches!(signal, EngineSignal::Cancel | EngineSignal::CancelAnchored { .. })
+        {
             return Err(EngineError::TerminalState(session_id.0.clone()));
         }
         // Continue is the ONLY non-cancel signal that may act on a waiting
         // run; all other non-cancel signals are fenced against waits and
         // in-flight markers (A4: advance/resume/force-transition cannot
         // bypass a human wait).
-        if !matches!(signal, EngineSignal::Cancel | EngineSignal::Continue { .. })
+        if !matches!(
+            signal,
+            EngineSignal::Cancel | EngineSignal::CancelAnchored { .. } | EngineSignal::Continue { .. }
+        )
             && (matches!(record.status, SessionStatus::WaitingForInput)
                 || next_state.wait.is_some()
                 || next_state.step_in_flight.is_some()
@@ -1052,6 +1094,13 @@ impl EngineSharedState {
                     {
                         Ok(_) => break,
                         Err(EngineError::RevisionMismatch { .. }) => {
+                            if !cancel_allow_rebase {
+                                return Err(EngineError::RevisionMismatch {
+                                    session_id: session_id.0.clone(),
+                                    expected: fence_revision,
+                                    found: fence_revision,
+                                });
+                            }
                             attempts += 1;
                             if attempts >= CANCEL_FENCE_RETRY_BOUND {
                                 // The run is still cancellable but the fence
@@ -1250,6 +1299,13 @@ impl EngineSharedState {
                         {
                             Ok(_) => break,
                             Err(EngineError::RevisionMismatch { .. }) => {
+                                if !cancel_allow_rebase {
+                                    return Err(EngineError::RevisionMismatch {
+                                        session_id: session_id.0.clone(),
+                                        expected: current_revision,
+                                        found: current_revision,
+                                    });
+                                }
                                 interrupted_attempts += 1;
                                 if interrupted_attempts >= CANCEL_FENCE_RETRY_BOUND {
                                     return Err(EngineError::RevisionMismatch {
@@ -1348,6 +1404,13 @@ impl EngineSharedState {
                 {
                     Ok(_) => break,
                     Err(EngineError::RevisionMismatch { .. }) => {
+                        if !cancel_allow_rebase {
+                            return Err(EngineError::RevisionMismatch {
+                                session_id: session_id.0.clone(),
+                                expected: current_revision,
+                                found: current_revision,
+                            });
+                        }
                         settle_attempts += 1;
                         if settle_attempts >= CANCEL_FENCE_RETRY_BOUND {
                             return Err(EngineError::RevisionMismatch {
@@ -1504,12 +1567,16 @@ impl EngineSharedState {
                 .ok_or(EngineError::NoGraphLoaded)?
         };
 
+        let mut step_witness: Option<FailedStepWitness> = None;
+
         // Capture the current revision before the step so the transition CAS
-        // is anchored to the pre-step state (A2).
+        // is anchored to the pre-step state (A2). A `load_run` failure has
+        // no witness — the driver must not reconstruct authority afterward.
         let (expected_revision, pre_step_status) = if let Some(store) = &self.workflow_store {
-            match store.load_run(session_id).await? {
-                Some(r) => (r.state_revision, r.status),
-                None => (0, SessionStatus::Running),
+            match store.load_run(session_id).await {
+                Ok(Some(r)) => (r.state_revision, r.status),
+                Ok(None) => (0, SessionStatus::Running),
+                Err(e) => return Err(e),
             }
         } else {
             let status = self
@@ -1529,63 +1596,101 @@ impl EngineSharedState {
         // its pre-step position — `FlowRunner.run` saves position/context
         // before `commit_transition`, so without this the root would be left
         // partially advanced on failure (Important 2).
-        let pre_step_root = self
-            .storage
-            .get(&session_id.0)
-            .await
-            .map_err(EngineError::GraphFlow)?;
+        let pre_step_root = match self.storage.get(&session_id.0).await {
+            Ok(session) => session,
+            Err(e) => return Err(EngineError::GraphFlow(e)),
+        };
 
         // Persist the current-position safety intent BEFORE any external
         // effect in the step. The marker write is fenced to step-able status
         // plus the pre-step revision and atomically advances the revision.
-        // A signal loaded before the marker then loses its CAS; a signal
-        // loaded afterward sees the in-flight state and is refused unless it
-        // is cancellation. The subsequent transition anchors to the marker's
-        // revision. A FlowRunner/storage save failure after this point cannot
-        // leave an unmarked running row.
-        if let Some(store) = &self.workflow_store {
-            if let Some(pre) = &pre_step_root {
-                transition_revision = expected_revision.checked_add(1).ok_or_else(|| {
-                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                        "run '{}': state revision overflow",
-                        session_id.0
-                    )))
-                })?;
-                let in_flight_state = RunStateV1 {
-                    step_in_flight: Some(pre.current_task_id.clone()),
-                    ..RunStateV1::default()
-                };
-                let in_flight_checkpoint = RunCheckpoint {
-                    root: pre,
-                    children: &[],
-                };
-                store
-                    .mark_step_in_flight(
-                        session_id,
-                        expected_revision,
-                        in_flight_checkpoint,
-                        &in_flight_state,
-                    )
-                    .await?;
+        if let (Some(store), Some(pre)) = (&self.workflow_store, pre_step_root.as_ref()) {
+            transition_revision = expected_revision.checked_add(1).ok_or_else(|| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "run '{}': state revision overflow",
+                    session_id.0
+                )))
+            })?;
+            let in_flight_state = RunStateV1 {
+                step_in_flight: Some(pre.current_task_id.clone()),
+                ..RunStateV1::default()
+            };
+            let in_flight_checkpoint = RunCheckpoint {
+                root: pre,
+                children: &[],
+            };
+            step_witness = Some(FailedStepWitness {
+                owned_revision: transition_revision,
+                owned_graph_version: pre.version.checked_add(1),
+                pre_step_status: pre_step_status.clone(),
+                pre_step_root: pre.clone(),
+            });
+            match store
+                .mark_step_in_flight(
+                    session_id,
+                    expected_revision,
+                    in_flight_checkpoint,
+                    &in_flight_state,
+                )
+                .await
+            {
+                Err(
+                    e @ EngineError::RevisionMismatch { .. }
+                    | e @ EngineError::TerminalState(_),
+                ) => return Err(e),
+                Err(e) => {
+                    let witness = FailedStepWitness {
+                        owned_revision: expected_revision,
+                        owned_graph_version: Some(pre.version),
+                        pre_step_status: pre_step_status.clone(),
+                        pre_step_root: pre.clone(),
+                    };
+                    return Err(EngineError::step_failed(&session_id.0, e, witness));
+                }
+                Ok(()) => {}
             }
         }
+
+        let wrap_step_boundary_err = |err: EngineError| -> EngineError {
+            if matches!(
+                err,
+                EngineError::RevisionMismatch { .. } | EngineError::TerminalState(_)
+            ) {
+                return err;
+            }
+            if let Some(witness) = step_witness.clone() {
+                return EngineError::step_failed(&session_id.0, err, witness);
+            }
+            if let Some(pre) = pre_step_root.as_ref() {
+                return EngineError::step_failed(
+                    &session_id.0,
+                    err,
+                    FailedStepWitness {
+                        owned_revision: transition_revision,
+                        owned_graph_version: Some(pre.version),
+                        pre_step_status: pre_step_status.clone(),
+                        pre_step_root: pre.clone(),
+                    },
+                );
+            }
+            err
+        };
 
         // Execute one step using the Arc<FlowRunner>.
         let result = match runner.run(&session_id.0).await {
             Ok(result) => result,
             Err(e) => {
-                let witness = FailedStepWitness {
-                    owned_revision: transition_revision,
-                    pre_step_status,
-                    pre_step_root: pre_step_root
-                        .clone()
-                        .unwrap_or_else(|| {
-                            graph_flow::Session::new_from_task(
-                                session_id.0.clone(),
-                                "",
-                            )
-                        }),
-                };
+                let witness = step_witness.unwrap_or_else(|| {
+                    let pre = pre_step_root.as_ref().expect(
+                        "runner failure without a pre-step root checkpoint",
+                    );
+                    FailedStepWitness {
+                        owned_revision: transition_revision,
+                        owned_graph_version: Some(pre.version),
+                        pre_step_status: pre_step_status.clone(),
+                        pre_step_root: pre.clone(),
+                    }
+                });
                 return Err(EngineError::step_failed(
                     &session_id.0,
                     EngineError::GraphFlow(e),
@@ -1725,10 +1830,12 @@ impl EngineSharedState {
                         // cached snapshot is otherwise a stale OCC
                         // preimage).
                         for child in &children {
-                            self.sync_child_checkpoint_after_step(&SessionId(
-                                child.session.id.clone(),
-                            ))
-                            .await?;
+                            if let Err(e) = self
+                                .sync_child_checkpoint_after_step(&SessionId(child.session.id.clone()))
+                                .await
+                            {
+                                return Err(wrap_step_boundary_err(e));
+                            }
                         }
                         if parent_advanced
                             && children.iter().any(|child| child.status.is_terminal())
@@ -1887,7 +1994,9 @@ impl EngineSharedState {
         // A storage/load failure here is propagated (A7): a child whose
         // persisted record cannot be read is non-replayable and must not
         // let the parent continue with a stale/missing checkpoint.
-        self.sync_child_checkpoint_after_step(session_id).await?;
+        if let Err(e) = self.sync_child_checkpoint_after_step(session_id).await {
+            return Err(wrap_step_boundary_err(e));
+        }
 
         // Update in-memory status.
         if let Some(s) = self
@@ -4256,6 +4365,28 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
             .await
     }
 
+
+    async fn commit_transition_with_graph_fence(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_graph_version: Option<u64>,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_status: SessionStatus,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        let _ = expected_graph_version;
+        self.commit_transition(
+            session_id,
+            expected_revision,
+            checkpoint,
+            next_status,
+            next_state,
+        )
+        .await
+    }
+
+
     async fn settle_cancelled(
         &self,
         session_id: &SessionId,
@@ -4470,6 +4601,28 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
             .await
     }
 
+
+    async fn commit_transition_with_graph_fence(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_graph_version: Option<u64>,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_status: SessionStatus,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        let _ = expected_graph_version;
+        self.commit_transition(
+            session_id,
+            expected_revision,
+            checkpoint,
+            next_status,
+            next_state,
+        )
+        .await
+    }
+
+
     async fn settle_cancelled(
         &self,
         session_id: &SessionId,
@@ -4639,6 +4792,28 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
             )
             .await
     }
+
+
+    async fn commit_transition_with_graph_fence(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_graph_version: Option<u64>,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_status: SessionStatus,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        let _ = expected_graph_version;
+        self.commit_transition(
+            session_id,
+            expected_revision,
+            checkpoint,
+            next_status,
+            next_state,
+        )
+        .await
+    }
+
 
     async fn settle_cancelled(
         &self,
@@ -7760,9 +7935,19 @@ mod tests {
             .run_step(&session_id)
             .await
             .expect_err("the losing drive must surface the graph-save conflict");
+        let conflict = match &err {
+            EngineError::StepFailed { source, witness, .. } => {
+                assert!(
+                    witness.owned_graph_version.is_some(),
+                    "graph-save conflict must carry a graph-clock witness"
+                );
+                source.as_ref()
+            }
+            other => other,
+        };
         assert!(
             matches!(
-                err,
+                conflict,
                 EngineError::GraphFlow(graph_flow::GraphError::SessionConflict(_))
             ),
             "expected GraphFlow(SessionConflict), got {err:?}"

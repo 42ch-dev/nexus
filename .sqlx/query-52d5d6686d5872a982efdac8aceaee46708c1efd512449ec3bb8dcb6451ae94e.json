@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT session_id as \"session_id!\", status as \"status!\",\n                      execution_version as \"execution_version!\",\n                      state_revision as \"state_revision!\", run_state_json, run_descriptor_json\n               FROM orchestration_sessions WHERE session_id = ?",
+  "query": "SELECT session_id as \"session_id!\", status as \"status!\",\n                      execution_version as \"execution_version!\",\n                      state_revision as \"state_revision!\", graph_version as \"graph_version!\",\n                      run_state_json, run_descriptor_json\n               FROM orchestration_sessions WHERE session_id = ?",
   "describe": {
     "columns": [
       {
@@ -24,13 +24,18 @@
         "type_info": "Integer"
       },
       {
-        "name": "run_state_json",
+        "name": "graph_version!",
         "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "run_state_json",
+        "ordinal": 5,
         "type_info": "Blob"
       },
       {
         "name": "run_descriptor_json",
-        "ordinal": 5,
+        "ordinal": 6,
         "type_info": "Blob"
       }
     ],
@@ -42,9 +47,10 @@
       false,
       false,
       false,
+      false,
       true,
       true
     ]
   },
-  "hash": "9c0f4b46de3d524b141925ea676b1d5c32ab7d9b83851646eb27e4152e6e5538"
+  "hash": "52d5d6686d5872a982efdac8aceaee46708c1efd512449ec3bb8dcb6451ae94e"
 }

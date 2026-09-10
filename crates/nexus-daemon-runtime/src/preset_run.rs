@@ -139,7 +139,6 @@ pub async fn drive_preset_run(
     config: &PresetRunConfig,
     cancel: Option<&CancellationToken>,
     driver_authoritative_fault: Option<&Arc<AtomicBool>>,
-    driver_context_fault: Option<&Arc<AtomicBool>>,
 ) -> PresetRunOutcome {
     let mut steps: u32 = 0;
 
@@ -171,16 +170,14 @@ pub async fn drive_preset_run(
             }
             Err(e) => {
                 let error = format!("get_status failed: {e}");
-                let witness = witness_from_durable_row(workflow_store, storage, session_id).await;
                 let settlement = settle_drive_failure(
                     engine,
                     workflow_store,
                     storage,
                     session_id,
                     &error,
-                    witness.as_ref(),
+                    None,
                     driver_authoritative_fault,
-                    driver_context_fault,
                 )
                 .await;
                 return failed_outcome(steps, error, settlement);
@@ -203,16 +200,14 @@ pub async fn drive_preset_run(
                 };
             }
             Ok(StepOutcome::Error(msg)) => {
-                let witness = witness_from_durable_row(workflow_store, storage, session_id).await;
                 let settlement = settle_drive_failure(
                     engine,
                     workflow_store,
                     storage,
                     session_id,
                     &msg,
-                    witness.as_ref(),
+                    None,
                     driver_authoritative_fault,
-                    driver_context_fault,
                 )
                 .await;
                 return failed_outcome(steps.saturating_add(1), msg, settlement);
@@ -247,7 +242,6 @@ pub async fn drive_preset_run(
                     &error,
                     witness.as_ref(),
                     driver_authoritative_fault,
-                    driver_context_fault,
                 )
                 .await;
                 return failed_outcome(steps.saturating_add(1), error, settlement);
@@ -261,7 +255,9 @@ fn failed_outcome(
     error: String,
     settlement: FailureSettlement,
 ) -> PresetRunOutcome {
-    if settlement.authoritative == FailurePersistenceDisposition::OwnershipLost {
+    if settlement.authoritative == FailurePersistenceDisposition::OwnershipLost
+        || settlement.cleanup == FailurePersistenceDisposition::OwnershipLost
+    {
         return PresetRunOutcome::SessionConflict { steps, error };
     }
     PresetRunOutcome::Failed {
@@ -271,33 +267,7 @@ fn failed_outcome(
     }
 }
 
-/// Build a witness from the durable row when no step witness exists (e.g.
-/// `get_status` failure before a step). Returns `None` when authority cannot
-/// be established fail-closed.
-async fn witness_from_durable_row(
-    workflow_store: Option<&Arc<dyn WorkflowStateStore>>,
-    storage: Option<&Arc<dyn SessionStorage>>,
-    session_id: &SessionId,
-) -> Option<FailedStepWitness> {
-    let store = workflow_store?;
-    let storage = storage?;
-    let Ok(Some(record)) = store.load_run(session_id).await else {
-        return None;
-    };
-    if record.execution_version < 1 || record.status.is_terminal() {
-        return None;
-    }
-    let Ok(Some(pre_step_root)) = storage.get(&session_id.0).await else {
-        return None;
-    };
-    Some(FailedStepWitness {
-        owned_revision: record.state_revision,
-        pre_step_status: record.status,
-        pre_step_root,
-    })
-}
-
-/// Authoritative + context failure persistence with cleanup gating.
+/// Authoritative + context failure persistence with anchored cleanup.
 async fn settle_drive_failure(
     engine: &dyn OrchestrationEngine,
     workflow_store: Option<&Arc<dyn WorkflowStateStore>>,
@@ -306,7 +276,6 @@ async fn settle_drive_failure(
     error: &str,
     witness: Option<&FailedStepWitness>,
     driver_authoritative_fault: Option<&Arc<AtomicBool>>,
-    driver_context_fault: Option<&Arc<AtomicBool>>,
 ) -> FailureSettlement {
     let authoritative = record_driver_failure(
         workflow_store,
@@ -316,26 +285,36 @@ async fn settle_drive_failure(
         driver_authoritative_fault,
     )
     .await;
-    let context = if authoritative.permits_terminal_cleanup() {
-        persist_failure(storage, session_id, error, driver_context_fault).await
+    let context = if workflow_store.is_some() {
+        if authoritative == FailurePersistenceDisposition::Committed {
+            FailurePersistenceDisposition::Committed
+        } else {
+            FailurePersistenceDisposition::NoAuthority
+        }
+    } else {
+        persist_failure(storage, session_id, error).await
+    };
+    let cleanup = if let Some(store) = workflow_store {
+        if authoritative.permits_terminal_cleanup() && context.permits_terminal_cleanup() {
+            cleanup_failed_run(engine, store, session_id).await
+        } else {
+            FailurePersistenceDisposition::NoAuthority
+        }
+    } else if context.permits_terminal_cleanup() {
+        cleanup_failed_run_legacy(engine, session_id).await
     } else {
         FailurePersistenceDisposition::NoAuthority
     };
-    let settlement = FailureSettlement {
+    FailureSettlement {
         witness: witness.cloned(),
         authoritative,
         context,
-    };
-    if settlement.authoritative.permits_terminal_cleanup()
-        && settlement.context.permits_terminal_cleanup()
-    {
-        // Only after both durable failure record and context keys succeed.
-        mark_failed(engine, session_id).await;
+        cleanup,
     }
-    settlement
 }
 
-/// Persist the authoritative v1 [`RunFailure`] at the witnessed revision.
+/// Persist the authoritative v1 [`RunFailure`] at the witnessed revision and
+/// graph clock, coupling the legacy context keys in the same transaction.
 async fn record_driver_failure(
     workflow_store: Option<&Arc<dyn WorkflowStateStore>>,
     session_id: &SessionId,
@@ -343,13 +322,6 @@ async fn record_driver_failure(
     witness: Option<&FailedStepWitness>,
     driver_authoritative_fault: Option<&Arc<AtomicBool>>,
 ) -> FailurePersistenceDisposition {
-    if driver_authoritative_fault.is_some_and(|f| f.swap(false, Ordering::SeqCst)) {
-        tracing::warn!(
-            session_id = %session_id.0,
-            "preset-run driver: fault-injection armed; authoritative failure write skipped"
-        );
-        return FailurePersistenceDisposition::PersistenceFailed;
-    }
     let witness = match witness {
         Some(w) => w,
         None => return FailurePersistenceDisposition::NoAuthority,
@@ -357,11 +329,21 @@ async fn record_driver_failure(
     let Some(store) = workflow_store else {
         return FailurePersistenceDisposition::NoAuthority;
     };
+    if driver_authoritative_fault.is_some_and(|f| f.swap(false, Ordering::SeqCst)) {
+        tracing::warn!(
+            session_id = %session_id.0,
+            "preset-run driver: fault-injection armed; authoritative failure write skipped"
+        );
+        return FailurePersistenceDisposition::PersistenceFailed;
+    }
     let Ok(Some(record)) = store.load_run(session_id).await else {
         return FailurePersistenceDisposition::PersistenceFailed;
     };
     if record.execution_version < 1 {
         return FailurePersistenceDisposition::NoAuthority;
+    }
+    if record.state.is_none() {
+        return FailurePersistenceDisposition::PersistenceFailed;
     }
     if record.status.is_terminal() {
         if record
@@ -377,6 +359,9 @@ async fn record_driver_failure(
     if record.state_revision != witness.owned_revision {
         return FailurePersistenceDisposition::OwnershipLost;
     }
+    if witness.owned_graph_version.is_some_and(|gv| record.graph_version != gv) {
+        return FailurePersistenceDisposition::OwnershipLost;
+    }
     if record
         .state
         .as_ref()
@@ -385,21 +370,35 @@ async fn record_driver_failure(
     {
         return FailurePersistenceDisposition::Committed;
     }
-    let mut next_state = record.state.unwrap_or_default();
+    let mut next_state = record.state.clone().expect("v1 state checked above");
     next_state.in_flight = None;
     next_state.step_in_flight = None;
     next_state.failure = Some(nexus_orchestration::run_state::RunFailure {
         code: "driver_failed".to_string(),
         message: error.to_string(),
     });
+    let mut root_with_failure = witness.pre_step_root.clone();
+    if let Err(e) = root_with_failure
+        .context
+        .set("_run_status", "failed")
+        .and_then(|()| root_with_failure.context.set("_run_error", error.to_string()))
+    {
+        tracing::warn!(
+            session_id = %session_id.0,
+            error = %e,
+            "preset-run driver: coupled failure context write failed"
+        );
+        return FailurePersistenceDisposition::PersistenceFailed;
+    }
     let checkpoint = nexus_orchestration::run_state::RunCheckpoint {
-        root: &witness.pre_step_root,
+        root: &root_with_failure,
         children: &[],
     };
     match store
-        .commit_transition(
+        .commit_transition_with_graph_fence(
             session_id,
             witness.owned_revision,
+            witness.owned_graph_version,
             checkpoint,
             witness.pre_step_status.clone(),
             &next_state,
@@ -421,33 +420,68 @@ async fn record_driver_failure(
     }
 }
 
-/// Flip the in-memory tracker via `Cancel` after authoritative failure
-/// persistence succeeded. Durable terminal `Failed` is committed by the
-/// coordinator's `persist_drive_failure` boundary.
-async fn mark_failed(engine: &dyn OrchestrationEngine, session_id: &SessionId) {
-    if let Err(e) = engine.signal(session_id, EngineSignal::Cancel).await {
-        tracing::debug!(
-            session_id = %session_id.0,
-            error = %e,
-            "preset-run driver: could not mark session failed in tracker"
-        );
+/// Anchored failed-step cleanup after the coupled failure commit advanced
+/// the workflow/graph clocks — anchor to the post-persistence row.
+async fn cleanup_failed_run(
+    engine: &dyn OrchestrationEngine,
+    workflow_store: &Arc<dyn WorkflowStateStore>,
+    session_id: &SessionId,
+) -> FailurePersistenceDisposition {
+    let Ok(Some(record)) = workflow_store.load_run(session_id).await else {
+        return FailurePersistenceDisposition::PersistenceFailed;
+    };
+    match engine
+        .signal(
+            session_id,
+            EngineSignal::CancelAnchored {
+                expected_revision: record.state_revision,
+                expected_graph_version: record.graph_version,
+            },
+        )
+        .await
+    {
+        Ok(_) => FailurePersistenceDisposition::Committed,
+        Err(EngineError::RevisionMismatch { .. }) | Err(EngineError::TerminalState(_)) => {
+            FailurePersistenceDisposition::OwnershipLost
+        }
+        Err(e) => {
+            tracing::warn!(
+                session_id = %session_id.0,
+                error = %e,
+                "preset-run driver: anchored cleanup failed"
+            );
+            FailurePersistenceDisposition::PersistenceFailed
+        }
     }
 }
 
-/// Persist the failure record into the session context.
+/// Legacy v0 cleanup path: ordinary cancel after context-only failure record.
+async fn cleanup_failed_run_legacy(
+    engine: &dyn OrchestrationEngine,
+    session_id: &SessionId,
+) -> FailurePersistenceDisposition {
+    match engine.signal(session_id, EngineSignal::Cancel).await {
+        Ok(_) => FailurePersistenceDisposition::Committed,
+        Err(EngineError::RevisionMismatch { .. }) | Err(EngineError::TerminalState(_)) => {
+            FailurePersistenceDisposition::OwnershipLost
+        }
+        Err(e) => {
+            tracing::warn!(
+                session_id = %session_id.0,
+                error = %e,
+                "preset-run driver: legacy cleanup failed"
+            );
+            FailurePersistenceDisposition::PersistenceFailed
+        }
+    }
+}
+
+/// Persist the failure record into the session context (legacy v0 path).
 async fn persist_failure(
     storage: Option<&Arc<dyn SessionStorage>>,
     session_id: &SessionId,
     error: &str,
-    driver_context_fault: Option<&Arc<AtomicBool>>,
 ) -> FailurePersistenceDisposition {
-    if driver_context_fault.is_some_and(|f| f.swap(false, Ordering::SeqCst)) {
-        tracing::warn!(
-            session_id = %session_id.0,
-            "preset-run driver: fault-injection armed; context failure write skipped"
-        );
-        return FailurePersistenceDisposition::PersistenceFailed;
-    }
     let Some(storage) = storage else {
         return FailurePersistenceDisposition::NoAuthority;
     };
@@ -784,7 +818,6 @@ pub async fn resume_driven_sessions(
             config,
             cancel,
             None,
-            None,
         )
         .await;
         decisions.push(ResumeDecision::ReDriven {
@@ -954,7 +987,6 @@ pub struct WorkflowRunCoordinator {
     /// or echo path.
     fail_drive_failure_write: Arc<AtomicBool>,
     fail_driver_authoritative_write: Arc<AtomicBool>,
-    fail_driver_context_write: Arc<AtomicBool>,
     /// Bounds for each drive call.
     config: PresetRunConfig,
     /// The schedule supervisor for terminal settlement (T3, A3). Set at
@@ -1103,7 +1135,6 @@ impl WorkflowRunCoordinator {
             failed_owners: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
             fail_drive_failure_write: Arc::new(AtomicBool::new(false)),
             fail_driver_authoritative_write: Arc::new(AtomicBool::new(false)),
-            fail_driver_context_write: Arc::new(AtomicBool::new(false)),
             config: PresetRunConfig::default(),
             schedule_supervisor: std::sync::Arc::new(std::sync::RwLock::new(None)),
         }
@@ -1174,9 +1205,6 @@ impl WorkflowRunCoordinator {
         self.fail_driver_authoritative_write.store(true, Ordering::SeqCst);
     }
 
-    pub fn fail_next_driver_context_write(&self) {
-        self.fail_driver_context_write.store(true, Ordering::SeqCst);
-    }
 
     /// Read-only fence probe (N-14): whether `session_id` is currently
     /// fenced against re-entry because its durable failure transition
@@ -1300,21 +1328,26 @@ impl WorkflowRunCoordinator {
     async fn persist_drive_failure(
         &self,
         session_id: &SessionId,
-        error: &str,
         settlement: &FailureSettlementSummary,
     ) -> bool {
         if settlement.authoritative.requires_owner_fence()
             || settlement.context.requires_owner_fence()
+            || settlement.cleanup.requires_owner_fence()
         {
             return false;
         }
-        if settlement.authoritative == FailurePersistenceDisposition::OwnershipLost {
+        if settlement.authoritative == FailurePersistenceDisposition::OwnershipLost
+            || settlement.cleanup == FailurePersistenceDisposition::OwnershipLost
+        {
             return true;
         }
         if settlement.authoritative != FailurePersistenceDisposition::Committed {
             return false;
         }
         if settlement.context != FailurePersistenceDisposition::Committed {
+            return false;
+        }
+        if settlement.cleanup != FailurePersistenceDisposition::Committed {
             return false;
         }
         if self.fail_drive_failure_write.swap(false, Ordering::SeqCst) {
@@ -1623,7 +1656,6 @@ impl WorkflowRunCoordinator {
         let drive_cancel = cancel.clone();
         let coordinator = self.clone();
         let driver_authoritative_fault = self.fail_driver_authoritative_write.clone();
-        let driver_context_fault = self.fail_driver_context_write.clone();
         let join = tokio::spawn(async move {
             let outcome = drive_preset_run(
                 &*engine,
@@ -1633,7 +1665,6 @@ impl WorkflowRunCoordinator {
                 &config,
                 Some(&drive_cancel),
                 Some(&driver_authoritative_fault),
-                Some(&driver_context_fault),
             )
             .await;
             // Closure 8: a failed driver persists a durable non-replayable
@@ -1641,8 +1672,8 @@ impl WorkflowRunCoordinator {
             // runnable again after owner cleanup. When the transition
             // cannot be committed, the failed owner is fenced so
             // `ensure_driving` refuses re-entry until it is durable.
-            if let PresetRunOutcome::Failed { error, settlement, .. } = &outcome {
-                if !coordinator.persist_drive_failure(&sid, error, settlement).await {
+            if let PresetRunOutcome::Failed { settlement, .. } = &outcome {
+                if !coordinator.persist_drive_failure(&sid, settlement).await {
                     coordinator.failed_owners.lock().await.insert(sid.0.clone());
                 }
             }
@@ -1854,7 +1885,6 @@ impl WorkflowRunCoordinator {
             let sid = session_id.clone();
             let drive_cancel = cancel.clone();
             let driver_authoritative_fault = coordinator.fail_driver_authoritative_write.clone();
-            let driver_context_fault = coordinator.fail_driver_context_write.clone();
             let join = tokio::spawn(async move {
                 let outcome = drive_preset_run(
                     &*engine,
@@ -1864,14 +1894,13 @@ impl WorkflowRunCoordinator {
                     &config,
                     Some(&drive_cancel),
                     Some(&driver_authoritative_fault),
-                    Some(&driver_context_fault),
                 )
                 .await;
                 // Closure 8: a failed recovery drive persists a durable
                 // non-replayable `Failed` transition (same boundary as
                 // `ensure_driving`); a failed write fences the owner.
-                if let PresetRunOutcome::Failed { error, settlement, .. } = &outcome {
-                    if !coordinator.persist_drive_failure(&sid, error, settlement).await {
+                if let PresetRunOutcome::Failed { settlement, .. } = &outcome {
+                    if !coordinator.persist_drive_failure(&sid, settlement).await {
                         coordinator.failed_owners.lock().await.insert(sid.0.clone());
                     }
                 }
@@ -3117,7 +3146,7 @@ mod tests {
             signal: EngineSignal,
         ) -> Result<(), EngineError> {
             self.signals.lock().push(signal.clone());
-            if matches!(signal, EngineSignal::Cancel) {
+            if matches!(signal, EngineSignal::Cancel | EngineSignal::CancelAnchored { .. }) {
                 *self.status.lock() = SessionStatus::Cancelled;
             }
             Ok(())
@@ -3198,7 +3227,7 @@ mod tests {
             Ok(StepOutcome::Completed { response: None }),
         ]);
         let outcome =
-            drive_preset_run(&engine, None, None, &sid(), &PresetRunConfig::default(), None, None, None).await;
+            drive_preset_run(&engine, None, None, &sid(), &PresetRunConfig::default(), None, None).await;
         assert_eq!(
             outcome,
             PresetRunOutcome::Completed { steps: 3 },
@@ -3210,7 +3239,7 @@ mod tests {
     async fn stops_at_waiting_for_input_without_resume_flag() {
         let engine = ScriptedEngine::with_script(vec![Ok(waiting())]);
         let outcome =
-            drive_preset_run(&engine, None, None, &sid(), &PresetRunConfig::default(), None, None, None).await;
+            drive_preset_run(&engine, None, None, &sid(), &PresetRunConfig::default(), None, None).await;
         assert_eq!(outcome, PresetRunOutcome::WaitingForInput { steps: 1 });
     }
 
@@ -3220,7 +3249,7 @@ mod tests {
             ScriptedEngine::with_script(vec![Ok(StepOutcome::Completed { response: None })]);
         *engine.status.lock() = SessionStatus::WaitingForInput;
         let outcome =
-            drive_preset_run(&engine, None, None, &sid(), &PresetRunConfig::default(), None, None, None).await;
+            drive_preset_run(&engine, None, None, &sid(), &PresetRunConfig::default(), None, None).await;
         assert_eq!(
             outcome,
             PresetRunOutcome::WaitingForInput { steps: 0 },
@@ -3241,7 +3270,7 @@ mod tests {
             resume_waiting: true,
             ..PresetRunConfig::default()
         };
-        let outcome = drive_preset_run(&engine, None, None, &sid(), &config, None, None, None).await;
+        let outcome = drive_preset_run(&engine, None, None, &sid(), &config, None, None).await;
         assert_eq!(
             outcome,
             PresetRunOutcome::Completed { steps: 1 },
@@ -3261,7 +3290,6 @@ mod tests {
             &sid(),
             &PresetRunConfig::default(),
             Some(&token),
-            None,
             None,
         )
         .await;
@@ -3286,7 +3314,7 @@ mod tests {
             ),
         ))]);
         let outcome =
-            drive_preset_run(&engine, None, None, &sid(), &PresetRunConfig::default(), None, None, None).await;
+            drive_preset_run(&engine, None, None, &sid(), &PresetRunConfig::default(), None, None).await;
         match outcome {
             PresetRunOutcome::Failed { steps, error, .. } => {
                 assert_eq!(steps, 1);
@@ -3297,14 +3325,14 @@ mod tests {
             }
             other => panic!("expected Failed, got {other:?}"),
         }
-        assert_eq!(*engine.status.lock(), SessionStatus::Cancelled);
+        assert_eq!(
+            *engine.status.lock(),
+            SessionStatus::Running,
+            "without a step witness the driver must not send cleanup signals"
+        );
         assert!(
-            engine
-                .signals
-                .lock()
-                .iter()
-                .any(|s| matches!(s, EngineSignal::Cancel)),
-            "driver must mark the tracker Cancelled via Cancel"
+            engine.signals.lock().is_empty(),
+            "fail-closed: no Cancel without an ownership anchor"
         );
     }
 
@@ -3326,7 +3354,6 @@ mod tests {
             None,
             &sid(),
             &PresetRunConfig::default(),
-            None,
             None,
             None,
         )
@@ -3360,7 +3387,6 @@ mod tests {
             None,
             &sid(),
             &PresetRunConfig::default(),
-            None,
             None,
             None,
         )
@@ -3455,7 +3481,6 @@ mod tests {
             &PresetRunConfig::default(),
             None,
             None,
-            None,
         )
         .await;
         match &outcome {
@@ -3521,7 +3546,7 @@ mod tests {
             max_steps: 2,
             ..PresetRunConfig::default()
         };
-        let outcome = drive_preset_run(&engine, None, None, &sid(), &config, None, None, None).await;
+        let outcome = drive_preset_run(&engine, None, None, &sid(), &config, None, None).await;
         assert_eq!(
             outcome,
             PresetRunOutcome::MaxStepsExceeded { steps: 2 },
@@ -3534,7 +3559,7 @@ mod tests {
         let engine = ScriptedEngine::with_script(vec![Ok(paused())]);
         *engine.status.lock() = SessionStatus::Failed;
         let outcome =
-            drive_preset_run(&engine, None, None, &sid(), &PresetRunConfig::default(), None, None, None).await;
+            drive_preset_run(&engine, None, None, &sid(), &PresetRunConfig::default(), None, None).await;
         assert_eq!(
             outcome,
             PresetRunOutcome::Cancelled { steps: 0 },
@@ -4520,6 +4545,26 @@ mod tests {
                 .await
         }
 
+        async fn commit_transition_with_graph_fence(
+            &self,
+            session_id: &SessionId,
+            expected_revision: u64,
+            expected_graph_version: Option<u64>,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            next_status: SessionStatus,
+            next_state: &nexus_orchestration::run_state::RunStateV1,
+        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            let _ = expected_graph_version;
+            self.commit_transition(
+                session_id,
+                expected_revision,
+                checkpoint,
+                next_status,
+                next_state,
+            )
+            .await
+        }
+
         async fn settle_cancelled(
             &self,
             session_id: &SessionId,
@@ -5478,8 +5523,8 @@ mod tests {
     }
 
 
-    /// `get_status` failure with a durable witness must still persist
-    /// authoritative `RunFailure` and context keys (no post-error rebase).
+    /// `get_status` failure before any step witness must not fabricate
+    /// authority from a durable-row reload (fail-closed).
     #[tokio::test]
     async fn get_status_error_with_durable_witness_persists_failure() {
 
@@ -5537,7 +5582,6 @@ mod tests {
             &PresetRunConfig::default(),
             None,
             None,
-            None,
         )
         .await;
         let PresetRunOutcome::Failed { settlement, error, .. } = outcome else {
@@ -5549,9 +5593,10 @@ mod tests {
         );
         assert_eq!(
             settlement.authoritative,
-            FailurePersistenceDisposition::Committed
+            FailurePersistenceDisposition::NoAuthority
         );
-        assert_eq!(settlement.context, FailurePersistenceDisposition::Committed);
+        assert_eq!(settlement.context, FailurePersistenceDisposition::NoAuthority);
+        assert_eq!(settlement.cleanup, FailurePersistenceDisposition::NoAuthority);
 
         let record = store.load_run(&session_id).await.expect("load").expect("row");
         assert!(
@@ -5559,13 +5604,13 @@ mod tests {
                 .state
                 .as_ref()
                 .and_then(|s| s.failure.as_ref())
-                .is_some_and(|f| f.code == "driver_failed"),
-            "authoritative RunFailure must be written at witnessed revision"
+                .is_none(),
+            "must not fabricate RunFailure without a step witness"
         );
         let root = storage.get(&session_id.0).await.expect("get").expect("root");
-        assert_eq!(
-            root.context.get::<String>("_run_status").as_deref(),
-            Some("failed")
+        assert!(
+            root.context.get::<String>("_run_status").is_none(),
+            "context failure keys must not be written without step witness"
         );
     }
 
@@ -5638,7 +5683,6 @@ mod tests {
             Some(&store),
             &session_id,
             &PresetRunConfig::default(),
-            None,
             None,
             None,
         )
@@ -5725,7 +5769,7 @@ mod tests {
             .await
             .expect("start session");
 
-        coordinator.fail_next_driver_context_write();
+        coordinator.fail_next_driver_authoritative_write();
         coordinator
             .ensure_driving(&session_id)
             .await
@@ -5743,18 +5787,23 @@ mod tests {
         .expect("coordinator must fence after context persistence error");
 
         let record = store.load_run(&session_id).await.expect("load").expect("row");
+        assert_ne!(
+            record.status,
+            SessionStatus::Failed,
+            "coupled authoritative+context commit must not partially apply when faulted"
+        );
         assert!(
             record
                 .state
                 .as_ref()
                 .and_then(|s| s.failure.as_ref())
-                .is_some_and(|f| f.code == "driver_failed"),
-            "authoritative failure must exist before context fault"
+                .is_none(),
+            "authoritative RunFailure must be absent when the coupled write was faulted"
         );
         let root = storage.get(&session_id.0).await.expect("get").expect("root");
         assert!(
             root.context.get::<String>("_run_status").is_none(),
-            "context failure keys must not be written when context persistence faulted"
+            "context failure keys must not be written when coupled persistence faulted"
         );
     }
 
@@ -6018,13 +6067,18 @@ mod tests {
         );
 
         let record = store.load_run(&session_id).await.expect("load").expect("row");
-        assert_ne!(record.status, SessionStatus::Failed);
+        assert_ne!(
+            record.status,
+            SessionStatus::Failed,
+            "coordinator must not claim durable Failed when terminal persist faulted"
+        );
         assert!(
             record
                 .state
                 .as_ref()
                 .and_then(|s| s.failure.as_ref())
-                .is_none()
+                .is_some_and(|f| f.code == "driver_failed"),
+            "authoritative failure from the drive must remain even when coordinator terminal commit faults"
         );
     }
 

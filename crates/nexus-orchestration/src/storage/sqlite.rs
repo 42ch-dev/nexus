@@ -482,6 +482,7 @@ struct RunRow {
     status: String,
     execution_version: i64,
     state_revision: i64,
+    graph_version: i64,
     run_state_json: Option<Vec<u8>>,
     run_descriptor_json: Option<Vec<u8>>,
 }
@@ -694,7 +695,8 @@ impl WorkflowStateStore for SqliteSessionStorage {
             RunRow,
             r#"SELECT session_id as "session_id!", status as "status!",
                       execution_version as "execution_version!",
-                      state_revision as "state_revision!", run_state_json, run_descriptor_json
+                      state_revision as "state_revision!", graph_version as "graph_version!",
+                      run_state_json, run_descriptor_json
                FROM orchestration_sessions WHERE session_id = ?"#,
             id
         )
@@ -751,6 +753,18 @@ impl WorkflowStateStore for SqliteSessionStorage {
             ));
         }
         let state_revision = u64::try_from(row.state_revision).unwrap_or(0);
+        // A negative graph clock is corrupt and non-replayable under the
+        // same rule as the revision clock: surface it, preserve the row.
+        if row.graph_version < 0 {
+            let gv = row.graph_version;
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "load_run '{}': negative graph_version {gv} (non-replayable)",
+                    session_id.0
+                )),
+            ));
+        }
+        let graph_version = u64::try_from(row.graph_version).unwrap_or(0);
 
         // v0 rows are legacy/unverified: no descriptor/state, status is
         // diagnostic only. v1 rows carry the authoritative descriptor/state.
@@ -788,6 +802,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 execution_version,
                 descriptor: Some(descriptor),
                 state: Some(state),
+                graph_version,
             }))
         } else {
             // v0 legacy row: status is diagnostic only. A corrupt/ambiguous
@@ -808,6 +823,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 execution_version,
                 descriptor: None,
                 state: None,
+                graph_version,
             }))
         }
     }
@@ -819,7 +835,6 @@ impl WorkflowStateStore for SqliteSessionStorage {
         checkpoint: RunCheckpoint<'_>,
         next_state: &RunStateV1,
     ) -> Result<RunRecord, EngineError> {
-        let now = chrono::Utc::now().timestamp();
         let id = session_id.0.clone();
         let creator_id = descriptor.creator_id.clone();
         let preset_id = descriptor.preset_id.clone();
@@ -836,6 +851,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         // graph-flow 0.8: seed the new row's durable graph_version from the
         // checked incoming checkpoint version + 1 (normally 1) — brief §3.3.
         let root_graph_version = checked_next_graph_version(checkpoint.root.version)?;
+        let now = chrono::Utc::now().timestamp();
 
         let mut tx = nexus_local_db::begin_immediate(&self.pool)
             .await
@@ -1015,6 +1031,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
             execution_version: 1,
             descriptor: Some(descriptor.clone()),
             state: Some(next_state.clone()),
+            graph_version: u64::try_from(root_graph_version).unwrap_or(1),
         })
     }
 
@@ -1347,13 +1364,15 @@ impl WorkflowStateStore for SqliteSessionStorage {
             execution_version: 1,
             descriptor: Some(descriptor.clone()),
             state: Some(next_state.clone()),
+            graph_version: u64::try_from(root_graph_version).unwrap_or(1),
         })
     }
 
-    async fn commit_transition(
+    async fn commit_transition_with_graph_fence(
         &self,
         session_id: &SessionId,
         expected_revision: u64,
+        expected_graph_version: Option<u64>,
         checkpoint: RunCheckpoint<'_>,
         next_status: SessionStatus,
         next_state: &RunStateV1,
@@ -1381,6 +1400,19 @@ impl WorkflowStateStore for SqliteSessionStorage {
         // authoritative v1 rows may advance. Legacy v0 rows are inspectable,
         // but cannot be mutated into partially reconstructed v1 runs.
         let expected_revision_i64 = expected_revision as i64;
+        // Optional graph-clock fence (failed-step settlement ownership): a
+        // graph-only winner that advanced `graph_version` without the
+        // workflow revision must lose this CAS exactly like a revision
+        // winner. `None` keeps the revision-only CAS unchanged.
+        let expected_graph_i64: Option<i64> = expected_graph_version
+            .map(i64::try_from)
+            .transpose()
+            .map_err(|_| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "commit_transition '{}': expected graph_version out of range",
+                    session_id.0
+                )))
+            })?;
         let result = sqlx::query!(
             r"
             UPDATE orchestration_sessions
@@ -1392,6 +1424,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
               AND execution_version = 1
               AND status NOT IN ('completed', 'failed', 'cancelled', 'interrupted')
               AND graph_version >= 0 AND graph_version < 9223372036854775807
+              AND (? IS NULL OR graph_version = ?)
             ",
             status_str,
             current_task_id,
@@ -1399,7 +1432,9 @@ impl WorkflowStateStore for SqliteSessionStorage {
             now,
             state_bytes,
             id,
-            expected_revision_i64
+            expected_revision_i64,
+            expected_graph_i64,
+            expected_graph_i64
         )
         .execute(&mut *tx)
         .await
@@ -1458,6 +1493,20 @@ impl WorkflowStateStore for SqliteSessionStorage {
                     )),
                 )),
                 Some(row) if row.state_revision != expected_revision as i64 => {
+                    Err(EngineError::RevisionMismatch {
+                        session_id: session_id.0.clone(),
+                        expected: expected_revision,
+                        found: u64::try_from(row.state_revision).unwrap_or(0),
+                    })
+                }
+                // Graph-clock fence loss with an intact workflow revision: a
+                // graph-only winner owns the session clock — the same typed
+                // ownership loss as a revision mismatch, never a mutation.
+                Some(row)
+                    if expected_graph_i64.is_some_and(|expected| {
+                        row.graph_version != expected
+                    }) =>
+                {
                     Err(EngineError::RevisionMismatch {
                         session_id: session_id.0.clone(),
                         expected: expected_revision,
@@ -1616,6 +1665,16 @@ impl WorkflowStateStore for SqliteSessionStorage {
             )))
         })?;
 
+        let graph_version = checkpoint
+            .root
+            .version
+            .checked_add(1)
+            .ok_or_else(|| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "commit_transition '{}': graph_version overflow",
+                    session_id.0
+                )))
+            })?;
         Ok(RunRecord {
             session_id: SessionId(session_id.0.clone()),
             status: next_status,
@@ -1623,6 +1682,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
             execution_version,
             descriptor: root_descriptor,
             state: Some(next_state.clone()),
+            graph_version,
         })
     }
 
@@ -1766,6 +1826,16 @@ impl WorkflowStateStore for SqliteSessionStorage {
             )))
         })?;
 
+        let graph_version = checkpoint
+            .root
+            .version
+            .checked_add(1)
+            .ok_or_else(|| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "settle_cancelled '{}': graph_version overflow",
+                    session_id.0
+                )))
+            })?;
         Ok(RunRecord {
             session_id: SessionId(session_id.0.clone()),
             status: SessionStatus::Cancelled,
@@ -1773,6 +1843,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
             execution_version,
             descriptor: root_descriptor,
             state: Some(next_state.clone()),
+            graph_version,
         })
     }
 
@@ -1785,7 +1856,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
             RunRow,
             r#"SELECT session_id as "session_id!", status as "status!",
                       execution_version as "execution_version!",
-                      state_revision as "state_revision!", run_state_json, run_descriptor_json
+                      state_revision as "state_revision!", graph_version as "graph_version!", run_state_json, run_descriptor_json
                FROM orchestration_sessions WHERE parent_session_id = ?"#,
             parent
         )
@@ -1858,6 +1929,15 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 let descriptor =
                     deserialize_blob::<RunDescriptorV1>(descriptor_bytes, "run_descriptor_json")?;
                 let state = deserialize_blob::<RunStateV1>(state_bytes, "run_state_json")?;
+                if row.graph_version < 0 {
+                    return Err(EngineError::GraphFlow(
+                        graph_flow::GraphError::StorageError(format!(
+                            "load_children '{}': child '{}' has negative graph_version {}                              (non-replayable)",
+                            parent_session_id.0, row.session_id, row.graph_version
+                        )),
+                    ));
+                }
+                let graph_version = u64::try_from(row.graph_version).unwrap_or(0);
                 children.push(RunRecord {
                     session_id: SessionId(row.session_id),
                     status,
@@ -1865,6 +1945,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
                     execution_version,
                     descriptor: Some(descriptor),
                     state: Some(state),
+                    graph_version,
                 });
             } else {
                 // A v0 child row is legacy/unverified; surface it as a

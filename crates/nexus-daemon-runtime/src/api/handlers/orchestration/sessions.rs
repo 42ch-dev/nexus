@@ -913,6 +913,30 @@ mod tests {
                 .await
         }
 
+
+        async fn commit_transition_with_graph_fence(
+            &self,
+            session_id: &nexus_orchestration::engine::SessionId,
+            expected_revision: u64,
+            expected_graph_version: Option<u64>,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            next_status: nexus_orchestration::engine::SessionStatus,
+            next_state: &nexus_orchestration::run_state::RunStateV1,
+        ) -> Result<
+            nexus_orchestration::run_state::RunRecord,
+            nexus_orchestration::engine::EngineError,
+        > {
+            let _ = expected_graph_version;
+            self.commit_transition(
+                session_id,
+                expected_revision,
+                checkpoint,
+                next_status,
+                next_state,
+            )
+            .await
+        }
+
         async fn settle_cancelled(
             &self,
             session_id: &nexus_orchestration::engine::SessionId,
