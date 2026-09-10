@@ -645,7 +645,7 @@ function InputSection() {
     <section>
       <SectionHeading id="comp-input">Input</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
-        Text input — default, focus-visible, disabled, and invalid states.
+        Text input — default, hover, focus-visible, disabled, and invalid states.
       </p>
       <MatrixCard>
         <div className="flex flex-col gap-4 max-w-md">
@@ -661,6 +661,17 @@ function InputSection() {
             <div className="flex flex-col gap-1.5 flex-1">
               <Label htmlFor="input-focus">Focus target</Label>
               <Input id="input-focus" data-testid="input-focus" defaultValue="Tab or click to focus" />
+            </div>
+          </MatrixRow>
+          <MatrixRow>
+            <VariantLabel label="hover" />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="input-hover">Hover target</Label>
+              <Input
+                id="input-hover"
+                data-testid="input-fixture-hover"
+                defaultValue="Point at the field"
+              />
             </div>
           </MatrixRow>
           <MatrixRow>
@@ -866,7 +877,7 @@ function SelectSection() {
       </MatrixCard>
 
       <p className="text-label-14 text-gray-900 mb-4">
-        Hover (point at the control — border/well darken natively)
+        Hover (point at the control — background-200 fill wash, gray-500 border preserved)
       </p>
       <MatrixCard className="mb-6">
         <div className="flex flex-col gap-1.5 max-w-md">
@@ -1133,7 +1144,7 @@ function TextareaSection() {
     <section>
       <SectionHeading id="comp-textarea">Textarea</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
-        Multi-line text input — min-height 96px, default, focus-visible,
+        Multi-line text input — min-height 96px, default, hover, focus-visible,
         disabled, and invalid states.
       </p>
       <MatrixCard>
@@ -1150,6 +1161,17 @@ function TextareaSection() {
             <div className="flex flex-col gap-1.5 flex-1">
               <Label htmlFor="textarea-focus">Focus target</Label>
               <Textarea id="textarea-focus" data-testid="textarea-focus" defaultValue="Tab or click to focus" />
+            </div>
+          </MatrixRow>
+          <MatrixRow>
+            <VariantLabel label="hover" />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="textarea-hover">Hover target</Label>
+              <Textarea
+                id="textarea-hover"
+                data-testid="textarea-fixture-hover"
+                defaultValue="Point at the field"
+              />
             </div>
           </MatrixRow>
           <MatrixRow>
@@ -1215,7 +1237,7 @@ function FormFieldSection() {
           <Input
             id={fieldId}
             invalid={hasError}
-            aria-describedby={`${helperId} ${errorId}`}
+            aria-describedby={hasError ? `${helperId} ${errorId}` : helperId}
             placeholder="Enter work title…"
             defaultValue="The Lost City"
           />

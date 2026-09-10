@@ -89,6 +89,8 @@ describe('Textarea', () => {
     expect(container.querySelectorAll('[role="alert"]').length).toBe(0);
   });
 
-  // --- disabled state ---
-
+  it('exposes the native disabled state', () => {
+    render(<Textarea disabled data-testid="test-textarea" />);
+    expect(screen.getByTestId('test-textarea')).toBeDisabled();
+  });
 });

@@ -89,6 +89,8 @@ describe('Input', () => {
     expect(container.querySelectorAll('[role="alert"]').length).toBe(0);
   });
 
-  // --- disabled state ---
-
+  it('exposes the native disabled state', () => {
+    render(<Input disabled data-testid="test-input" />);
+    expect(screen.getByTestId('test-input')).toBeDisabled();
+  });
 });

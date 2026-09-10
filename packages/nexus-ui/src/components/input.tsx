@@ -34,6 +34,7 @@ export function Input({ className, invalid, ref, ...props }: InputProps) {
         'h-10 w-full rounded-control border bg-background-100 px-3 text-copy-14 text-gray-1000 transition-colors duration-state ease-standard',
         'placeholder:text-gray-700',
         'focus-visible:border-blue-700',
+        'enabled:hover:bg-background-200',
         'disabled:bg-gray-100 disabled:text-gray-700 disabled:border-gray-alpha-300 disabled:cursor-not-allowed',
         invalid ? 'border-red-700' : 'border-gray-500',
         className,

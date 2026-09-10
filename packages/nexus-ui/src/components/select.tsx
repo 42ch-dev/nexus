@@ -39,6 +39,7 @@ export function Select({ className, invalid, children, ref, ...props }: SelectPr
         className={cn(
           'h-10 w-full appearance-none rounded-control border bg-background-100 ps-3 pe-8 text-copy-14 text-gray-1000 transition-colors duration-state ease-standard',
           'focus-visible:border-blue-700',
+          'enabled:hover:bg-background-200',
           'disabled:bg-gray-100 disabled:text-gray-700 disabled:border-gray-alpha-300 disabled:cursor-not-allowed',
           invalid ? 'border-red-700' : 'border-gray-500',
           className,

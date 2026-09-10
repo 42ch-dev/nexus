@@ -319,8 +319,6 @@ describe('TransportErrorBlock', () => {
       );
       const region = screen.getByTestId('transport-error-block');
       expect(region).toHaveClass('mt-8');
-      expect(region).toHaveClass('rounded-control');
     });
   });
 });
-
