@@ -289,7 +289,7 @@ function buildProjection(doc) {
   }
 
   // ── Colors → --color-<name> ──
-  const colors = doc.colors || {};
+  const colors = doc.colors ?? {};
   for (const name of Object.keys(colors)) {
     projections.push(scalar(`--color-${name}`, `colors.${name}`));
   }
@@ -575,7 +575,7 @@ function projectValue(doc, entry, index = indexPaths(doc)) {
 function emitBlock(doc, entries, index, indent = '  ', brandAlias = false) {
   const lines = [];
   for (const entry of entries) {
-    let cssVar = entry.cssVar;
+    const cssVar = entry.cssVar;
     if (brandAlias && cssVar.startsWith('--color-brand-')) {
       // Forward to theme.css brand variable: --color-brand-<n> -> var(--nexus-brand-<n>)
       const rest = cssVar.slice('--color-brand-'.length);
@@ -694,7 +694,7 @@ export function projectDesign(pair) {
   // or unresolved literal): resolve each brand key through the shared light
   // projection index, which fails closed on null/undefined/empty/missing.
   const brandScalars = ['brand-deep-blue', 'brand-cyan', 'brand-white'];
-  const colors = light.colors || {};
+  const colors = light.colors ?? {};
   for (const key of brandScalars) {
     if (colors[key] === undefined || colors[key] === null) {
       throw new Error(

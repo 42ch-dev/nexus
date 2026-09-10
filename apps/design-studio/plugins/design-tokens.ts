@@ -76,7 +76,7 @@ export function designTokensPlugin(repoRoot: string): Plugin {
 
   /** Return the memoized pair, recompiling once when the cache is stale. */
   async function compiled(): Promise<{ css: string; brandCss: string }> {
-    if (!compileCache) compileCache = await compile();
+    compileCache ??= await compile();
     return compileCache;
   }
 

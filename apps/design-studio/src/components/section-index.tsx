@@ -39,7 +39,7 @@ export function SectionIndex({ entries, onNavigate }: SectionIndexProps) {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       if (filtered.length === 0) return;
-      setActiveIndex((current) => (current === null ? 0 : current));
+      setActiveIndex((current) => current ?? 0);
       listRef.current?.querySelector<HTMLAnchorElement>('a[data-index="0"]')?.focus();
       return;
     }
