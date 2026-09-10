@@ -130,7 +130,7 @@ function DualPaneShellFixture({
 
 export function ChronosTitlebarFixtures() {
   return (
-    <div data-testid="chronos-titlebar-fixtures">
+    <div className="studio-fixture-boundary" data-testid="chronos-titlebar-fixtures">
       <FixtureFrame
         title="Light + dark titlebar (browser)"
         description="White labels on ink (light shell) and cyan labels (dark shell). Logo uses bright mark on ink — no primary plate on the light sidebar."
@@ -140,7 +140,7 @@ export function ChronosTitlebarFixtures() {
           <div className="rounded-card border border-gray-alpha-200 overflow-hidden">
             <TitlebarSpecimen isDark={false} testId="chronos-titlebar-light" />
           </div>
-          <div className="dark rounded-card border border-gray-alpha-200 overflow-hidden">
+          <div className="rounded-card border border-gray-alpha-200 overflow-hidden">
             <TitlebarSpecimen isDark testId="chronos-titlebar-dark" />
           </div>
         </div>
@@ -159,7 +159,7 @@ export function ChronosTitlebarFixtures() {
               testId="chronos-titlebar-drag-contract-light"
             />
           </div>
-          <div className="dark rounded-card border border-gray-alpha-200 overflow-hidden">
+          <div className="rounded-card border border-gray-alpha-200 overflow-hidden">
             <TitlebarSpecimen
               isDark
               desktopSafeInset
@@ -186,13 +186,11 @@ export function ChronosTitlebarFixtures() {
         description={`Native traffic-light inset with drag on logo/title paint and empty spacer; interactive controls remain clickable. Sidebar has no logo row.`}
         testId="chronos-titlebar-fixture-dark-dual-pane"
       >
-        <div className="dark">
-          <DualPaneShellFixture
-            isDark
-            desktopSafeInset
-            testId="chronos-titlebar-dual-pane-dark"
-          />
-        </div>
+        <DualPaneShellFixture
+          isDark
+          desktopSafeInset
+          testId="chronos-titlebar-dual-pane-dark"
+        />
       </FixtureFrame>
     </div>
   );

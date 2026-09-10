@@ -18,6 +18,8 @@ import {
   TabsTrigger,
   TabsContent,
 } from '@42ch/nexus-ui';
+
+import { SurfaceSourceBadges } from '@/components/surface-source-badge';
 import { Dialog, DialogTrigger, DialogContent } from '@web-ui/dialog'; // transitional — keep-web (Radix portal/focus-trap beyond presentational scope)
 import { Spinner, LoadingState, EmptyState, ErrorState } from '@web-ui/states'; // transitional — keep-web (lucide-react asset boundary; product copy & app-composition callbacks)
 import { ToastFixtures } from '@/fixtures/toast-fixtures';
@@ -51,7 +53,7 @@ function SectionHeading({
   return (
     <h3
       id={id}
-      className="text-heading-20 font-semibold text-gray-1000 mb-4 pt-8 scroll-mt-16"
+      className="text-heading-20 font-semibold text-gray-1000 mb-4 pt-8 scroll-mt-sticky-header"
     >
       {children}
     </h3>
@@ -451,7 +453,7 @@ function ButtonSection() {
           <Button variant="tertiary">focus me</Button>
           <Button variant="destructive">focus me</Button>
         </div>
-        <p className="text-copy-13 text-gray-500 mt-4">
+        <p className="text-copy-13 text-gray-700 mt-4">
           Press <kbd className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">Tab</kbd> to cycle
           through — the two-layer focus ring is applied globally via{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">{'src/index.css'}</code>.
@@ -625,7 +627,7 @@ function DialogSection() {
             </div>
           </DialogContent>
         </Dialog>
-        <p className="text-copy-13 text-gray-500 mt-4">
+        <p className="text-copy-13 text-gray-700 mt-4">
           Transitional{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@web-ui/dialog</code>{' '}
           — Radix portal, focus trap, and scroll lock. Keyboard: Tab cycles
@@ -784,7 +786,7 @@ function SelectSection() {
         </code>
         .
       </p>
-      <p className="text-copy-13 text-gray-500 mb-6">
+      <p className="text-copy-13 text-gray-700 mb-6">
         Open listbox chrome is UA-owned — Tab to the control, then Space /
         Enter / Alt+↓ (platform-dependent) to open. Automated Studio tests do
         not drive OS listbox UI.
@@ -861,7 +863,7 @@ function SelectSection() {
             <SelectOptionList options={options} />
           </Select>
         </div>
-        <p className="text-copy-13 text-gray-500 mt-4">
+        <p className="text-copy-13 text-gray-700 mt-4">
           Press{' '}
           <kbd className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">Tab</kbd>{' '}
           onto the control — package class{' '}
@@ -908,7 +910,7 @@ function SelectSection() {
             <SelectOptionList options={options} />
           </Select>
         </div>
-        <p className="text-copy-13 text-gray-500 mt-4">
+        <p className="text-copy-13 text-gray-700 mt-4">
           With the control focused, open the native list (Space / Enter /
           Alt+↓). There is no package{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
@@ -986,7 +988,7 @@ function StatesSection() {
         {retries > 0 && (
           <p
             data-testid="states-error-retry-count"
-            className="text-copy-13 text-gray-500 mt-4"
+            className="text-copy-13 text-gray-700 mt-4"
           >
             Retry requested {retries} {retries === 1 ? 'time' : 'times'}.
           </p>
@@ -1049,7 +1051,7 @@ function TableSection() {
             </TableBody>
           </Table>
         </div>
-        <p className="text-copy-13 text-gray-500 p-4">
+        <p className="text-copy-13 text-gray-700 p-4">
           Row hover triggers background-200; header uses background-200 with
           bottom border gray-alpha-400. The last row carries long copy to prove
           local horizontal scroll.
@@ -1075,7 +1077,7 @@ function TabsSection() {
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">TabsTrigger</code>{' '}
         has no disabled prop — label that state unsupported rather than simulating it.
       </p>
-      <p className="text-copy-13 text-gray-500 mb-6">
+      <p className="text-copy-13 text-gray-700 mb-6">
         Focus a tab, then use{' '}
         <kbd className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">←</kbd> /{' '}
         <kbd className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">→</kbd>,{' '}
@@ -1437,6 +1439,7 @@ export function ComponentsPage() {
         focus-visible, disabled, and loading states are live; toggle the theme
         to verify both light and dark (V1.121 states matrix).
       </p>
+      <SurfaceSourceBadges importPaths={["@42ch/nexus-ui", "@web-ui/dialog", "@web-ui/states", "@web-ui/table"]} /> {/* transitional — badge path labels (not imports) */}
       <SubNav />
 
       <BadgeSection />
@@ -1457,7 +1460,7 @@ export function ComponentsPage() {
       <RunStudioSection />
       <ComputeTimelineSection />
 
-      <section id="comp-vi-acceptance" data-testid="comp-vi-acceptance" className="scroll-mt-16">
+      <section id="comp-vi-acceptance" data-testid="comp-vi-acceptance" className="scroll-mt-sticky-header">
         <SectionHeading id="comp-vi-acceptance-heading">VI acceptance (P2)</SectionHeading>
         <p
           data-testid="comp-vi-acceptance-note"
@@ -1470,7 +1473,7 @@ export function ComponentsPage() {
         <ViTransportErrorAcceptanceFixtures />
       </section>
 
-      <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
+      <p className="text-copy-13 text-gray-700 mt-12 pt-8 border-t border-gray-alpha-200">
         17 promoted (Badge, Button, Card, Input, Label, Textarea, Select, Toast,
         TransportErrorBlock, Tabs, RunFormFields, EntityPickerField,
         ProposalSections, RunStatusBadge, RunsTable, ComputeResultNodeChrome,

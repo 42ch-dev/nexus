@@ -389,7 +389,7 @@ function EventInspectorSample({ event }: { event: MentalSurfacingEvent }) {
  */
 export function MentalSurfacingFixtures() {
   return (
-    <div data-testid="mental-surfacing-fixtures">
+    <div className="studio-fixture-boundary" data-testid="mental-surfacing-fixtures">
       <FixtureFrame
         title="Character inspector — modules.mental populated"
         description="Bo (kb_bo) carries a populated mental bag: every populated nine-field key renders as a bold label + JSON value row (PD-16) under the collapsible-style 'Mental State' header. Beliefs / goals / emotions are the AC proof. The chevron is a static affordance — collapse wiring lands with the App inspector (Task 3)."

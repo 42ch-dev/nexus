@@ -28,6 +28,7 @@ import logoMonoSrc from '@42ch/nexus-ui/assets/logos/logo-mono.svg';
 import logoTextSrc from '@42ch/nexus-ui/assets/logos/logo-text.svg';
 
 import { StudioShellLogo } from '@/components/studio-shell-logo';
+import { SurfaceSourceBadges } from '@/components/surface-source-badge';
 import { ViBrandAcceptanceFixtures } from '@/fixtures/vi-aesthetic-retune-fixtures';
 
 /* ------------------------------------------------------------------ */
@@ -224,7 +225,7 @@ function SubNav() {
 
 function SectionHeading({ id, children }: { id: string; children: ReactNode }) {
   return (
-    <h3 id={id} className="text-heading-20 font-semibold text-gray-1000 mb-4 pt-8 scroll-mt-16">
+    <h3 id={id} className="text-heading-20 font-semibold text-gray-1000 mb-4 pt-8 scroll-mt-sticky-header">
       {children}
     </h3>
   );
@@ -361,18 +362,16 @@ function ChronosShellMini({
   mode: 'light' | 'dark';
   logo: ReactNode;
 }) {
-  const { resolvedTheme } = useTheme();
   const isDark = mode === 'dark';
-  // The "light" shell's content follows the document theme (no light reset);
-  // its label must be honest about the actual current theme so it never claims
-  // a light plate under html.dark (F-004). The scoped-dark shell always forces
-  // a true dark plate via a nested `.dark`, so its label stays "dark".
-  const lightLabel = resolvedTheme === 'dark' ? 'Theme-following · dark' : 'Chronos Light';
+  // The ink titlebar is a fixed-pigment plate in both themes (see the
+  // brand-chronos note); only its label paint differs — white on light,
+  // cobalt on dark — so the label names the titlebar treatment, never the
+  // document (F-004). The content area below follows the document theme:
+  // light/dark parity for the shell comes from the Compare view, not a
+  // nested `.dark` scope.
   return (
     <div
-      className={`border border-gray-alpha-300 rounded-card overflow-hidden ${
-        isDark ? 'dark dark:bg-background-100' : 'bg-background-100'
-      }`}
+      className="border border-gray-alpha-300 rounded-card overflow-hidden bg-background-100"
       data-testid={`chronos-mini-${mode}`}
     >
       <div
@@ -381,25 +380,15 @@ function ChronosShellMini({
       >
         <span
           className={`text-label-14 font-medium ${
-            isDark ? 'text-brand-cyan dark:text-brand-cyan' : 'text-white'
+            isDark ? 'text-brand-cyan' : 'text-white'
           }`}
         >
-          {isDark ? 'Chronos Dark' : lightLabel}
+          {isDark ? 'Chronos Dark titlebar' : 'Chronos Light titlebar'}
         </span>
         {logo}
       </div>
-      <div
-        className={`min-h-[72px] p-4 ${
-          isDark ? 'bg-background-100 dark:bg-background-100' : 'bg-background-100'
-        }`}
-      >
-        <div
-          className={`h-8 rounded-control border ${
-            isDark
-              ? 'border-white/10 bg-background-200 dark:bg-background-200'
-              : 'border-gray-alpha-200 bg-background-200'
-          }`}
-        />
+      <div className="min-h-[72px] p-4 bg-background-100">
+        <div className="h-8 rounded-control border border-gray-alpha-200 bg-background-200" />
       </div>
     </div>
   );
@@ -527,19 +516,21 @@ function MarkSection() {
           </div>
         </div>
 
-        <div className="border border-gray-alpha-300 rounded-card overflow-hidden dark">
-          <div className="bg-background-100 dark:bg-background-100 p-8 flex flex-col items-center justify-center gap-3 min-h-[120px]">
-            <NexusMark size={32} className="w-auto text-brand-cyan dark:text-brand-cyan" />
-            <span className="text-copy-13 dark:text-gray-800">
-              Dark surface —{' '}
-              <code className="text-copy-13-mono bg-gray-alpha-200 px-1 rounded dark:text-gray-800">
+        <div className="border border-gray-alpha-300 rounded-card bg-background-100 overflow-hidden">
+          <div className="bg-background-100 p-8 flex flex-col items-center justify-center gap-3 min-h-[120px]">
+            <NexusMark size={32} className="w-auto text-brand-deep-blue dark:text-brand-cyan" />
+            <span className="text-copy-13 text-gray-600 text-center">
+              Same specimen — theme-following paint: deep ink on light,{' '}
+              <code className="text-copy-13-mono bg-gray-alpha-200 px-1 rounded">
                 text-brand-cyan
               </code>{' '}
-              (dark `#8EB1F4`).
+              (dark `#8EB1F4`) on dark. Compare shows both themes.
             </span>
           </div>
-          <div className="px-4 py-2 border-t border-white/10 bg-background-200 dark:bg-background-200">
-            <span className="text-label-14 dark:text-gray-800">Dark theme</span>
+          <div className="px-4 py-2 border-t border-gray-alpha-200 bg-gray-alpha-100">
+            <span className="text-label-14 text-gray-700">
+              Theme-following (uses current document theme)
+            </span>
           </div>
         </div>
       </div>
@@ -719,6 +710,7 @@ export function BrandPage() {
         specimens, and clear-space guidance. Cobalt is signal; deep blue is ink structure. Toggle
         light/dark to verify theme-aware shell fixtures.
       </p>
+      <SurfaceSourceBadges importPaths={["@42ch/nexus-ui", "@/fixtures/vi-aesthetic-retune-fixtures"]} />
       <SubNav />
 
       <LogoGrid />
@@ -728,8 +720,11 @@ export function BrandPage() {
       <ThemeCssSwatches />
       <ClearSpaceSection />
 
-      <section id="brand-vi-acceptance" className="scroll-mt-16">
-        <h3 className="text-heading-20 font-semibold text-gray-1000 mb-2 pt-8">
+      <section id="brand-vi-acceptance" className="scroll-mt-sticky-header">
+        <h3
+          id="brand-vi-acceptance-heading"
+          className="text-heading-20 font-semibold text-gray-1000 mb-2 pt-8 scroll-mt-sticky-header"
+        >
           VI acceptance fixtures
         </h3>
         <p

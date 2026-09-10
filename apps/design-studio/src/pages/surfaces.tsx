@@ -3,6 +3,7 @@ import { NavLink, Outlet } from 'react-router';
 
 import { cn, Badge, Button } from '@42ch/nexus-ui';
 
+import { useStudioEmbed } from '@/components/studio-embed-context';
 import { StudioShellLogo } from '@/components/studio-shell-logo';
 
 import {
@@ -97,9 +98,21 @@ const SURFACES_SECTIONS = [
 /*  Sub-components — shared                                            */
 /* ------------------------------------------------------------------ */
 
-function SurfaceHeading({ children }: { children: ReactNode }) {
+function FixtureBoundary({ children }: { children: ReactNode }) {
   return (
-    <h3 className="text-heading-20 font-semibold text-gray-1000 mb-2 scroll-mt-16">
+    <div className="studio-fixture-boundary" data-testid="studio-fixture-boundary">
+      {children}
+    </div>
+  );
+}
+
+function SurfaceHeading({ id, children }: { id?: string; children: ReactNode }) {
+  return (
+    <h3
+      id={id}
+      tabIndex={id ? -1 : undefined}
+      className="text-heading-20 font-semibold text-gray-1000 mb-2 scroll-mt-sticky-header"
+    >
       {children}
     </h3>
   );
@@ -109,7 +122,7 @@ function SurfacesSectionNav() {
   return (
     <nav
       aria-label="Surfaces sections"
-      className="flex flex-col gap-0.5 w-44"
+      className="flex flex-col gap-0.5 w-full md:w-44"
       data-testid="surfaces-section-nav"
       data-layout="sidebar"
     >
@@ -140,6 +153,12 @@ function SurfacesSectionNav() {
  * V1.128 P0 T1 left-sidebar IA).
  */
 export function SurfacesLayout() {
+  const { isEmbedded } = useStudioEmbed();
+
+  if (isEmbedded) {
+    return <Outlet />;
+  }
+
   return (
     <div className="max-w-6xl mx-auto py-8 px-4">
       <h2 className="text-heading-24 font-semibold text-gray-1000 mb-2">
@@ -148,16 +167,52 @@ export function SurfacesLayout() {
       <p className="text-copy-16 text-gray-700 mb-4">
         Real product-surface slices — Setup wizard step card and App shell
         chrome, composed as studio-local fixtures. Each section below labels
-        whether imports are App presentational extracts (
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-*
-        </code>
-        ) or promoted primitives (
+        its imports across all four source categories per IA guide §4.5:
+        promoted primitives (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @42ch/nexus-ui
         </code>
-        ) per IA guide §4.5. No daemon data, no live routing, and no
-        product-page imports (
+        ), App presentational extracts (
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-layout/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-setup/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-settings/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-canvas/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-global-timeline/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-shell/*
+        </code>
+        ), transitional primitives (
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-ui/*
+        </code>
+        ), and Studio-local fixtures (
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @/fixtures/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @/components/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @/pages/*
+        </code>
+        ). No daemon data, no live routing, and no product-page imports (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           pages/
         </code>{' '}
@@ -171,19 +226,19 @@ export function SurfacesLayout() {
         data-testid="surfaces-chronos-note"
         className="text-copy-14 text-gray-700 mb-4 max-w-prose"
       >
-        Chronos chrome: cyan active affordances (sidebar bar, mode pills, setup step, focus rings)
-        on warm-paper (light) and ink (dark) surfaces — tokens drive both themes.
+        Chronos chrome: cobalt active affordances (sidebar bar, mode pills, setup step, focus rings)
+        on silver-neutral (light) and graphite (dark) surfaces — tokens drive both themes.
       </p>
       <SurfaceSourceLegend />
 
-      <div className="flex gap-8 items-start">
+      <div className="flex flex-col gap-6 md:flex-row md:gap-8 md:items-start">
         <aside
-          className="sticky top-16 shrink-0 border-r border-gray-alpha-200 pr-4"
+          className="shrink-0 border-b border-gray-alpha-200 pb-4 md:sticky md:top-16 md:border-b-0 md:border-r md:pb-0 md:pr-4"
           data-testid="surfaces-section-sidebar"
         >
           <SurfacesSectionNav />
         </aside>
-        <div className="flex-1 min-w-0">
+        <div className="w-full min-w-0 md:flex-1">
           <Outlet />
         </div>
       </div>
@@ -318,10 +373,8 @@ function ShellSidebarFrame({
 function ShellSidebarFixture() {
   return (
     <div className="space-y-4" data-testid="app-shell-fixture-themes">
-      <ShellSidebarFrame activeTab="creator" testId="app-shell-fixture-light" />
-      <div className="dark">
-        <ShellSidebarFrame activeTab="orchestrator" testId="app-shell-fixture-dark" />
-      </div>
+      <ShellSidebarFrame activeTab="creator" testId="app-shell-fixture-creator" />
+      <ShellSidebarFrame activeTab="orchestrator" testId="app-shell-fixture-orchestrator" />
     </div>
   );
 }
@@ -450,22 +503,51 @@ export function SurfacesIndexPage() {
           ),
         )}
       </div>
-      <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
-        Surface fixtures: Setup wizard chrome, App shell chrome, AgentPicker
-        states, Settings shell chrome (under Shell), daemon status strip. Composed
-        from{' '}
+      <p className="text-copy-13 text-gray-700 mt-12 pt-8 border-t border-gray-alpha-200">
+        Surface fixtures: Setup wizard chrome; Shell — Chronos titlebar, App
+        shell chrome, Creator Hub sidebar create IA, Creator / Orchestrator
+        functional-area IA, Creator shell, Settings shell chrome, Footer
+        profiles, Header health indicator; AgentPicker states; Canvas —
+        mirrored Outline/Strategy/WorldKB node chrome, Mental Surfacing,
+        NLE/World/Work/Global timelines, Layer Breadcrumb, Conflict Modals;
+        Daemon status strip; Launch splash; Selection Submenu (6 variants).
+        Sources span all four categories: promoted primitives (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @42ch/nexus-ui
+        </code>
+        ), App presentational extracts (
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-layout/*
         </code>
         ,{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @web-setup/*
         </code>
-        , and transitional{' '}
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-settings/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-canvas/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-global-timeline/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-shell/*
+        </code>
+        ), transitional primitives (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @web-ui/*
         </code>
-        . No live product pages, no{' '}
+        ), and Studio-local fixtures (
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @/fixtures/*
+        </code>
+        ). No live product pages, no{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           components/layout/
         </code>{' '}
@@ -477,8 +559,8 @@ export function SurfacesIndexPage() {
 
 export function SurfacesSetupPage() {
   return (
-    <section data-testid="surfaces-setup">
-      <SurfaceHeading>Setup — Wizard chrome</SurfaceHeading>
+    <section data-testid="surfaces-setup" id="surfaces-setup">
+      <SurfaceHeading id="surfaces-setup">Setup — Wizard chrome</SurfaceHeading>
       <SurfaceSourceBadges
         importPaths={[
           '@web-setup/top-step-indicator',
@@ -501,7 +583,9 @@ export function SurfacesSetupPage() {
         </code>
         . Static — no Tauri IPC, no daemon wiring, no App page imports.
       </p>
-      <SetupWizardChromeFixtures />
+      <FixtureBoundary>
+        <SetupWizardChromeFixtures />
+      </FixtureBoundary>
     </section>
   );
 }
@@ -509,8 +593,8 @@ export function SurfacesSetupPage() {
 export function SurfacesShellPage() {
   return (
     <div data-testid="surfaces-shell">
-      <section data-testid="surfaces-chronos-titlebar">
-        <SurfaceHeading>Chronos titlebar</SurfaceHeading>
+      <section data-testid="surfaces-chronos-titlebar" id="surfaces-chronos-titlebar">
+        <SurfaceHeading id="surfaces-chronos-titlebar">Chronos titlebar</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={['@web-layout/chronos-titlebar-chrome', '@42ch/nexus-ui']}
         />
@@ -523,11 +607,13 @@ export function SurfacesShellPage() {
           </code>
           .
         </p>
-        <ChronosTitlebarFixtures />
+        <FixtureBoundary>
+          <ChronosTitlebarFixtures />
+        </FixtureBoundary>
       </section>
 
-      <section className="mt-10">
-        <SurfaceHeading>App shell chrome</SurfaceHeading>
+      <section className="mt-10" id="surfaces-app-shell-chrome">
+        <SurfaceHeading id="surfaces-app-shell-chrome">App shell chrome</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={[
             '@web-layout/shell-sidebar-chrome',
@@ -540,18 +626,21 @@ export function SurfacesShellPage() {
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             @web-layout/shell-sidebar-chrome
           </code>{' '}
-          extract. Active nav bar and mode pills use cyan signal; surfaces are
-          warm-paper / ink via background tokens. No live routing, no{' '}
+          extract. Active nav bar and mode pills use cobalt signal; surfaces are
+          silver-neutral (light) / graphite (dark) via background tokens. No
+          live routing, no{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             NexusClient
           </code>
           , and no direct layout component imports.
         </p>
-        <ShellSidebarFixture />
+        <FixtureBoundary>
+          <ShellSidebarFixture />
+        </FixtureBoundary>
       </section>
 
-      <section className="mt-10" data-testid="surfaces-creator-hub-dual-pane-ia">
-        <SurfaceHeading>Creator Hub — sidebar create IA (V1.135 P0)</SurfaceHeading>
+      <section className="mt-10" data-testid="surfaces-creator-hub-dual-pane-ia" id="surfaces-creator-hub-dual-pane-ia">
+        <SurfaceHeading id="surfaces-creator-hub-dual-pane-ia">Creator Hub — sidebar create IA (V1.135 P0)</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={[
             '@web-layout/shell-sidebar-chrome',
@@ -573,11 +662,13 @@ export function SurfacesShellPage() {
           ). Eight-variant matrix (tab × content × theme). No content-left create form. No routing,
           no daemon client.
         </p>
-        <CreatorHubDualPaneIaFixtures />
+        <FixtureBoundary>
+          <CreatorHubDualPaneIaFixtures />
+        </FixtureBoundary>
       </section>
 
-      <section className="mt-10" data-testid="surfaces-creator-orch-gongnengqu-ia">
-        <SurfaceHeading>Creator / Orchestrator 功能区 IA (P3)</SurfaceHeading>
+      <section className="mt-10" data-testid="surfaces-creator-orch-gongnengqu-ia" id="surfaces-creator-orch-gongnengqu-ia">
+        <SurfaceHeading id="surfaces-creator-orch-gongnengqu-ia">Creator / Orchestrator 功能区 IA (P3)</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={[
             '@web-layout/creator-shell-content',
@@ -594,11 +685,13 @@ export function SurfacesShellPage() {
           ); content = World/Work tab bar + card list (browse-only); 工作区 footer visible under
           both 创作 and 编排. Single frame follows Studio theme toggle. No App routing, no daemon client.
         </p>
-        <CreatorOrchGongnengquIaFixtures />
+        <FixtureBoundary>
+          <CreatorOrchGongnengquIaFixtures />
+        </FixtureBoundary>
       </section>
 
-      <section className="mt-10" data-testid="surfaces-creator-shell">
-        <SurfaceHeading>Creator shell — Create vs Controller</SurfaceHeading>
+      <section className="mt-10" data-testid="surfaces-creator-shell" id="surfaces-creator-shell">
+        <SurfaceHeading id="surfaces-creator-shell">Creator shell — Create vs Controller</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={[
             '@web-layout/creator-shell-content',
@@ -619,12 +712,14 @@ export function SurfacesShellPage() {
           Back). Worlds-first nav data matches App sidebar IA. No App context,
           no daemon client.
         </p>
-        <CreatorShellFixtures />
+        <FixtureBoundary>
+          <CreatorShellFixtures />
+        </FixtureBoundary>
       </section>
 
       {/* Settings shell chrome stays discoverable under Shell (V1.103 P0) */}
-      <section className="mt-10">
-        <SurfaceHeading>Settings — Shell chrome</SurfaceHeading>
+      <section className="mt-10" id="surfaces-settings-shell">
+        <SurfaceHeading id="surfaces-settings-shell">Settings — Shell chrome</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={[
             '@web-settings/connect-daemon-form-chrome',
@@ -658,11 +753,13 @@ export function SurfacesShellPage() {
           </code>{' '}
           imports.
         </p>
-        <SettingsHostFixtures />
+        <FixtureBoundary>
+          <SettingsHostFixtures />
+        </FixtureBoundary>
       </section>
 
-      <section className="mt-10">
-        <SurfaceHeading>Footer profiles</SurfaceHeading>
+      <section className="mt-10" id="surfaces-footer-profiles">
+        <SurfaceHeading id="surfaces-footer-profiles">Footer profiles</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={['@web-layout/footer-profiles-chrome']}
         />
@@ -673,11 +770,13 @@ export function SurfacesShellPage() {
           </code>{' '}
           — props-driven 0/1/N states. No creator context, no daemon client.
         </p>
-        <FooterProfilesFixture />
+        <FixtureBoundary>
+          <FooterProfilesFixture />
+        </FixtureBoundary>
       </section>
 
-      <section className="mt-10">
-        <SurfaceHeading>Header health indicator</SurfaceHeading>
+      <section className="mt-10" id="surfaces-header-health">
+        <SurfaceHeading id="surfaces-header-health">Header health indicator</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={['@web-layout/daemon-health-indicator-chrome']}
         />
@@ -689,7 +788,9 @@ export function SurfacesShellPage() {
           — unknown, connected (local/remote), and offline states. No polling,
           no daemon client.
         </p>
-        <DaemonHealthIndicatorFixture />
+        <FixtureBoundary>
+          <DaemonHealthIndicatorFixture />
+        </FixtureBoundary>
       </section>
     </div>
   );
@@ -697,8 +798,8 @@ export function SurfacesShellPage() {
 
 export function SurfacesAgentPickerPage() {
   return (
-    <section className="mt-0" data-testid="surfaces-agent-picker">
-      <SurfaceHeading>Setup — AgentPicker</SurfaceHeading>
+    <section className="mt-0" data-testid="surfaces-agent-picker" id="surfaces-agent-picker">
+      <SurfaceHeading id="surfaces-agent-picker">Setup — AgentPicker</SurfaceHeading>
       <SurfaceSourceBadges importPaths={['@web-setup/agent-picker']} />
       <p className="text-copy-14 text-gray-700 mb-6">
         Presentational card grid from{' '}
@@ -713,15 +814,17 @@ export function SurfacesAgentPickerPage() {
         selected, VI-001 historical ring-only target, and V1.134 P2 StatusDot
         retune target (light+dark). No contracts, no daemon client.
       </p>
-      <AgentPickerFixtures />
+      <FixtureBoundary>
+        <AgentPickerFixtures />
+      </FixtureBoundary>
     </section>
   );
 }
 
 export function SurfacesDaemonPage() {
   return (
-    <section data-testid="surfaces-daemon">
-      <SurfaceHeading>Daemon status strip</SurfaceHeading>
+    <section data-testid="surfaces-daemon" id="surfaces-daemon">
+      <SurfaceHeading id="surfaces-daemon">Daemon status strip</SurfaceHeading>
       <SurfaceSourceBadges importPaths={['@42ch/nexus-ui']} />
       <p className="text-copy-14 text-gray-700 mb-6">
         Healthy daemon status affordance — green dot, badge, helper text.
@@ -735,15 +838,17 @@ export function SurfacesDaemonPage() {
         </code>{' '}
         tokens.
       </p>
-      <DaemonStatusStrip />
+      <FixtureBoundary>
+        <DaemonStatusStrip />
+      </FixtureBoundary>
     </section>
   );
 }
 
 export function SurfacesLaunchPage() {
   return (
-    <section data-testid="surfaces-launch">
-      <SurfaceHeading>Launch — Daemon splash</SurfaceHeading>
+    <section data-testid="surfaces-launch" id="surfaces-launch">
+      <SurfaceHeading id="surfaces-launch">Launch — Daemon splash</SurfaceHeading>
       <SurfaceSourceBadges
         importPaths={['@web-setup/daemon-ready-splash']}
       />
@@ -755,15 +860,17 @@ export function SurfacesLaunchPage() {
         . Props-driven variants: waiting, error + Restart Nexus, and error +
         Reset local database. No daemon IPC, no Tauri commands.
       </p>
-      <LaunchDaemonFixtures />
+      <FixtureBoundary>
+        <LaunchDaemonFixtures />
+      </FixtureBoundary>
     </section>
   );
 }
 
 export function SurfacesSelectionSubmenuPage() {
   return (
-    <section data-testid="surfaces-selection-submenu">
-      <SurfaceHeading>Selection Submenu — 6 variants (V1.126 P0 T4)</SurfaceHeading>
+    <section data-testid="surfaces-selection-submenu" id="surfaces-selection-submenu">
+      <SurfaceHeading id="surfaces-selection-submenu">Selection Submenu — 6 variants (V1.126 P0 T4)</SurfaceHeading>
       <SurfaceSourceBadges
         importPaths={['@web-shell/selection-submenu']}
       />
@@ -781,8 +888,8 @@ export function SurfacesSelectionSubmenuPage() {
       <div className="mb-4 rounded-card border border-gray-alpha-200 bg-background-100 p-3">
         <p className="text-label-14 font-medium text-gray-1000 mb-2">Legend</p>
         <ul className="flex flex-col gap-1 text-copy-13 text-gray-700">
-          <li><strong className="text-gray-1000">1–2:</strong> World row (KB item) + submenu open, light / dark</li>
-          <li><strong className="text-gray-1000">3–4:</strong> Work row (Outline item) + submenu open, light / dark</li>
+          <li><strong className="text-gray-1000">1–2:</strong> World row (KB item) + submenu open — catalog ids world-light / world-dark (document theme; use Compare for parity)</li>
+          <li><strong className="text-gray-1000">3–4:</strong> Work row (Outline item) + submenu open — catalog ids work-light / work-dark (document theme; use Compare for parity)</li>
           <li><strong className="text-gray-1000">5:</strong> Rename in progress — inline edit active with blue focus ring</li>
           <li><strong className="text-gray-1000">6:</strong> Agent dialog overlay — submenu closed, AgentPicker dialog open with entity-name title</li>
         </ul>
@@ -796,8 +903,8 @@ export function SurfacesSelectionSubmenuPage() {
 export function SurfacesCanvasPage() {
   return (
     <div data-testid="surfaces-canvas">
-      <section>
-        <SurfaceHeading>Canvas — Three mirrored surfaces + shared chrome</SurfaceHeading>
+      <section id="surfaces-canvas-mirrored">
+        <SurfaceHeading id="surfaces-canvas-mirrored">Canvas — Three mirrored surfaces + shared chrome</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={['@web-canvas/node-chrome-shell']}
         />
@@ -868,12 +975,15 @@ export function SurfacesCanvasPage() {
           </code>
           — light/dark acceptance here carries to the App graph.
         </p>
-        <CanvasSurfacesFixtures />
+        <FixtureBoundary>
+          <CanvasSurfacesFixtures />
+        </FixtureBoundary>
       </section>
 
       {/* V1.164 P3 T2 — Mental surfacing inspector states (AR-6 studio-first) */}
-      <section className="mt-10" data-testid="surfaces-mental-surfacing">
-        <SurfaceHeading>Mental Surfacing</SurfaceHeading>
+      <section className="mt-10" data-testid="surfaces-mental-surfacing" id="surfaces-mental-surfacing">
+        <SurfaceHeading id="surfaces-mental-surfacing">Mental Surfacing</SurfaceHeading>
+        <SurfaceSourceBadges importPaths={["@/fixtures/mental-surfacing-fixtures"]} />
         <p className="text-copy-14 text-gray-700 mb-6">
           Read-only inspector states for the mental layer — character{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
@@ -905,8 +1015,8 @@ export function SurfacesCanvasPage() {
       </section>
 
       {/* V1.128 P1 T1 — NLE multi-track Timeline band */}
-      <section className="mt-10" data-testid="surfaces-nle-timeline">
-        <SurfaceHeading>NLE Timeline</SurfaceHeading>
+      <section className="mt-10" data-testid="surfaces-nle-timeline" id="surfaces-nle-timeline">
+        <SurfaceHeading id="surfaces-nle-timeline">NLE Timeline</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={['@web-canvas/nle-timeline-chrome']}
         />
@@ -936,8 +1046,8 @@ export function SurfacesCanvasPage() {
       </section>
 
       {/* V1.124 P0 T3 — World Timeline node chrome (Brief-era / Event / KnowledgeEntry) */}
-      <section className="mt-10" data-testid="surfaces-world-timeline">
-        <SurfaceHeading>World Timeline</SurfaceHeading>
+      <section className="mt-10" data-testid="surfaces-world-timeline" id="surfaces-world-timeline">
+        <SurfaceHeading id="surfaces-world-timeline">World Timeline</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={[
             '@web-canvas/node-chrome-shell',
@@ -986,8 +1096,8 @@ export function SurfacesCanvasPage() {
       </section>
 
       {/* V1.124 P0 T4 — Work Timeline node chrome (Narrative + Moment scene + beat) */}
-      <section className="mt-10" data-testid="surfaces-work-timeline">
-        <SurfaceHeading>Work Timeline</SurfaceHeading>
+      <section className="mt-10" data-testid="surfaces-work-timeline" id="surfaces-work-timeline">
+        <SurfaceHeading id="surfaces-work-timeline">Work Timeline</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={[
             '@web-canvas/node-chrome-shell',
@@ -1034,8 +1144,8 @@ export function SurfacesCanvasPage() {
       </section>
 
       {/* V1.124 P2 T2 — Global Timeline list chrome */}
-      <section className="mt-10" data-testid="surfaces-global-timeline">
-        <SurfaceHeading>Global Timeline</SurfaceHeading>
+      <section className="mt-10" data-testid="surfaces-global-timeline" id="surfaces-global-timeline">
+        <SurfaceHeading id="surfaces-global-timeline">Global Timeline</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={['@web-global-timeline/global-timeline-list-chrome']}
         />
@@ -1057,8 +1167,8 @@ export function SurfacesCanvasPage() {
       </section>
 
       {/* V1.124 P2 T3a — Layer breadcrumb */}
-      <section className="mt-10" data-testid="surfaces-layer-breadcrumb">
-        <SurfaceHeading>Layer Breadcrumb</SurfaceHeading>
+      <section className="mt-10" data-testid="surfaces-layer-breadcrumb" id="surfaces-layer-breadcrumb">
+        <SurfaceHeading id="surfaces-layer-breadcrumb">Layer Breadcrumb</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={['@web-canvas/layer-breadcrumb']}
         />
@@ -1078,8 +1188,8 @@ export function SurfacesCanvasPage() {
       </section>
 
       {/* V1.124 P2 T3b — Conflict-modal shared chrome */}
-      <section className="mt-10" data-testid="surfaces-conflict-modals">
-        <SurfaceHeading>Conflict Modals</SurfaceHeading>
+      <section className="mt-10" data-testid="surfaces-conflict-modals" id="surfaces-conflict-modals">
+        <SurfaceHeading id="surfaces-conflict-modals">Conflict Modals</SurfaceHeading>
         <SurfaceSourceBadges
           importPaths={['@web-canvas/conflict-modal-chrome']}
         />

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useTheme } from '@/components/theme-provider';
+import { SurfaceSourceBadges } from '@/components/surface-source-badge';
 
 /* ------------------------------------------------------------------ */
 /*  Data — token inventory from SSOT                                    */
@@ -1112,7 +1113,7 @@ function trimRatio(value: number, decimals: number): string {
 
 function SectionHeading({ id, children }: { id: string; children: ReactNode }) {
   return (
-    <h3 id={id} className="text-heading-20 font-semibold text-gray-1000 mb-4 pt-8 scroll-mt-16">
+    <h3 id={id} className="text-heading-20 font-semibold text-gray-1000 mb-4 pt-8 scroll-mt-sticky-header">
       {children}
     </h3>
   );
@@ -2406,6 +2407,7 @@ export function TokensPage() {
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">blue-*</code> as the
         cobalt interactive scale — see Colors for the ink-vs-signal split.
       </p>
+      <SurfaceSourceBadges importPaths={["@nexus/design-tokens"]} />
       <SubNav />
 
       <ColorsSection />

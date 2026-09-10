@@ -90,7 +90,7 @@ function ThemePair({
         data-testid={`${testId}-light`}
         className="rounded-card border border-gray-alpha-300 bg-background-100 p-4"
       >
-        <p className="mb-3 text-label-14 font-medium text-gray-1000">Light reference</p>
+        <p className="mb-3 text-label-14 font-medium text-gray-1000">Fixed reference plate (light)</p>
         {light}
       </div>
       <div
@@ -126,7 +126,7 @@ function ViSection({
     <section
       id={id}
       data-testid={sectionTestId ?? `vi-section-${ledgerId.toLowerCase()}`}
-      className="scroll-mt-16 border-t border-gray-alpha-200 pt-8 first:border-t-0 first:pt-0"
+      className="scroll-mt-sticky-header border-t border-gray-alpha-200 pt-8 first:border-t-0 first:pt-0"
     >
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <ViLedgerBadge id={ledgerId} />

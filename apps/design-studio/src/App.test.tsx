@@ -17,6 +17,7 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '@/App';
+import { StudioEmbedProvider } from '@/components/studio-embed-context';
 import { ThemeProvider } from '@/components/theme-provider';
 
 /* ---- helpers ------------------------------------------------------------ */
@@ -38,9 +39,11 @@ function mockMatchMedia(prefersDark: boolean) {
 async function renderStudio(initialRoute = '/') {
   const result = render(
     <ThemeProvider>
-      <MemoryRouter initialEntries={[initialRoute]}>
-        <App />
-      </MemoryRouter>
+      <StudioEmbedProvider forcedTheme={null}>
+        <MemoryRouter initialEntries={[initialRoute]}>
+          <App />
+        </MemoryRouter>
+      </StudioEmbedProvider>
     </ThemeProvider>,
   );
   // Lazy route chunks resolve asynchronously (S-002); flush them so gallery
@@ -81,7 +84,9 @@ describe('App landing page', () => {
   it('renders the read-only SSOT hint in footer', async () => {
     mockMatchMedia(false);
     await renderStudio();
-    expect(screen.getByText(/Read-only/)).toBeInTheDocument();
+    const footer = screen.getByRole('contentinfo');
+    expect(within(footer).getByText(/Read-only/)).toBeInTheDocument();
+    expect(within(footer).getByText('DESIGN.md')).toBeInTheDocument();
   });
 
   it('renders navigation links for all five gallery sections', async () => {
@@ -752,7 +757,7 @@ describe('Surfaces page — app shell fixture', () => {
 
   it('renders Worlds-first nav and Creator mode content placeholder', () => {
     expect(screen.getAllByText('Worlds').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByTestId('app-shell-fixture-light-content')).toBeInTheDocument();
+    expect(screen.getByTestId('app-shell-fixture-creator-content')).toBeInTheDocument();
   });
 
   it('renders Settings fixture sidebar with SSOT segmented pill tabs (FB-UI-002)', () => {
@@ -793,20 +798,20 @@ describe('Surfaces page — app shell fixture', () => {
     expect(screen.getAllByText('Local Creator').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('renders add-profile button under Orchestrator mode switch (dark fixture)', () => {
-    const appShell = screen.getByTestId('app-shell-fixture-dark');
+  it('renders add-profile button under Orchestrator mode switch', () => {
+    const appShell = screen.getByTestId('app-shell-fixture-orchestrator');
     expect(
       within(appShell).getByRole('button', { name: 'Add profile' }),
     ).toBeInTheDocument();
     expect(within(appShell).getByTestId('shell-mode-switch')).toBeInTheDocument();
   });
 
-  it('renders footer mode switch in both light and dark app-shell fixtures', async () => {
+  it('renders footer mode switch in both Creator and Orchestrator app-shell fixtures', async () => {
     expect(
-      within(screen.getByTestId('app-shell-fixture-light')).getByTestId('shell-mode-switch'),
+      within(screen.getByTestId('app-shell-fixture-creator')).getByTestId('shell-mode-switch'),
     ).toBeInTheDocument();
     expect(
-      within(screen.getByTestId('app-shell-fixture-dark')).getByTestId('shell-mode-switch'),
+      within(screen.getByTestId('app-shell-fixture-orchestrator')).getByTestId('shell-mode-switch'),
     ).toBeInTheDocument();
   });
 
@@ -972,11 +977,10 @@ describe('Surfaces page — selection submenu fixtures', () => {
     expect(within(agentFrame).getByRole('dialog')).toBeInTheDocument();
   });
 
-  it('renders dark variant with dark class wrapper', async () => {
+  it('renders document-theme World variant with open submenu (no nested .dark wrapper)', async () => {
     const worldDark = screen.getByTestId('selection-submenu-world-dark');
-    const darkWrapper = worldDark.querySelector('.dark') as HTMLElement | null;
-    expect(darkWrapper).toBeInTheDocument();
-    expect(within(darkWrapper!).getByRole('menu')).toBeInTheDocument();
+    expect(worldDark.querySelector('.dark')).not.toBeInTheDocument();
+    expect(within(worldDark).getByRole('menu')).toBeInTheDocument();
   });
 });
 

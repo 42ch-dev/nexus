@@ -214,7 +214,7 @@ function AlwaysOpenPreview() {
  */
 export function ConflictModalFixtures() {
   return (
-    <div data-testid="conflict-modal-fixtures">
+    <div className="studio-fixture-boundary" data-testid="conflict-modal-fixtures">
       <AlwaysOpenPreview />
       <ResolvePathFrame />
       <OverlapPathFrame />
