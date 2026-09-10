@@ -260,7 +260,8 @@ async fn labeled_no_match_does_not_stall_session() {
     // Set judge context to produce output that won't match any label.
     if let Some(session) = storage.get(&sid.0).await.expect("get session") {
         session
-            .context.set("_judge_reason", "this is just testing".to_string());
+            .context.set("_judge_reason", "this is just testing".to_string())
+            .unwrap();
         session.context.set("_judge_result", true).unwrap();
         storage.save(session).await.expect("save session");
     }

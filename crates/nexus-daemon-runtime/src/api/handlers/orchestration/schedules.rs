@@ -1909,18 +1909,17 @@ async fn cancel_running_session_invalidating_graph(
     sid: &str,
 ) -> Result<(), NexusApiError> {
     let now = chrono::Utc::now().timestamp();
-    // SAFETY: runtime `sqlx::query` — DML for session cancellation.
-    let result = sqlx::query(
+    let result = sqlx::query!(
         "UPDATE orchestration_sessions
              SET status = 'cancelled', updated_at = ?,
                  graph_version = graph_version + 1
              WHERE session_id = ? AND status = 'running'
                AND graph_version >= 0
                AND graph_version < 9223372036854775807",
+        now,
+        sid
     )
-    .bind(now)
-    .bind(sid)
-    .execute(pool)
+    .execute(&*pool)
     .await
     .map_err(|e| NexusApiError::Internal {
         code: "SESSION_CANCEL_ERROR".into(),
@@ -1930,12 +1929,12 @@ async fn cancel_running_session_invalidating_graph(
     // (negative/exhausted counter), surface a hard error instead of leaving
     // a cancelable row with a stale clock.
     if result.rows_affected() == 0 {
-        let still_running: Option<(String,)> = sqlx::query_as(
+        let still_running: Option<String> = sqlx::query_scalar!(
             "SELECT status FROM orchestration_sessions
                  WHERE session_id = ? AND status = 'running'",
+            sid
         )
-        .bind(sid)
-        .fetch_optional(pool)
+        .fetch_optional(&*pool)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".into(),

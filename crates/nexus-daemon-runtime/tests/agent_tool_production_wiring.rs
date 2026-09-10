@@ -158,7 +158,7 @@ async fn agent_tool_e2e_host_tool_call_task_round_trip() {
 
     // Create a graph-flow context and set the work_id
     let context = Context::new();
-    context.set("work_id", &work_id);
+    context.set("work_id", &work_id).unwrap();
 
     // Act: run the task
     let result = task.run(context.clone()).await;
@@ -195,7 +195,7 @@ async fn agent_tool_e2e_stub_mode_without_adapter() {
     );
 
     let context = Context::new();
-    context.set("work_id", "wrk_stub");
+    context.set("work_id", "wrk_stub").unwrap();
 
     let result = task.run(context.clone()).await;
     assert!(result.is_ok(), "stub mode should succeed");

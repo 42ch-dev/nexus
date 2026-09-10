@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE orchestration_sessions\n             SET status = 'cancelled', updated_at = ?,\n                 graph_version = graph_version + 1\n             WHERE session_id = ? AND status = 'running'\n               AND graph_version >= 0\n               AND graph_version < 9223372036854775807",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "676eb42d96bb57fd1a01990a8d9276057b995fe026e90c5326c8558fb750e628"
+}

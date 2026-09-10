@@ -5062,7 +5062,8 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
         .expect("session present");
     session.current_task_id = "join".to_string();
     session
-        .context.set("_converge_arrivals_join", vec!["branch_a".to_string()]);
+        .context.set("_converge_arrivals_join", vec!["branch_a".to_string()])
+            .unwrap();
     storage.save(session).await.expect("save parked position");
 
     // One real engine step at the parked join → graph-flow `WaitForInput`;
@@ -5416,9 +5417,11 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
             .expect("get session")
             .expect("present");
         session
-            .context.set("_merge_other", serde_json::json!(["x"]));
+            .context.set("_merge_other", serde_json::json!(["x"]))
+            .unwrap();
         session
-            .context.set("_join_wait_start_other", serde_json::json!(1));
+            .context.set("_join_wait_start_other", serde_json::json!(1))
+            .unwrap();
         storage.save(session).await.expect("save seeded session");
     }
 
@@ -5604,9 +5607,11 @@ states:
             .expect("present");
         session.context.set("score", serde_json::json!(95)).unwrap();
         session
-            .context.set("_merge_other", serde_json::json!(["x"]));
+            .context.set("_merge_other", serde_json::json!(["x"]))
+            .unwrap();
         session
-            .context.set("_join_wait_start_other", serde_json::json!(1));
+            .context.set("_join_wait_start_other", serde_json::json!(1))
+            .unwrap();
         storage.save(session).await.expect("save seeded session");
     }
 

@@ -98,7 +98,7 @@ fn merge_arrive(ctx: &Context, target_id: &str, label: &str) {
     let key = format!("_merge_{target_id}");
     let mut arrived: Vec<String> = ctx.get(&key).unwrap_or_default();
     arrived.push(label.to_string());
-    ctx.set(&key, arrived);
+    ctx.set(&key, arrived).unwrap();
 }
 
 // ── (a) converge reroute ─────────────────────────────────────────────────

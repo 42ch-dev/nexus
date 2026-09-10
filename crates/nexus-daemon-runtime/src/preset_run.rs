@@ -180,8 +180,13 @@ pub async fn drive_preset_run(
                 };
             }
             Ok(StepOutcome::Error(msg)) => {
-                mark_failed(engine, session_id).await;
+                // Order matters (graph-flow 0.8 OCC): the failure record must
+                // be persisted BEFORE the terminal cancellation fence, because
+                // the protected-row save fence refuses writes onto a terminal
+                // row. A concurrent terminal winner in between legitimately
+                // refuses the save and is left untouched.
                 persist_failure(storage, session_id, &msg).await;
+                mark_failed(engine, session_id).await;
                 return PresetRunOutcome::Failed {
                     steps: steps.saturating_add(1),
                     error: msg,
@@ -209,8 +214,10 @@ pub async fn drive_preset_run(
             }
             Err(e) => {
                 let error = e.to_string();
-                mark_failed(engine, session_id).await;
+                // Failure record BEFORE terminal cancellation (see the
+                // StepOutcome::Error arm above for the OCC rationale).
                 persist_failure(storage, session_id, &error).await;
+                mark_failed(engine, session_id).await;
                 return PresetRunOutcome::Failed {
                     steps: steps.saturating_add(1),
                     error,
@@ -1086,7 +1093,32 @@ impl WorkflowRunCoordinator {
         let Ok(Some(record)) = store.load_run(session_id).await else {
             return false;
         };
-        if record.execution_version < 1 || record.status.is_terminal() {
+        if record.execution_version < 1 {
+            return true;
+        }
+        if record.status.is_terminal() {
+            // The drive loop persists its failure record
+            // (`_run_status`/`_run_error`) BEFORE the terminal cancellation
+            // fence, so a terminal row carrying the record is durably handled.
+            // A terminal row WITHOUT it belongs to a concurrent control/cancel
+            // winner — never overwrite the winner's state to retrofit a
+            // failure transition. Either way the row is terminal and
+            // non-replayable; only observability differs.
+            let has_failure_record = match self.storage.get(&session_id.0).await {
+                Ok(Some(session)) => session
+                    .context
+                    .get::<String>("_run_status")
+                    .is_some_and(|s| s == "failed"),
+                _ => false,
+            };
+            if !has_failure_record {
+                tracing::debug!(
+                    sid = %session_id.0,
+                    status = ?record.status,
+                    "coordinator: run is terminal without a driver failure record \
+                     (concurrent control/cancel winner or external cancel); left untouched"
+                );
+            }
             return true;
         }
         let expected_revision = record.state_revision;
@@ -2977,6 +3009,111 @@ mod tests {
             "no failure record may be written onto the winner's context"
         );
     }
+
+    /// graph-flow 0.8 OCC (Critical fix): a NON-conflict drive failure must
+    /// leave a durable failure record. The driver persists
+    /// `_run_status`/`_run_error` BEFORE the terminal cancellation fence —
+    /// after cancel settles, the protected-row save fence would refuse the
+    /// write. Real SQLite + real engine prove the record survives terminal
+    /// settlement while cleanup semantics (terminal cancel) are retained.
+    #[tokio::test]
+    async fn failed_drive_persists_failure_record_before_terminal_settlement() {
+        let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let _ = &tmp;
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("open pool");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+
+        struct FailingTask;
+        #[async_trait]
+        impl graph_flow::Task for FailingTask {
+            fn id(&self) -> &str {
+                "fail"
+            }
+            async fn run(
+                &self,
+                _context: graph_flow::Context,
+            ) -> Result<graph_flow::TaskResult, graph_flow::GraphError> {
+                Err(graph_flow::GraphError::TaskExecutionFailed(
+                    "deterministic failure for regression test".to_string(),
+                ))
+            }
+        }
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("fail-graph")
+                .add_task(Arc::new(FailingTask))
+                .build()
+                .expect("test graph build"),
+        );
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        let outcome = drive_preset_run(
+            &engine,
+            Some(&storage),
+            &session_id,
+            &PresetRunConfig::default(),
+            None,
+        )
+        .await;
+        match &outcome {
+            PresetRunOutcome::Failed { error, .. } => {
+                assert!(
+                    error.contains("deterministic failure"),
+                    "the task failure must surface verbatim: {error}"
+                );
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+
+        // The failure record survived terminal settlement (the fix ordering).
+        let persisted = storage
+            .get(&session_id.0)
+            .await
+            .expect("get session")
+            .expect("session exists");
+        let run_status: String = persisted
+            .context
+            .get("_run_status")
+            .expect("durable failure record must exist");
+        let run_error: String = persisted
+            .context
+            .get("_run_error")
+            .expect("durable failure record must exist");
+        assert_eq!(run_status, "failed");
+        assert!(
+            run_error.contains("deterministic failure"),
+            "{run_error}"
+        );
+
+        // Cleanup semantics retained: the cancellation path still settled the
+        // row terminal (the failure record was written BEFORE that fence).
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert!(
+            record.status.is_terminal(),
+            "row must be terminal after the failure path: {:?}",
+            record.status
+        );
+    }
+
 
 
     #[tokio::test]

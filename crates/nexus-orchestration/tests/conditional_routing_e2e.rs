@@ -41,7 +41,7 @@ async fn run_expression_route(
 
     let ctx = Context::new();
     for (key, value) in context_values {
-        ctx.set(*key, value.clone());
+        ctx.set(*key, value.clone()).unwrap();
     }
 
     let result = task.run(ctx).await.expect("task run should succeed");

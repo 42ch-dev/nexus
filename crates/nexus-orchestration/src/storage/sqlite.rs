@@ -1406,7 +1406,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
             // Distinguish an unsupported legacy row, a revision mismatch, and
             // a terminal/cancelled fence without mutating any of them.
             let current = sqlx::query!(
-                "SELECT state_revision, execution_version, graph_version \
+                "SELECT state_revision, execution_version, graph_version, status \
                  FROM orchestration_sessions WHERE session_id = ?",
                 session_id.0
             )
@@ -1428,6 +1428,17 @@ impl WorkflowStateStore for SqliteSessionStorage {
                             "commit_transition '{}': corrupt/exhausted graph_version {} \
                              (non-replayable)",
                             session_id.0, row.graph_version
+                        ),
+                    )))
+                }
+                // An unknown/corrupt status is corruption, never a
+                // concurrency or terminal outcome (Important 6).
+                Some(row) if crate::engine::SessionStatus::from_db_str(&row.status).is_none() => {
+                    Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+                        format!(
+                            "commit_transition '{}': unknown/corrupt status {:?} \
+                             (non-replayable)",
+                            session_id.0, row.status
                         ),
                     )))
                 }
@@ -1667,7 +1678,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
 
         if result.rows_affected() == 0 {
             let current = sqlx::query!(
-                "SELECT state_revision, execution_version, graph_version \
+                "SELECT state_revision, execution_version, graph_version, status \
                  FROM orchestration_sessions WHERE session_id = ?",
                 session_id.0
             )
@@ -1686,6 +1697,17 @@ impl WorkflowStateStore for SqliteSessionStorage {
                             "settle_cancelled '{}': corrupt/exhausted graph_version {} \
                              (non-replayable)",
                             session_id.0, row.graph_version
+                        ),
+                    )))
+                }
+                // An unknown/corrupt status is corruption, never a
+                // concurrency or terminal outcome (Important 6).
+                Some(row) if crate::engine::SessionStatus::from_db_str(&row.status).is_none() => {
+                    Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+                        format!(
+                            "settle_cancelled '{}': unknown/corrupt status {:?} \
+                             (non-replayable)",
+                            session_id.0, row.status
                         ),
                     )))
                 }
@@ -1926,10 +1948,11 @@ impl WorkflowStateStore for SqliteSessionStorage {
             struct RestoreFenceRow {
                 state_revision: i64,
                 graph_version: i64,
+                status: String,
             }
             let current: Option<RestoreFenceRow> = sqlx::query_as!(
                 RestoreFenceRow,
-                "SELECT state_revision, graph_version FROM orchestration_sessions \
+                "SELECT state_revision, graph_version, status FROM orchestration_sessions \
                  WHERE session_id = ?",
                 session_id.0
             )
@@ -1950,6 +1973,19 @@ impl WorkflowStateStore for SqliteSessionStorage {
                         ),
                     )))
                 }
+                // An unknown/corrupt status must NEVER be presented as the
+                // deterministic `TerminalState`/`RevisionMismatch` outcomes the
+                // engine treats as an expected concurrent winner — it is
+                // corruption, checked before the revision fence (Important 6).
+                Some(row) if crate::engine::SessionStatus::from_db_str(&row.status).is_none() => {
+                    Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+                        format!(
+                            "restore_pre_step '{}': unknown/corrupt status {:?} \
+                             (non-replayable)",
+                            session_id.0, row.status
+                        ),
+                    )))
+                }
                 Some(row) if row.state_revision != expected_revision as i64 => {
                     Err(EngineError::RevisionMismatch {
                         session_id: session_id.0.clone(),
@@ -1957,7 +1993,18 @@ impl WorkflowStateStore for SqliteSessionStorage {
                         found: u64::try_from(row.state_revision).unwrap_or(0),
                     })
                 }
-                _ => Err(EngineError::TerminalState(session_id.0.clone())),
+                // A known, non-steppable status on the fence is a genuine
+                // terminal/waiting winner.
+                Some(_) => Err(EngineError::TerminalState(session_id.0.clone())),
+                // The row vanished between the fenced write and the re-read:
+                // not a winner, and not safely replayable.
+                None => Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+                    format!(
+                        "restore_pre_step '{}': row absent after zero-row restore fence \
+                         (non-replayable)",
+                        session_id.0
+                    ),
+                ))),
             };
         }
         Ok(())
@@ -2039,6 +2086,15 @@ impl WorkflowStateStore for SqliteSessionStorage {
                         "mark_step_in_flight '{}': corrupt/exhausted graph_version {} \
                          (non-replayable)",
                         session_id.0, row.graph_version
+                    )))
+                }
+                // An unpersistable status string is corruption: a hard storage
+                // error, never a concurrency/terminal outcome (Important 6).
+                Some(row) if crate::engine::SessionStatus::from_db_str(&row.status).is_none() => {
+                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                        "mark_step_in_flight '{}': unknown/corrupt status {:?} \
+                         (non-replayable)",
+                        session_id.0, row.status
                     )))
                 }
                 Some(row) if row.state_revision != expected_revision as i64 => {
@@ -3071,4 +3127,33 @@ mod tests {
             "stale step prompt must never install an in_flight attempt"
         );
     }
+
+    #[tokio::test]
+    async fn restore_pre_step_corrupt_status_is_storage_error_not_terminal() {
+        let (pool, _db) = fresh_pool().await;
+        seed_v1_stepped_row(&pool, "sess-corrupt-status").await;
+        sqlx::query(
+            "UPDATE orchestration_sessions SET status = 'not-a-valid-status' WHERE session_id = ?",
+        )
+        .bind("sess-corrupt-status")
+        .execute(&*pool)
+        .await
+        .expect("corrupt status");
+        let storage = SqliteSessionStorage::new(pool.clone());
+        let pre = graph_flow::Session::new_from_task("sess-corrupt-status".into(), "task_a");
+        let err = storage
+            .restore_pre_step(&SessionId("sess-corrupt-status".into()), 2, &pre)
+            .await
+            .expect_err("corrupt status must fail closed");
+        assert!(
+            !matches!(err, EngineError::TerminalState(_)),
+            "corrupt status must not masquerade as TerminalState: {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("unknown/corrupt status"),
+            "expected corruption classifier, got: {msg}"
+        );
+    }
+
 }

@@ -598,7 +598,18 @@ impl EngineSharedState {
         // never fall back to minting a fresh child). Legacy v0 children are
         // left to the shipped conservative path by the validator itself, so a
         // v1 child under a v0 parent is still refused.
-        if let Ok(Some(parent_record)) = store.load_run(parent_session_id).await {
+        // A load ERROR must not be swallowed by the `if let` fence: propagate
+        // it and drop the stale children-map entry (Minor 1 discipline) so a
+        // later replay retries cleanly instead of hydrating against an
+        // unverified parent record.
+        let parent_record = match store.load_run(parent_session_id).await {
+            Ok(record) => record,
+            Err(e) => {
+                self.children.write().await.remove(&parent_session_id.0);
+                return Err(e);
+            }
+        };
+        if let Some(parent_record) = parent_record {
             for child in &children {
                 if let Err(e) = validate_child_descriptor_identity(
                     parent_session_id,

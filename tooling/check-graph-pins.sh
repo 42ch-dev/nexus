@@ -23,11 +23,16 @@
 #   -F embedded-mcp (both crates):
 #     rmcp            exactly one 3.2.0
 #     agent-client-protocol exactly one 2.1.0
+#     spoke-connect   exactly one 0.11.x
+#     spoke-operations exactly one 0.11.1
+#     libp2p          exactly one 0.56.x
 #   -F connect-client,connect-host (nexus42 only; nexus-daemon-runtime has no
 #     connect-host feature):
 #     libp2p          exactly one 0.56.x
 #     rmcp            exactly one 3.2.0
 #     agent-client-protocol exactly one 2.1.0
+#     spoke-connect   exactly one 0.11.x
+#     spoke-operations exactly one 0.11.1
 #
 # DEV-DEP CAVEAT (AR-74): `cargo tree -p <crate>` includes dev-dependencies
 # by default. `--edges normal` drops them — the pins below therefore verify
@@ -151,12 +156,20 @@ done
 for crate in nexus-daemon-runtime nexus42; do
   assert_exactly_one "$crate" "--features embedded-mcp" rmcp "3.2.0"
   assert_exactly_one "$crate" "--features embedded-mcp" agent-client-protocol "2.1.0"
+  # embedded-mcp embeds the full in-process connect stack: the same
+  # spoke/libp2p pins as the connect-client rows apply (verified present via
+  # `cargo tree -i` on both crates).
+  assert_exactly_one "$crate" "--features embedded-mcp" spoke-connect "0.11.*"
+  assert_exactly_one "$crate" "--features embedded-mcp" spoke-operations "0.11.1"
+  assert_exactly_one "$crate" "--features embedded-mcp" libp2p "0.56.*"
 done
 
 # --- connect-client + connect-host (nexus42 only) ------------------------------
 assert_exactly_one nexus42 "--features connect-client,connect-host" libp2p "0.56.*"
 assert_exactly_one nexus42 "--features connect-client,connect-host" rmcp "3.2.0"
 assert_exactly_one nexus42 "--features connect-client,connect-host" agent-client-protocol "2.1.0"
+assert_exactly_one nexus42 "--features connect-client,connect-host" spoke-connect "0.11.*"
+assert_exactly_one nexus42 "--features connect-client,connect-host" spoke-operations "0.11.1"
 
 # --- graph-flow feature evidence (no postgres / no rig) ------------------------
 # `-f "{p} feats=[{f}]"` prints the resolved feature set on the inverted

@@ -55,7 +55,7 @@ async fn acp_prompt_task_dispatches_to_executor_and_records_output() {
     );
 
     let ctx = graph_flow::Context::new();
-    let _ = ctx.set("core_context.version", "0");
+    ctx.set("core_context.version", "0").unwrap();
     let result = task.run(ctx.clone()).await.unwrap();
 
     // The executor returns the non-echo transformation as full_text.
@@ -85,7 +85,7 @@ async fn acp_prompt_task_no_executor_refuses() {
     );
 
     let ctx = graph_flow::Context::new();
-    let _ = ctx.set("name", "world");
+    ctx.set("name", "world").unwrap();
     let result = task.run(ctx).await;
     assert!(result.is_err(), "no executor must refuse: {result:?}");
     let err = result.unwrap_err().to_string();

@@ -227,7 +227,7 @@ async fn start_v1_run(
         .expect("session cancels write")
         .insert(run_id.clone(), tokio_util::sync::CancellationToken::new());
     let session = GraphSession::new_from_task(run_id.clone(), "start");
-    session.context.set("_session_id", run_id.clone());
+    session.context.set("_session_id", run_id.clone()).unwrap();
 
     let mut agent_bindings = HashMap::new();
     agent_bindings.insert(
@@ -360,8 +360,8 @@ async fn all_five_consumers_observe_non_echo_agent_output() {
         .with_prompt_executor(Some(executor.clone() as Arc<dyn PromptExecutor>))
         .with_session_cancels(session_cancels.clone());
     let ctx = graph_flow::Context::new();
-    ctx.set("_session_id", run_id.clone());
-    ctx.set("core_context.version", "7");
+    ctx.set("_session_id", run_id.clone()).unwrap();
+    ctx.set("core_context.version", "7").unwrap();
     let result = task
         .run(ctx.clone())
         .await
@@ -826,7 +826,7 @@ async fn capability_route_fails_closed_when_run_token_missing() {
     // token — the registry map is left empty.
     let run_id = format!("run:{}", uuid::Uuid::new_v4());
     let session = GraphSession::new_from_task(run_id.clone(), "start");
-    session.context.set("_session_id", run_id.clone());
+    session.context.set("_session_id", run_id.clone()).unwrap();
     let mut agent_bindings = HashMap::new();
     agent_bindings.insert(
         "default".to_string(),
@@ -1062,7 +1062,7 @@ async fn nested_inner_graph_prompt_executes_with_child_identity() {
     );
     let parent_session = GraphSession::new_from_task(parent_sid.clone(), "parent_state");
     parent_session
-        .context.set("_session_id", parent_sid.clone());
+        .context.set("_session_id", parent_sid.clone()).unwrap();
     let mut agent_bindings = HashMap::new();
     agent_bindings.insert(
         "default".to_string(),
