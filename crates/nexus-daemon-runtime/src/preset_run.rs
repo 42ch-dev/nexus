@@ -629,6 +629,18 @@ pub struct RunControlResult {
     pub current_wait_id: Option<String>,
 }
 
+/// Cancel fence-loss idempotence (A5): a `Cancel` signal that exhausts the
+/// engine's revision-fence retry bound and loses the race still has its
+/// goal durably accomplished when the record already settled `cancelled`
+/// (confirmed stop) or `interrupted` (unconfirmed stop) — a concurrent
+/// cancel committed the same intent. The loser reports the persisted
+/// outcome as success instead of a conflict that would contradict the
+/// durable truth. A run that settled `completed`/`failed` (or is still
+/// live) keeps the conflict: the cancel genuinely did not happen.
+fn cancel_fence_loss_accomplished(status: &SessionStatus) -> bool {
+    matches!(status, SessionStatus::Cancelled | SessionStatus::Interrupted)
+}
+
 /// One cancellation/join owner per (Creator DB identity, session) (A3).
 ///
 /// The coordinator is the SINGLE production owner of the bounded
@@ -2127,6 +2139,18 @@ impl WorkflowRunCoordinator {
                         return Ok(sid);
                     }
                 }
+                // The row settled TERMINAL between our preflight read and
+                // the store transaction (an operator cancel/fail/settle
+                // landed in between): the admission is refused for the same
+                // reason a preflight terminal status is — not eligible.
+                // Surfacing it as `Admission` would project a 500 for a
+                // legitimate control race.
+                if msg.contains("status is 'cancelled'")
+                    || msg.contains("status is 'failed'")
+                    || msg.contains("status is 'completed'")
+                {
+                    return Err(RunControlError::NotEligible(schedule_id.to_string(), msg));
+                }
                 // N-1: the store's in-transaction matrix recheck refused the
                 // row (dependency not satisfied, not due, or the per-creator
                 // concurrency gate) — the row stays pending and unowned, the
@@ -2222,7 +2246,18 @@ impl WorkflowRunCoordinator {
                     Ok(Some(record)) => {
                         let state = record.state.as_ref();
                         let cancel_requested = state.is_some_and(|s| s.cancel_requested);
-                        if record.status == SessionStatus::WaitingForInput && !cancel_requested {
+                        // A5 idempotence: a Cancel that lost the fence race
+                        // but finds the run durably settled (cancelled /
+                        // interrupted) has its goal accomplished by the
+                        // concurrent winner — project the persisted outcome
+                        // as success, never a conflict.
+                        if matches!(signal, RunSignal::Cancel)
+                            && cancel_fence_loss_accomplished(&record.status)
+                        {
+                            Ok(())
+                        } else if record.status == SessionStatus::WaitingForInput
+                            && !cancel_requested
+                        {
                             let current_wait_id = state
                                 .and_then(|s| s.wait.as_ref())
                                 .map(|w| w.wait_id.clone());
@@ -2505,6 +2540,28 @@ mod tests {
     use nexus_orchestration::engine::{
         ChildSessionParams, Context, EngineError, SessionFilter, SessionKey, SessionSummary,
     };
+
+    /// A5 idempotence: a fence-losing Cancel is a success only when the run
+    /// durably settled cancelled/interrupted; every other state (still
+    /// live, or settled completed/failed) keeps the conflict — the cancel
+    /// genuinely did not happen.
+    #[test]
+    fn cancel_fence_loss_accomplished_only_for_cancel_outcomes() {
+        assert!(cancel_fence_loss_accomplished(&SessionStatus::Cancelled));
+        assert!(cancel_fence_loss_accomplished(&SessionStatus::Interrupted));
+        for status in [
+            SessionStatus::Running,
+            SessionStatus::Paused,
+            SessionStatus::WaitingForInput,
+            SessionStatus::Completed,
+            SessionStatus::Failed,
+        ] {
+            assert!(
+                !cancel_fence_loss_accomplished(&status),
+                "{status:?} must keep the conflict"
+            );
+        }
+    }
     use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
 
     /// Scripted engine: `run_step` pops from a queue; `get_status` reads a

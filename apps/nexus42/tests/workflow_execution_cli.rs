@@ -548,9 +548,17 @@ async fn admission_concurrent_pending_row_one_session() {
 /// same creator — both preflights see an empty running set, but the store's
 /// in-transaction matrix recheck lets exactly ONE claim; the other stays
 /// pending and unowned.
+///
+/// Determinism (R-2): the winner's run must STAY in flight until the
+/// loser's recheck runs. A hostless daemon fails the winner's drive
+/// instantly and settles its schedule row terminal — the loser's gate then
+/// legitimately sees an empty running set and also admits (serial means
+/// no OVERLAP, and a settled run no longer overlaps). The blocking host
+/// holds the winner's first prompt open so the race is between the two
+/// claims, never between a claim and a settle.
 #[tokio::test]
 async fn admission_distinct_serial_rows_race_one_owned() {
-    let daemon = LiveDaemon::start().await;
+    let daemon = LiveDaemon::start_with_agent_host(BlockingHost::non_cooperative()).await;
     let now = chrono::Utc::now().timestamp();
     for id in ["SCHRACE1", "SCHRACE2"] {
         sqlx::query(
