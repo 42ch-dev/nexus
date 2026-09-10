@@ -1,6 +1,11 @@
 import { lazy, Suspense, type ReactNode } from 'react';
 import { Link, Routes, Route } from 'react-router';
+
+import { EmbedReadyNotifier } from '@/components/embed-ready-notifier';
+import { GalleryShell } from '@/components/gallery-shell';
 import { TopNav } from '@/components/nav';
+import { StudioShellLogo } from '@/components/studio-shell-logo';
+import { useStudioEmbed } from '@/components/studio-embed-context';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { HomePage } from '@/pages/home';
 
@@ -38,10 +43,11 @@ function RouteLoading({ label }: { label: string }) {
     <div
       role="status"
       aria-busy="true"
-      data-testid={`route-loading-${label.toLowerCase().replace(/[^a-z]+/g, '-')}`}
-      className="max-w-6xl mx-auto py-8 px-4"
+      aria-label={`Loading ${label}`}
+      data-testid={`route-loading-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+      className="max-w-6xl mx-auto py-16 px-4 text-copy-16 text-gray-700"
     >
-      <p className="text-copy-14 text-gray-600">Loading {label}…</p>
+      Loading {label}…
     </div>
   );
 }
@@ -49,6 +55,74 @@ function RouteLoading({ label }: { label: string }) {
 /** Wrap a lazy component in a Suspense boundary with an accessible fallback. */
 function lazyRoute(node: ReactNode, label: string) {
   return <Suspense fallback={<RouteLoading label={label} />}>{node}</Suspense>;
+}
+
+function withGalleryShell(node: ReactNode) {
+  return <GalleryShell>{node}</GalleryShell>;
+}
+
+function GalleryRoutes() {
+  return (
+    <Routes>
+      <Route path="/" element={<HomePage />} />
+      <Route path="/tokens" element={lazyRoute(withGalleryShell(<TokensPage />), 'Tokens')} />
+      <Route path="/brand" element={lazyRoute(withGalleryShell(<BrandPage />), 'Brand')} />
+      <Route
+        path="/components"
+        element={lazyRoute(withGalleryShell(<ComponentsPage />), 'Components')}
+      />
+      <Route path="/voice" element={lazyRoute(withGalleryShell(<VoicePage />), 'Voice & Content')} />
+      <Route
+        path="/surfaces"
+        element={lazyRoute(withGalleryShell(<SurfacesLayout />), 'Surfaces')}
+      >
+        <Route index element={lazyRoute(<SurfacesIndexPage />, 'Surfaces')} />
+        <Route path="setup" element={lazyRoute(<SurfacesSetupPage />, 'Surfaces / Setup')} />
+        <Route path="shell" element={lazyRoute(<SurfacesShellPage />, 'Surfaces / Shell')} />
+        <Route
+          path="agent-picker"
+          element={lazyRoute(<SurfacesAgentPickerPage />, 'Surfaces / Agent picker')}
+        />
+        <Route path="canvas" element={lazyRoute(<SurfacesCanvasPage />, 'Surfaces / Canvas')} />
+        <Route path="daemon" element={lazyRoute(<SurfacesDaemonPage />, 'Surfaces / Daemon')} />
+        <Route path="launch" element={lazyRoute(<SurfacesLaunchPage />, 'Surfaces / Launch')} />
+        <Route
+          path="selection-submenu"
+          element={lazyRoute(<SurfacesSelectionSubmenuPage />, 'Surfaces / Selection')}
+        />
+      </Route>
+    </Routes>
+  );
+}
+
+function EmbeddedRoutes() {
+  return (
+    <>
+      <EmbedReadyNotifier />
+      <Routes>
+        <Route path="/tokens" element={lazyRoute(<TokensPage />, 'Tokens')} />
+        <Route path="/brand" element={lazyRoute(<BrandPage />, 'Brand')} />
+        <Route path="/components" element={lazyRoute(<ComponentsPage />, 'Components')} />
+        <Route path="/voice" element={lazyRoute(<VoicePage />, 'Voice & Content')} />
+        <Route path="/surfaces" element={lazyRoute(<SurfacesLayout />, 'Surfaces')}>
+          <Route index element={lazyRoute(<SurfacesIndexPage />, 'Surfaces')} />
+          <Route path="setup" element={lazyRoute(<SurfacesSetupPage />, 'Surfaces / Setup')} />
+          <Route path="shell" element={lazyRoute(<SurfacesShellPage />, 'Surfaces / Shell')} />
+          <Route
+            path="agent-picker"
+            element={lazyRoute(<SurfacesAgentPickerPage />, 'Surfaces / Agent picker')}
+          />
+          <Route path="canvas" element={lazyRoute(<SurfacesCanvasPage />, 'Surfaces / Canvas')} />
+          <Route path="daemon" element={lazyRoute(<SurfacesDaemonPage />, 'Surfaces / Daemon')} />
+          <Route path="launch" element={lazyRoute(<SurfacesLaunchPage />, 'Surfaces / Launch')} />
+          <Route
+            path="selection-submenu"
+            element={lazyRoute(<SurfacesSelectionSubmenuPage />, 'Surfaces / Selection')}
+          />
+        </Route>
+      </Routes>
+    </>
+  );
 }
 
 /**
@@ -59,17 +133,33 @@ function lazyRoute(node: ReactNode, label: string) {
  * SSOT hint per IA guide §2.
  *
  * Surfaces uses nested Studio-only section routes (V1.102 P2) — not App
- * Settings IA.
+ * Settings IA. Embedded iframe documents omit chrome, discovery, comparison,
+ * and the Surfaces navigation rail.
  */
 export function App() {
+  const { isEmbedded } = useStudioEmbed();
+
+  if (isEmbedded) {
+    return (
+      <div className="min-h-screen bg-background-100">
+        <EmbeddedRoutes />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Header chrome */}
-      <header className="sticky top-0 z-10 border-b border-gray-alpha-200 bg-background-100/80 backdrop-blur-sm">
-        <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-2">
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
-            <Link to="/" className="text-heading-16 font-semibold text-gray-1000 no-underline hover:opacity-80 transition-opacity">
-              Nexus Design Studio
+      <header className="sticky top-0 z-20 h-12 border-b border-gray-alpha-200 bg-background-100/90 backdrop-blur-sm">
+        <div className="mx-auto flex h-full max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
+            <Link
+              to="/"
+              className="flex min-w-0 items-center gap-2 no-underline hover:opacity-80 transition-opacity"
+            >
+              <StudioShellLogo />
+              <span className="truncate text-heading-16 font-semibold text-gray-1000">
+                Design Studio
+              </span>
             </Link>
             <TopNav />
           </div>
@@ -77,30 +167,12 @@ export function App() {
         </div>
       </header>
 
-      {/* Main content */}
       <main className="flex-1">
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/tokens" element={lazyRoute(<TokensPage />, 'Tokens')} />
-          <Route path="/brand" element={lazyRoute(<BrandPage />, 'Brand')} />
-          <Route path="/components" element={lazyRoute(<ComponentsPage />, 'Components')} />
-          <Route path="/voice" element={lazyRoute(<VoicePage />, 'Voice & Content')} />
-          <Route path="/surfaces" element={lazyRoute(<SurfacesLayout />, 'Surfaces')}>
-            <Route index element={lazyRoute(<SurfacesIndexPage />, 'Surfaces')} />
-            <Route path="setup" element={lazyRoute(<SurfacesSetupPage />, 'Surfaces / Setup')} />
-            <Route path="shell" element={lazyRoute(<SurfacesShellPage />, 'Surfaces / Shell')} />
-            <Route path="agent-picker" element={lazyRoute(<SurfacesAgentPickerPage />, 'Surfaces / Agent picker')} />
-            <Route path="canvas" element={lazyRoute(<SurfacesCanvasPage />, 'Surfaces / Canvas')} />
-            <Route path="daemon" element={lazyRoute(<SurfacesDaemonPage />, 'Surfaces / Daemon')} />
-            <Route path="launch" element={lazyRoute(<SurfacesLaunchPage />, 'Surfaces / Launch')} />
-            <Route path="selection-submenu" element={lazyRoute(<SurfacesSelectionSubmenuPage />, 'Surfaces / Selection')} />
-          </Route>
-        </Routes>
+        <GalleryRoutes />
       </main>
 
-      {/* Footer — SSOT hint */}
       <footer className="border-t border-gray-alpha-200 py-2 px-4">
-        <div className="max-w-6xl mx-auto flex items-center justify-between text-copy-13 text-gray-700">
+        <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-2 text-copy-13 text-gray-700">
           <span>
             Read-only · edit{' '}
             <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">DESIGN.md</code>
@@ -111,3 +183,4 @@ export function App() {
     </div>
   );
 }
+

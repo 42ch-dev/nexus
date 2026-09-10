@@ -17,6 +17,7 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '@/App';
+import { StudioEmbedProvider } from '@/components/studio-embed-context';
 import { ThemeProvider } from '@/components/theme-provider';
 
 /* ---- helpers ------------------------------------------------------------ */
@@ -38,9 +39,11 @@ function mockMatchMedia(prefersDark: boolean) {
 async function renderStudio(initialRoute = '/') {
   const result = render(
     <ThemeProvider>
-      <MemoryRouter initialEntries={[initialRoute]}>
-        <App />
-      </MemoryRouter>
+      <StudioEmbedProvider forcedTheme={null}>
+        <MemoryRouter initialEntries={[initialRoute]}>
+          <App />
+        </MemoryRouter>
+      </StudioEmbedProvider>
     </ThemeProvider>,
   );
   // Lazy route chunks resolve asynchronously (S-002); flush them so gallery

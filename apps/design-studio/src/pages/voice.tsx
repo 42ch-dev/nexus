@@ -79,9 +79,13 @@ const SPECIMENS: VoiceSpecimen[] = [
 /*  Sub-components                                                      */
 /* ------------------------------------------------------------------ */
 
-function SectionHeading({ children }: { children: ReactNode }) {
+function SectionHeading({ id, children }: { id?: string; children: ReactNode }) {
   return (
-    <h3 className="text-heading-20 font-semibold text-gray-1000 mb-4 pt-8 scroll-mt-16">
+    <h3
+      id={id}
+      tabIndex={id ? -1 : undefined}
+      className="text-heading-20 font-semibold text-gray-1000 mb-4 pt-8 scroll-mt-16"
+    >
       {children}
     </h3>
   );
@@ -200,11 +204,14 @@ export function VoicePage() {
       </p>
 
       {/* Guidance block first */}
-      <GuidanceBlock />
+      <section id="voice-guidance">
+        <SectionHeading id="voice-guidance">Voice guidance summary</SectionHeading>
+        <GuidanceBlock />
+      </section>
 
       {/* Page title pattern */}
-      <section>
-        <SectionHeading>Writing Patterns</SectionHeading>
+      <section id="voice-writing-patterns">
+        <SectionHeading id="voice-writing-patterns">Writing Patterns</SectionHeading>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {SPECIMENS.map((s) => (
             <VoiceCard key={s.label} specimen={s} />
