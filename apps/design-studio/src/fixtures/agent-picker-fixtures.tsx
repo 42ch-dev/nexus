@@ -121,7 +121,7 @@ export function AgentPickerFixtures() {
   const [errorCustom, setErrorCustom] = useState('');
 
   return (
-    <div data-testid="agent-picker-fixtures">
+    <div className="studio-fixture-boundary" data-testid="agent-picker-fixtures">
       <FixtureFrame
         title="Loading"
         description="Scan in progress — spinner + present participle copy."

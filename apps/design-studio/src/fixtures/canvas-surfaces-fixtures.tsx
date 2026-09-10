@@ -400,7 +400,7 @@ function CanvasShellChrome({
       {/* Sample outline nodes — laid out statically to mirror the RF graph. */}
       <div className="relative flex h-full flex-wrap items-start gap-6 p-10">
         <div className="flex flex-col gap-3">
-          <span className="text-label-12 font-medium text-gray-500">Volume lane</span>
+          <span className="text-label-12 font-medium text-gray-700">Volume lane</span>
           <div className="relative">
             <div className="absolute -right-3 top-1/2 -translate-y-1/2">
               <PortSample />
@@ -410,7 +410,7 @@ function CanvasShellChrome({
         </div>
 
         <div className="flex flex-col gap-3">
-          <span className="text-label-12 font-medium text-gray-500">Chapter cards</span>
+          <span className="text-label-12 font-medium text-gray-700">Chapter cards</span>
           <div className="relative">
             <div className="absolute -left-3 top-1/2 -translate-y-1/2">
               <PortSample />
@@ -451,7 +451,7 @@ function CanvasShellChrome({
         </div>
 
         <div className="flex flex-col gap-3">
-          <span className="text-label-12 font-medium text-gray-500">Timeline lane</span>
+          <span className="text-label-12 font-medium text-gray-700">Timeline lane</span>
           <div className="relative">
             <div className="absolute -left-3 top-1/2 -translate-y-1/2">
               <PortSample />
@@ -807,7 +807,7 @@ function StrategyShellChrome() {
       {/* Static state-machine graph — initial → join → terminal. */}
       <div className="relative flex h-full flex-col items-start justify-center gap-4 p-10">
         <div className="flex flex-col gap-2">
-          <span className="text-label-12 font-medium text-gray-500">Initial</span>
+          <span className="text-label-12 font-medium text-gray-700">Initial</span>
           <StrategyStateSample
             label="Drafting"
             stateKind="standard"
@@ -822,7 +822,7 @@ function StrategyShellChrome() {
         </div>
 
         <div className="flex flex-col gap-2">
-          <span className="text-label-12 font-medium text-gray-500">Join</span>
+          <span className="text-label-12 font-medium text-gray-700">Join</span>
           <StrategyJoinSample label="Converge" convergeStrategy="wait_for_all" />
         </div>
 
@@ -831,7 +831,7 @@ function StrategyShellChrome() {
         </div>
 
         <div className="flex flex-col gap-2">
-          <span className="text-label-12 font-medium text-gray-500">Terminal</span>
+          <span className="text-label-12 font-medium text-gray-700">Terminal</span>
           <StrategyTerminalSample label="Done" status="completed" />
         </div>
       </div>
@@ -1240,7 +1240,7 @@ function WorldKbShellChrome() {
       <div className="relative flex h-full flex-col items-start justify-center gap-4 p-10">
         {/* Source-anchor provenance chain: anchor → edge → confirmed entity. */}
         <div className="flex flex-col gap-2">
-          <span className="text-label-12 font-medium text-gray-500">Source-anchor provenance</span>
+          <span className="text-label-12 font-medium text-gray-700">Source-anchor provenance</span>
           <div className="flex items-center gap-3">
             <WorldKbSourceAnchorNodeSample
               sourceType="manuscript"
@@ -1269,7 +1269,7 @@ function WorldKbShellChrome() {
         </div>
 
         <div className="flex flex-col gap-2">
-          <span className="text-label-12 font-medium text-gray-500">Entity lane · Character</span>
+          <span className="text-label-12 font-medium text-gray-700">Entity lane · Character</span>
           <div className="flex items-center gap-6">
             {/* Merged entity — demonstrates the merged lifecycle badge. */}
             <WorldKbEntityNodeSample
@@ -1306,7 +1306,7 @@ function WorldKbShellChrome() {
         </div>
 
         <div className="flex flex-col gap-2">
-          <span className="text-label-12 font-medium text-gray-500">Rejected entity · computable</span>
+          <span className="text-label-12 font-medium text-gray-700">Rejected entity · computable</span>
           <WorldKbEntityNodeSample
             name="Act II — Siege"
             entityKind="Act"
@@ -1349,7 +1349,7 @@ function ElevationStateChip({
 }) {
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-label-12 font-medium text-gray-500">{label}</span>
+      <span className="text-label-12 font-medium text-gray-700">{label}</span>
       <NodeChromeShell selected={selected} dragging={dragging} accent="strategy">
         <span className="font-heading text-copy-14 font-semibold text-gray-1000">
           State node
@@ -1377,7 +1377,7 @@ function AccentSpineChip({
 }) {
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-label-12 font-medium text-gray-500">{label}</span>
+      <span className="text-label-12 font-medium text-gray-700">{label}</span>
       <NodeChromeShell accent={accent}>
         <span className="font-heading text-copy-14 font-semibold text-gray-1000">
           {label}
@@ -1416,7 +1416,7 @@ function NodeWidthChip({
       >
         {label}
       </div>
-      <span className="text-copy-13-mono font-mono text-gray-500 break-all">
+      <span className="text-copy-13-mono font-mono text-gray-700 break-all">
         {varName}
       </span>
     </div>
@@ -1434,7 +1434,7 @@ function NodeWidthChip({
  */
 export function CanvasSurfacesFixtures() {
   return (
-    <div data-testid="canvas-surfaces-fixtures">
+    <div className="studio-fixture-boundary" data-testid="canvas-surfaces-fixtures">
       <FixtureFrame
         title="Canvas shell chrome"
         description="Shared canvas surface chrome — dot-grid background, controls, minimap, and sample outline nodes (Volume / Chapter / Timeline Event). Mirrors the App CanvasShell presentational structure using canvas-* tokens. No live graph — nodes are static markup."
@@ -1453,12 +1453,12 @@ export function CanvasSurfacesFixtures() {
           data-testid="canvas-node-matrix"
         >
           <div className="flex flex-col gap-2">
-            <span className="text-label-12 font-medium text-gray-500">Volume</span>
+            <span className="text-label-12 font-medium text-gray-700">Volume</span>
             <VolumeNodeSample label="Volume II — Journeys" chapterCount={5} />
           </div>
 
           <div className="flex flex-col gap-2">
-            <span className="text-label-12 font-medium text-gray-500">Not started</span>
+            <span className="text-label-12 font-medium text-gray-700">Not started</span>
             <ChapterNodeSample
               title="Untitled chapter"
               status="pending"
@@ -1469,7 +1469,7 @@ export function CanvasSurfacesFixtures() {
           </div>
 
           <div className="flex flex-col gap-2">
-            <span className="text-label-12 font-medium text-gray-500">Draft</span>
+            <span className="text-label-12 font-medium text-gray-700">Draft</span>
             <ChapterNodeSample
               title="Chapter 5 — The Climb"
               status="drafted"
@@ -1480,7 +1480,7 @@ export function CanvasSurfacesFixtures() {
           </div>
 
           <div className="flex flex-col gap-2">
-            <span className="text-label-12 font-medium text-gray-500">Finalized (selected)</span>
+            <span className="text-label-12 font-medium text-gray-700">Finalized (selected)</span>
             <ChapterNodeSample
               title="Chapter 6 — Descent"
               status="completed"
@@ -1492,7 +1492,7 @@ export function CanvasSurfacesFixtures() {
           </div>
 
           <div className="flex flex-col gap-2">
-            <span className="text-label-12 font-medium text-gray-500">Timeline event</span>
+            <span className="text-label-12 font-medium text-gray-700">Timeline event</span>
             <TimelineEventNodeSample
               title="Midpoint Reversal"
               description={null}
@@ -1504,27 +1504,27 @@ export function CanvasSurfacesFixtures() {
               scene-beat-nodes.tsx using canvas-outline-scene-* / -beat-*
               tokens. Light/dark acceptance here carries to the App graph. */}
           <div className="flex flex-col gap-2">
-            <span className="text-label-12 font-medium text-gray-500">Scene (drafted)</span>
+            <span className="text-label-12 font-medium text-gray-700">Scene (drafted)</span>
             <SceneNodeSample title="Opening Scene" status="drafted" />
           </div>
 
           <div className="flex flex-col gap-2">
-            <span className="text-label-12 font-medium text-gray-500">Scene (completed)</span>
+            <span className="text-label-12 font-medium text-gray-700">Scene (completed)</span>
             <SceneNodeSample title="Closing Scene" status="completed" />
           </div>
 
           <div className="flex flex-col gap-2">
-            <span className="text-label-12 font-medium text-gray-500">Scene (no status)</span>
+            <span className="text-label-12 font-medium text-gray-700">Scene (no status)</span>
             <SceneNodeSample title="Untitled Scene" status={null} />
           </div>
 
           <div className="flex flex-col gap-2">
-            <span className="text-label-12 font-medium text-gray-500">Beat</span>
+            <span className="text-label-12 font-medium text-gray-700">Beat</span>
             <BeatNodeSample title="Inciting Moment" />
           </div>
 
           <div className="flex flex-col gap-2">
-            <span className="text-label-12 font-medium text-gray-500">Beat (selected)</span>
+            <span className="text-label-12 font-medium text-gray-700">Beat (selected)</span>
             <BeatNodeSample title="Turning Point" selected />
           </div>
         </div>
@@ -1540,7 +1540,7 @@ export function CanvasSurfacesFixtures() {
           data-testid="canvas-context-menu-matrix"
         >
           <div className="flex flex-col gap-2">
-            <span className="text-label-12 font-medium text-gray-500">Entity (World KB)</span>
+            <span className="text-label-12 font-medium text-gray-700">Entity (World KB)</span>
             <ContextMenuShell label="Actions for Lore Fragment">
               <ContextMenuItem icon={<Link2 className="h-4 w-4" aria-hidden />}>
                 Connect to…
@@ -1549,7 +1549,7 @@ export function CanvasSurfacesFixtures() {
           </div>
 
           <div className="flex flex-col gap-2">
-            <span className="text-label-12 font-medium text-gray-500">Path (browser)</span>
+            <span className="text-label-12 font-medium text-gray-700">Path (browser)</span>
             <ContextMenuShell label="Path context menu">
               <ContextMenuItem icon={<Copy className="h-4 w-4" aria-hidden />}>
                 Copy Path
@@ -1558,7 +1558,7 @@ export function CanvasSurfacesFixtures() {
           </div>
 
           <div className="flex flex-col gap-2">
-            <span className="text-label-12 font-medium text-gray-500">Path (desktop)</span>
+            <span className="text-label-12 font-medium text-gray-700">Path (desktop)</span>
             <ContextMenuShell label="Path context menu (desktop)">
               <ContextMenuItem icon={<Copy className="h-4 w-4" aria-hidden />}>
                 Copy Path
@@ -1573,7 +1573,7 @@ export function CanvasSurfacesFixtures() {
           </div>
 
           <div className="flex flex-col gap-2">
-            <span className="text-label-12 font-medium text-gray-500">Canvas (future)</span>
+            <span className="text-label-12 font-medium text-gray-700">Canvas (future)</span>
             <ContextMenuShell label="Canvas node context menu">
               <ContextMenuItem icon={<Plus className="h-4 w-4" aria-hidden />}>
                 Add Chapter

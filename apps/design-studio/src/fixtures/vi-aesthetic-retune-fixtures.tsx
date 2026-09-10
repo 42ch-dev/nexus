@@ -90,7 +90,7 @@ function ThemePair({
         data-testid={`${testId}-light`}
         className="rounded-card border border-gray-alpha-300 bg-background-100 p-4"
       >
-        <p className="mb-3 text-label-14 font-medium text-gray-1000">Light reference</p>
+        <p className="mb-3 text-label-14 font-medium text-gray-1000">Fixed reference plate (light)</p>
         {light}
       </div>
       <div

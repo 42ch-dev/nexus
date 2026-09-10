@@ -26,6 +26,32 @@ on 5173).
 Every value is driven by the repo-root `DESIGN.md` / `DESIGN.dark.md` SSOT.
 Edit those files in your IDE, then refresh the studio to see the effect.
 
+## Discovery and comparison (v1.187)
+
+- **Section index** — each gallery exposes a labeled filter over route headings,
+  keywords, and import provenance. Keyboard: Arrow keys move results, Enter
+  selects, Escape clears.
+- **Pair view** — on Tokens, Brand, Components, Voice, and every Surfaces nested
+  page, toggle **Compare** to render two same-origin iframe documents
+  (`?studio-embed=light|dark`) side by side (stacked below 1024px). Each frame
+  owns its own theme, portals, and focus — not a nested `.dark` wrapper in the
+  parent document.
+- **Read-only SSOT** — edit repo-root `DESIGN.md` / `DESIGN.dark.md`, then
+  refresh; the dev server re-projects tokens in memory.
+
+## Import provenance (four categories)
+
+| Category | Pattern | Meaning |
+| --- | --- | --- |
+| Promoted primitive | `@42ch/nexus-ui` | Package export after Studio acceptance |
+| App presentational extract | `@web-layout/*`, `@web-setup/*`, `@web-canvas/*`, … | Props-driven `apps/web` chrome |
+| Transitional primitive | `@web-ui/*` | Unpromoted `components/ui/*` mirror |
+| Studio-local | `@/fixtures/*`, `@/pages/*`, `@/components/*` | Gallery composition only |
+
+Surfaces nested routes: Overview, Setup, Shell, AgentPicker, Canvas, Daemon,
+Launch, Selection Submenu — see `.mstar/specs/design-studio.md` §6–§7.
+
+
 ## Visual review (surfaces)
 
 The `/surfaces` page is the primary visual-review target for product-surface

@@ -67,8 +67,8 @@ const COMPONENT_ENTRIES: readonly GalleryEntry[] = [
 ];
 
 const VOICE_ENTRIES: readonly GalleryEntry[] = [
-  entry('/voice', 'voice-guidance', 'Voice guidance summary', ['rules', 'design'], ['DESIGN.md']),
-  entry('/voice', 'voice-writing-patterns', 'Writing Patterns', ['title case', 'toast', 'empty', 'cta'], ['DESIGN.md']),
+  entry('/voice', 'voice-guidance', 'Voice guidance summary', ['rules', 'design'], ['DESIGN.md', '@42ch/nexus-ui']),
+  entry('/voice', 'voice-writing-patterns', 'Writing Patterns', ['title case', 'toast', 'empty', 'cta'], ['DESIGN.md', '@42ch/nexus-ui']),
 ];
 
 const SURFACES_OVERVIEW_ENTRIES: readonly GalleryEntry[] = [
@@ -157,7 +157,7 @@ const SURFACES_CANVAS_ENTRIES: readonly GalleryEntry[] = [
 ];
 
 const SURFACES_DAEMON_ENTRIES: readonly GalleryEntry[] = [
-  entry('/surfaces/daemon', 'surfaces-daemon', 'Daemon status strip', ['healthy', 'badge'], [UI]),
+  entry('/surfaces/daemon', 'surfaces-daemon', 'Daemon status strip', ['healthy', 'badge'], [UI, '@/pages/surfaces']),
 ];
 
 const SURFACES_LAUNCH_ENTRIES: readonly GalleryEntry[] = [

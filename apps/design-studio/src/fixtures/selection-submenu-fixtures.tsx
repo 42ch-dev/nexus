@@ -206,7 +206,7 @@ function AgentDialogPanel({ onClose }: { onClose: () => void }) {
             </span>
             <div className="flex-1">
               <span className="font-medium text-gray-1000">Claude</span>
-              <span className="ml-2 text-label-12 text-gray-500">claude-native</span>
+              <span className="ml-2 text-label-12 text-gray-700">claude-native</span>
             </div>
           </button>
           <button
@@ -218,7 +218,7 @@ function AgentDialogPanel({ onClose }: { onClose: () => void }) {
             </span>
             <div className="flex-1">
               <span className="font-medium text-gray-1000">GPT-4</span>
-              <span className="ml-2 text-label-12 text-gray-500">openai-gpt4</span>
+              <span className="ml-2 text-label-12 text-gray-700">openai-gpt4</span>
             </div>
           </button>
         </div>
@@ -277,7 +277,7 @@ function AgentDialogFixture() {
 
 export function SelectionSubmenuStubFixtures() {
   return (
-    <div data-testid="selection-submenu-fixtures">
+    <div className="studio-fixture-boundary" data-testid="selection-submenu-fixtures">
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
         <VariantFrame
           label="World row + submenu open (light)"
@@ -288,13 +288,11 @@ export function SelectionSubmenuStubFixtures() {
         </VariantFrame>
 
         <VariantFrame
-          label="World row + submenu open (dark)"
-          description="Same as light, with dark theme"
+          label="World row + submenu open (document theme)"
+          description="Same World row specimen — follows the document theme (use Compare for light/dark parity)"
           testId="selection-submenu-world-dark"
         >
-          <div className="dark">
-            <WorldRowFixture />
-          </div>
+          <WorldRowFixture />
         </VariantFrame>
 
         <VariantFrame
@@ -306,13 +304,11 @@ export function SelectionSubmenuStubFixtures() {
         </VariantFrame>
 
         <VariantFrame
-          label="Work row + submenu open (dark)"
-          description="Same as light, with dark theme"
+          label="Work row + submenu open (document theme)"
+          description="Same Work row specimen — follows the document theme (use Compare for light/dark parity)"
           testId="selection-submenu-work-dark"
         >
-          <div className="dark">
-            <WorkRowFixture />
-          </div>
+          <WorkRowFixture />
         </VariantFrame>
 
         <VariantFrame

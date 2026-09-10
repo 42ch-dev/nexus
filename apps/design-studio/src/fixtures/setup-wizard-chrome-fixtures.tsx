@@ -288,7 +288,7 @@ function WizardChromeCard({
  */
 export function SetupWizardChromeFixtures() {
   return (
-    <div data-testid="setup-wizard-chrome-fixtures">
+    <div className="studio-fixture-boundary" data-testid="setup-wizard-chrome-fixtures">
       <FixtureFrame
         title="Steps — agent active"
         description="Portrait card; top Steps: Entrance complete; Agent active; Workspace/Done pending. No left rail."

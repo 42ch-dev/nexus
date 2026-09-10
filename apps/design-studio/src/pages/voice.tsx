@@ -2,6 +2,8 @@ import type { ReactNode } from 'react';
 
 import { cn, Badge, Card } from '@42ch/nexus-ui';
 
+import { SurfaceSourceBadges } from '@/components/surface-source-badge';
+
 /* ------------------------------------------------------------------ */
 /*  Data — Voice & Content specimens from DESIGN.md §Voice & Content   */
 /*  and IA guide §4.4. Every fixture string is canonical from the      */
@@ -200,18 +202,30 @@ export function VoicePage() {
           root DESIGN.md § Voice &amp; Content
         </a>
         , rendered per IA guide §4.4. Every fixture string is canonical — do not
-        substitute marketing voice in product copy.
+        substitute marketing voice in product copy. Strings follow DESIGN tone and
+        bilingual-readable hierarchy — English specimens shown; zh-CN verb forms
+        are documented in the guidance block.
       </p>
+      <SurfaceSourceBadges importPaths={['DESIGN.md', '@42ch/nexus-ui']} />
 
       {/* Guidance block first */}
       <section id="voice-guidance">
         <SectionHeading id="voice-guidance">Voice guidance summary</SectionHeading>
+        <p className="text-copy-14 text-gray-700 mb-4">
+          Usage: normative copy rules for contributors tuning product strings.
+          Source: repo-root DESIGN.md § Voice &amp; Content (read-only in Studio).
+        </p>
         <GuidanceBlock />
       </section>
 
       {/* Page title pattern */}
       <section id="voice-writing-patterns">
         <SectionHeading id="voice-writing-patterns">Writing Patterns</SectionHeading>
+        <p className="text-copy-14 text-gray-700 mb-4">
+          Usage: labeled Title Case, Sentence case, Verb-only, Action + object,
+          error, empty, loading, and success patterns for page titles, CTAs,
+          helpers, toasts, and empty states.
+        </p>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {SPECIMENS.map((s) => (
             <VoiceCard key={s.label} specimen={s} />
@@ -219,7 +233,7 @@ export function VoicePage() {
         </div>
       </section>
 
-      <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
+      <p className="text-copy-13 text-gray-700 mt-12 pt-8 border-t border-gray-alpha-200">
         8 writing-pattern specimens drawn from{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           DESIGN.md § Voice &amp; Content

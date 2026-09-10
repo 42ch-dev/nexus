@@ -16,7 +16,7 @@ import { DaemonReadySplash } from '@web-setup/daemon-ready-splash';
  */
 export function LaunchDaemonFixtures() {
   return (
-    <div className="space-y-8" data-testid="launch-daemon-fixtures">
+    <div className="studio-fixture-boundary space-y-8" data-testid="launch-daemon-fixtures">
       <div
         data-testid="daemon-ready-splash"
         className="border border-gray-alpha-300 rounded-card overflow-hidden"

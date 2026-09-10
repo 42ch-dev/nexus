@@ -274,7 +274,7 @@ function GongnengquIaShellFrame({
 
 export function CreatorOrchGongnengquIaFixtures() {
   return (
-    <div data-testid="creator-orch-gongnengqu-ia-fixtures">
+    <div className="studio-fixture-boundary" data-testid="creator-orch-gongnengqu-ia-fixtures">
       <FixtureFrame
         title="创作 hub — sidebar inline create + browse content"
         description="V1.136 P1: 创作 sidebar panelContent = World|Work 标签 + 标题输入 + 提交 (sidebar-create-panel). 内容区 = World/Work 标签 + 卡片列表 — 无双栏左侧创建表单。主题随 Studio 切换。"

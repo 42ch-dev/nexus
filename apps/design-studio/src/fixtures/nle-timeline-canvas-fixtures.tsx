@@ -122,7 +122,7 @@ function NleTimelinePullOffFixtureFrame() {
           className="relative min-h-[180px] flex-1 border-b border-gray-alpha-300 bg-canvas-surface p-4"
           data-testid="nle-pull-off-canvas"
         >
-          <p className="text-label-12 text-gray-500">
+          <p className="text-label-12 text-gray-700">
             Canvas area — detached timeline items land here
           </p>
           {detachedClip ? (
@@ -184,7 +184,7 @@ function NleTimelinePullOffFixtureFrame() {
  */
 export function NleTimelineCanvasFixtures() {
   return (
-    <div data-testid="nle-timeline-canvas-fixtures">
+    <div className="studio-fixture-boundary" data-testid="nle-timeline-canvas-fixtures">
       <NleTimelineBandFixtureFrame />
       <NleTimelinePullOffFixtureFrame />
     </div>

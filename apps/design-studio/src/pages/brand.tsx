@@ -28,6 +28,7 @@ import logoMonoSrc from '@42ch/nexus-ui/assets/logos/logo-mono.svg';
 import logoTextSrc from '@42ch/nexus-ui/assets/logos/logo-text.svg';
 
 import { StudioShellLogo } from '@/components/studio-shell-logo';
+import { SurfaceSourceBadges } from '@/components/surface-source-badge';
 import { ViBrandAcceptanceFixtures } from '@/fixtures/vi-aesthetic-retune-fixtures';
 
 /* ------------------------------------------------------------------ */
@@ -719,6 +720,7 @@ export function BrandPage() {
         specimens, and clear-space guidance. Cobalt is signal; deep blue is ink structure. Toggle
         light/dark to verify theme-aware shell fixtures.
       </p>
+      <SurfaceSourceBadges importPaths={["@42ch/nexus-ui", "@/fixtures/vi-aesthetic-retune-fixtures"]} />
       <SubNav />
 
       <LogoGrid />

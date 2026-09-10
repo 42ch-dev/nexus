@@ -125,7 +125,7 @@ function VariantChip({
 }) {
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-label-12 font-medium text-gray-500">{label}</span>
+      <span className="text-label-12 font-medium text-gray-700">{label}</span>
       {children}
     </div>
   );
@@ -280,7 +280,7 @@ function InspectorVariant({
       data-testid={testId}
       className="flex flex-col gap-3 rounded-card border border-gray-alpha-300 bg-background-100 p-4"
     >
-      <span className="text-label-12 font-medium text-gray-500">{chipLabel}</span>
+      <span className="text-label-12 font-medium text-gray-700">{chipLabel}</span>
       {children}
     </div>
   );

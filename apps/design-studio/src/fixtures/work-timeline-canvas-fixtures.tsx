@@ -72,7 +72,7 @@ function VariantChip({
 }) {
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-label-12 font-medium text-gray-500">{label}</span>
+      <span className="text-label-12 font-medium text-gray-700">{label}</span>
       {children}
     </div>
   );
@@ -544,7 +544,7 @@ function BriefEmptyStateFixtureFrame() {
  */
 export function WorkTimelineCanvasFixtures() {
   return (
-    <div data-testid="work-timeline-canvas-fixtures">
+    <div className="studio-fixture-boundary" data-testid="work-timeline-canvas-fixtures">
       <NarrativeEventFixtureFrame />
       <MomentSceneFixtureFrame />
       <MomentBeatFixtureFrame />

@@ -98,6 +98,14 @@ const SURFACES_SECTIONS = [
 /*  Sub-components — shared                                            */
 /* ------------------------------------------------------------------ */
 
+function FixtureBoundary({ children }: { children: ReactNode }) {
+  return (
+    <div className="studio-fixture-boundary" data-testid="studio-fixture-boundary">
+      {children}
+    </div>
+  );
+}
+
 function SurfaceHeading({ id, children }: { id?: string; children: ReactNode }) {
   return (
     <h3
@@ -182,8 +190,8 @@ export function SurfacesLayout() {
         data-testid="surfaces-chronos-note"
         className="text-copy-14 text-gray-700 mb-4 max-w-prose"
       >
-        Chronos chrome: cyan active affordances (sidebar bar, mode pills, setup step, focus rings)
-        on warm-paper (light) and ink (dark) surfaces — tokens drive both themes.
+        Chronos chrome: cobalt active affordances (sidebar bar, mode pills, setup step, focus rings)
+        on silver-neutral (light) and graphite (dark) surfaces — tokens drive both themes.
       </p>
       <SurfaceSourceLegend />
 
@@ -329,10 +337,8 @@ function ShellSidebarFrame({
 function ShellSidebarFixture() {
   return (
     <div className="space-y-4" data-testid="app-shell-fixture-themes">
-      <ShellSidebarFrame activeTab="creator" testId="app-shell-fixture-light" />
-      <div className="dark">
-        <ShellSidebarFrame activeTab="orchestrator" testId="app-shell-fixture-dark" />
-      </div>
+      <ShellSidebarFrame activeTab="creator" testId="app-shell-fixture-creator" />
+      <ShellSidebarFrame activeTab="orchestrator" testId="app-shell-fixture-orchestrator" />
     </div>
   );
 }
@@ -461,7 +467,7 @@ export function SurfacesIndexPage() {
           ),
         )}
       </div>
-      <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
+      <p className="text-copy-13 text-gray-700 mt-12 pt-8 border-t border-gray-alpha-200">
         Surface fixtures: Setup wizard chrome, App shell chrome, AgentPicker
         states, Settings shell chrome (under Shell), daemon status strip. Composed
         from{' '}
@@ -512,7 +518,9 @@ export function SurfacesSetupPage() {
         </code>
         . Static — no Tauri IPC, no daemon wiring, no App page imports.
       </p>
-      <SetupWizardChromeFixtures />
+      <FixtureBoundary>
+        <SetupWizardChromeFixtures />
+      </FixtureBoundary>
     </section>
   );
 }
@@ -534,7 +542,9 @@ export function SurfacesShellPage() {
           </code>
           .
         </p>
-        <ChronosTitlebarFixtures />
+        <FixtureBoundary>
+          <ChronosTitlebarFixtures />
+        </FixtureBoundary>
       </section>
 
       <section className="mt-10" id="surfaces-app-shell-chrome">
@@ -584,7 +594,9 @@ export function SurfacesShellPage() {
           ). Eight-variant matrix (tab × content × theme). No content-left create form. No routing,
           no daemon client.
         </p>
-        <CreatorHubDualPaneIaFixtures />
+        <FixtureBoundary>
+          <CreatorHubDualPaneIaFixtures />
+        </FixtureBoundary>
       </section>
 
       <section className="mt-10" data-testid="surfaces-creator-orch-gongnengqu-ia" id="surfaces-creator-orch-gongnengqu-ia">
@@ -605,7 +617,9 @@ export function SurfacesShellPage() {
           ); content = World/Work tab bar + card list (browse-only); 工作区 footer visible under
           both 创作 and 编排. Single frame follows Studio theme toggle. No App routing, no daemon client.
         </p>
-        <CreatorOrchGongnengquIaFixtures />
+        <FixtureBoundary>
+          <CreatorOrchGongnengquIaFixtures />
+        </FixtureBoundary>
       </section>
 
       <section className="mt-10" data-testid="surfaces-creator-shell" id="surfaces-creator-shell">
@@ -630,7 +644,9 @@ export function SurfacesShellPage() {
           Back). Worlds-first nav data matches App sidebar IA. No App context,
           no daemon client.
         </p>
-        <CreatorShellFixtures />
+        <FixtureBoundary>
+          <CreatorShellFixtures />
+        </FixtureBoundary>
       </section>
 
       {/* Settings shell chrome stays discoverable under Shell (V1.103 P0) */}
@@ -669,7 +685,9 @@ export function SurfacesShellPage() {
           </code>{' '}
           imports.
         </p>
-        <SettingsHostFixtures />
+        <FixtureBoundary>
+          <SettingsHostFixtures />
+        </FixtureBoundary>
       </section>
 
       <section className="mt-10" id="surfaces-footer-profiles">
@@ -724,7 +742,9 @@ export function SurfacesAgentPickerPage() {
         selected, VI-001 historical ring-only target, and V1.134 P2 StatusDot
         retune target (light+dark). No contracts, no daemon client.
       </p>
-      <AgentPickerFixtures />
+      <FixtureBoundary>
+        <AgentPickerFixtures />
+      </FixtureBoundary>
     </section>
   );
 }
@@ -746,7 +766,9 @@ export function SurfacesDaemonPage() {
         </code>{' '}
         tokens.
       </p>
-      <DaemonStatusStrip />
+      <FixtureBoundary>
+        <DaemonStatusStrip />
+      </FixtureBoundary>
     </section>
   );
 }
@@ -766,7 +788,9 @@ export function SurfacesLaunchPage() {
         . Props-driven variants: waiting, error + Restart Nexus, and error +
         Reset local database. No daemon IPC, no Tauri commands.
       </p>
-      <LaunchDaemonFixtures />
+      <FixtureBoundary>
+        <LaunchDaemonFixtures />
+      </FixtureBoundary>
     </section>
   );
 }
@@ -792,8 +816,8 @@ export function SurfacesSelectionSubmenuPage() {
       <div className="mb-4 rounded-card border border-gray-alpha-200 bg-background-100 p-3">
         <p className="text-label-14 font-medium text-gray-1000 mb-2">Legend</p>
         <ul className="flex flex-col gap-1 text-copy-13 text-gray-700">
-          <li><strong className="text-gray-1000">1–2:</strong> World row (KB item) + submenu open, light / dark</li>
-          <li><strong className="text-gray-1000">3–4:</strong> Work row (Outline item) + submenu open, light / dark</li>
+          <li><strong className="text-gray-1000">1–2:</strong> World row (KB item) + submenu open — catalog ids world-light / world-dark (document theme; use Compare for parity)</li>
+          <li><strong className="text-gray-1000">3–4:</strong> Work row (Outline item) + submenu open — catalog ids work-light / work-dark (document theme; use Compare for parity)</li>
           <li><strong className="text-gray-1000">5:</strong> Rename in progress — inline edit active with blue focus ring</li>
           <li><strong className="text-gray-1000">6:</strong> Agent dialog overlay — submenu closed, AgentPicker dialog open with entity-name title</li>
         </ul>
@@ -879,12 +903,15 @@ export function SurfacesCanvasPage() {
           </code>
           — light/dark acceptance here carries to the App graph.
         </p>
-        <CanvasSurfacesFixtures />
+        <FixtureBoundary>
+          <CanvasSurfacesFixtures />
+        </FixtureBoundary>
       </section>
 
       {/* V1.164 P3 T2 — Mental surfacing inspector states (AR-6 studio-first) */}
       <section className="mt-10" data-testid="surfaces-mental-surfacing" id="surfaces-mental-surfacing">
         <SurfaceHeading id="surfaces-mental-surfacing">Mental Surfacing</SurfaceHeading>
+        <SurfaceSourceBadges importPaths={["@/fixtures/mental-surfacing-fixtures"]} />
         <p className="text-copy-14 text-gray-700 mb-6">
           Read-only inspector states for the mental layer — character{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">

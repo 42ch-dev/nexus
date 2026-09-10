@@ -345,7 +345,7 @@ function VariantMatrixCell({
 
 export function CreatorHubDualPaneIaFixtures() {
   return (
-    <div data-testid="creator-hub-dual-pane-ia-fixtures">
+    <div className="studio-fixture-boundary" data-testid="creator-hub-dual-pane-ia-fixtures">
       <FixtureFrame
         title="Hub IA — sidebar inline create + content browse (World tab)"
         description="V1.136 P1: sidebar hosts World|Work create tabs + inline form + submit. Content is browse-only: World/Work tab bar + card list or empty — no content-left create form."

@@ -110,7 +110,7 @@ export function CreatorShellFixtures() {
   const [interactiveEntity, setInteractiveEntity] = useState<CreatorEntityRef | null>(null);
 
   return (
-    <div data-testid="creator-shell-fixtures">
+    <div className="studio-fixture-boundary" data-testid="creator-shell-fixtures">
       <FixtureFrame
         title="Interactive — toggle Create ↔ Controller"
         description="Prop-driven selectedEntity mirror. Empty → Create page CTAs; selected → Controller stub + Back clears selection."

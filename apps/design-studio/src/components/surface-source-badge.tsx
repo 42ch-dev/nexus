@@ -1,11 +1,15 @@
 import { Badge } from '@42ch/nexus-ui';
 
-/** Two-tier import model — V1.128 P3 gallery labeling. */
-export type SurfaceSourceTier = 'extract' | 'promoted' | 'transitional';
+/** Four-tier import model — V1.128 P3 gallery labeling + V1.187 P2 studio-local. */
+export type SurfaceSourceTier =
+  | 'extract'
+  | 'promoted'
+  | 'transitional'
+  | 'studio-local';
 
 const TIER_COPY: Record<
   SurfaceSourceTier,
-  { shortLabel: string; badgeVariant: 'preset' | 'running' | 'queued' }
+  { shortLabel: string; badgeVariant: 'preset' | 'running' | 'queued' | 'neutral' }
 > = {
   extract: {
     shortLabel: 'App presentational extract',
@@ -19,7 +23,21 @@ const TIER_COPY: Record<
     shortLabel: 'Transitional primitive',
     badgeVariant: 'queued',
   },
+  'studio-local': {
+    shortLabel: 'Studio-local fixture',
+    badgeVariant: 'neutral',
+  },
 };
+
+function isStudioLocalPath(importPath: string): boolean {
+  if (importPath.startsWith('@/fixtures/')) return true;
+  if (importPath.startsWith('@/components/')) return true;
+  if (importPath.startsWith('@/pages/')) return true;
+  if (importPath.startsWith('@/lib/')) return true;
+  if (importPath === 'DESIGN.md' || importPath === 'DESIGN.dark.md') return true;
+  if (importPath.startsWith('./') || importPath.startsWith('../')) return true;
+  return false;
+}
 
 /** Classify a Studio import path for Surfaces source badges. */
 export function classifySurfaceImport(importPath: string): SurfaceSourceTier {
@@ -32,7 +50,10 @@ export function classifySurfaceImport(importPath: string): SurfaceSourceTier {
   if (importPath.startsWith('@web-')) {
     return 'extract';
   }
-  return 'extract';
+  if (isStudioLocalPath(importPath)) {
+    return 'studio-local';
+  }
+  return 'studio-local';
 }
 
 /** Human-readable label for a tier (optionally including the import path). */
@@ -52,7 +73,7 @@ export interface SurfaceSourceBadgeProps {
   importPath: string;
 }
 
-/** Single import-path badge — extract vs promoted vs transitional. */
+/** Single import-path badge — extract vs promoted vs transitional vs studio-local. */
 export function SurfaceSourceBadge({ importPath }: SurfaceSourceBadgeProps) {
   const tier = classifySurfaceImport(importPath);
   const { shortLabel, badgeVariant } = TIER_COPY[tier];
@@ -75,7 +96,7 @@ export function SurfaceSourceBadge({ importPath }: SurfaceSourceBadgeProps) {
 }
 
 export interface SurfaceSourceBadgesProps {
-  /** Distinct `@web-*` or `@42ch/nexus-ui` paths cited by the section. */
+  /** Distinct import paths cited by the section. */
   importPaths: string[];
 }
 
@@ -136,6 +157,16 @@ export function SurfaceSourceLegend() {
               apps/web/src/components/ui
             </code>
             .
+          </span>
+        </li>
+        <li className="flex flex-wrap items-center gap-2">
+          <SurfaceSourceBadge importPath="@/fixtures/example" />
+          <span>
+            Studio-local composition under{' '}
+            <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+              apps/design-studio/src
+            </code>{' '}
+            — props-driven fixtures, not App extracts.
           </span>
         </li>
       </ul>

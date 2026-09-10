@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useTheme } from '@/components/theme-provider';
+import { SurfaceSourceBadges } from '@/components/surface-source-badge';
 
 /* ------------------------------------------------------------------ */
 /*  Data — token inventory from SSOT                                    */
@@ -2406,6 +2407,7 @@ export function TokensPage() {
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">blue-*</code> as the
         cobalt interactive scale — see Colors for the ink-vs-signal split.
       </p>
+      <SurfaceSourceBadges importPaths={["@nexus/design-tokens"]} />
       <SubNav />
 
       <ColorsSection />

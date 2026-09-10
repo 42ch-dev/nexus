@@ -162,7 +162,7 @@ function ErrorFrame() {
  */
 export function GlobalTimelineFixtures() {
   return (
-    <div data-testid="global-timeline-fixtures">
+    <div className="studio-fixture-boundary" data-testid="global-timeline-fixtures">
       <PopulatedFrame />
       <EmptyFrame />
       <LoadingFrame />
