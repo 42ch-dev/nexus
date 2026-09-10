@@ -78,17 +78,23 @@ export function SurfaceSourceBadge({ importPath }: SurfaceSourceBadgeProps) {
   const tier = classifySurfaceImport(importPath);
   const { shortLabel, badgeVariant } = TIER_COPY[tier];
 
+  // Narrow-viewport safety: the pill must never force document-wide overflow.
+  // The full label + path stay visible — the mono path wraps inside the pill
+  // (flex-wrap + break-all) instead of the nowrap pill escaping its column.
   return (
     <Badge
       variant={badgeVariant}
       tone="soft"
+      className="h-auto min-h-6 max-w-full flex-wrap whitespace-normal py-0.5"
       data-testid={`surface-source-badge-${tier}`}
       data-import-path={importPath}
       title={getSurfaceSourceLabel(importPath)}
     >
       <span className="sr-only">{shortLabel}: </span>
-      <span aria-hidden>{shortLabel}</span>
-      <code className="text-label-12 font-mono font-normal opacity-90">
+      <span aria-hidden className="whitespace-nowrap">
+        {shortLabel}
+      </span>
+      <code className="min-w-0 break-all text-label-12 font-mono font-normal opacity-90">
         {importPath}
       </code>
     </Badge>

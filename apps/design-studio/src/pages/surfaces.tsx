@@ -122,7 +122,7 @@ function SurfacesSectionNav() {
   return (
     <nav
       aria-label="Surfaces sections"
-      className="flex flex-col gap-0.5 w-44"
+      className="flex flex-col gap-0.5 w-full md:w-44"
       data-testid="surfaces-section-nav"
       data-layout="sidebar"
     >
@@ -195,14 +195,14 @@ export function SurfacesLayout() {
       </p>
       <SurfaceSourceLegend />
 
-      <div className="flex gap-8 items-start">
+      <div className="flex flex-col gap-6 md:flex-row md:gap-8 md:items-start">
         <aside
-          className="sticky top-16 shrink-0 border-r border-gray-alpha-200 pr-4"
+          className="shrink-0 border-b border-gray-alpha-200 pb-4 md:sticky md:top-16 md:border-b-0 md:border-r md:pb-0 md:pr-4"
           data-testid="surfaces-section-sidebar"
         >
           <SurfacesSectionNav />
         </aside>
-        <div className="flex-1 min-w-0">
+        <div className="w-full min-w-0 md:flex-1">
           <Outlet />
         </div>
       </div>
@@ -568,7 +568,9 @@ export function SurfacesShellPage() {
           </code>
           , and no direct layout component imports.
         </p>
-        <ShellSidebarFixture />
+        <FixtureBoundary>
+          <ShellSidebarFixture />
+        </FixtureBoundary>
       </section>
 
       <section className="mt-10" data-testid="surfaces-creator-hub-dual-pane-ia" id="surfaces-creator-hub-dual-pane-ia">
@@ -702,7 +704,9 @@ export function SurfacesShellPage() {
           </code>{' '}
           — props-driven 0/1/N states. No creator context, no daemon client.
         </p>
-        <FooterProfilesFixture />
+        <FixtureBoundary>
+          <FooterProfilesFixture />
+        </FixtureBoundary>
       </section>
 
       <section className="mt-10" id="surfaces-header-health">
@@ -718,7 +722,9 @@ export function SurfacesShellPage() {
           — unknown, connected (local/remote), and offline states. No polling,
           no daemon client.
         </p>
-        <DaemonHealthIndicatorFixture />
+        <FixtureBoundary>
+          <DaemonHealthIndicatorFixture />
+        </FixtureBoundary>
       </section>
     </div>
   );
