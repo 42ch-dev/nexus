@@ -429,7 +429,7 @@ function VariantBlock({
         <h4 className="text-heading-16 font-heading text-gray-1000">{title}</h4>
         {note && <p className="mt-0.5 text-copy-13 text-gray-700">{note}</p>}
       </div>
-      <div data-testid={testId} className="rounded-card border border-gray-alpha-300 bg-background-100 p-6">
+      <div data-testid={testId} className="min-w-0 rounded-card border border-gray-alpha-300 bg-background-100 p-6">
         {children}
       </div>
     </div>
