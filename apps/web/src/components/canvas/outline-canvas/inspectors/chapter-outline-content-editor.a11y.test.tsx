@@ -63,7 +63,7 @@ vi.mock('@tiptap/react', () => {
     EditorContent: () => <div data-testid="editor-surface" />,
   };
 });
-vi.mock('@tiptap/starter-kit', () => ({ default: {} }));
+vi.mock('@tiptap/starter-kit', () => ({ default: { configure: () => ({}) } }));
 vi.mock('tiptap-markdown', () => ({ Markdown: {} }));
 
 import { ChapterOutlineContentEditor } from './chapter-outline-content-editor';

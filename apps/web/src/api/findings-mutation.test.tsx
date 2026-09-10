@@ -10,6 +10,7 @@
 import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 
 import { BrowserClient } from '@/lib/nexus';
 import { useFindings, useUpdateFinding, flattenPages } from '@/api/queries';
@@ -141,7 +142,9 @@ describe('useUpdateFinding — optimistic update + invalidation', () => {
     // A mutation on w1 must refetch w1's list (a status transition can move a
     // finding between filter views of w1) but must NOT touch w2's list. The
     // global findings-list prefix is no longer invalidated.
-    const listSpies: Record<string, ReturnType<typeof vi.fn>> = {};
+    // Vitest 4's bare `vi.fn()` overload types as `Mock<Constructable | Procedure>`
+    // (not callable); name the callable shape instead.
+    const listSpies: Record<string, Mock<() => Response>> = {};
     const listFor = (workId: string) => {
       listSpies[workId] ??= vi.fn(() =>
         HttpResponse.json({

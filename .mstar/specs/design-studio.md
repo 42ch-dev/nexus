@@ -91,7 +91,7 @@ Surfaces gallery sections display source badges distinguishing extract vs promot
 | TypeScript | strict, `@/*` alias | strict, `@/*` + `@web-ui/*` aliases |
 | Tailwind | v3.4, `class` darkMode | v3.4 — **shared preset** from `@nexus/design-tokens` |
 | CSS tokens | `@nexus/design-tokens/tokens.css` | Same import — no second transcription |
-| Test runner | Vitest 3 | Vitest 3 |
+| Test runner | Vitest 4 | Vitest 4 |
 | Contracts | `@42ch/nexus-contracts` required | **Not used** — dev surface only |
 | Dev server port | 5173 | 5174 (document in README; avoid clash) |
 

@@ -15,7 +15,7 @@
 import { describe, expect, it, beforeAll } from 'vitest';
 import { Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import { Markdown } from 'tiptap-markdown';
+import { Markdown, type MarkdownStorage } from 'tiptap-markdown';
 
 // ProseMirror/TipTap read layout APIs that jsdom does not implement. Polyfill
 // the minimal surface so a headless Editor can mount and serialize without a
@@ -37,7 +37,17 @@ beforeAll(() => {
 
 function makeEditor(initial: string): Editor {
   return new Editor({
-    extensions: [StarterKit, Markdown],
+    // Mirror the component's extension set (v2 parity: Tiptap v3's StarterKit
+    // adds Link, Underline, ListKeymap and TrailingNode — disabled in both).
+    extensions: [
+      StarterKit.configure({
+        link: false,
+        underline: false,
+        listKeymap: false,
+        trailingNode: false,
+      }),
+      Markdown,
+    ],
     content: initial,
     // No DOM mount needed for serialization-only use.
     element: document.createElement('div'),
@@ -46,7 +56,10 @@ function makeEditor(initial: string): Editor {
 
 function roundTrip(md: string): string {
   const editor = makeEditor(md);
-  const out = (editor.storage.markdown as { getMarkdown: () => string }).getMarkdown();
+  // Tiptap v3 types `Editor.storage` as a closed empty `Storage` interface, so
+  // the tiptap-markdown storage slice has to be narrowed by hand.
+  const storage = editor.storage as unknown as { markdown: MarkdownStorage };
+  const out = storage.markdown.getMarkdown();
   editor.destroy();
   return out;
 }

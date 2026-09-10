@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import { EditorContent, useEditor, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import { Markdown } from 'tiptap-markdown';
+import { Markdown, type MarkdownStorage } from 'tiptap-markdown';
 
 import { Button } from '@/components/ui/button';
 import { useChapterOutline } from '@/api/queries';
@@ -90,7 +90,21 @@ export function ChapterOutlineContentEditor({
   const [saveState, setSaveState] = useState<SaveState>('clean');
 
   // Pin editor deps so useEditor does not re-initialize on every render.
-  const editorExtensions = useMemo(() => [StarterKit, Markdown], []);
+  // Tiptap v3's StarterKit additionally registers Link, Underline, ListKeymap
+  // and TrailingNode; disable them so the editor keeps the v2 extension set.
+  const editorExtensions = useMemo(
+    () =>
+      [
+        StarterKit.configure({
+          link: false,
+          underline: false,
+          listKeymap: false,
+          trailingNode: false,
+        }),
+        Markdown,
+      ],
+    [],
+  );
 
   const handleEditorUpdate = useCallback(() => {
     setSaveState((prev) => (prev === 'saving' ? prev : 'dirty'));
@@ -101,6 +115,9 @@ export function ChapterOutlineContentEditor({
     content: outline.data?.content ?? '',
     editable: !disabled,
     onUpdate: handleEditorUpdate,
+    // Tiptap v3 defaults this to false; the toolbar reads `editor.isActive(...)`
+    // during render, so keep the v2 behavior (re-render on every transaction).
+    shouldRerenderOnTransaction: true,
   });
 
   // Sync editable when the disabled flag flips after mount.
@@ -140,7 +157,7 @@ export function ChapterOutlineContentEditor({
     if (!forcedReset && (saveState === 'dirty' || saveState === 'saving')) return;
     const current = getMarkdown(editor);
     if (current !== outline.data.content) {
-      editor.commands.setContent(outline.data.content, false);
+      editor.commands.setContent(outline.data.content, { emitUpdate: false });
     }
     setSaveState('clean');
     // chapterNumber + contentVersion + saveState are intentional reset/guard
@@ -174,7 +191,7 @@ export function ChapterOutlineContentEditor({
 
   function handleReset() {
     if (!editor || !outline.data) return;
-    editor.commands.setContent(outline.data.content, false);
+    editor.commands.setContent(outline.data.content, { emitUpdate: false });
     setSaveState('clean');
   }
 
@@ -243,7 +260,10 @@ export function ChapterOutlineContentEditor({
 }
 
 function getMarkdown(editor: Editor): string {
-  return (editor.storage.markdown as { getMarkdown: () => string }).getMarkdown();
+  // Tiptap v3 types `Editor.storage` as a closed empty `Storage` interface, so
+  // the tiptap-markdown storage slice has to be narrowed by hand.
+  const storage = editor.storage as unknown as { markdown: MarkdownStorage };
+  return storage.markdown.getMarkdown();
 }
 
 function SaveStateIndicator({ state }: { state: SaveState }) {

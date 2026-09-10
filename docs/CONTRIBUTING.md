@@ -8,7 +8,7 @@ Thank you for helping improve Nexus. This document is the contributor guide: set
 
 ## Code of conduct
 
-Be respectful, constructive, and inclusive.
+This project follows the [Contributor Covenant Code of Conduct v2.1](../.github/CODE_OF_CONDUCT.md), which defines expected behavior, the enforcement ladder, and how to report unacceptable behavior privately.
 
 ## Prerequisites
 
@@ -210,6 +210,7 @@ CI ignores pushes that only touch paths such as `docs/**` or certain `README.md`
 
 - Prefer minimal, well-maintained dependencies.
 - Do not commit secrets or machine-specific credentials.
+- **Report vulnerabilities privately** — never open a public issue for a suspected vulnerability; see [`SECURITY.md`](../.github/SECURITY.md) for supported versions and the confidential reporting channel.
 
 ## Where to put documentation
 
