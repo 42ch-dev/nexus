@@ -18,14 +18,36 @@ describe('classifySurfaceImport', () => {
     expect(classifySurfaceImport('@web-ui/dialog')).toBe('transitional');
   });
 
-  it('classifies other @web-* roots as extract', () => {
+  it('classifies recognized @web-* presentational roots as extract', () => {
     expect(classifySurfaceImport('@web-layout/shell-sidebar-chrome')).toBe(
       'extract',
     );
+    expect(classifySurfaceImport('@web-canvas/node-chrome-shell')).toBe(
+      'extract',
+    );
     expect(classifySurfaceImport('@web-setup/agent-picker')).toBe('extract');
+    expect(classifySurfaceImport('@web-settings/settings-host-chrome')).toBe(
+      'extract',
+    );
+    expect(
+      classifySurfaceImport('@web-global-timeline/global-timeline-list-chrome'),
+    ).toBe('extract');
     expect(classifySurfaceImport('@web-shell/selection-submenu')).toBe(
       'extract',
     );
+  });
+
+  it('rejects lookalike package prefixes at root/subpath boundaries', () => {
+    expect(classifySurfaceImport('@42ch/nexus-ui-legacy')).toBe('studio-local');
+    expect(classifySurfaceImport('@web-ui-legacy/dialog')).toBe('studio-local');
+    expect(classifySurfaceImport('@web-layouts/not-a-root')).toBe(
+      'studio-local',
+    );
+  });
+
+  it('falls back unrecognized @web-* aliases to studio-local', () => {
+    expect(classifySurfaceImport('@web-foo/bar')).toBe('studio-local');
+    expect(classifySurfaceImport('@web-lib/utils')).toBe('studio-local');
   });
 
   it('classifies Studio-local paths as studio-local', () => {

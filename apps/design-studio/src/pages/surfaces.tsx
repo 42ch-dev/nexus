@@ -167,16 +167,52 @@ export function SurfacesLayout() {
       <p className="text-copy-16 text-gray-700 mb-4">
         Real product-surface slices — Setup wizard step card and App shell
         chrome, composed as studio-local fixtures. Each section below labels
-        whether imports are App presentational extracts (
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-*
-        </code>
-        ) or promoted primitives (
+        its imports across all four source categories per IA guide §4.5:
+        promoted primitives (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @42ch/nexus-ui
         </code>
-        ) per IA guide §4.5. No daemon data, no live routing, and no
-        product-page imports (
+        ), App presentational extracts (
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-layout/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-setup/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-settings/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-canvas/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-global-timeline/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-shell/*
+        </code>
+        ), transitional primitives (
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-ui/*
+        </code>
+        ), and Studio-local fixtures (
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @/fixtures/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @/components/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @/pages/*
+        </code>
+        ). No daemon data, no live routing, and no product-page imports (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           pages/
         </code>{' '}
@@ -468,21 +504,50 @@ export function SurfacesIndexPage() {
         )}
       </div>
       <p className="text-copy-13 text-gray-700 mt-12 pt-8 border-t border-gray-alpha-200">
-        Surface fixtures: Setup wizard chrome, App shell chrome, AgentPicker
-        states, Settings shell chrome (under Shell), daemon status strip. Composed
-        from{' '}
+        Surface fixtures: Setup wizard chrome; Shell — Chronos titlebar, App
+        shell chrome, Creator Hub sidebar create IA, Creator / Orchestrator
+        functional-area IA, Creator shell, Settings shell chrome, Footer
+        profiles, Header health indicator; AgentPicker states; Canvas —
+        mirrored Outline/Strategy/WorldKB node chrome, Mental Surfacing,
+        NLE/World/Work/Global timelines, Layer Breadcrumb, Conflict Modals;
+        Daemon status strip; Launch splash; Selection Submenu (6 variants).
+        Sources span all four categories: promoted primitives (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @42ch/nexus-ui
+        </code>
+        ), App presentational extracts (
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-layout/*
         </code>
         ,{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @web-setup/*
         </code>
-        , and transitional{' '}
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-settings/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-canvas/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-global-timeline/*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-shell/*
+        </code>
+        ), transitional primitives (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @web-ui/*
         </code>
-        . No live product pages, no{' '}
+        ), and Studio-local fixtures (
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @/fixtures/*
+        </code>
+        ). No live product pages, no{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           components/layout/
         </code>{' '}
@@ -561,8 +626,9 @@ export function SurfacesShellPage() {
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             @web-layout/shell-sidebar-chrome
           </code>{' '}
-          extract. Active nav bar and mode pills use cyan signal; surfaces are
-          warm-paper / ink via background tokens. No live routing, no{' '}
+          extract. Active nav bar and mode pills use cobalt signal; surfaces are
+          silver-neutral (light) / graphite (dark) via background tokens. No
+          live routing, no{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             NexusClient
           </code>

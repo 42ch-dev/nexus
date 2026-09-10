@@ -39,15 +39,50 @@ function isStudioLocalPath(importPath: string): boolean {
   return false;
 }
 
-/** Classify a Studio import path for Surfaces source badges. */
+const PROMOTED_IMPORT_ROOT = '@42ch/nexus-ui';
+const TRANSITIONAL_IMPORT_ROOT = '@web-ui';
+
+/**
+ * Recognized presentational extract roots (spec §3.2). Utility/locale aliases
+ * such as `@web-lib/utils` or `@web-locales/*` are NOT presentational extracts.
+ */
+const EXTRACT_IMPORT_ROOTS: readonly string[] = [
+  '@web-layout',
+  '@web-canvas',
+  '@web-setup',
+  '@web-settings',
+  '@web-global-timeline',
+  '@web-shell',
+];
+
+/**
+ * Exact-root/subpath boundary check — lockstep for every classified root so
+ * lookalike prefixes (`@web-ui-legacy`, `@42ch/nexus-ui-legacy`) never match.
+ */
+function isPackageOrSubpath(importPath: string, root: string): boolean {
+  return importPath === root || importPath.startsWith(`${root}/`);
+}
+
+/**
+ * Classify a Studio import path for Surfaces source badges.
+ *
+ * Locked precedence: exact `@42ch/nexus-ui` (or an exported subpath) →
+ * promoted; `@web-ui/<name>` → transitional; recognized presentational
+ * `@web-*` alias roots → extract; Studio `@/fixtures`, `@/components`,
+ * `@/pages`, `@/lib` and relative composition paths → studio-local. Any
+ * other path (unknown catalog paths, lookalike roots such as
+ * `@42ch/nexus-ui-legacy`, `@web-ui-legacy`, or arbitrary `@web-foo`) falls
+ * back to studio-local — never silently labeled promoted/transitional/
+ * extract.
+ */
 export function classifySurfaceImport(importPath: string): SurfaceSourceTier {
-  if (importPath.startsWith('@42ch/nexus-ui')) {
+  if (isPackageOrSubpath(importPath, PROMOTED_IMPORT_ROOT)) {
     return 'promoted';
   }
-  if (importPath.startsWith('@web-ui')) {
+  if (isPackageOrSubpath(importPath, TRANSITIONAL_IMPORT_ROOT)) {
     return 'transitional';
   }
-  if (importPath.startsWith('@web-')) {
+  if (EXTRACT_IMPORT_ROOTS.some((root) => isPackageOrSubpath(importPath, root))) {
     return 'extract';
   }
   if (isStudioLocalPath(importPath)) {
