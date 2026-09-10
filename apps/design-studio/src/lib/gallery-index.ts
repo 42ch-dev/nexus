@@ -167,16 +167,16 @@ const SURFACES_LAUNCH_ENTRIES: readonly GalleryEntry[] = [
 ];
 
 const SURFACES_SELECTION_ENTRIES: readonly GalleryEntry[] = [
-  entry('/surfaces/selection-submenu', 'selection-submenu-world-light', 'World row + submenu open (light)', ['world', 'light'], [
+  entry('/surfaces/selection-submenu', 'selection-submenu-world-light', 'World row + submenu open', ['world', 'menu'], [
     '@web-shell/selection-submenu',
   ]),
-  entry('/surfaces/selection-submenu', 'selection-submenu-world-dark', 'World row + submenu open (dark)', ['world', 'dark'], [
+  entry('/surfaces/selection-submenu', 'selection-submenu-world-dark', 'World row + submenu open (document theme)', ['world', 'document theme'], [
     '@web-shell/selection-submenu',
   ]),
-  entry('/surfaces/selection-submenu', 'selection-submenu-work-light', 'Work row + submenu open (light)', ['work', 'light'], [
+  entry('/surfaces/selection-submenu', 'selection-submenu-work-light', 'Work row + submenu open', ['work', 'menu'], [
     '@web-shell/selection-submenu',
   ]),
-  entry('/surfaces/selection-submenu', 'selection-submenu-work-dark', 'Work row + submenu open (dark)', ['work', 'dark'], [
+  entry('/surfaces/selection-submenu', 'selection-submenu-work-dark', 'Work row + submenu open (document theme)', ['work', 'document theme'], [
     '@web-shell/selection-submenu',
   ]),
   entry('/surfaces/selection-submenu', 'selection-submenu-rename-frame', 'Rename in progress', ['rename', 'inline'], [
@@ -221,6 +221,26 @@ export function getGalleryEntries(pathname: string): readonly GalleryEntry[] {
   return CATALOG_BY_PATH[pathname] ?? [];
 }
 
+/** Frozen gallery labels keyed by route (spec §6) — used for pair-frame titles. */
+const GALLERY_LABEL_BY_PATH: Readonly<Record<string, string>> = {
+  '/tokens': 'Tokens',
+  '/brand': 'Brand',
+  '/components': 'Components',
+  '/voice': 'Voice',
+  '/surfaces': 'Surfaces',
+  '/surfaces/setup': 'Setup',
+  '/surfaces/shell': 'Shell',
+  '/surfaces/agent-picker': 'AgentPicker',
+  '/surfaces/canvas': 'Canvas',
+  '/surfaces/daemon': 'Daemon',
+  '/surfaces/launch': 'Launch',
+  '/surfaces/selection-submenu': 'Selection Submenu',
+};
+
+export function getGalleryLabel(pathname: string): string {
+  return GALLERY_LABEL_BY_PATH[pathname] ?? 'Gallery';
+}
+
 export function filterGalleryEntries(
   entries: readonly GalleryEntry[],
   query: string,
@@ -255,13 +275,39 @@ function resolveGalleryFocusTarget(element: HTMLElement): HTMLElement {
   return element;
 }
 
-export function focusGalleryHeading(id: string): void {
-  if (!id) return;
-  window.requestAnimationFrame(() => {
+/**
+ * Focus the catalog heading once the matched route has actually mounted.
+ * Retries each animation frame until the target exists or the bounded
+ * deadline passes — a nested lazy leaf still rendering its loading boundary
+ * receives focus when it commits. Returns a cancel function; callers cancel
+ * on unmount or when a newer navigation supersedes this attempt.
+ */
+const FOCUS_RETRY_DEADLINE_MS = 2000;
+
+export function focusGalleryHeading(id: string): () => void {
+  if (!id) return () => {};
+
+  let cancelled = false;
+  let frameHandle = 0;
+  const startedAt = performance.now();
+
+  const attempt = () => {
+    if (cancelled) return;
     const target = document.getElementById(id);
-    if (!target) return;
-    const focusTarget = resolveGalleryFocusTarget(target);
-    focusTarget.tabIndex = -1;
-    focusTarget.focus({ preventScroll: false });
-  });
+    if (target) {
+      const focusTarget = resolveGalleryFocusTarget(target);
+      focusTarget.tabIndex = -1;
+      focusTarget.focus({ preventScroll: false });
+      return;
+    }
+    if (performance.now() - startedAt >= FOCUS_RETRY_DEADLINE_MS) return;
+    frameHandle = window.requestAnimationFrame(attempt);
+  };
+
+  frameHandle = window.requestAnimationFrame(attempt);
+
+  return () => {
+    cancelled = true;
+    window.cancelAnimationFrame(frameHandle);
+  };
 }

@@ -21,7 +21,7 @@ on 5173).
 | **Brand VI** | `/brand` | All five `@42ch/nexus-ui` logo variants + square plates + `NexusMark` + theme.css swatches + clear-space guidance + four historical `NexusLogoVariant` specimens + VI acceptance fixtures. Frozen assets and historical palettes are explicitly labeled references, separate from live theme tokens. |
 | **Components** | `/components` | All 11 `apps/web/src/components/ui/*` primitives with variant/state matrices — promoted primitives (Button, Badge, Card, Input, Label, Textarea, Select, Tabs, Toast, TransportErrorBlock, RunFormFields, EntityPickerField, ProposalSections, RunStatusBadge, RunsTable) imported from `@42ch/nexus-ui`; unpromoted remain on `@web-ui/*` (Dialog, States, Table) |
 | **Voice & Content** | `/voice` | Labeled writing-pattern specimens from `DESIGN.md` §Voice & Content |
-| **Surfaces** | `/surfaces` | Setup wizard, App shell, AgentPicker, Settings shell chrome fixtures (studio-local; no daemon data) |
+| **Surfaces** | `/surfaces` | §7.5 fixture families on nested routes: Setup wizard; Shell (Chronos titlebar, app shell, dual-pane IA, Creator/Orchestrator IA, Creator shell, Settings shell, Footer profiles, Header health); AgentPicker states; Canvas (mirrored chrome, Mental Surfacing, NLE/World/Work/Global timelines, Layer Breadcrumb, Conflict Modals); Daemon status strip; Launch splash; Selection Submenu (six variants) — studio-local composition, no daemon data |
 
 Every value is driven by the repo-root `DESIGN.md` / `DESIGN.dark.md` SSOT.
 Edit those files in your IDE, then refresh the studio to see the effect.
@@ -44,9 +44,9 @@ Edit those files in your IDE, then refresh the studio to see the effect.
 | Category | Pattern | Meaning |
 | --- | --- | --- |
 | Promoted primitive | `@42ch/nexus-ui` | Package export after Studio acceptance |
-| App presentational extract | `@web-layout/*`, `@web-setup/*`, `@web-canvas/*`, … | Props-driven `apps/web` chrome |
+| App presentational extract | Recognized `@web-*` roots only: `@web-layout`, `@web-canvas`, `@web-setup`, `@web-settings`, `@web-global-timeline`, `@web-shell` (exact root or `/` subpath) | Props-driven `apps/web` chrome — not every `@web-*` alias |
 | Transitional primitive | `@web-ui/*` | Unpromoted `components/ui/*` mirror |
-| Studio-local | `@/fixtures/*`, `@/pages/*`, `@/components/*` | Gallery composition only |
+| Studio-local | `@/fixtures/*`, `@/pages/*`, `@/components/*`, `@/lib/*` | Gallery composition only |
 
 Surfaces nested routes: Overview, Setup, Shell, AgentPicker, Canvas, Daemon,
 Launch, Selection Submenu — see `.mstar/specs/design-studio.md` §6–§7.

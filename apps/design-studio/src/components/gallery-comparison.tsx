@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { Link } from 'react-router';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type RefObject } from 'react';
 
 import {
   buildStudioEmbedSrc,
@@ -11,6 +10,8 @@ export type GalleryComparisonProps = {
   path: string;
   hash: string;
   resetKey: number;
+  galleryLabel: string;
+  onOpenCurrentGallery: () => void;
 };
 
 type FrameState = {
@@ -26,6 +27,7 @@ function normalizeHash(hash: string): string {
 }
 
 function FramePanel({
+  headingId,
   title,
   theme,
   src,
@@ -34,6 +36,7 @@ function FramePanel({
   remountKey,
   onLoadError,
 }: {
+  headingId: string;
   title: string;
   theme: EmbeddedTheme;
   src: string;
@@ -44,7 +47,9 @@ function FramePanel({
 }) {
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-2">
-      <h3 className="text-heading-16 font-semibold text-gray-1000">{title}</h3>
+      <h3 id={headingId} className="text-heading-16 font-semibold text-gray-1000">
+        {title}
+      </h3>
       <div className="relative h-[640px] w-full overflow-hidden rounded-card border border-gray-alpha-300 bg-background-200">
         {!state.ready && !state.failed ? (
           <p className="absolute inset-0 flex items-center justify-center px-4 text-center text-copy-14 text-gray-700">
@@ -59,7 +64,8 @@ function FramePanel({
         <iframe
           key={remountKey}
           ref={iframeRef}
-          title={`${title} comparison frame`}
+          title={title}
+          aria-labelledby={headingId}
           src={src}
           className="h-full w-full border-0 bg-background-100"
           onError={onLoadError}
@@ -69,16 +75,26 @@ function FramePanel({
   );
 }
 
-export function GalleryComparison({ path, hash, resetKey }: GalleryComparisonProps) {
+export function GalleryComparison({
+  path,
+  hash,
+  resetKey,
+  galleryLabel,
+  onOpenCurrentGallery,
+}: GalleryComparisonProps) {
   const lightRef = useRef<HTMLIFrameElement>(null);
   const darkRef = useRef<HTMLIFrameElement>(null);
   const timersRef = useRef<number[]>([]);
   const [lightState, setLightState] = useState<FrameState>({ ready: false, failed: false });
   const [darkState, setDarkState] = useState<FrameState>({ ready: false, failed: false });
   const [localResetKey, setLocalResetKey] = useState(0);
+  const lightHeadingId = useId();
+  const darkHeadingId = useId();
 
   const normalizedHash = normalizeHash(hash);
   const effectiveResetKey = resetKey + localResetKey;
+  const lightFrameTitle = `Light — ${galleryLabel}`;
+  const darkFrameTitle = `Dark — ${galleryLabel}`;
 
   const lightSrc = useMemo(
     () => buildStudioEmbedSrc(path, normalizedHash, 'light'),
@@ -150,7 +166,6 @@ export function GalleryComparison({ path, hash, resetKey }: GalleryComparisonPro
   }, [path, effectiveResetKey, clearTimers]);
 
   const anyFailed = lightState.failed || darkState.failed;
-  const openPath = `${path}${normalizedHash}`;
 
   return (
     <div className="space-y-4" data-testid="gallery-comparison">
@@ -168,19 +183,21 @@ export function GalleryComparison({ path, hash, resetKey }: GalleryComparisonPro
             >
               Retry
             </button>
-            <Link
-              to={openPath}
-              className="rounded-control border border-gray-alpha-300 bg-background-100 px-3 py-2 text-label-14 no-underline hover:bg-gray-alpha-100"
+            <button
+              type="button"
+              onClick={onOpenCurrentGallery}
+              className="rounded-control border border-gray-alpha-300 bg-background-100 px-3 py-2 text-label-14 hover:bg-gray-alpha-100"
             >
               Open current gallery
-            </Link>
+            </button>
           </div>
         </div>
       ) : null}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <FramePanel
-          title="Light gallery"
+          headingId={lightHeadingId}
+          title={lightFrameTitle}
           theme="light"
           src={lightSrc}
           state={lightState}
@@ -189,7 +206,8 @@ export function GalleryComparison({ path, hash, resetKey }: GalleryComparisonPro
           onLoadError={() => markFailed('light')}
         />
         <FramePanel
-          title="Dark gallery"
+          headingId={darkHeadingId}
+          title={darkFrameTitle}
           theme="dark"
           src={darkSrc}
           state={darkState}

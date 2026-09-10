@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
 import { GalleryComparison } from '@/components/gallery-comparison';
@@ -6,6 +6,7 @@ import { SectionIndex } from '@/components/section-index';
 import {
   focusGalleryHeading,
   getGalleryEntries,
+  getGalleryLabel,
   type GalleryEntry,
 } from '@/lib/gallery-index';
 
@@ -24,18 +25,30 @@ export function GalleryShell({ children }: GalleryShellProps) {
   const pathname = location.pathname;
   const hash = location.hash;
   const entries = getGalleryEntries(pathname);
+  const cancelFocusRef = useRef<(() => void) | null>(null);
 
+  const scheduleHeadingFocus = useCallback((id: string) => {
+    cancelFocusRef.current?.();
+    cancelFocusRef.current = focusGalleryHeading(id);
+  }, []);
+  // Deep links and Back/Forward focus the hash heading once the matched route
+  // mounts. Pair mode never searches the parent document for fixture IDs —
+  // the announcement and frame URL hash updates carry the selection there.
   useEffect(() => {
     const id = hash.startsWith('#') ? hash.slice(1) : hash;
-    if (!id) return;
-    focusGalleryHeading(id);
-  }, [pathname, hash]);
+    if (!id || compareEnabled) return;
+    scheduleHeadingFocus(id);
+    return () => {
+      cancelFocusRef.current?.();
+      cancelFocusRef.current = null;
+    };
+  }, [pathname, hash, compareEnabled, scheduleHeadingFocus]);
 
   function handleNavigate(entry: GalleryEntry) {
     const target = `${entry.path}#${entry.id}`;
     navigate(target);
     setSelectionAnnouncement(`Selected ${entry.label}.`);
-    focusGalleryHeading(entry.id);
+    if (!compareEnabled) scheduleHeadingFocus(entry.id);
   }
 
   function handleCompareToggle() {
@@ -78,7 +91,13 @@ export function GalleryShell({ children }: GalleryShellProps) {
 
       {compareEnabled ? (
         <div className="max-w-6xl mx-auto px-4 pb-8">
-          <GalleryComparison path={pathname} hash={hash} resetKey={resetKey} />
+          <GalleryComparison
+            path={pathname}
+            hash={hash}
+            resetKey={resetKey}
+            galleryLabel={getGalleryLabel(pathname)}
+            onOpenCurrentGallery={() => setCompareEnabled(false)}
+          />
         </div>
       ) : (
         children

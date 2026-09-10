@@ -158,29 +158,34 @@ export function SectionIndex({ entries, onNavigate }: SectionIndexProps) {
         query.trim() ? (
           <p className="text-copy-14 text-gray-700">No results for “{query.trim()}”.</p>
         ) : null
-      ) : (
-        <ul id={listId} ref={listRef} className="flex flex-col gap-1">
-          {filtered.map((entry, index) => (
-            <li key={`${entry.path}#${entry.id}`}>
-              <a
-                href={`${entry.path}#${entry.id}`}
-                data-index={index}
-                tabIndex={0}
-                aria-current={activeIndex === index ? 'true' : undefined}
-                className="block rounded-control px-3 py-2 text-label-14 text-gray-900 no-underline hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700"
-                onClick={(event) => {
-                  event.preventDefault();
-                  selectEntry(index);
-                }}
-                onFocus={() => setActiveIndex(index)}
-                onKeyDown={(event) => handleLinkKeyDown(event, index)}
-              >
-                {entry.label}
-              </a>
-            </li>
-          ))}
-        </ul>
-      )}
+      ) : null}
+
+      <ul
+        id={listId}
+        ref={listRef}
+        className="flex flex-col gap-1"
+        hidden={filtered.length === 0}
+      >
+        {filtered.map((entry, index) => (
+          <li key={`${entry.path}#${entry.id}`}>
+            <a
+              href={`${entry.path}#${entry.id}`}
+              data-index={index}
+              tabIndex={0}
+              aria-current={activeIndex === index ? 'true' : undefined}
+              className="block rounded-control px-3 py-2 text-label-14 text-gray-900 no-underline hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700"
+              onClick={(event) => {
+                event.preventDefault();
+                selectEntry(index);
+              }}
+              onFocus={() => setActiveIndex(index)}
+              onKeyDown={(event) => handleLinkKeyDown(event, index)}
+            >
+              {entry.label}
+            </a>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

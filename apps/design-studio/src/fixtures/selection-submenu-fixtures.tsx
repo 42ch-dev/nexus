@@ -172,6 +172,8 @@ function InlineModalHost({
         type="button"
         className="mb-3 rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-1.5 text-button-12 text-gray-900 hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
         onClick={() => setOpen(true)}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         data-testid="selection-submenu-agent-dialog-open"
       >
         {openLabel}
@@ -253,19 +255,6 @@ function AgentDialogFixture() {
               <span className="truncate font-heading text-copy-14 font-semibold text-gray-1000">
                 My Fantasy World
               </span>
-              <button
-                type="button"
-                aria-haspopup="menu"
-                aria-expanded="false"
-                aria-label="Open menu for My Fantasy World"
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-gray-400 hover:bg-gray-alpha-200 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-1"
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-                  <circle cx="8" cy="3" r="1.5" fill="currentColor" />
-                  <circle cx="8" cy="8" r="1.5" fill="currentColor" />
-                  <circle cx="8" cy="13" r="1.5" fill="currentColor" />
-                </svg>
-              </button>
             </div>
             {open ? <AgentDialogPanel onClose={() => setOpen(false)} /> : null}
           </>
@@ -280,7 +269,7 @@ export function SelectionSubmenuStubFixtures() {
     <div className="studio-fixture-boundary" data-testid="selection-submenu-fixtures">
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
         <VariantFrame
-          label="World row + submenu open (light)"
+          label="World row + submenu open"
           description="World row with submenu showing 4 items: Open Timeline, Open KB, Agent, Rename"
           testId="selection-submenu-world-light"
         >
@@ -296,7 +285,7 @@ export function SelectionSubmenuStubFixtures() {
         </VariantFrame>
 
         <VariantFrame
-          label="Work row + submenu open (light)"
+          label="Work row + submenu open"
           description="Work row with submenu showing 4 items: Open Timeline, Open Outline, Agent, Rename"
           testId="selection-submenu-work-light"
         >

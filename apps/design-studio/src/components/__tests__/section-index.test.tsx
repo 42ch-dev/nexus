@@ -49,6 +49,9 @@ describe('SectionIndex', () => {
     fireEvent.change(input, { target: { value: 'missing' } });
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
     expect(getPoliteStatus().textContent?.toLowerCase()).toMatch(/no matching/);
+    const listId = input.getAttribute('aria-controls');
+    expect(listId).toBeTruthy();
+    expect(document.getElementById(listId!)).toBeInTheDocument();
 
     fireEvent.keyDown(input, { key: 'Escape' });
     expect(input).toHaveValue('');
