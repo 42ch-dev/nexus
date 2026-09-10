@@ -637,8 +637,13 @@ pub struct RunControlResult {
 /// outcome as success instead of a conflict that would contradict the
 /// durable truth. A run that settled `completed`/`failed` (or is still
 /// live) keeps the conflict: the cancel genuinely did not happen.
-fn cancel_fence_loss_accomplished(status: &SessionStatus) -> bool {
-    matches!(status, SessionStatus::Cancelled | SessionStatus::Interrupted)
+fn cancel_fence_loss_accomplished(status: &SessionStatus, cancel_requested: bool) -> bool {
+    // `Cancelled` is the confirmed A5 outcome. `Interrupted` only counts when
+    // the durable state carries the cancel intent: an `interrupted` produced
+    // by a failed state transition (no `cancel_requested`) is NOT proof that
+    // this cancel succeeded, so it must stay a conflict (Greptile P1).
+    matches!(status, SessionStatus::Cancelled)
+        || (matches!(status, SessionStatus::Interrupted) && cancel_requested)
 }
 
 /// One cancellation/join owner per (Creator DB identity, session) (A3).
@@ -2252,7 +2257,7 @@ impl WorkflowRunCoordinator {
                         // concurrent winner — project the persisted outcome
                         // as success, never a conflict.
                         if matches!(signal, RunSignal::Cancel)
-                            && cancel_fence_loss_accomplished(&record.status)
+                            && cancel_fence_loss_accomplished(&record.status, cancel_requested)
                         {
                             Ok(())
                         } else if record.status == SessionStatus::WaitingForInput
@@ -2547,8 +2552,19 @@ mod tests {
     /// genuinely did not happen.
     #[test]
     fn cancel_fence_loss_accomplished_only_for_cancel_outcomes() {
-        assert!(cancel_fence_loss_accomplished(&SessionStatus::Cancelled));
-        assert!(cancel_fence_loss_accomplished(&SessionStatus::Interrupted));
+        assert!(cancel_fence_loss_accomplished(
+            &SessionStatus::Cancelled,
+            false
+        ));
+        // Interrupted only counts with the durable cancel intent (Greptile P1).
+        assert!(cancel_fence_loss_accomplished(
+            &SessionStatus::Interrupted,
+            true
+        ));
+        assert!(!cancel_fence_loss_accomplished(
+            &SessionStatus::Interrupted,
+            false
+        ));
         for status in [
             SessionStatus::Running,
             SessionStatus::Paused,
@@ -2557,7 +2573,7 @@ mod tests {
             SessionStatus::Failed,
         ] {
             assert!(
-                !cancel_fence_loss_accomplished(&status),
+                !cancel_fence_loss_accomplished(&status, true),
                 "{status:?} must keep the conflict"
             );
         }
