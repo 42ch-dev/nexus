@@ -172,6 +172,7 @@ async fn drive(d: &LiveDaemon, sid: &SessionId, resume_waiting: bool) -> PresetR
         &config,
         None,
         None,
+        None,
     )
     .await
 }
@@ -380,7 +381,7 @@ async fn hanging_upstream_without_on_timeout_fails_typed_not_waiting_forever() {
     let second = drive(&d, &sid, true).await;
 
     let error = match second {
-        PresetRunOutcome::Failed { steps, error } => {
+        PresetRunOutcome::Failed { steps, error, settlement: _ } => {
             assert_eq!(steps, 1, "the deadline-firing tick is one step");
             error
         }

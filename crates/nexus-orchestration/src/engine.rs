@@ -252,6 +252,82 @@ impl Default for Context {
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// Failed-step ownership witness
+// ---------------------------------------------------------------------------
+
+/// Anchor captured by [`EngineSharedState::run_step_internal`] for a failed
+/// step attempt. Durable failure writes must CAS against
+/// [`owned_revision`](Self::owned_revision) and the pre-step checkpoint —
+/// never a post-error reload of the latest revision.
+#[derive(Debug, Clone)]
+pub struct FailedStepWitness {
+    /// Revision owned by this step attempt after `mark_step_in_flight`
+    /// (or the pre-step revision when no in-flight marker was written).
+    pub owned_revision: u64,
+    /// Durable status observed before the step began.
+    pub pre_step_status: SessionStatus,
+    /// Pre-step root checkpoint — the position/context before `runner.run`.
+    pub pre_step_root: graph_flow::Session,
+}
+
+/// Structured outcome of an authoritative failure persistence attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailurePersistenceDisposition {
+    /// Authoritative `RunFailure` committed at the witnessed revision.
+    Committed,
+    /// A concurrent writer already holds a terminal row legitimately.
+    ExternalTerminalWinner,
+    /// The witnessed revision no longer matches — the drive lost ownership.
+    OwnershipLost,
+    /// Persistence could not commit; the owner must be fenced.
+    PersistenceFailed,
+    /// No valid ownership anchor was available (fail-closed).
+    NoAuthority,
+}
+
+impl FailurePersistenceDisposition {
+    /// Whether the drive may proceed with terminal cleanup (`Cancel`).
+    #[must_use]
+    pub const fn permits_terminal_cleanup(self) -> bool {
+        matches!(self, Self::Committed)
+    }
+
+    /// Whether the coordinator should fence re-entry.
+    #[must_use]
+    pub const fn requires_owner_fence(self) -> bool {
+        matches!(self, Self::PersistenceFailed | Self::NoAuthority)
+    }
+}
+
+/// Settlement context carried from the drive loop to the coordinator owner.
+#[derive(Debug, Clone)]
+pub struct FailureSettlement {
+    pub witness: Option<FailedStepWitness>,
+    pub authoritative: FailurePersistenceDisposition,
+    pub context: FailurePersistenceDisposition,
+}
+
+/// Serializable settlement summary for drive outcomes (no `Session` clone).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FailureSettlementSummary {
+    pub owned_revision: Option<u64>,
+    pub authoritative: FailurePersistenceDisposition,
+    pub context: FailurePersistenceDisposition,
+}
+
+impl FailureSettlementSummary {
+    #[must_use]
+    pub fn from_settlement(settlement: &FailureSettlement) -> Self {
+        Self {
+            owned_revision: settlement.witness.as_ref().map(|w| w.owned_revision),
+            authoritative: settlement.authoritative,
+            context: settlement.context,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
@@ -312,6 +388,38 @@ pub enum EngineError {
         /// Current durable wait id (null when the run is not waiting).
         current_wait_id: Option<String>,
     },
+    /// A step failed after the engine captured an ownership witness. The
+    /// witness must be propagated to failure persistence — never discarded.
+    #[error("step failed for session {session_id}: {source}")]
+    StepFailed {
+        /// Session id.
+        session_id: String,
+        /// Underlying failure.
+        source: Box<EngineError>,
+        /// Pre-attempt ownership anchor.
+        witness: FailedStepWitness,
+    },
+}
+
+impl EngineError {
+    /// Return the failed-step witness when this error carries one.
+    #[must_use]
+    pub fn step_witness(&self) -> Option<&FailedStepWitness> {
+        match self {
+            Self::StepFailed { witness, .. } => Some(witness),
+            _ => None,
+        }
+    }
+
+    /// Wrap `source` with a failed-step ownership witness.
+    #[must_use]
+    pub fn step_failed(session_id: &str, source: EngineError, witness: FailedStepWitness) -> Self {
+        Self::StepFailed {
+            session_id: session_id.to_string(),
+            source: Box::new(source),
+            witness,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1398,13 +1506,21 @@ impl EngineSharedState {
 
         // Capture the current revision before the step so the transition CAS
         // is anchored to the pre-step state (A2).
-        let expected_revision = if let Some(store) = &self.workflow_store {
-            store
-                .load_run(session_id)
-                .await?
-                .map_or(0, |r| r.state_revision)
+        let (expected_revision, pre_step_status) = if let Some(store) = &self.workflow_store {
+            match store.load_run(session_id).await? {
+                Some(r) => (r.state_revision, r.status),
+                None => (0, SessionStatus::Running),
+            }
         } else {
-            0
+            let status = self
+                .sessions
+                .read()
+                .await
+                .iter()
+                .find(|s| s.session_id == *session_id)
+                .map(|s| s.status.clone())
+                .unwrap_or(SessionStatus::Running);
+            (0, status)
         };
         let mut transition_revision = expected_revision;
 
@@ -1455,7 +1571,28 @@ impl EngineSharedState {
         }
 
         // Execute one step using the Arc<FlowRunner>.
-        let result = runner.run(&session_id.0).await?;
+        let result = match runner.run(&session_id.0).await {
+            Ok(result) => result,
+            Err(e) => {
+                let witness = FailedStepWitness {
+                    owned_revision: transition_revision,
+                    pre_step_status,
+                    pre_step_root: pre_step_root
+                        .clone()
+                        .unwrap_or_else(|| {
+                            graph_flow::Session::new_from_task(
+                                session_id.0.clone(),
+                                "",
+                            )
+                        }),
+                };
+                return Err(EngineError::step_failed(
+                    &session_id.0,
+                    EngineError::GraphFlow(e),
+                    witness,
+                ));
+            }
+        };
 
         // Map graph-flow ExecutionStatus → SessionStatus. A `WaitingForInput`
         // outcome is EITHER a scheduler converge/merge gate park (live join

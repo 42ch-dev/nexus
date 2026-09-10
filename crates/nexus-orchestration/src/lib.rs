@@ -39,7 +39,8 @@ pub use capability::{
     ToolPolicy,
 };
 pub use engine::{
-    ChildSessionParams, EngineError, GraphFlowEngine, OrchestrationEngine, SessionId,
+    ChildSessionParams, EngineError, FailedStepWitness, FailurePersistenceDisposition,
+    FailureSettlement, FailureSettlementSummary, GraphFlowEngine, OrchestrationEngine, SessionId,
 };
 pub use preset::resolve_preset;
 pub use run_state::{
