@@ -1928,12 +1928,21 @@ pub async fn delete_schedule(
             })?;
 
             if let Some((Some(sid),)) = session_row {
-                // Cancel the active session by updating its status
+                // Cancel the active session by updating its status.
+                // graph-flow 0.8: the cancellation is an authoritative
+                // control write, so it must invalidate any in-flight graph
+                // snapshot in the same statement — advance graph_version
+                // (checked: refuse overflow instead of wrapping) while the
+                // status guard keeps the write single-winner.
                 let now = chrono::Utc::now().timestamp();
                 // SAFETY: runtime `sqlx::query` — DML for session cancellation.
-                sqlx::query(
-                    "UPDATE orchestration_sessions SET status = 'cancelled', updated_at = ?
-                         WHERE session_id = ? AND status = 'running'",
+                let result = sqlx::query(
+                    "UPDATE orchestration_sessions
+                         SET status = 'cancelled', updated_at = ?,
+                             graph_version = graph_version + 1
+                         WHERE session_id = ? AND status = 'running'
+                           AND graph_version >= 0
+                           AND graph_version < 9223372036854775807",
                 )
                 .bind(now)
                 .bind(&sid)
@@ -1943,6 +1952,31 @@ pub async fn delete_schedule(
                     code: "SESSION_CANCEL_ERROR".into(),
                     message: format!("failed to cancel session: {e}"),
                 })?;
+                // If the row was running but the version guard rejected the
+                // write (negative/exhausted counter), surface a hard error
+                // instead of leaving a cancelable row with a stale clock.
+                if result.rows_affected() == 0 {
+                    let still_running: Option<(String,)> = sqlx::query_as(
+                        "SELECT status FROM orchestration_sessions
+                             WHERE session_id = ? AND status = 'running'",
+                    )
+                    .bind(&sid)
+                    .fetch_optional(&*pool)
+                    .await
+                    .map_err(|e| NexusApiError::Internal {
+                        code: "DATABASE_ERROR".into(),
+                        message: format!("database error: {e}"),
+                    })?;
+                    if still_running.is_some() {
+                        return Err(NexusApiError::Internal {
+                            code: "SESSION_CANCEL_ERROR".into(),
+                            message: format!(
+                                "failed to cancel session {sid}: durable graph_version \
+                                 counter is exhausted or corrupt"
+                            ),
+                        });
+                    }
+                }
             }
 
             // NULL out current_session_id on the schedule

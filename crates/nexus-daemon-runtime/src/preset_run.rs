@@ -47,7 +47,8 @@ use std::time::Duration;
 
 use graph_flow::SessionStorage;
 use nexus_orchestration::engine::{
-    EngineSignal, OrchestrationEngine, SessionId, SessionStatus, SessionSummary, StepOutcome,
+    EngineError, EngineSignal, OrchestrationEngine, SessionId, SessionStatus, SessionSummary,
+    StepOutcome,
 };
 use nexus_orchestration::resume_rules;
 use nexus_orchestration::run_state::WorkflowStateStore;
@@ -184,6 +185,26 @@ pub async fn drive_preset_run(
                 return PresetRunOutcome::Failed {
                     steps: steps.saturating_add(1),
                     error: msg,
+                };
+            }
+            // graph-flow 0.8 conflict disposition: a SessionConflict means a
+            // concurrent authoritative writer (control cancel, settle, or a
+            // winning drive) owns the row. This drive LOST — stop it without
+            // the blanket failure path: no Cancel signal and no failure
+            // context save against the winner's state. The durable row keeps
+            // the winner's status/revision; if this step's in-flight marker
+            // persists, A7 recovery classifies it as interrupted.
+            Err(e @ EngineError::GraphFlow(graph_flow::GraphError::SessionConflict(_))) => {
+                let error = e.to_string();
+                tracing::warn!(
+                    session_id = %session_id.0,
+                    error = %error,
+                    "preset-run driver: losing drive stopped on session conflict \
+                     (concurrent authoritative writer won)"
+                );
+                return PresetRunOutcome::Failed {
+                    steps: steps.saturating_add(1),
+                    error,
                 };
             }
             Err(e) => {
@@ -2884,11 +2905,64 @@ mod tests {
         assert!(matches!(outcome, PresetRunOutcome::Failed { .. }));
 
         let persisted = storage.get("test:session").await.unwrap().unwrap();
-        let status: String = persisted.context.get("_run_status").await.unwrap();
-        let error: String = persisted.context.get("_run_error").await.unwrap();
+        let status: String = persisted.context.get("_run_status").unwrap();
+        let error: String = persisted.context.get("_run_error").unwrap();
         assert_eq!(status, "failed");
         assert!(error.contains("converge_timeout: gate=merge"));
     }
+    /// graph-flow 0.8 conflict disposition: a `SessionConflict` from the
+    /// engine means a concurrent authoritative writer won the row. The
+    /// losing drive must stop WITHOUT the blanket failure path — no Cancel
+    /// signal, no status flip, no failure context write against the winner.
+    #[tokio::test]
+    async fn session_conflict_stops_losing_drive_without_winner_mutation() {
+        let storage: Arc<dyn SessionStorage> = Arc::new(graph_flow::InMemorySessionStorage::new());
+        let session = graph_flow::Session::new_from_task("test:session".to_string(), "join");
+        storage.save(session).await.unwrap();
+
+        let engine = ScriptedEngine::with_script(vec![Err(EngineError::GraphFlow(
+            graph_flow::GraphError::SessionConflict(
+                "save session 'test:session': graph_version mismatch".to_string(),
+            ),
+        ))]);
+        let outcome = drive_preset_run(
+            &engine,
+            Some(&storage),
+            &sid(),
+            &PresetRunConfig::default(),
+            None,
+        )
+        .await;
+        match outcome {
+            PresetRunOutcome::Failed { steps, error } => {
+                assert_eq!(steps, 1);
+                assert!(
+                    error.contains("graph_version mismatch"),
+                    "the conflict discriminator must surface verbatim: {error}"
+                );
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+        assert!(
+            engine.signals.lock().is_empty(),
+            "a losing drive must NOT send Cancel against the winner"
+        );
+        assert_eq!(
+            *engine.status.lock(),
+            SessionStatus::Running,
+            "the in-memory status must stay the winner's, not flip to Cancelled"
+        );
+        let persisted = storage.get("test:session").await.unwrap().unwrap();
+        assert!(
+            persisted.context.get::<String>("_run_status").is_none(),
+            "no failure record may be written onto the winner's context"
+        );
+        assert!(
+            persisted.context.get::<String>("_run_error").is_none(),
+            "no failure record may be written onto the winner's context"
+        );
+    }
+
 
     #[tokio::test]
     async fn max_steps_bound_is_enforced() {
@@ -2931,7 +3005,7 @@ mod tests {
     ) {
         let session = graph_flow::Session::new_from_task(id.to_string(), current_task);
         for (k, v) in keys {
-            session.context.set(*k, v.clone()).await;
+            session.context.set(*k, v.clone());
         }
         storage.save(session).await.unwrap();
     }
@@ -4015,7 +4089,12 @@ mod tests {
 
         // Start a v1 run and park it at a durable human wait.
         let graph = Arc::new(graph_flow::Graph::new("race-graph"));
-        graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+        let graph = Arc::new(
+        graph_flow::GraphBuilder::new("fence-graph")
+            .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+            .build()
+            .expect("test graph build"),
+        );
         let session_id = engine
             .start_session("novel-writing", graph)
             .await
@@ -4157,8 +4236,12 @@ mod tests {
         );
 
         // Start a v1 run and park it at a durable human wait.
-        let graph = Arc::new(graph_flow::Graph::new("fence-graph"));
-        graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+        let graph = Arc::new(
+        graph_flow::GraphBuilder::new("fence-graph")
+            .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+            .build()
+            .expect("test graph build"),
+        );
         let session_id = engine
             .start_session("novel-writing", graph)
             .await

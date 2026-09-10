@@ -227,7 +227,7 @@ async fn start_v1_run(
         .expect("session cancels write")
         .insert(run_id.clone(), tokio_util::sync::CancellationToken::new());
     let session = GraphSession::new_from_task(run_id.clone(), "start");
-    session.context.set("_session_id", run_id.clone()).await;
+    session.context.set("_session_id", run_id.clone());
 
     let mut agent_bindings = HashMap::new();
     agent_bindings.insert(
@@ -360,8 +360,8 @@ async fn all_five_consumers_observe_non_echo_agent_output() {
         .with_prompt_executor(Some(executor.clone() as Arc<dyn PromptExecutor>))
         .with_session_cancels(session_cancels.clone());
     let ctx = graph_flow::Context::new();
-    ctx.set("_session_id", run_id.clone()).await;
-    ctx.set("core_context.version", "7").await;
+    ctx.set("_session_id", run_id.clone());
+    ctx.set("core_context.version", "7");
     let result = task
         .run(ctx.clone())
         .await
@@ -370,7 +370,7 @@ async fn all_five_consumers_observe_non_echo_agent_output() {
         result.response.as_deref().unwrap_or(""),
         "transformed:graph prompt 7"
     );
-    let stored: String = ctx.get("state.n1.output").await.unwrap();
+    let stored: String = ctx.get("state.n1.output").unwrap();
     assert_eq!(stored, "transformed:graph prompt 7");
 
     // The fixture log proves real agent output flowed (non-echo).
@@ -826,7 +826,7 @@ async fn capability_route_fails_closed_when_run_token_missing() {
     // token — the registry map is left empty.
     let run_id = format!("run:{}", uuid::Uuid::new_v4());
     let session = GraphSession::new_from_task(run_id.clone(), "start");
-    session.context.set("_session_id", run_id.clone()).await;
+    session.context.set("_session_id", run_id.clone());
     let mut agent_bindings = HashMap::new();
     agent_bindings.insert(
         "default".to_string(),
@@ -1062,9 +1062,7 @@ async fn nested_inner_graph_prompt_executes_with_child_identity() {
     );
     let parent_session = GraphSession::new_from_task(parent_sid.clone(), "parent_state");
     parent_session
-        .context
-        .set("_session_id", parent_sid.clone())
-        .await;
+        .context.set("_session_id", parent_sid.clone());
     let mut agent_bindings = HashMap::new();
     agent_bindings.insert(
         "default".to_string(),
@@ -1107,18 +1105,21 @@ async fn nested_inner_graph_prompt_executes_with_child_identity() {
     // node reads the engine's shared cancellation map (production unifies
     // the boot map via `set_prompt_executor`).
     let storage_arc: Arc<dyn graph_flow::SessionStorage> = storage.clone();
-    let inner_graph = Arc::new(Graph::new("inner_graph"));
     let prompt_node = nexus_orchestration::tasks::InnerGraphNodeTask::new("n1")
         .with_template("hello from outer")
         .with_tool_policy(ToolPolicy::DenyAll)
         .with_prompt_executor(Some(executor.clone() as Arc<dyn PromptExecutor>))
         .with_session_cancels(node_cancels.clone());
-    inner_graph.add_task(Arc::new(prompt_node));
-    inner_graph.add_task(Arc::new(EndTask));
-    inner_graph.add_edge("n1", "end_task");
+    let inner_graph = Arc::new(
+    graph_flow::GraphBuilder::new("inner_graph")
+        .add_task(Arc::new(prompt_node))
+        .add_task(Arc::new(EndTask))
+        .add_edge("n1", "end_task")
+        .build()
+        .expect("test graph build"),
+    );
 
     // Parent graph whose start task is an InnerGraphTask over that graph.
-    let parent_graph = Arc::new(Graph::new("parent_graph"));
     let engine_shared = engine.shared_state();
     let engine_arc: Arc<dyn OrchestrationEngine> = Arc::new(engine);
     let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
@@ -1128,9 +1129,14 @@ async fn nested_inner_graph_prompt_executes_with_child_identity() {
         "_session_id",
         None,
     );
-    parent_graph.add_task(Arc::new(inner_task));
-    parent_graph.add_task(Arc::new(EndTask));
-    parent_graph.add_edge("parent_state", "end_task");
+    let parent_graph = Arc::new(
+    graph_flow::GraphBuilder::new("parent_graph")
+        .add_task(Arc::new(inner_task))
+        .add_task(Arc::new(EndTask))
+        .add_edge("parent_state", "end_task")
+        .build()
+        .expect("test graph build"),
+    );
 
     // Register the parent runner AFTER the graph is fully wired (the runner
     // shares the same `Arc<Graph>`, so start-task resolution sees the final
@@ -1206,12 +1212,10 @@ async fn nested_inner_graph_prompt_executes_with_child_identity() {
         .await
         .expect("child session snapshot")
         .expect("child session present");
-    let child_ctx_id: String = child_session.context.get("_session_id").await.unwrap();
+    let child_ctx_id: String = child_session.context.get("_session_id").unwrap();
     assert_eq!(child_ctx_id, child.session_id.0);
     let child_output: String = child_session
-        .context
-        .get("state.n1.output")
-        .await
+        .context.get("state.n1.output")
         .expect("child prompt output");
     assert_eq!(child_output, "transformed:hello from outer");
 

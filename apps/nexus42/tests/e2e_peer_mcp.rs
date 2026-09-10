@@ -58,7 +58,8 @@ use futures_util::future::BoxFuture;
 use nexus_daemon_runtime::api::auth_middleware::DaemonApiConfig;
 use nexus_daemon_runtime::api::create_router;
 use nexus_daemon_runtime::connect::{
-    daemon_manifest, peer_tool_table, spawn_accept_loop, ws_config, PeerResponderOptions,
+    peer_tool_table, spawn_accept_loop, ws_config, PeerConfigHolder, PeerConfigSnapshot,
+    PeerResponderOptions,
     PeerSessionManager, PeerToolsConfig, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES,
 };
 use nexus_daemon_runtime::test_utils::{self, TestTempRoot};
@@ -148,7 +149,7 @@ impl E2eDaemon {
             invoke_timeout_ms: 2000,
             max_envelope_bytes: DEFAULT_MAX_ENVELOPE_BYTES,
             tool_allowlist: operator_allowlist.clone(),
-            peer_ids: Vec::new(),
+            peer_ids: peer_allowlist,
             embedded_mcp: false,
             // DF-91: the new collision-policy fields default to first_stays +
             // empty rank (AR-68 #3 behavior preserved for every fixture).
@@ -157,13 +158,14 @@ impl E2eDaemon {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let ws_addr = listener.local_addr().unwrap();
         let sessions = Arc::new(PeerSessionManager::new());
-        let manifest = Arc::new(daemon_manifest("daemon-test", &operator_allowlist));
         let shutdown = Arc::new(Notify::new());
         let options = PeerResponderOptions {
             identity_seed: seed_host(),
-            manifest,
-            allowlist: peer_allowlist,
-            peer_keys,
+            host_id: "daemon-test".to_owned(),
+            config: PeerConfigHolder::new(PeerConfigSnapshot {
+                config: Arc::clone(&config),
+                peer_keys: Arc::new(peer_keys),
+            }),
             capability_registry: None,
         };
         let accept_task = spawn_accept_loop(

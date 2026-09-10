@@ -297,12 +297,18 @@ async fn stale_graph_save_cannot_overwrite_terminal_status() {
         .expect("commit completed");
 
     // A stale graph save (position-only) must NOT flip the row back to
-    // running or overwrite the terminal status.
+    // running or overwrite the terminal status. graph-flow 0.8 makes the
+    // refusal honest: the save errors with SessionConflict instead of a
+    // fake-success no-op.
     let stale = root_session(&session_id.0, "task_stale");
-    storage
+    let err = storage
         .save(stale)
         .await
-        .expect("stale save is best-effort, not an error");
+        .expect_err("stale save against terminal row must be refused");
+    assert!(
+        matches!(err, graph_flow::GraphError::SessionConflict(_)),
+        "expected SessionConflict, got {err:?}"
+    );
 
     let record = storage
         .load_run(&session_id)
@@ -759,7 +765,7 @@ async fn engine_start_creates_v1_run() {
         .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
         .build()
         .expect("test graph"),
-);
+    );
     let sid = engine
         .start_session("novel-writing", graph)
         .await
@@ -841,7 +847,7 @@ async fn resume_after_terminal_is_refused() {
         .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
         .build()
         .expect("test graph"),
-);
+    );
     let sid = engine
         .start_session("novel-writing", graph)
         .await
@@ -907,7 +913,7 @@ async fn engine_wait_produces_durable_wait_token() {
         .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
         .build()
         .expect("test graph"),
-);
+    );
     let sid = engine
         .start_session("novel-writing", graph)
         .await
@@ -998,7 +1004,7 @@ async fn in_flight_marker_fences_control_signals_and_stale_transition() {
         .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
         .build()
         .expect("test graph"),
-);
+    );
     let sid = engine
         .start_session("novel-writing", graph)
         .await
@@ -1210,12 +1216,18 @@ async fn stale_save_cannot_overwrite_wait_or_paused() {
             .await
             .expect("commit");
 
-        // A stale graph save must NOT flip the row back to running.
+        // A stale graph save must NOT flip the row back to running. Under
+        // graph-flow 0.8 the protection is an honest SessionConflict, not a
+        // silent no-op.
         let stale = root_session(&session_id.0, "task_stale");
-        storage
+        let err = storage
             .save(stale)
             .await
-            .expect("stale save is best-effort");
+            .expect_err("stale save against protected row must be refused");
+        assert!(
+            matches!(err, graph_flow::GraphError::SessionConflict(_)),
+            "expected SessionConflict for {status:?}, got {err:?}"
+        );
 
         let record = storage
             .load_run(&session_id)
@@ -1822,7 +1834,7 @@ async fn engine_nested_child_creates_v1_run() {
         .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
         .build()
         .expect("test graph"),
-);
+    );
     let parent_sid = engine
         .start_session("novel-writing", graph)
         .await
@@ -1836,7 +1848,7 @@ async fn engine_nested_child_creates_v1_run() {
     ))
         .build()
         .expect("test graph"),
-);
+    );
     let params = nexus_orchestration::ChildSessionParams {
         parent_session_id: parent_sid.0.clone(),
         inner_graph,
@@ -1967,7 +1979,7 @@ states:
         .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
         .build()
         .expect("test graph"),
-);
+    );
     let sid = engine
         .start_session("novel-writing", graph)
         .await
@@ -2149,7 +2161,7 @@ async fn engine_nested_child_runs_to_completion_then_parent_commits() {
         .add_task(Arc::new(EndTask))
         .build()
         .expect("test graph"),
-);
+    );
 
     // Build a parent graph whose start task is an InnerGraphTask that spawns
     // the child and polls it to completion.
@@ -2161,9 +2173,14 @@ async fn engine_nested_child_runs_to_completion_then_parent_commits() {
         "_session_id",
         None,
     );
-    parent_graph.add_task(Arc::new(inner_task));
-    parent_graph.add_task(Arc::new(EndTask));
-    parent_graph.add_edge("parent_state", "end_task");
+    let parent_graph = Arc::new(
+    graph_flow::GraphBuilder::new("parent_graph")
+        .add_task(Arc::new(inner_task))
+        .add_task(Arc::new(EndTask))
+        .add_edge("parent_state", "end_task")
+        .build()
+        .expect("test graph build"),
+    );
 
     let parent_sid = engine
         .start_session("novel-writing", parent_graph)
@@ -2242,7 +2259,7 @@ async fn tampered_child_descriptor_is_non_replayable_and_never_reattached() {
         .add_task(Arc::new(EndTask))
         .build()
         .expect("test graph"),
-);
+    );
 
     let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
     let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
@@ -2252,7 +2269,12 @@ async fn tampered_child_descriptor_is_non_replayable_and_never_reattached() {
         "_session_id",
         None,
     );
-    parent_graph.add_task(Arc::new(inner_task));
+    let parent_graph = Arc::new(
+    graph_flow::GraphBuilder::new("parent_graph")
+        .add_task(Arc::new(inner_task))
+        .build()
+        .expect("test graph build"),
+    );
     let parent_sid = engine
         .start_session("novel-writing", parent_graph)
         .await
@@ -2338,7 +2360,7 @@ async fn tampered_child_graph_name_is_non_replayable_on_recovery() {
         .add_task(Arc::new(EndTask))
         .build()
         .expect("test graph"),
-);
+    );
     let parent_graph = Arc::new(
     graph_flow::GraphBuilder::new("parent_graph")
         .add_task(Arc::new(nexus_orchestration::tasks::InnerGraphTask::new(
@@ -2350,7 +2372,7 @@ async fn tampered_child_graph_name_is_non_replayable_on_recovery() {
     )))
         .build()
         .expect("test graph"),
-);
+    );
     let parent_sid = engine
         .start_session("novel-writing", parent_graph)
         .await
@@ -2416,7 +2438,7 @@ async fn v1_child_under_parent_without_descriptor_is_non_replayable() {
         .add_task(Arc::new(EndTask))
         .build()
         .expect("test graph"),
-);
+    );
     let parent_graph = Arc::new(
     graph_flow::GraphBuilder::new("parent_graph")
         .add_task(Arc::new(nexus_orchestration::tasks::InnerGraphTask::new(
@@ -2428,7 +2450,7 @@ async fn v1_child_under_parent_without_descriptor_is_non_replayable() {
     )))
         .build()
         .expect("test graph"),
-);
+    );
     let parent_sid = engine
         .start_session("novel-writing", parent_graph)
         .await
@@ -2489,7 +2511,7 @@ async fn restart_hydrates_child_checkpoints() {
         .add_task(Arc::new(EndTask))
         .build()
         .expect("test graph"),
-);
+        );
         let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
         let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
             Arc::new(engine.clone()),
@@ -2498,7 +2520,12 @@ async fn restart_hydrates_child_checkpoints() {
             "_session_id",
             None,
         );
-        parent_graph.add_task(Arc::new(inner_task));
+        let parent_graph = Arc::new(
+        graph_flow::GraphBuilder::new("parent_graph")
+            .add_task(Arc::new(inner_task))
+            .build()
+            .expect("test graph build"),
+        );
 
         parent_sid = engine
             .start_session("novel-writing", parent_graph)
@@ -2566,11 +2593,11 @@ async fn failed_child_cas_restores_root_position() {
     let parent_graph = Arc::new(
     graph_flow::GraphBuilder::new("parent_graph")
         .add_task(Arc::new(ContinueTask))
+        .add_task(Arc::new(EndTask))
+        .add_edge("continue_task", "end_task")
         .build()
         .expect("test graph"),
-);
-    parent_graph.add_task(Arc::new(EndTask));
-    parent_graph.add_edge("continue_task", "end_task");
+    );
 
     let parent_sid = engine
         .start_session("novel-writing", parent_graph)
@@ -2677,7 +2704,7 @@ async fn child_ids_are_collision_resistant() {
         .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
         .build()
         .expect("test graph"),
-);
+    );
     let parent_sid = engine
         .start_session("novel-writing", parent_graph)
         .await
@@ -2689,7 +2716,7 @@ async fn child_ids_are_collision_resistant() {
         .add_task(Arc::new(EndTask))
         .build()
         .expect("test graph"),
-);
+    );
     let params1 = nexus_orchestration::ChildSessionParams {
         parent_session_id: parent_sid.0.clone(),
         inner_graph: inner_graph.clone(),
@@ -2728,8 +2755,7 @@ impl graph_flow::Task for EffectTask {
         "effect_task"
     }
     async fn run(&self, ctx: graph_flow::Context) -> graph_flow::Result<graph_flow::TaskResult> {
-        ctx.set(nexus_orchestration::engine::EXTERNAL_EFFECT_MARKER, true)
-            .await;
+        ctx.set(nexus_orchestration::engine::EXTERNAL_EFFECT_MARKER, true);
         Ok(graph_flow::TaskResult::new(
             None,
             graph_flow::NextAction::Continue,
@@ -2932,13 +2958,13 @@ async fn failed_cas_restore_is_revision_fenced() {
         pool: pool.clone(),
         parent_sid: "placeholder".to_string(),
     }))
+        .add_task(Arc::new(DeterministicContinueTask))
+        .add_task(Arc::new(EndTask))
+        .add_edge("concurrent_bump_task", "deterministic_continue_task")
+        .add_edge("deterministic_continue_task", "end_task")
         .build()
         .expect("test graph"),
-);
-    parent_graph.add_task(Arc::new(DeterministicContinueTask));
-    parent_graph.add_task(Arc::new(EndTask));
-    parent_graph.add_edge("concurrent_bump_task", "deterministic_continue_task");
-    parent_graph.add_edge("deterministic_continue_task", "end_task");
+    );
     let parent_sid = engine
         .start_session("novel-writing", parent_graph)
         .await
@@ -2991,18 +3017,18 @@ async fn failed_cas_restore_is_revision_fenced() {
     // revision (2) no longer matches the expected (1) — proving the restore
     // is revision-fenced (F2).
     let parent_graph2 = Arc::new(
-    graph_flow::GraphBuilder::new("parent_graph")
-        .add_task(Arc::new(ConcurrentBumpRootTask {
-        pool: pool.clone(),
-        parent_sid: parent_sid.0.clone(),
-    }))
-        .build()
-        .expect("test graph"),
-);
-    parent_graph2.add_task(Arc::new(DeterministicContinueTask));
-    parent_graph2.add_task(Arc::new(EndTask));
-    parent_graph2.add_edge("concurrent_bump_task", "deterministic_continue_task");
-    parent_graph2.add_edge("deterministic_continue_task", "end_task");
+        graph_flow::GraphBuilder::new("parent_graph")
+            .add_task(Arc::new(ConcurrentBumpRootTask {
+                pool: pool.clone(),
+                parent_sid: parent_sid.0.clone(),
+            }))
+            .add_task(Arc::new(DeterministicContinueTask))
+            .add_task(Arc::new(EndTask))
+            .add_edge("concurrent_bump_task", "deterministic_continue_task")
+            .add_edge("deterministic_continue_task", "end_task")
+            .build()
+            .expect("test graph build"),
+    );
     let shared_state = engine.shared_state();
     let stored_runner = shared_state.runners.read().await;
     let _runner = stored_runner
@@ -3076,11 +3102,11 @@ async fn post_effect_failure_persists_interrupted() {
     let parent_graph = Arc::new(
     graph_flow::GraphBuilder::new("parent_graph")
         .add_task(Arc::new(EffectTask))
+        .add_task(Arc::new(EndTask))
+        .add_edge("effect_task", "end_task")
         .build()
         .expect("test graph"),
-);
-    parent_graph.add_task(Arc::new(EndTask));
-    parent_graph.add_edge("effect_task", "end_task");
+    );
     let parent_sid = engine
         .start_session("novel-writing", parent_graph)
         .await
@@ -3185,11 +3211,11 @@ async fn deterministic_failure_restores_pre_step_position() {
     let parent_graph = Arc::new(
     graph_flow::GraphBuilder::new("parent_graph")
         .add_task(Arc::new(DeterministicContinueTask))
+        .add_task(Arc::new(EndTask))
+        .add_edge("deterministic_continue_task", "end_task")
         .build()
         .expect("test graph"),
-);
-    parent_graph.add_task(Arc::new(EndTask));
-    parent_graph.add_edge("deterministic_continue_task", "end_task");
+    );
     let parent_sid = engine
         .start_session("novel-writing", parent_graph)
         .await
@@ -3301,7 +3327,7 @@ async fn recovered_parent_drives_existing_inner_child() {
         .add_task(Arc::new(EndTask))
         .build()
         .expect("test graph"),
-);
+        );
         let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
         let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
             Arc::new(engine.clone()),
@@ -3310,7 +3336,12 @@ async fn recovered_parent_drives_existing_inner_child() {
             "_session_id",
             None,
         );
-        parent_graph.add_task(Arc::new(inner_task));
+        let parent_graph = Arc::new(
+        graph_flow::GraphBuilder::new("parent_graph")
+            .add_task(Arc::new(inner_task))
+            .build()
+            .expect("test graph build"),
+        );
 
         parent_sid = engine
             .start_session("novel-writing", parent_graph)
@@ -3324,7 +3355,7 @@ async fn recovered_parent_drives_existing_inner_child() {
         .add_task(Arc::new(EndTask))
         .build()
         .expect("test graph"),
-);
+        );
         let params = nexus_orchestration::ChildSessionParams {
             parent_session_id: parent_sid.0.clone(),
             inner_graph: ig,
@@ -3363,7 +3394,7 @@ async fn recovered_parent_drives_existing_inner_child() {
         .add_task(Arc::new(EndTask))
         .build()
         .expect("test graph"),
-);
+        );
         let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
         let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
             Arc::new(engine.clone()),
@@ -3372,7 +3403,12 @@ async fn recovered_parent_drives_existing_inner_child() {
             "_session_id",
             None,
         );
-        parent_graph.add_task(Arc::new(inner_task));
+        let parent_graph = Arc::new(
+        graph_flow::GraphBuilder::new("parent_graph")
+            .add_task(Arc::new(inner_task))
+            .build()
+            .expect("test graph build"),
+        );
         let shared_state = engine.shared_state();
         shared_state.runners.write().await.insert(
             parent_sid.0.clone(),
@@ -3476,7 +3512,7 @@ states:
         .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
         .build()
         .expect("test graph"),
-);
+        );
         parent_sid = engine
             .start_session("dir-preset", graph)
             .await
@@ -3714,7 +3750,7 @@ async fn terminal_child_is_reattached_not_respawned() {
         .add_task(Arc::new(EndTask))
         .build()
         .expect("test graph"),
-);
+        );
         let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
         let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
             Arc::new(engine.clone()),
@@ -3723,7 +3759,12 @@ async fn terminal_child_is_reattached_not_respawned() {
             "_session_id",
             None,
         );
-        parent_graph.add_task(Arc::new(inner_task));
+        let parent_graph = Arc::new(
+        graph_flow::GraphBuilder::new("parent_graph")
+            .add_task(Arc::new(inner_task))
+            .build()
+            .expect("test graph build"),
+        );
 
         parent_sid = engine
             .start_session("novel-writing", parent_graph)
@@ -3767,7 +3808,7 @@ async fn terminal_child_is_reattached_not_respawned() {
         .add_task(Arc::new(EndTask))
         .build()
         .expect("test graph"),
-);
+        );
         let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
         let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
             Arc::new(engine.clone()),
@@ -3776,7 +3817,12 @@ async fn terminal_child_is_reattached_not_respawned() {
             "_session_id",
             None,
         );
-        parent_graph.add_task(Arc::new(inner_task));
+        let parent_graph = Arc::new(
+        graph_flow::GraphBuilder::new("parent_graph")
+            .add_task(Arc::new(inner_task))
+            .build()
+            .expect("test graph build"),
+        );
         let shared = engine.shared_state();
         shared.runners.write().await.insert(
             parent_sid.0.clone(),
@@ -3909,7 +3955,7 @@ async fn child_effect_propagates_to_parent_interrupted_on_failed_commit() {
         .add_task(Arc::new(EndTask))
         .build()
         .expect("test graph"),
-);
+    );
     let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
     let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
         Arc::new(engine.clone()),
@@ -3918,7 +3964,12 @@ async fn child_effect_propagates_to_parent_interrupted_on_failed_commit() {
         "_session_id",
         None,
     );
-    parent_graph.add_task(Arc::new(inner_task));
+    let parent_graph = Arc::new(
+    graph_flow::GraphBuilder::new("parent_graph")
+        .add_task(Arc::new(inner_task))
+        .build()
+        .expect("test graph build"),
+    );
     let parent_sid = engine
         .start_session("novel-writing", parent_graph)
         .await
@@ -4182,11 +4233,11 @@ async fn step_in_flight_persisted_before_effect_dispatch() {
     let parent_graph = Arc::new(
     graph_flow::GraphBuilder::new("parent_graph")
         .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+        .add_task(Arc::new(EndTask))
+        .add_edge("manual_wait_task", "end_task")
         .build()
         .expect("test graph"),
-);
-    parent_graph.add_task(Arc::new(EndTask));
-    parent_graph.add_edge("manual_wait_task", "end_task");
+    );
     let parent_sid = engine
         .start_session("novel-writing", parent_graph)
         .await
@@ -4246,11 +4297,11 @@ async fn crash_after_effect_with_pre_step_mark_lands_interrupted() {
     let parent_graph = Arc::new(
     graph_flow::GraphBuilder::new("parent_graph")
         .add_task(Arc::new(EffectTask))
+        .add_task(Arc::new(EndTask))
+        .add_edge("effect_task", "end_task")
         .build()
         .expect("test graph"),
-);
-    parent_graph.add_task(Arc::new(EndTask));
-    parent_graph.add_edge("effect_task", "end_task");
+    );
     let parent_sid = engine
         .start_session("novel-writing", parent_graph)
         .await
@@ -4330,13 +4381,13 @@ async fn external_effect_marker_cleared_per_step() {
     let parent_graph = Arc::new(
     graph_flow::GraphBuilder::new("parent_graph")
         .add_task(Arc::new(EffectTask))
+        .add_task(Arc::new(DeterministicContinueTask))
+        .add_task(Arc::new(EndTask))
+        .add_edge("effect_task", "deterministic_continue_task")
+        .add_edge("deterministic_continue_task", "end_task")
         .build()
         .expect("test graph"),
-);
-    parent_graph.add_task(Arc::new(DeterministicContinueTask));
-    parent_graph.add_task(Arc::new(EndTask));
-    parent_graph.add_edge("effect_task", "deterministic_continue_task");
-    parent_graph.add_edge("deterministic_continue_task", "end_task");
+    );
     let parent_sid = engine
         .start_session("novel-writing", parent_graph)
         .await
@@ -4366,9 +4417,7 @@ async fn external_effect_marker_cleared_per_step() {
         .expect("get post-step root")
         .expect("root present");
     let marker: Option<bool> = post
-        .context
-        .get(nexus_orchestration::engine::EXTERNAL_EFFECT_MARKER)
-        .await;
+        .context.get(nexus_orchestration::engine::EXTERNAL_EFFECT_MARKER);
     assert_eq!(
         marker, None,
         "the external-effect marker must be cleared after a successful Paused step commit (Minor 2)"
@@ -4471,8 +4520,7 @@ impl graph_flow::Task for MarkerEffectTask {
     async fn run(&self, ctx: graph_flow::Context) -> graph_flow::Result<graph_flow::TaskResult> {
         // Set both the engine effect marker AND a test-only dispatch marker so
         // the test can observe whether the task actually ran.
-        ctx.set(nexus_orchestration::engine::EXTERNAL_EFFECT_MARKER, true)
-            .await;
+        ctx.set(nexus_orchestration::engine::EXTERNAL_EFFECT_MARKER, true);
         let _ = ctx.set("dispatched", true);
         Ok(graph_flow::TaskResult::new(
             None,
@@ -4829,11 +4877,11 @@ async fn engine_effectful_task_does_not_dispatch_before_in_flight_mark() {
     let parent_graph = Arc::new(
     graph_flow::GraphBuilder::new("parent_graph")
         .add_task(Arc::new(MarkerEffectTask))
+        .add_task(Arc::new(EndTask))
+        .add_edge("marker_effect_task", "end_task")
         .build()
         .expect("test graph"),
-);
-    parent_graph.add_task(Arc::new(EndTask));
-    parent_graph.add_edge("marker_effect_task", "end_task");
+    );
     let parent_sid = engine
         .start_session("novel-writing", parent_graph)
         .await
@@ -4899,9 +4947,7 @@ async fn engine_effectful_task_does_not_dispatch_before_in_flight_mark() {
         "the effectful task must NOT dispatch before the in-flight mark persists"
     );
     let effect: Option<bool> = post
-        .context
-        .get(nexus_orchestration::engine::EXTERNAL_EFFECT_MARKER)
-        .await;
+        .context.get(nexus_orchestration::engine::EXTERNAL_EFFECT_MARKER);
     assert_eq!(
         effect, None,
         "no external-effect marker — no effect task ran before the mark gate"
@@ -5016,9 +5062,7 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
         .expect("session present");
     session.current_task_id = "join".to_string();
     session
-        .context
-        .set("_converge_arrivals_join", vec!["branch_a".to_string()])
-        .await;
+        .context.set("_converge_arrivals_join", vec!["branch_a".to_string()]);
     storage.save(session).await.expect("save parked position");
 
     // One real engine step at the parked join → graph-flow `WaitForInput`;
@@ -5136,7 +5180,7 @@ async fn engine_manual_wait_persists_waiting_for_input_fresh_retained_token() {
         .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
         .build()
         .expect("test graph"),
-);
+    );
     let sid = engine
         .start_session("novel-writing", graph)
         .await
@@ -5352,12 +5396,12 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
     );
 
     let graph = Arc::new(
-    graph_flow::GraphBuilder::new("test-labeled-manual")
-        .add_task(Arc::new(start))
-        .build()
-        .expect("test graph"),
-);
-    graph.add_task(Arc::new(manual));
+        graph_flow::GraphBuilder::new("test-labeled-manual")
+            .add_task(Arc::new(start))
+            .add_task(Arc::new(manual))
+            .build()
+            .expect("test graph build"),
+    );
     let sid = engine
         .start_session("novel-writing", graph)
         .await
@@ -5372,11 +5416,9 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
             .expect("get session")
             .expect("present");
         session
-            .context
-            .set("_merge_other", serde_json::json!(["x"]));
+            .context.set("_merge_other", serde_json::json!(["x"]));
         session
-            .context
-            .set("_join_wait_start_other", serde_json::json!(1));
+            .context.set("_join_wait_start_other", serde_json::json!(1));
         storage.save(session).await.expect("save seeded session");
     }
 
@@ -5562,11 +5604,9 @@ states:
             .expect("present");
         session.context.set("score", serde_json::json!(95));
         session
-            .context
-            .set("_merge_other", serde_json::json!(["x"]));
+            .context.set("_merge_other", serde_json::json!(["x"]));
         session
-            .context
-            .set("_join_wait_start_other", serde_json::json!(1));
+            .context.set("_join_wait_start_other", serde_json::json!(1));
         storage.save(session).await.expect("save seeded session");
     }
 
@@ -5696,10 +5736,9 @@ async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume(
         .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
         .build()
         .expect("test graph"),
-);
+    );
 
     // Parent graph: the inner-graph task polls the child.
-    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
     let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
         Arc::new(engine.clone()),
         inner_graph,
@@ -5707,7 +5746,12 @@ async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume(
         "_session_id",
         None,
     );
-    parent_graph.add_task(Arc::new(inner_task));
+    let parent_graph = Arc::new(
+    graph_flow::GraphBuilder::new("parent_graph")
+        .add_task(Arc::new(inner_task))
+        .build()
+        .expect("test graph build"),
+    );
 
     let parent_sid = engine
         .start_session("novel-writing", parent_graph)

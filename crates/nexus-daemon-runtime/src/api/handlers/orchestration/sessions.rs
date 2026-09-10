@@ -557,9 +557,12 @@ mod tests {
     /// Build a minimal graph with a single manual-wait task (sessions stay
     /// non-terminal without executing any step).
     fn manual_wait_graph(name: &str) -> Arc<graph_flow::Graph> {
-        let graph = Arc::new(graph_flow::Graph::new(name));
-        graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
-        graph
+        Arc::new(
+            graph_flow::GraphBuilder::new(name)
+                .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+                .build()
+                .expect("manual-wait test graph"),
+        )
     }
 
     /// AD-P0-2b (V1.120 P2 / F3): daemon auto-started `_system.*` boot sessions

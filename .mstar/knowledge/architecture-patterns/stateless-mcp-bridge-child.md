@@ -56,7 +56,7 @@ stdio child**, and the child is a thin, stateless proxy.
   could spawn `nexus42 mcp serve` could already call the daemon's loopback
   HTTP directly; all policy stays daemon-side.
 
-### 2. rmcp 1.8.0 realities (source-verified, three corrections shipped)
+### 2. rmcp 3.2.0 realities (source-verified; the 1.8.0 corrections still stand)
 
 - **Runtime-dynamic handler.** `ServerHandler`'s `list_tools`/`call_tool`
   are plain async trait methods — the handler builds the tool list at call
@@ -64,7 +64,7 @@ stdio child**, and the child is a thin, stateless proxy.
   static-only; our registry-dynamic catalog maps natively. **schemars stays
   off our surface** — `Tool.input_schema` is an `Arc<JsonObject>` constructed
   directly.
-- **Default lists are empty, not errors.** rmcp 1.8.0's default
+- **Default lists are empty, not errors.** rmcp's default
   `prompts/list` and `resources/list` return `Ok(default())` — **empty
   result lists** — and the service layer does not gate by advertised
   capabilities. The tools-only boundary is enforced by **absence**: only
@@ -72,24 +72,33 @@ stdio child**, and the child is a thin, stateless proxy.
   `prompts/get` / `resources/read` remain `METHOD_NOT_FOUND`. Machine-check
   with grep + a protocol probe
   (`prompts_and_resources_are_empty_lists_not_errors`).
-- **Two-class error mapping** (SDK-documented semantics):
+- **Two-class error mapping** (SDK-documented semantics), now through the
+  rmcp 3.2 `CallToolResponse` union: the shared bridge handler's `call_tool`
+  returns `Result<CallToolResponse, McpError>` and Nexus implements **only**
+  the `Complete(CallToolResult)` variant (`InputRequired`/`Task` are never
+  produced; no tasks/sampling/roots/elicitation are advertised):
   - *Unroutable* ⇒ JSON-RPC protocol error `Err(McpError)` —
     `METHOD_NOT_FOUND` for never-admitted/evicted/non-exposable ids (name
     the refusal class); `INTERNAL_ERROR` for daemon unreachable / auth
     rejected, **bounded** by the daemon client's connect/request timeouts —
     never a hang.
-  - *Executed-but-failed* ⇒ `Ok(CallToolResult::error(...))` with content
-    naming the spine code: structural argument failure (`invalid_input`),
-    peer deny (`op_unsupported`/`capability_missing` with the lowercase
-    `wire_code` preserved), invoke timeout, transport closed mid-invoke,
-    user-cap `run()` error. Success ⇒ text content + `structured_content` =
-    the spine result value when it is a JSON object (else text-only).
-- **Pin** `rmcp = { version = "=1.8.0", default-features = false, features =
-  ["server", "transport-io"] }` behind `connect-client`. The pin's job is
-  **single-version lockstep** with the rmcp already in the graph via
-  `nexus-acp-host → agent-client-protocol =0.11.1` — not graph introduction
-  (see `conventions/graph-pin-honesty-discipline.md`). No streamable-HTTP,
-  no child-process, no client features.
+  - *Executed-but-failed* ⇒ `Ok(Complete(CallToolResult::error(...)))` with
+    content naming the spine code: structural argument failure
+    (`invalid_input`), peer deny (`op_unsupported`/`capability_missing` with
+    the lowercase `wire_code` preserved), invoke timeout, transport closed
+    mid-invoke, user-cap `run()` error. Success ⇒ text content +
+    `structured_content` = the spine result value when it is a JSON object
+    (else text-only). Conversion happens once at the handler boundary via
+    `.map(CallToolResponse::from)`; inner mapping still produces
+    `CallToolResult`.
+- **Pin** `rmcp = { version = "=3.2.0", default-features = false, features =
+  ["server", "transport-io"] }` behind `connect-client` (CLI) and
+  `features = ["server"]` behind daemon `connect-client`; dev/test lanes use
+  `client` + `transport-async-rw`. ACP 2.1.0 core no longer carries an rmcp
+  edge, so the default graph is now rmcp-free and these pins ARE the graph
+  introduction — feature-gated, exactly one 3.2.0 per shipped graph (see
+  `conventions/graph-pin-honesty-discipline.md`). No streamable-HTTP, no
+  child-process, no auth features in the normal graph.
 - Advertisement: **tools + `tools.listChanged`** — delivered V1.175
   (DF-90 / AR-79) by the child-side watch in section 6; still no
   daemon→child push channel.

@@ -1,6 +1,6 @@
 # ACP Client Integration — Technical Specification
 
-**Status:** Shipped. Current implementation uses official `agent-client-protocol = "=0.11.1"` behind Nexus-owned DTOs; daemon-orchestrated ACP sessions are delegated to per-creator `nexus42 acp-worker` children, while the route-facing daemon `HostManager` currently registers installed native CLI providers. Sections 2–10 retain the original V1.0 design and migration record where not superseded by the current amendment below.
+**Status:** Shipped. Current implementation uses official `agent-client-protocol = "=2.1.0"` (stable-v1 API via `schema::v1::*`; no unstable v2 features, no `agent-client-protocol-rmcp`) behind Nexus-owned DTOs; daemon-orchestrated ACP sessions are delegated to per-creator `nexus42 acp-worker` children, while the route-facing daemon `HostManager` currently registers installed native CLI providers. Sections 2–10 retain the original V1.0 design and migration record where not superseded by the current amendment below.
 **Document class**: Master  
 
 **Source Plan**: `2025-04-05-acp-client`
@@ -11,7 +11,9 @@
 The shipped boundary is:
 
 - `crates/nexus-acp-host/Cargo.toml` pins
-  `agent-client-protocol = "=0.11.1"`.
+  `agent-client-protocol = "=2.1.0"`; stable-v1 messages are imported from
+  `agent_client_protocol::schema::v1` (the flat `schema` re-export was
+  removed upstream) and the adapter pins `ProtocolVersion::V1` explicitly.
 - Official SDK types are confined to `nexus-acp-host`; the public
   `NexusAcpClient` trait uses Nexus-owned DTOs and includes both one-shot and
   streaming prompt operations without treating a method count as a contract.
@@ -45,8 +47,11 @@ The shipped boundary is:
 
 ### 1.1 Current dependency and boundary
 
-The shipped ACP SDK is **`agent-client-protocol` 0.11.1**, exact-pinned in
-`crates/nexus-acp-host/Cargo.toml`. `crates/nexus-acp-host/src/client.rs`
+The shipped ACP SDK is **`agent-client-protocol` 2.1.0**, exact-pinned in
+`crates/nexus-acp-host/Cargo.toml`. ACP crate major 2 does not put the wire
+on protocol v2 — the adapter stays on stable v1 and no longer pulls `rmcp`
+transitively (the default dependency graph is rmcp-free; see
+`tooling/check-graph-pins.sh`). `crates/nexus-acp-host/src/client.rs`
 confines `agent_client_protocol::schema` types to `AcpSdkAdapter` conversion
 and implementation code; consumers use nexus contract DTOs through
 `NexusAcpClient`.
@@ -700,7 +705,7 @@ cat ~/.nexus42/registry/cache_meta.json
 - `apps/nexus42/src/acp/error.rs`
 
 **Files to modify:**
-- `apps/nexus42/Cargo.toml` — originally planned `agent-client-protocol = "=0.10.4"` dependency; current pin is `=0.11.1` in `crates/nexus-acp-host/Cargo.toml`
+- `apps/nexus42/Cargo.toml` — originally planned `agent-client-protocol = "=0.10.4"` dependency; current pin is `=2.1.0` in `crates/nexus-acp-host/Cargo.toml`
 - `apps/nexus42/src/main.rs` — add `mod acp;` and `Agent` command variant
 - `apps/nexus42/src/commands/mod.rs` — add `pub mod agent;`
 

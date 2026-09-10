@@ -64,10 +64,7 @@ impl Task for CapabilityTask {
         context: graph_flow::Context,
     ) -> Result<TaskResult, graph_flow::GraphError> {
         let name: String = context.get("_capability_name").unwrap_or_default();
-        let input: Value = context
-            .get("_capability_input")
-            
-            .unwrap_or(Value::Null);
+        let input: Value = context.get("_capability_input").unwrap_or(Value::Null);
 
         let cap = self.registry.get(&name).ok_or_else(|| {
             graph_flow::GraphError::TaskExecutionFailed(format!("capability not found: {name}"))
@@ -78,9 +75,7 @@ impl Task for CapabilityTask {
         // having performed a potentially-external effect so a failed
         // post-effect `commit_transition` can persist an interrupted
         // disposition rather than blindly rewinding (Important 3).
-        context
-            .set(crate::engine::EXTERNAL_EFFECT_MARKER, true)
-            ;
+        context.set(crate::engine::EXTERNAL_EFFECT_MARKER, true);
 
         match cap.run(input).await {
             Ok(output) => {
@@ -242,10 +237,7 @@ impl Task for InnerGraphTask {
         context.set("_child_wait_task", Value::Null);
 
         // 1. Read the parent session ID from context.
-        let parent_session_id: String = context
-            .get(&self.parent_session_id_key)
-            
-            .unwrap_or_default();
+        let parent_session_id: String = context.get(&self.parent_session_id_key).unwrap_or_default();
 
         if parent_session_id.is_empty() {
             return Err(graph_flow::GraphError::TaskExecutionFailed(
@@ -326,9 +318,7 @@ impl Task for InnerGraphTask {
         // CAS) is classified Interrupted, never deterministically restored and
         // replayed on restart (Important 2). Scoped to this parent step: the
         // engine clears the marker after a successful parent checkpoint.
-        context
-            .set(crate::engine::EXTERNAL_EFFECT_MARKER, true)
-            ;
+        context.set(crate::engine::EXTERNAL_EFFECT_MARKER, true);
 
         // A reattached child that is already terminal (its durable checkpoint
         // was persisted before the parent committed past this inner graph)
@@ -413,9 +403,7 @@ impl Task for InnerGraphTask {
                 .get_current_task_id(&SessionId(child_session.clone()))
                 .await
                 .unwrap_or(None);
-            context
-                .set("_child_wait_session", child_session.clone())
-                ;
+            context.set("_child_wait_session", child_session.clone());
             context
                 .set(
                     "_child_wait_task",
@@ -455,12 +443,10 @@ impl Task for InnerGraphTask {
         context.set(&output_key, output_value.clone());
 
         // Also store the child session ID for debugging.
-        context
-            .set(
+        context.set(
                 format!("_inner_child_session_{}", self.parent_state_id),
                 child_sid.0,
-            )
-            ;
+            );
 
         last_error.map_or_else(
             || {
@@ -714,10 +700,7 @@ impl LlmExtractTask {
         // V1.55 P2 fix-wave (F-001): read work_profile from context so the
         // extraction path produces profile-aware payloads. Defaults to "novel"
         // for backward compatibility with existing callers.
-        let work_profile: String = context
-            .get("work_profile")
-            
-            .unwrap_or_else(|| "novel".to_string());
+        let work_profile: String = context.get("work_profile").unwrap_or_else(|| "novel".to_string());
 
         // 3. Use the shared extraction path (closes R-V151Q3-W001).
         Ok(crate::quality_loop::run_llm_extract(
@@ -1349,7 +1332,7 @@ impl StateCompositeTask {
             return Ok(None);
         };
         let wait_start_key = format!("_join_wait_start_{}", self.id);
-        let wait_start: u64 = if let Some(t) = context.get(&wait_start_key) {
+        let wait_start: u64 = if let Some(t) = context.get(&wait_start_key){
             t
         } else {
             let now = self.clock.now_ms();
@@ -1436,10 +1419,7 @@ impl StateCompositeTask {
     /// latency and fallback rate on conditional-edge evaluation paths.
     async fn inject_registry_refresh_context(&self, context: &graph_flow::Context) {
         // Check if we already have registry output (avoid redundant invocation).
-        if context
-            .get::<serde_json::Value>("__registry_refresh_output")
-            
-            .is_some()
+        if context.get::<serde_json::Value>("__registry_refresh_output").is_some()
         {
             tracing::debug!("registry.refresh skipped: cached output already present in context");
             return;
@@ -1506,10 +1486,7 @@ impl StateCompositeTask {
     /// (previously this path had zero tracing).
     async fn inject_workspace_context(&self, context: &graph_flow::Context) {
         // Check if already injected (avoid clobbering).
-        if context
-            .get::<serde_json::Value>("__workspace_state")
-            
-            .is_some()
+        if context.get::<serde_json::Value>("__workspace_state").is_some()
         {
             tracing::debug!(
                 "workspace context injection skipped: __workspace_state already present"
@@ -1600,7 +1577,7 @@ fn build_context_json(context: &graph_flow::Context) -> serde_json::Value {
 
     // Include known orchestration keys.
     for key in &known_keys {
-        if let Some(val) = context.get::<serde_json::Value>(key) {
+        if let Some(val) = context.get::<serde_json::Value>(key){
             map.insert(key.to_string(), val);
         }
     }
@@ -1626,7 +1603,7 @@ fn build_context_json(context: &graph_flow::Context) -> serde_json::Value {
     }
 
     // V1.56 P3: expose registry.refresh output as a nested object.
-    if let Some(reg_output) = context.get::<serde_json::Value>("__registry_refresh_output") {
+    if let Some(reg_output) = context.get::<serde_json::Value>("__registry_refresh_output"){
         // Translate camelCase capability output fields to snake_case
         // context fields for expression grammar consistency.
         let reg_obj = registry_output_to_context(&reg_output);
@@ -1634,7 +1611,7 @@ fn build_context_json(context: &graph_flow::Context) -> serde_json::Value {
     }
 
     // V1.56 P3: expose workspace session state as a nested object.
-    if let Some(ws_state) = context.get::<serde_json::Value>("__workspace_state") {
+    if let Some(ws_state) = context.get::<serde_json::Value>("__workspace_state"){
         map.insert("workspace".to_string(), ws_state);
     }
 
@@ -1837,9 +1814,7 @@ impl Task for StateCompositeTask {
                 }
 
                 // Converge condition met — clear arrivals for next cycle.
-                context
-                    .set(&self.converge_key, serde_json::Value::Null)
-                    ;
+                context.set(&self.converge_key, serde_json::Value::Null);
                 // Success-leave: the join has passed (see merge gate above).
                 Self::set_gate_park(&context, &self.id, false);
                 tracing::info!(
@@ -1862,9 +1837,7 @@ impl Task for StateCompositeTask {
         // Guarded on `timeout_ms` so states without bounded-join fields
         // keep writing no tracking keys (byte-identical behaviour, e2e (e)).
         if self.timeout_ms.is_some() {
-            context
-                .set(&format!("_join_wait_start_{}", self.id), Value::Null)
-                ;
+            context.set(&format!("_join_wait_start_{}", self.id), Value::Null);
         }
 
         // 1. Process enter actions.
@@ -1902,10 +1875,10 @@ impl Task for StateCompositeTask {
                         obj.remove("_creator_id");
                         obj.remove("_session_id");
 
-                        if let Some(creator_id) = context.get::<String>("_creator_id") {
+                        if let Some(creator_id) = context.get::<String>("_creator_id"){
                             obj.insert("_creator_id".into(), Value::String(creator_id));
                         }
-                        if let Some(session_id) = context.get::<String>("_session_id") {
+                        if let Some(session_id) = context.get::<String>("_session_id"){
                             obj.insert("_session_id".into(), Value::String(session_id));
                         }
                     }
@@ -1943,12 +1916,10 @@ impl Task for StateCompositeTask {
                     } else {
                         // No engine set — use fallback stub behavior.
                         context.set("_inner_graph_name", name.clone());
-                        context
-                            .set(
+                        context.set(
                                 format!("_inner_graph_error_{name}"),
                                 "no engine reference available",
-                            )
-                            ;
+                            );
                     }
                 }
                 EnterAction::HostTool { tool_name, args } => {
@@ -2022,12 +1993,10 @@ impl Task for StateCompositeTask {
                         "llm_judge exit_when has no template_file; returning WaitForInput"
                     );
                     context.set("_judge_result", false);
-                    context
-                        .set(
+                    context.set(
                             "_judge_reason",
                             "llm_judge: no template_file configured".to_string(),
-                        )
-                        ;
+                        );
                     NextAction::WaitForInput
                 } else {
                     let cap_name = judge_capability.as_deref().unwrap_or("judge.llm");
@@ -2067,10 +2036,7 @@ impl Task for StateCompositeTask {
                                         // Return the previous judge result.
                                         let prev_result: bool =
                                             context.get("_judge_result").unwrap_or(false);
-                                        let prev_reason: String = context
-                                            .get("_judge_reason")
-                                            
-                                            .unwrap_or_else(|| {
+                                        let prev_reason: String = context.get("_judge_reason").unwrap_or_else(|| {
                                                 "min_interval throttle: reusing previous result"
                                                     .to_string()
                                             });
@@ -2117,9 +2083,7 @@ impl Task for StateCompositeTask {
                     // Record timestamp for min_interval throttle.
                     if min_interval.is_some() {
                         let throttle_key = format!("_judge_last_eval_{}", self.id);
-                        context
-                            .set(throttle_key, chrono::Utc::now().to_rfc3339())
-                            ;
+                        context.set(throttle_key, chrono::Utc::now().to_rfc3339());
                     }
 
                     context.set("_judge_result", result);
@@ -2351,14 +2315,9 @@ impl Task for InnerGraphNodeTask {
             // `state.<node>.output`; mirror it into the node-namespaced keys
             // so existing output_binding values keep working after the P1
             // prompt-executor cutover.
-            let text: String = context
-                .get(&format!("state.{}.output", self.id))
-                
-                .unwrap_or_default();
+            let text: String = context.get(&format!("state.{}.output", self.id)).unwrap_or_default();
             if !text.is_empty() {
-                context
-                    .set(format!("nodes.{}.output", self.id), text.clone())
-                    ;
+                context.set(format!("nodes.{}.output", self.id), text.clone());
                 context.set(format!("nodes.{}.text", self.id), text);
             }
             return Ok(result);
@@ -2561,9 +2520,7 @@ impl Task for AcpPromptTask {
             // effect — mark the step so a failed post-effect commit persists
             // an interrupted disposition rather than blindly rewinding
             // (Important 3).
-            context
-                .set(crate::engine::EXTERNAL_EFFECT_MARKER, true)
-                ;
+            context.set(crate::engine::EXTERNAL_EFFECT_MARKER, true);
 
             let result = executor
                 .execute(crate::capability::PromptRequest {
@@ -2890,9 +2847,7 @@ impl Task for HostToolCallTask {
             // A host-tool dispatch is an external effect — mark the step so a
             // failed post-effect commit persists an interrupted disposition
             // rather than blindly rewinding (Important 3).
-            context
-                .set(crate::engine::EXTERNAL_EFFECT_MARKER, true)
-                ;
+            context.set(crate::engine::EXTERNAL_EFFECT_MARKER, true);
             dispatch_ref
                 .dispatch_tool(&self.tool_name, &rendered_args, &request_id)
                 .await
@@ -2905,9 +2860,7 @@ impl Task for HostToolCallTask {
         } else if let Some(ref dispatch_arc) = self.dispatch {
             // Test-oriented path: call through Mutex-wrapped dispatch slot.
             // A host-tool dispatch is an external effect (Important 3).
-            context
-                .set(crate::engine::EXTERNAL_EFFECT_MARKER, true)
-                ;
+            context.set(crate::engine::EXTERNAL_EFFECT_MARKER, true);
             let dispatch = {
                 let guard = dispatch_arc.lock().map_err(|e| {
                     graph_flow::GraphError::TaskExecutionFailed(format!(
@@ -3085,8 +3038,11 @@ mod tests {
                 CapabilityRegistry::with_builtins(),
             )),
         );
-        let inner_graph = graph_flow::Graph::new("test_inner");
-        inner_graph.add_task(std::sync::Arc::new(InnerGraphNodeTask::new("n1")));
+        let inner_graph =
+        graph_flow::GraphBuilder::new("test_inner")
+            .add_task(std::sync::Arc::new(InnerGraphNodeTask::new("n1")))
+            .build()
+            .expect("test graph build");
 
         let task = InnerGraphTask::new(
             Arc::new(engine),
@@ -3314,8 +3270,7 @@ mod tests {
         ctx.set(
             "chapter_prose".to_string(),
             "Lin Xia drew her blade.".to_string(),
-        )
-        .await;
+        );
 
         let outcome = task.evaluate(&ctx).await.unwrap();
         let candidates = match outcome {
@@ -3442,10 +3397,8 @@ mod tests {
         ctx.set(
             "chapter_prose".to_string(),
             "The Ironfang Legion marched through the gates at dawn.".to_string(),
-        )
-        .await;
-        ctx.set("work_profile".to_string(), "game_bible".to_string())
-            .await;
+        );
+        ctx.set("work_profile".to_string(), "game_bible".to_string());
 
         let outcome = task.evaluate(&ctx).await.unwrap();
         let candidates = match outcome {
@@ -4401,8 +4354,7 @@ mod tests {
         ctx.set(
             "state.synthesizing.output",
             serde_json::to_string(&brief).unwrap(),
-        )
-        .await;
+        );
 
         let result = task.run(ctx.clone()).await.unwrap();
         assert!(
@@ -4694,8 +4646,7 @@ mod tests {
         );
 
         // With 1 arrival → should still wait (wait-all needs all 2).
-        ctx.set("_merge_merged", serde_json::json!(["label_a"]))
-            .await;
+        ctx.set("_merge_merged", serde_json::json!(["label_a"]));
         let result = task.run(ctx.clone()).await.unwrap();
         assert!(
             matches!(result.next_action, NextAction::WaitForInput),
@@ -4704,8 +4655,7 @@ mod tests {
         );
 
         // With 2 arrivals → should continue.
-        ctx.set("_merge_merged", serde_json::json!(["label_a", "label_b"]))
-            .await;
+        ctx.set("_merge_merged", serde_json::json!(["label_a", "label_b"]));
         let result = task.run(ctx.clone()).await.unwrap();
         assert!(
             matches!(result.next_action, NextAction::Continue),
@@ -4803,8 +4753,7 @@ mod tests {
                 "fetchTimeoutMs": 10000,
                 "maxRetries": 3,
             }),
-        )
-        .await;
+        );
 
         let result = task.run(ctx).await.unwrap();
 
@@ -4841,8 +4790,7 @@ mod tests {
                 "fetchTimeoutMs": 10000,
                 "maxRetries": 3,
             }),
-        )
-        .await;
+        );
 
         let result = task.run(ctx).await.unwrap();
 
@@ -4879,8 +4827,7 @@ mod tests {
                 "fetchTimeoutMs": 0,
                 "maxRetries": 0,
             }),
-        )
-        .await;
+        );
 
         let result = task.run(ctx).await.unwrap();
 
@@ -4917,8 +4864,7 @@ mod tests {
                 "fetchTimeoutMs": 0,
                 "maxRetries": 0,
             }),
-        )
-        .await;
+        );
 
         let result = task.run(ctx).await.unwrap();
 
@@ -4953,8 +4899,7 @@ mod tests {
                 "changes_applied": 0,
                 "workspace_root": "/tmp/ws"
             }),
-        )
-        .await;
+        );
 
         let result = task.run(ctx).await.unwrap();
 
@@ -4986,8 +4931,7 @@ mod tests {
                 "changes_applied": 0,
                 "workspace_root": "/tmp/ws"
             }),
-        )
-        .await;
+        );
 
         let result = task.run(ctx).await.unwrap();
 
@@ -5019,8 +4963,7 @@ mod tests {
                 "changes_applied": 5,
                 "workspace_root": "/tmp/ws"
             }),
-        )
-        .await;
+        );
 
         let result = task.run(ctx).await.unwrap();
 
@@ -5052,8 +4995,7 @@ mod tests {
                 "changes_applied": 2,
                 "workspace_root": "/tmp/ws"
             }),
-        )
-        .await;
+        );
 
         let result = task.run(ctx).await.unwrap();
 

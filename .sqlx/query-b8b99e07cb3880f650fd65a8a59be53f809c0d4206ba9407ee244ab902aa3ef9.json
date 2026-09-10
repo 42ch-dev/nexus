@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO narrative_worlds (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json, created_at) VALUES ('wld_fork_foreign', 'ws', 'other_creator', 'Foreign', 'foreign', 'active', 'private', 'manual', '{}', datetime('now'))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "b8b99e07cb3880f650fd65a8a59be53f809c0d4206ba9407ee244ab902aa3ef9"
+}

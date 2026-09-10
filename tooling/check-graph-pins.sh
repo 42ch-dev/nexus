@@ -10,16 +10,24 @@
 #     spoke-connect   ABSENT
 #     libp2p          ABSENT
 #     spoke-operations exactly one 0.11.1   (via nexus-spoke-adapter, prior art)
-#     rmcp            ABSENT                (optional; ACP 2.1 core no longer pulls it)
+#     rmcp            ABSENT   (ACP 2.1 core no longer pulls rmcp; the optional
+#                               server/transport-io edge stays feature-gated)
+#     agent-client-protocol exactly one 2.1.0  (via nexus-acp-host normal edge)
+#     graph-flow      exactly one 0.8.0, EMPTY feature set (no postgres/rig)
 #   -F connect-client (both crates):
 #     spoke-connect   exactly one 0.11.x
 #     libp2p          exactly one 0.56.x    (spoke-connect base dep)
 #     spoke-operations exactly one 0.11.1
 #     rmcp            exactly one 3.2.0
+#     agent-client-protocol exactly one 2.1.0
+#   -F embedded-mcp (both crates):
+#     rmcp            exactly one 3.2.0
+#     agent-client-protocol exactly one 2.1.0
 #   -F connect-client,connect-host (nexus42 only; nexus-daemon-runtime has no
 #     connect-host feature):
 #     libp2p          exactly one 0.56.x
 #     rmcp            exactly one 3.2.0
+#     agent-client-protocol exactly one 2.1.0
 #
 # DEV-DEP CAVEAT (AR-74): `cargo tree -p <crate>` includes dev-dependencies
 # by default. `--edges normal` drops them — the pins below therefore verify
@@ -120,6 +128,14 @@ for crate in nexus-daemon-runtime nexus42; do
   assert_empty "$crate" "" libp2p
   assert_exactly_one "$crate" "" spoke-operations "0.11.1"
   assert_empty "$crate" "" rmcp
+  # ACP 2.1.0 rides the unconditional nexus-acp-host normal edge in BOTH
+  # shipped graphs (daemon -> nexus-acp-host / nexus-agent-host). Exactly one
+  # stable-v1 core; the brief's daemon "absent" cell was verified false via
+  # `cargo tree -i agent-client-protocol` and corrected to the truthful pin.
+  assert_exactly_one "$crate" "" agent-client-protocol "2.1.0"
+  # graph-flow 0.8.0 exactly once, with NO default features (no `postgres`,
+  # no `rig`): feature evidence is asserted below via -f "{f}".
+  assert_exactly_one "$crate" "" graph-flow "0.8.0"
 done
 
 # --- connect-client ------------------------------------------------------------
@@ -128,10 +144,36 @@ for crate in nexus-daemon-runtime nexus42; do
   assert_exactly_one "$crate" "--features connect-client" libp2p "0.56.*"
   assert_exactly_one "$crate" "--features connect-client" spoke-operations "0.11.1"
   assert_exactly_one "$crate" "--features connect-client" rmcp "3.2.0"
+  assert_exactly_one "$crate" "--features connect-client" agent-client-protocol "2.1.0"
+done
+
+# --- embedded-mcp --------------------------------------------------------------
+for crate in nexus-daemon-runtime nexus42; do
+  assert_exactly_one "$crate" "--features embedded-mcp" rmcp "3.2.0"
+  assert_exactly_one "$crate" "--features embedded-mcp" agent-client-protocol "2.1.0"
 done
 
 # --- connect-client + connect-host (nexus42 only) ------------------------------
 assert_exactly_one nexus42 "--features connect-client,connect-host" libp2p "0.56.*"
 assert_exactly_one nexus42 "--features connect-client,connect-host" rmcp "3.2.0"
+assert_exactly_one nexus42 "--features connect-client,connect-host" agent-client-protocol "2.1.0"
+
+# --- graph-flow feature evidence (no postgres / no rig) ------------------------
+# `-f "{p} feats=[{f}]"` prints the resolved feature set on the inverted
+# probe row; graph-flow MUST resolve with an empty feature set everywhere
+# (default-features=false on every declaration). A silently re-enabled
+# upstream default (e.g. `postgres`) shows up here as a non-empty list.
+for crate in nexus-orchestration nexus-daemon-runtime nexus42; do
+  gf_out=$(cargo tree -p "$crate" --edges normal -i graph-flow -f "{p} feats=[{f}]" 2>&1) || gf_status=$?
+  gf_status=${gf_status:-0}
+  if [[ "$gf_status" -ne 0 ]]; then
+    fail "cargo tree graph-flow feature probe for $crate failed (exit $gf_status): $gf_out"
+  fi
+  if ! grep -q "^graph-flow v0.8.0 feats=\[\]" <<<"$gf_out"; then
+    fail "graph-flow for $crate must resolve 0.8.0 with EMPTY features (no postgres/rig): $gf_out"
+  fi
+  echo "ok: graph-flow 0.8.0 featureless for $crate"
+  unset gf_status
+done
 
 echo "graph pins OK"

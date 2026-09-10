@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) VALUES ('other_creator', 'Other', 'active', datetime('now'), '{}')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "014ecbb52bfd5ee1d7c7951b3fe44aba3b78e201dc622a83b4031b70f32171ef"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO narrative_worlds\n               (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json)\n               VALUES ('wld_other', 'wrk_test', 'ctr_test', 'Other World', 'other-world', 'active', 'private', 'manual', '{}')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "f1940f4da1b41c323be2808ba193b2f8bf45d445a22f62bca31b834d30c22d84"
+}

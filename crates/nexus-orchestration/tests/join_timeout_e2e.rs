@@ -118,8 +118,7 @@ async fn converge_timeout_reroutes_to_on_timeout_and_clears_arrivals() {
         result.next_action
     );
     assert!(
-        ctx.get_sync::<Vec<String>>("_converge_arrivals_join_a")
-            .is_some(),
+        ctx.get::<Vec<String>>("_converge_arrivals_join_a").is_some(),
         "arrival must survive while inside the deadline"
     );
 
@@ -133,13 +132,10 @@ async fn converge_timeout_reroutes_to_on_timeout_and_clears_arrivals() {
     );
     // Arrivals key cleared for the next cycle + context note written.
     assert!(
-        ctx.get_sync::<HashSet<String>>("_converge_arrivals_join_a")
-            .is_none(),
+        ctx.get::<HashSet<String>>("_converge_arrivals_join_a").is_none(),
         "arrivals key must be cleared on timeout reroute"
     );
-    let note: String = ctx
-        .get("_join_timeout_note")
-        .expect("context note written on reroute");
+    let note: String = ctx.get("_join_timeout_note").expect("context note written on reroute");
     assert!(
         note.contains("timeout_handler"),
         "note names the target: {note}"
@@ -180,12 +176,11 @@ async fn converge_timeout_without_on_timeout_fails_typed_not_wait() {
     assert!(msg.contains("elapsed_ms=101"), "names elapsed: {msg}");
     // F-004 (qc2): the typed-fail path also clears arrivals + wait-start.
     assert!(
-        ctx.get_sync::<HashSet<String>>("_converge_arrivals_join_b")
-            .is_none(),
+        ctx.get::<HashSet<String>>("_converge_arrivals_join_b").is_none(),
         "typed fail must clear the converge arrivals key"
     );
     assert!(
-        ctx.get_sync::<u64>("_join_wait_start_join_b").is_none(),
+        ctx.get::<u64>("_join_wait_start_join_b").is_none(),
         "typed fail must clear the wait-start key"
     );
 }
@@ -214,7 +209,7 @@ async fn merge_timeout_reroutes_to_on_timeout_and_clears_arrivals() {
         result.next_action
     );
     assert!(
-        ctx.get_sync::<Vec<String>>("_merge_join_c").is_none(),
+        ctx.get::<Vec<String>>("_merge_join_c").is_none(),
         "merge arrivals key must be cleared on timeout reroute"
     );
 }
@@ -251,11 +246,11 @@ async fn merge_timeout_without_on_timeout_fails_typed_with_merge_gate() {
     assert!(msg.contains("expected=2"), "names expected: {msg}");
     // F-004 (qc2): the typed-fail path also clears arrivals + wait-start.
     assert!(
-        ctx.get_sync::<Vec<String>>("_merge_join_d").is_none(),
+        ctx.get::<Vec<String>>("_merge_join_d").is_none(),
         "typed fail must clear the merge arrivals key"
     );
     assert!(
-        ctx.get_sync::<u64>("_join_wait_start_join_d").is_none(),
+        ctx.get::<u64>("_join_wait_start_join_d").is_none(),
         "typed fail must clear the wait-start key"
     );
 }
@@ -280,11 +275,11 @@ async fn join_without_timeout_fields_keeps_legacy_waiting_and_writes_no_tracking
         clock.advance(1_000_000);
     }
     assert!(
-        ctx.get_sync::<u64>("_join_wait_start_join_e").is_none(),
+        ctx.get::<u64>("_join_wait_start_join_e").is_none(),
         "no wait-start tracking key may be written when timeout_ms is absent"
     );
     assert!(
-        ctx.get_sync::<String>("_join_timeout_note").is_none(),
+        ctx.get::<String>("_join_timeout_note").is_none(),
         "no timeout note may be written when timeout_ms is absent"
     );
 }
@@ -341,7 +336,7 @@ async fn join_exit_clears_wait_start_so_same_session_reentry_gets_fresh_budget()
         result.next_action
     );
     assert!(
-        ctx.get_sync::<u64>("_join_wait_start_join_f").is_none(),
+        ctx.get::<u64>("_join_wait_start_join_f").is_none(),
         "successful join exit must clear the wait-start key"
     );
 

@@ -58,7 +58,7 @@ Users need to express creator workflows as configurable, prompt-driven strategie
 - **Daemon becomes `orchestration engine + capability registry`**: existing HTTP-era capabilities (sync, workspace ops, outbox flush, registry refresh) are **reclassified as first-class capabilities** invokable as graph nodes; HTTP API retreats to a *trigger/query surface* over the same engine.
 - **Strategy shape is hierarchical**: an outer **state machine** (long-lived, cross-session) containing inner **DAG graphs** (short, in-memory prompt/tool call chains) — *graph-of-graphs*.
 - **ACP remains external behind the Host plane**: CLI keeps interactive `acp run`; orchestration prompts use the daemon's existing `HostFacade` through an injected `PromptExecutor`. `nexus-acp-host` owns transport and process lifecycle; orchestration never owns provider handles.
-- **Runtime is `graph-flow` (outer + inner) + custom SQLite `SessionStorage`**: adapted behind a thin trait layer so the upstream `0.2.x` crate is swappable.
+- **Runtime is `graph-flow` (outer + inner, exact `=0.8.0`, default-features off) + custom SQLite `SessionStorage`**: adapted behind a thin trait layer so the upstream crate stays swappable. 0.8 made `Context` synchronous/fallible, graph topology immutable (`GraphBuilder`), and stale-save conflicts honest (`SessionConflict`); the durable checkpoint carries an explicit `graph_version`.
 - **Daemon lifecycle is `statig` HSM**: 6-state process lifecycle (`Stopped`/`Starting`/`Running`/`Degraded`/`Stopping`/`Failed`) — closes TD-9.
 - **Presets are filesystem bundles**: YAML manifest + companion Markdown prompt templates; loaded dynamically by name; decoupled from compiled Rust code.
 
@@ -175,11 +175,11 @@ Per [effort-estimation.md](https://github.com/btspoony/mstar-harness/blob/main/d
 
 ## 4. Orchestration Engine (graph-flow integration)
 
-> **Crate selection cross-reference**: `graph-flow = "=0.2.3"` pinning, `sqlx` adoption for the shared pool, and the general dependency conventions are now governed by [`crate-selection-best-practices.md`](../knowledge/crate-selection-best-practices.md) (see §1 conventions + §2.1/§2.2/§2.3 decisions). This section remains the design SSOT for *how* those crates are integrated; it defers crate-identity and versioning policy to the best-practices document.
+> **Crate selection cross-reference**: `graph-flow = "=0.8.0"` pinning (default-features disabled — no `postgres`, no `rig`), `sqlx` adoption for the shared pool, and the general dependency conventions are now governed by [`crate-selection-best-practices.md`](../knowledge/crate-selection-best-practices.md) (see §1 conventions + §2.1/§2.2/§2.3 decisions). This section remains the design SSOT for *how* those crates are integrated; it defers crate-identity and versioning policy to the best-practices document.
 
 ### 4.1 Library adoption decision
 
-Library: [`graph-flow` v0.2.3](https://github.com/a-agmon/rs-graph-llm) (aka `rs-graph-llm`).
+Library: [`graph-flow` v0.8.0](https://github.com/a-agmon/rs-graph-llm) (aka `rs-graph-llm`). Graphs are built once via `GraphBuilder` and shared as `Arc<Graph>`; `Context` operations are synchronous (`set` is fallible and propagated); `Session.version` tracks durable graph checkpoints alongside the workflow `state_revision` CAS.
 
 **Why this library** (consolidated rationale from 2026-04-17 brainstorming):
 
@@ -1029,7 +1029,7 @@ Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependen
 **Scope**
 
 - New crate `crates/nexus-orchestration/`.
-- `OrchestrationEngine` trait + `GraphFlowEngine` impl over `graph_flow = "=0.2.3"`.
+- `OrchestrationEngine` trait + `GraphFlowEngine` impl over `graph_flow = "=0.8.0"`.
 - `SqliteSessionStorage` + migration added to `nexus-local-db`.
 - `Capability` trait + registry; register the initial built-ins.
 - Establish the daemon's Host-owned prompt execution seam and durable run-state boundary.
@@ -1130,7 +1130,7 @@ If you landed on this section looking for the `schemas/` refactor scope, open th
 
 | Risk                                                                          | Likelihood | Impact | Mitigation                                                                                                           |
 | ----------------------------------------------------------------------------- | ---------- | ------ | -------------------------------------------------------------------------------------------------------------------- |
-| `graph-flow` breaking change on 0.3.x / 0.4.x before we reach V1.5             | Medium     | Medium | Adapter trait (§4.2); pin `=0.2.3`; isolated in `nexus-orchestration`; swap impl if needed                           |
+| `graph-flow` breaking change on a future 0.x before we reach V1.5              | Medium     | Medium | Adapter trait (§4.2); pin `=0.8.0`; isolated in `nexus-orchestration`; swap impl if needed                           |
 | `statig` breaking change                                                      | Low        | Low    | statig is 0.3.x; HSM description is small (~200 LOC); trivial to re-implement by hand if library diverges            |
 | Host provider lifecycle leaks into orchestration internals                     | Low        | High   | **Structural**: orchestration depends only on `PromptExecutor`; ACP transport/process handles remain behind `HostFacade` |
 | Host prompt timeout or cancellation leaves an owned process tree               | Medium     | High   | Persist owned identity; bounded Host session shutdown; birth-validated process-group terminate→kill→reap                |
@@ -1153,7 +1153,7 @@ Internal:
 
 External (stable, public):
 
-- graph-flow (rs-graph-llm): https://github.com/a-agmon/rs-graph-llm — v0.2.3
+- graph-flow (rs-graph-llm): https://github.com/a-agmon/rs-graph-llm — v0.8.0
 - statig: https://github.com/mdeloof/statig — v0.3.x (hierarchical state machines)
 - ACP Protocol: https://agentclientprotocol.com/
 - ACP Registry (public CDN): https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json

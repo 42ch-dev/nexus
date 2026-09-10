@@ -158,7 +158,7 @@ async fn agent_tool_e2e_host_tool_call_task_round_trip() {
 
     // Create a graph-flow context and set the work_id
     let context = Context::new();
-    context.set("work_id", &work_id).await;
+    context.set("work_id", &work_id);
 
     // Act: run the task
     let result = task.run(context.clone()).await;
@@ -168,7 +168,7 @@ async fn agent_tool_e2e_host_tool_call_task_round_trip() {
 
     // Check context has the result stored
     let stored: Option<serde_json::Value> =
-        context.get("host_tool.check_schedule_status.result").await;
+        context.get("host_tool.check_schedule_status.result");
     assert!(stored.is_some(), "result should be stored in context");
     let stored = stored.unwrap();
     assert_eq!(stored["work_id"].as_str(), Some(work_id.as_str()));
@@ -178,7 +178,7 @@ async fn agent_tool_e2e_host_tool_call_task_round_trip() {
     );
 
     // Check _last_host_tool_result
-    let last: Option<serde_json::Value> = context.get("_last_host_tool_result").await;
+    let last: Option<serde_json::Value> = context.get("_last_host_tool_result");
     assert!(last.is_some(), "_last_host_tool_result should be set");
 }
 
@@ -195,12 +195,12 @@ async fn agent_tool_e2e_stub_mode_without_adapter() {
     );
 
     let context = Context::new();
-    context.set("work_id", "wrk_stub").await;
+    context.set("work_id", "wrk_stub");
 
     let result = task.run(context.clone()).await;
     assert!(result.is_ok(), "stub mode should succeed");
 
-    let stored: Option<serde_json::Value> = context.get("host_tool.stub_check.result").await;
+    let stored: Option<serde_json::Value> = context.get("host_tool.stub_check.result");
     assert!(stored.is_some());
     let stored = stored.unwrap();
     assert_eq!(stored["stub"].as_bool(), Some(true));

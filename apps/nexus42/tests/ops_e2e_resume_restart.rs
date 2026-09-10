@@ -300,9 +300,7 @@ async fn restart_mid_chain_resumes_without_re_executing_completed_edges() {
     // (the persisted wall-clock wait-start is compared against the wall
     // clock on the first re-step — no re-baseline).
     let ctx = engine2.get_context(&sid).await.expect("context");
-    let note = ctx
-        .get::<String>("_join_timeout_note")
-        .await
+    let note = ctx.get::<String>("_join_timeout_note")
         .expect("reroute must write _join_timeout_note");
     let elapsed = elapsed_ms_from_note(&note);
     // The wait-start was persisted BEFORE the kill; the re-step compares it
@@ -632,9 +630,7 @@ async fn inspect_after_interrupt_is_side_effect_free_and_resume_matches_baseline
     );
 
     let ctx = engine2.get_context(&sid).await.expect("context");
-    let note = ctx
-        .get::<String>("_join_timeout_note")
-        .await
+    let note = ctx.get::<String>("_join_timeout_note")
         .expect("reroute must write _join_timeout_note");
     let elapsed = elapsed_ms_from_note(&note);
     assert!(
@@ -672,21 +668,13 @@ async fn resume_skips_typed_failed_and_non_class_sessions() {
     // `running` (save ON CONFLICT never updates it). Must NOT be re-driven.
     let typed_failed = graph_flow::Session::new_from_task("test:typed-failed".to_string(), "join");
     typed_failed
-        .context
-        .set("_converge_arrivals_join", serde_json::json!(["branch_a"]))
-        .await;
+        .context.set("_converge_arrivals_join", serde_json::json!(["branch_a"]));
     typed_failed
-        .context
-        .set("_join_wait_start_join", serde_json::json!(1000u64))
-        .await;
+        .context.set("_join_wait_start_join", serde_json::json!(1000u64));
     typed_failed
-        .context
-        .set("_run_status", "failed".to_string())
-        .await;
+        .context.set("_run_status", "failed".to_string());
     typed_failed
-        .context
-        .set("_run_error", "converge_timeout: gate=converge".to_string())
-        .await;
+        .context.set("_run_error", "converge_timeout: gate=converge".to_string());
     storage.save(typed_failed).await.unwrap();
 
     // Session B: no join-tracking keys — not of the converge/merge chain

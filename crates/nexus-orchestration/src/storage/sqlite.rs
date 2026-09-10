@@ -260,13 +260,9 @@ impl SessionStorage for SqliteSessionStorage {
 
         // Extract metadata from context (synchronous get deserializes).
         let creator_id: String = session
-            .context
-            .get("_creator_id")
-            .unwrap_or_else(|| "unknown".to_string());
+            .context.get("_creator_id").unwrap_or_else(|| "unknown".to_string());
         let preset_id: String = session
-            .context
-            .get("_preset_id")
-            .unwrap_or_else(|| "default".to_string());
+            .context.get("_preset_id").unwrap_or_else(|| "default".to_string());
         let preset_version: i64 = session.context.get("_preset_version").unwrap_or(0);
         let parent_session_id: Option<String> = session.context.get("_parent_session_id");
 
@@ -2405,10 +2401,8 @@ mod tests {
             &serde_json::to_vec(&session.context).expect("serialize seed context"),
         )
         .await;
-        storage
-            .save(session.clone())
-            .await
-            .expect("insert wait row");
+        // The seeded row IS the durable wait row; any graph save against it
+        // must conflict (0.8 honest refusal, no fake-success no-op).
         let mut session = storage
             .get("sess-wait-fence")
             .await
@@ -2436,9 +2430,7 @@ mod tests {
         );
         assert!(
             persisted
-                .context
-                .get::<bool>("_gate_park_wait_state")
-                .is_none(),
+                .context.get::<bool>("_gate_park_wait_state").is_none(),
             "the save seam must not write context onto a waiting_for_input row"
         );
     }

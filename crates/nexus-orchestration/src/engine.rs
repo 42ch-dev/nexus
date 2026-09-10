@@ -51,10 +51,7 @@ pub const CANCEL_FENCE_RETRY_BOUND: u32 = 8;
 /// Whether the post-step root context carries the [`EXTERNAL_EFFECT_MARKER`],
 /// indicating that one or more external effects executed during the step.
 async fn step_had_external_effect(root: &graph_flow::Session) -> bool {
-    root.context
-        .get::<bool>(EXTERNAL_EFFECT_MARKER)
-        
-        .unwrap_or(false)
+    root.context.get::<bool>(EXTERNAL_EFFECT_MARKER).unwrap_or(false)
 }
 
 /// Clear the [`EXTERNAL_EFFECT_MARKER`] from a root context (Minor 2): the
@@ -1773,16 +1770,12 @@ impl EngineSharedState {
         // wrong run (Important: nested graph prompts lose the child durable
         // identity).
         session_mut
-            .context
-            .set("_session_id", child_session_id.clone())
-            ;
+            .context.set("_session_id", child_session_id.clone());
         // Record the parent so `run_step_internal` can sync this child's
         // checkpoint back to the parent's children map after each step
         // (Important 1: child revisions must be synchronized).
         session_mut
-            .context
-            .set("_parent_session_id", params.parent_session_id.clone())
-            ;
+            .context.set("_parent_session_id", params.parent_session_id.clone());
 
         // When a workflow store is present, create a v1 child run that
         // inherits the trusted root descriptor (A2/A4). The child's
@@ -3261,9 +3254,7 @@ impl GraphFlowEngine {
             session.context.set("_session_id", session_id.clone());
             if !creator_id.is_empty() {
                 session
-                    .context
-                    .set("_creator_id", creator_id.to_string())
-                    ;
+                    .context.set("_creator_id", creator_id.to_string());
             }
             let checkpoint = RunCheckpoint {
                 root: &session,
@@ -3340,28 +3331,20 @@ impl GraphFlowEngine {
             let session =
                 graph_flow::Session::new_from_task(session_id.to_string(), &start_task_id);
             session
-                .context
-                .set("_session_id", session_id.to_string())
-                ;
+                .context.set("_session_id", session_id.to_string());
             if !creator_id.is_empty() {
                 session
-                    .context
-                    .set("_creator_id", creator_id.to_string())
-                    ;
+                    .context.set("_creator_id", creator_id.to_string());
             }
             // Seed the frozen admission input + core-context seed into the
             // session context BEFORE the checkpoint is persisted (A3).
             for (key, value) in &input {
                 session
-                    .context
-                    .set(format!("preset.input.{key}"), value.clone())
-                    ;
+                    .context.set(format!("preset.input.{key}"), value.clone());
             }
             if let Some(cc) = core_context {
                 session
-                    .context
-                    .set("core_context.text", cc.to_string())
-                    ;
+                    .context.set("core_context.text", cc.to_string());
             }
             let checkpoint = RunCheckpoint {
                 root: &session,
@@ -3481,28 +3464,20 @@ impl GraphFlowEngine {
         let start_task_id = graph.start_task_id().unwrap_or_default().to_string();
         let session = graph_flow::Session::new_from_task(session_id.to_string(), &start_task_id);
         session
-            .context
-            .set("_session_id", session_id.to_string())
-            ;
+            .context.set("_session_id", session_id.to_string());
         if !creator_id.is_empty() {
             session
-                .context
-                .set("_creator_id", creator_id.to_string())
-                ;
+                .context.set("_creator_id", creator_id.to_string());
         }
         // Seed the frozen admission input + core-context seed into the
         // session context BEFORE the checkpoint is persisted (A3).
         for (key, value) in &input {
             session
-                .context
-                .set(format!("preset.input.{key}"), value.clone())
-                ;
+                .context.set(format!("preset.input.{key}"), value.clone());
         }
         if let Some(cc) = core_context {
             session
-                .context
-                .set("core_context.text", cc.to_string())
-                ;
+                .context.set("core_context.text", cc.to_string());
         }
         let checkpoint = RunCheckpoint {
             root: &session,
@@ -3576,9 +3551,7 @@ impl GraphFlowEngine {
         session.context.set("_session_id", session_id.clone());
         if let Some(creator_id) = creator_id {
             session
-                .context
-                .set("_creator_id", creator_id.to_string())
-                ;
+                .context.set("_creator_id", creator_id.to_string());
         }
 
         // Critical 2: when a workflow store is present, a normal start creates
@@ -3721,9 +3694,7 @@ impl OrchestrationEngine for GraphFlowEngine {
         let session = graph_flow::Session::new_from_task(session_id.clone(), "");
         session.context.set("_session_id", session_id.clone());
         session
-            .context
-            .set("_creator_id", key.creator_id.clone())
-            ;
+            .context.set("_creator_id", key.creator_id.clone());
         if let Some(store) = &self.state.workflow_store {
             let (source, preset_version) = self.resolve_source_identity(&key.preset_id)?;
             let descriptor = RunDescriptorV1 {
@@ -4286,9 +4257,7 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
                 .expect("root exists at continue-v-cancel gate");
             winner_root.current_task_id = "winner-task".to_string();
             winner_root
-                .context
-                .set("winner.marker", "continue-won")
-                .await;
+                .context.set("winner.marker", "continue-won");
             self.inner
                 .commit_transition(
                     session_id,
@@ -4513,9 +4482,7 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
                 .expect("child session exists at rollback settle gate");
             winner_root.current_task_id = "competing-winner".to_string();
             winner_root
-                .context
-                .set("competing.marker", "advanced")
-                .await;
+                .context.set("competing.marker", "advanced");
             self.inner
                 .commit_transition(
                     session_id,
@@ -4779,13 +4746,9 @@ mod tests {
             .get_context(&session_id)
             .await
             .expect("session context should be persisted");
-        let creator_id: String = ctx
-            .get("_creator_id")
-            .await
+        let creator_id: String = ctx.get("_creator_id")
             .expect("trusted creator id should be seeded");
-        let seeded_session_id: String = ctx
-            .get("_session_id")
-            .await
+        let seeded_session_id: String = ctx.get("_session_id")
             .expect("trusted session id should be seeded");
 
         assert_eq!(creator_id, "creator_alice");
@@ -5635,9 +5598,7 @@ mod tests {
             .expect("root exists");
         winner_root.current_task_id = "winner-task".to_string();
         winner_root
-            .context
-            .set("winner.marker", "continue-won")
-            .await;
+            .context.set("winner.marker", "continue-won");
         let winner_state = RunStateV1::default();
         store
             .commit_transition(
@@ -5689,9 +5650,7 @@ mod tests {
         );
         assert_eq!(
             final_root
-                .context
-                .get::<String>("winner.marker")
-                .await
+                .context.get::<String>("winner.marker")
                 .as_deref(),
             Some("continue-won"),
             "the terminal checkpoint must carry the Continue winner's context"
@@ -5827,9 +5786,7 @@ mod tests {
         );
         assert_eq!(
             final_root
-                .context
-                .get::<String>("winner.marker")
-                .await
+                .context.get::<String>("winner.marker")
                 .as_deref(),
             Some("continue-won"),
             "the terminal checkpoint must carry the Continue winner's context"

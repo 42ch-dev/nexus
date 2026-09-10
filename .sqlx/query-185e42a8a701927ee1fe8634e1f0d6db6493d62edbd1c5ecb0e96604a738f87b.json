@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) as \"count!\" FROM outbox_entries WHERE delivery_state = 'staged'",
+  "describe": {
+    "columns": [
+      {
+        "name": "count!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "185e42a8a701927ee1fe8634e1f0d6db6493d62edbd1c5ecb0e96604a738f87b"
+}
