@@ -3053,6 +3053,9 @@ async fn control_unconfirmed_cancel_keeps_schedule_non_cancelled() {
         .expect("schedule_id")
         .to_string();
 
+    // Wait for the prompt to be in flight AND its stream to be polled by
+    // the executor's drain loop, then release it and let the run park at
+    // the durable manual wait.
     tokio::time::timeout(std::time::Duration::from_secs(15), async {
         loop {
             if host.streams_started() >= 1 {
@@ -3063,6 +3066,7 @@ async fn control_unconfirmed_cancel_keeps_schedule_non_cancelled() {
     })
     .await
     .expect("prompt stream polled");
+    host.release();
 
     let row = load_drive_row(&daemon, &schedule_id).await;
     let sid = row
@@ -3071,7 +3075,20 @@ async fn control_unconfirmed_cancel_keeps_schedule_non_cancelled() {
         .expect("owned session")
         .to_string();
 
-    // Cancel reaches a non-cooperative provider: stop cannot be confirmed.
+    // Deterministic cancel point: poll the DURABLE run record until the run
+    // is parked at the manual wait — provably non-terminal and signalable,
+    // with the drive loop exited. Cancelling the in-flight prompt instead is
+    // a structural race: the cancel token fails the blocked prompt step, the
+    // drive loop's failure boundary re-enters the engine cancel path, and
+    // whichever of the two racing `interrupted` commits loses the revision
+    // fence surfaces a spurious 409 "terminal or not in a signalable state".
+    let (parked_status, _parked_state) =
+        wait_for_run_status(&daemon, &sid, "waiting_for_input", 15).await;
+    assert_eq!(parked_status, "waiting_for_input");
+
+    // Cancel reaches a non-cooperative provider: the parked run's owned Host
+    // session cannot be reaped (`shutdown_session` fails), so the stop
+    // cannot be confirmed.
     let (status, body) = post_json(
         &daemon,
         &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
