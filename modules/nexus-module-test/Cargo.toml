@@ -22,8 +22,9 @@ description = "ABI-conformance mini-host for Nexus compute modules: wasmtime-bas
 publish = true
 
 [dependencies]
-# Matches the nexus-wasm-host pin (crates/nexus-wasm-host/Cargo.toml).
-wasmtime = "46"
+# Matches the nexus-wasm-host pin (crates/nexus-wasm-host/Cargo.toml): both
+# hosts select the wasmtime 48 line in lockstep (T3 aligned-48 cutover).
+wasmtime = "48"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 nexus-module-sdk = { path = "../nexus-module-sdk" }

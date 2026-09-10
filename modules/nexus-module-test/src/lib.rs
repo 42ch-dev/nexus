@@ -46,7 +46,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use nexus_module_sdk::{ComputeInput, ComputeOutput, HostFunction, ModuleManifest};
-use wasmtime::{Caller, Engine, Extern, Instance, Linker, Memory, Module, Store, TypedFunc};
+use wasmtime::{Caller, Config, Engine, Extern, Instance, Linker, Memory, Module, Store, TypedFunc};
 
 /// Sentinel returned by host functions when the lookup yields nothing
 /// (mirrors `nexus-wasm-host::host::RET_NOT_FOUND`).
@@ -163,7 +163,15 @@ pub fn run(
     manifest: &ModuleManifest,
     input: &ComputeInput,
 ) -> Result<ComputeOutput, MiniHostError> {
-    let engine = Engine::default();
+    // Wasmtime 47+ enables the GC, function-references and exceptions
+    // proposals by default; the real host (nexus-wasm-host) keeps them off.
+    // Pin the same admission set here so the mini-host never accepts a module
+    // the real host would reject (aligned-48 cutover, T3).
+    let mut config = Config::new();
+    config.wasm_gc(false);
+    config.wasm_function_references(false);
+    config.wasm_exceptions(false);
+    let engine = Engine::new(&config).map_err(|e| MiniHostError::Instantiation(e.to_string()))?;
     let module = Module::new(&engine, wasm_bytes)
         .map_err(|e| MiniHostError::Instantiation(e.to_string()))?;
 
@@ -713,6 +721,26 @@ mod tests {
   (func (export "compute") (param i32 i32 i32 i32) (result i64) (i64.const 0)))"#;
         let wasm = wat::parse_str(wat).expect("wat parses");
         let err = run(&wasm, &manifest(), &input(vec![])).expect_err("must fail");
+        assert!(matches!(err, MiniHostError::Instantiation(_)), "{err}");
+    }
+
+    #[test]
+    fn rejects_newly_default_enabled_proposals() {
+        // Wasmtime 47+ enables the GC / function-references / exceptions
+        // proposals by default; the mini-host pins them OFF to match the real
+        // host's module-admission set. A module requiring the exceptions
+        // proposal (`try_table`) must fail validation, not instantiate.
+        let wat = r#"(module
+  (tag $e)
+  (memory (export "memory") 1)
+  (func (export "alloc") (param $len i32) (result i32) (i32.const 0))
+  (func (export "compute") (param i32 i32 i32 i32) (result i64)
+    (block $b (result)
+      (try_table (catch $e $b) (nop)))
+    (i64.const 0)))"#;
+        let wasm = wat::parse_str(wat).expect("wat parses");
+        let err = run(&wasm, &manifest(), &input(vec![]))
+            .expect_err("exceptions-proposal module must be rejected");
         assert!(matches!(err, MiniHostError::Instantiation(_)), "{err}");
     }
 }

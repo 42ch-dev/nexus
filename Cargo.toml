@@ -101,8 +101,10 @@ blake3 = "1"
 # V1.58 P0 T1 (R-V156P0-M001): sha2 workspace-managed — referenced as
 # `sha2.workspace = true` by crates that compute OCC content hashes.
 # 2026-09-10 dependency sweep (#272): 0.10 → 0.11. `Digest`/`Sha256` API is
-# unchanged; the excluded standalone `modules/nexus-module-manifest` keeps its
-# own sha2 0.10 declaration (T3 scope), so the lock legitimately carries both.
+# unchanged; the excluded standalone `modules/nexus-module-manifest` was
+# aligned to the same 0.11 pin by T3 (#249). The lock still carries sha2
+# 0.10.9 transitively via cranelift/sqlx — those are upstream constraints,
+# not a repo pin.
 sha2 = "0.11"
 handlebars = "6"
 which = "8"
