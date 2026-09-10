@@ -3132,6 +3132,122 @@ async fn control_unconfirmed_cancel_keeps_schedule_non_cancelled() {
     );
 }
 
+/// Greptile follow-up (A5): cancelling a run whose prompt is IN FLIGHT
+/// against a non-cooperative host must report the unconfirmed outcome —
+/// `interrupted` with the durable cancel intent, never a false `cancelled`,
+/// and never a spurious 409. The cancel token fails the blocked prompt
+/// step, so the drive loop's failure boundary re-enters the engine cancel
+/// path concurrently with this signal's own A5 teardown; whichever
+/// `interrupted` commit loses the revision fence must resolve to the
+/// persisted outcome (`cancel_fence_loss_accomplished`), not a conflict.
+#[tokio::test]
+async fn control_in_flight_unconfirmed_cancel_reports_interrupted() {
+    let host = BlockingHost::non_cooperative();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": PUBLIC_PRESET,
+            "label": "p2-fix-in-flight-unconfirmed-cancel",
+            "seed": "p2-fix-in-flight-topic",
+            "input": { "keyword": "p2-fix-in-flight", "topic": "p2-fix-in-flight-topic" },
+            "agent_bindings": {
+                "default": { "provider_id": MOCK_PROVIDER }
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"]
+        .as_str()
+        .expect("schedule_id")
+        .to_string();
+
+    // Deterministic IN-FLIGHT cancel point: the first prompt's stream is
+    // being polled by the executor's drain loop, so the prompt is provably
+    // in flight and blocked. Do NOT release it — the cancel must interrupt
+    // active Host work, not a parked wait.
+    tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            if host.streams_started() >= 1 {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("prompt stream polled");
+
+    let row = load_drive_row(&daemon, &schedule_id).await;
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("owned session")
+        .to_string();
+
+    // Cancel reaches the in-flight prompt of a non-cooperative provider:
+    // `cancel` never completes (bounded by the executor's shutdown timeout)
+    // and `shutdown_session` fails, so the stop cannot be confirmed.
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "cancel" }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK,
+        "an in-flight unconfirmed cancel must never surface a spurious conflict: {body}"
+    );
+    assert_eq!(
+        body["status"].as_str(),
+        Some("interrupted"),
+        "unconfirmed cancel must report interrupted, never cancelled: {body}"
+    );
+
+    // The cancel reached the active Host operation.
+    assert!(
+        host.cancels() >= 1,
+        "cancel must reach the in-flight Host operation (cancels={})",
+        host.cancels()
+    );
+
+    // The durable run is interrupted (uncertain) WITH the cancel intent —
+    // never a false successful cancel.
+    let (run_status, state) = wait_for_run_status(&daemon, &sid, "interrupted", 15).await;
+    assert_eq!(run_status, "interrupted");
+    assert_eq!(
+        state["cancel_requested"].as_bool(),
+        Some(true),
+        "interrupted run must carry the durable cancel intent: {state}"
+    );
+    assert_eq!(
+        state["failure"]["code"].as_str(),
+        Some("cancel_cleanup_unconfirmed"),
+        "the actionable unconfirmed-cleanup reason must be durable: {state}"
+    );
+
+    // The schedule row is NOT cancelled and NOT pending (an unmapped
+    // `interrupted` string would project as Pending → re-runnable).
+    let row = load_drive_row(&daemon, &schedule_id).await;
+    assert_ne!(
+        row.status, "cancelled",
+        "unconfirmed cancel must not fabricate a successful schedule cancel"
+    );
+    assert_ne!(
+        row.status, "pending",
+        "an unmapped status string must never make the schedule re-runnable"
+    );
+    assert_eq!(
+        row.current_session_id.as_deref(),
+        Some(sid.as_str()),
+        "the schedule keeps its owned (interrupted) run identity"
+    );
+}
+
 /// qc1 F-001: an explicit legacy start with no configured default binding
 /// provider MUST refuse — the Host catalog's first entry is never selected
 /// as a fallback — and MUST NOT create a session.
