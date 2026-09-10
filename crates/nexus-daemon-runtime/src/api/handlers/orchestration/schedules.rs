@@ -2569,21 +2569,18 @@ async fn cancel_fence_loss_converged(
         .bind(schedule_id)
         .fetch_optional(pool)
         .await;
-        match row {
-            Ok(Some((status, session))) => {
-                if status == terminal_status && session.as_deref() == observed_session {
-                    return true;
-                }
-                // A settled row with the same owned session but a different
-                // terminal status (e.g. completed-vs-cancel) is a genuine
-                // conflict: the run reached its own outcome.
-                if matches!(status.as_str(), "completed" | "failed" | "cancelled")
-                    && session.as_deref() == observed_session
-                {
-                    return false;
-                }
+        if let Ok(Some((status, session))) = row {
+            if status == terminal_status && session.as_deref() == observed_session {
+                return true;
             }
-            _ => {}
+            // A settled row with the same owned session but a different
+            // terminal status (e.g. completed-vs-cancel) is a genuine
+            // conflict: the run reached its own outcome.
+            if matches!(status.as_str(), "completed" | "failed" | "cancelled")
+                && session.as_deref() == observed_session
+            {
+                return false;
+            }
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
