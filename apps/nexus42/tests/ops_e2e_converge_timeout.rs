@@ -316,7 +316,8 @@ async fn hanging_upstream_with_timeout_reroutes_via_on_timeout() {
     // names the join and the reroute target; the join keys are cleared for
     // the next cycle).
     let ctx = d.engine.get_context(&sid).await.expect("context");
-    let note = ctx.get::<String>("_join_timeout_note")
+    let note = ctx
+        .get::<String>("_join_timeout_note")
         .expect("reroute must write _join_timeout_note");
     assert!(
         note.contains("join timeout at 'join'"),
@@ -379,7 +380,11 @@ async fn hanging_upstream_without_on_timeout_fails_typed_not_waiting_forever() {
     let second = drive(&d, &sid, true).await;
 
     let error = match second {
-        PresetRunOutcome::Failed { steps, error, settlement: _ } => {
+        PresetRunOutcome::Failed {
+            steps,
+            error,
+            settlement: _,
+        } => {
             assert_eq!(steps, 1, "the deadline-firing tick is one step");
             error
         }

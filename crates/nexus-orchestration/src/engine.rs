@@ -50,8 +50,10 @@ pub const CANCEL_FENCE_RETRY_BOUND: u32 = 8;
 
 /// Whether the post-step root context carries the [`EXTERNAL_EFFECT_MARKER`],
 /// indicating that one or more external effects executed during the step.
-async fn step_had_external_effect(root: &graph_flow::Session) -> bool {
-    root.context.get::<bool>(EXTERNAL_EFFECT_MARKER).unwrap_or(false)
+fn step_had_external_effect(root: &graph_flow::Session) -> bool {
+    root.context
+        .get::<bool>(EXTERNAL_EFFECT_MARKER)
+        .unwrap_or(false)
 }
 
 /// Clear the [`EXTERNAL_EFFECT_MARKER`] from a root context (Minor 2): the
@@ -63,7 +65,7 @@ async fn step_had_external_effect(root: &graph_flow::Session) -> bool {
 /// durable context written by the next checkpoint stops carrying the stale
 /// marker. The marker is captured into a local `had_effect` binding first so a
 /// failed post-effect commit can still classify as Interrupted (Important 3).
-async fn clear_step_effect_marker(root: &graph_flow::Session) {
+fn clear_step_effect_marker(root: &graph_flow::Session) {
     root.context.remove(EXTERNAL_EFFECT_MARKER);
 }
 
@@ -258,13 +260,14 @@ impl Default for Context {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // Failed-step ownership witness
 // ---------------------------------------------------------------------------
 
 /// Anchor captured by [`EngineSharedState::run_step_internal`] for a failed
-/// step attempt. Durable failure writes must CAS against
+/// step attempt.
+///
+/// Durable failure writes must CAS against
 /// [`owned_revision`](Self::owned_revision) and the pre-step checkpoint —
 /// never a post-error reload of the latest revision.
 #[derive(Debug, Clone)]
@@ -339,7 +342,7 @@ pub struct FailureSettlementSummary {
 
 impl FailureSettlementSummary {
     #[must_use]
-    pub fn from_settlement(settlement: &FailureSettlement) -> Self {
+    pub const fn from_settlement(settlement: &FailureSettlement) -> Self {
         Self {
             authoritative: settlement.authoritative,
             context: settlement.context,
@@ -415,16 +418,16 @@ pub enum EngineError {
         /// Session id.
         session_id: String,
         /// Underlying failure.
-        source: Box<EngineError>,
+        source: Box<Self>,
         /// Pre-attempt ownership anchor.
-        witness: FailedStepWitness,
+        witness: Box<FailedStepWitness>,
     },
 }
 
 impl EngineError {
     /// Return the failed-step witness when this error carries one.
     #[must_use]
-    pub fn step_witness(&self) -> Option<&FailedStepWitness> {
+    pub const fn step_witness(&self) -> Option<&FailedStepWitness> {
         match self {
             Self::StepFailed { witness, .. } => Some(witness),
             _ => None,
@@ -433,11 +436,11 @@ impl EngineError {
 
     /// Wrap `source` with a failed-step ownership witness.
     #[must_use]
-    pub fn step_failed(session_id: &str, source: EngineError, witness: FailedStepWitness) -> Self {
+    pub fn step_failed(session_id: &str, source: Self, witness: FailedStepWitness) -> Self {
         Self::StepFailed {
             session_id: session_id.to_string(),
             source: Box::new(source),
-            witness,
+            witness: Box::new(witness),
         }
     }
 }
@@ -918,7 +921,6 @@ impl EngineSharedState {
             None
         };
 
-
         if record.status.is_terminal() {
             // A5 cleanup retry: an `Interrupted` run with a durable cancel
             // intent accepts a further `Cancel` as the bounded, owner-scoped
@@ -929,8 +931,7 @@ impl EngineSharedState {
             let interrupted_cancel_retry = matches!(
                 signal,
                 EngineSignal::Cancel | EngineSignal::CancelAnchored { .. }
-            )
-                && record.status == SessionStatus::Interrupted
+            ) && record.status == SessionStatus::Interrupted
                 && record.state.as_ref().is_some_and(|s| s.cancel_requested);
             if !interrupted_cancel_retry {
                 return Err(EngineError::TerminalState(session_id.0.clone()));
@@ -943,7 +944,10 @@ impl EngineSharedState {
         // refused with a state conflict and the wait is never consumed:
         // no new work is created while cancellation is in flight.
         if next_state.cancel_requested
-            && !matches!(signal, EngineSignal::Cancel | EngineSignal::CancelAnchored { .. })
+            && !matches!(
+                signal,
+                EngineSignal::Cancel | EngineSignal::CancelAnchored { .. }
+            )
         {
             return Err(EngineError::TerminalState(session_id.0.clone()));
         }
@@ -953,12 +957,13 @@ impl EngineSharedState {
         // bypass a human wait).
         if !matches!(
             signal,
-            EngineSignal::Cancel | EngineSignal::CancelAnchored { .. } | EngineSignal::Continue { .. }
-        )
-            && (matches!(record.status, SessionStatus::WaitingForInput)
-                || next_state.wait.is_some()
-                || next_state.step_in_flight.is_some()
-                || next_state.in_flight.is_some())
+            EngineSignal::Cancel
+                | EngineSignal::CancelAnchored { .. }
+                | EngineSignal::Continue { .. }
+        ) && (matches!(record.status, SessionStatus::WaitingForInput)
+            || next_state.wait.is_some()
+            || next_state.step_in_flight.is_some()
+            || next_state.in_flight.is_some())
         {
             return Err(EngineError::TerminalState(session_id.0.clone()));
         }
@@ -1074,7 +1079,6 @@ impl EngineSharedState {
             // become the CAS target. `None` in rebase mode (ordinary
             // Cancel), which keeps the existing load-fenced retry.
             let mut anchored_clocks: Option<(u64, u64)> = cancel_anchor;
-
 
             // C-001 phase 1: durable cancel-intent fence. Persist
             // `cancel_requested = true` while keeping the status
@@ -1372,11 +1376,9 @@ impl EngineSharedState {
                             }
                         };
                         if let Ok(record) = &interrupted_result {
-                            anchored_clocks =
-                                Some((record.state_revision, record.graph_version));
+                            anchored_clocks = Some((record.state_revision, record.graph_version));
                         }
-                        match interrupted_result
-                        {
+                        match interrupted_result {
                             Ok(_) => break,
                             Err(EngineError::RevisionMismatch { .. }) => {
                                 if !cancel_allow_rebase {
@@ -1507,7 +1509,6 @@ impl EngineSharedState {
                         &cancelled_state,
                     )
                     .await
-
                 {
                     Ok(_) => break,
                     Err(EngineError::RevisionMismatch { .. }) => {
@@ -1670,33 +1671,32 @@ impl EngineSharedState {
             let runners = self.runners.read().await;
             let found = runners.get(&session_id.0).cloned();
             drop(runners);
-            match found {
-                Some(runner) => runner,
-                None => {
-                    // No runner. A legacy v0 row under a workflow store is
-                    // NOT steppable (it has no v1 descriptor/authority, and a
-                    // v1 writer may never mutate or promote it): report the
-                    // typed non-replayable shape instead of a generic
-                    // no-graph error. Any other missing-runner case keeps the
-                    // existing contract.
-                    if let Some(store) = &self.workflow_store {
-                        if let Ok(Some(record)) = store.load_run(session_id).await {
-                            if record.execution_version < 1 {
-                                tracing::warn!(
-                                    session_id = %session_id.0,
-                                    "run_step: legacy v0 row is not steppable under v1 authority (non-replayable)"
-                                );
-                                return Err(EngineError::GraphFlow(
-                                    graph_flow::GraphError::StorageError(format!(
-                                        "run '{}': legacy execution_version 0 is not steppable under v1 authority (non-replayable)",
-                                        session_id.0
-                                    )),
-                                ));
-                            }
+            if let Some(runner) = found {
+                runner
+            } else {
+                // No runner. A legacy v0 row under a workflow store is
+                // NOT steppable (it has no v1 descriptor/authority, and a
+                // v1 writer may never mutate or promote it): report the
+                // typed non-replayable shape instead of a generic
+                // no-graph error. Any other missing-runner case keeps the
+                // existing contract.
+                if let Some(store) = &self.workflow_store {
+                    if let Ok(Some(record)) = store.load_run(session_id).await {
+                        if record.execution_version < 1 {
+                            tracing::warn!(
+                                session_id = %session_id.0,
+                                "run_step: legacy v0 row is not steppable under v1 authority (non-replayable)"
+                            );
+                            return Err(EngineError::GraphFlow(
+                                graph_flow::GraphError::StorageError(format!(
+                                    "run '{}': legacy execution_version 0 is not steppable under v1 authority (non-replayable)",
+                                    session_id.0
+                                )),
+                            ));
                         }
                     }
-                    return Err(EngineError::NoGraphLoaded);
                 }
+                return Err(EngineError::NoGraphLoaded);
             }
         };
 
@@ -1719,8 +1719,7 @@ impl EngineSharedState {
                     .await
                     .iter()
                     .find(|s| s.session_id == *session_id)
-                    .map(|s| s.status.clone())
-                    .unwrap_or(SessionStatus::Running);
+                    .map_or(SessionStatus::Running, |s| s.status.clone());
                 (0, status, None)
             };
         let mut transition_revision = expected_revision;
@@ -1779,7 +1778,10 @@ impl EngineSharedState {
         // effect in the step. The marker write is fenced to step-able status
         // plus the pre-step revision and atomically advances the revision.
         if let (Some(store), Some(pre)) = (&self.workflow_store, pre_step_root.as_ref()) {
-            transition_revision = expected_revision.checked_add(1).ok_or_else(|| {
+            // Overflow guard only: the owned revision the step actually
+            // transitions against comes from the returned marker record
+            // below, never from this derived value.
+            expected_revision.checked_add(1).ok_or_else(|| {
                 EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                     "run '{}': state revision overflow",
                     session_id.0
@@ -1808,10 +1810,9 @@ impl EngineSharedState {
                 )
                 .await
             {
-                Err(
-                    e @ EngineError::RevisionMismatch { .. }
-                    | e @ EngineError::TerminalState(_),
-                ) => return Err(e),
+                Err(e @ (EngineError::RevisionMismatch { .. } | EngineError::TerminalState(_))) => {
+                    return Err(e)
+                }
                 Err(e) => {
                     // The marker did not commit: the attempt owns only the
                     // pre-step revision/clock (typed ownership facts).
@@ -1864,32 +1865,33 @@ impl EngineSharedState {
         let result = match runner.run(&session_id.0).await {
             Ok(result) => result,
             Err(e) => {
-                let witness = match step_witness.clone() {
-                    Some(witness) => Some(witness),
-                    None => pre_step_root.as_ref().map(|pre| FailedStepWitness {
-                        owned_revision: transition_revision,
-                        owned_graph_version: Some(pre.version),
-                        pre_step_status: pre_step_status.clone(),
-                        pre_step_root: pre.clone(),
-                    }),
-                };
-                return match witness {
-                    Some(witness) => Err(EngineError::step_failed(
+                let witness = step_witness.clone().map_or_else(
+                    || {
+                        pre_step_root.as_ref().map(|pre| FailedStepWitness {
+                            owned_revision: transition_revision,
+                            owned_graph_version: Some(pre.version),
+                            pre_step_status: pre_step_status.clone(),
+                            pre_step_root: pre.clone(),
+                        })
+                    },
+                    Some,
+                );
+                return if let Some(witness) = witness {
+                    Err(EngineError::step_failed(
                         &session_id.0,
                         EngineError::GraphFlow(e),
                         witness,
-                    )),
+                    ))
+                } else {
                     // No marker and no pre-step root: the attempt owns no
                     // authority at all. Surface the original failure as
                     // non-replayable instead of fabricating an anchor (or
                     // panicking).
-                    None => {
-                        tracing::warn!(
-                            session_id = %session_id.0,
-                            "run_step: step failed with no pre-step root checkpoint;                              no ownership anchor exists (non-replayable)"
-                        );
-                        Err(EngineError::GraphFlow(e))
-                    }
+                    tracing::warn!(
+                        session_id = %session_id.0,
+                        "run_step: step failed with no pre-step root checkpoint; no ownership anchor exists (non-replayable)"
+                    );
+                    Err(EngineError::GraphFlow(e))
                 };
             }
         };
@@ -1963,8 +1965,7 @@ impl EngineSharedState {
                     status = SessionStatus::Paused;
                 }
 
-                let next_state =
-                    build_step_state(&result, &status, &root.current_task_id, &root.context);
+                let next_state = build_step_state(&status, &root.current_task_id, &root.context);
                 // Pass the real child checkpoints recorded by
                 // `spawn_child_session` so nested child rows are persisted
                 // atomically and reconstructible after restart (Important 2).
@@ -1997,9 +1998,9 @@ impl EngineSharedState {
                 // Interrupted (Important 3). The marker is then removed from the
                 // context that `commit_transition` persists so it reflects
                 // current-step intent only, not history (Minor 2).
-                let had_effect = step_had_external_effect(&root).await;
+                let had_effect = step_had_external_effect(&root);
                 if had_effect {
-                    clear_step_effect_marker(&root).await;
+                    clear_step_effect_marker(&root);
                 }
                 // Fence the step transition on the graph clock of the ROOT
                 // SNAPSHOT this checkpoint carries (the step's own position/
@@ -2038,7 +2039,9 @@ impl EngineSharedState {
                         // preimage).
                         for child in &children {
                             if let Err(e) = self
-                                .sync_child_checkpoint_after_step(&SessionId(child.session.id.clone()))
+                                .sync_child_checkpoint_after_step(&SessionId(
+                                    child.session.id.clone(),
+                                ))
                                 .await
                             {
                                 return Err(wrap_step_boundary_err(e));
@@ -2275,7 +2278,11 @@ impl EngineSharedState {
             params.parent_session_id,
             uuid::Uuid::new_v4()
         );
-        let start_task_id = params.inner_graph.start_task_id().unwrap_or_default().to_string();
+        let start_task_id = params
+            .inner_graph
+            .start_task_id()
+            .unwrap_or_default()
+            .to_string();
         let mut session_mut =
             graph_flow::Session::new_from_task(child_session_id.clone(), &start_task_id);
         session_mut.context = params.initial_context;
@@ -2287,12 +2294,14 @@ impl EngineSharedState {
         // wrong run (Important: nested graph prompts lose the child durable
         // identity).
         session_mut
-            .context.set("_session_id", child_session_id.clone())?;
+            .context
+            .set("_session_id", child_session_id.clone())?;
         // Record the parent so `run_step_internal` can sync this child's
         // checkpoint back to the parent's children map after each step
         // (Important 1: child revisions must be synchronized).
         session_mut
-            .context.set("_parent_session_id", params.parent_session_id.clone())?;
+            .context
+            .set("_parent_session_id", params.parent_session_id.clone())?;
 
         // When a workflow store is present, create a v1 child run that
         // inherits the trusted root descriptor (A2/A4). The child's
@@ -2826,17 +2835,16 @@ fn inner_graph_entered_by_state<'a>(
 /// stale/broad join keys are not re-mapped (no current-gate park marker) and
 /// keep the `waiting_for_input` + fresh token shape.
 fn build_step_state(
-    result: &graph_flow::ExecutionResult,
     status: &SessionStatus,
     current_task_id: &str,
     root_context: &graph_flow::Context,
 ) -> RunStateV1 {
-        // graph-flow 0.8: a successful `ExecutionResult` cannot encode a task
-        // failure (no upstream `ExecutionStatus::Error`); failures propagate as
-        // `Err(GraphError)` and are persisted by the daemon driver's failure
-        // path. A step that reached `build_step_state` therefore carries no
-        // fabricated failure record.
-        let failure: Option<crate::run_state::RunFailure> = None;
+    // graph-flow 0.8: a successful `ExecutionResult` cannot encode a task
+    // failure (no upstream `ExecutionStatus::Error`); failures propagate as
+    // `Err(GraphError)` and are persisted by the daemon driver's failure
+    // path. A step that reached `build_step_state` therefore carries no
+    // fabricated failure record.
+    let failure: Option<crate::run_state::RunFailure> = None;
     // Round-4 Critical 2 (A4): when THIS step parked because a nested child
     // is waiting for human input, the root WaitRecord names the exact
     // waiting descendant (`child_session_id` / `child_task_id`) so restart
@@ -3790,8 +3798,7 @@ impl GraphFlowEngine {
             let session = graph_flow::Session::new_from_task(session_id.clone(), &start_task_id);
             session.context.set("_session_id", session_id.clone())?;
             if !creator_id.is_empty() {
-                session
-                    .context.set("_creator_id", creator_id.to_string())?;
+                session.context.set("_creator_id", creator_id.to_string())?;
             }
             let checkpoint = RunCheckpoint {
                 root: &session,
@@ -3867,21 +3874,19 @@ impl GraphFlowEngine {
             let start_task_id = graph.start_task_id().unwrap_or_default().to_string();
             let session =
                 graph_flow::Session::new_from_task(session_id.to_string(), &start_task_id);
-            session
-                .context.set("_session_id", session_id.to_string())?;
+            session.context.set("_session_id", session_id.to_string())?;
             if !creator_id.is_empty() {
-                session
-                    .context.set("_creator_id", creator_id.to_string())?;
+                session.context.set("_creator_id", creator_id.to_string())?;
             }
             // Seed the frozen admission input + core-context seed into the
             // session context BEFORE the checkpoint is persisted (A3).
             for (key, value) in &input {
                 session
-                    .context.set(format!("preset.input.{key}"), value.clone())?;
+                    .context
+                    .set(format!("preset.input.{key}"), value.clone())?;
             }
             if let Some(cc) = core_context {
-                session
-                    .context.set("core_context.text", cc.to_string())?;
+                session.context.set("core_context.text", cc.to_string())?;
             }
             let checkpoint = RunCheckpoint {
                 root: &session,
@@ -4000,21 +4005,19 @@ impl GraphFlowEngine {
         }
         let start_task_id = graph.start_task_id().unwrap_or_default().to_string();
         let session = graph_flow::Session::new_from_task(session_id.to_string(), &start_task_id);
-        session
-            .context.set("_session_id", session_id.to_string())?;
+        session.context.set("_session_id", session_id.to_string())?;
         if !creator_id.is_empty() {
-            session
-                .context.set("_creator_id", creator_id.to_string())?;
+            session.context.set("_creator_id", creator_id.to_string())?;
         }
         // Seed the frozen admission input + core-context seed into the
         // session context BEFORE the checkpoint is persisted (A3).
         for (key, value) in &input {
             session
-                .context.set(format!("preset.input.{key}"), value.clone())?;
+                .context
+                .set(format!("preset.input.{key}"), value.clone())?;
         }
         if let Some(cc) = core_context {
-            session
-                .context.set("core_context.text", cc.to_string())?;
+            session.context.set("core_context.text", cc.to_string())?;
         }
         let checkpoint = RunCheckpoint {
             root: &session,
@@ -4087,8 +4090,7 @@ impl GraphFlowEngine {
         // Store session ID in context so InnerGraphTask can find it.
         session.context.set("_session_id", session_id.clone())?;
         if let Some(creator_id) = creator_id {
-            session
-                .context.set("_creator_id", creator_id.to_string())?;
+            session.context.set("_creator_id", creator_id.to_string())?;
         }
 
         // Critical 2: when a workflow store is present, a normal start creates
@@ -4230,8 +4232,7 @@ impl OrchestrationEngine for GraphFlowEngine {
         // Persist a session stub into the graph-flow storage.
         let session = graph_flow::Session::new_from_task(session_id.clone(), "");
         session.context.set("_session_id", session_id.clone())?;
-        session
-            .context.set("_creator_id", key.creator_id.clone())?;
+        session.context.set("_creator_id", key.creator_id.clone())?;
         if let Some(store) = &self.state.workflow_store {
             let (source, preset_version) = self.resolve_source_identity(&key.preset_id)?;
             let descriptor = RunDescriptorV1 {
@@ -4606,7 +4607,6 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
             .await
     }
 
-
     async fn commit_transition_with_graph_fence(
         &self,
         session_id: &SessionId,
@@ -4626,7 +4626,6 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
         )
         .await
     }
-
 
     async fn settle_cancelled(
         &self,
@@ -4830,7 +4829,9 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
                 .expect("root exists at continue-v-cancel gate");
             winner_root.current_task_id = "winner-task".to_string();
             winner_root
-                .context.set("winner.marker", "continue-won").unwrap();
+                .context
+                .set("winner.marker", "continue-won")
+                .unwrap();
             self.inner
                 .commit_transition(
                     session_id,
@@ -4856,7 +4857,6 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
             .await
     }
 
-
     async fn commit_transition_with_graph_fence(
         &self,
         session_id: &SessionId,
@@ -4876,7 +4876,6 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         )
         .await
     }
-
 
     async fn settle_cancelled(
         &self,
@@ -5062,7 +5061,6 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
             .await
     }
 
-
     async fn commit_transition_with_graph_fence(
         &self,
         session_id: &SessionId,
@@ -5082,7 +5080,6 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
         )
         .await
     }
-
 
     async fn settle_cancelled(
         &self,
@@ -5114,7 +5111,9 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
                 .expect("child session exists at rollback settle gate");
             winner_root.current_task_id = "competing-winner".to_string();
             winner_root
-                .context.set("competing.marker", "advanced").unwrap();
+                .context
+                .set("competing.marker", "advanced")
+                .unwrap();
             self.inner
                 .commit_transition(
                     session_id,
@@ -5376,10 +5375,10 @@ mod tests {
     async fn sec_v131_01_creator_start_seeds_trusted_creator_context() {
         let engine = test_engine();
         let graph = Arc::new(
-        graph_flow::GraphBuilder::new("creator-context")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("creator-context")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
 
         let session_id = engine
@@ -5391,9 +5390,11 @@ mod tests {
             .get_context(&session_id)
             .await
             .expect("session context should be persisted");
-        let creator_id: String = ctx.get("_creator_id")
+        let creator_id: String = ctx
+            .get("_creator_id")
             .expect("trusted creator id should be seeded");
-        let seeded_session_id: String = ctx.get("_session_id")
+        let seeded_session_id: String = ctx
+            .get("_session_id")
             .expect("trusted session id should be seeded");
 
         assert_eq!(creator_id, "creator_alice");
@@ -5617,10 +5618,10 @@ mod tests {
         // Start a v1 run through the engine (registers the run token in the
         // shared map the cancel path reads).
         let graph = Arc::new(
-        graph_flow::GraphBuilder::new("cancel-race")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("cancel-race")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -5737,10 +5738,10 @@ mod tests {
         );
 
         let graph = Arc::new(
-        graph_flow::GraphBuilder::new("cancel-terminal")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("cancel-terminal")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -5864,10 +5865,10 @@ mod tests {
         engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
 
         let graph = Arc::new(
-        graph_flow::GraphBuilder::new("cancel-retry")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("cancel-retry")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -5968,10 +5969,10 @@ mod tests {
         engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
 
         let graph = Arc::new(
-        graph_flow::GraphBuilder::new("cancel-retry-fail")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("cancel-retry-fail")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -6036,10 +6037,10 @@ mod tests {
         );
 
         let graph = Arc::new(
-        graph_flow::GraphBuilder::new("continue-fence")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("continue-fence")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -6186,10 +6187,10 @@ mod tests {
         engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
 
         let graph = Arc::new(
-        graph_flow::GraphBuilder::new("continue-wins")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("continue-wins")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -6245,7 +6246,9 @@ mod tests {
             .expect("root exists");
         winner_root.current_task_id = "winner-task".to_string();
         winner_root
-            .context.set("winner.marker", "continue-won").unwrap();
+            .context
+            .set("winner.marker", "continue-won")
+            .unwrap();
         let winner_state = RunStateV1::default();
         store
             .commit_transition(
@@ -6296,9 +6299,7 @@ mod tests {
             "the terminal checkpoint must carry the Continue winner's position"
         );
         assert_eq!(
-            final_root
-                .context.get::<String>("winner.marker")
-                .as_deref(),
+            final_root.context.get::<String>("winner.marker").as_deref(),
             Some("continue-won"),
             "the terminal checkpoint must carry the Continue winner's context"
         );
@@ -6347,10 +6348,10 @@ mod tests {
         engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
 
         let graph = Arc::new(
-        graph_flow::GraphBuilder::new("continue-wins-race")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("continue-wins-race")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -6432,9 +6433,7 @@ mod tests {
             "the terminal checkpoint must carry the Continue winner's position"
         );
         assert_eq!(
-            final_root
-                .context.get::<String>("winner.marker")
-                .as_deref(),
+            final_root.context.get::<String>("winner.marker").as_deref(),
             Some("continue-won"),
             "the terminal checkpoint must carry the Continue winner's context"
         );
@@ -6478,10 +6477,10 @@ mod tests {
         engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
 
         let graph = Arc::new(
-        graph_flow::GraphBuilder::new("nested-cancel")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("nested-cancel")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -6490,10 +6489,10 @@ mod tests {
 
         // Spawn child A (inner graph).
         let inner = Arc::new(
-        graph_flow::GraphBuilder::new("inner-a")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("inner-a")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let child_id = engine
             .state
@@ -6507,10 +6506,10 @@ mod tests {
 
         // Spawn grandchild A:child:* (nested inner graph under the child).
         let inner2 = Arc::new(
-        graph_flow::GraphBuilder::new("inner-b")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("inner-b")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let grandchild_id = engine
             .state
@@ -6665,10 +6664,10 @@ mod tests {
         engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
 
         let graph = Arc::new(
-        graph_flow::GraphBuilder::new("late-child-cancel")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("late-child-cancel")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -6677,10 +6676,10 @@ mod tests {
 
         // Spawn child A (mapped).
         let inner = Arc::new(
-        graph_flow::GraphBuilder::new("inner-a")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("inner-a")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let child_id = engine
             .state
@@ -6696,10 +6695,10 @@ mod tests {
         // in-memory entries — the shape of an admission whose map entry was
         // lost before the cancel closure snapshot.
         let inner2 = Arc::new(
-        graph_flow::GraphBuilder::new("inner-late")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("inner-late")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let late_id = engine
             .state
@@ -6831,10 +6830,10 @@ mod tests {
         engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
 
         let graph = Arc::new(
-        graph_flow::GraphBuilder::new("child-after-fence")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("child-after-fence")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -6873,10 +6872,10 @@ mod tests {
         // `cancel_requested`, so no child may be created/registered after the
         // fence.
         let inner = Arc::new(
-        graph_flow::GraphBuilder::new("inner-late")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("inner-late")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let err = engine
             .state
@@ -6998,10 +6997,10 @@ mod tests {
         engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
 
         let graph = Arc::new(
-        graph_flow::GraphBuilder::new("child-settle-cas-loss")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("child-settle-cas-loss")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -7040,10 +7039,10 @@ mod tests {
         // CAS to the injected competing transition, reloads the child
         // record, and re-settles against the current revision.
         let inner = Arc::new(
-        graph_flow::GraphBuilder::new("inner-late")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("inner-late")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let err = engine
             .state
@@ -7174,10 +7173,10 @@ mod tests {
         engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
 
         let graph = Arc::new(
-        graph_flow::GraphBuilder::new("nested-retry")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("nested-retry")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -7185,10 +7184,10 @@ mod tests {
             .expect("start session");
 
         let inner = Arc::new(
-        graph_flow::GraphBuilder::new("inner-a")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("inner-a")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let child_id = engine
             .state
@@ -7201,10 +7200,10 @@ mod tests {
             .expect("spawn child");
 
         let inner2 = Arc::new(
-        graph_flow::GraphBuilder::new("inner-b")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("inner-b")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let grandchild_id = engine
             .state
@@ -7337,10 +7336,10 @@ mod tests {
             caps,
         );
         let graph = Arc::new(
-        graph_flow::GraphBuilder::new("restart-nested")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("restart-nested")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let session_id = live
             .start_session("novel-writing", graph)
@@ -7348,10 +7347,10 @@ mod tests {
             .expect("start session");
 
         let inner = Arc::new(
-        graph_flow::GraphBuilder::new("inner-a")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("inner-a")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let child_id = live
             .state
@@ -7364,10 +7363,10 @@ mod tests {
             .expect("spawn child");
 
         let inner2 = Arc::new(
-        graph_flow::GraphBuilder::new("inner-b")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("inner-b")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let grandchild_id = live
             .state
@@ -7544,10 +7543,10 @@ mod tests {
             caps,
         );
         let graph = Arc::new(
-        graph_flow::GraphBuilder::new("restart-retry")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("restart-retry")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let session_id = live
             .start_session("novel-writing", graph)
@@ -7555,10 +7554,10 @@ mod tests {
             .expect("start session");
 
         let inner = Arc::new(
-        graph_flow::GraphBuilder::new("inner-a")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("inner-a")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let child_id = live
             .state
@@ -7571,10 +7570,10 @@ mod tests {
             .expect("spawn child");
 
         let inner2 = Arc::new(
-        graph_flow::GraphBuilder::new("inner-b")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("inner-b")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let grandchild_id = live
             .state
@@ -7742,10 +7741,10 @@ mod tests {
         engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
 
         let graph = Arc::new(
-        graph_flow::GraphBuilder::new("interrupted-cas")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("interrupted-cas")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -7846,10 +7845,10 @@ mod tests {
         engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
 
         let graph = Arc::new(
-        graph_flow::GraphBuilder::new("child-cancel")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("child-cancel")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -7859,10 +7858,10 @@ mod tests {
         // Spawn a child (inner graph) — registered in the children map with
         // its own cancellation token and v1 run row.
         let inner = Arc::new(
-        graph_flow::GraphBuilder::new("inner")
-            .add_task(Arc::new(crate::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph"),
+            graph_flow::GraphBuilder::new("inner")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
         );
         let child_id = engine
             .state
@@ -7960,8 +7959,8 @@ mod tests {
     /// AUTHORITATIVE persisted child `Session.version` (graph OCC clock) —
     /// at admission (seeded from the persisted row, not the version-0
     /// pre-save snapshot), after a parent commit that carries the child, and
-    /// after a nested continuation commit. Both clocks (state_revision and
-    /// graph_version) are asserted.
+    /// after a nested continuation commit. Both clocks (`state_revision` and
+    /// `graph_version`) are asserted.
     #[tokio::test]
     async fn cached_child_checkpoint_tracks_persisted_graph_version() {
         let db = tempfile::NamedTempFile::new().unwrap();
@@ -8034,23 +8033,39 @@ mod tests {
             .await
             .expect("child cached");
         assert_eq!(persisted_child_gv(&pool, &child_id.0).await, 1);
-        assert_eq!(cached_v, 1, "admission cache must carry the persisted version");
+        assert_eq!(
+            cached_v, 1,
+            "admission cache must carry the persisted version"
+        );
         assert_eq!(cached_rev, 1);
 
         // Parent step parks at the manual wait and carries the child in the
         // same commit: the child clock advances and the cache is RELOADED.
         let outcome = engine.run_step(&session_id).await.expect("parent step");
         assert!(
-            matches!(outcome, StepOutcome::WaitingForInput { .. } | StepOutcome::Paused { .. }),
+            matches!(
+                outcome,
+                StepOutcome::WaitingForInput { .. } | StepOutcome::Paused { .. }
+            ),
             "manual wait outcome, got {outcome:?}"
         );
         let (cached_v, cached_rev) = cached_child(&engine, &session_id.0, &child_id.0)
             .await
             .expect("child cached after parent commit");
         let persisted_v = persisted_child_gv(&pool, &child_id.0).await;
-        assert_eq!(persisted_v, 2, "carried child clock advanced by the parent commit");
-        assert_eq!(cached_v, u64::try_from(persisted_v).unwrap(), "cached child version must equal the persisted clock");
-        assert_eq!(cached_rev, 2, "cached child revision must equal the persisted revision");
+        assert_eq!(
+            persisted_v, 2,
+            "carried child clock advanced by the parent commit"
+        );
+        assert_eq!(
+            cached_v,
+            u64::try_from(persisted_v).unwrap(),
+            "cached child version must equal the persisted clock"
+        );
+        assert_eq!(
+            cached_rev, 2,
+            "cached child revision must equal the persisted revision"
+        );
 
         // Continuation path: craft the nested child-wait record (parent waits
         // ON the child) and continue with the exact token. The root+child
@@ -8106,9 +8121,19 @@ mod tests {
             .await
             .expect("child cached after continuation");
         let persisted_v = persisted_child_gv(&pool, &child_id.0).await;
-        assert_eq!(persisted_v, 3, "continuation commit advanced the child clock");
-        assert_eq!(cached_v, u64::try_from(persisted_v).unwrap(), "cached child version must track the persisted clock");
-        assert_eq!(cached_rev, 3, "cached child revision must track the persisted revision");
+        assert_eq!(
+            persisted_v, 3,
+            "continuation commit advanced the child clock"
+        );
+        assert_eq!(
+            cached_v,
+            u64::try_from(persisted_v).unwrap(),
+            "cached child version must track the persisted clock"
+        );
+        assert_eq!(
+            cached_rev, 3,
+            "cached child revision must track the persisted revision"
+        );
     }
 
     /// T1 review gap 5: a real SQLite winner/loser race through the engine
@@ -8130,7 +8155,7 @@ mod tests {
 
         #[async_trait]
         impl Task for CompetingWinnerTask {
-            fn id(&self) -> &str {
+            fn id(&self) -> &'static str {
                 "competing_winner_task"
             }
 
@@ -8138,8 +8163,7 @@ mod tests {
                 &self,
                 context: graph_flow::Context,
             ) -> Result<TaskResult, graph_flow::GraphError> {
-                self.calls
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 // The engine seeds the durable run identity into the context
                 // at session start; the racing task reads it from there.
                 let session_id: String = context
@@ -8148,8 +8172,7 @@ mod tests {
                 // The competing writer wins the workflow CAS mid-step: the
                 // losing drive marked the step in flight (revision 1 -> 2)
                 // before the runner loaded, so the winner anchors at 2.
-                let mut winner =
-                    graph_flow::Session::new_from_task(session_id.clone(), "winner-task");
+                let winner = graph_flow::Session::new_from_task(session_id.clone(), "winner-task");
                 winner
                     .context
                     .set("_session_id", session_id.clone())
@@ -8175,7 +8198,10 @@ mod tests {
                             "fixture winner commit failed: {e}"
                         ))
                     })?;
-                Ok(TaskResult::new(Some("done".to_string()), NextAction::Continue))
+                Ok(TaskResult::new(
+                    Some("done".to_string()),
+                    NextAction::Continue,
+                ))
             }
         }
 
@@ -8221,7 +8247,9 @@ mod tests {
             .await
             .expect_err("the losing drive must surface the graph-save conflict");
         let conflict = match &err {
-            EngineError::StepFailed { source, witness, .. } => {
+            EngineError::StepFailed {
+                source, witness, ..
+            } => {
                 assert!(
                     witness.owned_graph_version.is_some(),
                     "graph-save conflict must carry a graph-clock witness"
@@ -8263,7 +8291,10 @@ mod tests {
             .await
             .expect("load_run")
             .expect("record");
-        assert_eq!(record.state_revision, 3, "winner revision retained (1 start + 1 mark + 1 win)");
+        assert_eq!(
+            record.state_revision, 3,
+            "winner revision retained (1 start + 1 mark + 1 win)"
+        );
         assert_eq!(record.status, SessionStatus::Running);
     }
 }

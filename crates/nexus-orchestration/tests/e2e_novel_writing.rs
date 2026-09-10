@@ -46,7 +46,8 @@ async fn seed_novel_writing_preset_input(
     ctx.set(
         "preset.input.topic",
         "AI consciousness in a near-future city",
-    ).unwrap();
+    )
+    .unwrap();
     ctx.set("preset.input.vibe", "literary").unwrap();
     ctx.set("preset.input.work_ref", "e2e-test-novel").unwrap();
     ctx.set("preset.input.work_id", "wrk_e2e_test").unwrap();
@@ -57,11 +58,13 @@ async fn seed_novel_writing_preset_input(
     ctx.set(
         "preset.input.outline_path",
         "Works/e2e-test-novel/Outlines/chapters/ch01-outline.md",
-    ).unwrap();
+    )
+    .unwrap();
     ctx.set(
         "preset.input.body_path",
         "Works/e2e-test-novel/Stories/ch01-ch01.md",
-    ).unwrap();
+    )
+    .unwrap();
     ctx.set("preset.input.slug", "ch01").unwrap();
     // V1.40 P2 (QC1-C001 fix): seed world_kb_block so strict-mode template
     // rendering does not fail. Worldless e2e tests use empty string.

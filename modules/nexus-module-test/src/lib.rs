@@ -46,7 +46,9 @@ use std::collections::HashMap;
 use std::fmt;
 
 use nexus_module_sdk::{ComputeInput, ComputeOutput, HostFunction, ModuleManifest};
-use wasmtime::{Caller, Config, Engine, Extern, Instance, Linker, Memory, Module, Store, TypedFunc};
+use wasmtime::{
+    Caller, Config, Engine, Extern, Instance, Linker, Memory, Module, Store, TypedFunc,
+};
 
 /// Sentinel returned by host functions when the lookup yields nothing
 /// (mirrors `nexus-wasm-host::host::RET_NOT_FOUND`).

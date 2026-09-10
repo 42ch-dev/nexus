@@ -12,7 +12,9 @@
 //! End-to-end dispatch latency is covered by the concurrent dispatch tests
 //! in `host_tool_executor.rs`.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
+
+use criterion::{criterion_group, criterion_main, Criterion};
 use nexus_daemon_runtime::capability_registry::host_tool_registry;
 
 // `build_registry` is `pub(crate)`, accessible from benchmarks in the same crate.

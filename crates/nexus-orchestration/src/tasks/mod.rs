@@ -237,7 +237,8 @@ impl Task for InnerGraphTask {
         context.set("_child_wait_task", Value::Null)?;
 
         // 1. Read the parent session ID from context.
-        let parent_session_id: String = context.get(&self.parent_session_id_key).unwrap_or_default();
+        let parent_session_id: String =
+            context.get(&self.parent_session_id_key).unwrap_or_default();
 
         if parent_session_id.is_empty() {
             return Err(graph_flow::GraphError::TaskExecutionFailed(
@@ -698,7 +699,9 @@ impl LlmExtractTask {
         // V1.55 P2 fix-wave (F-001): read work_profile from context so the
         // extraction path produces profile-aware payloads. Defaults to "novel"
         // for backward compatibility with existing callers.
-        let work_profile: String = context.get("work_profile").unwrap_or_else(|| "novel".to_string());
+        let work_profile: String = context
+            .get("work_profile")
+            .unwrap_or_else(|| "novel".to_string());
 
         // 3. Use the shared extraction path (closes R-V151Q3-W001).
         Ok(crate::quality_loop::run_llm_extract(
@@ -1260,6 +1263,10 @@ impl StateCompositeTask {
     /// `gate_park_live(data, current_task_id)`, never the any-key chain test,
     /// so a manual wait reached through a labeled/conditional path with stale
     /// or broad join keys keeps its fresh retained A4 token.
+    ///
+    /// # Errors
+    /// Returns `graph_flow::GraphError` when persisting the updated arrival
+    /// set into the context fails.
     pub fn record_converge_arrival(
         context: &graph_flow::Context,
         target: &str,
@@ -1329,7 +1336,7 @@ impl StateCompositeTask {
     /// `gate` is `"merge"` or `"converge"`; `arrived`/`expected` are the
     /// arrival counts observed on the timing-out tick. Returns `Ok(None)`
     /// when the join may keep waiting.
-    async fn join_timeout_tick(
+    fn join_timeout_tick(
         &self,
         context: &graph_flow::Context,
         gate: &'static str,
@@ -1340,7 +1347,7 @@ impl StateCompositeTask {
             return Ok(None);
         };
         let wait_start_key = format!("_join_wait_start_{}", self.id);
-        let wait_start: u64 = if let Some(t) = context.get(&wait_start_key){
+        let wait_start: u64 = if let Some(t) = context.get(&wait_start_key) {
             t
         } else {
             let now = self.clock.now_ms();
@@ -1412,7 +1419,7 @@ impl StateCompositeTask {
                 self.inject_registry_refresh_context(context).await?;
             }
             if cache.needs_workspace {
-                self.inject_workspace_context(context).await?;
+                self.inject_workspace_context(context)?;
             }
         }
         Ok(())
@@ -1431,7 +1438,9 @@ impl StateCompositeTask {
         context: &graph_flow::Context,
     ) -> graph_flow::Result<()> {
         // Check if we already have registry output (avoid redundant invocation).
-        if context.get::<serde_json::Value>("__registry_refresh_output").is_some()
+        if context
+            .get::<serde_json::Value>("__registry_refresh_output")
+            .is_some()
         {
             tracing::debug!("registry.refresh skipped: cached output already present in context");
             return Ok(());
@@ -1497,12 +1506,13 @@ impl StateCompositeTask {
     /// V1.58 P2 (R-V156P3-W001): emits a `tracing::debug!` span so operators
     /// can trace what workspace context was injected into which schedule tick
     /// (previously this path had zero tracing).
-    async fn inject_workspace_context(
-        &self,
-        context: &graph_flow::Context,
-    ) -> graph_flow::Result<()> {
+    fn inject_workspace_context(&self, context: &graph_flow::Context) -> graph_flow::Result<()> {
+        // Synchronous by design: the workspace snapshot is already in memory
+        // (`self.workspace_state`), so no `.await` point exists here.
         // Check if already injected (avoid clobbering).
-        if context.get::<serde_json::Value>("__workspace_state").is_some()
+        if context
+            .get::<serde_json::Value>("__workspace_state")
+            .is_some()
         {
             tracing::debug!(
                 "workspace context injection skipped: __workspace_state already present"
@@ -1594,7 +1604,7 @@ fn build_context_json(context: &graph_flow::Context) -> serde_json::Value {
 
     // Include known orchestration keys.
     for key in &known_keys {
-        if let Some(val) = context.get::<serde_json::Value>(key){
+        if let Some(val) = context.get::<serde_json::Value>(key) {
             map.insert(key.to_string(), val);
         }
     }
@@ -1620,7 +1630,7 @@ fn build_context_json(context: &graph_flow::Context) -> serde_json::Value {
     }
 
     // V1.56 P3: expose registry.refresh output as a nested object.
-    if let Some(reg_output) = context.get::<serde_json::Value>("__registry_refresh_output"){
+    if let Some(reg_output) = context.get::<serde_json::Value>("__registry_refresh_output") {
         // Translate camelCase capability output fields to snake_case
         // context fields for expression grammar consistency.
         let reg_obj = registry_output_to_context(&reg_output);
@@ -1628,7 +1638,7 @@ fn build_context_json(context: &graph_flow::Context) -> serde_json::Value {
     }
 
     // V1.56 P3: expose workspace session state as a nested object.
-    if let Some(ws_state) = context.get::<serde_json::Value>("__workspace_state"){
+    if let Some(ws_state) = context.get::<serde_json::Value>("__workspace_state") {
         map.insert("workspace".to_string(), ws_state);
     }
 
@@ -1744,10 +1754,12 @@ impl Task for StateCompositeTask {
             if !condition_met {
                 // DR-06: bounded join — reroute or fail typed when the
                 // deadline has elapsed (no-op when timeout_ms is absent).
-                if let Some(timeout_result) = self
-                    .join_timeout_tick(&context, "merge", arrived_count, self.expected_incoming)
-                    .await?
-                {
+                if let Some(timeout_result) = self.join_timeout_tick(
+                    &context,
+                    "merge",
+                    arrived_count,
+                    self.expected_incoming,
+                )? {
                     return Ok(timeout_result);
                 }
                 let state_id = self.id.clone();
@@ -1805,9 +1817,8 @@ impl Task for StateCompositeTask {
                     let state_id = self.id.clone();
                     // DR-06: bounded join — reroute or fail typed when the
                     // deadline has elapsed (no-op when timeout_ms is absent).
-                    if let Some(timeout_result) = self
-                        .join_timeout_tick(&context, "converge", arrived_count, expected)
-                        .await?
+                    if let Some(timeout_result) =
+                        self.join_timeout_tick(&context, "converge", arrived_count, expected)?
                     {
                         return Ok(timeout_result);
                     }
@@ -1854,7 +1865,7 @@ impl Task for StateCompositeTask {
         // Guarded on `timeout_ms` so states without bounded-join fields
         // keep writing no tracking keys (byte-identical behaviour, e2e (e)).
         if self.timeout_ms.is_some() {
-            context.set(&format!("_join_wait_start_{}", self.id), Value::Null)?;
+            context.set(format!("_join_wait_start_{}", self.id), Value::Null)?;
         }
 
         // 1. Process enter actions.
@@ -1892,10 +1903,10 @@ impl Task for StateCompositeTask {
                         obj.remove("_creator_id");
                         obj.remove("_session_id");
 
-                        if let Some(creator_id) = context.get::<String>("_creator_id"){
+                        if let Some(creator_id) = context.get::<String>("_creator_id") {
                             obj.insert("_creator_id".into(), Value::String(creator_id));
                         }
-                        if let Some(session_id) = context.get::<String>("_session_id"){
+                        if let Some(session_id) = context.get::<String>("_session_id") {
                             obj.insert("_session_id".into(), Value::String(session_id));
                         }
                     }
@@ -2053,7 +2064,8 @@ impl Task for StateCompositeTask {
                                         // Return the previous judge result.
                                         let prev_result: bool =
                                             context.get("_judge_result").unwrap_or(false);
-                                        let prev_reason: String = context.get("_judge_reason").unwrap_or_else(|| {
+                                        let prev_reason: String =
+                                            context.get("_judge_reason").unwrap_or_else(|| {
                                                 "min_interval throttle: reusing previous result"
                                                     .to_string()
                                             });
@@ -2281,7 +2293,7 @@ impl InnerGraphNodeTask {
     /// `default` run id. The engine seeds `_session_id` at run admission;
     /// its absence means the node is being executed outside a trusted run
     /// context.
-    async fn resolve_session_id(
+    fn resolve_session_id(
         &self,
         context: &graph_flow::Context,
     ) -> Result<String, graph_flow::GraphError> {
@@ -2310,7 +2322,7 @@ impl Task for InnerGraphNodeTask {
     ) -> Result<TaskResult, graph_flow::GraphError> {
         // Resolve session_id for this node (WS-E T5). M-002: a missing
         // trusted identity refuses the node execution.
-        let session_id = self.resolve_session_id(&context).await?;
+        let session_id = self.resolve_session_id(&context)?;
 
         // If we have a prompt executor, delegate to AcpPromptTask.
         if let Some(executor) = &self.executor {
@@ -2332,7 +2344,9 @@ impl Task for InnerGraphNodeTask {
             // `state.<node>.output`; mirror it into the node-namespaced keys
             // so existing output_binding values keep working after the P1
             // prompt-executor cutover.
-            let text: String = context.get(&format!("state.{}.output", self.id)).unwrap_or_default();
+            let text: String = context
+                .get(&format!("state.{}.output", self.id))
+                .unwrap_or_default();
             if !text.is_empty() {
                 context.set(format!("nodes.{}.output", self.id), text.clone())?;
                 context.set(format!("nodes.{}.text", self.id), text)?;
@@ -3055,8 +3069,7 @@ mod tests {
                 CapabilityRegistry::with_builtins(),
             )),
         );
-        let inner_graph =
-        graph_flow::GraphBuilder::new("test_inner")
+        let inner_graph = graph_flow::GraphBuilder::new("test_inner")
             .add_task(std::sync::Arc::new(InnerGraphNodeTask::new("n1")))
             .build()
             .expect("test graph build");
@@ -3287,7 +3300,8 @@ mod tests {
         ctx.set(
             "chapter_prose".to_string(),
             "Lin Xia drew her blade.".to_string(),
-        ).unwrap();
+        )
+        .unwrap();
 
         let outcome = task.evaluate(&ctx).await.unwrap();
         let candidates = match outcome {
@@ -3414,8 +3428,10 @@ mod tests {
         ctx.set(
             "chapter_prose".to_string(),
             "The Ironfang Legion marched through the gates at dawn.".to_string(),
-        ).unwrap();
-        ctx.set("work_profile".to_string(), "game_bible".to_string()).unwrap();
+        )
+        .unwrap();
+        ctx.set("work_profile".to_string(), "game_bible".to_string())
+            .unwrap();
 
         let outcome = task.evaluate(&ctx).await.unwrap();
         let candidates = match outcome {
@@ -3823,7 +3839,8 @@ mod tests {
         let reg = Arc::new(CapabilityRegistry::with_builtins());
         let task = CapabilityTask { registry: reg };
         let ctx = graph_flow::Context::new();
-        ctx.set("_capability_name", "nonexistent.capability").unwrap();
+        ctx.set("_capability_name", "nonexistent.capability")
+            .unwrap();
         let result = task.run(ctx).await;
         assert!(result.is_err());
     }
@@ -3992,7 +4009,9 @@ mod tests {
 
         let ctx = graph_flow::Context::new();
         let task = AcpPromptTask::new(
-            Some(std::sync::Arc::new(MarkerObservingExecutor { ctx: ctx.clone() })),
+            Some(std::sync::Arc::new(MarkerObservingExecutor {
+                ctx: ctx.clone(),
+            })),
             session_cancels_with("default"),
             "state-1",
             "test prompt",
@@ -4421,7 +4440,8 @@ mod tests {
         ctx.set(
             "state.synthesizing.output",
             serde_json::to_string(&brief).unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
 
         let result = task.run(ctx.clone()).await.unwrap();
         assert!(
@@ -4430,8 +4450,7 @@ mod tests {
         );
 
         // Verify the capability received RENDERED args
-        let cap_input: serde_json::Value =
-            ctx.get("_capability_input").unwrap_or(Value::Null);
+        let cap_input: serde_json::Value = ctx.get("_capability_input").unwrap_or(Value::Null);
         assert_eq!(
             cap_input["workId"], "wrk_rendered_123",
             "workId should be rendered, not literal '{{preset.input.work_id}}': {cap_input}"
@@ -4713,7 +4732,8 @@ mod tests {
         );
 
         // With 1 arrival → should still wait (wait-all needs all 2).
-        ctx.set("_merge_merged", serde_json::json!(["label_a"])).unwrap();
+        ctx.set("_merge_merged", serde_json::json!(["label_a"]))
+            .unwrap();
         let result = task.run(ctx.clone()).await.unwrap();
         assert!(
             matches!(result.next_action, NextAction::WaitForInput),
@@ -4722,7 +4742,8 @@ mod tests {
         );
 
         // With 2 arrivals → should continue.
-        ctx.set("_merge_merged", serde_json::json!(["label_a", "label_b"])).unwrap();
+        ctx.set("_merge_merged", serde_json::json!(["label_a", "label_b"]))
+            .unwrap();
         let result = task.run(ctx.clone()).await.unwrap();
         assert!(
             matches!(result.next_action, NextAction::Continue),
@@ -4820,7 +4841,8 @@ mod tests {
                 "fetchTimeoutMs": 10000,
                 "maxRetries": 3,
             }),
-        ).unwrap();
+        )
+        .unwrap();
 
         let result = task.run(ctx).await.unwrap();
 
@@ -4857,7 +4879,8 @@ mod tests {
                 "fetchTimeoutMs": 10000,
                 "maxRetries": 3,
             }),
-        ).unwrap();
+        )
+        .unwrap();
 
         let result = task.run(ctx).await.unwrap();
 
@@ -4894,7 +4917,8 @@ mod tests {
                 "fetchTimeoutMs": 0,
                 "maxRetries": 0,
             }),
-        ).unwrap();
+        )
+        .unwrap();
 
         let result = task.run(ctx).await.unwrap();
 
@@ -4931,7 +4955,8 @@ mod tests {
                 "fetchTimeoutMs": 0,
                 "maxRetries": 0,
             }),
-        ).unwrap();
+        )
+        .unwrap();
 
         let result = task.run(ctx).await.unwrap();
 
@@ -4966,7 +4991,8 @@ mod tests {
                 "changes_applied": 0,
                 "workspace_root": "/tmp/ws"
             }),
-        ).unwrap();
+        )
+        .unwrap();
 
         let result = task.run(ctx).await.unwrap();
 
@@ -4998,7 +5024,8 @@ mod tests {
                 "changes_applied": 0,
                 "workspace_root": "/tmp/ws"
             }),
-        ).unwrap();
+        )
+        .unwrap();
 
         let result = task.run(ctx).await.unwrap();
 
@@ -5030,7 +5057,8 @@ mod tests {
                 "changes_applied": 5,
                 "workspace_root": "/tmp/ws"
             }),
-        ).unwrap();
+        )
+        .unwrap();
 
         let result = task.run(ctx).await.unwrap();
 
@@ -5062,7 +5090,8 @@ mod tests {
                 "changes_applied": 2,
                 "workspace_root": "/tmp/ws"
             }),
-        ).unwrap();
+        )
+        .unwrap();
 
         let result = task.run(ctx).await.unwrap();
 

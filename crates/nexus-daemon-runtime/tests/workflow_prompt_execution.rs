@@ -43,7 +43,7 @@ use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
 use nexus_orchestration::{CapabilityRegistryHolder, SessionId};
 use tempfile::TempDir;
 
-use graph_flow::{FlowRunner, Graph, Session as GraphSession, SessionStorage, Task};
+use graph_flow::{FlowRunner, Session as GraphSession, SessionStorage, Task};
 
 const FIXTURE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -1062,7 +1062,9 @@ async fn nested_inner_graph_prompt_executes_with_child_identity() {
     );
     let parent_session = GraphSession::new_from_task(parent_sid.clone(), "parent_state");
     parent_session
-        .context.set("_session_id", parent_sid.clone()).unwrap();
+        .context
+        .set("_session_id", parent_sid.clone())
+        .unwrap();
     let mut agent_bindings = HashMap::new();
     agent_bindings.insert(
         "default".to_string(),
@@ -1111,12 +1113,12 @@ async fn nested_inner_graph_prompt_executes_with_child_identity() {
         .with_prompt_executor(Some(executor.clone() as Arc<dyn PromptExecutor>))
         .with_session_cancels(node_cancels.clone());
     let inner_graph = Arc::new(
-    graph_flow::GraphBuilder::new("inner_graph")
-        .add_task(Arc::new(prompt_node))
-        .add_task(Arc::new(EndTask))
-        .add_edge("n1", "end_task")
-        .build()
-        .expect("test graph build"),
+        graph_flow::GraphBuilder::new("inner_graph")
+            .add_task(Arc::new(prompt_node))
+            .add_task(Arc::new(EndTask))
+            .add_edge("n1", "end_task")
+            .build()
+            .expect("test graph build"),
     );
 
     // Parent graph whose start task is an InnerGraphTask over that graph.
@@ -1130,12 +1132,12 @@ async fn nested_inner_graph_prompt_executes_with_child_identity() {
         None,
     );
     let parent_graph = Arc::new(
-    graph_flow::GraphBuilder::new("parent_graph")
-        .add_task(Arc::new(inner_task))
-        .add_task(Arc::new(EndTask))
-        .add_edge("parent_state", "end_task")
-        .build()
-        .expect("test graph build"),
+        graph_flow::GraphBuilder::new("parent_graph")
+            .add_task(Arc::new(inner_task))
+            .add_task(Arc::new(EndTask))
+            .add_edge("parent_state", "end_task")
+            .build()
+            .expect("test graph build"),
     );
 
     // Register the parent runner AFTER the graph is fully wired (the runner
@@ -1215,7 +1217,8 @@ async fn nested_inner_graph_prompt_executes_with_child_identity() {
     let child_ctx_id: String = child_session.context.get("_session_id").unwrap();
     assert_eq!(child_ctx_id, child.session_id.0);
     let child_output: String = child_session
-        .context.get("state.n1.output")
+        .context
+        .get("state.n1.output")
         .expect("child prompt output");
     assert_eq!(child_output, "transformed:hello from outer");
 

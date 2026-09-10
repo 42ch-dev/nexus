@@ -59,8 +59,8 @@ use nexus_daemon_runtime::api::auth_middleware::DaemonApiConfig;
 use nexus_daemon_runtime::api::create_router;
 use nexus_daemon_runtime::connect::{
     peer_tool_table, spawn_accept_loop, ws_config, PeerConfigHolder, PeerConfigSnapshot,
-    PeerResponderOptions,
-    PeerSessionManager, PeerToolsConfig, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES,
+    PeerResponderOptions, PeerSessionManager, PeerToolsConfig, WsTransport,
+    DEFAULT_MAX_ENVELOPE_BYTES,
 };
 use nexus_daemon_runtime::test_utils::{self, TestTempRoot};
 use nexus_daemon_runtime::workspace::WorkspaceState;

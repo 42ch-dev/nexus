@@ -33,9 +33,10 @@
 //!
 //! Run with: `cargo bench -p nexus-orchestration --bench registry_refresh_latency`
 
+use std::hint::black_box;
 use std::time::Duration;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use nexus_orchestration::capability::{
     builtins::registry::{CdnConfig, RegistryRefresh, DEFAULT_MAX_CDN_BODY_SIZE},
     Capability,

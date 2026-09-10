@@ -118,7 +118,8 @@ async fn converge_timeout_reroutes_to_on_timeout_and_clears_arrivals() {
         result.next_action
     );
     assert!(
-        ctx.get::<Vec<String>>("_converge_arrivals_join_a").is_some(),
+        ctx.get::<Vec<String>>("_converge_arrivals_join_a")
+            .is_some(),
         "arrival must survive while inside the deadline"
     );
 
@@ -132,10 +133,13 @@ async fn converge_timeout_reroutes_to_on_timeout_and_clears_arrivals() {
     );
     // Arrivals key cleared for the next cycle + context note written.
     assert!(
-        ctx.get::<HashSet<String>>("_converge_arrivals_join_a").is_none(),
+        ctx.get::<HashSet<String>>("_converge_arrivals_join_a")
+            .is_none(),
         "arrivals key must be cleared on timeout reroute"
     );
-    let note: String = ctx.get("_join_timeout_note").expect("context note written on reroute");
+    let note: String = ctx
+        .get("_join_timeout_note")
+        .expect("context note written on reroute");
     assert!(
         note.contains("timeout_handler"),
         "note names the target: {note}"
@@ -176,7 +180,8 @@ async fn converge_timeout_without_on_timeout_fails_typed_not_wait() {
     assert!(msg.contains("elapsed_ms=101"), "names elapsed: {msg}");
     // F-004 (qc2): the typed-fail path also clears arrivals + wait-start.
     assert!(
-        ctx.get::<HashSet<String>>("_converge_arrivals_join_b").is_none(),
+        ctx.get::<HashSet<String>>("_converge_arrivals_join_b")
+            .is_none(),
         "typed fail must clear the converge arrivals key"
     );
     assert!(

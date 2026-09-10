@@ -444,8 +444,7 @@ fn is_entrance_value(value: &str) -> bool {
 /// validation — plan QC S-1): the web side fail-opens to `content-creator`.
 #[tauri::command]
 fn get_entrance() -> Result<String, String> {
-    let path = nexus_config_path()
-        .ok_or_else(|| "cannot determine home directory".to_string())?;
+    let path = nexus_config_path().ok_or_else(|| "cannot determine home directory".to_string())?;
     get_entrance_at(&path)
 }
 
@@ -527,12 +526,6 @@ fn write_setup_completed_at(path: &Path, value: bool) -> anyhow::Result<()> {
     std::fs::write(path, doc.to_string())?;
     Ok(())
 }
-
-fn read_entrance() -> Option<String> {
-    let path = nexus_config_path()?;
-    read_entrance_at(&path).ok()?
-}
-
 fn read_entrance_at(path: &Path) -> anyhow::Result<Option<String>> {
     let content = std::fs::read_to_string(path)?;
     #[derive(serde::Deserialize, Default)]
@@ -1224,8 +1217,8 @@ mod tests {
         default_workspace_root, get_entrance_at, guard_path, read_agent_profile_at,
         read_entrance_at, read_setup_completed_at, reset_local_database_at,
         resolve_workspace_root_at, setup_auto_starts_sidecar, switch_active_creator_at,
-        validate_url_scheme, write_agent_profile_at, write_entrance_at,
-        write_setup_completed_at, write_workspace_path_at, write_workspace_path_by_creator_at,
+        validate_url_scheme, write_agent_profile_at, write_entrance_at, write_setup_completed_at,
+        write_workspace_path_at, write_workspace_path_by_creator_at,
         write_workspace_path_for_active_creator_at, AgentProfile, PathGuardError, WorkspaceRoot,
     };
     use super::{ensure_setup_bootstrap_at, generate_local_creator_id, read_bootstrap_state};
@@ -1493,11 +1486,8 @@ mod tests {
     fn entrance_missing_field_reads_none() {
         let tmp = tempfile::tempdir().expect("temp dir");
         let config_path = tmp.path().join("config.toml");
-        std::fs::write(
-            &config_path,
-            "workspace_path = \"/existing/workspace\"\n",
-        )
-        .expect("write config without entrance");
+        std::fs::write(&config_path, "workspace_path = \"/existing/workspace\"\n")
+            .expect("write config without entrance");
 
         assert_eq!(
             read_entrance_at(&config_path).unwrap(),

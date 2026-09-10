@@ -167,8 +167,7 @@ async fn agent_tool_e2e_host_tool_call_task_round_trip() {
     assert!(result.is_ok(), "HostToolCallTask should succeed");
 
     // Check context has the result stored
-    let stored: Option<serde_json::Value> =
-        context.get("host_tool.check_schedule_status.result");
+    let stored: Option<serde_json::Value> = context.get("host_tool.check_schedule_status.result");
     assert!(stored.is_some(), "result should be stored in context");
     let stored = stored.unwrap();
     assert_eq!(stored["work_id"].as_str(), Some(work_id.as_str()));

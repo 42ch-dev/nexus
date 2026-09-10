@@ -164,13 +164,12 @@ async fn spawn_child_and_get_context() {
     // Create a simple inner graph.
     // A1: the node resolves its cancellation token from this map.
     let session_cancels = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
-    let inner =
-    graph_flow::GraphBuilder::new("test_child")
+    let inner = graph_flow::GraphBuilder::new("test_child")
         .add_task(std::sync::Arc::new(
-        nexus_orchestration::tasks::InnerGraphNodeTask::new("x")
-            .with_prompt_executor(Some(Arc::new(EchoExecutor)))
-            .with_session_cancels(session_cancels.clone()),
-    ))
+            nexus_orchestration::tasks::InnerGraphNodeTask::new("x")
+                .with_prompt_executor(Some(Arc::new(EchoExecutor)))
+                .with_session_cancels(session_cancels.clone()),
+        ))
         .build()
         .expect("test graph build");
 

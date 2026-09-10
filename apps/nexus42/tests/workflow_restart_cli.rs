@@ -777,7 +777,8 @@ async fn restart_durable_status_converge_merge_redrives_after_reopen() {
         Some(dispatch.clone()),
         None,
         engine.shared_state().session_cancels.clone(),
-    ).expect("wired outer graph builds");
+    )
+    .expect("wired outer graph builds");
     let runner = Arc::new(graph_flow::FlowRunner::new(
         Arc::new(wired),
         dyn_storage.clone(),
@@ -915,7 +916,8 @@ async fn restart_durable_status_converge_merge_redrives_after_reopen() {
         Some(dispatch.clone()),
         None,
         engine_c.shared_state().session_cancels.clone(),
-    ).expect("wired outer graph builds");
+    )
+    .expect("wired outer graph builds");
     let runner_c = Arc::new(graph_flow::FlowRunner::new(
         Arc::new(wired_c),
         dyn_storage_c.clone(),
@@ -1044,7 +1046,8 @@ async fn restart_durable_status_engine_parked_join_redrives_after_reopen() {
         None,
         None,
         engine.shared_state().session_cancels.clone(),
-    ).expect("wired outer graph builds");
+    )
+    .expect("wired outer graph builds");
     let runner = Arc::new(graph_flow::FlowRunner::new(
         Arc::new(wired),
         dyn_storage.clone(),

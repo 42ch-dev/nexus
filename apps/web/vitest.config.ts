@@ -57,8 +57,8 @@ export default defineConfig({
   oxc: { target: 'esnext' },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
-      '@config': path.resolve(__dirname, './config'),
+      '@': path.resolve(import.meta.dirname, './src'),
+      '@config': path.resolve(import.meta.dirname, './config'),
     },
   },
   test: {

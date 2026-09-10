@@ -913,7 +913,6 @@ mod tests {
                 .await
         }
 
-
         async fn commit_transition_with_graph_fence(
             &self,
             session_id: &nexus_orchestration::engine::SessionId,

@@ -1919,7 +1919,7 @@ async fn cancel_running_session_invalidating_graph(
         now,
         sid
     )
-    .execute(&*pool)
+    .execute(pool)
     .await
     .map_err(|e| NexusApiError::Internal {
         code: "SESSION_CANCEL_ERROR".into(),
@@ -1934,7 +1934,7 @@ async fn cancel_running_session_invalidating_graph(
                  WHERE session_id = ? AND status = 'running'",
             sid
         )
-        .fetch_optional(&*pool)
+        .fetch_optional(pool)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".into(),

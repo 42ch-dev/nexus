@@ -828,7 +828,10 @@ mod tests {
         let rejected = serde_json::from_value::<ListChaptersQuery>(serde_json::json!({
             "limit": 0
         }));
-        assert!(rejected.is_err(), "limit=0 must fail NonZeroU64 deserialization");
+        assert!(
+            rejected.is_err(),
+            "limit=0 must fail NonZeroU64 deserialization"
+        );
         // The lower boundary value still deserializes and reaches the handler.
         let accepted = serde_json::from_value::<ListChaptersQuery>(serde_json::json!({
             "limit": 1

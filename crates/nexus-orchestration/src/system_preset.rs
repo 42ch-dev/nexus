@@ -120,6 +120,10 @@ impl Task for PresetCapabilityTask {
 /// graph-flow 0.8: assembled through the consuming `GraphBuilder`; the fixed
 /// internal topology below is an invariant, so `build()` failure is a bug,
 /// not user input — a checked `expect` documents that invariant.
+///
+/// # Panics
+/// Panics when the fixed `_system.maintenance` topology fails to build —
+/// an internal invariant violation, never user input.
 #[must_use]
 pub fn build(registry: Arc<CapabilityRegistry>) -> Arc<Graph> {
     let sync_pull = PresetCapabilityTask::new("sync.pull", "sync_pull", registry.clone());

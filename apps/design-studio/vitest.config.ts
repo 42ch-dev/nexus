@@ -17,32 +17,32 @@ export default defineConfig({
     alias: {
       // web components import @/lib/utils — resolve it to apps/web before the
       // general `@` -> design-studio/src alias catches it (matches vite.config.ts).
-      '@/lib/utils': path.resolve(__dirname, '../web/src/lib/utils'),
+      '@/lib/utils': path.resolve(import.meta.dirname, '../web/src/lib/utils'),
       // Studio imports web's English source locale catalogs for its own i18next
       // instance (matches vite.config.ts).
-      '@web-locales/en': path.resolve(__dirname, '../web/src/locales/en'),
+      '@web-locales/en': path.resolve(import.meta.dirname, '../web/src/locales/en'),
       // Presentational app modules (e.g. daemon-ready-splash) reach into
       // apps/web UI primitives via @/components/ui/*. Mirror that alias so
       // Studio tests can import the presentational module without duplicating it.
-      '@/components/ui': path.resolve(__dirname, '../web/src/components/ui'),
-      '@': path.resolve(__dirname, './src'),
-      '@web-ui': path.resolve(__dirname, '../web/src/components/ui'),
-      '@web-setup': path.resolve(__dirname, '../web/src/components/setup'),
+      '@/components/ui': path.resolve(import.meta.dirname, '../web/src/components/ui'),
+      '@': path.resolve(import.meta.dirname, './src'),
+      '@web-ui': path.resolve(import.meta.dirname, '../web/src/components/ui'),
+      '@web-setup': path.resolve(import.meta.dirname, '../web/src/components/setup'),
       // Gallery-only alias for app-shared layout chrome (V1.107 sidebar/footer/header).
-      '@web-layout': path.resolve(__dirname, '../web/src/components/layout/presentational'),
+      '@web-layout': path.resolve(import.meta.dirname, '../web/src/components/layout/presentational'),
       // Gallery-only alias for app-shared Settings presentational extracts (V1.107 Connection/Setup).
-      '@web-settings': path.resolve(__dirname, '../web/src/components/settings/presentational'),
+      '@web-settings': path.resolve(import.meta.dirname, '../web/src/components/settings/presentational'),
       // Gallery-only alias for app-shared canvas node-chrome extracts (V1.115 NodeChromeShell).
-      '@web-canvas': path.resolve(__dirname, '../web/src/components/canvas/presentational'),
+      '@web-canvas': path.resolve(import.meta.dirname, '../web/src/components/canvas/presentational'),
       // Gallery-only alias for Global Timeline list chrome (V1.124 P2).
       '@web-global-timeline': path.resolve(
-        __dirname,
+        import.meta.dirname,
         '../web/src/components/global-timeline/presentational',
       ),
-      '@web-lib/utils': path.resolve(__dirname, '../web/src/lib/utils'),
+      '@web-lib/utils': path.resolve(import.meta.dirname, '../web/src/lib/utils'),
       // Gallery-only alias for selection submenu presentational component (V1.126 P0).
       '@web-shell': path.resolve(
-        __dirname,
+        import.meta.dirname,
         '../web/src/components/selection-submenu',
       ),
     },

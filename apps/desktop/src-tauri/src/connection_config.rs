@@ -233,7 +233,7 @@ mod tests {
                 }
                 StubResult::Err => Err(keyring::Error::NoEntry),
                 StubResult::ErrOther => Err(keyring::Error::PlatformFailure(Box::new(
-                    std::io::Error::new(std::io::ErrorKind::Other, "keychain unavailable"),
+                    std::io::Error::other("keychain unavailable"),
                 ))),
             }
         }
@@ -292,7 +292,10 @@ mod tests {
             .expect("should have a value");
         assert_eq!(result, r#"{"endpointUrl":"https://x","apiKey":"k"}"#);
         // Native-value precedence: the stale fallback is left untouched.
-        assert_eq!(read_fallback(Some(&isolated.path)).as_deref(), Some("stale"));
+        assert_eq!(
+            read_fallback(Some(&isolated.path)).as_deref(),
+            Some("stale")
+        );
     }
 
     #[test]
@@ -325,8 +328,8 @@ mod tests {
     #[test]
     fn get_returns_none_when_constructor_is_unavailable_and_fallback_is_missing() {
         let isolated = isolated_fallback();
-        let result = get_connection_config_inner(None, Some(&isolated.path))
-            .expect("get should succeed");
+        let result =
+            get_connection_config_inner(None, Some(&isolated.path)).expect("get should succeed");
         assert!(result.is_none());
     }
 
@@ -419,8 +422,7 @@ mod tests {
         let isolated = isolated_fallback();
         write_fallback(Some(&isolated.path), "fallback").expect("write fallback");
 
-        delete_connection_config_inner(None, Some(&isolated.path))
-            .expect("delete should succeed");
+        delete_connection_config_inner(None, Some(&isolated.path)).expect("delete should succeed");
 
         assert!(!isolated.path.exists());
     }

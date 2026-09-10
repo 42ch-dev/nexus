@@ -101,7 +101,10 @@ mod tests {
         let req: ContextAssembleRequestV1 =
             serde_json::from_str(json).expect("deserialization should succeed");
         assert!(!req.include_memory);
-        assert_eq!(req.max_timeline_events.map(|v| v.get()), Some(10));
+        assert_eq!(
+            req.max_timeline_events.map(std::num::NonZero::get),
+            Some(10)
+        );
     }
 
     #[test]

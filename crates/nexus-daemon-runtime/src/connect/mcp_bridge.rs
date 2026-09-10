@@ -49,9 +49,8 @@ use std::sync::Arc;
 
 use crate::connect::visibility::VisibilityPolicy;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode, Implementation,
-    ListToolsResult,
-    PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode,
+    Implementation, ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
@@ -775,7 +774,9 @@ mod tests {
             "server negotiates the requested legacy version"
         );
         assert!(
-            init.get("result").and_then(|r| r.get("resultType")).is_none(),
+            init.get("result")
+                .and_then(|r| r.get("resultType"))
+                .is_none(),
             "initialize result must not carry resultType: {init_line}"
         );
 

@@ -1211,10 +1211,12 @@ pub fn record_input_from_request(
     let belief = BeliefPropositionRaw {
         holder: Some(newtype_wire_string(&req.holder)),
         proposition: Some(newtype_wire_string(&req.proposition)),
-        order: Some(i64::try_from(req.order.get()).map_err(|_| NexusApiError::BadRequest {
-            code: "invalid_input".into(),
-            message: "order exceeds the i64 domain".into(),
-        })?),
+        order: Some(
+            i64::try_from(req.order.get()).map_err(|_| NexusApiError::BadRequest {
+                code: "invalid_input".into(),
+                message: "order exceeds the i64 domain".into(),
+            })?,
+        ),
         truth: req.truth.as_ref().map(enum_wire_string),
         access: req.access.as_ref().map(enum_wire_string),
         representation: req.representation.as_ref().map(enum_wire_string),

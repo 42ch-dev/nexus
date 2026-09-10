@@ -1155,10 +1155,9 @@ fn process_alive(_pid: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        backoff, drain_stderr, format_error_detail, probe_health, probe_port_state,
-        resolve_port, trim_stderr_tail, DaemonState, PortState, HEALTH_PROBE_TIMEOUT,
-        HEALTH_START_TIMEOUT, MAX_RESTART_ATTEMPTS, PORT_FREE_POLL_TIMEOUT,
-        STDERR_TAIL_MAX_BYTES,
+        backoff, drain_stderr, format_error_detail, probe_health, probe_port_state, resolve_port,
+        trim_stderr_tail, DaemonState, PortState, HEALTH_PROBE_TIMEOUT, HEALTH_START_TIMEOUT,
+        MAX_RESTART_ATTEMPTS, PORT_FREE_POLL_TIMEOUT, STDERR_TAIL_MAX_BYTES,
     };
     #[cfg(unix)]
     use super::{process_alive, stop_external_daemon};
@@ -1733,7 +1732,7 @@ mod tests {
     // desktop always-start path can reach Running without a fatal
     // "No active creator" boot failure.
 
-    static CLEAN_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static CLEAN_HOME_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     fn sidecar_target_triple() -> String {
         let arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_else(|_| "aarch64".to_string());
@@ -1836,7 +1835,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn clean_home_nexus42_daemon_reaches_healthy_without_profile() {
-        let _guard = CLEAN_HOME_LOCK.lock().expect("clean home lock");
+        let _guard = CLEAN_HOME_LOCK.lock().await;
         let port = reserve_ephemeral_port();
         let mut daemon = spawn_nexus42_on_clean_home(port);
 
@@ -1872,7 +1871,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn clean_home_creators_tier1_before_profile() {
-        let _guard = CLEAN_HOME_LOCK.lock().expect("clean home lock");
+        let _guard = CLEAN_HOME_LOCK.lock().await;
         let port = reserve_ephemeral_port();
         let _daemon = spawn_nexus42_on_clean_home(port);
 
@@ -1901,7 +1900,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn clean_home_sidecar_manager_attaches_to_running_daemon() {
-        let _guard = CLEAN_HOME_LOCK.lock().expect("clean home lock");
+        let _guard = CLEAN_HOME_LOCK.lock().await;
         let port = reserve_ephemeral_port();
         let _daemon = spawn_nexus42_on_clean_home(port);
 
@@ -2005,7 +2004,7 @@ mod tests {
 
         // handle_crash must detect restart_in_progress and return early
         // WITHOUT clobbering Starting → Stopped.
-        manager.handle_crash(&handle).await;
+        manager.handle_crash(handle).await;
 
         let inner = manager.0.lock().await;
         assert!(
@@ -2032,7 +2031,6 @@ mod tests {
             "PORT_FREE_POLL_TIMEOUT must allow time for socket cleanup (>=1s), got {PORT_FREE_POLL_TIMEOUT:?}"
         );
     }
-
 
     // ── T3: probe_health boundary coverage against reqwest 0.13 ──────────
     // The success path is exercised end-to-end by the clean-home lifecycle
@@ -2065,7 +2063,8 @@ mod tests {
             .expect("test listener should bind");
         let server = tokio::spawn(serve_once(
             listener,
-            "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".to_owned(),
+            "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+                .to_owned(),
         ));
         assert!(probe_health(63411).await.is_none());
         server.await.expect("server task");

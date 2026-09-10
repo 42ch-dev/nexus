@@ -233,7 +233,9 @@ fn inject_character_display_name_trim(rust: &str) -> String {
 }
 
 fn rewrite_unicode_scalar_length_checks(rust: &str) -> String {
-    inject_character_display_name_trim(&rust.replace("value . len ()", "value . chars () . count ()"))
+    inject_character_display_name_trim(
+        &rust.replace("value . len ()", "value . chars () . count ()"),
+    )
 }
 
 /// A path relative to the schemas dir, rendered with POSIX separators, for

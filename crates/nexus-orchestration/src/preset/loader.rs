@@ -1274,6 +1274,10 @@ fn build_outer_graph(
 /// and per-run coordinator cancellation tokens are wired into every inner
 /// graph `acp_prompt` node at wired-graph build time — the loader-only
 /// graphs stay executor-free for validation/test construction.
+///
+/// # Errors
+/// Returns `graph_flow::GraphError` when an inner graph fails to build or the
+/// outer graph topology is invalid.
 #[allow(clippy::needless_pass_by_value, clippy::implicit_hasher)]
 pub fn build_wired_outer_graph(
     loaded: &LoadedPreset,
@@ -2034,7 +2038,8 @@ states:
             .get_task("m")
             .expect("merge state task present in wired graph");
         let ctx = graph_flow::Context::new();
-        ctx.set("_merge_m", vec!["go".to_string()]).expect("context set");
+        ctx.set("_merge_m", vec!["go".to_string()])
+            .expect("context set");
         let result = task.run(ctx).await.expect("merge gate check runs");
 
         assert_eq!(
@@ -3373,7 +3378,7 @@ states:
 
         // When _judge_result is false, find_next_task should return nogo_state.
         let ctx2 = graph_flow::Context::new();
-        ctx2.set("_judge_result", false);
+        ctx2.set("_judge_result", false).unwrap();
         let next2 = loaded.outer_graph.find_next_task("judge_state", &ctx2);
         assert_eq!(
             next2.as_deref(),
