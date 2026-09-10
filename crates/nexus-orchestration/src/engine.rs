@@ -889,7 +889,11 @@ impl EngineSharedState {
             .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
         let expected_revision = record.state_revision;
 
-        if let EngineSignal::CancelAnchored {
+        // Anchored failed-step cleanup: the exact commit-owned clocks the
+        // caller anchored to. Every write of this signal path fences the
+        // graph clock too — a graph-only winner between any load and any
+        // commit of this cleanup is an ownership loss, never an overwrite.
+        let cancel_anchor = if let EngineSignal::CancelAnchored {
             expected_revision: anchor_revision,
             expected_graph_version: anchor_graph,
         } = *signal
@@ -901,7 +905,10 @@ impl EngineSharedState {
                     found: record.state_revision,
                 });
             }
-        }
+            Some((anchor_revision, anchor_graph))
+        } else {
+            None
+        };
 
 
         if record.status.is_terminal() {
@@ -1052,6 +1059,15 @@ impl EngineSharedState {
             // `Interrupted`).
             let interrupted_retry = record.status == SessionStatus::Interrupted;
 
+            // Commit-owned clocks for the anchored chain: start at the
+            // caller's verified anchor and advance ONLY from the
+            // `RunRecord` each successful write returns. Reads verify
+            // (build state/root), never anchor — a later load must not
+            // become the CAS target. `None` in rebase mode (ordinary
+            // Cancel), which keeps the existing load-fenced retry.
+            let mut anchored_clocks: Option<(u64, u64)> = cancel_anchor;
+
+
             // C-001 phase 1: durable cancel-intent fence. Persist
             // `cancel_requested = true` while keeping the status
             // non-terminal — the run is not yet confirmed cancelled. The
@@ -1082,17 +1098,43 @@ impl EngineSharedState {
                         root: &fence_root,
                         children: &[],
                     };
-                    match store
-                        .commit_transition(
-                            session_id,
-                            fence_revision,
-                            fence_checkpoint,
-                            fence_status.clone(),
-                            &fence_state,
-                        )
-                        .await
-                    {
-                        Ok(_) => break,
+                    // Anchored cleanup fences BOTH clocks at the fence
+                    // commit: a graph-only winner between the anchor check
+                    // and this write loses the CAS exactly like a revision
+                    // winner (no rebase is possible in anchored mode).
+                    let fence_result = match cancel_anchor {
+                        Some((_, anchor_graph)) => {
+                            store
+                                .commit_transition_with_graph_fence(
+                                    session_id,
+                                    fence_revision,
+                                    Some(anchor_graph),
+                                    fence_checkpoint,
+                                    fence_status.clone(),
+                                    &fence_state,
+                                )
+                                .await
+                        }
+                        None => {
+                            store
+                                .commit_transition(
+                                    session_id,
+                                    fence_revision,
+                                    fence_checkpoint,
+                                    fence_status.clone(),
+                                    &fence_state,
+                                )
+                                .await
+                        }
+                    };
+                    match fence_result {
+                        Ok(record) => {
+                            if cancel_anchor.is_some() {
+                                anchored_clocks =
+                                    Some((record.state_revision, record.graph_version));
+                            }
+                            break;
+                        }
                         Err(EngineError::RevisionMismatch { .. }) => {
                             if !cancel_allow_rebase {
                                 return Err(EngineError::RevisionMismatch {
@@ -1287,15 +1329,45 @@ impl EngineSharedState {
                             root: &interrupted_root,
                             children: &[],
                         };
-                        match store
-                            .commit_transition(
-                                session_id,
-                                current_revision,
-                                interrupted_checkpoint,
-                                SessionStatus::Interrupted,
-                                &interrupted_state,
-                            )
-                            .await
+                        // Anchored cleanup CASes the PREVIOUS operation's
+                        // commit-owned clocks (phase-1's returned record, or
+                        // the caller's anchor when phase 1 was skipped for an
+                        // Interrupted retry) — never the freshly loaded
+                        // revision/graph, which may belong to a winner. The
+                        // loads below only build the state/root the write
+                        // carries.
+                        let (interrupted_revision, interrupted_graph) =
+                            anchored_clocks.unwrap_or((current_revision, current.graph_version));
+                        let interrupted_result = match anchored_clocks {
+                            Some(_) => {
+                                store
+                                    .commit_transition_with_graph_fence(
+                                        session_id,
+                                        interrupted_revision,
+                                        Some(interrupted_graph),
+                                        interrupted_checkpoint,
+                                        SessionStatus::Interrupted,
+                                        &interrupted_state,
+                                    )
+                                    .await
+                            }
+                            None => {
+                                store
+                                    .commit_transition(
+                                        session_id,
+                                        interrupted_revision,
+                                        interrupted_checkpoint,
+                                        SessionStatus::Interrupted,
+                                        &interrupted_state,
+                                    )
+                                    .await
+                            }
+                        };
+                        if let Ok(record) = &interrupted_result {
+                            anchored_clocks =
+                                Some((record.state_revision, record.graph_version));
+                        }
+                        match interrupted_result
                         {
                             Ok(_) => break,
                             Err(EngineError::RevisionMismatch { .. }) => {
@@ -1393,14 +1465,23 @@ impl EngineSharedState {
                     root: &settle_root,
                     children: &[],
                 };
+                // Anchored cleanup CASes the previous operation's
+                // commit-owned clocks (phase-1 / Interrupted records); the
+                // load above only builds the state/root. A graph-only or
+                // revision winner since that write loses the CAS and the
+                // winner is left untouched (no rebase in anchored mode).
+                let (settle_revision, settle_graph) =
+                    anchored_clocks.unwrap_or((current_revision, current.graph_version));
                 match store
                     .settle_cancelled(
                         session_id,
-                        current_revision,
+                        settle_revision,
+                        anchored_clocks.map(|_| settle_graph),
                         settle_checkpoint,
                         &cancelled_state,
                     )
                     .await
+
                 {
                     Ok(_) => break,
                     Err(EngineError::RevisionMismatch { .. }) => {
@@ -2241,6 +2322,10 @@ impl EngineSharedState {
                             .settle_cancelled(
                                 &child_sid,
                                 current_revision,
+                                // Child-rollback settle keeps the
+                                // revision-only CAS (not the anchored
+                                // failure-cleanup path).
+                                None,
                                 settle_checkpoint,
                                 &cancelled_state,
                             )
@@ -4391,11 +4476,18 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
         &self,
         session_id: &SessionId,
         expected_revision: u64,
+        expected_graph_version: Option<u64>,
         checkpoint: crate::run_state::RunCheckpoint<'_>,
         next_state: &crate::run_state::RunStateV1,
     ) -> Result<crate::run_state::RunRecord, EngineError> {
         self.inner
-            .settle_cancelled(session_id, expected_revision, checkpoint, next_state)
+            .settle_cancelled(
+                session_id,
+                expected_revision,
+                expected_graph_version,
+                checkpoint,
+                next_state,
+            )
             .await
     }
 
@@ -4627,11 +4719,18 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         &self,
         session_id: &SessionId,
         expected_revision: u64,
+        expected_graph_version: Option<u64>,
         checkpoint: crate::run_state::RunCheckpoint<'_>,
         next_state: &crate::run_state::RunStateV1,
     ) -> Result<crate::run_state::RunRecord, EngineError> {
         self.inner
-            .settle_cancelled(session_id, expected_revision, checkpoint, next_state)
+            .settle_cancelled(
+                session_id,
+                expected_revision,
+                expected_graph_version,
+                checkpoint,
+                next_state,
+            )
             .await
     }
 
@@ -4819,6 +4918,7 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
         &self,
         session_id: &SessionId,
         expected_revision: u64,
+        expected_graph_version: Option<u64>,
         checkpoint: crate::run_state::RunCheckpoint<'_>,
         next_state: &crate::run_state::RunStateV1,
     ) -> Result<crate::run_state::RunRecord, EngineError> {
@@ -4860,7 +4960,13 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
                 .expect("competing transition wins the CAS before the child settle");
         }
         self.inner
-            .settle_cancelled(session_id, expected_revision, checkpoint, next_state)
+            .settle_cancelled(
+                session_id,
+                expected_revision,
+                expected_graph_version,
+                checkpoint,
+                next_state,
+            )
             .await
     }
 

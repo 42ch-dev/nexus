@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE kb_key_blocks SET world_id = ? WHERE key_block_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "08fdc5930ef05ceb3a8740e1644e69c02363d75b491d43ae9a446e066ea9e8b0"
+}

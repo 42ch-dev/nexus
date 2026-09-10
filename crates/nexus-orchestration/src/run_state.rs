@@ -380,13 +380,21 @@ pub trait WorkflowStateStore: Send + Sync {
     /// never re-driven; this method is used only by the cancel path after
     /// `finalize_run` confirms cleanup.
     ///
+    /// When `expected_graph_version` is `Some` (anchored failed-step
+    /// cleanup), the settlement CAS additionally requires the persisted
+    /// `graph_version` to equal it: a graph-only writer that advanced the
+    /// session clock between the caller's load and this settlement loses
+    /// the write exactly like a revision winner, and is never overwritten.
+    /// `None` keeps the revision-only CAS (ordinary user cancel).
+    ///
     /// # Errors
-    /// Returns [`EngineError`] on storage failure, revision mismatch, or a
-    /// terminal status other than `Interrupted`.
+    /// Returns [`EngineError`] on storage failure, revision/graph mismatch,
+    /// or a terminal status other than `Interrupted`.
     async fn settle_cancelled(
         &self,
         session_id: &SessionId,
         expected_revision: u64,
+        expected_graph_version: Option<u64>,
         checkpoint: RunCheckpoint<'_>,
         next_state: &RunStateV1,
     ) -> Result<RunRecord, EngineError>;

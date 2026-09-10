@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT status as \"status!\" FROM creator_schedules WHERE schedule_id = 'SCH-FENCE'",
+  "describe": {
+    "columns": [
+      {
+        "name": "status!",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1ed22a90770cbee1a4792d323bd6504f4fab239577e99e942c9befca313d024c"
+}

@@ -6186,6 +6186,7 @@ async fn negative_or_max_graph_version_is_hard_storage_error_across_writers() {
             .settle_cancelled(
                 &session_id,
                 1,
+                None,
                 RunCheckpoint {
                     root: &root,
                     children: &[],
@@ -6225,15 +6226,19 @@ async fn negative_or_max_graph_version_is_hard_storage_error_across_writers() {
         assert_hard_storage_error(&err, "mark_step_in_flight");
 
         // No writer mutated the row: corrupt version, revision, and status
-        // are all exactly as seeded.
+        // are all exactly as seeded. The read-back is raw SQL — `load_run`
+        // deliberately refuses this non-replayable row, so it cannot be the
+        // evidence that nothing was written.
         assert_eq!(db_graph_version(&pool, &session_id.0).await, corrupt);
-        let record = storage
-            .load_run(&session_id)
-            .await
-            .expect("load_run")
-            .expect("record");
-        assert_eq!(record.state_revision, 1);
-        assert_eq!(record.status, SessionStatus::Running);
+        let (revision, status): (i64, String) = sqlx::query_as(
+            "SELECT state_revision, status FROM orchestration_sessions WHERE session_id = ?",
+        )
+        .bind(&session_id.0)
+        .fetch_one(&*pool)
+        .await
+        .expect("read corrupt row");
+        assert_eq!(revision, 1);
+        assert_eq!(status, "running");
     }
 }
 
@@ -6435,6 +6440,7 @@ async fn graph_version_clock_monotonic_across_writers_and_untouched_by_prompt_at
         .settle_cancelled(
             &session_id,
             3,
+            None,
             RunCheckpoint {
                 root: &root,
                 children: &[],

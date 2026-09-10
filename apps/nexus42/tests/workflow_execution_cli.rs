@@ -2381,15 +2381,15 @@ async fn admission_work_linked_vs_general_insertion() {
     }
 }
 
-/// N-14: failed durable driver transition followed by refused re-entry —
-/// a drive loop whose durable `Failed` transition cannot be committed
-/// fences the owner; `ensure_driving` refuses to re-drive the session.
+/// N-14 (end-to-end): a failed drive over the REAL daemon settles its
+/// durable failure record and is never re-driven — the public admission path
+/// mints exactly one session and every later re-entry is refused.
 ///
-/// The deterministic production-storage fault seam
-/// (`WorkflowRunCoordinator::fail_next_drive_failure_write`) forces the
-/// durable `Failed` transition write to fail AFTER the drive outcome is
-/// `Failed`, so the failed-owner fence path is exercised through the REAL
-/// coordinator and REAL store — never a test-only coordinator or echo path.
+/// The storage-fault half of this contract (a commit/cleanup write that
+/// FAILS and fences the owner) is proven at the real store boundary in
+/// `nexus-daemon-runtime`'s `preset_run` fixtures with a delegating
+/// real-store wrapper; here the store is healthy, so the refusal comes from
+/// the durable terminal state instead.
 #[tokio::test]
 async fn admission_failed_driver_transition_refuses_reentry() {
     let daemon = LiveDaemon::start().await;
@@ -2397,9 +2397,9 @@ async fn admission_failed_driver_transition_refuses_reentry() {
 
     // Seed a driven_v1 row for `combat-engine` — a preset whose first
     // capability (`narrative.compute`) fails at runtime when the world has
-    // no computable knowledge entries. The drive loop fails, and the
-    // durable `Failed` transition is committed (the store is healthy), so
-    // the run is terminal and re-entry is refused by the durable state.
+    // no computable knowledge entries. The drive loop fails; the durable
+    // failure record and terminal settlement commit on the healthy store,
+    // so re-entry is refused by durable state.
     sqlx::query(
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
@@ -2425,14 +2425,9 @@ async fn admission_failed_driver_transition_refuses_reentry() {
         .expect("production starter injected");
     let coordinator = daemon.state.run_coordinator().expect("coordinator wired");
 
-    // N-14: arm the deterministic production-storage fault seam — the
-    // durable `Failed` transition write will be forced to fail after the
-    // drive outcome is `Failed`.
-    coordinator.fail_next_drive_failure_write();
-
     // First admission: the drive loop fails (narrative.compute has no
-    // computable entries in the seeded world). The durable `Failed`
-    // transition write FAILS (seam armed), so the failed owner is fenced.
+    // computable entries in the seeded world). The healthy store records the
+    // authoritative `RunFailure` and settles the run terminal.
     let first = starter.start("SCHDRVFAIL").await;
     assert!(
         first.is_ok(),
@@ -2440,25 +2435,8 @@ async fn admission_failed_driver_transition_refuses_reentry() {
     );
     let sid = first.expect("session id").0;
 
-    // The drive loop finishes and the failed owner is fenced (the seam
-    // made `persist_drive_failure` return false).
-    tokio::time::timeout(std::time::Duration::from_secs(15), async {
-        loop {
-            if coordinator
-                .is_fenced(&nexus_orchestration::SessionId(sid.clone()))
-                .await
-            {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-    })
-    .await
-    .expect("failed owner must be fenced after the failed durable write");
-
-    // The engine's failure surface (`mark_failed` → `EngineSignal::Cancel`)
-    // still persists the terminal `cancelled` record — the fence is
-    // independent of the durable terminal state.
+    // The failed drive settles `cancelled` with the authoritative failure and
+    // cancel intent durable — the honest record of a failed run.
     let (status, state) = wait_for_run_status(&daemon, &sid, "cancelled", 15).await;
     assert_eq!(status, "cancelled");
     assert!(
@@ -2468,10 +2446,23 @@ async fn admission_failed_driver_transition_refuses_reentry() {
             .unwrap_or(false),
         "durable cancel/failure record must be present: {state}"
     );
+    assert_eq!(
+        state
+            .get("failure")
+            .and_then(|f| f.get("code"))
+            .and_then(Value::as_str),
+        Some("driver_failed"),
+        "the authoritative RunFailure must be durable: {state}"
+    );
+    assert!(
+        !coordinator
+            .is_fenced(&nexus_orchestration::SessionId(sid.clone()))
+            .await,
+        "a healthy-store failure settles terminal; the owner fence is only for a FAILED write"
+    );
 
-    // Re-entry: the fenced owner refuses a fresh drive — `ensure_driving`
-    // returns `NotDriving` (the failed-owner fence, not the durable
-    // terminal gate).
+    // Re-entry: the durable terminal gate refuses a fresh drive —
+    // `ensure_driving` returns `NotDriving`.
     let disposition = coordinator
         .ensure_driving(&nexus_orchestration::SessionId(sid.clone()))
         .await
@@ -2479,7 +2470,7 @@ async fn admission_failed_driver_transition_refuses_reentry() {
     assert_eq!(
         disposition,
         nexus_daemon_runtime::preset_run::DriveDisposition::NotDriving,
-        "fenced owner must refuse re-entry"
+        "a terminal failed run must refuse re-entry"
     );
 
     // The starter re-entry is refused (the owned `running` row's status

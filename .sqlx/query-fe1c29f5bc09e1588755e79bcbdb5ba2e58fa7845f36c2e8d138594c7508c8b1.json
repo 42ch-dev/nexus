@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO work_chapters\n         (work_id, volume, chapter, slug, status, created_at, updated_at)\n         VALUES (?, 1, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "fe1c29f5bc09e1588755e79bcbdb5ba2e58fa7845f36c2e8d138594c7508c8b1"
+}

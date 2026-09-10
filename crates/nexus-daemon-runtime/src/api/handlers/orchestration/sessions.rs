@@ -941,6 +941,7 @@ mod tests {
             &self,
             session_id: &nexus_orchestration::engine::SessionId,
             expected_revision: u64,
+            expected_graph_version: Option<u64>,
             checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
             next_state: &nexus_orchestration::run_state::RunStateV1,
         ) -> Result<
@@ -948,7 +949,13 @@ mod tests {
             nexus_orchestration::engine::EngineError,
         > {
             self.inner
-                .settle_cancelled(session_id, expected_revision, checkpoint, next_state)
+                .settle_cancelled(
+                    session_id,
+                    expected_revision,
+                    expected_graph_version,
+                    checkpoint,
+                    next_state,
+                )
                 .await
         }
 

@@ -205,8 +205,6 @@ async fn restart_mid_chain_resumes_without_re_executing_completed_edges() {
         &sid,
         &PresetRunConfig::default(),
         None,
-        None,
-        None,
     )
     .await;
     assert_eq!(
@@ -379,8 +377,6 @@ async fn inspect_after_interrupt_is_side_effect_free_and_resume_matches_baseline
         None,
         &sid,
         &PresetRunConfig::default(),
-        None,
-        None,
         None,
     )
     .await;

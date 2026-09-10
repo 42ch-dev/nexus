@@ -171,8 +171,6 @@ async fn drive(d: &LiveDaemon, sid: &SessionId, resume_waiting: bool) -> PresetR
         sid,
         &config,
         None,
-        None,
-        None,
     )
     .await
 }

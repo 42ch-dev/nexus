@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT graph_version FROM orchestration_sessions WHERE session_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "graph_version",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6e501323f5894dc538d7866294e377618b8d2966bad55c0a27c262c0aad1f376"
+}

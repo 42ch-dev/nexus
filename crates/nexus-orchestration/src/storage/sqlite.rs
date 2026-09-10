@@ -1659,22 +1659,39 @@ impl WorkflowStateStore for SqliteSessionStorage {
             }
         }
 
+        // Read the exact post-commit graph clock back INSIDE the commit
+        // transaction: the UPDATE advanced `graph_version` from the fenced
+        // stored value, which is NOT `checkpoint.root.version + 1` when the
+        // marker (or any earlier transition) already bumped the column past
+        // the pre-step session version. The returned record is the
+        // commit-owned anchor for the next owner write (e.g. anchored
+        // cleanup) — it must equal the durable clocks exactly, never a
+        // derived guess.
+        let post_graph_version: i64 = sqlx::query_scalar!(
+            "SELECT graph_version FROM orchestration_sessions WHERE session_id = ?",
+            id
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "commit_transition read post-commit graph_version: {e}"
+            )))
+        })?;
+        let graph_version = u64::try_from(post_graph_version).map_err(|_| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "commit_transition '{}': negative post-commit graph_version \
+                 {post_graph_version} (non-replayable)",
+                session_id.0
+            )))
+        })?;
+
         tx.commit().await.map_err(|e| {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "commit_transition commit: {e}"
             )))
         })?;
 
-        let graph_version = checkpoint
-            .root
-            .version
-            .checked_add(1)
-            .ok_or_else(|| {
-                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                    "commit_transition '{}': graph_version overflow",
-                    session_id.0
-                )))
-            })?;
         Ok(RunRecord {
             session_id: SessionId(session_id.0.clone()),
             status: next_status,
@@ -1690,6 +1707,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         &self,
         session_id: &SessionId,
         expected_revision: u64,
+        expected_graph_version: Option<u64>,
         checkpoint: RunCheckpoint<'_>,
         next_state: &RunStateV1,
     ) -> Result<RunRecord, EngineError> {
@@ -1714,8 +1732,21 @@ impl WorkflowStateStore for SqliteSessionStorage {
         // A5 settlement fence: revision CAS + execution-version fence, and the
         // current status must be `interrupted` (the cleanup-retry shape) or
         // non-terminal — a run already settled `cancelled`/`completed`/
-        // `failed` is never overwritten by a retry.
+        // `failed` is never overwritten by a retry. When
+        // `expected_graph_version` is `Some` (anchored failed-step cleanup),
+        // the CAS additionally requires the persisted graph clock, so a
+        // graph-only winner between the load and this settlement loses the
+        // write exactly like a revision winner.
         let expected_revision_i64 = expected_revision as i64;
+        let expected_graph_i64: Option<i64> = expected_graph_version
+            .map(i64::try_from)
+            .transpose()
+            .map_err(|_| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "settle_cancelled '{}': expected graph_version out of range",
+                    session_id.0
+                )))
+            })?;
         let result = sqlx::query!(
             r"
             UPDATE orchestration_sessions
@@ -1727,13 +1758,16 @@ impl WorkflowStateStore for SqliteSessionStorage {
               AND execution_version = 1
               AND status IN ('running', 'paused', 'waiting_for_input', 'interrupted')
               AND graph_version >= 0 AND graph_version < 9223372036854775807
+              AND (? IS NULL OR graph_version = ?)
             ",
             current_task_id,
             context_bytes,
             now,
             state_bytes,
             id,
-            expected_revision_i64
+            expected_revision_i64,
+            expected_graph_i64,
+            expected_graph_i64
         )
         .execute(&mut *tx)
         .await
@@ -1779,14 +1813,21 @@ impl WorkflowStateStore for SqliteSessionStorage {
                         ),
                     )))
                 }
-                Some(row) if row.execution_version != 1 => Err(EngineError::GraphFlow(
-                    graph_flow::GraphError::StorageError(format!(
-                        "settle_cancelled '{}': execution_version {} is non-replayable; \
-                             legacy runs cannot transition",
-                        session_id.0, row.execution_version
-                    )),
-                )),
                 Some(row) if row.state_revision != expected_revision as i64 => {
+                    Err(EngineError::RevisionMismatch {
+                        session_id: session_id.0.clone(),
+                        expected: expected_revision,
+                        found: u64::try_from(row.state_revision).unwrap_or(0),
+                    })
+                }
+                // Graph-clock fence loss with an intact workflow revision: a
+                // graph-only winner owns the session clock — the same typed
+                // ownership loss as a revision mismatch, never a mutation.
+                Some(row)
+                    if expected_graph_i64.is_some_and(|expected| {
+                        row.graph_version != expected
+                    }) =>
+                {
                     Err(EngineError::RevisionMismatch {
                         session_id: session_id.0.clone(),
                         expected: expected_revision,
@@ -1820,22 +1861,36 @@ impl WorkflowStateStore for SqliteSessionStorage {
         }
         let execution_version = persisted_version as u32;
 
+        // Exact post-commit graph clock, read back INSIDE the transaction
+        // (same contract as `commit_transition_with_graph_fence`): the
+        // returned record anchors any subsequent owner write, so the clock
+        // must equal the durable value, never `root.version + 1` derived
+        // from a pre-step snapshot.
+        let post_graph_version: i64 = sqlx::query_scalar!(
+            "SELECT graph_version FROM orchestration_sessions WHERE session_id = ?",
+            id
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "settle_cancelled read post-commit graph_version: {e}"
+            )))
+        })?;
+        let graph_version = u64::try_from(post_graph_version).map_err(|_| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "settle_cancelled '{}': negative post-commit graph_version \
+                 {post_graph_version} (non-replayable)",
+                session_id.0
+            )))
+        })?;
+
         tx.commit().await.map_err(|e| {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "settle_cancelled commit: {e}"
             )))
         })?;
 
-        let graph_version = checkpoint
-            .root
-            .version
-            .checked_add(1)
-            .ok_or_else(|| {
-                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                    "settle_cancelled '{}': graph_version overflow",
-                    session_id.0
-                )))
-            })?;
         Ok(RunRecord {
             session_id: SessionId(session_id.0.clone()),
             status: SessionStatus::Cancelled,
