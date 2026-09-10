@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT schedule_id as \"schedule_id!\" FROM creator_schedules\n         WHERE creator_id = ? AND status = 'running'\n           AND execution_policy = 'driven_v1'\n           AND schedule_id != ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "schedule_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "64d8a000f517386196ad4646ed03ecde87809db0ce53f43ffd277f0f7aa0de82"
+}

@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT execution_policy, status, current_session_id, preset_id,\n                    current_core_context_version\n             FROM creator_schedules WHERE schedule_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "execution_policy",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "status",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "current_session_id",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "preset_id",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "current_core_context_version",
+        "ordinal": 4,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "0083185ee5dfc9865078e43fb314ff454d60a1243c8c6327c4c7be745b47feea"
+}

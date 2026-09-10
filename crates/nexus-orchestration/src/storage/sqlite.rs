@@ -78,11 +78,13 @@ impl SqliteSessionStorage {
             current_task_id: Option<String>,
         }
 
-        let rows = sqlx::query_as::<_, SummaryRow>(
-            "SELECT session_id, creator_id, preset_id, status, current_task_id
-             FROM orchestration_sessions
-             WHERE parent_session_id IS NULL
-               AND status IN ('running', 'paused', 'waiting_for_input')",
+        let rows = sqlx::query_as!(
+            SummaryRow,
+            r#"SELECT session_id as "session_id!", creator_id as "creator_id!",
+                      preset_id as "preset_id!", status as "status!", current_task_id
+               FROM orchestration_sessions
+               WHERE parent_session_id IS NULL
+                 AND status IN ('running', 'paused', 'waiting_for_input')"#
         )
         .fetch_all(&*self.pool)
         .await
@@ -309,10 +311,10 @@ impl SessionStorage for SqliteSessionStorage {
         // an expected no-op (A4); unknown/corrupt status and an unexpected
         // zero-row on a still-running/paused row must surface explicitly.
         if result.rows_affected() == 0 {
-            let current_status: Option<String> = sqlx::query_scalar(
+            let current_status: Option<String> = sqlx::query_scalar!(
                 "SELECT status FROM orchestration_sessions WHERE session_id = ?",
+                session_id
             )
-            .bind(&session_id)
             .fetch_optional(&mut *tx)
             .await
             .map_err(|e| {
@@ -488,10 +490,10 @@ async fn child_cas_outcome(
     expected_revision: u64,
     submitted_status: SessionStatus,
 ) -> Result<Option<EngineError>, EngineError> {
-    let row: Option<(i64, String)> = sqlx::query_as(
+    let row = sqlx::query!(
         "SELECT state_revision, status FROM orchestration_sessions WHERE session_id = ?",
+        child_id
     )
-    .bind(child_id)
     .fetch_optional(&mut **tx)
     .await
     .map_err(|e| {
@@ -501,7 +503,9 @@ async fn child_cas_outcome(
     })?;
 
     Ok(match row {
-        Some((found_rev, status)) => {
+        Some(row) => {
+            let found_rev = row.state_revision;
+            let status = row.status;
             let terminal = matches!(
                 status.as_str(),
                 "completed" | "failed" | "cancelled" | "interrupted"
@@ -554,10 +558,10 @@ async fn read_root_descriptor(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     session_id: &str,
 ) -> Result<Option<RunDescriptorV1>, EngineError> {
-    let bytes: Option<Option<Vec<u8>>> = sqlx::query_scalar(
+    let bytes: Option<Option<Vec<u8>>> = sqlx::query_scalar!(
         "SELECT run_descriptor_json FROM orchestration_sessions WHERE session_id = ?",
+        session_id
     )
-    .bind(session_id)
     .fetch_optional(&mut **tx)
     .await
     .map_err(|e| {
@@ -740,10 +744,10 @@ impl WorkflowStateStore for SqliteSessionStorage {
         // launders an existing uncertain legacy row in place — an existing
         // row (any execution_version, including a v0 legacy row) must be
         // left untouched and the caller must mint a new session id.
-        let existing_version: Option<i64> = sqlx::query_scalar(
+        let existing_version: Option<i64> = sqlx::query_scalar!(
             "SELECT execution_version FROM orchestration_sessions WHERE session_id = ?",
+            id
         )
-        .bind(&id)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| {
@@ -940,12 +944,13 @@ impl WorkflowStateStore for SqliteSessionStorage {
             preset_id: String,
             current_core_context_version: i64,
         }
-        let row = sqlx::query_as::<_, ScheduleClaimRow>(
+        let row = sqlx::query_as!(
+            ScheduleClaimRow,
             "SELECT execution_policy, status, current_session_id, preset_id,
                     current_core_context_version
              FROM creator_schedules WHERE schedule_id = ?",
+            schedule_id
         )
-        .bind(schedule_id)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| {
@@ -992,10 +997,10 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 ));
             }
             for dep in &gate.depends_on {
-                let dep_status: Option<String> = sqlx::query_scalar(
+                let dep_status: Option<String> = sqlx::query_scalar!(
                     "SELECT status FROM creator_schedules WHERE schedule_id = ?",
+                    dep
                 )
-                .bind(dep)
                 .fetch_optional(&mut *tx)
                 .await
                 .map_err(|e| {
@@ -1017,14 +1022,14 @@ impl WorkflowStateStore for SqliteSessionStorage {
             // capacity; the candidate's OWN row is excluded (a concurrent
             // admission that already claimed it must not look
             // serial-blocked — the loser re-reads the winner's run).
-            let running: Vec<String> = sqlx::query_scalar(
-                "SELECT schedule_id FROM creator_schedules
+            let running: Vec<String> = sqlx::query_scalar!(
+                r#"SELECT schedule_id as "schedule_id!" FROM creator_schedules
                  WHERE creator_id = ? AND status = 'running'
                    AND execution_policy = 'driven_v1'
-                   AND schedule_id != ?",
+                   AND schedule_id != ?"#,
+                gate.creator_id,
+                schedule_id
             )
-            .bind(&gate.creator_id)
-            .bind(schedule_id)
             .fetch_all(&mut *tx)
             .await
             .map_err(|e| {
@@ -1092,10 +1097,10 @@ impl WorkflowStateStore for SqliteSessionStorage {
             // Re-entry: the schedule already owns a run. Verify the run row
             // exists; a stale claim (crash between claim and run creation)
             // is NOT cleared here — boot recovery classifies it (C-1).
-            let existing_version: Option<i64> = sqlx::query_scalar(
+            let existing_version: Option<i64> = sqlx::query_scalar!(
                 "SELECT execution_version FROM orchestration_sessions WHERE session_id = ?",
+                existing
             )
-            .bind(existing)
             .fetch_optional(&mut *tx)
             .await
             .map_err(|e| {
@@ -1124,10 +1129,10 @@ impl WorkflowStateStore for SqliteSessionStorage {
         // 2. Insert the v1 session row (initial checkpoint + descriptor +
         //    seeded context) — the run is durable before the schedule
         //    pointer is published (C-2).
-        let existing_version: Option<i64> = sqlx::query_scalar(
+        let existing_version: Option<i64> = sqlx::query_scalar!(
             "SELECT execution_version FROM orchestration_sessions WHERE session_id = ?",
+            id
         )
-        .bind(&id)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| {
@@ -1174,18 +1179,19 @@ impl WorkflowStateStore for SqliteSessionStorage {
         })?;
 
         // 3. Claim the schedule row atomically with the run row (C-1).
-        let claim = sqlx::query(
+        let core_context_version_i64 = i64::from(core_context_version);
+        let claim = sqlx::query!(
             "UPDATE creator_schedules
              SET status = 'running', current_session_id = ?,
                  current_core_context_version = ?, updated_at = ?,
                  execution_policy = 'driven_v1'
              WHERE schedule_id = ? AND status IN ('pending', 'paused', 'running')
                AND current_session_id IS NULL",
+            session_id.0,
+            core_context_version_i64,
+            now,
+            schedule_id
         )
-        .bind(&session_id.0)
-        .bind(i64::from(core_context_version))
-        .bind(now)
-        .bind(schedule_id)
         .execute(&mut *tx)
         .await
         .map_err(|e| {
@@ -1252,7 +1258,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         // authoritative v1 rows may advance. Legacy v0 rows are inspectable,
         // but cannot be mutated into partially reconstructed v1 runs.
         let expected_revision_i64 = expected_revision as i64;
-        let result = sqlx::query(
+        let result = sqlx::query!(
             r"
             UPDATE orchestration_sessions
             SET status = ?, current_task_id = ?, context_json = ?,
@@ -1262,14 +1268,14 @@ impl WorkflowStateStore for SqliteSessionStorage {
               AND execution_version = 1
               AND status NOT IN ('completed', 'failed', 'cancelled', 'interrupted')
             ",
+            status_str,
+            current_task_id,
+            context_bytes,
+            now,
+            state_bytes,
+            id,
+            expected_revision_i64
         )
-        .bind(status_str)
-        .bind(&current_task_id)
-        .bind(&context_bytes)
-        .bind(now)
-        .bind(&state_bytes)
-        .bind(&id)
-        .bind(expected_revision_i64)
         .execute(&mut *tx)
         .await
         .map_err(|e| {
@@ -1282,11 +1288,11 @@ impl WorkflowStateStore for SqliteSessionStorage {
         if result.rows_affected() == 0 {
             // Distinguish an unsupported legacy row, a revision mismatch, and
             // a terminal/cancelled fence without mutating any of them.
-            let current: Option<(i64, i64)> = sqlx::query_as(
+            let current = sqlx::query!(
                 "SELECT state_revision, execution_version \
                  FROM orchestration_sessions WHERE session_id = ?",
+                session_id.0
             )
-            .bind(&session_id.0)
             .fetch_optional(&mut *tx)
             .await
             .map_err(|e| {
@@ -1296,18 +1302,18 @@ impl WorkflowStateStore for SqliteSessionStorage {
             })?;
 
             return match current {
-                Some((_revision, version)) if version != 1 => Err(EngineError::GraphFlow(
+                Some(row) if row.execution_version != 1 => Err(EngineError::GraphFlow(
                     graph_flow::GraphError::StorageError(format!(
-                        "commit_transition '{}': execution_version {version} is non-replayable; \
+                        "commit_transition '{}': execution_version {} is non-replayable; \
                              legacy runs cannot transition",
-                        session_id.0
+                        session_id.0, row.execution_version
                     )),
                 )),
-                Some((found, _)) if found != expected_revision as i64 => {
+                Some(row) if row.state_revision != expected_revision as i64 => {
                     Err(EngineError::RevisionMismatch {
                         session_id: session_id.0.clone(),
                         expected: expected_revision,
-                        found: u64::try_from(found).unwrap_or(0),
+                        found: u64::try_from(row.state_revision).unwrap_or(0),
                     })
                 }
                 _ => Err(EngineError::TerminalState(session_id.0.clone())),
@@ -1320,10 +1326,10 @@ impl WorkflowStateStore for SqliteSessionStorage {
         // The update fence admits only execution_version=1. Re-read it inside
         // the transaction so a corrupt storage invariant rolls back rather
         // than returning a misleading reconstructible record.
-        let persisted_version: i64 = sqlx::query_scalar(
+        let persisted_version: i64 = sqlx::query_scalar!(
             "SELECT execution_version FROM orchestration_sessions WHERE session_id = ?",
+            session_id.0
         )
-        .bind(&session_id.0)
         .fetch_one(&mut *tx)
         .await
         .map_err(|e| {
@@ -1489,7 +1495,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         // non-terminal — a run already settled `cancelled`/`completed`/
         // `failed` is never overwritten by a retry.
         let expected_revision_i64 = expected_revision as i64;
-        let result = sqlx::query(
+        let result = sqlx::query!(
             r"
             UPDATE orchestration_sessions
             SET status = 'cancelled', current_task_id = ?, context_json = ?,
@@ -1499,13 +1505,13 @@ impl WorkflowStateStore for SqliteSessionStorage {
               AND execution_version = 1
               AND status IN ('running', 'paused', 'waiting_for_input', 'interrupted')
             ",
+            current_task_id,
+            context_bytes,
+            now,
+            state_bytes,
+            id,
+            expected_revision_i64
         )
-        .bind(&current_task_id)
-        .bind(&context_bytes)
-        .bind(now)
-        .bind(&state_bytes)
-        .bind(&id)
-        .bind(expected_revision_i64)
         .execute(&mut *tx)
         .await
         .map_err(|e| {
@@ -1516,11 +1522,11 @@ impl WorkflowStateStore for SqliteSessionStorage {
         })?;
 
         if result.rows_affected() == 0 {
-            let current: Option<(i64, i64)> = sqlx::query_as(
+            let current = sqlx::query!(
                 "SELECT state_revision, execution_version \
                  FROM orchestration_sessions WHERE session_id = ?",
+                session_id.0
             )
-            .bind(&session_id.0)
             .fetch_optional(&mut *tx)
             .await
             .map_err(|e| {
@@ -1530,18 +1536,18 @@ impl WorkflowStateStore for SqliteSessionStorage {
             })?;
 
             return match current {
-                Some((_revision, version)) if version != 1 => Err(EngineError::GraphFlow(
+                Some(row) if row.execution_version != 1 => Err(EngineError::GraphFlow(
                     graph_flow::GraphError::StorageError(format!(
-                        "settle_cancelled '{}': execution_version {version} is non-replayable; \
+                        "settle_cancelled '{}': execution_version {} is non-replayable; \
                              legacy runs cannot transition",
-                        session_id.0
+                        session_id.0, row.execution_version
                     )),
                 )),
-                Some((found, _)) if found != expected_revision as i64 => {
+                Some(row) if row.state_revision != expected_revision as i64 => {
                     Err(EngineError::RevisionMismatch {
                         session_id: session_id.0.clone(),
                         expected: expected_revision,
-                        found: u64::try_from(found).unwrap_or(0),
+                        found: u64::try_from(row.state_revision).unwrap_or(0),
                     })
                 }
                 _ => Err(EngineError::TerminalState(session_id.0.clone())),
@@ -1549,10 +1555,10 @@ impl WorkflowStateStore for SqliteSessionStorage {
         }
 
         let root_descriptor = read_root_descriptor(&mut tx, &session_id.0).await?;
-        let persisted_version: i64 = sqlx::query_scalar(
+        let persisted_version: i64 = sqlx::query_scalar!(
             "SELECT execution_version FROM orchestration_sessions WHERE session_id = ?",
+            session_id.0
         )
-        .bind(&session_id.0)
         .fetch_one(&mut *tx)
         .await
         .map_err(|e| {
@@ -1761,10 +1767,10 @@ impl WorkflowStateStore for SqliteSessionStorage {
 
         if result.rows_affected() == 0 {
             // Distinguish a revision mismatch from a non-running row.
-            let current = sqlx::query_scalar::<_, i64>(
+            let current: Option<i64> = sqlx::query_scalar!(
                 "SELECT state_revision FROM orchestration_sessions WHERE session_id = ?",
+                session_id.0
             )
-            .bind(&session_id.0)
             .fetch_optional(&*self.pool)
             .await
             .map_err(|e| {
@@ -1815,7 +1821,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         // in-flight marker a CAS boundary: a control signal loaded before this
         // marker cannot subsequently erase it.
         let expected_revision_i64 = expected_revision as i64;
-        let result = sqlx::query(
+        let result = sqlx::query!(
             r"
             UPDATE orchestration_sessions
             SET current_task_id = ?, context_json = ?, updated_at = ?, run_state_json = ?,
@@ -1823,13 +1829,13 @@ impl WorkflowStateStore for SqliteSessionStorage {
             WHERE session_id = ? AND status IN ('running', 'paused')
               AND state_revision = ?
             ",
+            current_task_id,
+            context_bytes,
+            now,
+            state_bytes,
+            id,
+            expected_revision_i64
         )
-        .bind(current_task_id)
-        .bind(context_bytes)
-        .bind(now)
-        .bind(state_bytes)
-        .bind(id)
-        .bind(expected_revision_i64)
         .execute(&*self.pool)
         .await
         .map_err(|e| {
@@ -1842,10 +1848,10 @@ impl WorkflowStateStore for SqliteSessionStorage {
         if result.rows_affected() == 0 {
             // The pre-step row is no longer running or its revision moved —
             // the external effect must not run on an unmarked row.
-            let current: Option<(String, i64)> = sqlx::query_as(
+            let current = sqlx::query!(
                 "SELECT status, state_revision FROM orchestration_sessions WHERE session_id = ?",
+                session_id.0
             )
-            .bind(&session_id.0)
             .fetch_optional(&*self.pool)
             .await
             .map_err(|e| {
@@ -1854,11 +1860,11 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 )))
             })?;
             return Err(match current {
-                Some((_status, rev)) if rev != expected_revision as i64 => {
+                Some(row) if row.state_revision != expected_revision as i64 => {
                     EngineError::RevisionMismatch {
                         session_id: session_id.0.clone(),
                         expected: expected_revision,
-                        found: u64::try_from(rev).unwrap_or(0),
+                        found: u64::try_from(row.state_revision).unwrap_or(0),
                     }
                 }
                 Some(_) => EngineError::TerminalState(session_id.0.clone()),
@@ -1960,6 +1966,8 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 "
             ),
         };
+        // SAFETY: dynamic SQL — the owner-CAS/step clauses are spliced at
+        // runtime; compile-time macro not applicable.
         let mut q = sqlx::query(&sql)
             .bind(&attempt_json)
             .bind(chrono::Utc::now().timestamp())
@@ -1987,15 +1995,16 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 step_marker: Option<String>,
                 in_flight_attempt_id: Option<String>,
             }
-            let current: Option<FenceRow> = sqlx::query_as(
-                "SELECT state_revision, \
-                        json_extract(COALESCE(run_state_json, '{}'), '$.step_in_flight') \
-                        AS step_marker, \
-                        json_extract(COALESCE(run_state_json, '{}'), '$.in_flight.attempt_id') \
-                        AS in_flight_attempt_id \
-                 FROM orchestration_sessions WHERE session_id = ?",
+            let current: Option<FenceRow> = sqlx::query_as!(
+                FenceRow,
+                r#"SELECT state_revision,
+                        json_extract(COALESCE(run_state_json, '{}'), '$.step_in_flight')
+                        AS "step_marker?: String",
+                        json_extract(COALESCE(run_state_json, '{}'), '$.in_flight.attempt_id')
+                        AS "in_flight_attempt_id?: String"
+                 FROM orchestration_sessions WHERE session_id = ?"#,
+                session_id.0
             )
-            .bind(&session_id.0)
             .fetch_optional(&*self.pool)
             .await
             .map_err(|e| {
@@ -2087,6 +2096,8 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 "
             .to_string(),
         };
+        // SAFETY: dynamic SQL — the step-marker clause is spliced at
+        // runtime; compile-time macro not applicable.
         let mut q = sqlx::query(&sql)
             .bind(chrono::Utc::now().timestamp())
             .bind(&id)
@@ -2606,17 +2617,17 @@ mod tests {
         });
         let state_bytes = serde_json::to_vec(&state).expect("serialize seed state");
         let descriptor_bytes = serde_json::to_vec(&descriptor).expect("serialize seed descriptor");
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO orchestration_sessions
                 (session_id, creator_id, preset_id, preset_version, status,
                  current_task_id, context_json, created_at, updated_at,
                  execution_version, state_revision, run_state_json, run_descriptor_json)
              VALUES (?, 'ctr_t', 'preset_t', 7, 'running', 'task_a',
                      '{}', 1756990000, 1756990300, 1, 2, ?, ?)",
+            session_id,
+            state_bytes,
+            descriptor_bytes
         )
-        .bind(session_id)
-        .bind(&state_bytes)
-        .bind(&descriptor_bytes)
         .execute(pool)
         .await
         .expect("seed v1 stepped row");
@@ -2777,11 +2788,11 @@ mod tests {
 
         // A control transition (e.g. Cancel) advances the revision while the
         // prompt invocation holds the old anchor.
-        sqlx::query(
+        sqlx::query!(
             "UPDATE orchestration_sessions
              SET state_revision = state_revision + 1, run_state_json = json_set(
                      COALESCE(run_state_json, '{}'), '$.cancel_requested', json('true'))
-             WHERE session_id = 'sess-stale'",
+             WHERE session_id = 'sess-stale'"
         )
         .execute(&*pool)
         .await
@@ -2838,10 +2849,10 @@ mod tests {
 
         // The step moved on (a newer task is now in flight) while the prompt
         // invocation still holds the old task marker.
-        sqlx::query(
+        sqlx::query!(
             "UPDATE orchestration_sessions
              SET run_state_json = json_set(
-                     COALESCE(run_state_json, '{}'), '$.step_in_flight', json('\"task_b\"'))",
+                     COALESCE(run_state_json, '{}'), '$.step_in_flight', json('\"task_b\"'))"
         )
         .execute(&*pool)
         .await

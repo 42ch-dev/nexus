@@ -1190,10 +1190,10 @@ impl WorkflowRunCoordinator {
         };
 
         // Only the schedule whose current_session_id equals this run.
-        let schedule_id: Option<String> = sqlx::query_scalar(
-            "SELECT schedule_id FROM creator_schedules WHERE current_session_id = ?",
+        let schedule_id: Option<String> = sqlx::query_scalar!(
+            r#"SELECT schedule_id as "schedule_id!" FROM creator_schedules WHERE current_session_id = ?"#,
+            session_id.0
         )
-        .bind(&session_id.0)
         .fetch_optional(&*self.pool)
         .await
         .unwrap_or_else(|e| {
@@ -1600,13 +1600,16 @@ impl WorkflowRunCoordinator {
         >,
     ) -> Result<SessionId, RunControlError> {
         // Load the schedule row.
-        let row = sqlx::query_as::<_, ScheduleAdmissionRow>(
-            "SELECT schedule_id, creator_id, preset_id, status,
-                    current_core_context_version, current_session_id, execution_policy,
+        let row = sqlx::query_as!(
+            ScheduleAdmissionRow,
+            r#"SELECT schedule_id as "schedule_id!", creator_id as "creator_id!",
+                    preset_id as "preset_id!", status as "status!",
+                    current_core_context_version as "current_core_context_version!",
+                    current_session_id, execution_policy as "execution_policy!",
                     work_id, execution_descriptor_json
-             FROM creator_schedules WHERE schedule_id = ?",
+             FROM creator_schedules WHERE schedule_id = ?"#,
+            schedule_id
         )
-        .bind(schedule_id)
         .fetch_optional(pool)
         .await
         .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?
@@ -1811,13 +1814,13 @@ impl WorkflowRunCoordinator {
         let descriptor_bytes = serde_json::to_vec(&descriptor).map_err(|e| {
             RunControlError::Admission(format!("descriptor serialization failed: {e}"))
         })?;
-        sqlx::query(
+        sqlx::query!(
             "UPDATE creator_schedules
              SET execution_descriptor_json = ?
              WHERE schedule_id = ? AND execution_descriptor_json IS NULL",
+            descriptor_bytes,
+            row.schedule_id
         )
-        .bind(descriptor_bytes)
-        .bind(&row.schedule_id)
         .execute(pool)
         .await
         .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
@@ -1868,13 +1871,16 @@ impl WorkflowRunCoordinator {
         >,
     ) -> Result<SessionId, RunControlError> {
         // 1. Load the schedule row.
-        let row = sqlx::query_as::<_, ScheduleAdmissionRow>(
-            "SELECT schedule_id, creator_id, preset_id, status,
-                    current_core_context_version, current_session_id, execution_policy,
+        let row = sqlx::query_as!(
+            ScheduleAdmissionRow,
+            r#"SELECT schedule_id as "schedule_id!", creator_id as "creator_id!",
+                    preset_id as "preset_id!", status as "status!",
+                    current_core_context_version as "current_core_context_version!",
+                    current_session_id, execution_policy as "execution_policy!",
                     work_id, execution_descriptor_json
-             FROM creator_schedules WHERE schedule_id = ?",
+             FROM creator_schedules WHERE schedule_id = ?"#,
+            schedule_id
         )
-        .bind(schedule_id)
         .fetch_optional(pool)
         .await
         .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?
@@ -1949,31 +1955,31 @@ impl WorkflowRunCoordinator {
         // Snapshot the matrix for the store's in-transaction recheck (N-1).
         let admission_gate = nexus_orchestration::run_state::ScheduleAdmissionGate {
             creator_id: row.creator_id.clone(),
-            scheduled_at: sqlx::query_scalar(
+            scheduled_at: sqlx::query_scalar!(
                 "SELECT scheduled_at FROM creator_schedules WHERE schedule_id = ?",
+                schedule_id
             )
-            .bind(schedule_id)
             .fetch_one(pool)
             .await
             .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?,
-            depends_on: sqlx::query_scalar(
-                "SELECT depends_on FROM schedule_dependencies WHERE schedule_id = ?",
+            depends_on: sqlx::query_scalar!(
+                r#"SELECT depends_on as "depends_on!" FROM schedule_dependencies WHERE schedule_id = ?"#,
+                schedule_id
             )
-            .bind(schedule_id)
             .fetch_all(pool)
             .await
             .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?,
-            concurrency_kind: sqlx::query_scalar(
-                "SELECT concurrency_kind FROM creator_schedules WHERE schedule_id = ?",
+            concurrency_kind: sqlx::query_scalar!(
+                r#"SELECT concurrency_kind as "concurrency_kind!" FROM creator_schedules WHERE schedule_id = ?"#,
+                schedule_id
             )
-            .bind(schedule_id)
             .fetch_one(pool)
             .await
             .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?,
-            concurrency_whitelist: sqlx::query_scalar(
+            concurrency_whitelist: sqlx::query_scalar!(
                 "SELECT concurrency_whitelist FROM creator_schedules WHERE schedule_id = ?",
+                schedule_id
             )
-            .bind(schedule_id)
             .fetch_one(pool)
             .await
             .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?,
@@ -2130,10 +2136,10 @@ impl WorkflowRunCoordinator {
                     || msg.contains("already owns run")
                     || msg.contains("status is 'running'")
                 {
-                    let winner: Option<String> = sqlx::query_scalar(
+                    let winner: Option<String> = sqlx::query_scalar!(
                         "SELECT current_session_id FROM creator_schedules WHERE schedule_id = ?",
+                        schedule_id
                     )
-                    .bind(schedule_id)
                     .fetch_optional(pool)
                     .await
                     .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?
@@ -2380,12 +2386,13 @@ async fn schedule_eligible(
     row: &ScheduleAdmissionRow,
 ) -> Result<bool, RunControlError> {
     // scheduled_at gate (same shape as the supervisor's clocked tick).
-    let scheduled_at: Option<i64> =
-        sqlx::query_scalar("SELECT scheduled_at FROM creator_schedules WHERE schedule_id = ?")
-            .bind(&row.schedule_id)
-            .fetch_one(pool)
-            .await
-            .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
+    let scheduled_at: Option<i64> = sqlx::query_scalar!(
+        "SELECT scheduled_at FROM creator_schedules WHERE schedule_id = ?",
+        row.schedule_id
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
     if let Some(at) = scheduled_at {
         if at > chrono::Utc::now().timestamp() {
             return Ok(false);
@@ -2394,29 +2401,32 @@ async fn schedule_eligible(
 
     // Load the candidate's concurrency + dependencies.
     let concurrency_kind: String =
-        sqlx::query_scalar("SELECT concurrency_kind FROM creator_schedules WHERE schedule_id = ?")
-            .bind(&row.schedule_id)
-            .fetch_one(pool)
-            .await
-            .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
-    let concurrency_whitelist: Option<String> = sqlx::query_scalar(
+        sqlx::query_scalar!(
+            r#"SELECT concurrency_kind as "concurrency_kind!" FROM creator_schedules WHERE schedule_id = ?"#,
+            row.schedule_id
+        )
+        .fetch_one(pool)
+        .await
+        .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
+    let concurrency_whitelist: Option<String> = sqlx::query_scalar!(
         "SELECT concurrency_whitelist FROM creator_schedules WHERE schedule_id = ?",
+        row.schedule_id
     )
-    .bind(&row.schedule_id)
     .fetch_one(pool)
     .await
     .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
-    let deps: Vec<String> =
-        sqlx::query_scalar("SELECT depends_on FROM schedule_dependencies WHERE schedule_id = ?")
-            .bind(&row.schedule_id)
-            .fetch_all(pool)
-            .await
-            .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
+    let deps: Vec<String> = sqlx::query_scalar!(
+        r#"SELECT depends_on as "depends_on!" FROM schedule_dependencies WHERE schedule_id = ?"#,
+        row.schedule_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
 
     // Completed/cancelled set for dependency satisfaction (Failed does not
     // satisfy — spec §4).
-    let completed: std::collections::HashSet<String> = sqlx::query_scalar(
-        "SELECT schedule_id FROM creator_schedules WHERE status IN ('completed', 'cancelled')",
+    let completed: std::collections::HashSet<String> = sqlx::query_scalar!(
+        r#"SELECT schedule_id as "schedule_id!" FROM creator_schedules WHERE status IN ('completed', 'cancelled')"#
     )
     .fetch_all(pool)
     .await
@@ -2433,14 +2443,14 @@ async fn schedule_eligible(
     // The candidate's OWN row is excluded — a concurrent admission that
     // already claimed this row must not make the candidate look
     // serial-blocked; the loser re-reads the winner's owned run instead.
-    let running: Vec<String> = sqlx::query_scalar(
-        "SELECT schedule_id FROM creator_schedules
+    let running: Vec<String> = sqlx::query_scalar!(
+        r#"SELECT schedule_id as "schedule_id!" FROM creator_schedules
          WHERE creator_id = ? AND status = 'running'
            AND execution_policy = 'driven_v1'
-           AND schedule_id != ?",
+           AND schedule_id != ?"#,
+        row.creator_id,
+        row.schedule_id
     )
-    .bind(&row.creator_id)
-    .bind(&row.schedule_id)
     .fetch_all(pool)
     .await
     .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;

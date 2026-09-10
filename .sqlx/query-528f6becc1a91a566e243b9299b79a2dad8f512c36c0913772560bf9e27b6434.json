@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO creator_schedules\n               (schedule_id, creator_id, preset_id, preset_version, status,\n                concurrency_kind, current_core_context_version, created_at, updated_at)\n               VALUES ('SCH-FENCE', 'creator-1', 'memory-augmented', 1, 'running',\n                       'serial', 0, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "528f6becc1a91a566e243b9299b79a2dad8f512c36c0913772560bf9e27b6434"
+}

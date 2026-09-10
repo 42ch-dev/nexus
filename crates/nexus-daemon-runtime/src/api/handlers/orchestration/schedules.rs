@@ -741,18 +741,18 @@ async fn seed_core_context_in_tx(
             code: "CORE_CONTEXT_SEED_ERROR".into(),
             message: format!("failed to serialize core-context derivation: {e}"),
         })?;
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO core_context_versions
            (schedule_id, version, payload_kind, content,
             derivation_kind, derivation_detail,
             created_at, created_by_kind, created_by_user_id)
          VALUES (?, 0, 'text', ?, 'seed', ?, ?, 'user', ?)",
+        schedule_id,
+        content_bytes,
+        derivation_bytes,
+        now,
+        creator_id
     )
-    .bind(schedule_id)
-    .bind(content_bytes)
-    .bind(derivation_bytes)
-    .bind(now)
-    .bind(creator_id)
     .execute(&mut **tx)
     .await
     .map_err(|e| NexusApiError::Internal {
@@ -893,22 +893,25 @@ async fn admit_new_schedule(
 ) -> Result<String, NexusApiError> {
     // A scheduled_at in the future defers admission to the clocked tick.
     let pool = supervisor.pool();
-    let scheduled_at: Option<i64> =
-        sqlx::query_scalar("SELECT scheduled_at FROM creator_schedules WHERE schedule_id = ?")
-            .bind(schedule_id)
-            .fetch_one(&*pool)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".into(),
-                message: format!("database error reading scheduled_at: {e}"),
-            })?;
+    let scheduled_at: Option<i64> = sqlx::query_scalar!(
+        "SELECT scheduled_at FROM creator_schedules WHERE schedule_id = ?",
+        schedule_id
+    )
+    .fetch_one(&*pool)
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("database error reading scheduled_at: {e}"),
+    })?;
     if let Some(at) = scheduled_at {
         if at > chrono::Utc::now().timestamp() {
-            sqlx::query("UPDATE creator_schedules SET status = 'pending' WHERE schedule_id = ? AND status = 'paused'")
-                .bind(schedule_id)
-                .execute(&*pool)
-                .await
-                .ok();
+            sqlx::query!(
+                "UPDATE creator_schedules SET status = 'pending' WHERE schedule_id = ? AND status = 'paused'",
+                schedule_id
+            )
+            .execute(&*pool)
+            .await
+            .ok();
             return Ok("pending".to_string());
         }
     }
@@ -936,11 +939,13 @@ async fn admit_new_schedule(
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("not eligible") {
-                sqlx::query("UPDATE creator_schedules SET status = 'pending' WHERE schedule_id = ? AND status = 'paused'")
-                    .bind(schedule_id)
-                    .execute(&*pool)
-                    .await
-                    .ok();
+                sqlx::query!(
+                    "UPDATE creator_schedules SET status = 'pending' WHERE schedule_id = ? AND status = 'paused'",
+                    schedule_id
+                )
+                .execute(&*pool)
+                .await
+                .ok();
                 tracing::debug!(
                     schedule_id = schedule_id,
                     error = msg.as_str(),
@@ -2563,13 +2568,15 @@ async fn cancel_fence_loss_converged(
     terminal_status: &str,
 ) -> bool {
     for _ in 0..20 {
-        let row: Result<Option<(String, Option<String>)>, sqlx::Error> = sqlx::query_as(
+        let row = sqlx::query!(
             "SELECT status, current_session_id FROM creator_schedules WHERE schedule_id = ?",
+            schedule_id
         )
-        .bind(schedule_id)
         .fetch_optional(pool)
         .await;
-        if let Ok(Some((status, session))) = row {
+        if let Ok(Some(row)) = row {
+            let status = row.status;
+            let session = row.current_session_id;
             if status == terminal_status && session.as_deref() == observed_session {
                 return true;
             }
@@ -2595,16 +2602,16 @@ async fn fenced_cancel_schedule_status(
     terminal_status: &str,
     now: i64,
 ) -> Result<u64, sqlx::Error> {
-    let result = sqlx::query(
+    let result = sqlx::query!(
         "UPDATE creator_schedules SET status = ?, terminated_at = ?, updated_at = ?
          WHERE schedule_id = ? AND status = ? AND current_session_id IS ?",
+        terminal_status,
+        now,
+        now,
+        schedule_id,
+        observed_status,
+        observed_session_id
     )
-    .bind(terminal_status)
-    .bind(now)
-    .bind(now)
-    .bind(schedule_id)
-    .bind(observed_status)
-    .bind(observed_session_id)
     .execute(pool)
     .await?;
     Ok(result.rows_affected())
@@ -2630,44 +2637,46 @@ mod tests {
         let now = chrono::Utc::now().timestamp();
 
         // Admission-only historical shape: running, no owned session.
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO creator_schedules
                (schedule_id, creator_id, preset_id, preset_version, status,
                 concurrency_kind, current_core_context_version, created_at, updated_at)
                VALUES ('SCH-FENCE', 'creator-1', 'memory-augmented', 1, 'running',
                        'serial', 0, ?, ?)",
+            now,
+            now
         )
-        .bind(now)
-        .bind(now)
         .execute(&pool)
         .await
         .expect("seed schedule");
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO orchestration_sessions
                (session_id, creator_id, preset_id, preset_version, status,
                 context_json, created_at, updated_at)
                VALUES ('sess-admitted', 'creator-1', 'memory-augmented', 1, 'running',
                        X'00', ?, ?)",
+            now,
+            now
         )
-        .bind(now)
-        .bind(now)
         .execute(&pool)
         .await
         .expect("seed admitted session");
 
         // Handler snapshot: (running, NULL).
-        let (observed_status, observed_session): (String, Option<String>) = sqlx::query_as(
+        let row = sqlx::query!(
             "SELECT status, current_session_id FROM creator_schedules
-             WHERE schedule_id = 'SCH-FENCE'",
+             WHERE schedule_id = 'SCH-FENCE'"
         )
         .fetch_one(&pool)
         .await
         .expect("snapshot");
+        let observed_status = row.status;
+        let observed_session = row.current_session_id;
 
         // Concurrent admission commits the owned session in the window.
-        sqlx::query(
+        sqlx::query!(
             "UPDATE creator_schedules SET current_session_id = 'sess-admitted'
-             WHERE schedule_id = 'SCH-FENCE'",
+             WHERE schedule_id = 'SCH-FENCE'"
         )
         .execute(&pool)
         .await
@@ -2685,18 +2694,18 @@ mod tests {
         .expect("fenced write");
         assert_eq!(rows, 0, "a stale observed pair must lose the fence");
 
-        let (status, session): (String, Option<String>) = sqlx::query_as(
+        let row = sqlx::query!(
             "SELECT status, current_session_id FROM creator_schedules
-             WHERE schedule_id = 'SCH-FENCE'",
+             WHERE schedule_id = 'SCH-FENCE'"
         )
         .fetch_one(&pool)
         .await
         .expect("read back");
         assert_eq!(
-            status, "running",
+            row.status, "running",
             "a lost fence must not write a terminal status"
         );
-        assert_eq!(session.as_deref(), Some("sess-admitted"));
+        assert_eq!(row.current_session_id.as_deref(), Some("sess-admitted"));
 
         // The current observed pair commits.
         let rows = fenced_cancel_schedule_status(
@@ -2710,8 +2719,8 @@ mod tests {
         .await
         .expect("fenced write");
         assert_eq!(rows, 1, "the current observed pair must commit");
-        let status: String = sqlx::query_scalar(
-            "SELECT status FROM creator_schedules WHERE schedule_id = 'SCH-FENCE'",
+        let status: String = sqlx::query_scalar!(
+            "SELECT status as \"status!\" FROM creator_schedules WHERE schedule_id = 'SCH-FENCE'"
         )
         .fetch_one(&pool)
         .await

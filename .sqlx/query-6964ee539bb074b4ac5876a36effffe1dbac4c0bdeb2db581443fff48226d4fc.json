@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT schedule_id as \"schedule_id!\" FROM creator_schedules WHERE current_session_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "schedule_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "6964ee539bb074b4ac5876a36effffe1dbac4c0bdeb2db581443fff48226d4fc"
+}
