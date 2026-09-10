@@ -16,6 +16,6 @@ path = "src/main.rs"
 
 [dependencies]
 glob = "0.3"
-typify = "0.3"
+typify = "0.7"
 serde_json = { version = "1", features = ["preserve_order"] }
 schemars = "0.8"
