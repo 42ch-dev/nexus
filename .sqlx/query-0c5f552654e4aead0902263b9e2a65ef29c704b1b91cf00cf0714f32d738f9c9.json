@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT concurrency_whitelist FROM creator_schedules WHERE schedule_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "concurrency_whitelist",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "0c5f552654e4aead0902263b9e2a65ef29c704b1b91cf00cf0714f32d738f9c9"
+}

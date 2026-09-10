@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT state_revision,\n                        json_extract(COALESCE(run_state_json, '{}'), '$.step_in_flight')\n                        AS \"step_marker?: String\",\n                        json_extract(COALESCE(run_state_json, '{}'), '$.in_flight.attempt_id')\n                        AS \"in_flight_attempt_id?: String\"\n                 FROM orchestration_sessions WHERE session_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "state_revision",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "step_marker?: String",
+        "ordinal": 1,
+        "type_info": "Null"
+      },
+      {
+        "name": "in_flight_attempt_id?: String",
+        "ordinal": 2,
+        "type_info": "Null"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "fcd22bb6fc42594414b234f537a67a7c3dc2c1d7d006fa0391fcf5a2d3d2f60a"
+}

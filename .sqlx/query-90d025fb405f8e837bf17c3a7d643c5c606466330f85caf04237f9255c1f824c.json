@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE creator_schedules SET status = 'pending' WHERE schedule_id = ? AND status = 'paused'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "90d025fb405f8e837bf17c3a7d643c5c606466330f85caf04237f9255c1f824c"
+}
