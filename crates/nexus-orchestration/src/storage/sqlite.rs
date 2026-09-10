@@ -687,6 +687,15 @@ async fn read_root_descriptor(
     clippy::cast_sign_loss,
     clippy::items_after_statements
 )] // SQLite column types are i64; every cast is bounds-checked above the cast site
+/// Fixed-shape `(graph clock, status)` row for the post-write clock reads of
+/// `restore_pre_step` / `mark_step_in_flight` (static SQL, compile-time
+/// validated against the migrated schema).
+#[derive(sqlx::FromRow)]
+struct RestoreClocks {
+    graph_version: i64,
+    status: String,
+}
+
 #[async_trait]
 impl WorkflowStateStore for SqliteSessionStorage {
     async fn load_run(&self, session_id: &SessionId) -> Result<Option<RunRecord>, EngineError> {
@@ -2163,10 +2172,12 @@ impl WorkflowStateStore for SqliteSessionStorage {
         // Exact post-restore clocks, read back INSIDE the transaction: the
         // restore advances only the graph clock, and this record is the
         // operation-owned anchor a failed step's witness must adopt.
-        let (post_graph_version, post_status): (i64, String) = sqlx::query_as(
-            "SELECT graph_version, status FROM orchestration_sessions WHERE session_id = ?",
+        let clocks = sqlx::query_as!(
+            RestoreClocks,
+            r#"SELECT graph_version as "graph_version!", status as "status!"
+               FROM orchestration_sessions WHERE session_id = ?"#,
+            session_id.0
         )
-        .bind(&session_id.0)
         .fetch_one(&mut *tx)
         .await
         .map_err(|e| {
@@ -2174,6 +2185,8 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 "restore_pre_step read post-restore clocks: {e}"
             )))
         })?;
+        let post_graph_version = clocks.graph_version;
+        let post_status = clocks.status;
         let graph_version = u64::try_from(post_graph_version).map_err(|_| {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "restore_pre_step '{}': negative post-restore graph_version                  {post_graph_version} (non-replayable)",
@@ -2347,10 +2360,12 @@ impl WorkflowStateStore for SqliteSessionStorage {
 
         // Exact marker-owned clocks, read back INSIDE the transaction: the
         // step transition and any failure witness anchor here.
-        let (post_graph_version, post_status): (i64, String) = sqlx::query_as(
-            "SELECT graph_version, status FROM orchestration_sessions WHERE session_id = ?",
+        let clocks = sqlx::query_as!(
+            RestoreClocks,
+            r#"SELECT graph_version as "graph_version!", status as "status!"
+               FROM orchestration_sessions WHERE session_id = ?"#,
+            session_id.0
         )
-        .bind(&session_id.0)
         .fetch_one(&mut *tx)
         .await
         .map_err(|e| {
@@ -2358,6 +2373,8 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 "mark_step_in_flight read post-marker clocks: {e}"
             )))
         })?;
+        let post_graph_version = clocks.graph_version;
+        let post_status = clocks.status;
         let graph_version = u64::try_from(post_graph_version).map_err(|_| {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "mark_step_in_flight '{}': negative post-marker graph_version                  {post_graph_version} (non-replayable)",

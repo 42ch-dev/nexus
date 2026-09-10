@@ -294,6 +294,13 @@ pub enum FailurePersistenceDisposition {
     PersistenceFailed,
     /// No valid ownership anchor was available (fail-closed).
     NoAuthority,
+    /// Legacy v0 context-only failure record: the durable row predates v1
+    /// authority, so the only honest failure evidence is the persisted
+    /// `_run_status`/`_run_error` context pair plus the A7 recovery skip it
+    /// drives. No v1 workflow transition is attempted (a v0 row cannot be
+    /// promoted or terminalized by a v1 writer) and no successful v1 cancel
+    /// is claimed.
+    LegacyContextOnly,
 }
 
 impl FailurePersistenceDisposition {
@@ -306,7 +313,10 @@ impl FailurePersistenceDisposition {
     /// Whether the coordinator should fence re-entry.
     #[must_use]
     pub const fn requires_owner_fence(self) -> bool {
-        matches!(self, Self::PersistenceFailed | Self::NoAuthority)
+        matches!(
+            self,
+            Self::PersistenceFailed | Self::NoAuthority | Self::LegacyContextOnly
+        )
     }
 }
 
@@ -1658,37 +1668,61 @@ impl EngineSharedState {
         // Get Arc<FlowRunner> without cloning (WS2 R3).
         let runner = {
             let runners = self.runners.read().await;
-            runners
-                .get(&session_id.0)
-                .cloned()
-                .ok_or(EngineError::NoGraphLoaded)?
+            let found = runners.get(&session_id.0).cloned();
+            drop(runners);
+            match found {
+                Some(runner) => runner,
+                None => {
+                    // No runner. A legacy v0 row under a workflow store is
+                    // NOT steppable (it has no v1 descriptor/authority, and a
+                    // v1 writer may never mutate or promote it): report the
+                    // typed non-replayable shape instead of a generic
+                    // no-graph error. Any other missing-runner case keeps the
+                    // existing contract.
+                    if let Some(store) = &self.workflow_store {
+                        if let Ok(Some(record)) = store.load_run(session_id).await {
+                            if record.execution_version < 1 {
+                                tracing::warn!(
+                                    session_id = %session_id.0,
+                                    "run_step: legacy v0 row is not steppable under v1 authority (non-replayable)"
+                                );
+                                return Err(EngineError::GraphFlow(
+                                    graph_flow::GraphError::StorageError(format!(
+                                        "run '{}': legacy execution_version 0 is not steppable under v1 authority (non-replayable)",
+                                        session_id.0
+                                    )),
+                                ));
+                            }
+                        }
+                    }
+                    return Err(EngineError::NoGraphLoaded);
+                }
+            }
         };
 
         let mut step_witness: Option<FailedStepWitness> = None;
-        // Marker-owned graph clock (None until the marker commits): every
-        // post-marker write fences this exact clock.
-        let mut step_graph_version: Option<u64> = None;
 
         // Capture the current revision before the step so the transition CAS
         // is anchored to the pre-step state (A2). A `load_run` failure has
         // no witness — the driver must not reconstruct authority afterward.
-        let (expected_revision, pre_step_status) = if let Some(store) = &self.workflow_store {
-            match store.load_run(session_id).await {
-                Ok(Some(r)) => (r.state_revision, r.status),
-                Ok(None) => (0, SessionStatus::Running),
-                Err(e) => return Err(e),
-            }
-        } else {
-            let status = self
-                .sessions
-                .read()
-                .await
-                .iter()
-                .find(|s| s.session_id == *session_id)
-                .map(|s| s.status.clone())
-                .unwrap_or(SessionStatus::Running);
-            (0, status)
-        };
+        let (expected_revision, pre_step_status, pre_execution_version) =
+            if let Some(store) = &self.workflow_store {
+                match store.load_run(session_id).await {
+                    Ok(Some(r)) => (r.state_revision, r.status, Some(r.execution_version)),
+                    Ok(None) => (0, SessionStatus::Running, None),
+                    Err(e) => return Err(e),
+                }
+            } else {
+                let status = self
+                    .sessions
+                    .read()
+                    .await
+                    .iter()
+                    .find(|s| s.session_id == *session_id)
+                    .map(|s| s.status.clone())
+                    .unwrap_or(SessionStatus::Running);
+                (0, status, None)
+            };
         let mut transition_revision = expected_revision;
 
         // Capture the pre-step root session (position/context) so a failed
@@ -1700,6 +1734,46 @@ impl EngineSharedState {
             Ok(session) => session,
             Err(e) => return Err(EngineError::GraphFlow(e)),
         };
+
+        // Fail-stop BEFORE any external effect, under v1 authority:
+        //
+        // - A workflow-store run whose root session cannot be read has no
+        //   durable pre-step checkpoint and can therefore never be marked,
+        //   witnessed, or replayed. Refuse with the typed non-replayable
+        //   error instead of dispatching a step that would leave the effect
+        //   boundary ambiguous.
+        // - A legacy v0 row (`execution_version < 1`) carries NO v1 authority:
+        //   a v1 marker/transition may neither mutate nor promote it, so it is
+        //   never stepped under a workflow store. Its failure contract is
+        //   context-only.
+        //
+        // No root is synthesized and no witness is fabricated.
+        if self.workflow_store.is_some() {
+            if matches!(pre_execution_version, Some(v) if v < 1) {
+                tracing::warn!(
+                    session_id = %session_id.0,
+                    "run_step: legacy v0 row is not steppable under v1 authority; refusing dispatch (non-replayable)"
+                );
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "run '{}': legacy execution_version 0 is not steppable under v1 authority (non-replayable)",
+                        session_id.0
+                    )),
+                ));
+            }
+            if pre_step_root.is_none() {
+                tracing::warn!(
+                    session_id = %session_id.0,
+                    "run_step: no pre-step root session for a workflow-store run; refusing dispatch (non-replayable)"
+                );
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "run '{}': no pre-step root session to mark in flight (non-replayable)",
+                        session_id.0
+                    )),
+                ));
+            }
+        }
 
         // Persist the current-position safety intent BEFORE any external
         // effect in the step. The marker write is fenced to step-able status
@@ -1751,7 +1825,6 @@ impl EngineSharedState {
                 }
                 Ok(marker_record) => {
                     transition_revision = marker_record.state_revision;
-                    step_graph_version = Some(marker_record.graph_version);
                     step_witness = Some(FailedStepWitness {
                         owned_revision: marker_record.state_revision,
                         owned_graph_version: Some(marker_record.graph_version),
@@ -2117,12 +2190,12 @@ impl EngineSharedState {
                                 // / pre-step restore did NOT complete. Chain
                                 // it with the original commit error.
                                 Err(restore_err) => {
-                                    return Err(EngineError::GraphFlow(
+                                    return Err(wrap_step_boundary_err(EngineError::GraphFlow(
                                         graph_flow::GraphError::StorageError(format!(
                                             "step commit failed ({commit_err}) and the \
                                              pre-step restore also failed: {restore_err}"
                                         )),
-                                    ));
+                                    )));
                                 }
                             }
                         }

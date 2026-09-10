@@ -1,5 +1,6 @@
 -- graph-flow 0.8 session OCC version (2026-09-10 dependency sweep, PR #276)
--- Design: `.mstar/plans/20260910-dependency-bot-sweep.md` (T1 brief §3)
+-- Contract: graph-flow 0.8's `Session.version` optimistic-concurrency clock is
+-- persisted per session row and is advanced by every legitimate writer.
 --
 -- Append-only migration. Adds the durable `graph_version` column backing
 -- graph-flow 0.8's optimistic-locking `Session.version` to
