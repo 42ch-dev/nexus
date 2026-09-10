@@ -1652,11 +1652,29 @@ pub async fn signal_schedule(
                     message: format!("database error: {e}"),
                 })?;
                 if fenced_rows == 0 {
-                    // The schedule state moved on between our snapshot and
-                    // the write (e.g. a concurrent admission claimed the
-                    // NULL-session window) — the cancel must not mark the
-                    // row cancelled while the admitted run drives. Exact
-                    // conflict envelope, no write.
+                    // The row moved on between the snapshot and the write.
+                    // Two cases: (a) the run's own async settlement committed
+                    // the SAME terminal outcome first — the cancel already
+                    // succeeded, so report it (bounded retry: the settle may
+                    // still be in flight); (b) a concurrent admission claimed
+                    // the row — a genuine conflict, never a status write.
+                    if cancel_fence_loss_converged(
+                        &pool,
+                        &schedule_id,
+                        snapshot_session.as_deref(),
+                        &terminal_status,
+                    )
+                    .await
+                    {
+                        return Ok((
+                            StatusCode::OK,
+                            Json(SignalScheduleResponse {
+                                schedule_id,
+                                status: terminal_status,
+                                current_wait_id: None,
+                            }),
+                        ));
+                    }
                     return Err(NexusApiError::ConflictCoded {
                         code: "workflow_state_conflict".into(),
                         message: format!(
@@ -2530,6 +2548,48 @@ struct HistoryRow {
 /// cancelled.
 ///
 /// Returns the number of rows affected (0 = the fence was lost).
+/// Bounded convergence check after a lost cancel fence (A5 idempotence).
+///
+/// Returns `true` when the schedule row reaches the SAME terminal status for
+/// the SAME owned session this cancel targeted — i.e. the run's own async
+/// settlement (or a concurrent identical cancel) already committed our
+/// outcome, so the cancel is a success even though our fenced write lost.
+/// Any other state (a new admitted run, a foreign terminal, or no convergence
+/// within the bound) keeps the conflict.
+async fn cancel_fence_loss_converged(
+    pool: &sqlx::SqlitePool,
+    schedule_id: &str,
+    observed_session: Option<&str>,
+    terminal_status: &str,
+) -> bool {
+    for _ in 0..20 {
+        let row: Result<Option<(String, Option<String>)>, sqlx::Error> = sqlx::query_as(
+            "SELECT status, current_session_id FROM creator_schedules WHERE schedule_id = ?",
+        )
+        .bind(schedule_id)
+        .fetch_optional(pool)
+        .await;
+        match row {
+            Ok(Some((status, session))) => {
+                if status == terminal_status && session.as_deref() == observed_session {
+                    return true;
+                }
+                // A settled row with the same owned session but a different
+                // terminal status (e.g. completed-vs-cancel) is a genuine
+                // conflict: the run reached its own outcome.
+                if matches!(status.as_str(), "completed" | "failed" | "cancelled")
+                    && session.as_deref() == observed_session
+                {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    false
+}
+
 async fn fenced_cancel_schedule_status(
     pool: &sqlx::SqlitePool,
     schedule_id: &str,
