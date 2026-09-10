@@ -37,7 +37,7 @@ toml_edit = "0.22"
 # the custom `open_with`/`reveal_in_finder` commands AFTER the runtime path
 # guard accepts the path — calling it directly avoids coupling to the plugin's
 # Rust extension-trait API surface and is the canonical macOS mechanism.
-opener = "0.7"
+opener = "0.8"
 # The Tauri dialog plugin (Rust crate only — no JS package is added). Used by
 # the custom `pick_directory` command so the SPA can open a native folder picker
 # through the existing transport boundary.
