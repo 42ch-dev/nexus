@@ -1112,7 +1112,7 @@ function trimRatio(value: number, decimals: number): string {
 
 function SectionHeading({ id, children }: { id: string; children: ReactNode }) {
   return (
-    <h3 id={id} className="text-heading-20 font-semibold text-gray-1000 mb-4 pt-8 scroll-mt-16">
+    <h3 id={id} className="text-heading-20 font-semibold text-gray-1000 mb-4 pt-8 scroll-mt-sticky-header">
       {children}
     </h3>
   );

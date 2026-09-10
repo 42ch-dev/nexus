@@ -15,6 +15,12 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer utilities {
+  .scroll-mt-sticky-header {
+    scroll-margin-top: var(--studio-sticky-header-offset, 3rem);
+  }
+}
+
 @layer base {
   html {
     font-family: var(--font-sans);

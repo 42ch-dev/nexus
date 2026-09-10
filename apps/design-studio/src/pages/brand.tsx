@@ -224,7 +224,7 @@ function SubNav() {
 
 function SectionHeading({ id, children }: { id: string; children: ReactNode }) {
   return (
-    <h3 id={id} className="text-heading-20 font-semibold text-gray-1000 mb-4 pt-8 scroll-mt-16">
+    <h3 id={id} className="text-heading-20 font-semibold text-gray-1000 mb-4 pt-8 scroll-mt-sticky-header">
       {children}
     </h3>
   );
@@ -728,10 +728,10 @@ export function BrandPage() {
       <ThemeCssSwatches />
       <ClearSpaceSection />
 
-      <section id="brand-vi-acceptance" className="scroll-mt-16">
+      <section id="brand-vi-acceptance" className="scroll-mt-sticky-header">
         <h3
           id="brand-vi-acceptance-heading"
-          className="text-heading-20 font-semibold text-gray-1000 mb-2 pt-8 scroll-mt-16"
+          className="text-heading-20 font-semibold text-gray-1000 mb-2 pt-8 scroll-mt-sticky-header"
         >
           VI acceptance fixtures
         </h3>

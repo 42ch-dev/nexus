@@ -84,7 +84,7 @@ function SectionHeading({ id, children }: { id?: string; children: ReactNode }) 
     <h3
       id={id}
       tabIndex={id ? -1 : undefined}
-      className="text-heading-20 font-semibold text-gray-1000 mb-4 pt-8 scroll-mt-16"
+      className="text-heading-20 font-semibold text-gray-1000 mb-4 pt-8 scroll-mt-sticky-header"
     >
       {children}
     </h3>

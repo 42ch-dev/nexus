@@ -51,7 +51,7 @@ function SectionHeading({
   return (
     <h3
       id={id}
-      className="text-heading-20 font-semibold text-gray-1000 mb-4 pt-8 scroll-mt-16"
+      className="text-heading-20 font-semibold text-gray-1000 mb-4 pt-8 scroll-mt-sticky-header"
     >
       {children}
     </h3>
@@ -1457,7 +1457,7 @@ export function ComponentsPage() {
       <RunStudioSection />
       <ComputeTimelineSection />
 
-      <section id="comp-vi-acceptance" data-testid="comp-vi-acceptance" className="scroll-mt-16">
+      <section id="comp-vi-acceptance" data-testid="comp-vi-acceptance" className="scroll-mt-sticky-header">
         <SectionHeading id="comp-vi-acceptance-heading">VI acceptance (P2)</SectionHeading>
         <p
           data-testid="comp-vi-acceptance-note"

@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useRef, type ReactNode } from 'react';
 import { Link, Routes, Route } from 'react-router';
 
 import { EmbeddedRouteReady } from '@/components/embed-ready-notifier';
@@ -57,6 +57,11 @@ function lazyRoute(node: ReactNode, label: string) {
   return <Suspense fallback={<RouteLoading label={label} />}>{node}</Suspense>;
 }
 
+/** Embedded layout routes defer readiness to nested leaf routes. */
+function embeddedLazyLayoutRoute(node: ReactNode, label: string) {
+  return <Suspense fallback={<RouteLoading label={label} />}>{node}</Suspense>;
+}
+
 /** Embedded routes post ready only after the lazy gallery page commits. */
 function embeddedLazyRoute(node: ReactNode, label: string) {
   return (
@@ -73,7 +78,7 @@ function EmbeddedRoutes() {
       <Route path="/brand" element={embeddedLazyRoute(<BrandPage />, 'Brand')} />
       <Route path="/components" element={embeddedLazyRoute(<ComponentsPage />, 'Components')} />
       <Route path="/voice" element={embeddedLazyRoute(<VoicePage />, 'Voice & Content')} />
-      <Route path="/surfaces" element={embeddedLazyRoute(<SurfacesLayout />, 'Surfaces')}>
+      <Route path="/surfaces" element={embeddedLazyLayoutRoute(<SurfacesLayout />, 'Surfaces')}>
         <Route index element={embeddedLazyRoute(<SurfacesIndexPage />, 'Surfaces')} />
         <Route path="setup" element={embeddedLazyRoute(<SurfacesSetupPage />, 'Surfaces / Setup')} />
         <Route path="shell" element={embeddedLazyRoute(<SurfacesShellPage />, 'Surfaces / Shell')} />
@@ -144,6 +149,25 @@ function GalleryRoutes() {
  */
 export function App() {
   const { isEmbedded } = useStudioEmbed();
+  const headerRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (isEmbedded) return;
+    const header = headerRef.current;
+    if (!header) return;
+
+    const syncStickyHeaderOffset = () => {
+      document.documentElement.style.setProperty(
+        '--studio-sticky-header-offset',
+        `${header.offsetHeight}px`,
+      );
+    };
+
+    syncStickyHeaderOffset();
+    const observer = new ResizeObserver(syncStickyHeaderOffset);
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, [isEmbedded]);
 
   if (isEmbedded) {
     return (
@@ -155,7 +179,10 @@ export function App() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="sticky top-0 z-20 min-h-12 border-b border-gray-alpha-200 bg-background-100/90 backdrop-blur-sm">
+      <header
+        ref={headerRef}
+        className="sticky top-0 z-20 min-h-12 border-b border-gray-alpha-200 bg-background-100/90 backdrop-blur-sm"
+      >
         <div className="mx-auto flex min-h-12 max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-1">
           <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
             <Link

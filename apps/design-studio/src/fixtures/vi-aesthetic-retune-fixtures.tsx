@@ -126,7 +126,7 @@ function ViSection({
     <section
       id={id}
       data-testid={sectionTestId ?? `vi-section-${ledgerId.toLowerCase()}`}
-      className="scroll-mt-16 border-t border-gray-alpha-200 pt-8 first:border-t-0 first:pt-0"
+      className="scroll-mt-sticky-header border-t border-gray-alpha-200 pt-8 first:border-t-0 first:pt-0"
     >
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <ViLedgerBadge id={ledgerId} />

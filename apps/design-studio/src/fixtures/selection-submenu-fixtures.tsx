@@ -31,7 +31,7 @@ function VariantFrame({
     <div
       id={testId}
       tabIndex={-1}
-      className="rounded-card border border-gray-alpha-300 bg-background-100 p-4 scroll-mt-16"
+      className="rounded-card border border-gray-alpha-300 bg-background-100 p-4 scroll-mt-sticky-header"
       data-testid={testId}
     >
       <p className="text-label-14 font-medium text-gray-1000 mb-1">{label}</p>
