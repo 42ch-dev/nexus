@@ -167,8 +167,10 @@ async fn drive(d: &LiveDaemon, sid: &SessionId, resume_waiting: bool) -> PresetR
     drive_preset_run(
         d.engine.as_ref(),
         Some(&d.session_storage),
+        None,
         sid,
         &config,
+        None,
         None,
     )
     .await

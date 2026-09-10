@@ -201,8 +201,10 @@ async fn restart_mid_chain_resumes_without_re_executing_completed_edges() {
     let first = drive_preset_run(
         engine1.as_ref(),
         Some(&storage),
+        None,
         &sid,
         &PresetRunConfig::default(),
+        None,
         None,
     )
     .await;
@@ -373,8 +375,10 @@ async fn inspect_after_interrupt_is_side_effect_free_and_resume_matches_baseline
     let first = drive_preset_run(
         engine1.as_ref(),
         Some(&storage),
+        None,
         &sid,
         &PresetRunConfig::default(),
+        None,
         None,
     )
     .await;

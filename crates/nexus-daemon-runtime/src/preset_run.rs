@@ -99,6 +99,10 @@ pub enum PresetRunOutcome {
     /// is also persisted into the session context (`_run_status`,
     /// `_run_error`).
     Failed { steps: u32, error: String },
+    /// A concurrent authoritative writer won the graph-flow OCC race while
+    /// this drive was in flight. The losing drive stops without cancel,
+    /// failure-context persistence, or coordinator durable-failure fencing.
+    SessionConflict { steps: u32, error: String },
     /// `max_steps` exhausted without reaching a terminal state.
     MaxStepsExceeded { steps: u32 },
 }
@@ -125,9 +129,11 @@ pub enum PresetRunOutcome {
 pub async fn drive_preset_run(
     engine: &dyn OrchestrationEngine,
     storage: Option<&Arc<dyn SessionStorage>>,
+    workflow_store: Option<&Arc<dyn WorkflowStateStore>>,
     session_id: &SessionId,
     config: &PresetRunConfig,
     cancel: Option<&CancellationToken>,
+    failure_write_fault: Option<&Arc<AtomicBool>>,
 ) -> PresetRunOutcome {
     let mut steps: u32 = 0;
 
@@ -159,6 +165,14 @@ pub async fn drive_preset_run(
             }
             Err(e) => {
                 let error = format!("get_status failed: {e}");
+                record_driver_failure(
+                    workflow_store,
+                    storage,
+                    session_id,
+                    &error,
+                    failure_write_fault,
+                )
+                .await;
                 persist_failure(storage, session_id, &error).await;
                 return PresetRunOutcome::Failed { steps, error };
             }
@@ -180,11 +194,14 @@ pub async fn drive_preset_run(
                 };
             }
             Ok(StepOutcome::Error(msg)) => {
-                // Order matters (graph-flow 0.8 OCC): the failure record must
-                // be persisted BEFORE the terminal cancellation fence, because
-                // the protected-row save fence refuses writes onto a terminal
-                // row. A concurrent terminal winner in between legitimately
-                // refuses the save and is left untouched.
+                record_driver_failure(
+                    workflow_store,
+                    storage,
+                    session_id,
+                    &msg,
+                    failure_write_fault,
+                )
+                .await;
                 persist_failure(storage, session_id, &msg).await;
                 mark_failed(engine, session_id).await;
                 return PresetRunOutcome::Failed {
@@ -207,15 +224,21 @@ pub async fn drive_preset_run(
                     "preset-run driver: losing drive stopped on session conflict \
                      (concurrent authoritative writer won)"
                 );
-                return PresetRunOutcome::Failed {
+                return PresetRunOutcome::SessionConflict {
                     steps: steps.saturating_add(1),
                     error,
                 };
             }
             Err(e) => {
                 let error = e.to_string();
-                // Failure record BEFORE terminal cancellation (see the
-                // StepOutcome::Error arm above for the OCC rationale).
+                record_driver_failure(
+                    workflow_store,
+                    storage,
+                    session_id,
+                    &error,
+                    failure_write_fault,
+                )
+                .await;
                 persist_failure(storage, session_id, &error).await;
                 mark_failed(engine, session_id).await;
                 return PresetRunOutcome::Failed {
@@ -223,6 +246,80 @@ pub async fn drive_preset_run(
                     error,
                 };
             }
+        }
+    }
+}
+
+/// Persist the authoritative v1 [`RunFailure`] while the row is still
+/// non-terminal. Status is preserved so the subsequent `Cancel` settlement
+/// can still run.
+async fn record_driver_failure(
+    workflow_store: Option<&Arc<dyn WorkflowStateStore>>,
+    storage: Option<&Arc<dyn SessionStorage>>,
+    session_id: &SessionId,
+    error: &str,
+    failure_write_fault: Option<&Arc<AtomicBool>>,
+) -> bool {
+    if failure_write_fault.is_some_and(|f| f.swap(false, Ordering::SeqCst)) {
+        tracing::warn!(
+            session_id = %session_id.0,
+            "preset-run driver: fault-injection armed; authoritative failure write skipped"
+        );
+        return false;
+    }
+    let Some(store) = workflow_store else {
+        return false;
+    };
+    let Some(storage) = storage else {
+        return false;
+    };
+    let Ok(Some(record)) = store.load_run(session_id).await else {
+        return false;
+    };
+    if record.execution_version < 1 || record.status.is_terminal() {
+        return false;
+    }
+    if record
+        .state
+        .as_ref()
+        .and_then(|s| s.failure.as_ref())
+        .is_some()
+    {
+        return true;
+    }
+    let expected_revision = record.state_revision;
+    let mut next_state = record.state.unwrap_or_default();
+    next_state.in_flight = None;
+    next_state.step_in_flight = None;
+    next_state.failure = Some(nexus_orchestration::run_state::RunFailure {
+        code: "driver_failed".to_string(),
+        message: error.to_string(),
+    });
+    let Ok(Some(root)) = storage.get(&session_id.0).await else {
+        return false;
+    };
+    let checkpoint = nexus_orchestration::run_state::RunCheckpoint {
+        root: &root,
+        children: &[],
+    };
+    match store
+        .commit_transition(
+            session_id,
+            expected_revision,
+            checkpoint,
+            record.status.clone(),
+            &next_state,
+        )
+        .await
+    {
+        Ok(_) => true,
+        Err(e) => {
+            tracing::warn!(
+                session_id = %session_id.0,
+                error = %e,
+                "preset-run driver: could not persist authoritative failure record"
+            );
+            false
         }
     }
 }
@@ -251,7 +348,7 @@ async fn persist_failure(
     let Some(storage) = storage else {
         return;
     };
-    let Ok(Some(mut session)) = storage.get(&session_id.0).await else {
+    let Ok(Some(session)) = storage.get(&session_id.0).await else {
         return;
     };
     // Both fields are REQUIRED parts of the failure record: if either
@@ -577,7 +674,16 @@ pub async fn resume_driven_sessions(
         }
 
         // 6. Re-drive from the persisted position.
-        let outcome = drive_preset_run(engine, Some(storage), &session_id, config, cancel).await;
+        let outcome = drive_preset_run(
+            engine,
+            Some(storage),
+            workflow_store.map(|s| s as &Arc<dyn WorkflowStateStore>),
+            &session_id,
+            config,
+            cancel,
+            None,
+        )
+        .await;
         decisions.push(ResumeDecision::ReDriven {
             session_id,
             outcome,
@@ -1096,29 +1202,35 @@ impl WorkflowRunCoordinator {
         if record.execution_version < 1 {
             return true;
         }
+        if record
+            .state
+            .as_ref()
+            .and_then(|s| s.failure.as_ref())
+            .is_some()
+        {
+            return true;
+        }
         if record.status.is_terminal() {
-            // The drive loop persists its failure record
-            // (`_run_status`/`_run_error`) BEFORE the terminal cancellation
-            // fence, so a terminal row carrying the record is durably handled.
-            // A terminal row WITHOUT it belongs to a concurrent control/cancel
-            // winner — never overwrite the winner's state to retrofit a
-            // failure transition. Either way the row is terminal and
-            // non-replayable; only observability differs.
-            let has_failure_record = match self.storage.get(&session_id.0).await {
+            let has_context_failure = match self.storage.get(&session_id.0).await {
                 Ok(Some(session)) => session
                     .context
                     .get::<String>("_run_status")
                     .is_some_and(|s| s == "failed"),
                 _ => false,
             };
-            if !has_failure_record {
-                tracing::debug!(
-                    sid = %session_id.0,
+            if has_context_failure {
+                tracing::warn!(
+                    session_id = %session_id.0,
                     status = ?record.status,
-                    "coordinator: run is terminal without a driver failure record \
-                     (concurrent control/cancel winner or external cancel); left untouched"
+                    "coordinator: terminal row has context failure keys but no                      authoritative RunFailure; fencing the failed owner"
                 );
+                return false;
             }
+            tracing::debug!(
+                sid = %session_id.0,
+                status = ?record.status,
+                "coordinator: run is terminal without a driver failure record                  (concurrent control/cancel winner or external cancel); left untouched"
+            );
             return true;
         }
         let expected_revision = record.state_revision;
@@ -1389,14 +1501,24 @@ impl WorkflowRunCoordinator {
 
         let engine = self.engine.clone();
         let storage = self.storage.clone();
+        let workflow_store: Arc<dyn WorkflowStateStore> =
+            Arc::new(SqliteSessionStorage::new(self.pool.clone()));
         let config = self.config.clone();
         let sid = session_id.clone();
         let drive_cancel = cancel.clone();
         let coordinator = self.clone();
+        let failure_write_fault = self.fail_drive_failure_write.clone();
         let join = tokio::spawn(async move {
-            let outcome =
-                drive_preset_run(&*engine, Some(&storage), &sid, &config, Some(&drive_cancel))
-                    .await;
+            let outcome = drive_preset_run(
+                &*engine,
+                Some(&storage),
+                Some(&workflow_store),
+                &sid,
+                &config,
+                Some(&drive_cancel),
+                Some(&failure_write_fault),
+            )
+            .await;
             // Closure 8: a failed driver persists a durable non-replayable
             // `Failed` transition so the v1 record is never classified
             // runnable again after owner cleanup. When the transition
@@ -1605,17 +1727,27 @@ impl WorkflowRunCoordinator {
 
             let engine = self.engine.clone();
             let storage = self.storage.clone();
+            let coordinator = self.clone();
+            let workflow_store: Arc<dyn WorkflowStateStore> =
+                Arc::new(SqliteSessionStorage::new(coordinator.pool.clone()));
             let config = PresetRunConfig {
                 resume_waiting: true,
                 ..self.config.clone()
             };
             let sid = session_id.clone();
             let drive_cancel = cancel.clone();
-            let coordinator = self.clone();
+            let failure_write_fault = coordinator.fail_drive_failure_write.clone();
             let join = tokio::spawn(async move {
-                let outcome =
-                    drive_preset_run(&*engine, Some(&storage), &sid, &config, Some(&drive_cancel))
-                        .await;
+                let outcome = drive_preset_run(
+                    &*engine,
+                    Some(&storage),
+                    Some(&workflow_store),
+                    &sid,
+                    &config,
+                    Some(&drive_cancel),
+                    Some(&failure_write_fault),
+                )
+                .await;
                 // Closure 8: a failed recovery drive persists a durable
                 // non-replayable `Failed` transition (same boundary as
                 // `ensure_driving`); a failed write fences the owner.
@@ -2822,7 +2954,7 @@ mod tests {
             Ok(StepOutcome::Completed { response: None }),
         ]);
         let outcome =
-            drive_preset_run(&engine, None, &sid(), &PresetRunConfig::default(), None).await;
+            drive_preset_run(&engine, None, None, &sid(), &PresetRunConfig::default(), None, None).await;
         assert_eq!(
             outcome,
             PresetRunOutcome::Completed { steps: 3 },
@@ -2834,7 +2966,7 @@ mod tests {
     async fn stops_at_waiting_for_input_without_resume_flag() {
         let engine = ScriptedEngine::with_script(vec![Ok(waiting())]);
         let outcome =
-            drive_preset_run(&engine, None, &sid(), &PresetRunConfig::default(), None).await;
+            drive_preset_run(&engine, None, None, &sid(), &PresetRunConfig::default(), None, None).await;
         assert_eq!(outcome, PresetRunOutcome::WaitingForInput { steps: 1 });
     }
 
@@ -2844,7 +2976,7 @@ mod tests {
             ScriptedEngine::with_script(vec![Ok(StepOutcome::Completed { response: None })]);
         *engine.status.lock() = SessionStatus::WaitingForInput;
         let outcome =
-            drive_preset_run(&engine, None, &sid(), &PresetRunConfig::default(), None).await;
+            drive_preset_run(&engine, None, None, &sid(), &PresetRunConfig::default(), None, None).await;
         assert_eq!(
             outcome,
             PresetRunOutcome::WaitingForInput { steps: 0 },
@@ -2865,7 +2997,7 @@ mod tests {
             resume_waiting: true,
             ..PresetRunConfig::default()
         };
-        let outcome = drive_preset_run(&engine, None, &sid(), &config, None).await;
+        let outcome = drive_preset_run(&engine, None, None, &sid(), &config, None, None).await;
         assert_eq!(
             outcome,
             PresetRunOutcome::Completed { steps: 1 },
@@ -2881,9 +3013,11 @@ mod tests {
         let outcome = drive_preset_run(
             &engine,
             None,
+            None,
             &sid(),
             &PresetRunConfig::default(),
             Some(&token),
+            None,
         )
         .await;
         assert_eq!(
@@ -2907,7 +3041,7 @@ mod tests {
             ),
         ))]);
         let outcome =
-            drive_preset_run(&engine, None, &sid(), &PresetRunConfig::default(), None).await;
+            drive_preset_run(&engine, None, None, &sid(), &PresetRunConfig::default(), None, None).await;
         match outcome {
             PresetRunOutcome::Failed { steps, error } => {
                 assert_eq!(steps, 1);
@@ -2944,8 +3078,10 @@ mod tests {
         let outcome = drive_preset_run(
             &engine,
             Some(&storage),
+            None,
             &sid(),
             &PresetRunConfig::default(),
+            None,
             None,
         )
         .await;
@@ -2975,20 +3111,22 @@ mod tests {
         let outcome = drive_preset_run(
             &engine,
             Some(&storage),
+            None,
             &sid(),
             &PresetRunConfig::default(),
+            None,
             None,
         )
         .await;
         match outcome {
-            PresetRunOutcome::Failed { steps, error } => {
+            PresetRunOutcome::SessionConflict { steps, error } => {
                 assert_eq!(steps, 1);
                 assert!(
                     error.contains("graph_version mismatch"),
                     "the conflict discriminator must surface verbatim: {error}"
                 );
             }
-            other => panic!("expected Failed, got {other:?}"),
+            other => panic!("expected SessionConflict, got {other:?}"),
         }
         assert!(
             engine.signals.lock().is_empty(),
@@ -3065,8 +3203,10 @@ mod tests {
         let outcome = drive_preset_run(
             &engine,
             Some(&storage),
+            Some(&store),
             &session_id,
             &PresetRunConfig::default(),
+            None,
             None,
         )
         .await;
@@ -3112,6 +3252,16 @@ mod tests {
             "row must be terminal after the failure path: {:?}",
             record.status
         );
+        let failure = record
+            .state
+            .as_ref()
+            .and_then(|s| s.failure.as_ref())
+            .expect("authoritative RunFailure must be populated");
+        assert_eq!(failure.code, "driver_failed");
+        assert!(
+            failure.message.contains("deterministic failure"),
+            "{failure:?}"
+        );
     }
 
 
@@ -3123,7 +3273,7 @@ mod tests {
             max_steps: 2,
             ..PresetRunConfig::default()
         };
-        let outcome = drive_preset_run(&engine, None, &sid(), &config, None).await;
+        let outcome = drive_preset_run(&engine, None, None, &sid(), &config, None, None).await;
         assert_eq!(
             outcome,
             PresetRunOutcome::MaxStepsExceeded { steps: 2 },
@@ -3136,7 +3286,7 @@ mod tests {
         let engine = ScriptedEngine::with_script(vec![Ok(paused())]);
         *engine.status.lock() = SessionStatus::Failed;
         let outcome =
-            drive_preset_run(&engine, None, &sid(), &PresetRunConfig::default(), None).await;
+            drive_preset_run(&engine, None, None, &sid(), &PresetRunConfig::default(), None, None).await;
         assert_eq!(
             outcome,
             PresetRunOutcome::Cancelled { steps: 0 },
@@ -4240,12 +4390,11 @@ mod tests {
         );
 
         // Start a v1 run and park it at a durable human wait.
-        let graph = Arc::new(graph_flow::Graph::new("race-graph"));
         let graph = Arc::new(
-        graph_flow::GraphBuilder::new("fence-graph")
-            .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
-            .build()
-            .expect("test graph build"),
+            graph_flow::GraphBuilder::new("fence-graph")
+                .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph build"),
         );
         let session_id = engine
             .start_session("novel-writing", graph)
@@ -4344,6 +4493,147 @@ mod tests {
             .expect("load run")
             .expect("run exists");
         assert_eq!(final_record.status, SessionStatus::Cancelled);
+    }
+
+    /// Coordinator boundary (Critical 1): a losing drive that surfaces
+    /// `SessionConflict` must not run `persist_drive_failure` or mutate the
+    /// concurrent winner's durable row.
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn coordinator_conflict_loser_leaves_winner_untouched() {
+        use graph_flow::{NextAction, Task, TaskResult};
+
+        struct CompetingWinnerTask {
+            store: Arc<SqliteSessionStorage>,
+        }
+
+        #[async_trait]
+        impl Task for CompetingWinnerTask {
+            fn id(&self) -> &str {
+                "competing_winner_task"
+            }
+
+            async fn run(
+                &self,
+                context: graph_flow::Context,
+            ) -> Result<TaskResult, graph_flow::GraphError> {
+                let session_id: String = context
+                    .get("_session_id")
+                    .expect("engine seeds _session_id");
+                let winner = graph_flow::Session::new_from_task(session_id.clone(), "winner-task");
+                winner
+                    .context
+                    .set("_session_id", session_id.clone())
+                    .expect("session id");
+                winner
+                    .context
+                    .set("winner.marker", "committed")
+                    .expect("marker");
+                self.store
+                    .commit_transition(
+                        &SessionId(session_id),
+                        2,
+                        nexus_orchestration::run_state::RunCheckpoint {
+                            root: &winner,
+                            children: &[],
+                        },
+                        SessionStatus::Running,
+                        &nexus_orchestration::run_state::RunStateV1::default(),
+                    )
+                    .await
+                    .map_err(|e| {
+                        graph_flow::GraphError::StorageError(format!(
+                            "fixture winner commit failed: {e}"
+                        ))
+                    })?;
+                Ok(TaskResult::new(Some("done".to_string()), NextAction::Continue))
+            }
+        }
+
+        let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let _ = &tmp;
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("open pool");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = Arc::new(
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+                storage.clone(),
+                store.clone(),
+                caps,
+            ),
+        );
+        let session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let coordinator = WorkflowRunCoordinator::new(
+            engine.clone(),
+            storage.clone(),
+            pool.clone(),
+            session_cancels,
+        );
+
+        let race_graph = Arc::new(
+            graph_flow::GraphBuilder::new("race-graph")
+                .add_task(Arc::new(CompetingWinnerTask {
+                    store: sqlite.clone(),
+                }))
+                .build()
+                .expect("race graph"),
+        );
+        let session_id = engine
+            .start_session("novel-writing", race_graph)
+            .await
+            .expect("start session");
+
+        coordinator
+            .ensure_driving(&session_id)
+            .await
+            .expect("start drive");
+
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                let record = store
+                    .load_run(&session_id)
+                    .await
+                    .expect("load")
+                    .expect("row");
+                if record.state_revision >= 3 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        })
+        .await
+        .expect("drive finished");
+
+        assert!(
+            !coordinator.is_fenced(&session_id).await,
+            "conflict loser must not fence the owner"
+        );
+
+        let after = store.load_run(&session_id).await.expect("load").expect("row");
+        let after_root = storage.get(&session_id.0).await.expect("get").expect("root");
+        assert_eq!(after.status, SessionStatus::Running);
+        assert_eq!(after.state_revision, 3, "winner revision retained (1 start + 1 mark + 1 win)");
+        assert_eq!(after_root.current_task_id, "winner-task");
+        assert_eq!(
+            after_root.context.get::<String>("winner.marker").as_deref(),
+            Some("committed")
+        );
+        assert!(after_root.context.get::<String>("_run_status").is_none());
+        assert!(after_root.context.get::<String>("_run_error").is_none());
+        assert!(after.state.as_ref().and_then(|s| s.failure.as_ref()).is_none());
     }
 
     /// Deterministic continue-after-cancel-fence proof (Finding 1, public

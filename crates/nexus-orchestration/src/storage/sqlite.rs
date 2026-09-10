@@ -600,6 +600,14 @@ async fn child_cas_outcome(
             }
             let found_rev = row.state_revision;
             let status = row.status;
+            if crate::engine::SessionStatus::from_db_str(&status).is_none() {
+                return Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+                    format!(
+                        "child CAS outcome for '{child_id}': unknown/corrupt status {:?}                          (non-replayable)",
+                        status
+                    ),
+                )));
+            }
             let terminal = matches!(
                 status.as_str(),
                 "completed" | "failed" | "cancelled" | "interrupted"

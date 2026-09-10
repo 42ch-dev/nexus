@@ -1661,6 +1661,65 @@ async fn child_cas_stale_revision_rolls_back_root() {
     assert_eq!(child_after.state_revision, 1, "child row not overwritten");
 }
 
+
+// Unknown/corrupt child status must be a hard storage error before OCC
+// classification (never RevisionMismatch or a generic CAS failure).
+#[tokio::test]
+async fn child_cas_unknown_status_is_storage_error_even_with_revision_mismatch() {
+    let (pool, _db) = fresh_pool().await;
+    let storage = SqliteSessionStorage::new(pool.clone());
+    let session_id = SessionId("sess-child-bogus-status".to_string());
+
+    let descriptor = test_descriptor(&session_id.0);
+    let root = root_session(&session_id.0, "parent_task");
+    let child = child_checkpoint("sess-child-bogus-status:child:1", "child_task");
+    storage
+        .start_run(
+            &session_id,
+            &descriptor,
+            RunCheckpoint {
+                root: &root,
+                children: &[child],
+            },
+            &RunStateV1::default(),
+        )
+        .await
+        .expect("start_run with child");
+
+    sqlx::query(
+        "UPDATE orchestration_sessions SET status = 'not-a-valid-status', state_revision = 2
+         WHERE session_id = 'sess-child-bogus-status:child:1'",
+    )
+    .execute(&*pool)
+    .await
+    .expect("corrupt child status + advance revision");
+
+    let root2 = root_session(&session_id.0, "parent_task2");
+    let child2 = child_checkpoint("sess-child-bogus-status:child:1", "child_task2");
+    let err = storage
+        .commit_transition(
+            &session_id,
+            1,
+            RunCheckpoint {
+                root: &root2,
+                children: &[child2],
+            },
+            SessionStatus::Running,
+            &RunStateV1::default(),
+        )
+        .await
+        .expect_err("unknown child status must fail closed");
+
+    assert_hard_storage_error(&err, "child CAS with corrupt status");
+
+    let root_after = storage
+        .load_run(&session_id)
+        .await
+        .expect("load_run")
+        .expect("root present");
+    assert_eq!(root_after.state_revision, 1, "root transition must roll back");
+}
+
 // Important 1: a child CAS that matches zero rows because the child is
 // already terminal must roll back the root transition with TerminalState.
 #[tokio::test]
