@@ -201,7 +201,7 @@ rmcp = { version = "=1.8.0", default-features = false, features = ["client", "tr
 # duplex run the full newSession.mcp_servers round trip without a live
 # LLM. Same =0.11.1 pin already in the shipped graph via nexus-acp-host;
 # dev-only, tests-only (graph pins use --edges normal, dev-deps excluded).
-agent-client-protocol = "=0.11.1"
+agent-client-protocol = "=2.1.0"
 # V1.174 P1 T4 (AR-77): three-process E2E harness (`tests/e2e_peer_mcp.rs`) —
 # the integrator leg (spoke `RemoteAdapter` over a REAL tokio-tungstenite WS
 # pair), the daemon leg (in-process accept loop + real axum HTTP listener),
