@@ -86,14 +86,16 @@ Guardrail: `tooling/check-ui-guardrails.sh`.
 
 ### 3.3 Toolchain alignment with `apps/web`
 
-| Concern | Shared rule |
-| --- | --- |
-| Bundler / React / TS | Vite 6, React 19, TypeScript strict |
-| Tailwind | v3, `class` darkMode, shared `@nexus/design-tokens` preset |
-| CSS tokens | `@nexus/design-tokens/tokens.css` — no second transcription |
-| Test runner | Vitest 3 |
-| Contracts | **Not used** |
-| Dev port | 5174 (web stays 5173) |
+| Concern | `apps/web` | `apps/design-studio` |
+| --- | --- | --- |
+| Bundler | Vite 6 | Vite 6 (same major) |
+| React | 19.2 | 19.2 |
+| TypeScript | 7.0 strict, `@/*` alias | 7.0 strict, `@/*` + `@web-ui/*` aliases |
+| Tailwind | v3.4, `class` darkMode | v3.4 — **shared preset** from `@nexus/design-tokens` |
+| CSS tokens | `@nexus/design-tokens/tokens.css` | Same import — no second transcription |
+| Test runner | Vitest 4 | Vitest 4 |
+| Contracts | `@42ch/nexus-contracts` required | **Not used** — dev surface only |
+| Dev server port | 5173 | 5174 (document in README; avoid clash) |
 
 ### 3.4 Relationship to `apps/web` and `@42ch/nexus-ui`
 
