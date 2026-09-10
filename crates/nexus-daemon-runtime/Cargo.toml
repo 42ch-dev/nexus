@@ -126,7 +126,7 @@ axum-test = "15"
 graph-flow = "=0.2.3"
 nexus-orchestration = { path = "../nexus-orchestration" }
 serial_test = "3"
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 tokio-rustls = "0.26"
 # `wat` compiles WebAssembly text → binary for integration tests that exercise
 # sandbox-limit paths (mirrors nexus-wasm-host's own test convention).
