@@ -1439,7 +1439,7 @@ export function ComponentsPage() {
         focus-visible, disabled, and loading states are live; toggle the theme
         to verify both light and dark (V1.121 states matrix).
       </p>
-      <SurfaceSourceBadges importPaths={["@42ch/nexus-ui", "@web-ui/dialog", "@web-ui/states", "@web-ui/table"]} />
+      <SurfaceSourceBadges importPaths={["@42ch/nexus-ui", "@web-ui/dialog", "@web-ui/states", "@web-ui/table"]} /> {/* transitional — badge path labels (not imports) */}
       <SubNav />
 
       <BadgeSection />
