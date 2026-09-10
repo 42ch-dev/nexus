@@ -89,7 +89,7 @@ fn make_merge_task(
 
 /// Record a converge arrival using the real runtime path.
 fn converge_arrive(ctx: &Context, target_id: &str, source_id: &str) {
-    StateCompositeTask::record_converge_arrival(ctx, target_id, source_id);
+    StateCompositeTask::record_converge_arrival(ctx, target_id, source_id).unwrap();
 }
 
 /// Record a merge arrival (direct key write, mirroring the existing merge

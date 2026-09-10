@@ -1895,6 +1895,65 @@ pub async fn signal_schedule(
 /// **R5 — Delete cascade**: For non-terminal schedules, cancels the active
 /// session (if any), NULLs out `current_session_id`, then cancels the schedule
 /// before deletion. Terminal schedules are deleted directly.
+/// Cancel a running orchestration session on behalf of schedule deletion.
+///
+/// graph-flow 0.8: the cancellation is an authoritative control write, so it
+/// invalidates any in-flight graph snapshot in the same statement — advancing
+/// `graph_version` under the `status = 'running'` guard (checked range: a
+/// corrupt/exhausted counter refuses the write instead of wrapping). A
+/// still-running row whose version guard rejected the write surfaces a hard
+/// error; an already non-running row is a benign no-op (the newer state owns
+/// the row).
+async fn cancel_running_session_invalidating_graph(
+    pool: &sqlx::SqlitePool,
+    sid: &str,
+) -> Result<(), NexusApiError> {
+    let now = chrono::Utc::now().timestamp();
+    // SAFETY: runtime `sqlx::query` — DML for session cancellation.
+    let result = sqlx::query(
+        "UPDATE orchestration_sessions
+             SET status = 'cancelled', updated_at = ?,
+                 graph_version = graph_version + 1
+             WHERE session_id = ? AND status = 'running'
+               AND graph_version >= 0
+               AND graph_version < 9223372036854775807",
+    )
+    .bind(now)
+    .bind(sid)
+    .execute(pool)
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "SESSION_CANCEL_ERROR".into(),
+        message: format!("failed to cancel session: {e}"),
+    })?;
+    // If the row was running but the version guard rejected the write
+    // (negative/exhausted counter), surface a hard error instead of leaving
+    // a cancelable row with a stale clock.
+    if result.rows_affected() == 0 {
+        let still_running: Option<(String,)> = sqlx::query_as(
+            "SELECT status FROM orchestration_sessions
+                 WHERE session_id = ? AND status = 'running'",
+        )
+        .bind(sid)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: format!("database error: {e}"),
+        })?;
+        if still_running.is_some() {
+            return Err(NexusApiError::Internal {
+                code: "SESSION_CANCEL_ERROR".into(),
+                message: format!(
+                    "failed to cancel session {sid}: durable graph_version \
+                     counter is exhausted or corrupt"
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
 pub async fn delete_schedule(
     state: State<WorkspaceState>,
     Path(schedule_id): Path<String>,
@@ -1930,53 +1989,9 @@ pub async fn delete_schedule(
             if let Some((Some(sid),)) = session_row {
                 // Cancel the active session by updating its status.
                 // graph-flow 0.8: the cancellation is an authoritative
-                // control write, so it must invalidate any in-flight graph
-                // snapshot in the same statement — advance graph_version
-                // (checked: refuse overflow instead of wrapping) while the
-                // status guard keeps the write single-winner.
-                let now = chrono::Utc::now().timestamp();
-                // SAFETY: runtime `sqlx::query` — DML for session cancellation.
-                let result = sqlx::query(
-                    "UPDATE orchestration_sessions
-                         SET status = 'cancelled', updated_at = ?,
-                             graph_version = graph_version + 1
-                         WHERE session_id = ? AND status = 'running'
-                           AND graph_version >= 0
-                           AND graph_version < 9223372036854775807",
-                )
-                .bind(now)
-                .bind(&sid)
-                .execute(&*pool)
-                .await
-                .map_err(|e| NexusApiError::Internal {
-                    code: "SESSION_CANCEL_ERROR".into(),
-                    message: format!("failed to cancel session: {e}"),
-                })?;
-                // If the row was running but the version guard rejected the
-                // write (negative/exhausted counter), surface a hard error
-                // instead of leaving a cancelable row with a stale clock.
-                if result.rows_affected() == 0 {
-                    let still_running: Option<(String,)> = sqlx::query_as(
-                        "SELECT status FROM orchestration_sessions
-                             WHERE session_id = ? AND status = 'running'",
-                    )
-                    .bind(&sid)
-                    .fetch_optional(&*pool)
-                    .await
-                    .map_err(|e| NexusApiError::Internal {
-                        code: "DATABASE_ERROR".into(),
-                        message: format!("database error: {e}"),
-                    })?;
-                    if still_running.is_some() {
-                        return Err(NexusApiError::Internal {
-                            code: "SESSION_CANCEL_ERROR".into(),
-                            message: format!(
-                                "failed to cancel session {sid}: durable graph_version \
-                                 counter is exhausted or corrupt"
-                            ),
-                        });
-                    }
-                }
+                // Authoritative control write: cancels the running session
+                // and invalidates any in-flight graph snapshot atomically.
+                cancel_running_session_invalidating_graph(&pool, &sid).await?;
             }
 
             // NULL out current_session_id on the schedule
@@ -2892,5 +2907,93 @@ mod tests {
             !msg.contains(".mstar/"),
             "completion guard must not cite raw .mstar/ paths"
         );
+    }
+
+    /// T1 review gap 3 (schedule-delete writer): cancelling a running session
+    /// through the schedule-delete route advances the durable graph clock in
+    /// the same atomic write; a corrupt/exhausted counter is a hard error
+    /// with no mutation.
+    #[tokio::test]
+    async fn schedule_delete_session_cancel_advances_graph_version_and_fails_closed() {
+        let db = tempfile::NamedTempFile::new().expect("temp db");
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("migrate");
+        let now = chrono::Utc::now().timestamp();
+
+        let gv = async |pool: &sqlx::SqlitePool, id: &str| -> i64 {
+            sqlx::query_scalar(
+                "SELECT graph_version FROM orchestration_sessions WHERE session_id = ?",
+            )
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .expect("graph_version")
+        };
+
+        // A running session at graph_version 4 is cancelled: status flips and
+        // the graph clock advances exactly once in the same statement.
+        sqlx::query!(
+            "INSERT INTO orchestration_sessions
+               (session_id, creator_id, preset_id, preset_version, status,
+                context_json, created_at, updated_at, graph_version)
+               VALUES ('sess-sched-del', 'creator-1', 'memory-augmented', 1, 'running',
+                       X'00', ?, ?, 4)",
+            now,
+            now
+        )
+        .execute(&pool)
+        .await
+        .expect("seed running session");
+        cancel_running_session_invalidating_graph(&pool, "sess-sched-del")
+            .await
+            .expect("cancel running session");
+        assert_eq!(gv(&pool, "sess-sched-del").await, 5);
+        let status: String = sqlx::query_scalar!(
+            "SELECT status as \"status!\" FROM orchestration_sessions WHERE session_id = 'sess-sched-del'"
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("status");
+        assert_eq!(status, "cancelled");
+
+        // A non-running row is a benign no-op (the newer state owns it).
+        cancel_running_session_invalidating_graph(&pool, "sess-sched-del")
+            .await
+            .expect("idempotent on terminal row");
+        assert_eq!(gv(&pool, "sess-sched-del").await, 5);
+
+        // A running row with an exhausted counter is a hard error, and the
+        // row is NOT mutated (status stays running, clock unchanged).
+        sqlx::query!(
+            "INSERT INTO orchestration_sessions
+               (session_id, creator_id, preset_id, preset_version, status,
+                context_json, created_at, updated_at, graph_version)
+               VALUES ('sess-sched-max', 'creator-1', 'memory-augmented', 1, 'running',
+                       X'00', ?, ?, 9223372036854775807)",
+            now,
+            now
+        )
+        .execute(&pool)
+        .await
+        .expect("seed max-counter session");
+        let err = cancel_running_session_invalidating_graph(&pool, "sess-sched-max")
+            .await
+            .expect_err("exhausted counter must be a hard error");
+        assert!(
+            matches!(err, NexusApiError::Internal { .. }),
+            "expected Internal error, got {err:?}"
+        );
+        assert_eq!(gv(&pool, "sess-sched-max").await, i64::MAX);
+        let status: String = sqlx::query_scalar!(
+            "SELECT status as \"status!\" FROM orchestration_sessions WHERE session_id = 'sess-sched-max'"
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("status");
+        assert_eq!(status, "running", "failed cancel must not mutate the row");
     }
 }

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT status as \"status!\" FROM orchestration_sessions WHERE session_id = 'sess-sched-max'",
+  "describe": {
+    "columns": [
+      {
+        "name": "status!",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "68f1dee7e550484d739f90841f8c0cf0ef56807751a1fc6d97c89a4bbec1989e"
+}

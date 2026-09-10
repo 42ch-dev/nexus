@@ -865,18 +865,13 @@ impl EngineSharedState {
                 .await?;
 
             // The root commit advanced each carried child's persisted
-            // revision by one; synchronize the in-memory children map so
-            // the parent's next `commit_transition` submits the correct
-            // child CAS anchor (N-7).
-            if !children.is_empty() {
-                let mut child_map = self.children.write().await;
-                if let Some(entries) = child_map.get_mut(&session_id.0) {
-                    for child in entries.iter_mut() {
-                        if children.iter().any(|c| c.session.id == child.session.id) {
-                            child.state_revision = child.state_revision.saturating_add(1);
-                        }
-                    }
-                }
+            // revision AND graph version. Rebuild each cached child
+            // checkpoint from the authoritative persisted record (session
+            // snapshot incl. `Session.version`, status, state, revision) —
+            // never a blind in-memory increment of a stale snapshot (N-7).
+            for child in &children {
+                self.sync_child_checkpoint_after_step(&SessionId(child.session.id.clone()))
+                    .await?;
             }
             return Ok(SessionStatus::Running);
         }
@@ -1574,16 +1569,18 @@ impl EngineSharedState {
                         // child CAS on the parent's next step and the run is
                         // misclassified Interrupted (N-7: multi-step inner
                         // graphs after a child step).
-                        {
-                            let mut child_map = self.children.write().await;
-                            if let Some(entries) = child_map.get_mut(&session_id.0) {
-                                for child in entries.iter_mut() {
-                                    if children.iter().any(|c| c.session.id == child.session.id) {
-                                        child.state_revision =
-                                            child.state_revision.saturating_add(1);
-                                    }
-                                }
-                            }
+                        // Reload every carried child checkpoint from
+                        // storage: the commit advanced both the child's
+                        // `state_revision` AND its durable `graph_version`,
+                        // so the cached `Session.version` must come from an
+                        // authoritative reload, not a blind increment (the
+                        // cached snapshot is otherwise a stale OCC
+                        // preimage).
+                        for child in &children {
+                            self.sync_child_checkpoint_after_step(&SessionId(
+                                child.session.id.clone(),
+                            ))
+                            .await?;
                         }
                         if parent_advanced
                             && children.iter().any(|child| child.status.is_terminal())
@@ -1698,9 +1695,35 @@ impl EngineSharedState {
                         // position, and the restore clears the in-flight markers
                         // the pre-step mark wrote (a safe boundary).
                         if let Some(pre) = &pre_step_root {
-                            let _ = store
+                            match store
                                 .restore_pre_step(session_id, transition_revision, pre)
-                                .await;
+                                .await
+                            {
+                                // Restored to the safe pre-step boundary.
+                                Ok(()) => {}
+                                // The intended concurrent-winner CAS outcome:
+                                // a newer control/terminal state legitimately
+                                // holds the row. Preserve the original commit
+                                // error as the truthful outcome; the winner is
+                                // untouched.
+                                Err(
+                                    EngineError::RevisionMismatch { .. }
+                                    | EngineError::TerminalState(_),
+                                ) => {}
+                                // Any other restore failure (storage fault,
+                                // corruption) must remain observable: an
+                                // operator must see that the in-flight marker
+                                // / pre-step restore did NOT complete. Chain
+                                // it with the original commit error.
+                                Err(restore_err) => {
+                                    return Err(EngineError::GraphFlow(
+                                        graph_flow::GraphError::StorageError(format!(
+                                            "step commit failed ({commit_err}) and the \
+                                             pre-step restore also failed: {restore_err}"
+                                        )),
+                                    ));
+                                }
+                            }
                         }
                         return Err(commit_err);
                     }
@@ -1770,12 +1793,12 @@ impl EngineSharedState {
         // wrong run (Important: nested graph prompts lose the child durable
         // identity).
         session_mut
-            .context.set("_session_id", child_session_id.clone());
+            .context.set("_session_id", child_session_id.clone())?;
         // Record the parent so `run_step_internal` can sync this child's
         // checkpoint back to the parent's children map after each step
         // (Important 1: child revisions must be synchronized).
         session_mut
-            .context.set("_parent_session_id", params.parent_session_id.clone());
+            .context.set("_parent_session_id", params.parent_session_id.clone())?;
 
         // When a workflow store is present, create a v1 child run that
         // inherits the trusted root descriptor (A2/A4). The child's
@@ -1830,8 +1853,24 @@ impl EngineSharedState {
         // child's actual persisted revision: a v1 child created via
         // `start_run` is at revision 1; a bare-save child (no store) is at 0.
         let child_revision = u64::from(self.workflow_store.is_some());
+        // Authoritative cache seed: `session_mut` is still the PRE-persist
+        // snapshot (`start_run`/`save` incremented the durable
+        // `graph_version` above it). Reload the persisted session so the
+        // cached checkpoint carries the authoritative `Session.version`
+        // instead of a stale version-0 preimage.
+        let persisted_child = self
+            .storage
+            .get(&child_session_id)
+            .await
+            .map_err(EngineError::GraphFlow)?
+            .ok_or_else(|| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "spawn_child_session '{child_session_id}': persisted child session \
+                     missing immediately after admission (non-replayable)"
+                )))
+            })?;
         let child_checkpoint = ChildCheckpoint {
-            session: session_mut.clone(),
+            session: persisted_child,
             status: SessionStatus::Running,
             state: RunStateV1::default(),
             state_revision: child_revision,
@@ -2389,7 +2428,7 @@ impl OrchestrationEngine for EngineProxy {
         let session_id = format!("{}:{}", id_prefix, uuid::Uuid::new_v4());
         let start_task_id = graph.start_task_id().unwrap_or_default().to_string();
         let session = graph_flow::Session::new_from_task(session_id.clone(), &start_task_id);
-        session.context.set("_session_id", session_id.clone());
+        session.context.set("_session_id", session_id.clone())?;
         if self.state.workflow_store.is_some() {
             return Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
                 "start_session_with_graph cannot create a recoverable run without a preset descriptor"
@@ -3251,10 +3290,10 @@ impl GraphFlowEngine {
             let session_id = format!("{}:{}", loaded.id, uuid::Uuid::new_v4());
             let start_task_id = graph.start_task_id().unwrap_or_default().to_string();
             let session = graph_flow::Session::new_from_task(session_id.clone(), &start_task_id);
-            session.context.set("_session_id", session_id.clone());
+            session.context.set("_session_id", session_id.clone())?;
             if !creator_id.is_empty() {
                 session
-                    .context.set("_creator_id", creator_id.to_string());
+                    .context.set("_creator_id", creator_id.to_string())?;
             }
             let checkpoint = RunCheckpoint {
                 root: &session,
@@ -3331,20 +3370,20 @@ impl GraphFlowEngine {
             let session =
                 graph_flow::Session::new_from_task(session_id.to_string(), &start_task_id);
             session
-                .context.set("_session_id", session_id.to_string());
+                .context.set("_session_id", session_id.to_string())?;
             if !creator_id.is_empty() {
                 session
-                    .context.set("_creator_id", creator_id.to_string());
+                    .context.set("_creator_id", creator_id.to_string())?;
             }
             // Seed the frozen admission input + core-context seed into the
             // session context BEFORE the checkpoint is persisted (A3).
             for (key, value) in &input {
                 session
-                    .context.set(format!("preset.input.{key}"), value.clone());
+                    .context.set(format!("preset.input.{key}"), value.clone())?;
             }
             if let Some(cc) = core_context {
                 session
-                    .context.set("core_context.text", cc.to_string());
+                    .context.set("core_context.text", cc.to_string())?;
             }
             let checkpoint = RunCheckpoint {
                 root: &session,
@@ -3464,20 +3503,20 @@ impl GraphFlowEngine {
         let start_task_id = graph.start_task_id().unwrap_or_default().to_string();
         let session = graph_flow::Session::new_from_task(session_id.to_string(), &start_task_id);
         session
-            .context.set("_session_id", session_id.to_string());
+            .context.set("_session_id", session_id.to_string())?;
         if !creator_id.is_empty() {
             session
-                .context.set("_creator_id", creator_id.to_string());
+                .context.set("_creator_id", creator_id.to_string())?;
         }
         // Seed the frozen admission input + core-context seed into the
         // session context BEFORE the checkpoint is persisted (A3).
         for (key, value) in &input {
             session
-                .context.set(format!("preset.input.{key}"), value.clone());
+                .context.set(format!("preset.input.{key}"), value.clone())?;
         }
         if let Some(cc) = core_context {
             session
-                .context.set("core_context.text", cc.to_string());
+                .context.set("core_context.text", cc.to_string())?;
         }
         let checkpoint = RunCheckpoint {
             root: &session,
@@ -3548,10 +3587,10 @@ impl GraphFlowEngine {
         // Create and persist the session.
         let session = graph_flow::Session::new_from_task(session_id.clone(), &start_task_id);
         // Store session ID in context so InnerGraphTask can find it.
-        session.context.set("_session_id", session_id.clone());
+        session.context.set("_session_id", session_id.clone())?;
         if let Some(creator_id) = creator_id {
             session
-                .context.set("_creator_id", creator_id.to_string());
+                .context.set("_creator_id", creator_id.to_string())?;
         }
 
         // Critical 2: when a workflow store is present, a normal start creates
@@ -3692,9 +3731,9 @@ impl OrchestrationEngine for GraphFlowEngine {
 
         // Persist a session stub into the graph-flow storage.
         let session = graph_flow::Session::new_from_task(session_id.clone(), "");
-        session.context.set("_session_id", session_id.clone());
+        session.context.set("_session_id", session_id.clone())?;
         session
-            .context.set("_creator_id", key.creator_id.clone());
+            .context.set("_creator_id", key.creator_id.clone())?;
         if let Some(store) = &self.state.workflow_store {
             let (source, preset_version) = self.resolve_source_identity(&key.preset_id)?;
             let descriptor = RunDescriptorV1 {
@@ -4257,7 +4296,7 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
                 .expect("root exists at continue-v-cancel gate");
             winner_root.current_task_id = "winner-task".to_string();
             winner_root
-                .context.set("winner.marker", "continue-won");
+                .context.set("winner.marker", "continue-won").unwrap();
             self.inner
                 .commit_transition(
                     session_id,
@@ -4482,7 +4521,7 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
                 .expect("child session exists at rollback settle gate");
             winner_root.current_task_id = "competing-winner".to_string();
             winner_root
-                .context.set("competing.marker", "advanced");
+                .context.set("competing.marker", "advanced").unwrap();
             self.inner
                 .commit_transition(
                     session_id,
@@ -5598,7 +5637,7 @@ mod tests {
             .expect("root exists");
         winner_root.current_task_id = "winner-task".to_string();
         winner_root
-            .context.set("winner.marker", "continue-won");
+            .context.set("winner.marker", "continue-won").unwrap();
         let winner_state = RunStateV1::default();
         store
             .commit_transition(
@@ -7307,5 +7346,306 @@ mod tests {
             .expect("load run")
             .expect("run exists");
         assert_eq!(final_record.status, SessionStatus::Cancelled);
+    }
+
+    /// T1 review gap 4: the cached child checkpoint must carry the
+    /// AUTHORITATIVE persisted child `Session.version` (graph OCC clock) —
+    /// at admission (seeded from the persisted row, not the version-0
+    /// pre-save snapshot), after a parent commit that carries the child, and
+    /// after a nested continuation commit. Both clocks (state_revision and
+    /// graph_version) are asserted.
+    #[tokio::test]
+    async fn cached_child_checkpoint_tracks_persisted_graph_version() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("parent-graph")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
+        );
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // Spawn a child (v1 admission via `start_run` seeds graph_version 1).
+        let inner = Arc::new(
+            graph_flow::GraphBuilder::new("inner-g")
+                .add_task(Arc::new(crate::tasks::ManualWaitTask))
+                .build()
+                .expect("inner graph"),
+        );
+        let child_id = engine
+            .state
+            .spawn_child_session_internal(ChildSessionParams {
+                parent_session_id: session_id.0.clone(),
+                inner_graph: inner,
+                initial_context: graph_flow::Context::new(),
+            })
+            .await
+            .expect("spawn child");
+
+        let persisted_child_gv = async |pool: &sqlx::SqlitePool, id: &str| -> i64 {
+            sqlx::query_scalar(
+                "SELECT graph_version FROM orchestration_sessions WHERE session_id = ?",
+            )
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .expect("child graph_version")
+        };
+        let cached_child = async |engine: &GraphFlowEngine, parent: &str, child: &str| {
+            let map = engine.state.children.read().await;
+            map.get(parent)
+                .and_then(|entries| entries.iter().find(|c| c.session.id == child))
+                .map(|c| (c.session.version, c.state_revision))
+        };
+
+        // Admission: cached session version is the PERSISTED graph_version
+        // (1), not the pre-save version-0 snapshot.
+        let (cached_v, cached_rev) = cached_child(&engine, &session_id.0, &child_id.0)
+            .await
+            .expect("child cached");
+        assert_eq!(persisted_child_gv(&pool, &child_id.0).await, 1);
+        assert_eq!(cached_v, 1, "admission cache must carry the persisted version");
+        assert_eq!(cached_rev, 1);
+
+        // Parent step parks at the manual wait and carries the child in the
+        // same commit: the child clock advances and the cache is RELOADED.
+        let outcome = engine.run_step(&session_id).await.expect("parent step");
+        assert!(
+            matches!(outcome, StepOutcome::WaitingForInput { .. } | StepOutcome::Paused { .. }),
+            "manual wait outcome, got {outcome:?}"
+        );
+        let (cached_v, cached_rev) = cached_child(&engine, &session_id.0, &child_id.0)
+            .await
+            .expect("child cached after parent commit");
+        let persisted_v = persisted_child_gv(&pool, &child_id.0).await;
+        assert_eq!(persisted_v, 2, "carried child clock advanced by the parent commit");
+        assert_eq!(cached_v, u64::try_from(persisted_v).unwrap(), "cached child version must equal the persisted clock");
+        assert_eq!(cached_rev, 2, "cached child revision must equal the persisted revision");
+
+        // Continuation path: craft the nested child-wait record (parent waits
+        // ON the child) and continue with the exact token. The root+child
+        // wait clear commits atomically and the cache is reloaded again.
+        let parent_record = store
+            .load_run(&session_id)
+            .await
+            .expect("load parent")
+            .expect("parent record");
+        let parent_rev = parent_record.state_revision;
+        let root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root row");
+        let wait_state = RunStateV1 {
+            wait: Some(crate::run_state::WaitRecord {
+                wait_id: "wait-nested-1".to_string(),
+                task_id: root.current_task_id.clone(),
+                child_session_id: Some(child_id.0.clone()),
+                child_task_id: None,
+                kind: crate::run_state::WaitKind::Manual,
+            }),
+            ..RunStateV1::default()
+        };
+        store
+            .commit_transition(
+                &session_id,
+                parent_rev,
+                RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                SessionStatus::WaitingForInput,
+                &wait_state,
+            )
+            .await
+            .expect("commit nested wait");
+
+        let status = engine
+            .state
+            .persist_signal_transition(
+                &session_id,
+                &EngineSignal::Continue {
+                    wait_id: "wait-nested-1".to_string(),
+                },
+            )
+            .await
+            .expect("continuation commits");
+        assert_eq!(status, SessionStatus::Running);
+
+        let (cached_v, cached_rev) = cached_child(&engine, &session_id.0, &child_id.0)
+            .await
+            .expect("child cached after continuation");
+        let persisted_v = persisted_child_gv(&pool, &child_id.0).await;
+        assert_eq!(persisted_v, 3, "continuation commit advanced the child clock");
+        assert_eq!(cached_v, u64::try_from(persisted_v).unwrap(), "cached child version must track the persisted clock");
+        assert_eq!(cached_rev, 3, "cached child revision must track the persisted revision");
+    }
+
+    /// T1 review gap 5: a real SQLite winner/loser race through the engine
+    /// drive path. A competing authoritative writer commits DURING the losing
+    /// step's task execution; the losing runner's graph save then conflicts.
+    /// The loser surfaces `EngineError::GraphFlow(SessionConflict)`, the task
+    /// is never re-invoked, and the winner's row/revision/context are
+    /// untouched (no cancel signal, no failure-context mutation — the daemon
+    /// arm behavior is covered by
+    /// `preset_run::tests::session_conflict_stops_losing_drive_without_winner_mutation`).
+    #[tokio::test]
+    async fn losing_drive_conflict_leaves_sqlite_winner_untouched() {
+        use graph_flow::{NextAction, Task, TaskResult};
+
+        struct CompetingWinnerTask {
+            store: Arc<SqliteSessionStorage>,
+            calls: Arc<std::sync::atomic::AtomicU64>,
+        }
+
+        #[async_trait]
+        impl Task for CompetingWinnerTask {
+            fn id(&self) -> &str {
+                "competing_winner_task"
+            }
+
+            async fn run(
+                &self,
+                context: graph_flow::Context,
+            ) -> Result<TaskResult, graph_flow::GraphError> {
+                self.calls
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                // The engine seeds the durable run identity into the context
+                // at session start; the racing task reads it from there.
+                let session_id: String = context
+                    .get("_session_id")
+                    .expect("engine seeds _session_id");
+                // The competing writer wins the workflow CAS mid-step: the
+                // losing drive marked the step in flight (revision 1 -> 2)
+                // before the runner loaded, so the winner anchors at 2.
+                let mut winner =
+                    graph_flow::Session::new_from_task(session_id.clone(), "winner-task");
+                winner
+                    .context
+                    .set("_session_id", session_id.clone())
+                    .expect("session id is a JSON-infallible string scalar");
+                winner
+                    .context
+                    .set("winner.marker", "committed")
+                    .expect("marker is a JSON-infallible string scalar");
+                self.store
+                    .commit_transition(
+                        &SessionId(session_id),
+                        2,
+                        RunCheckpoint {
+                            root: &winner,
+                            children: &[],
+                        },
+                        SessionStatus::Running,
+                        &RunStateV1::default(),
+                    )
+                    .await
+                    .map_err(|e| {
+                        graph_flow::GraphError::StorageError(format!(
+                            "fixture winner commit failed: {e}"
+                        ))
+                    })?;
+                Ok(TaskResult::new(Some("done".to_string()), NextAction::Continue))
+            }
+        }
+
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+
+        // One-task graph whose task commits the winning transition mid-step.
+        let calls = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let race_graph = Arc::new(
+            graph_flow::GraphBuilder::new("race-graph")
+                .add_task(Arc::new(CompetingWinnerTask {
+                    store: sqlite.clone(),
+                    calls: calls.clone(),
+                }))
+                .build()
+                .expect("race graph"),
+        );
+        let session_id = engine
+            .start_session("novel-writing", race_graph)
+            .await
+            .expect("start session");
+
+        let err = engine
+            .run_step(&session_id)
+            .await
+            .expect_err("the losing drive must surface the graph-save conflict");
+        assert!(
+            matches!(
+                err,
+                EngineError::GraphFlow(graph_flow::GraphError::SessionConflict(_))
+            ),
+            "expected GraphFlow(SessionConflict), got {err:?}"
+        );
+
+        // The task ran exactly once — a conflict never re-invokes the step.
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        // The winner's row is untouched: its cursor, context marker, and
+        // revision are exactly what the winning commit wrote.
+        let row = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root row");
+        assert_eq!(row.current_task_id, "winner-task");
+        assert_eq!(
+            row.context.get::<String>("winner.marker").as_deref(),
+            Some("committed")
+        );
+        assert!(
+            row.context.get::<String>("_run_status").is_none()
+                && row.context.get::<String>("_run_error").is_none(),
+            "a losing drive must never write failure context"
+        );
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load_run")
+            .expect("record");
+        assert_eq!(record.state_revision, 3, "winner revision retained (1 start + 1 mark + 1 win)");
+        assert_eq!(record.status, SessionStatus::Running);
     }
 }

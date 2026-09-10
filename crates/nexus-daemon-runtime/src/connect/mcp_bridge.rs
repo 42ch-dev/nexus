@@ -723,4 +723,91 @@ mod tests {
         assert_eq!(code, ErrorCode::METHOD_NOT_FOUND);
         assert_eq!(message, "tool_not_authorized: tools.t5.echo");
     }
+
+    /// T1 review gap 6: legacy negotiated-version wire proof. A raw
+    /// JSON-RPC client negotiates the OLDEST supported protocol version
+    /// (2024-11-05) over the real NDJSON transport; the negotiated
+    /// initialize result and the `tools/call` result must carry NO
+    /// `resultType` field (that discriminator belongs to the 3.2 MRTR
+    /// `InputRequired`/`Task` variants this handler never emits).
+    #[tokio::test]
+    async fn legacy_negotiated_version_wire_carries_no_result_type() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+
+        let rows = vec![CatalogRow {
+            id: "tools.t5.echo".to_owned(),
+            description: "echo".to_owned(),
+            input_schema: r#"{"type":"object"}"#.to_owned(),
+            output_schema: None,
+        }];
+        let handler = McpBridgeHandler {
+            backend: GoldenBackend::new(rows),
+            policy: VisibilityPolicy::absent(),
+        };
+        let (client_io, server_io) = tokio::io::duplex(4096);
+        tokio::spawn(async move {
+            let service = serve_server(handler, server_io).await.expect("server init");
+            let _ = service.waiting().await;
+        });
+
+        let (read_half, mut write_half) = tokio::io::split(client_io);
+        let mut lines = tokio::io::BufReader::new(read_half).lines();
+
+        // 1. initialize at the legacy version.
+        write_half
+            .write_all(
+                br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"legacy-probe","version":"0"}}}"#,
+            )
+            .await
+            .expect("write initialize");
+        write_half.write_all(b"\n").await.expect("newline");
+        let init_line = lines
+            .next_line()
+            .await
+            .expect("initialize response")
+            .expect("line present");
+        let init: serde_json::Value =
+            serde_json::from_str(&init_line).expect("initialize response parses");
+        assert_eq!(init["id"], serde_json::json!(1));
+        assert_eq!(
+            init["result"]["protocolVersion"],
+            serde_json::json!("2024-11-05"),
+            "server negotiates the requested legacy version"
+        );
+        assert!(
+            init.get("result").and_then(|r| r.get("resultType")).is_none(),
+            "initialize result must not carry resultType: {init_line}"
+        );
+
+        // 2. initialized notification, then a tools/call.
+        write_half
+            .write_all(br#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#)
+            .await
+            .expect("write initialized");
+        write_half.write_all(b"\n").await.expect("newline");
+        write_half
+            .write_all(
+                br#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tools.t5.echo","arguments":{"x":1}}}"#,
+            )
+            .await
+            .expect("write tools/call");
+        write_half.write_all(b"\n").await.expect("newline");
+        let call_line = lines
+            .next_line()
+            .await
+            .expect("tools/call response")
+            .expect("line present");
+        assert!(
+            !call_line.contains("resultType"),
+            "legacy-negotiated tools/call wire must not carry resultType: {call_line}"
+        );
+        let call: serde_json::Value =
+            serde_json::from_str(&call_line).expect("tools/call response parses");
+        assert_eq!(call["id"], serde_json::json!(2));
+        assert!(
+            call["result"]["isError"].is_null()
+                || call["result"]["isError"] == serde_json::json!(false),
+            "call executes successfully on the legacy wire: {call_line}"
+        );
+    }
 }

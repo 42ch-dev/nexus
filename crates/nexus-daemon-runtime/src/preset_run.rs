@@ -233,7 +233,9 @@ async fn mark_failed(engine: &dyn OrchestrationEngine, session_id: &SessionId) {
     }
 }
 
-/// Persist the failure record into the session context (best-effort).
+/// Persist the failure record into the session context. Best-effort at the
+/// storage boundary, but a failed context write aborts the attempt rather
+/// than persisting a partial record.
 async fn persist_failure(
     storage: Option<&Arc<dyn SessionStorage>>,
     session_id: &SessionId,
@@ -245,8 +247,21 @@ async fn persist_failure(
     let Ok(Some(mut session)) = storage.get(&session_id.0).await else {
         return;
     };
-    let _ = session.context.set("_run_status", "failed");
-    let _ = session.context.set("_run_error", error.to_string());
+    // Both fields are REQUIRED parts of the failure record: if either
+    // fallible context write fails, abort the attempt (no partial record is
+    // saved and later presented as a complete persisted failure).
+    if let Err(e) = session
+        .context
+        .set("_run_status", "failed")
+        .and_then(|()| session.context.set("_run_error", error.to_string()))
+    {
+        tracing::warn!(
+            session_id = %session_id.0,
+            error = %e,
+            "preset-run driver: failure-record context write failed; aborting persistence"
+        );
+        return;
+    }
     if let Err(e) = storage.save(session).await {
         tracing::warn!(
             session_id = %session_id.0,
@@ -3005,7 +3020,7 @@ mod tests {
     ) {
         let session = graph_flow::Session::new_from_task(id.to_string(), current_task);
         for (k, v) in keys {
-            session.context.set(*k, v.clone());
+            session.context.set(*k, v.clone()).unwrap();
         }
         storage.save(session).await.unwrap();
     }

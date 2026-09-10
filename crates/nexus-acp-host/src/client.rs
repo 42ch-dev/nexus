@@ -188,18 +188,20 @@ fn sdk_initialize_request_from_nexus(req: NexusInitializeRequest) -> InitializeR
 }
 
 fn sdk_protocol_version_from_nexus(version: &NexusProtocolVersion) -> ProtocolVersion {
-    // Explicit stable `ProtocolVersion::V1` fallback (never `LATEST`): a crate
-    // bump must not opt the product into draft v2 by default.
-    match version.0.parse::<u16>() {
-        Ok(v) => serde_json::from_value(serde_json::json!(v)).unwrap_or(ProtocolVersion::V1),
-        Err(e) => {
-            tracing::warn!(
-                version = %version.0,
-                error = %e,
-                "Failed to parse protocol version, defaulting to stable V1"
-            );
-            ProtocolVersion::V1
-        }
+    // Stable-v1-only boundary: the ONLY supported wire protocol value is "1".
+    // Any other value — including a numeric string like "2" that ACP's numeric
+    // `ProtocolVersion` newtype would silently accept — is rejected back to
+    // the explicit stable `ProtocolVersion::V1` fallback (never `LATEST`), so
+    // neither a crate bump nor a caller-supplied draft/unknown version can opt
+    // the product into an unsupported protocol.
+    if version.0.trim() == "1" {
+        ProtocolVersion::V1
+    } else {
+        tracing::warn!(
+            version = %version.0,
+            "Unsupported ACP protocol version (stable v1 only); using stable V1"
+        );
+        ProtocolVersion::V1
     }
 }
 
@@ -1948,6 +1950,22 @@ mod tests {
     #[test]
     fn protocol_version_empty_string_defaults_to_latest() {
         let version = NexusProtocolVersion::new("");
+        let sdk_version = sdk_protocol_version_from_nexus(&version);
+        assert_eq!(sdk_version, ProtocolVersion::V1);
+    }
+
+    #[test]
+    fn protocol_version_numeric_two_falls_back_to_stable_v1() {
+        // "2" parses as a number and ACP's numeric newtype would accept it,
+        // but this adapter is stable-v1-only: it must NOT pass through.
+        let version = NexusProtocolVersion::new("2");
+        let sdk_version = sdk_protocol_version_from_nexus(&version);
+        assert_eq!(sdk_version, ProtocolVersion::V1);
+    }
+
+    #[test]
+    fn protocol_version_unknown_numeric_falls_back_to_stable_v1() {
+        let version = NexusProtocolVersion::new("99");
         let sdk_version = sdk_protocol_version_from_nexus(&version);
         assert_eq!(sdk_version, ProtocolVersion::V1);
     }

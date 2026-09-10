@@ -668,13 +668,13 @@ async fn resume_skips_typed_failed_and_non_class_sessions() {
     // `running` (save ON CONFLICT never updates it). Must NOT be re-driven.
     let typed_failed = graph_flow::Session::new_from_task("test:typed-failed".to_string(), "join");
     typed_failed
-        .context.set("_converge_arrivals_join", serde_json::json!(["branch_a"]));
+        .context.set("_converge_arrivals_join", serde_json::json!(["branch_a"])).unwrap();
     typed_failed
-        .context.set("_join_wait_start_join", serde_json::json!(1000u64));
+        .context.set("_join_wait_start_join", serde_json::json!(1000u64)).unwrap();
     typed_failed
-        .context.set("_run_status", "failed".to_string());
+        .context.set("_run_status", "failed".to_string()).unwrap();
     typed_failed
-        .context.set("_run_error", "converge_timeout: gate=converge".to_string());
+        .context.set("_run_error", "converge_timeout: gate=converge".to_string()).unwrap();
     storage.save(typed_failed).await.unwrap();
 
     // Session B: no join-tracking keys — not of the converge/merge chain

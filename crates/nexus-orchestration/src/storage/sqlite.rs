@@ -361,12 +361,13 @@ impl SessionStorage for SqliteSessionStorage {
                     "save session '{session_id}': row absent after upsert (non-replayable)"
                 )));
             };
-            // A negative stored graph version is corrupt: surface it, never
-            // coerce, never write.
-            if row.graph_version < 0 {
+            // A negative or exhausted stored graph version is corrupt: a
+            // hard storage error, never a concurrency outcome. Surface it,
+            // never coerce, never write.
+            if row.graph_version < 0 || row.graph_version == i64::MAX {
                 return Err(graph_flow::GraphError::StorageError(format!(
-                    "save session '{session_id}': negative graph_version {} (non-replayable; \
-                     save not applied)",
+                    "save session '{session_id}': corrupt/exhausted graph_version {} \
+                     (non-replayable; save not applied)",
                     row.graph_version
                 )));
             }
@@ -573,7 +574,7 @@ async fn child_cas_outcome(
     submitted_status: SessionStatus,
 ) -> Result<Option<EngineError>, EngineError> {
     let row = sqlx::query!(
-        "SELECT state_revision, status FROM orchestration_sessions WHERE session_id = ?",
+        "SELECT state_revision, status, graph_version FROM orchestration_sessions WHERE session_id = ?",
         child_id
     )
     .fetch_optional(&mut **tx)
@@ -586,6 +587,17 @@ async fn child_cas_outcome(
 
     Ok(match row {
         Some(row) => {
+            // A negative or exhausted graph counter is a corrupt storage
+            // invariant: a hard storage error, never a concurrency outcome.
+            if row.graph_version < 0 || row.graph_version == i64::MAX {
+                return Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+                    format!(
+                        "child CAS outcome for '{child_id}': corrupt/exhausted \
+                         graph_version {} (non-replayable)",
+                        row.graph_version
+                    ),
+                )));
+            }
             let found_rev = row.state_revision;
             let status = row.status;
             let terminal = matches!(
@@ -1394,7 +1406,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
             // Distinguish an unsupported legacy row, a revision mismatch, and
             // a terminal/cancelled fence without mutating any of them.
             let current = sqlx::query!(
-                "SELECT state_revision, execution_version \
+                "SELECT state_revision, execution_version, graph_version \
                  FROM orchestration_sessions WHERE session_id = ?",
                 session_id.0
             )
@@ -1407,6 +1419,18 @@ impl WorkflowStateStore for SqliteSessionStorage {
             })?;
 
             return match current {
+                // A negative/exhausted graph counter is a corrupt storage
+                // invariant: a hard storage error, never misclassified as a
+                // concurrency or terminal outcome.
+                Some(row) if row.graph_version < 0 || row.graph_version == i64::MAX => {
+                    Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+                        format!(
+                            "commit_transition '{}': corrupt/exhausted graph_version {} \
+                             (non-replayable)",
+                            session_id.0, row.graph_version
+                        ),
+                    )))
+                }
                 Some(row) if row.execution_version != 1 => Err(EngineError::GraphFlow(
                     graph_flow::GraphError::StorageError(format!(
                         "commit_transition '{}': execution_version {} is non-replayable; \
@@ -1643,7 +1667,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
 
         if result.rows_affected() == 0 {
             let current = sqlx::query!(
-                "SELECT state_revision, execution_version \
+                "SELECT state_revision, execution_version, graph_version \
                  FROM orchestration_sessions WHERE session_id = ?",
                 session_id.0
             )
@@ -1656,6 +1680,15 @@ impl WorkflowStateStore for SqliteSessionStorage {
             })?;
 
             return match current {
+                Some(row) if row.graph_version < 0 || row.graph_version == i64::MAX => {
+                    Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+                        format!(
+                            "settle_cancelled '{}': corrupt/exhausted graph_version {} \
+                             (non-replayable)",
+                            session_id.0, row.graph_version
+                        ),
+                    )))
+                }
                 Some(row) if row.execution_version != 1 => Err(EngineError::GraphFlow(
                     graph_flow::GraphError::StorageError(format!(
                         "settle_cancelled '{}': execution_version {} is non-replayable; \
@@ -1889,8 +1922,15 @@ impl WorkflowStateStore for SqliteSessionStorage {
 
         if result.rows_affected() == 0 {
             // Distinguish a revision mismatch from a non-running row.
-            let current: Option<i64> = sqlx::query_scalar!(
-                "SELECT state_revision FROM orchestration_sessions WHERE session_id = ?",
+            #[derive(sqlx::FromRow)]
+            struct RestoreFenceRow {
+                state_revision: i64,
+                graph_version: i64,
+            }
+            let current: Option<RestoreFenceRow> = sqlx::query_as!(
+                RestoreFenceRow,
+                "SELECT state_revision, graph_version FROM orchestration_sessions \
+                 WHERE session_id = ?",
                 session_id.0
             )
             .fetch_optional(&*self.pool)
@@ -1901,11 +1941,20 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 )))
             })?;
             return match current {
-                Some(found) if found != expected_revision as i64 => {
+                Some(row) if row.graph_version < 0 || row.graph_version == i64::MAX => {
+                    Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+                        format!(
+                            "restore_pre_step '{}': corrupt/exhausted graph_version {} \
+                             (non-replayable)",
+                            session_id.0, row.graph_version
+                        ),
+                    )))
+                }
+                Some(row) if row.state_revision != expected_revision as i64 => {
                     Err(EngineError::RevisionMismatch {
                         session_id: session_id.0.clone(),
                         expected: expected_revision,
-                        found: u64::try_from(found).unwrap_or(0),
+                        found: u64::try_from(row.state_revision).unwrap_or(0),
                     })
                 }
                 _ => Err(EngineError::TerminalState(session_id.0.clone())),
@@ -1973,7 +2022,8 @@ impl WorkflowStateStore for SqliteSessionStorage {
             // The pre-step row is no longer running or its revision moved —
             // the external effect must not run on an unmarked row.
             let current = sqlx::query!(
-                "SELECT status, state_revision FROM orchestration_sessions WHERE session_id = ?",
+                "SELECT status, state_revision, graph_version FROM orchestration_sessions \
+                 WHERE session_id = ?",
                 session_id.0
             )
             .fetch_optional(&*self.pool)
@@ -1984,6 +2034,13 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 )))
             })?;
             return Err(match current {
+                Some(row) if row.graph_version < 0 || row.graph_version == i64::MAX => {
+                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                        "mark_step_in_flight '{}': corrupt/exhausted graph_version {} \
+                         (non-replayable)",
+                        session_id.0, row.graph_version
+                    )))
+                }
                 Some(row) if row.state_revision != expected_revision as i64 => {
                     EngineError::RevisionMismatch {
                         session_id: session_id.0.clone(),
@@ -2360,7 +2417,7 @@ mod tests {
             .await
             .expect("load paused row")
             .expect("row exists");
-        session.context.set("_gate_park_join", true);
+        session.context.set("_gate_park_join", true).unwrap();
         session.current_task_id = "join".to_string();
         storage
             .save(session)
@@ -2408,7 +2465,7 @@ mod tests {
             .await
             .expect("load wait row")
             .expect("row exists");
-        session.context.set("_gate_park_wait_state", true);
+        session.context.set("_gate_park_wait_state", true).unwrap();
         session.current_task_id = "other_state".to_string();
         let err = storage
             .save(session)

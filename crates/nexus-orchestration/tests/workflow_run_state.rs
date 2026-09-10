@@ -76,14 +76,14 @@ fn test_descriptor(_session_id: &str) -> RunDescriptorV1 {
 /// Build a root session snapshot.
 fn root_session(session_id: &str, task: &str) -> Session {
     let mut s = Session::new_from_task(session_id.to_string(), task);
-    let _ = s.context.set("_session_id", session_id.to_string());
+    s.context.set("_session_id", session_id.to_string()).unwrap();
     s
 }
 
 /// Build a child checkpoint.
 fn child_checkpoint(child_id: &str, task: &str) -> ChildCheckpoint {
     let mut s = Session::new_from_task(child_id.to_string(), task);
-    let _ = s.context.set("_session_id", child_id.to_string());
+    s.context.set("_session_id", child_id.to_string()).unwrap();
     ChildCheckpoint {
         session: s,
         status: SessionStatus::Running,
@@ -2118,7 +2118,7 @@ impl graph_flow::Task for ContinueTask {
         "continue_task"
     }
     async fn run(&self, ctx: graph_flow::Context) -> graph_flow::Result<graph_flow::TaskResult> {
-        let _ = ctx.set("advanced", true);
+        ctx.set("advanced", true).unwrap();
         Ok(graph_flow::TaskResult::new(
             None,
             graph_flow::NextAction::Continue,
@@ -2755,7 +2755,7 @@ impl graph_flow::Task for EffectTask {
         "effect_task"
     }
     async fn run(&self, ctx: graph_flow::Context) -> graph_flow::Result<graph_flow::TaskResult> {
-        ctx.set(nexus_orchestration::engine::EXTERNAL_EFFECT_MARKER, true);
+        ctx.set(nexus_orchestration::engine::EXTERNAL_EFFECT_MARKER, true).unwrap();
         Ok(graph_flow::TaskResult::new(
             None,
             graph_flow::NextAction::Continue,
@@ -2772,7 +2772,7 @@ impl graph_flow::Task for DeterministicContinueTask {
         "deterministic_continue_task"
     }
     async fn run(&self, ctx: graph_flow::Context) -> graph_flow::Result<graph_flow::TaskResult> {
-        let _ = ctx.set("advanced", true);
+        ctx.set("advanced", true).unwrap();
         Ok(graph_flow::TaskResult::new(
             None,
             graph_flow::NextAction::Continue,
@@ -4520,8 +4520,8 @@ impl graph_flow::Task for MarkerEffectTask {
     async fn run(&self, ctx: graph_flow::Context) -> graph_flow::Result<graph_flow::TaskResult> {
         // Set both the engine effect marker AND a test-only dispatch marker so
         // the test can observe whether the task actually ran.
-        ctx.set(nexus_orchestration::engine::EXTERNAL_EFFECT_MARKER, true);
-        let _ = ctx.set("dispatched", true);
+        ctx.set(nexus_orchestration::engine::EXTERNAL_EFFECT_MARKER, true).unwrap();
+        ctx.set("dispatched", true).unwrap();
         Ok(graph_flow::TaskResult::new(
             None,
             graph_flow::NextAction::Continue,
@@ -5602,7 +5602,7 @@ states:
             .await
             .expect("get session")
             .expect("present");
-        session.context.set("score", serde_json::json!(95));
+        session.context.set("score", serde_json::json!(95)).unwrap();
         session
             .context.set("_merge_other", serde_json::json!(["x"]));
         session
@@ -5941,4 +5941,450 @@ async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume(
         nexus_orchestration::resume_rules::RecoveryClass::HumanWait,
         "a nested child wait reopens as HumanWait (never ConvergeMerge/auto-stepped)"
     );
+}
+// ---------------------------------------------------------------------------
+// 6. graph-flow 0.8 graph-version OCC / clock / corruption (T1 review gaps)
+// ---------------------------------------------------------------------------
+
+/// Read the durable `graph_version` straight from the row (test observation,
+/// not a storage-API addition).
+async fn db_graph_version(pool: &sqlx::SqlitePool, session_id: &str) -> i64 {
+    sqlx::query_scalar("SELECT graph_version FROM orchestration_sessions WHERE session_id = ?")
+        .bind(session_id)
+        .fetch_one(pool)
+        .await
+        .expect("graph_version row")
+}
+
+/// Force a corrupt/exhausted `graph_version` directly (fixture-only write).
+async fn force_db_graph_version(pool: &sqlx::SqlitePool, session_id: &str, version: i64) {
+    sqlx::query("UPDATE orchestration_sessions SET graph_version = ? WHERE session_id = ?")
+        .bind(version)
+        .bind(session_id)
+        .execute(pool)
+        .await
+        .expect("force graph_version");
+}
+
+/// A corrupt/exhausted graph counter is a HARD storage error, never a
+/// concurrency (revision/terminal/conflict) outcome.
+fn assert_hard_storage_error(err: &nexus_orchestration::engine::EngineError, what: &str) {
+    match err {
+        nexus_orchestration::engine::EngineError::GraphFlow(
+            graph_flow::GraphError::StorageError(_),
+        ) => {}
+        other => panic!("{what}: expected hard GraphError::StorageError, got {other:?}"),
+    }
+}
+
+/// Review gap 1: two independently loaded snapshots at version N — the first
+/// save wins, the loser receives `SessionConflict`, the winner's
+/// row/context/status/revision remain exact, and a reloaded snapshot at N+1
+/// saves successfully.
+#[tokio::test]
+async fn two_writer_graph_save_occ_loser_conflicts_and_winner_row_unchanged() {
+    let (pool, _db) = fresh_pool().await;
+    let storage = SqliteSessionStorage::new(pool.clone());
+    let session_id = SessionId("sess-occ-two-writer".to_string());
+
+    let root = root_session(&session_id.0, "task_a");
+    storage
+        .start_run(
+            &session_id,
+            &test_descriptor(&session_id.0),
+            RunCheckpoint {
+                root: &root,
+                children: &[],
+            },
+            &RunStateV1::default(),
+        )
+        .await
+        .expect("start_run");
+    assert_eq!(db_graph_version(&pool, &session_id.0).await, 1);
+
+    // Two independent snapshots at version 1.
+    let mut winner = storage
+        .get(&session_id.0)
+        .await
+        .expect("get winner")
+        .expect("winner row");
+    let mut loser = storage
+        .get(&session_id.0)
+        .await
+        .expect("get loser")
+        .expect("loser row");
+    assert_eq!(winner.version, 1);
+    assert_eq!(loser.version, 1);
+
+    // First writer wins.
+    winner.current_task_id = "task_winner".to_string();
+    winner.context.set("winner.marker", "won").unwrap();
+    storage.save(winner).await.expect("first writer wins");
+    assert_eq!(db_graph_version(&pool, &session_id.0).await, 2);
+
+    // Loser's save against the stale preimage conflicts.
+    loser.current_task_id = "task_loser".to_string();
+    let err = storage.save(loser).await.expect_err("stale writer must lose");
+    assert!(
+        matches!(err, graph_flow::GraphError::SessionConflict(_)),
+        "expected SessionConflict, got {err:?}"
+    );
+
+    // Winner's cursor/context/version/revision remain exact.
+    let row = storage
+        .get(&session_id.0)
+        .await
+        .expect("get after conflict")
+        .expect("row");
+    assert_eq!(row.version, 2);
+    assert_eq!(row.current_task_id, "task_winner");
+    assert_eq!(
+        row.context.get::<String>("winner.marker").as_deref(),
+        Some("won")
+    );
+    let record = storage
+        .load_run(&session_id)
+        .await
+        .expect("load_run")
+        .expect("record");
+    assert_eq!(
+        record.state_revision, 1,
+        "a graph save must not touch the workflow control revision"
+    );
+    assert_eq!(record.status, SessionStatus::Running);
+
+    // A snapshot reloaded at the persisted version saves successfully.
+    let mut fresh = storage
+        .get(&session_id.0)
+        .await
+        .expect("get fresh")
+        .expect("row");
+    fresh.current_task_id = "task_next".to_string();
+    storage.save(fresh).await.expect("reloaded save succeeds");
+    assert_eq!(db_graph_version(&pool, &session_id.0).await, 3);
+}
+
+/// Review gap 2: a negative or exhausted (`i64::MAX`) stored `graph_version`
+/// is a hard storage error with NO write across `save` and every
+/// authoritative writer — never a revision/terminal/concurrency outcome.
+#[tokio::test]
+async fn negative_or_max_graph_version_is_hard_storage_error_across_writers() {
+    for corrupt in [-1i64, i64::MAX] {
+        let (pool, _db) = fresh_pool().await;
+        let storage = SqliteSessionStorage::new(pool.clone());
+        let session_id = SessionId(format!("sess-corrupt-{corrupt}"));
+
+        let root = root_session(&session_id.0, "task_a");
+        storage
+            .start_run(
+                &session_id,
+                &test_descriptor(&session_id.0),
+                RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                &RunStateV1::default(),
+            )
+            .await
+            .expect("start_run");
+        force_db_graph_version(&pool, &session_id.0, corrupt).await;
+
+        // save: the corrupt counter is classified BEFORE any concurrency
+        // outcome and nothing is written.
+        let session = root_session(&session_id.0, "task_save_attempt");
+        let err = storage.save(session).await.expect_err("save must refuse");
+        assert!(
+            matches!(err, graph_flow::GraphError::StorageError(_)),
+            "save with corrupt graph_version {corrupt}: expected StorageError, got {err:?}"
+        );
+        assert_eq!(db_graph_version(&pool, &session_id.0).await, corrupt);
+
+        // commit_transition at the correct revision: hard storage error.
+        let root = root_session(&session_id.0, "task_b");
+        let err = storage
+            .commit_transition(
+                &session_id,
+                1,
+                RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                SessionStatus::Running,
+                &RunStateV1::default(),
+            )
+            .await
+            .expect_err("commit_transition must refuse");
+        assert_hard_storage_error(&err, "commit_transition");
+
+        // settle_cancelled at the correct revision: hard storage error.
+        let root = root_session(&session_id.0, "task_b");
+        let err = storage
+            .settle_cancelled(
+                &session_id,
+                1,
+                RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                &RunStateV1::default(),
+            )
+            .await
+            .expect_err("settle_cancelled must refuse");
+        assert_hard_storage_error(&err, "settle_cancelled");
+
+        // restore_pre_step at the correct revision: hard storage error.
+        let pre = root_session(&session_id.0, "task_a");
+        let err = storage
+            .restore_pre_step(&session_id, 1, &pre)
+            .await
+            .expect_err("restore_pre_step must refuse");
+        assert_hard_storage_error(&err, "restore_pre_step");
+
+        // mark_step_in_flight at the correct revision: hard storage error.
+        let root = root_session(&session_id.0, "task_a");
+        let in_flight = RunStateV1 {
+            step_in_flight: Some("task_a".to_string()),
+            ..RunStateV1::default()
+        };
+        let err = storage
+            .mark_step_in_flight(
+                &session_id,
+                1,
+                RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                &in_flight,
+            )
+            .await
+            .expect_err("mark_step_in_flight must refuse");
+        assert_hard_storage_error(&err, "mark_step_in_flight");
+
+        // No writer mutated the row: corrupt version, revision, and status
+        // are all exactly as seeded.
+        assert_eq!(db_graph_version(&pool, &session_id.0).await, corrupt);
+        let record = storage
+            .load_run(&session_id)
+            .await
+            .expect("load_run")
+            .expect("record");
+        assert_eq!(record.state_revision, 1);
+        assert_eq!(record.status, SessionStatus::Running);
+    }
+}
+
+/// Review gap 2 (child path): a corrupt/exhausted CHILD `graph_version` makes
+/// the parent commit fail closed with a hard storage error and rolls the
+/// parent transition back atomically — never a partial parent advance.
+#[tokio::test]
+async fn corrupt_child_graph_version_fails_parent_transition_closed() {
+    let (pool, _db) = fresh_pool().await;
+    let storage = SqliteSessionStorage::new(pool.clone());
+    let parent = SessionId("sess-parent-corrupt-child".to_string());
+    let child_id = "sess-parent-corrupt-child:child:1";
+
+    let root = root_session(&parent.0, "task_a");
+    let child = child_checkpoint(child_id, "child_task");
+    storage
+        .start_run(
+            &parent,
+            &test_descriptor(&parent.0),
+            RunCheckpoint {
+                root: &root,
+                children: &[child],
+            },
+            &RunStateV1::default(),
+        )
+        .await
+        .expect("start_run with child");
+    assert_eq!(db_graph_version(&pool, child_id).await, 1);
+
+    // Corrupt the child's graph counter, then run the parent's next
+    // transition carrying the child at its correct revision.
+    force_db_graph_version(&pool, child_id, i64::MAX).await;
+    let root = root_session(&parent.0, "task_b");
+    let mut carried = child_checkpoint(child_id, "child_task");
+    carried.state_revision = 1;
+    carried.session.version = 1;
+    let err = storage
+        .commit_transition(
+            &parent,
+            1,
+            RunCheckpoint {
+                root: &root,
+                children: &[carried],
+            },
+            SessionStatus::Running,
+            &RunStateV1::default(),
+        )
+        .await
+        .expect_err("corrupt child counter must fail the parent transition");
+    assert_hard_storage_error(&err, "commit_transition with corrupt child");
+
+    // Atomic rollback: the parent's revision/graph clock did not advance and
+    // the child's corrupt counter is untouched.
+    let record = storage
+        .load_run(&parent)
+        .await
+        .expect("load_run")
+        .expect("record");
+    assert_eq!(record.state_revision, 1, "failed transition must not advance the root");
+    assert_eq!(db_graph_version(&pool, &parent.0).await, 1);
+    assert_eq!(db_graph_version(&pool, child_id).await, i64::MAX);
+}
+
+/// Review gap 3: the graph-version clock advances exactly once per
+/// authoritative cursor/context write (start_run -> mark_step_in_flight ->
+/// runner save -> commit_transition -> restore_pre_step -> settle_cancelled)
+/// while durable prompt-attempt writes deliberately leave it unchanged.
+#[tokio::test]
+async fn graph_version_clock_monotonic_across_writers_and_untouched_by_prompt_attempts() {
+    let (pool, _db) = fresh_pool().await;
+    let storage = SqliteSessionStorage::new(pool.clone());
+    let session_id = SessionId("sess-graph-clock".to_string());
+
+    // start_run seeds graph_version = incoming version (0) + 1 = 1.
+    let root = root_session(&session_id.0, "task_a");
+    storage
+        .start_run(
+            &session_id,
+            &test_descriptor(&session_id.0),
+            RunCheckpoint {
+                root: &root,
+                children: &[],
+            },
+            &RunStateV1::default(),
+        )
+        .await
+        .expect("start_run");
+    assert_eq!(db_graph_version(&pool, &session_id.0).await, 1, "start_run seeds 1");
+
+    // mark_step_in_flight: revision 1->2, graph clock 1->2.
+    let pre = storage
+        .get(&session_id.0)
+        .await
+        .expect("get")
+        .expect("row");
+    assert_eq!(pre.version, 1);
+    let in_flight = RunStateV1 {
+        step_in_flight: Some(pre.current_task_id.clone()),
+        ..RunStateV1::default()
+    };
+    storage
+        .mark_step_in_flight(
+            &session_id,
+            1,
+            RunCheckpoint {
+                root: &pre,
+                children: &[],
+            },
+            &in_flight,
+        )
+        .await
+        .expect("mark_step_in_flight");
+    assert_eq!(db_graph_version(&pool, &session_id.0).await, 2, "mark_step_in_flight advances");
+
+    // The runner loads AFTER the mark, then its graph save advances 2->3.
+    let mut loaded = storage
+        .get(&session_id.0)
+        .await
+        .expect("get")
+        .expect("row");
+    assert_eq!(loaded.version, 2, "runner loads the post-mark version");
+    loaded.current_task_id = "task_b".to_string();
+    storage.save(loaded).await.expect("runner save");
+    assert_eq!(db_graph_version(&pool, &session_id.0).await, 3, "runner save advances");
+
+    // commit_transition anchored at the marker revision (2): revision 2->3,
+    // graph clock 3->4.
+    let root = storage
+        .get(&session_id.0)
+        .await
+        .expect("get")
+        .expect("row");
+    storage
+        .commit_transition(
+            &session_id,
+            2,
+            RunCheckpoint {
+                root: &root,
+                children: &[],
+            },
+            SessionStatus::Running,
+            &RunStateV1::default(),
+        )
+        .await
+        .expect("commit_transition");
+    assert_eq!(db_graph_version(&pool, &session_id.0).await, 4, "commit_transition advances");
+
+    // Prompt-attempt writes are in-task metadata under the runner-owned
+    // session: they must NOT advance the graph clock (brief 3.3).
+    let attempt = nexus_orchestration::run_state::PromptAttempt {
+        attempt_id: uuid::Uuid::new_v4().to_string(),
+        task_id: "task_b".to_string(),
+        phase: nexus_orchestration::run_state::PromptPhase::Dispatching,
+        host_session_id: None,
+        operation_id: None,
+        process_identity: None,
+    };
+    storage
+        .persist_prompt_attempt(&session_id, 3, None, None, &attempt)
+        .await
+        .expect("persist_prompt_attempt");
+    assert_eq!(
+        db_graph_version(&pool, &session_id.0).await,
+        4,
+        "prompt-attempt persist must leave the graph clock unchanged"
+    );
+    storage
+        .clear_prompt_attempt(&session_id, 3, None, &attempt.attempt_id)
+        .await
+        .expect("clear_prompt_attempt");
+    assert_eq!(
+        db_graph_version(&pool, &session_id.0).await,
+        4,
+        "prompt-attempt clear must leave the graph clock unchanged"
+    );
+
+    // restore_pre_step: fenced restoration advances the graph clock (4->5)
+    // while the workflow revision intentionally stays fixed at 3.
+    let pre_root = root_session(&session_id.0, "task_a");
+    storage
+        .restore_pre_step(&session_id, 3, &pre_root)
+        .await
+        .expect("restore_pre_step");
+    assert_eq!(db_graph_version(&pool, &session_id.0).await, 5, "restore_pre_step advances");
+    let record = storage
+        .load_run(&session_id)
+        .await
+        .expect("load_run")
+        .expect("record");
+    assert_eq!(record.state_revision, 3, "restore keeps the workflow revision");
+
+    // settle_cancelled: revision 3->4, graph clock 5->6, status cancelled.
+    let root = storage
+        .get(&session_id.0)
+        .await
+        .expect("get")
+        .expect("row");
+    storage
+        .settle_cancelled(
+            &session_id,
+            3,
+            RunCheckpoint {
+                root: &root,
+                children: &[],
+            },
+            &RunStateV1::default(),
+        )
+        .await
+        .expect("settle_cancelled");
+    assert_eq!(db_graph_version(&pool, &session_id.0).await, 6, "settle_cancelled advances");
+    let record = storage
+        .load_run(&session_id)
+        .await
+        .expect("load_run")
+        .expect("record");
+    assert_eq!(record.status, SessionStatus::Cancelled);
+    assert_eq!(record.state_revision, 4);
 }

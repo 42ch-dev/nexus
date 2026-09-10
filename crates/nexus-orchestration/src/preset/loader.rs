@@ -3363,7 +3363,7 @@ states:
 
         // When _judge_result is true, find_next_task should return go_state.
         let ctx = graph_flow::Context::new();
-        ctx.set("_judge_result", true);
+        ctx.set("_judge_result", true).unwrap();
         let next = loaded.outer_graph.find_next_task("judge_state", &ctx);
         assert_eq!(
             next.as_deref(),
