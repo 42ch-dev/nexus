@@ -8,6 +8,9 @@
  * Read surface for world-attached check findings (V1.165 P1 T3 / DR-68, AR-3): GET /v1/daemon/worlds/{world_id}/findings. Items mirror the spoke Finding wire shape as inlined by check-response.schema.json (the check route returns the same shape verbatim); the projection converts the stored INTEGER Unix-epoch timestamps to RFC 3339 (spoke Timestamp = RFC 3339 date-time) and rehydrates the stored JSON columns (source_anchor / text_position / extensions). Severity/status are spoke vocabulary verbatim (info|warning|error / open|resolved|dismissed — AR-1: no nexus mapping on the world path). `truncated` is the honest flag for the 500-newest safety cap: true only when more rows exist than the cap. Owned world with zero findings → 200 + {"findings": [], "truncated": false} (PD-3).
  */
 export interface WorldFindingsListResponse {
+  /**
+   * Items: Spoke Finding wire shape (mirrored inline — same shape check-response.schema.json carries; epoch → RFC 3339 projection).
+   */
   findings: {
     /**
      * Stable finding id.

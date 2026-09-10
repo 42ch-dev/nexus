@@ -84,8 +84,8 @@ mod tests {
         assert_eq!(req.memory_kinds.len(), 3);
         assert_eq!(req.max_timeline_events, None);
         assert_eq!(req.max_story_summaries, None);
-        assert_eq!(req.key_block_limit, 100);
-        assert_eq!(req.timeline_limit, 50);
+        assert_eq!(req.key_block_limit.get(), 100);
+        assert_eq!(req.timeline_limit.get(), 50);
     }
 
     #[test]
@@ -101,7 +101,7 @@ mod tests {
         let req: ContextAssembleRequestV1 =
             serde_json::from_str(json).expect("deserialization should succeed");
         assert!(!req.include_memory);
-        assert_eq!(req.max_timeline_events, Some(10));
+        assert_eq!(req.max_timeline_events.map(|v| v.get()), Some(10));
     }
 
     #[test]

@@ -15,7 +15,7 @@
     "build": "tauri build"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.1.0",
+    "@tauri-apps/cli": "^2.11.4",
     "sharp": "^0.35.4"
   },
   "engines": {

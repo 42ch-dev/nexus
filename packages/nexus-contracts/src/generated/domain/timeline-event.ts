@@ -46,10 +46,14 @@ export interface TimelineEvent {
   summary?: string;
   /**
    * Preceding events that caused this one
+   *
+   * Items: TimelineEvent ID (prefix: 'evt_')
    */
   caused_by_event_ids?: string[];
   /**
    * Knowledge entries affected by this event
+   *
+   * Items: KnowledgeEntry entry_id (opaque string per spoke knowledge-entry.schema.json).
    */
   affected_key_block_ids?: string[];
   /**

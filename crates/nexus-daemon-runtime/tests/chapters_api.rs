@@ -118,7 +118,7 @@ async fn list_chapters_cursor_pagination_items_and_next_cursor() {
         Path(work_id.clone()),
         Query(ListChaptersQuery {
             status: None,
-            limit: Some(2),
+            limit: std::num::NonZeroU64::new(2),
             cursor: None,
         }),
     )
@@ -137,7 +137,7 @@ async fn list_chapters_cursor_pagination_items_and_next_cursor() {
         Path(work_id.clone()),
         Query(ListChaptersQuery {
             status: None,
-            limit: Some(2),
+            limit: std::num::NonZeroU64::new(2),
             cursor: Some(cursor.clone()),
         }),
     )
@@ -157,7 +157,7 @@ async fn list_chapters_cursor_pagination_items_and_next_cursor() {
         Path(work_id),
         Query(ListChaptersQuery {
             status: None,
-            limit: Some(2),
+            limit: std::num::NonZeroU64::new(2),
             cursor: Some(cursor2),
         }),
     )

@@ -1,4 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+// @vitest-environment node
+import { once } from 'node:events';
+import {
+  createServer,
+  request as httpRequest,
+  type IncomingMessage,
+  type ServerResponse,
+} from 'node:http';
+import { Socket, createServer as createNetServer } from 'node:net';
+import { describe, expect, it } from 'vitest';
 
 import {
   DAEMON_PROXY_UNAVAILABLE_STATUS,
@@ -29,29 +38,114 @@ describe('daemon-proxy', () => {
     });
   });
 
-  it('maps proxy connect refusal to 503 instead of Vite default 500', () => {
-    const writeHead = vi.fn();
-    const end = vi.fn();
-    const res = { headersSent: false, writeHead, end };
-
-    handleDaemonProxyError({ code: 'ECONNREFUSED' }, {}, res);
-
-    expect(writeHead).toHaveBeenCalledWith(
-      DAEMON_PROXY_UNAVAILABLE_STATUS,
-      { 'Content-Type': 'application/json' },
-    );
-    const body = JSON.parse(end.mock.calls[0]![0] as string) as {
-      error: { code: string };
-    };
+  it('maps proxy connect refusal to 503 JSON instead of Vite default 500', async () => {
+    const observed = await withHttpServer((req, res) => {
+      handleDaemonProxyError({ code: 'ECONNREFUSED' }, req, res);
+    });
+    expect(observed.status).toBe(DAEMON_PROXY_UNAVAILABLE_STATUS);
+    expect(observed.contentType).toBe('application/json');
+    const body = JSON.parse(observed.body) as { error: { code: string } };
     expect(body.error.code).toBe('daemon_unavailable');
-    expect(writeHead.mock.calls[0]![0]).not.toBe(500);
   });
 
-  it('does not write a response when headers were already sent', () => {
-    const writeHead = vi.fn();
-    const end = vi.fn();
-    handleDaemonProxyError({ code: 'ECONNREFUSED' }, {}, { headersSent: true, writeHead, end });
-    expect(writeHead).not.toHaveBeenCalled();
-    expect(end).not.toHaveBeenCalled();
+  it('maps non-connect proxy errors to 502 bad_gateway', async () => {
+    const observed = await withHttpServer((req, res) => {
+      handleDaemonProxyError(new Error('boom'), req, res);
+    });
+    expect(observed.status).toBe(502);
+    const body = JSON.parse(observed.body) as { error: { code: string } };
+    expect(body.error.code).toBe('bad_gateway');
+  });
+
+  it('does not write when HTTP headers were already sent', async () => {
+    const observed = await withHttpServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.write('upstream');
+      handleDaemonProxyError({ code: 'ECONNREFUSED' }, req, res);
+      res.end();
+    });
+    expect(observed.status).toBe(200);
+    expect(observed.body).toBe('upstream');
+  });
+
+  it('does not write when the HTTP response already ended', async () => {
+    const observed = await withHttpServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('upstream');
+      handleDaemonProxyError({ code: 'ECONNREFUSED' }, req, res);
+    });
+    expect(observed.status).toBe(200);
+    expect(observed.body).toBe('upstream');
+  });
+
+  it('ends a raw websocket socket without writing an HTTP response', async () => {
+    const ended = await withSocketServer((socket) => {
+      handleDaemonProxyError({ code: 'ECONNREFUSED' }, {}, socket);
+    });
+    expect(ended.data).toBe('');
+    expect(ended.closed).toBe(true);
   });
 });
+
+interface HttpObservation {
+  status: number;
+  contentType: string | undefined;
+  body: string;
+}
+
+/** Run `handler` inside a real loopback HTTP server and observe the wire result. */
+async function withHttpServer(
+  handler: (req: IncomingMessage, res: ServerResponse) => void,
+): Promise<HttpObservation> {
+  const server = createServer(handler);
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  if (address === null || typeof address === 'string') throw new Error('no bound address');
+  const { port } = address;
+
+  try {
+    const req = httpRequest({ host: '127.0.0.1', port, path: '/' });
+    req.on('error', () => {});
+    req.end();
+    const [res] = (await once(req, 'response')) as [IncomingMessage];
+    const chunks: Buffer[] = [];
+    res.on('data', (chunk: Buffer) => chunks.push(chunk));
+    await once(res, 'end');
+    return {
+      status: res.statusCode ?? 0,
+      contentType: res.headers['content-type'],
+      body: Buffer.concat(chunks).toString('utf8'),
+    };
+  } finally {
+    const done = once(server, 'close');
+    server.close();
+    await done;
+  }
+}
+
+/** Run `handler` against a real loopback socket and observe stream completion. */
+async function withSocketServer(
+  handler: (socket: Socket) => void,
+): Promise<{ data: string; closed: boolean }> {
+  const server = createNetServer((socket) => handler(socket));
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  if (address === null || typeof address === 'string') throw new Error('no bound address');
+  const { port } = address;
+
+  try {
+    const client = new Socket();
+    const chunks: Buffer[] = [];
+    client.on('data', (chunk: Buffer) => chunks.push(chunk));
+    client.on('error', () => {});
+    client.connect(port, '127.0.0.1');
+    await once(client, 'close');
+    return { data: Buffer.concat(chunks).toString('utf8'), closed: true };
+  } finally {
+    const done = once(server, 'close');
+    server.close();
+    await done;
+  }
+}

@@ -16,18 +16,24 @@ export interface PackExportResponse {
   };
   /**
    * Ordered KnowledgeEntry list (canonical_name ASC).
+   *
+   * Items: Spoke KnowledgeEntry (serialized JSON object). Typed access is via the spoke package (@42ch/spoke-schemas / spoke-schemas). Canonical schema: https://spoke42.invalid/schemas/data/knowledge-entry.schema.json. V1.139 fallback: opaque object here.
    */
   entries: {
     [k: string]: unknown | undefined;
   }[];
   /**
    * Ordered Relation list (relationship_id ASC).
+   *
+   * Items: Spoke Relation (serialized JSON object). Canonical schema: https://spoke42.invalid/schemas/data/relation.schema.json. V1.139 fallback: opaque object here.
    */
   relations: {
     [k: string]: unknown | undefined;
   }[];
   /**
    * Optional SourceAnchor list (present only when include_anchors is set on the request).
+   *
+   * Items: Spoke SourceAnchor (serialized JSON object).
    */
   source_anchors?: {
     [k: string]: unknown | undefined;

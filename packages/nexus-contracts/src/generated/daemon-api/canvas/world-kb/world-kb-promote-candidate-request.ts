@@ -76,12 +76,10 @@ export interface NexusWorldKbEntityPatch {
    */
   modules?: {
     [k: string]:
-      | (
-          | {
-              [k: string]: unknown | undefined;
-            }
-          | unknown[]
-        )
+      | {
+          [k: string]: unknown | undefined;
+        }
+      | unknown[]
       | undefined;
   };
 }

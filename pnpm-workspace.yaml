@@ -23,6 +23,17 @@ overrides:
   linkify-it: '>=5.0.2 <6'
   brace-expansion: '>=5.0.9'
   js-yaml: '>=4.3.2 <5'
+  # js-yaml 5.x is NOT in GHSA-2883-xcg3-v3hh's affected ranges (`>=4.0.0 <4.3.2`
+  # / `>=3.0.0 <3.15.2`; v5 rewrote default merge handling), so the >=4.3.2
+  # security floor above is unchanged. Two mandatory major-16 codegen packages
+  # require js-yaml v5-only exports (`Schema.withTags`, `binaryTag`):
+  # json-schema-to-typescript 16.0.0 declares js-yaml `^5.2.3` and
+  # @apidevtools/json-schema-ref-parser 16.0.2 declares js-yaml `^5.4.1`
+  # (registry.npmjs.org manifests). Uncap the override for exactly those two
+  # parents at `>=5.4.1 <6` (satisfies both upstream floors); every other
+  # consumer (incl. ref-parser 11.9.3 inside jstt) keeps the global <5 cap.
+  'json-schema-to-typescript>js-yaml': '>=5.4.1 <6'
+  '@apidevtools/json-schema-ref-parser@16>js-yaml': '>=5.4.1 <6'
   esbuild: '^0.28.1'
   nanoid: '>=3.3.18 <4'
 

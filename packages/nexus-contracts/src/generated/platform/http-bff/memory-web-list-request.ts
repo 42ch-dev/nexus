@@ -23,10 +23,14 @@ export interface MemoryWebListRequest {
   limit?: number;
   /**
    * Filter by MemoryItem.memory_type
+   *
+   * Items: MemoryItem type (data-model-v1.md §5.8)
    */
   memory_types?: ("canon" | "working" | "experience")[];
   /**
    * Filter by MemoryItem.memory_kind when set
+   *
+   * Items: Memory content kind (data-model-v1.md §5.8, ADR-001)
    */
   memory_kinds?: (
     | "story_summary"
@@ -41,6 +45,8 @@ export interface MemoryWebListRequest {
   )[];
   /**
    * Filter by MemoryItem.status
+   *
+   * Items: Memory status (data-model-v1.md §5.8)
    */
   statuses?: ("active" | "superseded" | "archived")[];
 }

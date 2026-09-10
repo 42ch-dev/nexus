@@ -5,14 +5,14 @@ import react from '@vitejs/plugin-react';
 /**
  * Vitest config for the Nexus Design Studio.
  *
- * Mirrors the resolve alias + esbuild target from vite.config.ts so source
+ * Mirrors the resolve alias + oxc target from vite.config.ts so source
  * transforms in tests match the dev/build pipeline. The test environment is
  * jsdom. No msw is needed — the studio is a read-only gallery with no daemon
  * transport, so we don't ship a mock server in setup.
  */
 export default defineConfig({
   plugins: [react()],
-  esbuild: { target: 'esnext' },
+  oxc: { target: 'esnext' },
   resolve: {
     alias: {
       // web components import @/lib/utils — resolve it to apps/web before the

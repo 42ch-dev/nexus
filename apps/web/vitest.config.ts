@@ -48,13 +48,13 @@ if (!(globalThis as Record<symbol, unknown>)[NEXUS_LOCALSTORAGE_WARNING_FILTER])
 
 // Vitest config for the Nexus local Web UI.
 //
-// Mirrors the resolve alias + esbuild target from vite.config.ts so source
+// Mirrors the resolve alias + oxc target from vite.config.ts so source
 // transforms in tests match the dev/build pipeline. The test environment is
 // jsdom (component + DOM-adapter coverage). msw is wired per test file via
 // src/test/setup.ts.
 export default defineConfig({
   plugins: [react()],
-  esbuild: { target: 'esnext' },
+  oxc: { target: 'esnext' },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

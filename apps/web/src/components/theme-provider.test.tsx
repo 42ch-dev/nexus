@@ -38,13 +38,15 @@ function mockMatchMedia(prefersDark: boolean) {
 /** Surface the context value from inside the provider for assertions. */
 function ThemeProbe({ onTheme }: { onTheme: (t: Theme) => void }) {
   const { theme } = useTheme();
-  return <>{(onTheme(theme), null)}</>;
+  onTheme(theme);
+  return null;
 }
 
 /** Surface the resolved effective theme from inside the provider. */
 function ThemeResolvedProbe({ onTheme }: { onTheme: (t: 'light' | 'dark') => void }) {
   const { resolvedTheme } = useTheme();
-  return <>{(onTheme(resolvedTheme), null)}</>;
+  onTheme(resolvedTheme);
+  return null;
 }
 
 function renderWith(ui: ReactNode) {
@@ -192,7 +194,8 @@ function ThemeProbeOnAction({
   onReady: (api: { setTheme: (t: Theme) => void; toggleTheme: () => void }) => void;
 }) {
   const { setTheme, toggleTheme } = useTheme();
-  return <>{(onReady({ setTheme, toggleTheme }), null)}</>;
+  onReady({ setTheme, toggleTheme });
+  return null;
 }
 
 function ThemeProbeApi({
@@ -203,9 +206,7 @@ function ThemeProbeApi({
   onTheme: (t: 'light' | 'dark') => void;
 }) {
   const { resolvedTheme, toggleTheme } = useTheme();
-  return (
-    <>
-      {(onReady({ toggleTheme }), onTheme(resolvedTheme), null)}
-    </>
-  );
+  onReady({ toggleTheme });
+  onTheme(resolvedTheme);
+  return null;
 }

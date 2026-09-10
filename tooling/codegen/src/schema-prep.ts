@@ -5,9 +5,10 @@
  * (spoke tooling/codegen/src/run.mjs): the only adaptation is the base URI
  * (spoke42.invalid → nexus42.invalid).
  *
- *   1. localize  — rewrite every schema's `$id` and any `$ref` that points at the
- *                  nexus42.invalid base URI into a POSIX-relative file path, mirroring
- *                  the `schemas/` tree under `.schemas-localized/`. Bare-relative refs
+ *   1. localize  — drop every schema's base-URI `$id` and rewrite any `$ref` that
+ *                  points at the nexus42.invalid base URI into a POSIX-relative file
+ *                  path, mirroring the `schemas/` tree under `.schemas-localized/`.
+ *                  Bare-relative refs
  *                  (e.g. `delta.schema.json`) are already filesystem-relative and are
  *                  left untouched; `$RefParser` resolves them natively.
  *   2. dereference — feed each localized schema through `@apidevtools/json-schema-ref-parser`
@@ -19,7 +20,8 @@
  * can resolve refs itself, but resolving them against the localized tree first makes
  * `cwd`-relative resolution robust.
  *
- * Run directly for a smoke check: `tsx tooling/codegen/src/schema-prep.ts`.
+ * Not a standalone entry point: `index.ts` is the sole CLI (`node dist/index.js`)
+ * and this module is imported for its functions only.
  */
 import $RefParser, { type FileInfo, type ParserOptions } from '@apidevtools/json-schema-ref-parser';
 import { glob } from 'glob';
@@ -65,8 +67,15 @@ export function resolvePrepPaths(): SchemaPrepPaths {
 }
 
 /**
- * Rewrite a schema object's base-URI `$id` and any base-URI `$ref` into
- * POSIX-relative file paths. Mutates and returns the given object.
+ * Neutralize a schema object's base-URI `$id` and rewrite any base-URI `$ref`
+ * into POSIX-relative file paths. Mutates and returns the given object.
+ *
+ * The base-URI `$id` is deleted (not rewritten): `@apidevtools/json-schema-ref-parser`
+ * 16 resolves `$ref`s against the schema `$id` when one is present, and a relative
+ * `$id` (e.g. `common/common.schema.json`) corrupts `../` traversal — the resolved
+ * relative URI is re-anchored at the file's own directory, producing bogus paths
+ * like `<dir>/common/common.schema.json`. With no `$id`, refs resolve against the
+ * file's own location, which is the semantics this stage relies on.
  *
  * Bare-relative refs (e.g. `delta.schema.json`) do not start with the base URI and
  * pass through unchanged; `$RefParser` resolves them against the file's location.
@@ -81,7 +90,7 @@ export function localizeSchemaRefs(
   const schemaDir = path.dirname(relSchemaPath);
 
   if (typeof schemaObj.$id === 'string' && schemaObj.$id.startsWith(NEXUS_SCHEMA_BASE)) {
-    schemaObj.$id = relSchemaPath;
+    delete schemaObj.$id;
   }
 
   const visit = (node: unknown): void => {
@@ -112,8 +121,8 @@ export function localizeSchemaRefs(
 }
 
 /**
- * Build the localized schema tree: glob `schemas/`, rewrite each schema's base-URI
- * `$id`/`$ref` to POSIX-relative paths, and write the result mirroring the `schemas/`
+ * Build the localized schema tree: glob `schemas/`, drop each schema's base-URI
+ * `$id`, rewrite base-URI `$ref`s to POSIX-relative paths, and write the result mirroring the `schemas/`
  * tree under `localizedDir`. Returns the sorted list of schema paths (relative to the
  * source schemas dir, POSIX slashes) for downstream stages.
  */
@@ -193,7 +202,7 @@ export function createConfinedDereferenceOptions(localizedDir: string): ParserOp
     resolve: {
       http: false,
       file: {
-        canRead: isLocalFileRefUrl,
+        canRead: (file: FileInfo) => isLocalFileRefUrl(file.url),
         async read(file: FileInfo) {
           const filePath = refUrlToFilePath(file.url);
           assertPathWithinRoot(confinedRoot, filePath);
@@ -228,7 +237,9 @@ export async function buildDereferencedSchemaTree(
 
 /**
  * Run the full localization + dereference prep on the real `schemas/` tree.
- * Logs resolved paths and counts. Intended to run via `tsx tooling/codegen/src/schema-prep.ts`.
+ * Logs resolved paths and counts. Invoked only by the `index.ts` orchestrator
+ * (`node dist/index.js`); this module is intentionally side-effect-free so the
+ * bundled single entry cannot double-run prep.
  */
 export async function runPrep(): Promise<SchemaPrepPaths> {
   const paths = resolvePrepPaths();
@@ -246,14 +257,3 @@ export async function runPrep(): Promise<SchemaPrepPaths> {
   return paths;
 }
 
-// Run if executed directly (tsx / node dist). Mirrors index.ts's guard shape.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-if (require.main === module) {
-  runPrep().catch((err: Error) => {
-    logger.error(`Schema prep failed: ${err.message}`);
-    if (process.env.DEBUG) {
-      console.error(err);
-    }
-    process.exit(1);
-  });
-}

@@ -20,12 +20,12 @@ const REPO_ROOT = path.resolve(__dirname, '../..');
  */
 export default defineConfig({
   plugins: [designTokensPlugin(REPO_ROOT), react()],
-  esbuild: { target: 'esnext' },
+  oxc: { target: 'esnext' },
   build: {
     target: 'esnext',
   },
   optimizeDeps: {
-    esbuildOptions: { target: 'esnext' },
+    rolldownOptions: { transform: { target: 'esnext' } },
   },
   resolve: {
     alias: {

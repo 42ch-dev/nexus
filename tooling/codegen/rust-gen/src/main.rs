@@ -26,7 +26,7 @@
 //! what consumers and the drift test expect.
 
 use glob::glob;
-use schemars::schema::RootSchema;
+use schemars::Schema;
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::env;
@@ -238,7 +238,6 @@ fn rewrite_unicode_scalar_length_checks(rust: &str) -> String {
 
 /// A path relative to the schemas dir, rendered with POSIX separators, for
 /// skip-list matching (independent of platform path separators).
-
 fn rel_posix(path: &Path) -> String {
     path.components()
         .filter_map(|c| match c {
@@ -427,7 +426,7 @@ fn generate_schema_rust(
 ) -> Result<(), String> {
     let content = fs::read_to_string(schema_path)
         .map_err(|err| format!("failed to read {}: {err}", schema_path.display()))?;
-    let mut schema: RootSchema = serde_json::from_str(&content)
+    let mut schema: Schema = serde_json::from_str(&content)
         .map_err(|err| format!("invalid JSON Schema in {}: {err}", schema_path.display()))?;
 
     // Override the schema `title` to the basename-derived PascalCase name BEFORE
@@ -436,25 +435,31 @@ fn generate_schema_rust(
     // → `NexusDelta`) or emits no root type at all when the title is absent
     // (e.g. `work-summary`). Overriding aligns the emitted name with the TS contract
     // (`schemaToTypeName`) and the drift-test `entry!` registrations (`World`,
-    // `WorkSummary`, `ForkBranch`, …). Only the in-memory `metadata.title` is touched;
-    // other metadata (description, $id, …) is preserved.
+    // `WorkSummary`, `ForkBranch`, …). Only the in-memory root `title` entry is
+    // touched; other metadata (description, $id, …) is preserved. The schemars-0.8
+    // `RootSchema` parser required an object root, so a non-object root stays a
+    // hard error here rather than being silently coerced.
     let file_name = rel
         .file_name()
         .and_then(|s| s.to_str())
         .expect("schema rel path has a file name");
     let type_name = schema_type_name(file_name);
-    {
-        let metadata = schema.schema.metadata.get_or_insert_with(Box::default);
-        metadata.title = Some(type_name.clone());
-    }
+    schema
+        .as_object_mut()
+        .ok_or_else(|| format!("root schema must be an object: {}", schema_path.display()))?
+        .insert("title".to_owned(), Value::String(type_name.clone()));
 
     let mut settings = TypeSpaceSettings::default();
     // Mirror the proven spoke setting; T4 may tune derives if clippy requires.
     settings.with_struct_builder(true);
 
+    // typify 0.7 owns a schemars 0.8 `RootSchema` input; cross through JSON,
+    // rather than importing or recreating its schema representation in Nexus.
+    let typify_schema = serde_json::from_value(schema.to_value())
+        .map_err(|err| format!("invalid typify input in {}: {err}", schema_path.display()))?;
     let mut type_space = TypeSpace::new(&settings);
     type_space
-        .add_root_schema(schema)
+        .add_root_schema(typify_schema)
         .map_err(|err| format!("typify failed for {}: {err}", schema_path.display()))?;
 
     let mut rust = rewrite_unicode_scalar_length_checks(&type_space.to_stream().to_string());

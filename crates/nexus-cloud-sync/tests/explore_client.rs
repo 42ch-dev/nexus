@@ -34,7 +34,7 @@ async fn explore_browse_parses_success() {
     let req = ExploreBrowseRequest {
         schema_version: std::num::NonZeroU64::new(1).unwrap(),
         cursor: None,
-        limit: Some(10),
+        limit: std::num::NonZeroU64::new(10),
         scope: Some("worlds".parse().unwrap()),
     };
 

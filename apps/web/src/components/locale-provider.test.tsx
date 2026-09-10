@@ -27,13 +27,15 @@ function setNavigatorLanguage(language: string) {
 /** Surface the preference value from inside the provider for assertions. */
 function LocaleProbe({ onPreference }: { onPreference: (p: LocalePreference) => void }) {
   const { preference } = useLocale();
-  return <>{(onPreference(preference), null)}</>;
+  onPreference(preference);
+  return null;
 }
 
 /** Surface the resolved locale from inside the provider for assertions. */
 function LocaleResolvedProbe({ onResolved }: { onResolved: (r: 'en' | 'zh-CN') => void }) {
   const { resolvedLocale } = useLocale();
-  return <>{(onResolved(resolvedLocale), null)}</>;
+  onResolved(resolvedLocale);
+  return null;
 }
 
 function renderWith(ui: ReactNode) {
@@ -193,5 +195,6 @@ function LocaleProbeApi({
   onReady: (api: { setPreference: (p: LocalePreference) => void }) => void;
 }) {
   const { setPreference } = useLocale();
-  return <>{(onReady({ setPreference }), null)}</>;
+  onReady({ setPreference });
+  return null;
 }

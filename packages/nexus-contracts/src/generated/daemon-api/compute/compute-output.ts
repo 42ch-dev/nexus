@@ -14,6 +14,8 @@ export interface ComputeOutput {
   schema_version: number;
   /**
    * Ordered list of +/-/set state operations to apply to computable KnowledgeEntry bodies.
+   *
+   * Items: A single state delta operation.
    */
   state_delta: {
     /**
@@ -41,6 +43,8 @@ export interface ComputeOutput {
   timeline_events: NexusTimelineEvent[];
   /**
    * New KnowledgeEntry records the module creates (e.g. a spawned item, a newly established faction relation). These are upserted by the host.
+   *
+   * Items: Spoke KnowledgeEntry (serialized JSON object). Typed access is via the spoke package (@42ch/spoke-schemas 0.1.1 TS / spoke-schemas 0.1.1 Rust). Canonical schema: https://spoke42.invalid/schemas/data/knowledge-entry.schema.json. V1.139 P0 fallback (spoke-adapter-architecture spec §3.4): the published spoke packages ship only compiled types (npm dist/ + cargo src/), not their schemas/ source, so codegen cannot resolve the $ref — the wire item is an opaque object here. Target state restores the $ref once spoke ships schemas/.
    */
   new_key_blocks: {
     [k: string]: unknown | undefined;
@@ -98,10 +102,14 @@ export interface NexusTimelineEvent {
   summary?: string;
   /**
    * Preceding events that caused this one
+   *
+   * Items: TimelineEvent ID (prefix: 'evt_')
    */
   caused_by_event_ids?: string[];
   /**
    * Knowledge entries affected by this event
+   *
+   * Items: KnowledgeEntry entry_id (opaque string per spoke knowledge-entry.schema.json).
    */
   affected_key_block_ids?: string[];
   /**

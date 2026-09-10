@@ -666,10 +666,10 @@ fn merge_modules(
         .unwrap_or_default();
     for (key, value) in provided {
         let json_val = match value {
-            NexusWorldKbEntityPatchModulesValue::Variant0(obj) => {
+            NexusWorldKbEntityPatchModulesValue::Object(obj) => {
                 serde_json::Value::Object(obj.clone())
             }
-            NexusWorldKbEntityPatchModulesValue::Variant1(arr) => {
+            NexusWorldKbEntityPatchModulesValue::Array(arr) => {
                 serde_json::Value::Array(arr.clone())
             }
         };
