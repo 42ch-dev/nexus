@@ -49,41 +49,60 @@ async fn test_ctx_with_active_creator(active_creator: &str) -> TestCtx {
     }
 }
 
-/// Seed a pending review entry via the daemon API.
-// axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
-#[allow(clippy::future_not_send)]
+/// Seed a pending review entry directly via SQL (same table the review pipeline reads).
+async fn seed_pending_review_sql(
+    pool: &sqlx::SqlitePool,
+    pending_id: &str,
+    creator_id: &str,
+    session_id: &str,
+    task_kind: &str,
+    raw_digest: &str,
+    world_id: Option<&str>,
+) {
+    // SAFETY: test helper using runtime query — compile-time macro not applicable in integration tests.
+    sqlx::query(
+        "INSERT OR IGNORE INTO memory_pending_review (pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, '2026-01-01T00:00:00Z')",
+    )
+    .bind(pending_id)
+    .bind(session_id)
+    .bind(creator_id)
+    .bind(world_id)
+    .bind(task_kind)
+    .bind(raw_digest)
+    .execute(pool)
+    .await
+    .expect("seed pending review");
+}
+
+/// Seed a pending review entry for the default test creator (`ctr_testuser`).
 async fn seed_pending_review(ctx: &TestCtx, pending_id: &str) {
-    let body = json!({
-        "pending_id": pending_id,
-        "session_id": "sess_test",
-        "creator_id": "ctr_testuser",
-        "world_id": null,
-        "task_kind": "brainstorm",
-        "raw_digest": "Discussed three key themes for the novel: narrative structure, character arcs, and emotional resonance. Explored how these interweave to create compelling storytelling."
-    });
-    let resp = ctx
-        .server
-        .post("/v1/daemon/memory/pending-review")
-        .json(&body)
-        .await;
-    resp.assert_status(axum::http::StatusCode::OK);
+    seed_pending_review_sql(
+        &ctx.pool,
+        pending_id,
+        "ctr_testuser",
+        "sess_test",
+        "brainstorm",
+        "Discussed three key themes for the novel: narrative structure, character arcs, and emotional resonance. Explored how these interweave to create compelling storytelling.",
+        None,
+    )
+    .await;
 }
 
 /// Seed a pending review entry directly via SQL (bypasses API auth enforcement).
 /// Use for cross-creator isolation tests where the active creator differs.
 async fn seed_pending_review_raw(pool: &sqlx::SqlitePool, pending_id: &str, creator_id: &str) {
     let session_id = format!("sess_{creator_id}");
-    // SAFETY: test helper using runtime query — compile-time macro not applicable in integration tests.
-    sqlx::query(
-        "INSERT OR IGNORE INTO memory_pending_review (pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at)
-         VALUES (?, ?, ?, NULL, 'brainstorm', 'Test digest content for cross-creator isolation.', '2026-01-01T00:00:00Z')",
+    seed_pending_review_sql(
+        pool,
+        pending_id,
+        creator_id,
+        &session_id,
+        "brainstorm",
+        "Test digest content for cross-creator isolation.",
+        None,
     )
-    .bind(pending_id)
-    .bind(&session_id)
-    .bind(creator_id)
-    .execute(pool)
-    .await
-    .expect("raw seed insert");
+    .await;
 }
 
 // ─── POST /v1/daemon/memory/review ────────────────────────────────────────
@@ -143,19 +162,16 @@ async fn review_returns_400_invalid_creator_id() {
 async fn review_drops_short_digest() {
     let ctx = test_ctx().await;
     // Seed a very short digest that should be dropped
-    let body = json!({
-        "pending_id": "pending_short_digest",
-        "session_id": "sess_short",
-        "creator_id": "ctr_testuser",
-        "task_kind": "unknown",
-        "raw_digest": "Short text"
-    });
-    let resp = ctx
-        .server
-        .post("/v1/daemon/memory/pending-review")
-        .json(&body)
-        .await;
-    resp.assert_status(axum::http::StatusCode::OK);
+    seed_pending_review_sql(
+        &ctx.pool,
+        "pending_short_digest",
+        "ctr_testuser",
+        "sess_short",
+        "unknown",
+        "Short text",
+        None,
+    )
+    .await;
 
     let review_body = json!({ "creator_id": "ctr_testuser" });
     let resp = ctx
@@ -211,19 +227,16 @@ async fn fragments_after_review_has_entries() {
     let ctx = test_ctx().await;
 
     // Seed a research entry → should become a fragment
-    let body = json!({
-        "pending_id": "pending_research_frag",
-        "session_id": "sess_research",
-        "creator_id": "ctr_testuser",
-        "task_kind": "research",
-        "raw_digest": "This is a research summary with enough content to pass the length check for fragment creation."
-    });
-    let resp = ctx
-        .server
-        .post("/v1/daemon/memory/pending-review")
-        .json(&body)
-        .await;
-    resp.assert_status(axum::http::StatusCode::OK);
+    seed_pending_review_sql(
+        &ctx.pool,
+        "pending_research_frag",
+        "ctr_testuser",
+        "sess_research",
+        "research",
+        "This is a research summary with enough content to pass the length check for fragment creation.",
+        None,
+    )
+    .await;
 
     // Run review
     let review_body = json!({ "creator_id": "ctr_testuser" });
@@ -257,10 +270,28 @@ async fn fragments_after_review_has_entries() {
 
 // ─── No regression on pending-review CRUD ─────────────────────────────────
 
+/// A row seeded directly into `memory_pending_review` is served by the list
+/// endpoint — the creator-scope POST create route was removed (M-005), so the
+/// seed path is the table itself.
 #[tokio::test]
-async fn pending_review_create_still_works() {
+async fn pending_review_seeded_row_is_listed() {
     let ctx = test_ctx().await;
     seed_pending_review(&ctx, "pending_regression_test").await;
+
+    let resp = ctx
+        .server
+        .get("/v1/daemon/memory/pending-review?creator_id=ctr_testuser")
+        .await;
+    resp.assert_status(axum::http::StatusCode::OK);
+    let body: Value = resp.json();
+    assert!(
+        body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["pending_id"].as_str() == Some("pending_regression_test")),
+        "SQL-seeded pending row must be listable via pending-review GET"
+    );
 }
 
 #[tokio::test]
@@ -461,9 +492,10 @@ async fn pending_review_delete_returns_401_without_creator() {
     drop(tmp);
 }
 
-/// Pending review create returns 403 when body `creator_id` does not match active creator.
+/// The creator-scope POST create route was removed (M-005): a POST to it is
+/// rejected by the router with 405, regardless of the body `creator_id`.
 #[tokio::test]
-async fn pending_review_create_returns_403_on_creator_id_mismatch() {
+async fn pending_review_create_route_removed_returns_405() {
     let ctx = test_ctx_with_active_creator("ctr_alice").await;
     let body = json!({
         "pending_id": "pending_bob_attempt",
@@ -476,7 +508,8 @@ async fn pending_review_create_returns_403_on_creator_id_mismatch() {
         .post("/v1/daemon/memory/pending-review")
         .json(&body)
         .await;
-    resp.assert_status(axum::http::StatusCode::FORBIDDEN);
+    // Creator-scope POST was removed (M-005); route no longer accepts POST.
+    resp.assert_status(axum::http::StatusCode::METHOD_NOT_ALLOWED);
 }
 
 /// Pending review list returns 403 when query `creator_id` does not match active creator.
@@ -910,24 +943,18 @@ async fn review_perpetually_failing_row_keeps_has_more_true_across_calls() {
 
 // ─── R-V181P0-QC1-W001: world_id propagation through review → fragments ─────
 
-/// Seed a pending review entry WITH a `world_id` via the daemon API.
-// axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
-#[allow(clippy::future_not_send)]
+/// Seed a pending review entry WITH a `world_id` directly via SQL.
 async fn seed_pending_review_with_world(ctx: &TestCtx, pending_id: &str, world_id: &str) {
-    let body = json!({
-        "pending_id": pending_id,
-        "session_id": "sess_test",
-        "creator_id": "ctr_testuser",
-        "world_id": world_id,
-        "task_kind": "research",
-        "raw_digest": "Research summary with enough content to pass the length threshold for fragment creation and keyword extraction."
-    });
-    let resp = ctx
-        .server
-        .post("/v1/daemon/memory/pending-review")
-        .json(&body)
-        .await;
-    resp.assert_status(axum::http::StatusCode::OK);
+    seed_pending_review_sql(
+        &ctx.pool,
+        pending_id,
+        "ctr_testuser",
+        "sess_test",
+        "research",
+        "Research summary with enough content to pass the length threshold for fragment creation and keyword extraction.",
+        Some(world_id),
+    )
+    .await;
 }
 
 /// R-V181P0-QC1-W001: when a pending review is created with `world_id="wld_x`",
