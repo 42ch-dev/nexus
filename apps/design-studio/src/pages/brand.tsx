@@ -729,7 +729,10 @@ export function BrandPage() {
       <ClearSpaceSection />
 
       <section id="brand-vi-acceptance" className="scroll-mt-16">
-        <h3 className="text-heading-20 font-semibold text-gray-1000 mb-2 pt-8">
+        <h3
+          id="brand-vi-acceptance-heading"
+          className="text-heading-20 font-semibold text-gray-1000 mb-2 pt-8 scroll-mt-16"
+        >
           VI acceptance fixtures
         </h3>
         <p

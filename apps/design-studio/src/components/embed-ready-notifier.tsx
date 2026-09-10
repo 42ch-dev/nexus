@@ -1,10 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { useLocation } from 'react-router';
 
 import { useStudioEmbed } from '@/components/studio-embed-context';
 
-/** Posts the embed-ready handshake after route commit in iframe documents. */
-export function EmbedReadyNotifier() {
+/** Posts the embed-ready handshake after the matched gallery route commits. */
+export function EmbeddedRouteReady({ children }: { children: ReactNode }) {
   const location = useLocation();
   const { isEmbedded, forcedTheme } = useStudioEmbed();
 
@@ -22,5 +22,10 @@ export function EmbedReadyNotifier() {
     );
   }, [isEmbedded, forcedTheme, location.pathname]);
 
-  return null;
+  return <>{children}</>;
+}
+
+/** @deprecated Use EmbeddedRouteReady inside embedded lazy routes. */
+export function EmbedReadyNotifier() {
+  return <EmbeddedRouteReady>{null}</EmbeddedRouteReady>;
 }

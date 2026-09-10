@@ -31,6 +31,7 @@ function FramePanel({
   src,
   state,
   iframeRef,
+  remountKey,
   onLoadError,
 }: {
   title: string;
@@ -38,6 +39,7 @@ function FramePanel({
   src: string;
   state: FrameState;
   iframeRef: RefObject<HTMLIFrameElement | null>;
+  remountKey: number;
   onLoadError: () => void;
 }) {
   return (
@@ -55,6 +57,7 @@ function FramePanel({
           </p>
         ) : null}
         <iframe
+          key={remountKey}
           ref={iframeRef}
           title={`${title} comparison frame`}
           src={src}
@@ -182,6 +185,7 @@ export function GalleryComparison({ path, hash, resetKey }: GalleryComparisonPro
           src={lightSrc}
           state={lightState}
           iframeRef={lightRef}
+          remountKey={effectiveResetKey}
           onLoadError={() => markFailed('light')}
         />
         <FramePanel
@@ -190,6 +194,7 @@ export function GalleryComparison({ path, hash, resetKey }: GalleryComparisonPro
           src={darkSrc}
           state={darkState}
           iframeRef={darkRef}
+          remountKey={effectiveResetKey}
           onLoadError={() => markFailed('dark')}
         />
       </div>

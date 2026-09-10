@@ -42,7 +42,7 @@ const BRAND_ENTRIES: readonly GalleryEntry[] = [
   entry('/brand', 'brand-specimens', 'Theme specimens', ['palette', 'variant'], [UI]),
   entry('/brand', 'brand-theme-css', 'Theme variables', ['theme.css', 'swatch'], [UI]),
   entry('/brand', 'brand-clear-space', 'Clear space', ['spacing', 'minimum'], [UI]),
-  entry('/brand', 'brand-vi-acceptance', 'VI acceptance', ['button', 'transport'], [UI]),
+  entry('/brand', 'brand-vi-acceptance-heading', 'VI acceptance', ['button', 'transport'], [UI]),
 ];
 
 const COMPONENT_ENTRIES: readonly GalleryEntry[] = [
@@ -63,7 +63,7 @@ const COMPONENT_ENTRIES: readonly GalleryEntry[] = [
   entry('/components', 'comp-transport-error-block', 'Transport Error Block', ['retry', 'daemon'], [UI]),
   entry('/components', 'comp-run-studio', 'Run Studio (Compute)', ['proposal', 'runs'], [UI]),
   entry('/components', 'comp-compute-timeline', 'Compute Timeline', ['node', 'inspector'], [UI]),
-  entry('/components', 'comp-vi-acceptance', 'VI acceptance (P2)', ['acceptance', 'theme'], [UI]),
+  entry('/components', 'comp-vi-acceptance-heading', 'VI acceptance (P2)', ['acceptance', 'theme'], [UI]),
 ];
 
 const VOICE_ENTRIES: readonly GalleryEntry[] = [
@@ -235,12 +235,33 @@ export function filterGalleryEntries(
 }
 
 /** Focus the catalog heading below sticky chrome after route/hash navigation. */
+function resolveGalleryFocusTarget(element: HTMLElement): HTMLElement {
+  const tag = element.tagName.toLowerCase();
+  if (/^h[1-6]$/.test(tag)) return element;
+
+  if (tag === 'section' || tag === 'article') {
+    const namedHeading = element.querySelector<HTMLElement>(
+      'h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]',
+    );
+    if (namedHeading) return namedHeading;
+
+    const firstHeading = element.querySelector<HTMLElement>('h1, h2, h3, h4, h5, h6');
+    if (firstHeading) return firstHeading;
+  }
+
+  const derivedHeading = document.getElementById(`${element.id}-heading`);
+  if (derivedHeading instanceof HTMLElement) return derivedHeading;
+
+  return element;
+}
+
 export function focusGalleryHeading(id: string): void {
   if (!id) return;
   window.requestAnimationFrame(() => {
     const target = document.getElementById(id);
     if (!target) return;
-    target.tabIndex = -1;
-    target.focus({ preventScroll: false });
+    const focusTarget = resolveGalleryFocusTarget(target);
+    focusTarget.tabIndex = -1;
+    focusTarget.focus({ preventScroll: false });
   });
 }

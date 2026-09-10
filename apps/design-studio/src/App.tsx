@@ -1,7 +1,7 @@
 import { lazy, Suspense, type ReactNode } from 'react';
 import { Link, Routes, Route } from 'react-router';
 
-import { EmbedReadyNotifier } from '@/components/embed-ready-notifier';
+import { EmbeddedRouteReady } from '@/components/embed-ready-notifier';
 import { GalleryShell } from '@/components/gallery-shell';
 import { TopNav } from '@/components/nav';
 import { StudioShellLogo } from '@/components/studio-shell-logo';
@@ -57,6 +57,42 @@ function lazyRoute(node: ReactNode, label: string) {
   return <Suspense fallback={<RouteLoading label={label} />}>{node}</Suspense>;
 }
 
+/** Embedded routes post ready only after the lazy gallery page commits. */
+function embeddedLazyRoute(node: ReactNode, label: string) {
+  return (
+    <Suspense fallback={<RouteLoading label={label} />}>
+      <EmbeddedRouteReady>{node}</EmbeddedRouteReady>
+    </Suspense>
+  );
+}
+
+function EmbeddedRoutes() {
+  return (
+    <Routes>
+      <Route path="/tokens" element={embeddedLazyRoute(<TokensPage />, 'Tokens')} />
+      <Route path="/brand" element={embeddedLazyRoute(<BrandPage />, 'Brand')} />
+      <Route path="/components" element={embeddedLazyRoute(<ComponentsPage />, 'Components')} />
+      <Route path="/voice" element={embeddedLazyRoute(<VoicePage />, 'Voice & Content')} />
+      <Route path="/surfaces" element={embeddedLazyRoute(<SurfacesLayout />, 'Surfaces')}>
+        <Route index element={embeddedLazyRoute(<SurfacesIndexPage />, 'Surfaces')} />
+        <Route path="setup" element={embeddedLazyRoute(<SurfacesSetupPage />, 'Surfaces / Setup')} />
+        <Route path="shell" element={embeddedLazyRoute(<SurfacesShellPage />, 'Surfaces / Shell')} />
+        <Route
+          path="agent-picker"
+          element={embeddedLazyRoute(<SurfacesAgentPickerPage />, 'Surfaces / Agent picker')}
+        />
+        <Route path="canvas" element={embeddedLazyRoute(<SurfacesCanvasPage />, 'Surfaces / Canvas')} />
+        <Route path="daemon" element={embeddedLazyRoute(<SurfacesDaemonPage />, 'Surfaces / Daemon')} />
+        <Route path="launch" element={embeddedLazyRoute(<SurfacesLaunchPage />, 'Surfaces / Launch')} />
+        <Route
+          path="selection-submenu"
+          element={embeddedLazyRoute(<SurfacesSelectionSubmenuPage />, 'Surfaces / Selection')}
+        />
+      </Route>
+    </Routes>
+  );
+}
+
 function withGalleryShell(node: ReactNode) {
   return <GalleryShell>{node}</GalleryShell>;
 }
@@ -95,36 +131,6 @@ function GalleryRoutes() {
   );
 }
 
-function EmbeddedRoutes() {
-  return (
-    <>
-      <EmbedReadyNotifier />
-      <Routes>
-        <Route path="/tokens" element={lazyRoute(<TokensPage />, 'Tokens')} />
-        <Route path="/brand" element={lazyRoute(<BrandPage />, 'Brand')} />
-        <Route path="/components" element={lazyRoute(<ComponentsPage />, 'Components')} />
-        <Route path="/voice" element={lazyRoute(<VoicePage />, 'Voice & Content')} />
-        <Route path="/surfaces" element={lazyRoute(<SurfacesLayout />, 'Surfaces')}>
-          <Route index element={lazyRoute(<SurfacesIndexPage />, 'Surfaces')} />
-          <Route path="setup" element={lazyRoute(<SurfacesSetupPage />, 'Surfaces / Setup')} />
-          <Route path="shell" element={lazyRoute(<SurfacesShellPage />, 'Surfaces / Shell')} />
-          <Route
-            path="agent-picker"
-            element={lazyRoute(<SurfacesAgentPickerPage />, 'Surfaces / Agent picker')}
-          />
-          <Route path="canvas" element={lazyRoute(<SurfacesCanvasPage />, 'Surfaces / Canvas')} />
-          <Route path="daemon" element={lazyRoute(<SurfacesDaemonPage />, 'Surfaces / Daemon')} />
-          <Route path="launch" element={lazyRoute(<SurfacesLaunchPage />, 'Surfaces / Launch')} />
-          <Route
-            path="selection-submenu"
-            element={lazyRoute(<SurfacesSelectionSubmenuPage />, 'Surfaces / Selection')}
-          />
-        </Route>
-      </Routes>
-    </>
-  );
-}
-
 /**
  * App shell for the Nexus Design Studio.
  *
@@ -149,8 +155,8 @@ export function App() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="sticky top-0 z-20 h-12 border-b border-gray-alpha-200 bg-background-100/90 backdrop-blur-sm">
-        <div className="mx-auto flex h-full max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4">
+      <header className="sticky top-0 z-20 min-h-12 border-b border-gray-alpha-200 bg-background-100/90 backdrop-blur-sm">
+        <div className="mx-auto flex min-h-12 max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-1">
           <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
             <Link
               to="/"
