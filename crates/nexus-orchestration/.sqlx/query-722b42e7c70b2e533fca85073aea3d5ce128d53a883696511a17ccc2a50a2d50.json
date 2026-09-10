@@ -1,0 +1,68 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT schedule_id, version, payload_kind, content,\n                    derivation_kind, derivation_detail,\n                    created_at, created_by_kind, created_by_user_id\n             FROM core_context_versions\n             WHERE schedule_id = ? AND version = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "schedule_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "version",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "payload_kind",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "content",
+        "ordinal": 3,
+        "type_info": "Blob"
+      },
+      {
+        "name": "derivation_kind",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "derivation_detail",
+        "ordinal": 5,
+        "type_info": "Blob"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "created_by_kind",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_by_user_id",
+        "ordinal": 8,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "722b42e7c70b2e533fca85073aea3d5ce128d53a883696511a17ccc2a50a2d50"
+}

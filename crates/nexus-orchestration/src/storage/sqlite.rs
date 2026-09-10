@@ -239,19 +239,36 @@ impl SessionStorage for SqliteSessionStorage {
     async fn save(&self, session: Session) -> graph_flow::Result<()> {
         let now = chrono::Utc::now().timestamp();
 
-        // Extract metadata from context (uses async get which deserializes).
+        // graph-flow 0.8 OCC: the incoming `Session.version` maps exclusively
+        // to the durable `graph_version` column (brief §3.1 — `state_revision`
+        // stays the workflow control CAS; `execution_version` stays the format
+        // marker). Checked conversions: an incoming version outside SQLite's
+        // signed range or an exhausted counter is a hard storage error with
+        // NO write — never wrapped, saturated, or clamped.
+        let incoming_version = i64::try_from(session.version).map_err(|_| {
+            graph_flow::GraphError::StorageError(format!(
+                "save session '{}': incoming graph version {} exceeds SQLite's signed range",
+                session.id, session.version
+            ))
+        })?;
+        let next_version = incoming_version.checked_add(1).ok_or_else(|| {
+            graph_flow::GraphError::StorageError(format!(
+                "save session '{}': graph version counter exhausted",
+                session.id
+            ))
+        })?;
+
+        // Extract metadata from context (synchronous get deserializes).
         let creator_id: String = session
             .context
             .get("_creator_id")
-            .await
             .unwrap_or_else(|| "unknown".to_string());
         let preset_id: String = session
             .context
             .get("_preset_id")
-            .await
             .unwrap_or_else(|| "default".to_string());
-        let preset_version: i64 = session.context.get("_preset_version").await.unwrap_or(0);
-        let parent_session_id: Option<String> = session.context.get("_parent_session_id").await;
+        let preset_version: i64 = session.context.get("_preset_version").unwrap_or(0);
+        let parent_session_id: Option<String> = session.context.get("_parent_session_id");
 
         // Serialize the entire context (includes chat history).
         let context_bytes = serde_json::to_vec(&session.context)
@@ -266,6 +283,15 @@ impl SessionStorage for SqliteSessionStorage {
         // `commit_transition` / `restore_pre_step`). The write and the
         // classification read are one atomic observation — no check-then-write
         // race that could re-open overwrite risk.
+        //
+        // graph-flow 0.8 OCC contract (brief §3.2): an absent row inserts with
+        // the incremented graph_version; an existing row updates ONLY when it
+        // is re-stepable (`status IN ('running','paused')`) AND its stored
+        // graph_version still equals the incoming session version. A stale
+        // version or a protected durable status is a `SessionConflict`, not a
+        // successful no-op. Only cursor/context/timestamp/graph_version move
+        // here — never status, workflow revision, descriptor, ownership,
+        // execution format, or wait token.
         let mut tx = nexus_local_db::begin_immediate(&self.pool)
             .await
             .map_err(|e| {
@@ -279,13 +305,16 @@ impl SessionStorage for SqliteSessionStorage {
             INSERT INTO orchestration_sessions
                 (session_id, creator_id, preset_id, preset_version,
                  parent_session_id, current_task_id, status,
-                 context_json, chat_history_json, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, 'running', ?, NULL, ?, ?)
+                 context_json, chat_history_json, created_at, updated_at,
+                 graph_version)
+            VALUES (?, ?, ?, ?, ?, ?, 'running', ?, NULL, ?, ?, ?)
             ON CONFLICT(session_id) DO UPDATE SET
                 current_task_id = excluded.current_task_id,
                 context_json     = excluded.context_json,
-                updated_at       = excluded.updated_at
+                updated_at       = excluded.updated_at,
+                graph_version    = excluded.graph_version
             WHERE orchestration_sessions.status IN ('running', 'paused')
+              AND orchestration_sessions.graph_version = ?
             "#,
             session_id,
             creator_id,
@@ -295,61 +324,90 @@ impl SessionStorage for SqliteSessionStorage {
             current_task_id,
             context_bytes,
             now,
-            now
+            now,
+            next_version,
+            incoming_version
         )
         .execute(&mut *tx)
         .await
         .map_err(|e| {
             graph_flow::GraphError::StorageError(format!("save session '{session_id}': {e}"))
         })?;
-
         // A missing row inserts (rows_affected = 1). Zero rows means the row
-        // already exists with a status outside the re-stepable set: SQLite
-        // `changes()` reports 0 for a WHERE-skipped upsert and 1 for any
-        // matched update (even identical values). Classify the outcome
-        // instead of silently reporting success: protected durable state is
-        // an expected no-op (A4); unknown/corrupt status and an unexpected
-        // zero-row on a still-running/paused row must surface explicitly.
+        // already exists outside the admitted set: a stale graph version, a
+        // protected durable status, or a corrupt/unknown row. Classify the
+        // outcome under the same write transaction instead of silently
+        // reporting success: in 0.8 a successful save promises a versioned
+        // write, so a refused save reports `SessionConflict` (stale version /
+        // protected known status) or an explicit storage error
+        // (unknown/corrupt) — never a fake success, never a mutation on
+        // refusal.
         if result.rows_affected() == 0 {
-            let current_status: Option<String> = sqlx::query_scalar!(
-                "SELECT status FROM orchestration_sessions WHERE session_id = ?",
+            #[derive(sqlx::FromRow)]
+            struct FenceRow {
+                status: String,
+                graph_version: i64,
+            }
+            let current: Option<FenceRow> = sqlx::query_as!(
+                FenceRow,
+                "SELECT status, graph_version FROM orchestration_sessions WHERE session_id = ?",
                 session_id
             )
             .fetch_optional(&mut *tx)
             .await
             .map_err(|e| {
                 graph_flow::GraphError::StorageError(format!(
-                    "save session '{session_id}': read status: {e}"
+                    "save session '{session_id}': read status/version: {e}"
                 ))
             })?;
-            let Some(status) = current_status else {
+            let Some(row) = current else {
                 return Err(graph_flow::GraphError::StorageError(format!(
                     "save session '{session_id}': row absent after upsert (non-replayable)"
                 )));
             };
-            match SessionStatus::from_db_str(&status) {
-                // Defensive contradiction: the write lock and fence make a
-                // zero-row with a running/paused status unreachable through
-                // this path, but if it ever happens the save did NOT apply —
-                // report a revision/status conflict, never success.
+            // A negative stored graph version is corrupt: surface it, never
+            // coerce, never write.
+            if row.graph_version < 0 {
+                return Err(graph_flow::GraphError::StorageError(format!(
+                    "save session '{session_id}': negative graph_version {} (non-replayable; \
+                     save not applied)",
+                    row.graph_version
+                )));
+            }
+            match SessionStatus::from_db_str(&row.status) {
+                // Stepable status: the status fence passed, so the zero-row
+                // cause is the graph_version OCC — a concurrent writer won.
+                // (The write lock makes status-passing + version-matching
+                // unreachable here; both shapes are the same concurrency
+                // outcome: conflict, save not applied.)
                 Some(SessionStatus::Running | SessionStatus::Paused) => {
-                    return Err(graph_flow::GraphError::StorageError(format!(
-                        "save session '{session_id}': unexpected zero-row on a {status:?} row \
-                         (revision/status conflict; save not applied)"
+                    return Err(graph_flow::GraphError::SessionConflict(format!(
+                        "save session '{}': stored graph version {} no longer equals the \
+                         incoming version {} (concurrent save won; save not applied)",
+                        session_id, row.graph_version, incoming_version
                     )));
                 }
                 // Unknown/corrupt status: non-replayable (A7) — never a
-                // silent success.
+                // silent success, never a conflict alias.
                 None => {
                     return Err(graph_flow::GraphError::StorageError(format!(
-                        "save session '{session_id}': unknown/corrupt status {status:?} \
-                         (non-replayable; save not applied)"
+                        "save session '{session_id}': unknown/corrupt status {:?} \
+                         (non-replayable; save not applied)",
+                        row.status
                     )));
                 }
                 // Protected durable state (waiting_for_input / terminal /
-                // interrupted / cancelled): expected no-op — a late graph
-                // save must not move or overwrite it (A4).
-                Some(_) => {}
+                // interrupted / cancelled): the save is REFUSED. 0.8 honesty:
+                // report SessionConflict rather than the old fake-success
+                // no-op; the durable row/blob/token/revisions/timestamp stay
+                // byte-identical (A4).
+                Some(_) => {
+                    return Err(graph_flow::GraphError::SessionConflict(format!(
+                        "save session '{}': durable status {:?} is protected from late \
+                         graph saves (save not applied)",
+                        session_id, row.status
+                    )));
+                }
             }
         }
 
@@ -364,7 +422,7 @@ impl SessionStorage for SqliteSessionStorage {
         let id_owned = id.to_owned();
         let row = sqlx::query_as!(
             SessionRow,
-            "SELECT session_id as \"session_id!\", current_task_id, context_json
+            "SELECT session_id as \"session_id!\", current_task_id, context_json, graph_version
              FROM orchestration_sessions WHERE session_id = ?",
             id_owned
         )
@@ -383,12 +441,23 @@ impl SessionStorage for SqliteSessionStorage {
                 ))
             })?;
 
+        // Checked conversion: a negative/corrupt stored graph version is a
+        // hard storage error — never coerced to zero, never silently
+        // deserialized away (brief §3.1).
+        let version = u64::try_from(row.graph_version).map_err(|_| {
+            graph_flow::GraphError::StorageError(format!(
+                "get session '{id}': negative/corrupt graph_version {} (non-replayable)",
+                row.graph_version
+            ))
+        })?;
+
         Ok(Some(Session {
             id: row.session_id,
             graph_id: "default".to_string(),
             current_task_id: row.current_task_id.unwrap_or_default(),
             status_message: None,
             context,
+            version,
         }))
     }
 
@@ -418,6 +487,23 @@ struct RunRow {
     state_revision: i64,
     run_state_json: Option<Vec<u8>>,
     run_descriptor_json: Option<Vec<u8>>,
+}
+
+/// Checked conversion + increment of a graph-flow `Session.version` bound for
+/// the durable `graph_version` column (brief §3.1): an incoming version outside
+/// SQLite's signed range or an exhausted counter is a hard storage error with
+/// no write — never wrapped, saturated, or clamped.
+fn checked_next_graph_version(version: u64) -> Result<i64, EngineError> {
+    let as_i64 = i64::try_from(version).map_err(|_| {
+        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            "graph version {version} exceeds SQLite's signed range"
+        )))
+    })?;
+    as_i64.checked_add(1).ok_or_else(|| {
+        EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+            "graph version counter exhausted".to_string(),
+        ))
+    })
 }
 
 /// Serialize a run-state value to a BLOB, mapping serde errors to
@@ -731,6 +817,9 @@ impl WorkflowStateStore for SqliteSessionStorage {
         })?;
         let state_bytes = serialize_blob(next_state)?;
         let descriptor_bytes = serialize_blob(descriptor)?;
+        // graph-flow 0.8: seed the new row's durable graph_version from the
+        // checked incoming checkpoint version + 1 (normally 1) — brief §3.3.
+        let root_graph_version = checked_next_graph_version(checkpoint.root.version)?;
 
         let mut tx = nexus_local_db::begin_immediate(&self.pool)
             .await
@@ -771,8 +860,9 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 (session_id, creator_id, preset_id, preset_version,
                  parent_session_id, current_task_id, status,
                  context_json, chat_history_json, created_at, updated_at,
-                 execution_version, state_revision, run_state_json, run_descriptor_json)
-            VALUES (?, ?, ?, ?, ?, ?, 'running', ?, NULL, ?, ?, 1, 1, ?, ?)
+                 execution_version, state_revision, run_state_json, run_descriptor_json,
+                 graph_version)
+            VALUES (?, ?, ?, ?, ?, ?, 'running', ?, NULL, ?, ?, 1, 1, ?, ?, ?)
             "#,
             id,
             creator_id,
@@ -784,7 +874,8 @@ impl WorkflowStateStore for SqliteSessionStorage {
             now,
             now,
             state_bytes,
-            descriptor_bytes
+            descriptor_bytes,
+            root_graph_version
         )
         .execute(&mut *tx)
         .await
@@ -818,14 +909,23 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 .as_ref()
                 .map(|s| s.0.clone());
             let child_revision = child.state_revision as i64;
+            // graph-flow 0.8: a NEW child row seeds graph_version from the
+            // checked incoming checkpoint version + 1; an existing row's
+            // authoritative write advances the stored graph_version in the
+            // same transaction (authority comes from the workflow CAS above,
+            // not the stale pre-step session version — brief §3.3). The range
+            // guard makes counter exhaustion/corruption fail closed (zero
+            // rows -> typed error), never wrap into a REAL.
+            let child_graph_version = checked_next_graph_version(child.session.version)?;
             let child_result = sqlx::query!(
                 r#"
                 INSERT INTO orchestration_sessions
                     (session_id, creator_id, preset_id, preset_version,
                      parent_session_id, current_task_id, status,
                      context_json, chat_history_json, created_at, updated_at,
-                     execution_version, state_revision, run_state_json, run_descriptor_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 1, ?, ?, ?)
+                     execution_version, state_revision, run_state_json, run_descriptor_json,
+                     graph_version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 1, ?, ?, ?, ?)
                 ON CONFLICT(session_id) DO UPDATE SET
                     status = excluded.status,
                     current_task_id = excluded.current_task_id,
@@ -834,10 +934,13 @@ impl WorkflowStateStore for SqliteSessionStorage {
                     execution_version = 1,
                     state_revision = state_revision + 1,
                     run_state_json = excluded.run_state_json,
-                    run_descriptor_json = excluded.run_descriptor_json
+                    run_descriptor_json = excluded.run_descriptor_json,
+                    graph_version = orchestration_sessions.graph_version + 1
                 WHERE orchestration_sessions.state_revision = ?
                   AND orchestration_sessions.status NOT IN
                       ('completed', 'failed', 'cancelled', 'interrupted')
+                  AND orchestration_sessions.graph_version >= 0
+                  AND orchestration_sessions.graph_version < 9223372036854775807
                 "#,
                 child_id,
                 child_creator,
@@ -852,6 +955,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 child_revision,
                 child_state,
                 child_descriptor_bytes,
+                child_graph_version,
                 child_revision
             )
             .execute(&mut *tx)
@@ -923,6 +1027,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         })?;
         let state_bytes = serialize_blob(next_state)?;
         let descriptor_bytes = serialize_blob(descriptor)?;
+        let root_graph_version = checked_next_graph_version(checkpoint.root.version)?;
 
         let mut tx = nexus_local_db::begin_immediate(&self.pool)
             .await
@@ -1154,8 +1259,9 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 (session_id, creator_id, preset_id, preset_version,
                  parent_session_id, current_task_id, status,
                  context_json, chat_history_json, created_at, updated_at,
-                 execution_version, state_revision, run_state_json, run_descriptor_json)
-            VALUES (?, ?, ?, ?, ?, ?, 'running', ?, NULL, ?, ?, 1, 1, ?, ?)
+                 execution_version, state_revision, run_state_json, run_descriptor_json,
+                 graph_version)
+            VALUES (?, ?, ?, ?, ?, ?, 'running', ?, NULL, ?, ?, 1, 1, ?, ?, ?)
             "#,
             id,
             creator_id,
@@ -1167,7 +1273,8 @@ impl WorkflowStateStore for SqliteSessionStorage {
             now,
             now,
             state_bytes,
-            descriptor_bytes
+            descriptor_bytes,
+            root_graph_version
         )
         .execute(&mut *tx)
         .await
@@ -1263,10 +1370,12 @@ impl WorkflowStateStore for SqliteSessionStorage {
             UPDATE orchestration_sessions
             SET status = ?, current_task_id = ?, context_json = ?,
                 updated_at = ?, state_revision = state_revision + 1,
-                run_state_json = ?
+                run_state_json = ?,
+                graph_version = graph_version + 1
             WHERE session_id = ? AND state_revision = ?
               AND execution_version = 1
               AND status NOT IN ('completed', 'failed', 'cancelled', 'interrupted')
+              AND graph_version >= 0 AND graph_version < 9223372036854775807
             ",
             status_str,
             current_task_id,
@@ -1385,14 +1494,23 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 .as_ref()
                 .map(|s| s.0.clone());
             let child_revision = child.state_revision as i64;
+            // graph-flow 0.8: a NEW child row seeds graph_version from the
+            // checked incoming checkpoint version + 1; an existing row's
+            // authoritative write advances the stored graph_version in the
+            // same transaction (authority comes from the workflow CAS above,
+            // not the stale pre-step session version — brief §3.3). The range
+            // guard makes counter exhaustion/corruption fail closed (zero
+            // rows -> typed error), never wrap into a REAL.
+            let child_graph_version = checked_next_graph_version(child.session.version)?;
             let child_result = sqlx::query!(
                 r#"
                 INSERT INTO orchestration_sessions
                     (session_id, creator_id, preset_id, preset_version,
                      parent_session_id, current_task_id, status,
                      context_json, chat_history_json, created_at, updated_at,
-                     execution_version, state_revision, run_state_json, run_descriptor_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 1, ?, ?, ?)
+                     execution_version, state_revision, run_state_json, run_descriptor_json,
+                     graph_version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 1, ?, ?, ?, ?)
                 ON CONFLICT(session_id) DO UPDATE SET
                     status = excluded.status,
                     current_task_id = excluded.current_task_id,
@@ -1401,10 +1519,13 @@ impl WorkflowStateStore for SqliteSessionStorage {
                     execution_version = 1,
                     state_revision = state_revision + 1,
                     run_state_json = excluded.run_state_json,
-                    run_descriptor_json = excluded.run_descriptor_json
+                    run_descriptor_json = excluded.run_descriptor_json,
+                    graph_version = orchestration_sessions.graph_version + 1
                 WHERE orchestration_sessions.state_revision = ?
                   AND orchestration_sessions.status NOT IN
                       ('completed', 'failed', 'cancelled', 'interrupted')
+                  AND orchestration_sessions.graph_version >= 0
+                  AND orchestration_sessions.graph_version < 9223372036854775807
                 "#,
                 child_id,
                 child_creator,
@@ -1419,6 +1540,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 child_revision,
                 child_state,
                 child_descriptor_bytes,
+                child_graph_version,
                 child_revision
             )
             .execute(&mut *tx)
@@ -1500,10 +1622,12 @@ impl WorkflowStateStore for SqliteSessionStorage {
             UPDATE orchestration_sessions
             SET status = 'cancelled', current_task_id = ?, context_json = ?,
                 updated_at = ?, state_revision = state_revision + 1,
-                run_state_json = ?
+                run_state_json = ?,
+                graph_version = graph_version + 1
             WHERE session_id = ? AND state_revision = ?
               AND execution_version = 1
               AND status IN ('running', 'paused', 'waiting_for_input', 'interrupted')
+              AND graph_version >= 0 AND graph_version < 9223372036854775807
             ",
             current_task_id,
             context_bytes,
@@ -1745,9 +1869,11 @@ impl WorkflowStateStore for SqliteSessionStorage {
         let result = sqlx::query!(
             r#"
             UPDATE orchestration_sessions
-            SET current_task_id = ?, context_json = ?, updated_at = ?, run_state_json = ?
+            SET current_task_id = ?, context_json = ?, updated_at = ?, run_state_json = ?,
+                graph_version = graph_version + 1
             WHERE session_id = ? AND state_revision = ?
               AND status IN ('running', 'paused')
+              AND graph_version >= 0 AND graph_version < 9223372036854775807
             "#,
             current_task_id,
             context_bytes,
@@ -1825,9 +1951,11 @@ impl WorkflowStateStore for SqliteSessionStorage {
             r"
             UPDATE orchestration_sessions
             SET current_task_id = ?, context_json = ?, updated_at = ?, run_state_json = ?,
-                state_revision = state_revision + 1
+                state_revision = state_revision + 1,
+                graph_version = graph_version + 1
             WHERE session_id = ? AND status IN ('running', 'paused')
               AND state_revision = ?
+              AND graph_version >= 0 AND graph_version < 9223372036854775807
             ",
             current_task_id,
             context_bytes,
@@ -2122,6 +2250,7 @@ struct SessionRow {
     session_id: String,
     current_task_id: Option<String>,
     context_json: Vec<u8>,
+    graph_version: i64,
 }
 
 #[cfg(test)]
@@ -2192,8 +2321,14 @@ mod tests {
         let mut session = Session::new_from_task("sess-upsert".into(), "task-a");
         storage.save(session.clone()).await.unwrap();
 
-        // Update with a different task id.
+        // Update with a different task id (reload OCC version after first write).
         session.current_task_id = "task-b".to_string();
+        session.version = storage
+            .get("sess-upsert")
+            .await
+            .unwrap()
+            .unwrap()
+            .version;
         storage.save(session).await.unwrap();
 
         let loaded = storage.get("sess-upsert").await.unwrap().unwrap();
@@ -2229,7 +2364,7 @@ mod tests {
             .await
             .expect("load paused row")
             .expect("row exists");
-        session.context.set_sync("_gate_park_join", true);
+        session.context.set("_gate_park_join", true);
         session.current_task_id = "join".to_string();
         storage
             .save(session)
@@ -2246,7 +2381,7 @@ mod tests {
             "position update must persist on a paused row"
         );
         assert_eq!(
-            persisted.context.get_sync::<bool>("_gate_park_join"),
+            persisted.context.get::<bool>("_gate_park_join"),
             Some(true),
             "task context mutations must persist on a paused row (the \
              reopen-resume post-step save seam)"
@@ -2279,9 +2414,16 @@ mod tests {
             .await
             .expect("load wait row")
             .expect("row exists");
-        session.context.set_sync("_gate_park_wait_state", true);
+        session.context.set("_gate_park_wait_state", true);
         session.current_task_id = "other_state".to_string();
-        storage.save(session).await.expect("save must not error");
+        let err = storage
+            .save(session)
+            .await
+            .expect_err("protected wait row must reject graph save");
+        assert!(
+            matches!(err, graph_flow::GraphError::SessionConflict(_)),
+            "expected SessionConflict, got {err:?}"
+        );
 
         let persisted = storage
             .get("sess-wait-fence")
@@ -2295,7 +2437,7 @@ mod tests {
         assert!(
             persisted
                 .context
-                .get_sync::<bool>("_gate_park_wait_state")
+                .get::<bool>("_gate_park_wait_state")
                 .is_none(),
             "the save seam must not write context onto a waiting_for_input row"
         );
@@ -2379,17 +2521,13 @@ mod tests {
             .await
             .expect_err("unexpected zero-row on a running row must not succeed");
         match &err {
-            graph_flow::GraphError::StorageError(msg) => {
-                assert!(
-                    msg.contains("unexpected zero-row"),
-                    "unexpected error: {msg}"
-                );
+            graph_flow::GraphError::SessionConflict(msg) => {
                 assert!(
                     msg.contains("sess-zero-row-race"),
                     "unexpected error: {msg}"
                 );
             }
-            other => panic!("expected StorageError, got {other:?}"),
+            other => panic!("expected SessionConflict, got {other:?}"),
         }
 
         // The row must be untouched.

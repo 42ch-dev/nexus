@@ -96,9 +96,9 @@ fn converge_arrive(ctx: &Context, target_id: &str, source_id: &str) {
 /// unit-test convention — merge arrivals have no public recorder).
 fn merge_arrive(ctx: &Context, target_id: &str, label: &str) {
     let key = format!("_merge_{target_id}");
-    let mut arrived: Vec<String> = ctx.get_sync(&key).unwrap_or_default();
+    let mut arrived: Vec<String> = ctx.get(&key).unwrap_or_default();
     arrived.push(label.to_string());
-    ctx.set_sync(&key, arrived);
+    ctx.set(&key, arrived);
 }
 
 // ── (a) converge reroute ─────────────────────────────────────────────────
@@ -138,7 +138,7 @@ async fn converge_timeout_reroutes_to_on_timeout_and_clears_arrivals() {
         "arrivals key must be cleared on timeout reroute"
     );
     let note: String = ctx
-        .get_sync("_join_timeout_note")
+        .get("_join_timeout_note")
         .expect("context note written on reroute");
     assert!(
         note.contains("timeout_handler"),

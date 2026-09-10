@@ -116,6 +116,12 @@ pub enum PresetLoadError {
         /// Maximum allowed size in bytes.
         limit: usize,
     },
+    /// graph-flow builder validation failure (0.8 immutable-graph cutover):
+    /// an edge/start task references a task that was never added. The Nexus
+    /// semantic validation above should catch these first; this is the
+    /// fail-closed backstop rather than a panic on user-provided manifests.
+    #[error("graph build error: {0}")]
+    GraphBuild(#[from] graph_flow::GraphError),
     /// YAML nesting depth exceeds the maximum allowed depth.
     #[error(
         "preset YAML nesting depth ({actual}) exceeds maximum ({limit}). \
@@ -253,7 +259,7 @@ pub fn load_preset_from_str_with_limits(
     }
 
     // 3. Build outer graph per §8.2 mapping table.
-    let outer_graph = build_outer_graph(&manifest);
+    let outer_graph = build_outer_graph(&manifest)?;
 
     // 4. Build inner graphs per §8.2 mapping table. The production prompt
     // executor and per-run cancellation tokens are wired at graph build time
@@ -264,7 +270,7 @@ pub fn load_preset_from_str_with_limits(
         None,
         None,
         std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
-    );
+    )?;
 
     // 5. Extract output bindings from manifest.
     let output_bindings = extract_output_bindings(&manifest);
@@ -1153,11 +1159,15 @@ fn incoming_labeled_edge_counts(manifest: &PresetManifest) -> HashMap<&str, usiz
 /// Note: template resolution is skipped here because `build_outer_graph` is
 /// used in test contexts where inline template strings are expected. Production
 /// code uses `build_wired_outer_graph` which resolves `template_file` paths.
-fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
+fn build_outer_graph(
+    manifest: &PresetManifest,
+) -> Result<graph_flow::Graph, graph_flow::GraphError> {
     use crate::tasks::StateCompositeTask;
     use std::collections::HashMap;
 
-    let graph = graph_flow::Graph::new(&manifest.preset.id);
+    // graph-flow 0.8: graphs are immutable and assembled through the
+    // consuming `GraphBuilder`; `build()` validates edge endpoints.
+    let mut builder = graph_flow::GraphBuilder::new(&manifest.preset.id);
 
     // V1.52 T-B P1: pre-compute incoming labeled edge counts for merge nodes.
     let incoming_labeled = incoming_labeled_edge_counts(manifest);
@@ -1218,21 +1228,21 @@ fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
         let task = StateCompositeTask::from_manifest(state)
             .with_expected_incoming(incoming)
             .with_converge_predecessors(preds);
-        graph.add_task(std::sync::Arc::new(task));
+        builder = builder.add_task(std::sync::Arc::new(task));
     }
 
     // Wire edges from state.next.
     for state in &manifest.states {
         match &state.next {
             Some(NextTarget::Linear(ref next_id)) => {
-                graph.add_edge(&state.id, next_id);
+                builder = builder.add_edge(&state.id, next_id);
             }
             Some(NextTarget::GoNogo(ref go_nogo)) => {
                 // V1.42 P2: conditional edge reads _judge_result from context.
                 // `go` branch when true; `nogo` branch when false or absent.
-                graph.add_conditional_edge(
+                builder = builder.add_conditional_edge(
                     &state.id,
-                    |ctx| ctx.get_sync::<bool>("_judge_result").unwrap_or(false),
+                    |ctx| ctx.get::<bool>("_judge_result").unwrap_or(false),
                     &go_nogo.go,
                     &go_nogo.nogo,
                 );
@@ -1244,14 +1254,14 @@ fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
                 // in StateCompositeTask::resolve_labeled_target, which also
                 // writes the matched label to context._judge_label.
                 for edge in labeled_edges {
-                    graph.add_edge(&state.id, &edge.target);
+                    builder = builder.add_edge(&state.id, &edge.target);
                 }
             }
             Some(NextTarget::Conditional(_) | NextTarget::Branches(_)) | None => {}
         }
     }
 
-    graph
+    builder.build()
 }
 
 /// Build the outer graph with engine + inner graph references wired into
@@ -1274,11 +1284,11 @@ pub fn build_wired_outer_graph(
     session_cancels: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
-) -> graph_flow::Graph {
+) -> Result<graph_flow::Graph, graph_flow::GraphError> {
     use crate::tasks::StateCompositeTask;
     use std::collections::HashMap;
 
-    let graph = graph_flow::Graph::new(&loaded.id);
+    let mut builder = graph_flow::GraphBuilder::new(&loaded.id);
 
     // A1: rebuild the inner graphs with the production prompt executor and
     // cancellation tokens wired into every `acp_prompt` node. Template files
@@ -1289,7 +1299,7 @@ pub fn build_wired_outer_graph(
         loaded.source_identity.as_ref(),
         prompt_executor,
         session_cancels,
-    );
+    )?;
 
     // V1.52 T-B P1: pre-compute incoming labeled edge counts for merge nodes.
     // W-2 (v1.179 QC fix round 2): production wiring shares the exact scan
@@ -1362,19 +1372,19 @@ pub fn build_wired_outer_graph(
             task = task.with_daemon_tool_dispatch(dispatch.clone());
         }
 
-        graph.add_task(std::sync::Arc::new(task));
+        builder = builder.add_task(std::sync::Arc::new(task));
     }
 
     // Wire edges.
     for state in &loaded.manifest.states {
         match &state.next {
             Some(NextTarget::Linear(ref next_id)) => {
-                graph.add_edge(&state.id, next_id);
+                builder = builder.add_edge(&state.id, next_id);
             }
             Some(NextTarget::GoNogo(ref go_nogo)) => {
-                graph.add_conditional_edge(
+                builder = builder.add_conditional_edge(
                     &state.id,
-                    |ctx| ctx.get_sync::<bool>("_judge_result").unwrap_or(false),
+                    |ctx| ctx.get::<bool>("_judge_result").unwrap_or(false),
                     &go_nogo.go,
                     &go_nogo.nogo,
                 );
@@ -1382,14 +1392,14 @@ pub fn build_wired_outer_graph(
             Some(NextTarget::Labeled(ref labeled_edges)) => {
                 // V1.52 T-B P0: N-way labeled routing.
                 for edge in labeled_edges {
-                    graph.add_edge(&state.id, &edge.target);
+                    builder = builder.add_edge(&state.id, &edge.target);
                 }
             }
             Some(NextTarget::Conditional(_) | NextTarget::Branches(_)) | None => {}
         }
     }
 
-    graph
+    builder.build()
 }
 
 /// Extract output bindings from the manifest's `inner_graphs`.
@@ -1431,7 +1441,7 @@ fn build_inner_graphs(
     session_cancels: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
-) -> HashMap<String, Arc<graph_flow::Graph>> {
+) -> Result<HashMap<String, Arc<graph_flow::Graph>>, graph_flow::GraphError> {
     use crate::preset::manifest::GraphNodeKind;
     use crate::tasks::InnerGraphNodeTask;
 
@@ -1439,7 +1449,7 @@ fn build_inner_graphs(
 
     if let Some(ref inner_graphs) = manifest.inner_graphs {
         for (name, ig) in inner_graphs {
-            let graph = graph_flow::Graph::new(name);
+            let mut builder = graph_flow::GraphBuilder::new(name);
 
             for node in &ig.nodes {
                 // Determine kind (currently only acp_prompt supported).
@@ -1489,21 +1499,21 @@ fn build_inner_graphs(
                         task
                     }
                 };
-                graph.add_task(std::sync::Arc::new(task));
+                builder = builder.add_task(std::sync::Arc::new(task));
             }
 
             // Wire edges from depends_on
             for node in &ig.nodes {
                 for dep in &node.depends_on {
-                    graph.add_edge(dep, &node.id);
+                    builder = builder.add_edge(dep, &node.id);
                 }
             }
 
-            result.insert(name.clone(), Arc::new(graph));
+            result.insert(name.clone(), Arc::new(builder.build()?));
         }
     }
 
-    result
+    Ok(result)
 }
 
 // ---------------------------------------------------------------------------
@@ -2017,13 +2027,14 @@ states:
             None,
             None,
             std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
-        );
+        )
+        .expect("wired outer graph builds");
 
         let task = graph
             .get_task("m")
             .expect("merge state task present in wired graph");
         let ctx = graph_flow::Context::new();
-        ctx.set_sync("_merge_m", vec!["go".to_string()]);
+        ctx.set("_merge_m", vec!["go".to_string()]).expect("context set");
         let result = task.run(ctx).await.expect("merge gate check runs");
 
         assert_eq!(
@@ -3352,7 +3363,7 @@ states:
 
         // When _judge_result is true, find_next_task should return go_state.
         let ctx = graph_flow::Context::new();
-        ctx.set_sync("_judge_result", true);
+        ctx.set("_judge_result", true);
         let next = loaded.outer_graph.find_next_task("judge_state", &ctx);
         assert_eq!(
             next.as_deref(),
@@ -3362,7 +3373,7 @@ states:
 
         // When _judge_result is false, find_next_task should return nogo_state.
         let ctx2 = graph_flow::Context::new();
-        ctx2.set_sync("_judge_result", false);
+        ctx2.set("_judge_result", false);
         let next2 = loaded.outer_graph.find_next_task("judge_state", &ctx2);
         assert_eq!(
             next2.as_deref(),

@@ -179,7 +179,7 @@ async fn converge_any_idempotent_second_run_resumes() {
 
     // Second pass (resumed via resume_key): advances immediately.
     // The resume path skips the gate entirely.
-    ctx.set_sync("_state_merge_idem_resumed", true);
+    ctx.set("_state_merge_idem_resumed", true);
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
         matches!(result.next_action, NextAction::Continue),

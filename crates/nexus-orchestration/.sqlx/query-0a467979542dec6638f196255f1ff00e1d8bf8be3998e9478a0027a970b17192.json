@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT outbox_entry_id as \"outbox_entry_id!\" FROM outbox_entries\n                 WHERE delivery_state IN ('staged', 'ready')\n                 ORDER BY created_at ASC\n                 LIMIT ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "outbox_entry_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "0a467979542dec6638f196255f1ff00e1d8bf8be3998e9478a0027a970b17192"
+}

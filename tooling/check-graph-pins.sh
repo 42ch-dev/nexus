@@ -10,22 +10,22 @@
 #     spoke-connect   ABSENT
 #     libp2p          ABSENT
 #     spoke-operations exactly one 0.11.1   (via nexus-spoke-adapter, prior art)
-#     rmcp            exactly one 1.8.0     (via agent-client-protocol, prior art)
+#     rmcp            ABSENT                (optional; ACP 2.1 core no longer pulls it)
 #   -F connect-client (both crates):
 #     spoke-connect   exactly one 0.11.x
 #     libp2p          exactly one 0.56.x    (spoke-connect base dep)
 #     spoke-operations exactly one 0.11.1
-#     rmcp            exactly one 1.8.0
+#     rmcp            exactly one 3.2.0
 #   -F connect-client,connect-host (nexus42 only; nexus-daemon-runtime has no
 #     connect-host feature):
 #     libp2p          exactly one 0.56.x
-#     rmcp            exactly one 1.8.0
+#     rmcp            exactly one 3.2.0
 #
 # DEV-DEP CAVEAT (AR-74): `cargo tree -p <crate>` includes dev-dependencies
 # by default. `--edges normal` drops them — the pins below therefore verify
 # the SHIPPED graph only. Tests-only harness deps (e.g. the rmcp CLIENT
 # dev-dep in nexus42) are intentionally excluded here; the shipped graph
-# keeps exactly one rmcp 1.8.0 (server + transport-io).
+# keeps exactly one rmcp 3.2.0 (server + transport-io).
 #
 # Run from the repository root. Requires a Rust toolchain + `cargo`.
 
@@ -119,7 +119,7 @@ for crate in nexus-daemon-runtime nexus42; do
   assert_empty "$crate" "" spoke-connect
   assert_empty "$crate" "" libp2p
   assert_exactly_one "$crate" "" spoke-operations "0.11.1"
-  assert_exactly_one "$crate" "" rmcp "1.8.0"
+  assert_empty "$crate" "" rmcp
 done
 
 # --- connect-client ------------------------------------------------------------
@@ -127,11 +127,11 @@ for crate in nexus-daemon-runtime nexus42; do
   assert_exactly_one "$crate" "--features connect-client" spoke-connect "0.11.*"
   assert_exactly_one "$crate" "--features connect-client" libp2p "0.56.*"
   assert_exactly_one "$crate" "--features connect-client" spoke-operations "0.11.1"
-  assert_exactly_one "$crate" "--features connect-client" rmcp "1.8.0"
+  assert_exactly_one "$crate" "--features connect-client" rmcp "3.2.0"
 done
 
 # --- connect-client + connect-host (nexus42 only) ------------------------------
 assert_exactly_one nexus42 "--features connect-client,connect-host" libp2p "0.56.*"
-assert_exactly_one nexus42 "--features connect-client,connect-host" rmcp "1.8.0"
+assert_exactly_one nexus42 "--features connect-client,connect-host" rmcp "3.2.0"
 
 echo "graph pins OK"

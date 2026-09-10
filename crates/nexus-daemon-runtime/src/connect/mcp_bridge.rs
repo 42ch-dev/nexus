@@ -49,7 +49,8 @@ use std::sync::Arc;
 
 use crate::connect::visibility::VisibilityPolicy;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, Content, ErrorCode, Implementation, ListToolsResult,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode, Implementation,
+    ListToolsResult,
     PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
 };
 use rmcp::service::RequestContext;
@@ -178,7 +179,7 @@ impl<B: McpBackend> ServerHandler for McpBridgeHandler<B> {
         &self,
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> std::result::Result<CallToolResult, McpError> {
+    ) -> std::result::Result<CallToolResponse, McpError> {
         let name = request.name.to_string();
         let parameters = serde_json::Value::Object(request.arguments.unwrap_or_default());
 
@@ -190,11 +191,12 @@ impl<B: McpBackend> ServerHandler for McpBridgeHandler<B> {
         // distinct from unroutable (the spine cannot resolve the id at
         // all).
         if !self.policy.is_visible(&name) {
-            return map_outcome(ToolCallOutcome::NotAuthorized { tool_name: name });
+            return map_outcome(ToolCallOutcome::NotAuthorized { tool_name: name })
+                .map(CallToolResponse::from);
         }
 
         let outcome = self.backend.call_tool(&name, parameters).await?;
-        map_outcome(outcome)
+        map_outcome(outcome).map(CallToolResponse::from)
     }
 }
 
@@ -212,7 +214,7 @@ fn map_outcome(outcome: ToolCallOutcome) -> std::result::Result<CallToolResult, 
             // `details.wire_code` (lowercase, e.g. `op_unsupported`);
             // surface it exactly once, ahead of the message. Other
             // executed-but-failed outcomes name the spine `code`.
-            Ok(CallToolResult::error(vec![Content::text(
+            Ok(CallToolResult::error(vec![ContentBlock::text(
                 executed_error_text(&code, &message, wire_code.as_deref()),
             )]))
         }
@@ -280,7 +282,7 @@ fn success_result(value: serde_json::Value) -> CallToolResult {
         CallToolResult::structured(value)
     } else {
         let text = serde_json::to_string(&value).unwrap_or_else(|_| "null".to_owned());
-        CallToolResult::success(vec![Content::text(text)])
+        CallToolResult::success(vec![ContentBlock::text(text)])
     }
 }
 

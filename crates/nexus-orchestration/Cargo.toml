@@ -54,6 +54,9 @@ chrono-tz = { workspace = true }
 regex = { workspace = true }
 blake3 = { workspace = true }
 sha2 = { workspace = true }
+# sha2 0.11 (#272): digest output no longer implements LowerHex;
+# `hex::encode` reproduces the frozen lowercase 64-char encoding byte-identically.
+hex = "0.4"
 include_dir = "0.7"
 handlebars = { workspace = true }
 anyhow = { workspace = true }

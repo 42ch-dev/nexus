@@ -74,16 +74,16 @@ fn test_descriptor(_session_id: &str) -> RunDescriptorV1 {
 }
 
 /// Build a root session snapshot.
-async fn root_session(session_id: &str, task: &str) -> Session {
-    let s = Session::new_from_task(session_id.to_string(), task);
-    s.context.set("_session_id", session_id.to_string()).await;
+fn root_session(session_id: &str, task: &str) -> Session {
+    let mut s = Session::new_from_task(session_id.to_string(), task);
+    let _ = s.context.set("_session_id", session_id.to_string());
     s
 }
 
 /// Build a child checkpoint.
-async fn child_checkpoint(child_id: &str, task: &str) -> ChildCheckpoint {
-    let s = Session::new_from_task(child_id.to_string(), task);
-    s.context.set("_session_id", child_id.to_string()).await;
+fn child_checkpoint(child_id: &str, task: &str) -> ChildCheckpoint {
+    let mut s = Session::new_from_task(child_id.to_string(), task);
+    let _ = s.context.set("_session_id", child_id.to_string());
     ChildCheckpoint {
         session: s,
         status: SessionStatus::Running,
@@ -112,7 +112,7 @@ async fn terminal_status_survives_reopen_not_disguised_as_running() {
         let storage = SqliteSessionStorage::new(Arc::new(pool));
 
         // Start a v1 run.
-        let root = root_session(&session_id.0, "task_a").await;
+        let root = root_session(&session_id.0, "task_a");
         let checkpoint = RunCheckpoint {
             root: &root,
             children: &[],
@@ -128,7 +128,7 @@ async fn terminal_status_survives_reopen_not_disguised_as_running() {
             .expect("start_run");
 
         // Commit a terminal transition (completed).
-        let root = root_session(&session_id.0, "task_z").await;
+        let root = root_session(&session_id.0, "task_z");
         let checkpoint = RunCheckpoint {
             root: &root,
             children: &[],
@@ -184,7 +184,7 @@ async fn wait_status_survives_reopen() {
             .expect("run migrations (first)");
         let storage = SqliteSessionStorage::new(Arc::new(pool));
 
-        let root = root_session(&session_id.0, "wait_task").await;
+        let root = root_session(&session_id.0, "wait_task");
         let checkpoint = RunCheckpoint {
             root: &root,
             children: &[],
@@ -210,7 +210,7 @@ async fn wait_status_survives_reopen() {
             }),
             ..RunStateV1::default()
         };
-        let root = root_session(&session_id.0, "wait_task").await;
+        let root = root_session(&session_id.0, "wait_task");
         let checkpoint = RunCheckpoint {
             root: &root,
             children: &[],
@@ -264,7 +264,7 @@ async fn stale_graph_save_cannot_overwrite_terminal_status() {
     let session_id = SessionId("sess-stale".to_string());
 
     // Start a v1 run.
-    let root = root_session(&session_id.0, "task_a").await;
+    let root = root_session(&session_id.0, "task_a");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[],
@@ -280,7 +280,7 @@ async fn stale_graph_save_cannot_overwrite_terminal_status() {
         .expect("start_run");
 
     // Commit a terminal transition.
-    let root = root_session(&session_id.0, "task_z").await;
+    let root = root_session(&session_id.0, "task_z");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[],
@@ -298,7 +298,7 @@ async fn stale_graph_save_cannot_overwrite_terminal_status() {
 
     // A stale graph save (position-only) must NOT flip the row back to
     // running or overwrite the terminal status.
-    let stale = root_session(&session_id.0, "task_stale").await;
+    let stale = root_session(&session_id.0, "task_stale");
     storage
         .save(stale)
         .await
@@ -326,7 +326,7 @@ async fn commit_transition_with_wrong_revision_fails() {
     let storage = SqliteSessionStorage::new(pool);
     let session_id = SessionId("sess-cas".to_string());
 
-    let root = root_session(&session_id.0, "task_a").await;
+    let root = root_session(&session_id.0, "task_a");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[],
@@ -342,7 +342,7 @@ async fn commit_transition_with_wrong_revision_fails() {
         .expect("start_run");
 
     // Commit with a stale expected revision (0 instead of 1).
-    let root = root_session(&session_id.0, "task_b").await;
+    let root = root_session(&session_id.0, "task_b");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[],
@@ -387,7 +387,7 @@ async fn commit_transition_after_terminal_fails() {
     let storage = SqliteSessionStorage::new(pool);
     let session_id = SessionId("sess-after-terminal".to_string());
 
-    let root = root_session(&session_id.0, "task_a").await;
+    let root = root_session(&session_id.0, "task_a");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[],
@@ -403,7 +403,7 @@ async fn commit_transition_after_terminal_fails() {
         .expect("start_run");
 
     // Commit terminal.
-    let root = root_session(&session_id.0, "task_z").await;
+    let root = root_session(&session_id.0, "task_z");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[],
@@ -420,7 +420,7 @@ async fn commit_transition_after_terminal_fails() {
         .expect("commit completed");
 
     // A second transition (even with the correct revision) must be refused.
-    let root = root_session(&session_id.0, "task_zz").await;
+    let root = root_session(&session_id.0, "task_zz");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[],
@@ -456,8 +456,8 @@ async fn descriptor_and_child_identity_preserved() {
     let session_id = SessionId("sess-child".to_string());
 
     let descriptor = test_descriptor(&session_id.0);
-    let root = root_session(&session_id.0, "parent_task").await;
-    let child = child_checkpoint("sess-child:child:1", "child_task").await;
+    let root = root_session(&session_id.0, "parent_task");
+    let child = child_checkpoint("sess-child:child:1", "child_task");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[child],
@@ -640,7 +640,7 @@ async fn old_migrated_db_upgrades_cleanly() {
     // The new columns must now be present and usable.
     let storage = SqliteSessionStorage::new(Arc::new(pool));
     let session_id = SessionId("sess-upgrade".to_string());
-    let root = root_session(&session_id.0, "task_a").await;
+    let root = root_session(&session_id.0, "task_a");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[],
@@ -682,7 +682,7 @@ async fn paused_status_survives_reopen() {
             .expect("run migrations (first)");
         let storage = SqliteSessionStorage::new(Arc::new(pool));
 
-        let root = root_session(&session_id.0, "task_a").await;
+        let root = root_session(&session_id.0, "task_a");
         let checkpoint = RunCheckpoint {
             root: &root,
             children: &[],
@@ -698,7 +698,7 @@ async fn paused_status_survives_reopen() {
             .expect("start_run");
 
         // Commit a paused transition.
-        let root = root_session(&session_id.0, "task_b").await;
+        let root = root_session(&session_id.0, "task_b");
         let checkpoint = RunCheckpoint {
             root: &root,
             children: &[],
@@ -754,8 +754,12 @@ async fn engine_start_creates_v1_run() {
         caps,
     );
 
-    let graph = Arc::new(graph_flow::Graph::new("test-graph"));
-    graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+    let graph = Arc::new(
+    graph_flow::GraphBuilder::new("test-graph")
+        .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+        .build()
+        .expect("test graph"),
+);
     let sid = engine
         .start_session("novel-writing", graph)
         .await
@@ -832,15 +836,19 @@ async fn resume_after_terminal_is_refused() {
         caps,
     );
 
-    let graph = Arc::new(graph_flow::Graph::new("test-graph"));
-    graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+    let graph = Arc::new(
+    graph_flow::GraphBuilder::new("test-graph")
+        .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+        .build()
+        .expect("test graph"),
+);
     let sid = engine
         .start_session("novel-writing", graph)
         .await
         .expect("start_session");
 
     // Commit a terminal transition directly on the store.
-    let root = root_session(&sid.0, "task_z").await;
+    let root = root_session(&sid.0, "task_z");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[],
@@ -894,8 +902,12 @@ async fn engine_wait_produces_durable_wait_token() {
         caps,
     );
 
-    let graph = Arc::new(graph_flow::Graph::new("test-graph"));
-    graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+    let graph = Arc::new(
+    graph_flow::GraphBuilder::new("test-graph")
+        .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+        .build()
+        .expect("test graph"),
+);
     let sid = engine
         .start_session("novel-writing", graph)
         .await
@@ -981,8 +993,12 @@ async fn in_flight_marker_fences_control_signals_and_stale_transition() {
         workflow_store,
         caps,
     );
-    let graph = Arc::new(graph_flow::Graph::new("test-graph"));
-    graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+    let graph = Arc::new(
+    graph_flow::GraphBuilder::new("test-graph")
+        .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+        .build()
+        .expect("test graph"),
+);
     let sid = engine
         .start_session("novel-writing", graph)
         .await
@@ -1056,8 +1072,8 @@ async fn child_identity_and_revision_fence() {
     let session_id = SessionId("sess-child-fix".to_string());
 
     let descriptor = test_descriptor(&session_id.0);
-    let root = root_session(&session_id.0, "parent_task").await;
-    let child = child_checkpoint("sess-child-fix:child:1", "child_task").await;
+    let root = root_session(&session_id.0, "parent_task");
+    let child = child_checkpoint("sess-child-fix:child:1", "child_task");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[child],
@@ -1120,8 +1136,8 @@ async fn child_identity_and_revision_fence() {
 
     // Child revision fence: a transition with a stale child revision must
     // not overwrite the child row.
-    let root2 = root_session(&session_id.0, "parent_task2").await;
-    let child2 = child_checkpoint("sess-child-fix:child:1", "child_task2").await;
+    let root2 = root_session(&session_id.0, "parent_task2");
+    let child2 = child_checkpoint("sess-child-fix:child:1", "child_task2");
     let checkpoint2 = RunCheckpoint {
         root: &root2,
         children: &[child2],
@@ -1163,7 +1179,7 @@ async fn stale_save_cannot_overwrite_wait_or_paused() {
         ("sess-paused-fence", SessionStatus::Paused),
     ] {
         let session_id = SessionId(sid_str.to_string());
-        let root = root_session(&session_id.0, "task_a").await;
+        let root = root_session(&session_id.0, "task_a");
         let checkpoint = RunCheckpoint {
             root: &root,
             children: &[],
@@ -1178,7 +1194,7 @@ async fn stale_save_cannot_overwrite_wait_or_paused() {
             .await
             .expect("start_run");
 
-        let root = root_session(&session_id.0, "task_wait").await;
+        let root = root_session(&session_id.0, "task_wait");
         let checkpoint = RunCheckpoint {
             root: &root,
             children: &[],
@@ -1195,7 +1211,7 @@ async fn stale_save_cannot_overwrite_wait_or_paused() {
             .expect("commit");
 
         // A stale graph save must NOT flip the row back to running.
-        let stale = root_session(&session_id.0, "task_stale").await;
+        let stale = root_session(&session_id.0, "task_stale");
         storage
             .save(stale)
             .await
@@ -1248,7 +1264,7 @@ async fn commit_transition_refuses_v0_rows_without_mutation() {
         .await
         .expect("seed v0 row");
 
-        let root = root_session(session_id, "task_z").await;
+        let root = root_session(session_id, "task_z");
         let err = storage
             .commit_transition(
                 &SessionId(session_id.to_string()),
@@ -1413,7 +1429,7 @@ async fn start_run_refuses_existing_v0_row() {
     .expect("seed v0 row");
 
     // start_run must refuse to launder the existing v0 row in place.
-    let root = root_session("sess-legacy", "task_new").await;
+    let root = root_session("sess-legacy", "task_new");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[],
@@ -1456,7 +1472,7 @@ async fn start_run_reports_accurate_conflict_for_v1_row() {
     let storage = SqliteSessionStorage::new(pool.clone());
     let session_id = SessionId("sess-already-v1".to_string());
 
-    let root = root_session(&session_id.0, "task_a").await;
+    let root = root_session(&session_id.0, "task_a");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[],
@@ -1473,7 +1489,7 @@ async fn start_run_reports_accurate_conflict_for_v1_row() {
 
     // A second start_run on the same id must report RunAlreadyExists with
     // execution_version=1 (not a misleading TerminalState).
-    let root = root_session(&session_id.0, "task_b").await;
+    let root = root_session(&session_id.0, "task_b");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[],
@@ -1564,8 +1580,8 @@ async fn child_cas_stale_revision_rolls_back_root() {
 
     // Start a root run with a child at revision 0.
     let descriptor = test_descriptor(&session_id.0);
-    let root = root_session(&session_id.0, "parent_task").await;
-    let child = child_checkpoint("sess-child-stale:child:1", "child_task").await;
+    let root = root_session(&session_id.0, "parent_task");
+    let child = child_checkpoint("sess-child-stale:child:1", "child_task");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[child],
@@ -1587,8 +1603,8 @@ async fn child_cas_stale_revision_rolls_back_root() {
 
     // Commit a root transition with a child checkpoint still anchored at
     // revision 0 — the child CAS must fail and roll back the root.
-    let root2 = root_session(&session_id.0, "parent_task2").await;
-    let child2 = child_checkpoint("sess-child-stale:child:1", "child_task2").await;
+    let root2 = root_session(&session_id.0, "parent_task2");
+    let child2 = child_checkpoint("sess-child-stale:child:1", "child_task2");
     let checkpoint2 = RunCheckpoint {
         root: &root2,
         children: &[child2],
@@ -1643,8 +1659,8 @@ async fn child_cas_terminal_child_rolls_back_root() {
 
     // Start a root run with a child at revision 0.
     let descriptor = test_descriptor(&session_id.0);
-    let root = root_session(&session_id.0, "parent_task").await;
-    let child = child_checkpoint("sess-child-term:child:1", "child_task").await;
+    let root = root_session(&session_id.0, "parent_task");
+    let child = child_checkpoint("sess-child-term:child:1", "child_task");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[child],
@@ -1668,8 +1684,8 @@ async fn child_cas_terminal_child_rolls_back_root() {
     // Commit a root transition with a child checkpoint anchored at revision
     // 0 — the child CAS must fail (terminal at a stale revision) and roll
     // back the root.
-    let root2 = root_session(&session_id.0, "parent_task2").await;
-    let child2 = child_checkpoint("sess-child-term:child:1", "child_task2").await;
+    let root2 = root_session(&session_id.0, "parent_task2");
+    let child2 = child_checkpoint("sess-child-term:child:1", "child_task2");
     let checkpoint2 = RunCheckpoint {
         root: &root2,
         children: &[child2],
@@ -1726,8 +1742,8 @@ async fn child_cas_terminal_at_expected_revision_is_confirmed() {
 
     // Start a root run with a child at revision 0.
     let descriptor = test_descriptor(&session_id.0);
-    let root = root_session(&session_id.0, "parent_task").await;
-    let child = child_checkpoint("sess-child-term-confirm:child:1", "child_task").await;
+    let root = root_session(&session_id.0, "parent_task");
+    let child = child_checkpoint("sess-child-term-confirm:child:1", "child_task");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[child],
@@ -1752,8 +1768,8 @@ async fn child_cas_terminal_at_expected_revision_is_confirmed() {
     // child at the expected revision is confirmed, so the root transition
     // succeeds (Important 6: confirmation requires a matching terminal
     // checkpoint, not just any terminal DB status at the expected revision).
-    let root2 = root_session(&session_id.0, "parent_task2").await;
-    let mut child2 = child_checkpoint("sess-child-term-confirm:child:1", "child_task2").await;
+    let root2 = root_session(&session_id.0, "parent_task2");
+    let mut child2 = child_checkpoint("sess-child-term-confirm:child:1", "child_task2");
     child2.status = SessionStatus::Completed;
     let checkpoint2 = RunCheckpoint {
         root: &root2,
@@ -1801,18 +1817,26 @@ async fn engine_nested_child_creates_v1_run() {
     );
 
     // Start a parent session (v1 run).
-    let graph = Arc::new(graph_flow::Graph::new("test-graph"));
-    graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+    let graph = Arc::new(
+    graph_flow::GraphBuilder::new("test-graph")
+        .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+        .build()
+        .expect("test graph"),
+);
     let parent_sid = engine
         .start_session("novel-writing", graph)
         .await
         .expect("start parent session");
 
     // Spawn a child session via the production path.
-    let inner_graph = Arc::new(graph_flow::Graph::new("inner_graph"));
-    inner_graph.add_task(Arc::new(
+    let inner_graph = Arc::new(
+    graph_flow::GraphBuilder::new("inner_graph")
+        .add_task(Arc::new(
         nexus_orchestration::tasks::InnerGraphNodeTask::new("n1"),
-    ));
+    ))
+        .build()
+        .expect("test graph"),
+);
     let params = nexus_orchestration::ChildSessionParams {
         parent_session_id: parent_sid.0.clone(),
         inner_graph,
@@ -1938,8 +1962,12 @@ states:
     engine.set_nexus_home(nexus_home.path().to_path_buf());
 
     // Start a session for the shadowed preset id.
-    let graph = Arc::new(graph_flow::Graph::new("test-graph"));
-    graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+    let graph = Arc::new(
+    graph_flow::GraphBuilder::new("test-graph")
+        .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+        .build()
+        .expect("test graph"),
+);
     let sid = engine
         .start_session("novel-writing", graph)
         .await
@@ -2078,7 +2106,7 @@ impl graph_flow::Task for ContinueTask {
         "continue_task"
     }
     async fn run(&self, ctx: graph_flow::Context) -> graph_flow::Result<graph_flow::TaskResult> {
-        ctx.set("advanced", true).await;
+        let _ = ctx.set("advanced", true);
         Ok(graph_flow::TaskResult::new(
             None,
             graph_flow::NextAction::Continue,
@@ -2116,8 +2144,12 @@ async fn engine_nested_child_runs_to_completion_then_parent_commits() {
     let (storage, engine) = fresh_engine(pool);
 
     // Build a child graph that completes in one step (EndTask).
-    let inner_graph = Arc::new(graph_flow::Graph::new("inner_graph"));
-    inner_graph.add_task(Arc::new(EndTask));
+    let inner_graph = Arc::new(
+    graph_flow::GraphBuilder::new("inner_graph")
+        .add_task(Arc::new(EndTask))
+        .build()
+        .expect("test graph"),
+);
 
     // Build a parent graph whose start task is an InnerGraphTask that spawns
     // the child and polls it to completion.
@@ -2205,8 +2237,12 @@ async fn tampered_child_descriptor_is_non_replayable_and_never_reattached() {
     let (pool, _db) = fresh_pool().await;
     let (storage, engine) = fresh_engine(pool.clone());
 
-    let inner_graph = Arc::new(graph_flow::Graph::new("inner_graph"));
-    inner_graph.add_task(Arc::new(EndTask));
+    let inner_graph = Arc::new(
+    graph_flow::GraphBuilder::new("inner_graph")
+        .add_task(Arc::new(EndTask))
+        .build()
+        .expect("test graph"),
+);
 
     let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
     let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
@@ -2297,16 +2333,24 @@ async fn tampered_child_graph_name_is_non_replayable_on_recovery() {
     let (pool, _db) = fresh_pool().await;
     let (storage, engine) = fresh_engine(pool.clone());
 
-    let inner_graph = Arc::new(graph_flow::Graph::new("inner_graph"));
-    inner_graph.add_task(Arc::new(EndTask));
-    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
-    parent_graph.add_task(Arc::new(nexus_orchestration::tasks::InnerGraphTask::new(
+    let inner_graph = Arc::new(
+    graph_flow::GraphBuilder::new("inner_graph")
+        .add_task(Arc::new(EndTask))
+        .build()
+        .expect("test graph"),
+);
+    let parent_graph = Arc::new(
+    graph_flow::GraphBuilder::new("parent_graph")
+        .add_task(Arc::new(nexus_orchestration::tasks::InnerGraphTask::new(
         Arc::new(engine.clone()),
         inner_graph.clone(),
         "parent_state",
         "_session_id",
         None,
-    )));
+    )))
+        .build()
+        .expect("test graph"),
+);
     let parent_sid = engine
         .start_session("novel-writing", parent_graph)
         .await
@@ -2367,16 +2411,24 @@ async fn v1_child_under_parent_without_descriptor_is_non_replayable() {
     let (pool, _db) = fresh_pool().await;
     let (_storage, engine) = fresh_engine(pool.clone());
 
-    let inner_graph = Arc::new(graph_flow::Graph::new("inner_graph"));
-    inner_graph.add_task(Arc::new(EndTask));
-    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
-    parent_graph.add_task(Arc::new(nexus_orchestration::tasks::InnerGraphTask::new(
+    let inner_graph = Arc::new(
+    graph_flow::GraphBuilder::new("inner_graph")
+        .add_task(Arc::new(EndTask))
+        .build()
+        .expect("test graph"),
+);
+    let parent_graph = Arc::new(
+    graph_flow::GraphBuilder::new("parent_graph")
+        .add_task(Arc::new(nexus_orchestration::tasks::InnerGraphTask::new(
         Arc::new(engine.clone()),
         inner_graph.clone(),
         "parent_state",
         "_session_id",
         None,
-    )));
+    )))
+        .build()
+        .expect("test graph"),
+);
     let parent_sid = engine
         .start_session("novel-writing", parent_graph)
         .await
@@ -2432,8 +2484,12 @@ async fn restart_hydrates_child_checkpoints() {
             .expect("run migrations (first)");
         let (storage, engine) = fresh_engine(Arc::new(pool));
 
-        let inner_graph = Arc::new(graph_flow::Graph::new("inner_graph"));
-        inner_graph.add_task(Arc::new(EndTask));
+        let inner_graph = Arc::new(
+    graph_flow::GraphBuilder::new("inner_graph")
+        .add_task(Arc::new(EndTask))
+        .build()
+        .expect("test graph"),
+);
         let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
         let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
             Arc::new(engine.clone()),
@@ -2507,8 +2563,12 @@ async fn failed_child_cas_restores_root_position() {
     let (storage, engine) = fresh_engine(pool.clone());
 
     // Build a parent graph: task "continue_task" → task "end_task".
-    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
-    parent_graph.add_task(Arc::new(ContinueTask));
+    let parent_graph = Arc::new(
+    graph_flow::GraphBuilder::new("parent_graph")
+        .add_task(Arc::new(ContinueTask))
+        .build()
+        .expect("test graph"),
+);
     parent_graph.add_task(Arc::new(EndTask));
     parent_graph.add_edge("continue_task", "end_task");
 
@@ -2538,7 +2598,7 @@ async fn failed_child_cas_restores_root_position() {
     // Create the child row in DB at revision 1, then advance it to 2
     // (simulating a concurrent child transition the parent does not know about).
     let child_descriptor = test_descriptor(&parent_sid.0);
-    let child_root = root_session(child_id, "child_task").await;
+    let child_root = root_session(child_id, "child_task");
     let child_checkpoint = RunCheckpoint {
         root: &child_root,
         children: &[],
@@ -2598,7 +2658,7 @@ async fn failed_child_cas_restores_root_position() {
         "root context_json must not advance on failed child CAS"
     );
     // The "advanced" marker set by ContinueTask must be gone (restored).
-    let advanced: Option<bool> = after.context.get("advanced").await;
+    let advanced: Option<bool> = after.context.get("advanced");
     assert_eq!(
         advanced, None,
         "context marker set during the failed step must be restored away"
@@ -2612,16 +2672,24 @@ async fn child_ids_are_collision_resistant() {
     let (pool, _db) = fresh_pool().await;
     let (_storage, engine) = fresh_engine(pool);
 
-    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
-    parent_graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+    let parent_graph = Arc::new(
+    graph_flow::GraphBuilder::new("parent_graph")
+        .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+        .build()
+        .expect("test graph"),
+);
     let parent_sid = engine
         .start_session("novel-writing", parent_graph)
         .await
         .expect("start parent session");
 
     // Spawn two children rapidly (same millisecond) — their IDs must differ.
-    let inner_graph = Arc::new(graph_flow::Graph::new("inner_graph"));
-    inner_graph.add_task(Arc::new(EndTask));
+    let inner_graph = Arc::new(
+    graph_flow::GraphBuilder::new("inner_graph")
+        .add_task(Arc::new(EndTask))
+        .build()
+        .expect("test graph"),
+);
     let params1 = nexus_orchestration::ChildSessionParams {
         parent_session_id: parent_sid.0.clone(),
         inner_graph: inner_graph.clone(),
@@ -2678,7 +2746,7 @@ impl graph_flow::Task for DeterministicContinueTask {
         "deterministic_continue_task"
     }
     async fn run(&self, ctx: graph_flow::Context) -> graph_flow::Result<graph_flow::TaskResult> {
-        ctx.set("advanced", true).await;
+        let _ = ctx.set("advanced", true);
         Ok(graph_flow::TaskResult::new(
             None,
             graph_flow::NextAction::Continue,
@@ -2698,7 +2766,7 @@ async fn corrupt_child_is_non_replayable_during_recovery() {
 
     // Start a parent run.
     let descriptor = test_descriptor(&parent_sid.0);
-    let root = root_session(&parent_sid.0, "parent_state").await;
+    let root = root_session(&parent_sid.0, "parent_state");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[],
@@ -2773,7 +2841,7 @@ async fn child_missing_session_snapshot_is_non_replayable() {
     let parent_sid = SessionId("par-missing-child".to_string());
 
     let descriptor = test_descriptor(&parent_sid.0);
-    let root = root_session(&parent_sid.0, "parent_state").await;
+    let root = root_session(&parent_sid.0, "parent_state");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[],
@@ -2858,11 +2926,15 @@ async fn failed_cas_restore_is_revision_fenced() {
     let (storage, engine) = fresh_engine(pool.clone());
 
     // Parent graph: concurrent-bump → deterministic-continue → end.
-    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
-    parent_graph.add_task(Arc::new(ConcurrentBumpRootTask {
+    let parent_graph = Arc::new(
+    graph_flow::GraphBuilder::new("parent_graph")
+        .add_task(Arc::new(ConcurrentBumpRootTask {
         pool: pool.clone(),
         parent_sid: "placeholder".to_string(),
-    }));
+    }))
+        .build()
+        .expect("test graph"),
+);
     parent_graph.add_task(Arc::new(DeterministicContinueTask));
     parent_graph.add_task(Arc::new(EndTask));
     parent_graph.add_edge("concurrent_bump_task", "deterministic_continue_task");
@@ -2893,7 +2965,7 @@ async fn failed_cas_restore_is_revision_fenced() {
     // Create the child row, then advance the child revision to 2 so the
     // child CAS fails (stale) below.
     let child_descriptor = test_descriptor(&parent_sid.0);
-    let child_root = root_session(child_id, "child_task").await;
+    let child_root = root_session(child_id, "child_task");
     storage
         .start_run(
             &SessionId(child_id.to_string()),
@@ -2918,11 +2990,15 @@ async fn failed_cas_restore_is_revision_fenced() {
     // RevisionMismatch. The restore must be SKIPPED because the persisted
     // revision (2) no longer matches the expected (1) — proving the restore
     // is revision-fenced (F2).
-    let parent_graph2 = Arc::new(graph_flow::Graph::new("parent_graph"));
-    parent_graph2.add_task(Arc::new(ConcurrentBumpRootTask {
+    let parent_graph2 = Arc::new(
+    graph_flow::GraphBuilder::new("parent_graph")
+        .add_task(Arc::new(ConcurrentBumpRootTask {
         pool: pool.clone(),
         parent_sid: parent_sid.0.clone(),
-    }));
+    }))
+        .build()
+        .expect("test graph"),
+);
     parent_graph2.add_task(Arc::new(DeterministicContinueTask));
     parent_graph2.add_task(Arc::new(EndTask));
     parent_graph2.add_edge("concurrent_bump_task", "deterministic_continue_task");
@@ -2997,8 +3073,12 @@ async fn post_effect_failure_persists_interrupted() {
 
     // Parent graph whose start is an EffectTask (sets the external-effect
     // marker) → end.
-    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
-    parent_graph.add_task(Arc::new(EffectTask));
+    let parent_graph = Arc::new(
+    graph_flow::GraphBuilder::new("parent_graph")
+        .add_task(Arc::new(EffectTask))
+        .build()
+        .expect("test graph"),
+);
     parent_graph.add_task(Arc::new(EndTask));
     parent_graph.add_edge("effect_task", "end_task");
     let parent_sid = engine
@@ -3023,7 +3103,7 @@ async fn post_effect_failure_persists_interrupted() {
         .await
         .insert(parent_sid.0.clone(), vec![child_cp]);
     let child_descriptor = test_descriptor(&parent_sid.0);
-    let child_root = root_session(child_id, "child_task").await;
+    let child_root = root_session(child_id, "child_task");
     storage
         .start_run(
             &SessionId(child_id.to_string()),
@@ -3102,8 +3182,12 @@ async fn deterministic_failure_restores_pre_step_position() {
     let (pool, _db) = fresh_pool().await;
     let (storage, engine) = fresh_engine(pool.clone());
 
-    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
-    parent_graph.add_task(Arc::new(DeterministicContinueTask));
+    let parent_graph = Arc::new(
+    graph_flow::GraphBuilder::new("parent_graph")
+        .add_task(Arc::new(DeterministicContinueTask))
+        .build()
+        .expect("test graph"),
+);
     parent_graph.add_task(Arc::new(EndTask));
     parent_graph.add_edge("deterministic_continue_task", "end_task");
     let parent_sid = engine
@@ -3127,7 +3211,7 @@ async fn deterministic_failure_restores_pre_step_position() {
         .await
         .insert(parent_sid.0.clone(), vec![child_cp]);
     let child_descriptor = test_descriptor(&parent_sid.0);
-    let child_root = root_session(child_id, "child_task").await;
+    let child_root = root_session(child_id, "child_task");
     storage
         .start_run(
             &SessionId(child_id.to_string()),
@@ -3187,7 +3271,7 @@ async fn deterministic_failure_restores_pre_step_position() {
     );
     let after_ctx = serde_json::to_vec(&after.context).expect("serialize post-failure context");
     assert_eq!(pre_ctx, after_ctx, "deterministic step context restored");
-    let advanced: Option<bool> = after.context.get("advanced").await;
+    let advanced: Option<bool> = after.context.get("advanced");
     assert_eq!(
         advanced, None,
         "context marker set during the failed deterministic step restored away"
@@ -3212,8 +3296,12 @@ async fn recovered_parent_drives_existing_inner_child() {
             .expect("run migrations (first)");
         let (_storage, engine) = fresh_engine(Arc::new(pool));
 
-        let inner_graph = Arc::new(graph_flow::Graph::new("ig"));
-        inner_graph.add_task(Arc::new(EndTask));
+        let inner_graph = Arc::new(
+    graph_flow::GraphBuilder::new("ig")
+        .add_task(Arc::new(EndTask))
+        .build()
+        .expect("test graph"),
+);
         let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
         let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
             Arc::new(engine.clone()),
@@ -3231,8 +3319,12 @@ async fn recovered_parent_drives_existing_inner_child() {
 
         // Spawn the child and leave it Running (non-terminal) so recovery can
         // attach it. Do NOT step it yet.
-        let ig = Arc::new(graph_flow::Graph::new("ig"));
-        ig.add_task(Arc::new(EndTask));
+        let ig = Arc::new(
+    graph_flow::GraphBuilder::new("ig")
+        .add_task(Arc::new(EndTask))
+        .build()
+        .expect("test graph"),
+);
         let params = nexus_orchestration::ChildSessionParams {
             parent_session_id: parent_sid.0.clone(),
             inner_graph: ig,
@@ -3266,8 +3358,12 @@ async fn recovered_parent_drives_existing_inner_child() {
 
         // Install the parent's FlowRunner over the custom InnerGraphTask graph
         // (mirroring what a restarting daemon does for this supported parent).
-        let inner_graph = Arc::new(graph_flow::Graph::new("ig"));
-        inner_graph.add_task(Arc::new(EndTask));
+        let inner_graph = Arc::new(
+    graph_flow::GraphBuilder::new("ig")
+        .add_task(Arc::new(EndTask))
+        .build()
+        .expect("test graph"),
+);
         let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
         let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
             Arc::new(engine.clone()),
@@ -3375,8 +3471,12 @@ states:
 
         // Start a session for the directory preset — the descriptor freezes
         // the Directory source + version 11.
-        let graph = Arc::new(graph_flow::Graph::new("test-graph"));
-        graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+        let graph = Arc::new(
+    graph_flow::GraphBuilder::new("test-graph")
+        .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+        .build()
+        .expect("test graph"),
+);
         parent_sid = engine
             .start_session("dir-preset", graph)
             .await
@@ -3533,8 +3633,8 @@ async fn child_terminal_status_mismatch_rejects_confirmation() {
 
     // Start a root run with a child at revision 0.
     let descriptor = test_descriptor(&session_id.0);
-    let root = root_session(&session_id.0, "parent_task").await;
-    let child = child_checkpoint("sess-child-mismatch:child:1", "child_task").await;
+    let root = root_session(&session_id.0, "parent_task");
+    let child = child_checkpoint("sess-child-mismatch:child:1", "child_task");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[child],
@@ -3555,8 +3655,8 @@ async fn child_terminal_status_mismatch_rejects_confirmation() {
     .await
     .expect("mark child failed");
 
-    let root2 = root_session(&session_id.0, "parent_task2").await;
-    let child2 = child_checkpoint("sess-child-mismatch:child:1", "child_task2").await;
+    let root2 = root_session(&session_id.0, "parent_task2");
+    let child2 = child_checkpoint("sess-child-mismatch:child:1", "child_task2");
     let checkpoint2 = RunCheckpoint {
         root: &root2,
         children: &[child2],
@@ -3609,8 +3709,12 @@ async fn terminal_child_is_reattached_not_respawned() {
             .expect("run migrations (first)");
         let (storage, engine) = fresh_engine(Arc::new(pool));
 
-        let inner_graph = Arc::new(graph_flow::Graph::new("ig"));
-        inner_graph.add_task(Arc::new(EndTask));
+        let inner_graph = Arc::new(
+    graph_flow::GraphBuilder::new("ig")
+        .add_task(Arc::new(EndTask))
+        .build()
+        .expect("test graph"),
+);
         let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
         let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
             Arc::new(engine.clone()),
@@ -3658,8 +3762,12 @@ async fn terminal_child_is_reattached_not_respawned() {
             .expect("hydrate children map");
 
         // Reconstruct the parent runner over the same InnerGraphTask graph.
-        let inner_graph = Arc::new(graph_flow::Graph::new("ig"));
-        inner_graph.add_task(Arc::new(EndTask));
+        let inner_graph = Arc::new(
+    graph_flow::GraphBuilder::new("ig")
+        .add_task(Arc::new(EndTask))
+        .build()
+        .expect("test graph"),
+);
         let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
         let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
             Arc::new(engine.clone()),
@@ -3721,7 +3829,7 @@ async fn missing_child_session_clears_stale_children_entry() {
     // Seed a parent run + a VALID child row but NO session row (missing
     // snapshot — the exact failing case from important/missing-child).
     let descriptor = test_descriptor(&parent_sid.0);
-    let root = root_session(&parent_sid.0, "parent_state").await;
+    let root = root_session(&parent_sid.0, "parent_state");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[],
@@ -3796,8 +3904,12 @@ async fn child_effect_propagates_to_parent_interrupted_on_failed_commit() {
     let (storage, engine) = fresh_engine(pool.clone());
 
     // Parent graph whose start is an InnerGraphTask (drives a child end task).
-    let child_graph = Arc::new(graph_flow::Graph::new("child_graph"));
-    child_graph.add_task(Arc::new(EndTask));
+    let child_graph = Arc::new(
+    graph_flow::GraphBuilder::new("child_graph")
+        .add_task(Arc::new(EndTask))
+        .build()
+        .expect("test graph"),
+);
     let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
     let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
         Arc::new(engine.clone()),
@@ -3848,7 +3960,7 @@ async fn child_effect_propagates_to_parent_interrupted_on_failed_commit() {
         descriptor.graph_name = Some("child_graph".to_string());
         descriptor
     };
-    let child_root = root_session(child_id, "child_task").await;
+    let child_root = root_session(child_id, "child_task");
     storage
         .start_run(
             &SessionId(child_id.to_string()),
@@ -3905,7 +4017,7 @@ async fn restore_pre_step_is_single_atomic_revision_fence() {
     let session_id = SessionId("sess-atomic-restore".to_string());
 
     let descriptor = test_descriptor(&session_id.0);
-    let root = root_session(&session_id.0, "pre_task").await;
+    let root = root_session(&session_id.0, "pre_task");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[],
@@ -3929,7 +4041,7 @@ async fn restore_pre_step_is_single_atomic_revision_fence() {
 
     // The restore anchored at expected_revision = 1 must fail RevisionMismatch
     // and leave the newer row (revision 2, newer task) untouched.
-    let pre = root_session(&session_id.0, "pre_task").await;
+    let pre = root_session(&session_id.0, "pre_task");
     let err = storage
         .restore_pre_step(&session_id, 1, &pre)
         .await
@@ -4067,8 +4179,12 @@ async fn step_in_flight_persisted_before_effect_dispatch() {
     let (storage, engine) = fresh_engine(pool.clone());
 
     // Parent graph: manual-wait start (Running) then end.
-    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
-    parent_graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+    let parent_graph = Arc::new(
+    graph_flow::GraphBuilder::new("parent_graph")
+        .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+        .build()
+        .expect("test graph"),
+);
     parent_graph.add_task(Arc::new(EndTask));
     parent_graph.add_edge("manual_wait_task", "end_task");
     let parent_sid = engine
@@ -4127,8 +4243,12 @@ async fn crash_after_effect_with_pre_step_mark_lands_interrupted() {
     let (storage, engine) = fresh_engine(pool.clone());
 
     // Parent graph: EffectTask (external effect) → end.
-    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
-    parent_graph.add_task(Arc::new(EffectTask));
+    let parent_graph = Arc::new(
+    graph_flow::GraphBuilder::new("parent_graph")
+        .add_task(Arc::new(EffectTask))
+        .build()
+        .expect("test graph"),
+);
     parent_graph.add_task(Arc::new(EndTask));
     parent_graph.add_edge("effect_task", "end_task");
     let parent_sid = engine
@@ -4155,7 +4275,7 @@ async fn crash_after_effect_with_pre_step_mark_lands_interrupted() {
         .await
         .insert(parent_sid.0.clone(), vec![child_cp]);
     let child_descriptor = test_descriptor(&parent_sid.0);
-    let child_root = root_session(child_id, "child_task").await;
+    let child_root = root_session(child_id, "child_task");
     storage
         .start_run(
             &SessionId(child_id.to_string()),
@@ -4207,8 +4327,12 @@ async fn external_effect_marker_cleared_per_step() {
     // deterministic continue (DeterministicContinueTask) → end.
     // Step 1 must be a Running (Paused) boundary with the marker present for
     // the effect classification; then the marker is cleared before step 2.
-    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
-    parent_graph.add_task(Arc::new(EffectTask));
+    let parent_graph = Arc::new(
+    graph_flow::GraphBuilder::new("parent_graph")
+        .add_task(Arc::new(EffectTask))
+        .build()
+        .expect("test graph"),
+);
     parent_graph.add_task(Arc::new(DeterministicContinueTask));
     parent_graph.add_task(Arc::new(EndTask));
     parent_graph.add_edge("effect_task", "deterministic_continue_task");
@@ -4270,7 +4394,7 @@ async fn external_effect_marker_cleared_per_step() {
         .await
         .insert(parent_sid.0.clone(), vec![child_cp]);
     let child_descriptor = test_descriptor(&parent_sid.0);
-    let child_root = root_session(child_id, "child_task").await;
+    let child_root = root_session(child_id, "child_task");
     storage
         .start_run(
             &SessionId(child_id.to_string()),
@@ -4349,7 +4473,7 @@ impl graph_flow::Task for MarkerEffectTask {
         // the test can observe whether the task actually ran.
         ctx.set(nexus_orchestration::engine::EXTERNAL_EFFECT_MARKER, true)
             .await;
-        ctx.set("dispatched", true).await;
+        let _ = ctx.set("dispatched", true);
         Ok(graph_flow::TaskResult::new(
             None,
             graph_flow::NextAction::Continue,
@@ -4366,7 +4490,7 @@ async fn v0_child_is_non_replayable_and_preserved() {
     let storage = SqliteSessionStorage::new(pool.clone());
     let parent_sid = SessionId("par-v0-child".to_string());
     let child_id = "par-v0-child:child:1";
-    let parent = root_session(&parent_sid.0, "parent_task").await;
+    let parent = root_session(&parent_sid.0, "parent_task");
     storage
         .start_run(
             &parent_sid,
@@ -4427,7 +4551,7 @@ async fn negative_child_revision_is_non_replayable() {
 
     // Start a parent run.
     let descriptor = test_descriptor(&parent_sid.0);
-    let root = root_session(&parent_sid.0, "parent_task").await;
+    let root = root_session(&parent_sid.0, "parent_task");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[],
@@ -4514,7 +4638,7 @@ async fn stale_mark_step_in_flight_against_waiting_row_leaves_wait_untouched() {
     let session_id = SessionId("sess-wait-mark".to_string());
 
     let descriptor = test_descriptor(&session_id.0);
-    let root = root_session(&session_id.0, "wait_task").await;
+    let root = root_session(&session_id.0, "wait_task");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[],
@@ -4535,7 +4659,7 @@ async fn stale_mark_step_in_flight_against_waiting_row_leaves_wait_untouched() {
         }),
         ..RunStateV1::default()
     };
-    let root = root_session(&session_id.0, "wait_task").await;
+    let root = root_session(&session_id.0, "wait_task");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[],
@@ -4554,7 +4678,7 @@ async fn stale_mark_step_in_flight_against_waiting_row_leaves_wait_untouched() {
     // A stale step invocation at expected_revision = 2 (matching, so the CAS
     // fence passes) but on a waiting_for_input row must be refused — never
     // overwrite the WaitRecord.
-    let pre = root_session(&session_id.0, "stale_effect_start").await;
+    let pre = root_session(&session_id.0, "stale_effect_start");
     let in_flight_state = RunStateV1 {
         step_in_flight: Some("stale_effect_start".to_string()),
         ..RunStateV1::default()
@@ -4612,7 +4736,7 @@ async fn stale_restore_pre_step_against_waiting_row_leaves_wait_untouched() {
     let session_id = SessionId("sess-wait-restore".to_string());
 
     let descriptor = test_descriptor(&session_id.0);
-    let root = root_session(&session_id.0, "wait_task").await;
+    let root = root_session(&session_id.0, "wait_task");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[],
@@ -4633,7 +4757,7 @@ async fn stale_restore_pre_step_against_waiting_row_leaves_wait_untouched() {
         }),
         ..RunStateV1::default()
     };
-    let root = root_session(&session_id.0, "wait_task").await;
+    let root = root_session(&session_id.0, "wait_task");
     let checkpoint = RunCheckpoint {
         root: &root,
         children: &[],
@@ -4651,7 +4775,7 @@ async fn stale_restore_pre_step_against_waiting_row_leaves_wait_untouched() {
 
     // A stale restore anchored at the matching revision must be refused on a
     // waiting_for_input row — never clear its WaitRecord.
-    let pre = root_session(&session_id.0, "pre_wait_boundary").await;
+    let pre = root_session(&session_id.0, "pre_wait_boundary");
     let err = storage
         .restore_pre_step(&session_id, 2, &pre)
         .await
@@ -4702,8 +4826,12 @@ async fn engine_effectful_task_does_not_dispatch_before_in_flight_mark() {
     let (storage, engine) = fresh_engine(pool.clone());
 
     // Parent graph: marker-effect task (external effect) → end.
-    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
-    parent_graph.add_task(Arc::new(MarkerEffectTask));
+    let parent_graph = Arc::new(
+    graph_flow::GraphBuilder::new("parent_graph")
+        .add_task(Arc::new(MarkerEffectTask))
+        .build()
+        .expect("test graph"),
+);
     parent_graph.add_task(Arc::new(EndTask));
     parent_graph.add_edge("marker_effect_task", "end_task");
     let parent_sid = engine
@@ -4765,7 +4893,7 @@ async fn engine_effectful_task_does_not_dispatch_before_in_flight_mark() {
         .await
         .expect("get post-refused root")
         .expect("root present");
-    let dispatched: Option<bool> = post.context.get("dispatched").await;
+    let dispatched: Option<bool> = post.context.get("dispatched");
     assert_eq!(
         dispatched, None,
         "the effectful task must NOT dispatch before the in-flight mark persists"
@@ -5003,8 +5131,12 @@ async fn engine_manual_wait_persists_waiting_for_input_fresh_retained_token() {
         caps,
     );
 
-    let graph = Arc::new(graph_flow::Graph::new("test-graph-manual"));
-    graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+    let graph = Arc::new(
+    graph_flow::GraphBuilder::new("test-graph-manual")
+        .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+        .build()
+        .expect("test graph"),
+);
     let sid = engine
         .start_session("novel-writing", graph)
         .await
@@ -5219,8 +5351,12 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
         Some(NextTarget::Linear("done".to_string())),
     );
 
-    let graph = Arc::new(graph_flow::Graph::new("test-labeled-manual"));
-    graph.add_task(Arc::new(start));
+    let graph = Arc::new(
+    graph_flow::GraphBuilder::new("test-labeled-manual")
+        .add_task(Arc::new(start))
+        .build()
+        .expect("test graph"),
+);
     graph.add_task(Arc::new(manual));
     let sid = engine
         .start_session("novel-writing", graph)
@@ -5237,10 +5373,10 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
             .expect("present");
         session
             .context
-            .set_sync("_merge_other", serde_json::json!(["x"]));
+            .set("_merge_other", serde_json::json!(["x"]));
         session
             .context
-            .set_sync("_join_wait_start_other", serde_json::json!(1));
+            .set("_join_wait_start_other", serde_json::json!(1));
         storage.save(session).await.expect("save seeded session");
     }
 
@@ -5424,13 +5560,13 @@ states:
             .await
             .expect("get session")
             .expect("present");
-        session.context.set_sync("score", serde_json::json!(95));
+        session.context.set("score", serde_json::json!(95));
         session
             .context
-            .set_sync("_merge_other", serde_json::json!(["x"]));
+            .set("_merge_other", serde_json::json!(["x"]));
         session
             .context
-            .set_sync("_join_wait_start_other", serde_json::json!(1));
+            .set("_join_wait_start_other", serde_json::json!(1));
         storage.save(session).await.expect("save seeded session");
     }
 
@@ -5555,8 +5691,12 @@ async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume(
     );
 
     // Child graph: a manual wait (human input required).
-    let inner_graph = Arc::new(graph_flow::Graph::new("inner_graph"));
-    inner_graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+    let inner_graph = Arc::new(
+    graph_flow::GraphBuilder::new("inner_graph")
+        .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+        .build()
+        .expect("test graph"),
+);
 
     // Parent graph: the inner-graph task polls the child.
     let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));

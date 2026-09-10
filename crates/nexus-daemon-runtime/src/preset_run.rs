@@ -221,11 +221,11 @@ async fn persist_failure(
     let Some(storage) = storage else {
         return;
     };
-    let Ok(Some(session)) = storage.get(&session_id.0).await else {
+    let Ok(Some(mut session)) = storage.get(&session_id.0).await else {
         return;
     };
-    session.context.set("_run_status", "failed").await;
-    session.context.set("_run_error", error.to_string()).await;
+    let _ = session.context.set("_run_status", "failed");
+    let _ = session.context.set("_run_error", error.to_string());
     if let Err(e) = storage.save(session).await {
         tracing::warn!(
             session_id = %session_id.0,
@@ -994,7 +994,8 @@ impl WorkflowRunCoordinator {
             daemon_tool_dispatch,
             prompt_executor,
             self.session_cancels.clone(),
-        );
+        )
+        .map_err(|e| RunControlError::PresetLoad(preset_id.to_string(), e.to_string()))?;
         let sid = self
             .engine
             .start_preset_run_with_input(
@@ -2092,7 +2093,8 @@ impl WorkflowRunCoordinator {
             daemon_tool_dispatch,
             prompt_executor,
             self.session_cancels.clone(),
-        );
+        )
+        .map_err(|e| RunControlError::PresetLoad(row.preset_id.clone(), e.to_string()))?;
 
         // 6. One Creator-DB transaction: schedule claim + v1 session row +
         //    schedule→session identity (C-1/C-2). A concurrent admission

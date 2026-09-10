@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE orchestration_sessions\n            SET current_task_id = ?, context_json = ?, updated_at = ?, run_state_json = ?,\n                graph_version = graph_version + 1\n            WHERE session_id = ? AND state_revision = ?\n              AND status IN ('running', 'paused')\n              AND graph_version >= 0 AND graph_version < 9223372036854775807\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "d4cb0b4e3b861ba3caacae00ca557e816fca2b4e41b52567780547c4013f0e97"
+}

@@ -71,6 +71,9 @@ tokio-stream = { workspace = true }
 regex = { workspace = true }
 serde_yaml = { workspace = true }
 sha2 = { workspace = true }
+# sha2 0.11 (#272): digest output no longer implements LowerHex;
+# `hex::encode` reproduces the frozen lowercase 64-char encoding byte-identically.
+hex = "0.4"
 nix = { version = "0.28", features = ["fs"] }
 # V1.153 P2 (DF-73): the embedded `apps/web` SPA is compile-time-gated behind
 # the `web-embed` feature (default ON; OFF for the slim `nexus-runtime`

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO orchestration_sessions\n                (session_id, creator_id, preset_id, preset_version,\n                 parent_session_id, current_task_id, status,\n                 context_json, chat_history_json, created_at, updated_at,\n                 execution_version, state_revision, run_state_json, run_descriptor_json,\n                 graph_version)\n            VALUES (?, ?, ?, ?, ?, ?, 'running', ?, NULL, ?, ?, 1, 1, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 12
+    },
+    "nullable": []
+  },
+  "hash": "68d71639dd2ea0cf5c2db0d2510dcf81056b571bc2ac4e43b44b96eaa869682b"
+}

@@ -185,7 +185,7 @@ pub fn build_story_bundle(
         .iter()
         .filter_map(|filename| {
             let content = std::fs::read_to_string(stories_path.join(filename)).ok()?;
-            let hash = format!("{:x}", Sha256::digest(content.as_bytes()));
+            let hash = hex::encode(Sha256::digest(content.as_bytes()));
             Some(ChapterContent {
                 filename: filename.clone(),
                 content_hash: hash,
@@ -467,7 +467,7 @@ mod tests {
         let bundle =
             build_story_bundle("w1", "wrk_002", &works[0], workspace.path()).expect("bundle");
 
-        let expected = format!("{:x}", Sha256::digest(b"test content"));
+        let expected = hex::encode(Sha256::digest(b"test content"));
         assert_eq!(bundle.chapters[0].content_hash, expected);
         assert_eq!(bundle.chapters[0].content_hash.len(), 64);
     }

@@ -239,7 +239,7 @@ async fn restart_mid_chain_resumes_without_re_executing_completed_edges() {
         Some(dispatch.clone()),
         None,
         engine2.shared_state().session_cancels.clone(),
-    );
+    ).expect("wired outer graph builds");
     let runner = Arc::new(graph_flow::FlowRunner::new(
         Arc::new(wired),
         storage2.clone(),
@@ -576,7 +576,7 @@ async fn inspect_after_interrupt_is_side_effect_free_and_resume_matches_baseline
         Some(dispatch.clone()),
         None,
         engine2.shared_state().session_cancels.clone(),
-    );
+    ).expect("wired outer graph builds");
     let runner = Arc::new(graph_flow::FlowRunner::new(
         Arc::new(wired),
         storage2.clone(),

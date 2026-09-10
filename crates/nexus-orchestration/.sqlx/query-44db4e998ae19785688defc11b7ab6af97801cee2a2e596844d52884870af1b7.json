@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT run_descriptor_json FROM orchestration_sessions WHERE session_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "run_descriptor_json",
+        "ordinal": 0,
+        "type_info": "Blob"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "44db4e998ae19785688defc11b7ab6af97801cee2a2e596844d52884870af1b7"
+}

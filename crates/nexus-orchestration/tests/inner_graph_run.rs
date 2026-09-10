@@ -135,7 +135,7 @@ async fn inner_graph_runs_to_completion_and_exports_output() {
 
     // Verify output was exported from inner graph.
     let ctx = engine.get_context(&sid).await.expect("get_context");
-    let exported: String = ctx.get("state.A.output").await.unwrap_or_default();
+    let exported: String = ctx.get("state.A.output").unwrap_or_default();
     assert!(
         !exported.is_empty(),
         "state.A.output should be populated from inner graph output_binding"

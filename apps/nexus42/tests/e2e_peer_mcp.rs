@@ -47,10 +47,11 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use agent_client_protocol::schema::{
+use agent_client_protocol::schema::v1::{
     AgentCapabilities, InitializeRequest, InitializeResponse, McpServer, NewSessionRequest,
-    NewSessionResponse, ProtocolVersion, SessionId,
+    NewSessionResponse, SessionId,
 };
+use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Agent, Channel, Client};
 use ed25519_dalek::SigningKey;
 use futures_util::future::BoxFuture;

@@ -106,7 +106,7 @@ pub fn load_or_create_identity(home: &Path) -> Result<[u8; 32], IdentityError> {
 /// Fill a 32-byte seed from the OS CSPRNG.
 fn random_seed() -> [u8; 32] {
     let mut seed = [0u8; 32];
-    getrandom::getrandom(&mut seed).expect("OS CSPRNG must be available");
+    getrandom::fill(&mut seed).expect("OS CSPRNG must be available");
     seed
 }
 

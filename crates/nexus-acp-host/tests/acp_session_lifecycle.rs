@@ -8,7 +8,7 @@
 
 use std::path::PathBuf;
 
-use agent_client_protocol::schema::SessionId;
+use agent_client_protocol::schema::v1::SessionId;
 use nexus_acp_host::session_manager::{SessionEntry, SessionManager};
 
 use chrono::{Duration, Utc};

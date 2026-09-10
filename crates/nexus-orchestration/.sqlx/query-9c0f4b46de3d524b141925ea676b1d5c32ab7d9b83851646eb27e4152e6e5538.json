@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT session_id as \"session_id!\", status as \"status!\",\n                      execution_version as \"execution_version!\",\n                      state_revision as \"state_revision!\", run_state_json, run_descriptor_json\n               FROM orchestration_sessions WHERE session_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "session_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "status!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "execution_version!",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "state_revision!",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "run_state_json",
+        "ordinal": 4,
+        "type_info": "Blob"
+      },
+      {
+        "name": "run_descriptor_json",
+        "ordinal": 5,
+        "type_info": "Blob"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "9c0f4b46de3d524b141925ea676b1d5c32ab7d9b83851646eb27e4152e6e5538"
+}
