@@ -164,6 +164,11 @@ export function App() {
     };
 
     syncStickyHeaderOffset();
+
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
     const observer = new ResizeObserver(syncStickyHeaderOffset);
     observer.observe(header);
     return () => observer.disconnect();
