@@ -50,12 +50,12 @@ const COMPONENT_ENTRIES: readonly GalleryEntry[] = [
   entry('/components', 'comp-domain-badges', 'Domain Badges', ['finding', 'memory', 'reading'], [UI]),
   entry('/components', 'comp-button', 'Button', ['primary', 'secondary', 'ghost'], [UI]),
   entry('/components', 'comp-card', 'Card', ['interactive', 'voice'], [UI]),
-  entry('/components', 'comp-dialog', 'Dialog', ['modal', 'portal', 'escape'], ['@web-ui/dialog']),
+  entry('/components', 'comp-dialog', 'Dialog', ['modal', 'portal', 'escape'], ['@web-ui/dialog']), // @web-ui/dialog — transitional — keep-web (Radix portal/focus-trap beyond presentational scope)
   entry('/components', 'comp-input', 'Input', ['invalid', 'focus'], [UI]),
   entry('/components', 'comp-label', 'Label', ['form'], [UI]),
   entry('/components', 'comp-select', 'Select', ['native', 'invalid'], [UI]),
-  entry('/components', 'comp-states', 'States', ['loading', 'empty', 'error', 'spinner'], ['@web-ui/states']),
-  entry('/components', 'comp-table', 'Table', ['overflow', 'row'], ['@web-ui/table']),
+  entry('/components', 'comp-states', 'States', ['loading', 'empty', 'error', 'spinner'], ['@web-ui/states']), // @web-ui/states — transitional — keep-web (lucide-react asset boundary; product copy & app-composition callbacks)
+  entry('/components', 'comp-table', 'Table', ['overflow', 'row'], ['@web-ui/table']), // @web-ui/table — transitional — keep-web (responsive overflow wrapper; not in V1.99 first batch)
   entry('/components', 'comp-tabs', 'Tabs', ['controlled', 'panel'], [UI]),
   entry('/components', 'comp-textarea', 'Textarea', ['invalid', 'disabled'], [UI]),
   entry('/components', 'comp-form-field', 'Form Field (composition)', ['helper', 'label'], [UI]),
