@@ -245,8 +245,10 @@ describe('useAcceptRun / useDiscardRun — runs-list + run-detail invalidation',
   function renderRunInspector(
     button: 'accept' | 'discard',
     crossCache: {
-      timelineSpy: ReturnType<typeof vi.fn>;
-      worldKbSpy: ReturnType<typeof vi.fn>;
+      // Only the call is needed here; Vitest 4's bare `vi.fn()` overload types
+      // as `Mock<Constructable | Procedure>`, which is not callable.
+      timelineSpy: () => unknown;
+      worldKbSpy: () => unknown;
     },
   ) {
     function Harness() {

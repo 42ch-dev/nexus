@@ -114,7 +114,7 @@ See [design-studio.md spec §2](../../.mstar/specs/design-studio.md#2-audiences)
 
 ## Tests
 
-- Runner: Vitest 3 with jsdom + @testing-library/react — mirrors `apps/web` conventions
+- Runner: Vitest 4 with jsdom + @testing-library/react — mirrors `apps/web` conventions
 - Config: `vitest.config.ts` (resolve aliases match `vite.config.ts`; setup in `src/test/setup.ts`)
 - Scope: smoke tests for App shell render, theme toggle, and gallery section routing — see `src/App.test.tsx`
 - Run: `pnpm --filter design-studio test` (CI-compatible; no daemon required)

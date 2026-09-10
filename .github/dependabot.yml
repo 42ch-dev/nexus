@@ -1,0 +1,212 @@
+# Dependabot version updates for the nexus monorepo.
+#
+# Entries mirror the repository's actual independent dependency graphs:
+#   npm            /                                one root pnpm workspace + pnpm-lock.yaml
+#   cargo          /                                root Cargo workspace (crates/* + apps/nexus42)
+#   cargo          /apps/desktop/src-tauri          standalone Tauri crate (own Cargo.lock)
+#   cargo          /modules/*                       standalone module crates (each own Cargo.lock)
+#   cargo          /tooling/codegen/rust-gen        standalone generator crate (own Cargo.lock)
+#   github-actions /                                .github/workflows
+#   github-actions /.github/actions/setup-monorepo  composite action with external `uses:`
+#     (.github/actions/free-disk-space has no external `uses:` refs, so it needs no entry.)
+#   gitsubmodule   /                                .agents/skills/react-flow (only declared
+#     submodule; tauri-v2 and the other skill dirs are plain tracked files, not gitlinks)
+#
+# Grouping is weekly and limited to minor + patch. Major updates are never
+# grouped, so they stay individually reviewable.
+#
+# SPOKE lockstep: `spoke-schemas` / `spoke-operations` / `spoke-connect` (cargo)
+# and `@42ch/spoke-schemas` / `@42ch/spoke-operations` (npm) are exact-pinned and
+# must move together with SPOKE_PIN in tooling/check-wire-drift.sh. Dependabot
+# cannot group across ecosystems, so each ecosystem keeps its own `spoke-*` group
+# and those PRs MUST be reviewed and merged as one coordinated lockstep set
+# (see .mstar/knowledge/engineering/spoke-lockstep-upgrade-procedure.md). Never
+# merge a lone SPOKE group PR.
+#
+# pnpm: the npm ecosystem handles pnpm workspaces. GitHub's supported-ecosystem
+# matrix currently lists pnpm v7-v10 while this repo requires pnpm 11. This
+# lockfile is single-document lockfileVersion 9.0, so the known pnpm 11
+# multi-document parse failure (dependabot-core #14919) is not currently
+# manifested; still verify npm PRs against a frozen install until upstream lists
+# pnpm 11 support.
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      npm-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "@42ch/spoke-*"
+        update-types:
+          - minor
+          - patch
+      npm-spoke-lockstep:
+        applies-to: version-updates
+        patterns:
+          - "@42ch/spoke-*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      cargo-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "spoke-*"
+        update-types:
+          - minor
+          - patch
+      cargo-spoke-lockstep:
+        applies-to: version-updates
+        patterns:
+          - "spoke-*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: cargo
+    directory: /apps/desktop/src-tauri
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: cargo
+    directory: /modules/_template
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: cargo
+    directory: /modules/basic-combat
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: cargo
+    directory: /modules/nexus-module-manifest
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: cargo
+    directory: /modules/nexus-module-sdk
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: cargo
+    directory: /modules/nexus-module-test
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: cargo
+    directory: /tooling/codegen/rust-gen
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      actions-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /.github/actions/setup-monorepo
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      actions-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  # Only .gitmodules entry; updates the .agents/skills/react-flow gitlink.
+  - package-ecosystem: gitsubmodule
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

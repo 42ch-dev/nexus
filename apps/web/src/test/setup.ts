@@ -30,6 +30,31 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
 }
 
 /**
+ * jsdom does not implement `window.matchMedia`, and Vitest 4's stricter
+ * `vi.spyOn` rejects spying on the undefined property the jsdom environment
+ * leaves behind (theme/layout tests spy on it). Install a no-op polyfill once so
+ * those spies work and guarded `window.matchMedia(...)` reads resolve to
+ * `matches: false`. Guarded so a real (browser) implementation wins.
+ */
+if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: (query: string): MediaQueryList =>
+      ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => false,
+      }) as unknown as MediaQueryList,
+  });
+}
+
+/**
  * Node 24+ may install an experimental `localStorage` shim that is undefined
  * unless `--localstorage-file` is set, which shadows jsdom's implementation.
  * ThemeProvider tests (and P2 logo wiring) need a working store.
