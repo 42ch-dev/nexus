@@ -29,7 +29,6 @@
  */
 import { readFile } from 'node:fs/promises';
 import { join, dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { parseDocument } from 'yaml';
 
 /** @typedef {Record<string, unknown>} ThemeDoc */
@@ -422,8 +421,6 @@ function buildProjection(doc) {
   projections.push(scalar('--color-reading-selection-toolbar-shadow', 'components.reading-selection-toolbar.shadow'));
 
   // ── Reading chrome (flatten component + nested member) ──
-  const RC = (prefix, cssPrefix) => (member, cssMember) =>
-    scalar(`--${cssPrefix}-${member}`, `${prefix}.${cssMember || member === 'text-align' ? cssMember || member : member}`);
   // Explicit map: cssVar leaf -> DESIGN member
   const readingChrome = [
     ['novel', 'chapter-title', 'font-family', 'fontFamily'],
@@ -515,7 +512,6 @@ function buildProjection(doc) {
     'wizard-padding': 'wizard-padding', 'step-row-height': 'step-row-height',
   };
   for (const [css, src] of Object.entries(SW_STEP)) {
-    const rule = css === 'step-label-typography' ? { fontSizeOf: true } : { member: src === 'step-label-typography' ? 'fontSize' : undefined };
     projections.push({
       cssVar: `--color-setup-wizard-${css}`,
       source: `components.setup-wizard-step.${src}`,

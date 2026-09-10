@@ -11,7 +11,7 @@
  * This command is the ONLY writer of those artifacts. It never touches source
  * during HMR (the Vite plugin transforms in memory instead).
  */
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -37,11 +37,25 @@ try {
     : REPO_ROOT;
   const pair = await loadDesignPair(repoRoot);
   const out = projectDesign(pair);
-  for (const { rel, field } of OUTPUTS) {
-    const target = join(repoRoot, rel);
-    await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, out[field], 'utf8');
-    console.log(`wrote ${rel} (${out[field].length} bytes)`);
+  // Write each artifact to a temp file in its target directory first; only
+  // after ALL writes succeed, replace the targets (atomic as a set), so a
+  // failure mid-loop cannot leave mixed-generation output.
+  const staged = [];
+  try {
+    for (const { rel, field } of OUTPUTS) {
+      const target = join(repoRoot, rel);
+      await mkdir(dirname(target), { recursive: true });
+      const tmp = `${target}.${process.pid}.tmp`;
+      await writeFile(tmp, out[field], 'utf8');
+      staged.push({ rel, field, target, tmp });
+    }
+    for (const { rel, field, target, tmp } of staged) {
+      await rename(tmp, target);
+      console.log(`wrote ${rel} (${out[field].length} bytes)`);
+    }
+  } finally {
+    // Best-effort cleanup of any temp file that was not renamed.
+    await Promise.all(staged.map(({ tmp }) => rm(tmp, { force: true })));
   }
 } catch (err) {
   console.error(`generate-tokens.mjs: ${err.message}`);
