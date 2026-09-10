@@ -58,7 +58,7 @@ dependencies = [
  "futures",
  "futures-concurrency",
  "jsonrpcmsg",
- "rmcp",
+ "rmcp 1.8.0",
  "rustc-hash",
  "schemars 1.2.2",
  "serde",
@@ -3832,7 +3832,7 @@ dependencies = [
  "parking_lot",
  "rcgen",
  "regex",
- "rmcp",
+ "rmcp 3.2.0",
  "rust-embed",
  "rustls",
  "rustls-pemfile",
@@ -4099,7 +4099,7 @@ dependencies = [
  "predicates",
  "regex",
  "reqwest",
- "rmcp",
+ "rmcp 3.2.0",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -5286,9 +5286,30 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "rmcp"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42b6914fac0be956fe704a38239c3f44a9f841d1b06a5713d2f638065593f5b5"
+dependencies = [
+ "chrono",
+ "futures",
+ "indexmap 2.14.0",
+ "pastey",
+ "pin-project-lite",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
  "tokio-stream",
  "tokio-util",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

@@ -122,7 +122,7 @@ libp2p = { workspace = true, optional = true }
 # optional dep behind `connect-client` (the shipped graph already carries
 # rmcp 1.8.0 via agent-client-protocol =0.11.1 → prior art; the pin keeps
 # exactly one version).
-rmcp = { version = "=1.8.0", default-features = false, features = ["server", "transport-io"], optional = true }
+rmcp = { version = "=3.2.0", default-features = false, features = ["server", "transport-io"], optional = true }
 clap = { workspace = true }
 clap_complete = { workspace = true }
 tokio = { workspace = true }
@@ -195,7 +195,7 @@ nexus-wasm-host = { path = "../../crates/nexus-wasm-host" }
 # tuple. The shipped graph keeps exactly one rmcp 1.8.0 (`server` +
 # `transport-io` via the optional `connect-client` dep); the `--edges
 # normal` graph pins in tooling/check-graph-pins.sh never count dev-deps.
-rmcp = { version = "=1.8.0", default-features = false, features = ["client", "transport-async-rw"] }
+rmcp = { version = "=3.2.0", default-features = false, features = ["client", "transport-async-rw"] }
 # V1.174 P1 T0 (AR-75 C-1): scripted in-process ACP agent probe
 # (`tests/mcp_acp_probe.rs`) — the SDK's Agent/Client roles + Channel
 # duplex run the full newSession.mcp_servers round trip without a live

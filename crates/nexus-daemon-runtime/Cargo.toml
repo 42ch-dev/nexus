@@ -111,7 +111,7 @@ getrandom = { version = "0.2", optional = true }
 # `transport::sink_stream` is an ungated core module — no new crate
 # features. Pinned exactly `=1.8.0` (AR-73: exactly-one-version, already
 # in the default graph via agent-client-protocol).
-rmcp = { version = "=1.8.0", default-features = false, features = ["server"], optional = true }
+rmcp = { version = "=3.2.0", default-features = false, features = ["server"], optional = true }
 # V1.174 P0 T3 (AR-68): pure tool manifest/ABI helpers for the PeerToolTable
 # admission chain (`validate_manifest_tools`, `parse_tool_capability_id`,
 # `validate_tool_arguments`) AND for the user-capability catalog grammar
@@ -143,7 +143,7 @@ spoke-operations = { workspace = true }
 # (`tests/embedded_mcp_e2e.rs`) — dev-only, tests-only. The shipped graph
 # keeps exactly one rmcp 1.8.0 with `server` only; graph pins use
 # `--edges normal`, dev-deps excluded (AR-74 caveat).
-rmcp = { version = "=1.8.0", default-features = false, features = ["client"] }
+rmcp = { version = "=3.2.0", default-features = false, features = ["client"] }
 
 [[bench]]
 name = "dispatch_latency"
