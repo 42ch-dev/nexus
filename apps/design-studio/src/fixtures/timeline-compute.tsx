@@ -125,7 +125,7 @@ function VariantChip({
 }) {
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-label-12 font-medium text-gray-500">{label}</span>
+      <span className="text-label-12 font-medium text-gray-700">{label}</span>
       {children}
     </div>
   );
@@ -280,7 +280,7 @@ function InspectorVariant({
       data-testid={testId}
       className="flex flex-col gap-3 rounded-card border border-gray-alpha-300 bg-background-100 p-4"
     >
-      <span className="text-label-12 font-medium text-gray-500">{chipLabel}</span>
+      <span className="text-label-12 font-medium text-gray-700">{chipLabel}</span>
       {children}
     </div>
   );
@@ -327,6 +327,20 @@ function ComputeInspectorFrame() {
           <ComputeInspectorSections
             moduleName="Economy Ticker"
             moduleVersion="2.1.0"
+            provenanceLabel={PROVENANCE_DIRECT}
+            copy={INSPECTOR_COPY}
+          />
+        </InspectorVariant>
+
+        <InspectorVariant
+          testId="timeline-compute-inspector-readonly"
+          chipLabel="Read-only (no Open Run)"
+        >
+          <ComputeInspectorSections
+            moduleName={RUN_EVENT.moduleName}
+            moduleVersion={RUN_EVENT.moduleVersion}
+            reportDigest={RUN_EVENT.summary}
+            runId={RUN_EVENT.runId}
             provenanceLabel={PROVENANCE_DIRECT}
             copy={INSPECTOR_COPY}
           />

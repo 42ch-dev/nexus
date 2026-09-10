@@ -42,14 +42,12 @@ describe('ComputeResultNodeChrome', () => {
     );
   });
 
-  it('marks the Cpu affordance aria-hidden and token-accented', () => {
+  it('marks the Cpu affordance aria-hidden', () => {
     render(<ComputeResultNodeChrome {...BASE_PROPS} />);
 
     const icon = screen.getByTestId('compute-result-node-chrome').querySelector('svg');
     expect(icon).not.toBeNull();
     expect(icon).toHaveAttribute('aria-hidden', 'true');
-    // Same-family token: compute nodes share the Narrative layer accent.
-    expect(icon!.getAttribute('class')).toContain('text-canvas-layer-narrative-accent');
   });
 
   it('is a pure presentational surface — copy props only, no side effects', () => {

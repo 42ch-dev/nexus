@@ -28,7 +28,7 @@ function Card({ className, interactive = false, ref, ...props }: CardProps) {
     <div
       ref={ref}
       className={cn(
-        'rounded-card border border-gray-alpha-400 bg-background-100 p-6 text-gray-1000 shadow-card',
+        'rounded-card border border-gray-alpha-400 bg-background-100 p-6 text-gray-1000 shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100',
         interactive &&
           'transition-[box-shadow,transform] duration-popover ease-standard motion-reduce:transition-none hover:shadow-elevation-2 motion-safe:hover:-translate-y-px active:shadow-elevation-1 motion-safe:active:translate-y-0',
         className,
@@ -51,10 +51,9 @@ export interface CardTitleProps extends HTMLAttributes<HTMLHeadingElement> {
    *
    * - `'interface'` (default): sans `text-heading-16 font-heading` treatment —
    *   unchanged; used on all interface cards (settings, dialogs, dashboards).
-   * - `'content'`: serif display tier `font-display text-display-20
+   * - `'content'`: larger sans display tier `text-display-20 font-heading
    *   tracking-tight` — reserved for cards presenting a creative entity
-   *   (work/world/brand-page). Greppable opt-in (`voice="content"`); serif
-   *   discipline per §Design Concept.
+   *   (work/world/brand-page). Greppable opt-in (`voice="content"`).
    */
   voice?: 'interface' | 'content';
   /** DOM ref forwarded to the underlying h3 (React 19 ref-as-prop). */
@@ -66,10 +65,9 @@ function CardTitle({ className, voice = 'interface', ref, ...props }: CardTitleP
     <h3
       ref={ref}
       className={cn(
-        // Content voice intentionally omits `leading-tight`: the display-20
-        // typography token supplies its own line-height.
+        // Content voice intentionally omits `leading-tight`: display-20 supplies line-height.
         voice === 'content'
-          ? 'font-display text-display-20 tracking-tight'
+          ? 'text-display-20 font-heading tracking-tight'
           : 'text-heading-16 font-heading leading-tight tracking-tight',
         className,
       )}

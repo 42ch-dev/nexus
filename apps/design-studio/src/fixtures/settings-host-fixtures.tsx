@@ -735,7 +735,7 @@ function SettingsShellChromeFixture() {
  */
 export function SettingsHostFixtures() {
   return (
-    <div data-testid="settings-host-fixtures" className="space-y-8">
+    <div className="studio-fixture-boundary space-y-8" data-testid="settings-host-fixtures">
       <div
         className="rounded-card border border-gray-alpha-200 bg-background-100 p-4"
         data-testid="settings-host-fixture-shell"

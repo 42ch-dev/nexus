@@ -1,11 +1,15 @@
 import { Badge } from '@42ch/nexus-ui';
 
-/** Two-tier import model — V1.128 P3 gallery labeling. */
-export type SurfaceSourceTier = 'extract' | 'promoted' | 'transitional';
+/** Four-tier import model — V1.128 P3 gallery labeling + V1.187 P2 studio-local. */
+export type SurfaceSourceTier =
+  | 'extract'
+  | 'promoted'
+  | 'transitional'
+  | 'studio-local';
 
 const TIER_COPY: Record<
   SurfaceSourceTier,
-  { shortLabel: string; badgeVariant: 'preset' | 'running' | 'queued' }
+  { shortLabel: string; badgeVariant: 'preset' | 'running' | 'queued' | 'neutral' }
 > = {
   extract: {
     shortLabel: 'App presentational extract',
@@ -19,20 +23,72 @@ const TIER_COPY: Record<
     shortLabel: 'Transitional primitive',
     badgeVariant: 'queued',
   },
+  'studio-local': {
+    shortLabel: 'Studio-local fixture',
+    badgeVariant: 'neutral',
+  },
 };
 
-/** Classify a Studio import path for Surfaces source badges. */
+function isStudioLocalPath(importPath: string): boolean {
+  if (importPath.startsWith('@/fixtures/')) return true;
+  if (importPath.startsWith('@/components/')) return true;
+  if (importPath.startsWith('@/pages/')) return true;
+  if (importPath.startsWith('@/lib/')) return true;
+  if (importPath === 'DESIGN.md' || importPath === 'DESIGN.dark.md') return true;
+  if (importPath.startsWith('./') || importPath.startsWith('../')) return true;
+  return false;
+}
+
+const PROMOTED_IMPORT_ROOT = '@42ch/nexus-ui';
+const TRANSITIONAL_IMPORT_ROOT = '@web-ui';
+
+/**
+ * Recognized presentational extract roots (spec §3.2). Utility/locale aliases
+ * such as `@web-lib/utils` or `@web-locales/*` are NOT presentational extracts.
+ */
+const EXTRACT_IMPORT_ROOTS: readonly string[] = [
+  '@web-layout',
+  '@web-canvas',
+  '@web-setup',
+  '@web-settings',
+  '@web-global-timeline',
+  '@web-shell',
+];
+
+/**
+ * Exact-root/subpath boundary check — lockstep for every classified root so
+ * lookalike prefixes (`@web-ui-legacy`, `@42ch/nexus-ui-legacy`) never match.
+ */
+function isPackageOrSubpath(importPath: string, root: string): boolean {
+  return importPath === root || importPath.startsWith(`${root}/`);
+}
+
+/**
+ * Classify a Studio import path for Surfaces source badges.
+ *
+ * Locked precedence: exact `@42ch/nexus-ui` (or an exported subpath) →
+ * promoted; `@web-ui/<name>` → transitional; recognized presentational
+ * `@web-*` alias roots → extract; Studio `@/fixtures`, `@/components`,
+ * `@/pages`, `@/lib` and relative composition paths → studio-local. Any
+ * other path (unknown catalog paths, lookalike roots such as
+ * `@42ch/nexus-ui-legacy`, `@web-ui-legacy`, or arbitrary `@web-foo`) falls
+ * back to studio-local — never silently labeled promoted/transitional/
+ * extract.
+ */
 export function classifySurfaceImport(importPath: string): SurfaceSourceTier {
-  if (importPath.startsWith('@42ch/nexus-ui')) {
+  if (isPackageOrSubpath(importPath, PROMOTED_IMPORT_ROOT)) {
     return 'promoted';
   }
-  if (importPath.startsWith('@web-ui')) {
+  if (isPackageOrSubpath(importPath, TRANSITIONAL_IMPORT_ROOT)) {
     return 'transitional';
   }
-  if (importPath.startsWith('@web-')) {
+  if (EXTRACT_IMPORT_ROOTS.some((root) => isPackageOrSubpath(importPath, root))) {
     return 'extract';
   }
-  return 'extract';
+  if (isStudioLocalPath(importPath)) {
+    return 'studio-local';
+  }
+  return 'studio-local';
 }
 
 /** Human-readable label for a tier (optionally including the import path). */
@@ -52,22 +108,28 @@ export interface SurfaceSourceBadgeProps {
   importPath: string;
 }
 
-/** Single import-path badge — extract vs promoted vs transitional. */
+/** Single import-path badge — extract vs promoted vs transitional vs studio-local. */
 export function SurfaceSourceBadge({ importPath }: SurfaceSourceBadgeProps) {
   const tier = classifySurfaceImport(importPath);
   const { shortLabel, badgeVariant } = TIER_COPY[tier];
 
+  // Narrow-viewport safety: the pill must never force document-wide overflow.
+  // The full label + path stay visible — the mono path wraps inside the pill
+  // (flex-wrap + break-all) instead of the nowrap pill escaping its column.
   return (
     <Badge
       variant={badgeVariant}
       tone="soft"
+      className="h-auto min-h-6 max-w-full flex-wrap whitespace-normal py-0.5"
       data-testid={`surface-source-badge-${tier}`}
       data-import-path={importPath}
       title={getSurfaceSourceLabel(importPath)}
     >
       <span className="sr-only">{shortLabel}: </span>
-      <span aria-hidden>{shortLabel}</span>
-      <code className="text-label-12 font-mono font-normal opacity-90">
+      <span aria-hidden className="whitespace-nowrap">
+        {shortLabel}
+      </span>
+      <code className="min-w-0 break-all text-label-12 font-mono font-normal opacity-90">
         {importPath}
       </code>
     </Badge>
@@ -75,7 +137,7 @@ export function SurfaceSourceBadge({ importPath }: SurfaceSourceBadgeProps) {
 }
 
 export interface SurfaceSourceBadgesProps {
-  /** Distinct `@web-*` or `@42ch/nexus-ui` paths cited by the section. */
+  /** Distinct import paths cited by the section. */
   importPaths: string[];
 }
 
@@ -136,6 +198,16 @@ export function SurfaceSourceLegend() {
               apps/web/src/components/ui
             </code>
             .
+          </span>
+        </li>
+        <li className="flex flex-wrap items-center gap-2">
+          <SurfaceSourceBadge importPath="@/fixtures/example" />
+          <span>
+            Studio-local composition under{' '}
+            <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+              apps/design-studio/src
+            </code>{' '}
+            — props-driven fixtures, not App extracts.
           </span>
         </li>
       </ul>

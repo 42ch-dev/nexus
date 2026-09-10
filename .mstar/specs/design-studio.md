@@ -1,48 +1,52 @@
-# Design Studio — Specification v0 (Draft)
+# Design Studio — Specification
 
-**Status**: Draft (V1.98) with V1.99 boundary amendment in progress — product contract
-**Document class**: Dev-surface auxiliary app (not author-facing product)  
+**Status**: Normative target contract (v1.187) — implementation and visual acceptance are separate  
+**Document class**: Feature line  
 **Created**: 2026-07-08 (`@product-manager`)  
-**Scope**: `apps/design-studio` — read-only gallery and visual proving ground for Nexus DESIGN SSOT, brand VI, shared presentational primitives, and representative surface fixtures
-**IA guide**: `design-studio-information-architecture.md`  
+**Revised**: 2026-09-09 (product, architecture and writing Review & Edit)  
+**Scope**: `apps/design-studio` — read-only gallery and visual proving ground for the Nexus DESIGN SSOT, brand VI, shared presentational primitives, and representative surface fixtures  
 **Coordinates with**:
 
-- Repo-root [`DESIGN.md`](../../DESIGN.md) + [`DESIGN.dark.md`](../../DESIGN.dark.md) — sole normative token SSOT after V1.98 merge
-- [`web-ui.md`](web-ui.md) §30 — V1.98 stage note (studio is dev tooling, not Control Room feature)
-- `design-unification.md` — merge rules (architect-owned, P-1)
-- `component-promotion-boundary.md` — V1.99 draft boundary for selected pure presentational primitives in `@42ch/nexus-ui`
-- `studio-first-ui-workflow.md` — V1.99 validation path from studio fixtures to package promotion to Web integration
-- `studio-first-visual-then-app.md` — V1.101 process note (Studio visual → App wiring; human smoke separate)
-- `studio-first-visual-then-app.md` — V1.102 process note (same discipline; Badge tone + Settings chrome + optional Surfaces Stretch)
-- `studio-first-visual-then-app.md` — V1.103 process note (Settings shell + section fixtures; DESIGN Voice copy tables in section specs)
-- `studio-first-invariant.md` — **V1.107 locked invariant** (需求 → Studio↔DESIGN.md → App); supersedes V1.106 guide for active iteration
-- `studio-ui-tune.md` — **V1.107 Must** — Studio Tailwind content, visual FBs, Toast App adoption, shell/Settings presentational SSOT
-- `@42ch/nexus-ui` — brand layer plus approved presentational primitives (V1.99 Button/Badge/Card; V1.100 form fields; V1.101 `Select`; V1.102 Badge `tone` soft/solid)
-- `apps/web/src/components/ui/*` — transitional gallery source for primitives not yet promoted
-- `apps/web/src/components/setup/*` — app-shared setup compositions (e.g. `AgentPicker`); Studio may import via gallery alias — **not** `@42ch/nexus-ui`
+- Repo-root [`DESIGN.md`](../../DESIGN.md) + [`DESIGN.dark.md`](../../DESIGN.dark.md) — sole token SSOT
+- [`web-ui.md`](web-ui.md) §30 — Studio is contributor tooling, not a Control Room feature
+- `@42ch/nexus-ui` — brand layer plus approved presentational primitives (public exports only)
+- Root [`AGENTS.md`](../../AGENTS.md) UI Component Policy (Studio-first)
+- [`apps/design-studio/AGENTS.md`](../../apps/design-studio/AGENTS.md) — import guardrails
+
+Iteration history that used to live in this file (V1.98–V1.107 task tables, superseded process notes) is **not** current promise. See §12.
 
 ---
 
 ## 1. Purpose
 
-Contributors and frontend implementers need a **single visual workspace** to validate Nexus tokens, brand VI, component states, voice samples, and representative product chrome — without running the daemon, Tauri, or navigating live product flows.
+Contributors and frontend implementers need one visual workspace to validate Nexus tokens, brand VI, component states, voice samples, and representative product chrome without running the daemon, Tauri, or live product flows.
 
-Design Studio is a **standalone Vite + React SPA** (`apps/design-studio`) that mirrors the unified DESIGN contract. It is a **read-only showcase**: token edits happen in repo-root `DESIGN.md` / `DESIGN.dark.md` on disk; refresh the dev server to see updates. App chrome displays **Read-only · edit `DESIGN.md`** as a persistent helper (see IA guide §2).
+Design Studio is a standalone Vite + React SPA (`apps/design-studio`). It is a **read-only showcase**: token edits happen in repo-root `DESIGN.md` / `DESIGN.dark.md` on disk; refresh the dev server to see updates. App chrome displays **Read-only · edit `DESIGN.md`**.
 
-**Product outcome (V1.98):** tuning UI/UX/brand no longer requires mental diffing of YAML frontmatter or hunting component usage across `apps/web`. One gallery, one DESIGN SSOT, measurable parity with the shipped Web UI.
+**Product outcome (v1.187):** Studio is a complete proving ground for a **precision creative tool** visual language. A contributor can find, inspect (both themes and meaningful states), and classify source without scrolling a monolithic gallery blindly, and without a second theme authority.
 
-**Product outcome (V1.99):** Design Studio becomes the first visual proving ground for reusable View-level UI. Accepted presentational primitives may graduate into `@42ch/nexus-ui`; app behavior, daemon state, routing, and full product shells still graduate only through `apps/web`.
+Studio is **not** the author-facing product. Shared token and primitive changes may restyle `apps/web` naturally. This spec does **not** accept web or desktop page redesign.
 
 ---
 
-## 2. Audiences
+## 2. Audiences and contributor jobs
 
-| Audience | Job-to-be-done | Studio value |
+| Audience | Job | Studio must |
 | --- | --- | --- |
-| **Contributors** (design-minded maintainers) | Tune colors, typography, spacing, and component tokens with confidence | Side-by-side token tables + live primitives + light/dark toggle |
-| **Frontend developers** | Pick correct variant/state when building screens | Component matrix with interactive states; surface slices as composition reference |
-| **Brand / VI reviewers** | Confirm logo usage, clear space, and theme.css alignment | Brand VI section with all five `@42ch/nexus-ui` logo variants + `NexusMark` |
-| **Authors** (local Web UI users) | — | **Not in scope** — authors never see design-studio; it is not bundled in `nexus42` |
+| Contributors | Recalibrate color, type, space, and component tokens with confidence | Filterable indexes, live token specimens, pair-view theme comparison, read-only DESIGN workflow |
+| Frontend developers | Pick the correct variant and state when building screens | Component matrices with rest/hover/active/focus/disabled and loading/empty/error where supported; surface slices as composition reference |
+| Brand / VI reviewers | Confirm name, timeline-mark geometry, clear space, and theme.css alignment | Brand section with all logo variants + `NexusMark`; geometry preserved; usage rules after palette recalibration |
+| Authors (local Web UI users) | — | **Not in scope** — Studio is not bundled in `nexus42` |
+
+### 2.1 Jobs that count as done
+
+A contributor, daemon-free, can:
+
+1. **Find** any inventory item in §7 via the section index (type-to-filter, keyboard, stable hash).
+2. **Inspect** that item in **light and dark together** (pair view) or by session theme toggle, including meaningful states in §8.
+3. **Read provenance** (promoted / extract / transitional / studio-local).
+4. **Edit SSOT only:** change the DESIGN pair, refresh, and see the gallery update.
+5. **Keep using** every frozen route and fixture family in §6–§7.
 
 ---
 
@@ -50,173 +54,345 @@ Design Studio is a **standalone Vite + React SPA** (`apps/design-studio`) that m
 
 ### 3.1 Placement: `apps/design-studio`
 
-- pnpm workspace member under `apps/*` (same polyglot product-surface rule as `apps/web`)
+- pnpm workspace member under `apps/*`
 - **Consumer**, not producer — no daemon API, no `NexusClient`, no `@42ch/nexus-contracts` wire types
-- Runs via `pnpm --filter design-studio dev` (or documented root script alias) **without** daemon or Tauri
+- Runs via `pnpm --filter design-studio dev` on port **5174** without daemon or Tauri
 
-### 3.2 What studio may import
+### 3.2 What Studio may import
 
-**Two-tier model (V1.128):** Studio consumes both `@42ch/nexus-ui` **and** `@web-*` aliases. They are not interchangeable.
+Four source categories. `@42ch/nexus-ui` and `@web-*` aliases are not interchangeable.
 
-| Tier | Pattern | Meaning |
+| Category | Pattern | Meaning |
 | --- | --- | --- |
 | Promoted primitive | `@42ch/nexus-ui` | Publishable package export after Studio visual acceptance |
 | App presentational extract | `@web-layout/*`, `@web-canvas/*`, `@web-setup/*`, `@web-settings/*`, `@web-global-timeline/*`, `@web-shell/*`, … | Monorepo-only alias → `apps/web` props-driven chrome |
 | Transitional primitive | `@web-ui/*` | Unpromoted `apps/web/src/components/ui/*` mirror |
-
-Surfaces gallery sections display source badges distinguishing extract vs promoted. Mass migration of `@web-*` into `@42ch/nexus-ui` is **out of scope** — clarity over consolidation. Detail: web-alias-clarity.
+| Studio-local | `@/fixtures/*`, `@/components/*`, `@/pages/*` | Gallery chrome and fixture composition |
 
 | Source | Allowed | Notes |
 | --- | --- | --- |
-| Root `DESIGN.md` / `DESIGN.dark.md` | Yes | SSOT; consumed via `@nexus/design-tokens` CSS pipeline |
+| Root `DESIGN.md` / `DESIGN.dark.md` | Yes | SSOT; consumed via `@nexus/design-tokens` |
 | `@nexus/design-tokens` | Yes | Shared `tokens.css` + Tailwind preset with `apps/web` |
-| `@42ch/nexus-ui` | Yes | Brand VI plus V1.99-approved pure presentational primitives, via public package exports only |
-| `@web-ui/*` → `apps/web/src/components/ui/*` | Yes (transitional) | Vite/TS alias for not-yet-promoted primitives only; promoted primitives should use `@42ch/nexus-ui` |
-| `@web-setup/*` → `apps/web/src/components/setup/*` | Yes | Props-driven setup compositions (AgentPicker, TopStepIndicator, WorkspacePathField); no daemon |
-| `@web-layout/*` → `apps/web/src/components/layout/presentational/*` | Yes (V1.107) | Props-driven shell chrome extracts only; no routing or daemon hooks |
-| `@web-settings/*` → `apps/web/src/components/settings/presentational/*` | Yes (V1.107) | Props-driven Settings section chrome; no IPC or storage |
-| `@web-lib/utils` → `apps/web/src/lib/utils.ts` | Yes | `cn()` helper only |
-| `apps/web` screens, routing, `NexusClient`, daemon hooks | **No** | Prevents studio becoming a second product shell |
-| `apps/web/src/components/layout/**` (direct) | **No** | Import presentational chrome only via `@web-layout/*` |
-| `apps/web/src/components/settings/**` (direct) | **No** | Import presentational chrome only via `@web-settings/*` |
-| `apps/web` app providers, route definitions, product hooks, localStorage-backed product state, Tauri helpers | **No** | Studio fixtures stay daemon-independent and behavior-free |
-| Live token override, localStorage theme hacks, YAML write-back | **No** | V1.98 read-only invariant |
+| `@42ch/nexus-ui` | Yes | Brand VI + promoted primitives, public exports only |
+| `@web-ui/*` | Yes (transitional) | Unpromoted primitives only; each import annotated `transitional` |
+| `@web-setup/*`, `@web-layout/*`, `@web-settings/*`, `@web-canvas/*`, `@web-global-timeline/*`, `@web-shell/*` | Yes | Props-driven extracts; no daemon, routing, or IPC |
+| `@web-lib/utils` | Yes | `cn()` only if still required; prefer `@42ch/nexus-ui` `cn` |
+| `apps/web` screens, routing, `NexusClient`, daemon hooks, providers, Tauri helpers | **No** | Studio must not become a second product shell |
+| Direct `apps/web/src/components/layout/**` or `settings/**` | **No** | Extracts only via `@web-*` |
+| Live token override, localStorage theme hacks, YAML write-back | **No** | Read-only invariant |
+| New component families or mass `@web-*` → package promotion | **No** | Out of v1.187 scope unless a later plan names the promotion |
+
+Guardrail: `tooling/check-ui-guardrails.sh`.
 
 ### 3.3 Toolchain alignment with `apps/web`
 
 | Concern | `apps/web` | `apps/design-studio` |
 | --- | --- | --- |
 | Bundler | Vite 6 | Vite 6 (same major) |
-| React | 18.3 | 18.3 |
-| TypeScript | strict, `@/*` alias | strict, `@/*` + `@web-ui/*` aliases |
+| React | 19.2 | 19.2 |
+| TypeScript | 7.0 strict, `@/*` alias | 7.0 strict, `@/*` + `@web-ui/*` aliases |
 | Tailwind | v3.4, `class` darkMode | v3.4 — **shared preset** from `@nexus/design-tokens` |
 | CSS tokens | `@nexus/design-tokens/tokens.css` | Same import — no second transcription |
 | Test runner | Vitest 4 | Vitest 4 |
 | Contracts | `@42ch/nexus-contracts` required | **Not used** — dev surface only |
 | Dev server port | 5173 | 5174 (document in README; avoid clash) |
 
-### 3.4 Relationship to `apps/web`
+### 3.4 Relationship to `apps/web` and `@42ch/nexus-ui`
 
-- `apps/web` remains the **author-facing** local product UI (daemon-served Control Room + Setup + Authoring)
-- Design Studio is **dev/ contributor tooling** — comparable to Storybook in intent, but Nexus-owned and DESIGN-native
-- After DESIGN unification, **both** web and studio read the **same root DESIGN pair**; studio must not invent tokens
+- `apps/web` remains the author-facing local product UI.
+- Both read the same root DESIGN pair. Studio must not invent tokens.
+- v1.187 may restyle existing public primitives. It must **not** break public callable contracts or require `apps/web` callsite edits.
+- An API break that would force web edits is a STOP, not a shim.
+- Forbidden in the package: app shells, page components, daemon-aware or route-aware controls.
 
-### 3.5 Relationship to `@42ch/nexus-ui`
+### 3.5 Token projection contract
 
-- **V1.98 baseline:** brand layer only — logos, marks, `brandColors`, `theme.css`
-- **V1.99 amendment:** selected pure presentational primitives may move into `@42ch/nexus-ui` only through the component-promotion boundary draft and follow-up package rule updates.
-- **Still forbidden:** app shells, page components, daemon-aware controls, route-aware components, and Web-only behavior must not move into `@42ch/nexus-ui`.
-- **Transition rule:** Design Studio may consume both `@42ch/nexus-ui` and `@web-ui/*` while V1.99 proves the first promotion batch. Promoted primitives should stop using `@web-ui/*` in Studio.
-- **Fixture rule:** setup steppers, workspace-row mocks, shell chrome, daemon status strips, nav groups, and page-section compositions remain studio-local unless a smaller primitive beneath them is explicitly promoted by the V1.99 boundary.
+The DESIGN pair is the authority; checked-in CSS and brand constants are **derived outputs**, not independently editable sources. The original checker only searched strings in handwritten CSS/preset files and could not make a DESIGN edit visible. The target replaces that gap with one shared build-time compiler in `tooling/design-tokens/scripts/project-tokens.mjs`, used by both the generation command and Studio Vite integration. No browser YAML parser, runtime token override, separate Studio palette, or second stylesheet transcription.
+
+**Compiler interface (internal tooling, not a package UI API):**
+
+```ts
+type DesignPair = { light: Record<string, unknown>; dark: Record<string, unknown> };
+type TokenProjection = { css: string; brandCss: string; brandTokens: string };
+loadDesignPair(repoRoot: string): Promise<DesignPair>;
+projectDesign(pair: DesignPair): TokenProjection;
+```
+
+Use the `yaml` package as an explicit tooling dependency (`^2.6.1`, matching the existing workspace range; current lock resolves 2.9.0). Reject duplicate YAML keys, differing leaf-path sets, unresolved `{path}` references, reference cycles, and non-scalar substitutions into scalar CSS. Resolve references recursively, including references embedded in color-mix, border strings, and typography references. `typography.font-display` and reading metrics are intentional scalar extensions. Existing compound SOUL values `{typography.X} @ {colors.Y}` project their color member to their existing `--color-*` property, not the object or literal `@` text.
+
+**Projection rules (preserve all existing CSS variable and Tailwind utility names):**
+
+| Source | Output rule |
+| --- | --- |
+| `colors.<name>` | `--color-<name>`; brand families also produce `--nexus-<name>` in package theme.css |
+| `typography` structured roles | `--text-<role>` from fontSize; `--text-<role>--line-height`, `--text-<role>--letter-spacing`, `--text-<role>--font-weight`, `--text-<role>--font-family` for the other fields; Tailwind keeps the existing role keys |
+| UI / mono / display families | `--font-sans` from heading-16.fontFamily, `--font-mono` from copy-13-mono.fontFamily, `--font-display` from font-display |
+| `typography.reading-prose-*` | Identically named `--reading-prose-*` |
+| `spacing.space-*`, `rounded.*`, `elevation.*`, `motion.*` | `--space-*`, `--radius-*`, `--shadow-elevation-*` / existing `--shadow-card/popover/modal`, and `--duration-*` / `--ease-*` |
+| `components.canvas` flat members | Existing `--color-canvas-*`, including grid-gap/dot-size; node-width members use `--canvas-node-width-<role>` |
+| `components.states.<error/success/warning/info>` | `--color-<role>-surface` from backgroundColor and `--color-<role>-surface-border` from borderColor |
+| `components.states.disabled.opacity`, `components.listbox.maxHeight` | Preserve `--color-states-disabled-opacity`, `--color-listbox-max-height` |
+| `components.data-table.row-protected`, `components.launch-daemon.main-banner.backgroundColor` | `--color-data-table-row-protected`, `--color-main-banner-background` |
+| `components.finding-status-pill.<state>` | `--color-finding-status-<state>-<bg/text/border>`; underscores become hyphens; use backgroundColor/textColor/borderColor |
+| `components.memory-task-kind-<kind>` | `--color-memory-task-kind-<kind>-<bg/text/border>` for brainstorm/outline/chapter/research/unknown |
+| `components.reading-maturation-badge` | world-kb-density-count → `--color-reading-maturation-kb-density-*`; open-findings-count → `--color-reading-maturation-open-findings-*` |
+| `components.badge-status-pill.soft.<variant>` | Existing `--color-nexus-ui-badge-soft-<variant>-<bg/text/border>` |
+| `components.soul-viz-*`, soul-narrative-prose, soul-growth-curve-stroke | Existing flattened `--color-<component>-<member>`; scalar component has no member suffix; compound label/prose emits the color after `@` |
+| `components.reading-annotation-*`, reading-selection-toolbar | Existing flattened `--color-<component>-<member>`; backgroundColor → background, textColor → text, borderColor → border; keep shadow's existing name |
+| `components.footer-profile` | Existing `--color-footer-profile-<member>` |
+| `components.setup-wizard-step` | Existing `--color-setup-wizard-<member>` (member already contains step where required); step-label-typography emits referenced fontSize only |
+| `components.setup-wizard-surface` | Existing `--color-setup-wizard-surface-<member>` for projected members; do not create CSS from asset filenames or behavior recipes |
+| `components.dialog`, sheet, sidebar-nav | Preserve `--color-dialog-max-width`, `--dialog-width`, `--dialog-max-height`, `--sheet-width`, `--sidebar-nav-width`, `--sidebar-nav-item-height` |
+| `components.reading-chrome-*` | Flatten component + nested member path to existing bare `--reading-chrome-*`; camelCase → kebab-case; game-bible.category-badge.textColor → existing `...-color` |
+
+The existing `tokens.css` declaration inventory is the cutover boundary: every existing property must retain a source mapping, including historical structural names under `--color-*`. Do not infer removal from a naming convention. Extra missing scalar color/brand/type projections are additive and get Tokens specimens. Recipes not directly projected remain compositional contracts, not invented CSS values. A declarative source-path mapping in tooling carries **paths only**, never a copied palette.
+
+`generate-tokens.mjs` writes deterministic `src/tokens.css`, `packages/nexus-ui/theme.css`, and `packages/nexus-ui/src/generated-brand.ts`; `src/tokens.ts` imports/re-exports the generated `brandColors` while preserving every other export and historical asset palette. `brandColors` is a light/default numeric snapshot. `check-tokens.mjs` compares generated output with these checked-in artifacts and checks projection coverage/parity; it must not retain serif-source or exact-source-string tests as a proxy for behavior.
+
+Studio Vite's local plugin uses the **same compiler** to transform the shared tokens.css and package theme.css modules in memory in dev. On either DESIGN file change, invalidate both CSS modules and perform a full reload so computed-value labels also refresh. A manual reload must re-read the pair even if no watch event arrived. Do not write source files during HMR, race two dev servers over generated files, or silently keep last-good tokens on malformed YAML; show the Vite error overlay. Production prebuild runs the same generation command, builds the public primitive package, then builds Studio. No normal app build consumes raw YAML.
+
+### 3.6 API and asset boundaries
+
+All existing public UI exports, props, variants, controlled/uncontrolled behavior, callbacks, and asset filenames remain source-compatible. No new compatibility alias, theme prop on public primitives, promotion, or app edit is required. `CardTitle.voice="content"` stays valid but now selects a larger sans title. `TabsTriggerProps` has no disabled prop; unsupported states are labeled, not fabricated. Keyboard and tab/panel association repairs may be internal.
+
+Frozen logo pigments are installed-identity/geometry references, not live token swatches. Keep all five logo variants, square plates, NexusMark and four historical NexusLogoVariant specimens. The Brand page explicitly separates frozen assets from live CSS/currentColor examples. Do not recolor/regenerate SVG/PNG/desktop assets to force palette equality.
 
 ---
 
-## 4. Dev UX (normative for V1.98)
+## 4. Visual language
 
-### 4.1 Commands
+Root DESIGN v0.5 locks the production-level contract:
+
+- Silver-neutral light planes, graphite dark planes, cobalt interaction; no warm-paper global default, cyan glow, ornamental gradient, or marketing choreography.
+- Offline system sans with named Latin/CJK system fallbacks for interface and content display. Existing display tokens and CardTitle voice prop remain; content voice means title hierarchy, not serif.
+- 4px spacing base; existing 24/32/40/48px control sizes; Studio chrome uses small controls and larger narrow/coarse-pointer hit areas. Radius: control 4px, card/popover 8px, fullscreen 12px.
+- Primary uses blue-700/800/900 rest/hover/active: white label in light, deep-blue label in dark. Semantic success/running, warning, error, queued, preset and info meanings are preserved.
+- 2px background gap + 2px focus band; 120ms state, 160ms popover/enter, 200ms modal, 140ms exit; reduced motion is immediate.
+- Keep Nexus name, timeline-mark geometry, asset filenames and desktop icons. Frozen asset pigments are labeled as references, not a second active theme.
+- Identical frontmatter token paths in both themes, including dark blue-1100 and Button tiny. Exact values and arithmetic contrast evidence live in the DESIGN pair; runtime acceptance remains separate.
+
+---
+
+## 5. Dev UX (normative)
+
+### 5.1 Commands
 
 | Action | Command |
 | --- | --- |
-| Start dev server | `pnpm --filter design-studio dev` |
+| Start | `pnpm --filter design-studio dev` |
 | Build | `pnpm --filter design-studio build` |
 | Test | `pnpm --filter design-studio test` |
 
-Exact port and script aliases finalized in P0 `README` / `AGENTS.md`.
+### 5.2 Read-only tuning workflow
 
-### 4.2 Contributor tuning workflow (read-only mirror)
+1. Open Studio (`pnpm --filter design-studio dev`).
+2. Baseline: session theme from `prefers-color-scheme`; optional pair view.
+3. Find the target via the section index (not by scrolling the whole page).
+4. Edit `DESIGN.md` and/or `DESIGN.dark.md` on disk.
+5. Refresh (HMR or reload) until the gallery reflects the SSOT.
+6. Validate Brand, Components, Voice, and Surfaces in both themes.
+7. Shared-consumer check: `pnpm --filter web typecheck` and `pnpm --filter web build` **without** editing web source.
 
-1. **Open studio** — `pnpm --filter design-studio dev`; default to Tokens overview.
-2. **Baseline** — toggle light/dark; scan token tables and component matrix for current SSOT.
-3. **Edit SSOT** — change values in repo-root `DESIGN.md` and/or `DESIGN.dark.md` (IDE or PR).
-4. **Refresh** — reload studio (HMR or manual refresh) until gallery reflects edits.
-5. **Validate** — confirm Brand VI, Components, Voice & Content, and Surface slices still look correct in both themes.
-6. **Verify product** — run `pnpm --filter web test` and `pnpm --filter web run build` to ensure `apps/web` consumers still resolve tokens (no unintended drift).
+**Success signal:** steps 1–7 do not require reading `index.css` or Tailwind config to understand token impact.
 
-**Success signal:** a contributor can complete steps 1–6 without reading `index.css` or tailwind config to understand token impact.
+### 5.3 Theme toggle and pair view
 
-### 4.3 Theme toggle
+- Header light/dark control retains `Theme = 'light' | 'dark' | 'system'`, OS default, and the existing `nexus-studio-theme` preference. Only the user preference may persist; pair mode and tokens do not.
+- Session theme applies `.dark` and `color-scheme` on the top document's `html`.
+- Pair view is page-level, default off, available on the five galleries and all existing nested Surfaces pages. It replaces the single gallery render with **two same-origin iframe documents loading the same Studio entrypoint**, not two React subtrees in the parent.
+- The iframe URL is the current allowlisted pathname + `?studio-embed=light` or `?studio-embed=dark` + current hash. This is a Studio display parameter, not a new route. `window.self !== window.top` plus an exact light/dark value enables embedded mode; arbitrary values and top-level uses do not force a theme.
+- Embedded boot sets its own document theme **before React renders**, then mounts the existing route/gallery with the forced ThemeProvider value. It does not read/write localStorage, listen to system/storage changes, show global shell/discovery/pair controls, or create nested comparison frames. Normal root behavior remains unchanged.
+- Each iframe owns its React root, DOM IDs, SVG definitions, native focus, body portals, and computed-style reads. Dialog/Toaster portals remain in that frame's body. This avoids duplicate label IDs, duplicate SVG IDs, parent-global theme reads, dark-variant ancestor leakage, and modal focus stealing from the other sample. Do not clone fixture markup or monkey-patch createPortal.
+- Both frames start with the same existing fixture data/default state and hash; interactions are independent. “Compare” means the same specimen/section in two themes, not synchronized user events or duplicated product behavior. Each frame retains all its section's actual states. A visible Reset comparison action remounts both at the current target.
+- Parent navigation, filter and hash selection remain outside the frames; navigation updates both frame URLs. Frame fragment links stay within that frame. The parent hash remains the canonical shareable target. Pair off restores the ordinary gallery at that hash and removes both frames. Session theme changes affect outer chrome only while the pair remains fixed.
+- At min-width 1024px use two equal minmax(0,1fr) columns with 16px gap; below 1024px stack light then dark. Each frame is width 100%, height 640px, with its own vertical scroll and visible accessible title (`Light — <gallery>` / `Dark — <gallery>`). No transform scaling, clipping, canvas screenshots, or hidden interactive duplicate in the parent. Surfaces' navigation rail is omitted inside frames; fixture headings/content remain.
+- Parent and iframe focus indicators stay visible; Tab enters/exits frames naturally, Dialog Escape closes only its own dialog, and labels/describedby/tab-panel relationships resolve within one document. Reduced-motion applies in each document. Broken frame load is an explicit error with retry/open-current-gallery recovery, never a blank “successful” comparison.
+- Embedded App posts `{type: 'nexus-studio-embed-ready', theme, path}` to its same-origin parent after route commit. Parent accepts only its own iframe contentWindow, exact origin and expected theme/path. Reset readiness on pathname/theme/remount changes, not fragment-only navigation within an already-ready document. Native error or no ready message after 10 seconds shows Retry/Open-current-gallery recovery; load alone is neither app-ready proof nor an error. Clear listeners/timers on remount/unmount. This handshake carries readiness only, never tokens, user events or synchronized product state.
 
-- Studio exposes an explicit **light / dark** control in app chrome (not author settings)
-- Toggle switches CSS variable layer between `DESIGN.md` and `DESIGN.dark.md` values
-- Default on load: `prefers-color-scheme`, overridable per session (no persistence required in V1.98)
+### 5.4 Discovery
+
+One Studio-local catalog holds route/anchor/label/keyword/source metadata only, never token values or fixture behavior. `GalleryEntry = { path: string; id: string; label: string; keywords: readonly string[]; importPaths: readonly string[] }`. Freeze all existing explicit IDs; add deterministic IDs to headings without them.
+
+Tokens, Brand, Components and Voice filter their own entries. Surfaces filters all nested route headings plus every Shell/Canvas family in §7.5, including entries on sibling routes. Filtering is trimmed, case-insensitive substring matching across label, id and keywords; it does not hide gallery content. Empty query lists everything in that gallery group.
+
+Render a labeled search input and ordinary links in an index nav, not a new command palette or a misleading listbox. ArrowDown from input focuses the first result, ArrowUp the last; within results arrows move without wrapping. Enter activates the link (or first result from input); Escape clears query and focuses the input. Tab remains natural. A polite result-count/no-results message and Clear action support recovery.
+
+Link activation updates the existing route + stable hash, waits for that route to mount, then focuses the heading (`tabIndex=-1`) and scrolls it below sticky chrome. In pair mode it targets both frame hashes and announces the selected comparison instead of searching the parent for nonexistent fixture IDs. Direct deep links and Back/Forward use the same route/hash path. Home is a job overview with the same five gallery links, not a marketing hero.
 
 ---
 
-## 5. Gallery scope (summary — detail in IA guide)
+## 6. Information architecture (frozen)
 
-| Section | Priority | V1.98 minimum |
+Changing a slug or a top-level nav label is a **user decision**, not an implementer cleanup.
+
+| Nav label | Route | Role |
 | --- | --- | --- |
-| Tokens | P0 | Colors, typography, spacing, rounded; elevation/motion if present in SSOT |
-| Brand VI | P0 | 4 logo variants + `NexusMark` + `theme.css` swatches + clear-space callout |
-| Components | P0 | All `apps/web/src/components/ui/*.tsx` primitives (variant/state matrix) |
-| Voice & Content | P1 | Labeled specimens per IA guide §4.4 — strings from DESIGN § Voice & Content |
-| Surfaces | P1 | Setup step card + App shell chrome fixtures per IA guide §4.5 |
+| (Home wordmark) | `/` | Job overview |
+| Tokens | `/tokens` | Scalar scales and canvas token families |
+| Brand | `/brand` | Logos, mark, clear space, theme.css |
+| Components | `/components` | Primitive and composite matrices |
+| Voice | `/voice` | Voice & Content specimens |
+| Surfaces | `/surfaces` | Product chrome fixtures |
 
-Section nav labels and per-component matrix: IA guide.
+Surfaces nested routes (sidebar labels frozen):
+
+| Sidebar label | Route |
+| --- | --- |
+| Overview | `/surfaces` |
+| Setup | `/surfaces/setup` |
+| Shell | `/surfaces/shell` |
+| AgentPicker | `/surfaces/agent-picker` |
+| Canvas | `/surfaces/canvas` |
+| Daemon | `/surfaces/daemon` |
+| Launch | `/surfaces/launch` |
+| Selection Submenu | `/surfaces/selection-submenu` |
+
+Do not add `/surfaces/banner`. That sketch was removed; do not restore it without a new plan.
+
+At 1280×800 and 390×844 the same five top-level labels remain reachable (wrap, compact, or overflow menu listing those labels). No document-wide horizontal overflow.
 
 ---
 
-## 6. Non-goals (V1.98)
+## 7. Gallery inventory (must not drop)
 
-- Not shipped inside `nexus42` binary or desktop installer
+This is the baseline at `origin/main` `9db88c10`. Architect may merge or rename **token values**, not silently delete a family or fixture family from Studio. If a DESIGN family is retired, the plan must say so and the gallery must not keep it as the live system.
+
+### 7.1 Tokens (`/tokens`)
+
+| Family | Baseline contents |
+| --- | --- |
+| Brand | All brand core/extended steps and alphas, plus blue-1100; names retained, values recalibrated |
+| Background | `background-100/200/300` |
+| Gray solid / alpha | `gray-100`–`gray-1000`, `gray-alpha-100`–`600` |
+| Semantic hues | `blue`, `red`, `amber`, `green`, `teal`, `purple`, `pink` (roles preserved) |
+| Component surfaces | `data-table-row-protected`, `main-banner-background` |
+| Other color families | scrim and all error/success/warning/info surface fills/borders retained and displayed |
+| Typography | all display, heading, label, copy (including copy-12), button, mono, and reading-measure roles; bilingual samples |
+| Spacing | `space-1` … `space-24` |
+| Radius | control, card, popover, fullscreen, pill |
+| Elevation | `elevation-0`–`4` plus legacy aliases `shadow-card/popover/modal` |
+| Motion | durations, easings, recipes; reduced-motion honesty |
+| States | disabled wash |
+| Canvas | ambient, node chrome, edges/ports, surface accents, timeline accent, layer accents, outline pins, soul-viz axes, node widths |
+
+Also expose all existing finding-status, memory-task-kind, reading-maturation, badge-soft, reading annotation/chrome, SOUL, footer-profile, setup-wizard and structural sizing projections, grouped by usage. Keep token labels bound to actual computed values, not hardcoded screenshots or literal palette echoes.
+
+Every **changed** family in the locked DESIGN must have a visible specimen in both themes.
+
+### 7.2 Brand (`/brand`)
+
+All `@42ch/nexus-ui` logo variants (primary, whiteBg, white, mono, text), square plate lockups, `NexusMark`, clear-space guidance, `theme.css` swatches, four historical `NexusLogoVariant` specimens, and VI acceptance fixtures. Preserve all asset files and timeline geometry; no desktop icon replacement. Separate **live theme tokens** from **frozen installed assets/historical pigment references** so preserved files are never presented as another active palette.
+
+### 7.3 Components (`/components`)
+
+Promoted (`@42ch/nexus-ui`): Badge, Button, Card, Input, Label, Textarea, Select, Tabs, Toast, TransportErrorBlock, RunFormFields, EntityPickerField, ProposalSections, RunStatusBadge, RunsTable, ComputeResultNodeChrome, ComputeInspectorSections.
+
+Transitional keep-web (`@web-ui/*`): Dialog, States, Table.
+
+Studio sections that must remain: Badge, Button, Card, Dialog, Domain Badges, Input, Label, Select, States, Table, Tabs, Textarea, Form Field, Toast, Transport Error, Run Studio, Compute Timeline, VI acceptance.
+
+No new primitive families in v1.187.
+
+### 7.4 Voice (`/voice`)
+
+Labeled specimens for Title Case, Sentence case, Verb-only, Action + object, error, empty, loading, success — sourced from DESIGN Voice & Content after the overhaul (copy may be recalibrated; patterns stay).
+
+### 7.5 Surfaces fixture families
+
+| Route | Fixture families (do not drop) |
+| --- | --- |
+| `/surfaces/setup` | Setup wizard chrome |
+| `/surfaces/shell` | Chronos titlebar; App shell chrome; Creator Hub dual-pane IA; Creator/Orchestrator functional-region IA; Creator shell; Settings shell chrome; Footer profiles; Header health indicator |
+| `/surfaces/agent-picker` | AgentPicker visual states (loading, grid, mixed, empty, error, selected, VI targets) |
+| `/surfaces/canvas` | Outline / Strategy / World KB mirrored chrome; Mental Surfacing; NLE Timeline; World Timeline; Work Timeline; Global Timeline; Layer Breadcrumb; Conflict Modals |
+| `/surfaces/daemon` | Daemon status strip |
+| `/surfaces/launch` | Launch splash (waiting, error, recovery) |
+| `/surfaces/selection-submenu` | Six documented variants; delete variant remains deferred unless a later plan names it |
+
+Each Surfaces section shows source badges and the compact legend (extract / promoted / transitional / studio-local). `@42ch/nexus-ui` is promoted, `@web-ui/*` transitional, recognized presentational `@web-*` aliases extract, and Studio composition paths studio-local. Classification is metadata, not permission to import app behavior.
+
+---
+
+## 8. State coverage (normative)
+
+Where a component already supports the state, Studio must show it. Do not fake behavior with non-functional controls when the real primitive can render the state.
+
+| Item | Required states |
+| --- | --- |
+| Button | rest, hover, active, focus-visible, disabled × existing variants and sizes |
+| Badge | all semantic variants × soft/solid |
+| Card | existing layout variants; title voice only if the public API still exposes it |
+| Input, Label, Textarea, Select | default, hover, focus-visible, disabled, validation/error |
+| Tabs | rest, hover, selected, focus-visible, arrow navigation and tab/panel association; disabled explicitly unsupported by current API |
+| Toast | existing variants |
+| TransportErrorBlock | existing kinds |
+| States (keep-web) | loading, empty, error |
+| AgentPicker / Global Timeline / Launch / Footer profiles | loading, empty, error (and populated) as the fixture already defines |
+| Canvas node chrome | rest, hover, selected (selection is never color-only) |
+| RunFormFields / EntityPickerField | populated, empty schema/entries, selected, disabled, invalid where exposed; genuine local controlled changes |
+| ProposalSections / RunsTable | populated/empty, event selection, truncated note, long IDs/copy, callback action where provided |
+| ComputeResultNodeChrome / ComputeInspectorSections | direct/preset provenance, missing optional report/params/run, affected entries, long content, callback presence/absence |
+
+Before page-level pair view exists, foundation and primitive work must already show its changed tokens/states in the existing Studio galleries and capture separate light/dark evidence. Pair view is an inspection improvement, not permission to defer P0/P1 coverage. Rework existing hard-coded nested theme wrappers into document-theme-following fixtures; retain every distinct behavioral variant, including the six Selection Submenu examples and all VI targets. “Light” labels must not wrap descendants still affected by an ancestor `.dark`.
+
+Focus rings remain visible. Text/control pairings used in the locked language meet WCAG AA.
+
+---
+
+## 9. Non-goals (v1.187)
+
+- Not shipped inside `nexus42` or the desktop installer
 - No Storybook adoption
-- No live token editor, drag-and-drop theme builder, or YAML export/write-back
-- No unbounded migration of shadcn primitives into `@42ch/nexus-ui`; V1.99 allows only approved pure presentational primitives
+- No live token editor, drag-and-drop theme builder, or YAML write-back
+- No unbounded migration of extracts into `@42ch/nexus-ui`
 - No daemon/Tauri integration, schema changes, or `@42ch/nexus-contracts` bump
-- Not a replacement for `apps/web` product QA — studio complements, does not gate author flows
-- Desktop clean-state / first-launch author onboarding is owned by **V1.105** (setup wizard chrome via Studio fixtures — see ); Design Studio itself does not ship author onboarding.
-
-### V1.106 Surfaces additions (P0 Must — iteration detail)
-
-**Authority:** `studio-first-pipeline.md` §SP-V1106-003.
-
-| Route | Fixture file | Classification |
-|-------|--------------|----------------|
-| `/surfaces/launch` | `launch-daemon-fixtures.tsx` | `@web-setup/daemon-ready-splash` import |
-| `/components` Toast section | `toast-fixtures.tsx` or inline | `@42ch/nexus-ui` + Studio renderer |
-
-Register Launch in `SURFACES_SECTIONS` alongside existing Setup / Shell / AgentPicker / Daemon slices. **Banner** (`/surfaces/banner`, `main-banner-fixtures.tsx`) was a V1.106 composition-only sketch — **removed in V1.128 P0** (closes residual R-V1128P0-001); do not re-add without a new plan entry.
-
-### V1.107 Surfaces and import amendments (P0 Must — iteration detail)
-
-**Authority:** `studio-ui-tune.md`.
-
-| Topic | Lock |
-|-------|------|
-| Studio Tailwind `content` | Scan `setup/**`, `layout/presentational/**`, `packages/nexus-ui/src/**` (FB-000) |
-| Shell Surfaces | `/surfaces/shell` imports `@web-layout/shell-sidebar-chrome` — replaces inline `AppShellFixture` stub (FB-013) |
-| Footer / health | Studio fixtures import `@web-layout/footer-profiles-chrome`, `@web-layout/daemon-health-indicator-chrome` (FB-014) |
-| Settings host | `settings-host-fixtures.tsx` imports `@web-settings/*` + `@web-setup/workspace-path-field` (FB-015) |
-| Toast | Package primitive in Studio; App adopts via thin `@/lib/use-toast` re-export (FB-012) — closes `R-V1106P0-001` |
-| Voice & Content | Workspace field label **Workspace folder**; CTA **Change Folder…** on wizard and Settings (FB-008) |
-
-**Note:** V1.106 promoted Toast to `@42ch/nexus-ui` for Studio fixtures; V1.107 completes App adoption — do not treat “package Toast exists” as “App unified” until FB-012 lands.
+- No `apps/web` or `apps/desktop` source, routing, business-flow, or asset edits
+- Not a replacement for `apps/web` product QA — Studio complements it
+- No new product routes or renamed top-level nav labels
+- No new logo geometry or desktop icon replacement
+- No second token authority, per-app override layer, or framework migration
 
 ---
 
-## 7. Acceptance hooks (product — implementation evidences in P0)
+## 10. Acceptance (product)
 
-- [ ] Studio starts without daemon on documented dev command
-- [ ] Light/dark toggle reflects root DESIGN pair (spot-check ≥3 semantic tokens per theme)
-- [ ] Every primitive in `components/ui/*.tsx` (excluding tests) appears in Components gallery with ≥1 interactive state
-- [ ] All five `logoVariants` from `@42ch/nexus-ui` render with clear-space guidance visible
-- [ ] Voice & Content section shows ≥3 labeled specimens matching IA guide §4.4 fixture strings
-- [ ] Surface slices: Setup step card + App shell chrome per IA guide §4.5 — identifiable without live routing
+- [ ] Studio starts without daemon on the documented command
+- [ ] Header theme toggle reflects the DESIGN pair; pair view shows the same specimen in both themes without a second token system
+- [ ] Filterable indexes cover §7 families; no-results is visible; hash deep links work
+- [ ] Every remaining/changed token family has a Tokens (or Brand) specimen in both themes
+- [ ] Component sections in §7.3 remain reachable; §8 states are present where supported
+- [ ] All logo variants and `NexusMark` render; timeline-mark geometry is unchanged
+- [ ] Voice section shows labeled specimens matching the locked Voice rules
+- [ ] Every Surfaces fixture family in §7.5 renders in both themes with source badges
+- [ ] Frozen routes and nav labels in §6 remain
+- [ ] 1440×900, 1280×800, and 390×844: usable nav, no document-wide horizontal overflow
+- [ ] Keyboard focus visible; reduced-motion recipes collapse
+- [ ] Read-only footer / DESIGN edit hint remains
 - [ ] `wire_contracts_changed: false`
-
-### V1.99 additional acceptance hooks
-
-- [ ] At least one approved presentational primitive is consumed from `@42ch/nexus-ui` in Studio instead of `@web-ui/*`
-- [ ] `/surfaces` functions as a visual proving ground for setup/shell direction without importing Web layout or daemon code
-- [ ] Each Studio fixture that influences Web has a recorded decision: promote to package, keep in Web, keep in Studio, or defer
-- [ ] Promoted primitives use public `@42ch/nexus-ui` exports; unpromoted primitives are the only allowed remaining `@web-ui/*` usage
-- [ ] `/surfaces` fixture sections record whether they are `promoted primitive`, `studio-local fixture`, `web-only wrapper`, or `future web product component`
+- [ ] `pnpm --filter web typecheck` and `pnpm --filter web build` pass **without** web source edits
+- [ ] No claim of web or desktop redesign acceptance
 
 ---
 
-## 8. Resolved (architect P-1)
+## 11. Resolved (historical, still true)
 
-- **B1 Merge precedence:** `design-unification.md` §3 — apps/web wins neutrals/accent scales; root wins brand VI extended; components union.
-- **B2 CSS pipeline:** `@nexus/design-tokens` (`tooling/design-tokens`) — shared preset + `tokens.css`.
-- **B3 Import strategy:** `@web-ui/*` Vite alias; `@web-lib/utils` for `cn()` only.
-- **B4 Primitive inventory:** 11 modules (§4.3); `tabs` barrel export in P0 T1.
+- CSS pipeline: `@nexus/design-tokens` (`tooling/design-tokens`) — shared preset + `tokens.css`
+- Import strategy: public `@42ch/nexus-ui` + annotated `@web-ui/*` + `@web-*` extracts
+- Theme mechanism: `.dark` on `html`
+
+The DESIGN pair locks exact v0.5 values and component recipes. This document locks the single compiler, iframe isolation, discovery metadata and source-compatible boundaries. Implementation evidence is required independently; these target contracts do not claim runtime or visual QC verification.
+
+---
+
+## 12. Historical (not current promises)
+
+Studio originated in V1.98 as a read-only DESIGN gallery. Later iterations added `@42ch/nexus-ui` promotions, `@web-*` extracts, Surfaces nested routes, and many fixture families. Those shipped behaviors remain as the inventory in §7.
+
+The following are **archived process**, not v1.187 work to re-execute:
+
+- V1.98 “parity with shipped Web UI” as the primary outcome (this iteration overhauls the shared language; web page QA is deferred)
+- V1.99 first-promotion-batch checklists
+- V1.106/V1.107 Surfaces addition tables and App Toast-adoption follow-ups
+- Earlier IA-guide prose that described five generic home cards and warm-paper Chronos copy as the target look (superseded by §6 and §7)
+
+Do not copy those checklists forward as open tasks.

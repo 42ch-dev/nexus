@@ -135,13 +135,8 @@ describe('TimelineComputeFixtures render', () => {
     render(<TimelineComputeFixtures />);
 
     const matrix = screen.getByTestId('timeline-compute-narrative-matrix');
-    expect(
-      matrix.querySelectorAll('[class*="border-canvas-node-border-selected"]')
-        .length,
-    ).toBeGreaterThanOrEqual(1);
-    expect(
-      matrix.querySelectorAll('[class*="data-[dragging=true]"]').length,
-    ).toBeGreaterThanOrEqual(0);
+    expect(within(matrix).getByText('Compute result · selected')).toBeInTheDocument();
+    expect(matrix.querySelectorAll('[data-dragging="true"]').length).toBe(1);
   });
 
   it('renders the direct-run inspector with module, params, Run id, provenance, Open Run', () => {
@@ -173,6 +168,17 @@ describe('TimelineComputeFixtures render', () => {
     expect(within(direct).getByTestId('compute-inspector-open-run')).toHaveTextContent(
       'Open Run',
     );
+  });
+
+  it('renders the read-only inspector with Run id but no Open Run affordance', () => {
+    mockMatchMedia(false);
+    render(<TimelineComputeFixtures />);
+
+    const readonly = screen.getByTestId('timeline-compute-inspector-readonly');
+    expect(within(readonly).getByTestId('compute-inspector-run-id')).toHaveTextContent(
+      'run_9f3a2c',
+    );
+    expect(within(readonly).queryByTestId('compute-inspector-open-run')).not.toBeInTheDocument();
   });
 
   it('renders the preset inspector with provenance but no Run section', () => {

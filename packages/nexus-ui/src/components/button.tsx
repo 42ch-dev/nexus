@@ -11,28 +11,28 @@ import { cn } from '../lib/cn';
  * destructive); sizes map to the tiny/small/default/large heights. The two-layer
  * focus ring is applied globally in src/index.css.
  *
- * Primary is theme-split: light shell uses mid-teal fill + white label; dark
- * shell keeps the strong cyan CTA + deep ink label. Hover/active steps follow
- * the cyan scale in both themes (tokens.css).
+ * Primary uses blue-700/800/900 rest/hover/active per DESIGN.md §Button.
+ * Light label is white; dark label uses deep-blue on the lighter cobalt fill
+ * (token-resolved blue-700). Secondary/native control borders use gray-500.
  */
 const buttonVariants = cva(
   'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-control font-button transition-colors duration-state ease-standard disabled:pointer-events-none disabled:bg-gray-100 disabled:text-gray-700 dark:disabled:bg-gray-100 dark:disabled:text-gray-700 focus-visible:outline-none',
   {
     variants: {
       variant: {
-        // primary: mid-teal fill in light; cyan CTA in dark (VI-002 / AC-5b)
+        // primary: blue-700 rest; white label (light) / deep-blue (dark)
         primary:
-          'bg-brand-cyan-1000 text-brand-white hover:bg-blue-900 active:bg-blue-1000 dark:bg-brand-cyan dark:text-brand-deep-blue dark:hover:bg-blue-800 dark:active:bg-blue-900',
-        // secondary: background-100 bg, gray-1000 text, gray-alpha-400 border
+          'bg-blue-700 text-brand-white hover:bg-blue-800 active:bg-blue-900 dark:text-brand-deep-blue',
+        // secondary: background-100 bg, gray-1000 text, gray-500 border
         secondary:
-          'bg-background-100 text-gray-1000 border border-gray-alpha-400 hover:bg-background-200 hover:border-gray-alpha-500',
+          'bg-background-100 text-gray-1000 border border-gray-500 hover:bg-background-200 hover:border-gray-alpha-500',
         // tertiary: transparent, gray-1000 text; hover gray-alpha-100
         tertiary: 'bg-transparent text-gray-1000 hover:bg-gray-alpha-100',
         // destructive: red-800 bg, white text (light) / deep-blue text (dark);
         // red-800 is dark in light mode and bright in dark mode, so text follows
         // the fill per the background-driven contrast invariant.
         destructive:
-          'bg-red-800 text-white hover:bg-red-700 active:bg-red-900 dark:text-brand-deep-blue',
+          'bg-red-800 text-white hover:bg-red-700 active:bg-red-900 dark:text-brand-deep-blue dark:hover:bg-red-700 dark:active:bg-red-900',
       },
       size: {
         // tiny: 24px height + button-12 (Badge-density)

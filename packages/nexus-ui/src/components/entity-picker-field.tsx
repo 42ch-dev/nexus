@@ -68,7 +68,7 @@ export function EntityPickerField({
 
   return (
     <div className={cn('flex flex-col gap-1.5', className)} data-testid="entity-picker-field">
-      <Label htmlFor={id}>
+      <Label htmlFor={entries.length > 0 ? id : undefined}>
         {label} {required && <span className="text-red-700">*</span>}
       </Label>
       {entries.length === 0 ? (

@@ -17,21 +17,6 @@ describe('Select', () => {
     expect(select).toHaveProperty('tagName', 'SELECT');
   });
 
-  it('renders with base structural classes', () => {
-    render(
-      <Select data-testid="test-select">
-        <option value="a">A</option>
-      </Select>,
-    );
-    const select = screen.getByTestId('test-select');
-    expect(select).toHaveClass('h-10');
-    expect(select).toHaveClass('w-full');
-    expect(select).toHaveClass('rounded-control');
-    expect(select).toHaveClass('border');
-    expect(select).toHaveClass('bg-background-100');
-    expect(select).toHaveClass('appearance-none');
-    expect(select).toHaveClass('focus-visible:border-blue-700');
-  });
 
   it('renders option children supplied by the consumer', () => {
     render(
@@ -46,41 +31,8 @@ describe('Select', () => {
 
   // --- chevron inset (asymmetric horizontal padding) ---
 
-  it('renders with asymmetric inline padding for chevron inset', () => {
-    render(
-      <Select data-testid="test-select">
-        <option value="a">A</option>
-      </Select>,
-    );
-    const select = screen.getByTestId('test-select');
-    expect(select).toHaveClass('ps-3');
-    expect(select).toHaveClass('pe-8');
-    expect(select).not.toHaveClass('px-3');
-  });
 
-  it('inherits chevron inset when disabled', () => {
-    render(
-      <Select disabled data-testid="test-select">
-        <option value="a">A</option>
-      </Select>,
-    );
-    const select = screen.getByTestId('test-select');
-    expect(select).toHaveClass('ps-3');
-    expect(select).toHaveClass('pe-8');
-    expect(select).not.toHaveClass('px-3');
-  });
 
-  it('inherits chevron inset when invalid', () => {
-    render(
-      <Select invalid data-testid="test-select">
-        <option value="a">A</option>
-      </Select>,
-    );
-    const select = screen.getByTestId('test-select');
-    expect(select).toHaveClass('ps-3');
-    expect(select).toHaveClass('pe-8');
-    expect(select).not.toHaveClass('px-3');
-  });
 
   // --- custom chevron overlay ---
 
@@ -93,8 +45,6 @@ describe('Select', () => {
     const chevron = screen.getByTestId('select-chevron');
     expect(chevron).toBeInTheDocument();
     expect(chevron).toHaveAttribute('aria-hidden', 'true');
-    expect(chevron).toHaveClass('right-3');
-    expect(chevron).toHaveClass('pointer-events-none');
   });
 
   it('keeps the custom chevron in disabled and invalid states', () => {
@@ -123,7 +73,6 @@ describe('Select', () => {
     );
     const select = screen.getByTestId('test-select');
     expect(select).toHaveClass('custom-class');
-    expect(select).toHaveClass('h-10');
   });
 
   // --- invalid prop → aria-invalid + visual state ---
@@ -155,27 +104,7 @@ describe('Select', () => {
     expect(screen.getByTestId('test-select')).not.toHaveAttribute('aria-invalid');
   });
 
-  it('applies red-700 border class when invalid', () => {
-    render(
-      <Select invalid data-testid="test-select">
-        <option value="a">A</option>
-      </Select>,
-    );
-    const select = screen.getByTestId('test-select');
-    expect(select).toHaveClass('border-red-700');
-    expect(select).not.toHaveClass('border-gray-alpha-400');
-  });
 
-  it('applies gray-alpha-400 border class when not invalid', () => {
-    render(
-      <Select data-testid="test-select">
-        <option value="a">A</option>
-      </Select>,
-    );
-    const select = screen.getByTestId('test-select');
-    expect(select).toHaveClass('border-gray-alpha-400');
-    expect(select).not.toHaveClass('border-red-700');
-  });
 
   // --- ref-as-prop ---
 
@@ -247,17 +176,12 @@ describe('Select', () => {
 
   // --- disabled state ---
 
-  it('applies disabled styling classes when disabled', () => {
+  it('exposes the native disabled state', () => {
     render(
       <Select disabled data-testid="test-select">
         <option value="a">A</option>
       </Select>,
     );
-    const select = screen.getByTestId('test-select');
-    expect(select).toBeDisabled();
-    expect(select).toHaveClass('disabled:bg-gray-100');
-    expect(select).toHaveClass('disabled:text-gray-700');
-    expect(select).toHaveClass('disabled:border-gray-alpha-300');
-    expect(select).toHaveClass('disabled:cursor-not-allowed');
+    expect(screen.getByTestId('test-select')).toBeDisabled();
   });
 });

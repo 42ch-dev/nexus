@@ -1,6 +1,11 @@
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { designTokensPlugin } from './plugins/design-tokens';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, '../..');
 
 /**
  * Vite config for the Nexus Design Studio.
@@ -14,7 +19,7 @@ import react from '@vitejs/plugin-react';
  * esnext target: same rationale as apps/web (no legacy browser support needed).
  */
 export default defineConfig({
-  plugins: [react()],
+  plugins: [designTokensPlugin(REPO_ROOT), react()],
   esbuild: { target: 'esnext' },
   build: {
     target: 'esnext',

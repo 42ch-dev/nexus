@@ -1,4 +1,6 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+
+import { useTheme } from '@/components/theme-provider';
 
 import {
   NexusLogo,
@@ -26,6 +28,7 @@ import logoMonoSrc from '@42ch/nexus-ui/assets/logos/logo-mono.svg';
 import logoTextSrc from '@42ch/nexus-ui/assets/logos/logo-text.svg';
 
 import { StudioShellLogo } from '@/components/studio-shell-logo';
+import { SurfaceSourceBadges } from '@/components/surface-source-badge';
 import { ViBrandAcceptanceFixtures } from '@/fixtures/vi-aesthetic-retune-fixtures';
 
 /* ------------------------------------------------------------------ */
@@ -57,42 +60,42 @@ interface LogoDisplay {
 const LOGO_DISPLAYS: LogoDisplay[] = [
   {
     variant: 'primary',
-    label: 'Primary (plain)',
+    label: 'Primary (frozen)',
     fileName: logoVariants.primary,
     description:
-      'Plain timeline mark — bright cyan gradient, no plate. Use inline on ink or paired with structure; square plate lockups use logo-primary-square.svg.',
+      'Frozen plain timeline mark — baked bright-cyan gradient (logo-primary.svg), no plate. Installed reference asset, not the live document palette. Square plate lockups use logo-primary-square.svg.',
     panelBgClass: 'bg-brand-deep-blue',
   },
   {
     variant: 'whiteBg',
-    label: 'White-bg (plain)',
+    label: 'White-bg (frozen)',
     fileName: logoVariants.whiteBg,
     description:
-      'Plain deep→cyan gradient mark for light surfaces. Plated lockups use logo-white-bg-square.svg.',
+      'Frozen plain deep→cyan gradient mark (logo-white-bg.svg) for light surfaces. Installed reference, separate from the live theme. Plated lockups use logo-white-bg-square.svg.',
     panelBgClass: 'bg-white',
   },
   {
     variant: 'white',
-    label: 'White',
+    label: 'White (frozen)',
     fileName: logoVariants.white,
     description:
-      'Dark-gray→white gradient mark — dark heroes, photography, high-contrast panels.',
+      'Frozen dark-gray→white gradient mark — dark heroes, photography, high-contrast panels. Installed reference asset, not the live document palette.',
     panelBgClass: 'bg-brand-deep-blue',
   },
   {
     variant: 'mono',
-    label: 'Mono',
+    label: 'Mono (frozen)',
     fileName: logoVariants.mono,
     description:
-      'Light-gray→black gradient mark (static). For tintable inline UI use <NexusMark>.',
+      'Frozen light-gray→black gradient mark (static). For tintable inline UI use <NexusMark>. Installed reference, not the active theme.',
     panelBgClass: 'bg-background-100',
   },
   {
     variant: 'text',
-    label: 'Text',
+    label: 'Text (frozen)',
     fileName: logoVariants.text,
     description:
-      'Wordmark (logo-text.svg) — the only approved Nexus logo text. Always render via <NexusLogo variant="text"> (apps/web: NexusTextLogo). Never typeset "nexus"/"Nexus" with UI fonts as a brand substitute. On dark heroes set color to white (inline) or invert img.',
+      'Frozen wordmark (logo-text.svg) — the only approved Nexus logo text. Always render via <NexusLogo variant="text"> (apps/web: NexusTextLogo). Never typeset "nexus"/"Nexus" with UI fonts as a brand substitute. On dark heroes set color to white (inline) or invert img. Installed reference, not live theme.',
     panelBgClass: 'bg-brand-deep-blue',
     invertForDark: true,
   },
@@ -101,18 +104,19 @@ const LOGO_DISPLAYS: LogoDisplay[] = [
 const LOGO_SQUARE_DISPLAYS = [
   {
     key: 'primary-square',
-    label: 'Primary plate',
+    label: 'Primary plate (frozen)',
     fileName: logoSquareVariants.primary,
     description:
-      'Square deep-blue plate lockup — sidebar shell, desktop icon compose source. Width-fill in gallery.',
+      'Frozen square deep-blue plate lockup — sidebar shell, desktop icon compose source. Installed reference asset, not the live document palette. Width-fill in gallery.',
     panelBgClass: 'bg-brand-deep-blue',
     src: logoPrimarySquareSrc,
   },
   {
     key: 'white-bg-square',
-    label: 'White-bg plate',
+    label: 'White-bg plate (frozen)',
     fileName: logoSquareVariants.whiteBg,
-    description: 'Square white plate lockup — only when a light/white surface is required.',
+    description:
+      'Frozen square white plate lockup — only when a light/white surface is required. Installed reference, separate from live theme.',
     panelBgClass: 'bg-white',
     src: logoWhiteBgSquareSrc,
   },
@@ -127,26 +131,64 @@ const VARIANT_THEMES: LogoVariantTheme[] = [
 
 interface ThemeCssSwatch {
   varName: string;
-  hex: string;
   description: string;
 }
 
-/** Static brand identity values from `@42ch/nexus-ui/theme.css`. These are
- *  constant across themes (no `.dark` variants in that file). */
+/** All 13 brand CSS variables exported by `@42ch/nexus-ui/theme.css` (the
+ *  extended deep-blue/cyan steps + white + four alphas). Values are generated
+ *  per-theme snapshots from the DESIGN pair; the gallery reads them live via
+ *  the actual `var(--nexus-brand-*)` so the swatch tracks the SSOT. */
 const THEME_CSS_SWATCHES: ThemeCssSwatch[] = [
   {
     varName: '--nexus-brand-deep-blue',
-    hex: '#0D2B3E',
     description: 'Ink structure — titlebar fill, light text links, logo structure on light.',
   },
   {
+    varName: '--nexus-brand-deep-blue-800',
+    description: 'Extended deep-blue step 800 (one notch lighter ink).',
+  },
+  {
+    varName: '--nexus-brand-deep-blue-900',
+    description: 'Extended deep-blue step 900 (deeper ink).',
+  },
+  {
+    varName: '--nexus-brand-deep-blue-1000',
+    description: 'Extended deep-blue step 1000 (deepest ink).',
+  },
+  {
     varName: '--nexus-brand-cyan',
-    hex: '#25D1E0',
-    description: 'Brand signal — shared light/dark accent (buttons, active bars, focus).',
+    description: 'Cobalt signal — shared light/dark accent (buttons, active bars, focus).',
+  },
+  {
+    varName: '--nexus-brand-cyan-800',
+    description: 'Extended cyan step 800 (slightly deeper cobalt).',
+  },
+  {
+    varName: '--nexus-brand-cyan-900',
+    description: 'Extended cyan step 900 (deeper cobalt).',
+  },
+  {
+    varName: '--nexus-brand-cyan-1000',
+    description: 'Extended cyan step 1000 (deepest cobalt).',
+  },
+  {
+    varName: '--nexus-brand-deep-blue-alpha-100',
+    description: 'Deep-blue 10% alpha tint — translucent structure wash.',
+  },
+  {
+    varName: '--nexus-brand-deep-blue-alpha-200',
+    description: 'Deep-blue 14% alpha tint — stronger structure wash.',
+  },
+  {
+    varName: '--nexus-brand-cyan-alpha-100',
+    description: 'Cyan 12% alpha tint — translucent cobalt wash.',
+  },
+  {
+    varName: '--nexus-brand-cyan-alpha-200',
+    description: 'Cyan 20% alpha tint — stronger cobalt wash.',
   },
   {
     varName: '--nexus-brand-white',
-    hex: '#FFFFFF',
     description: 'Text on deep fills; logo on dark hero surfaces.',
   },
 ];
@@ -183,7 +225,7 @@ function SubNav() {
 
 function SectionHeading({ id, children }: { id: string; children: ReactNode }) {
   return (
-    <h3 id={id} className="text-heading-20 font-semibold text-gray-1000 mb-4 pt-8 scroll-mt-16">
+    <h3 id={id} className="text-heading-20 font-semibold text-gray-1000 mb-4 pt-8 scroll-mt-sticky-header">
       {children}
     </h3>
   );
@@ -264,6 +306,16 @@ function LogoGrid() {
         — plain wide marks, square plate lockups (<code className="font-mono bg-gray-alpha-100 px-1 rounded">logoSquareVariants</code>
         ), plus wordmark — on their recommended surfaces per DESIGN.md § Logo Usage.
       </p>
+      <p className="text-copy-16 text-gray-700 mb-4">
+        <strong className="font-medium text-gray-1000">Frozen assets, not the live doc theme.</strong>{' '}
+        Every logo below is an <em>installed reference</em> (baked-gradient SVG shipped in{' '}
+        <code className="font-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui/assets/logos</code>)
+        and is labeled <strong>(frozen)</strong> so it can never be mistaken for the active cobalt
+        palette. Live, theme-aware rendering lives in{' '}
+        <code className="font-mono bg-gray-alpha-100 px-1 rounded">&lt;NexusMark&gt;</code> and the{' '}
+        <code className="font-mono bg-gray-alpha-100 px-1 rounded">--nexus-brand-*</code> CSS
+        variables (below, under Theme variables).
+      </p>
       <p
         data-testid="brand-wordmark-contract"
         className="text-copy-16 text-gray-700 mb-6"
@@ -286,10 +338,11 @@ function LogoGrid() {
         ))}
       </div>
 
-      <h4 className="text-heading-16 font-heading text-gray-1000 mt-8 mb-4">Square plate lockups</h4>
+      <h4 className="text-heading-16 font-heading text-gray-1000 mt-8 mb-4">Square plate lockups (frozen)</h4>
       <p className="text-copy-16 text-gray-700 mb-4">
         Plated assets use the <code className="font-mono bg-gray-alpha-100 px-1 rounded">*-square.svg</code>{' '}
-        suffix — separate from plain wide marks above.
+        suffix — separate from plain wide marks above. Both square lockups are installed reference
+        assets (frozen gradients), never the active document palette.
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {LOGO_SQUARE_DISPLAYS.map((d) => (
@@ -310,11 +363,15 @@ function ChronosShellMini({
   logo: ReactNode;
 }) {
   const isDark = mode === 'dark';
+  // The ink titlebar is a fixed-pigment plate in both themes (see the
+  // brand-chronos note); only its label paint differs — white on light,
+  // cobalt on dark — so the label names the titlebar treatment, never the
+  // document (F-004). The content area below follows the document theme:
+  // light/dark parity for the shell comes from the Compare view, not a
+  // nested `.dark` scope.
   return (
     <div
-      className={`border border-gray-alpha-300 rounded-card overflow-hidden ${
-        isDark ? 'bg-[#08141C]' : 'bg-background-100'
-      }`}
+      className="border border-gray-alpha-300 rounded-card overflow-hidden bg-background-100"
       data-testid={`chronos-mini-${mode}`}
     >
       <div
@@ -326,22 +383,12 @@ function ChronosShellMini({
             isDark ? 'text-brand-cyan' : 'text-white'
           }`}
         >
-          {isDark ? 'Chronos Dark' : 'Chronos Light'}
+          {isDark ? 'Chronos Dark titlebar' : 'Chronos Light titlebar'}
         </span>
         {logo}
       </div>
-      <div
-        className={`min-h-[72px] p-4 ${
-          isDark ? 'bg-[#08141C]' : 'bg-background-100'
-        }`}
-      >
-        <div
-          className={`h-8 rounded-control border ${
-            isDark
-              ? 'border-white/10 bg-[#0D1B26]'
-              : 'border-gray-alpha-200 bg-background-200'
-          }`}
-        />
+      <div className="min-h-[72px] p-4 bg-background-100">
+        <div className="h-8 rounded-control border border-gray-alpha-200 bg-background-200" />
       </div>
     </div>
   );
@@ -358,7 +405,7 @@ function ChronosContextSection() {
         Chronos identity: ink titlebar uses the compact bright mark (
         <code className="font-mono bg-gray-alpha-100 px-1 rounded">logo-white.svg</code> at{' '}
         <code className="font-mono bg-gray-alpha-100 px-1 rounded">logoCompactMarkHeightPx</code>
-        ), label white on light / cyan on dark. Sidebar shell uses the square primary plate (
+        ), label white on light / cobalt on dark. Sidebar shell uses the square primary plate (
         <code className="font-mono bg-gray-alpha-100 px-1 rounded">logo-primary-square.svg</code>
         ). Use{' '}
         <code className="font-mono bg-gray-alpha-100 px-1 rounded">logo-white-bg-square.svg</code>{' '}
@@ -459,27 +506,31 @@ function MarkSection() {
           <div className="bg-background-100 p-8 flex flex-col items-center justify-center gap-3 min-h-[120px]">
             <NexusMark size={32} className="w-auto text-brand-deep-blue" />
             <span className="text-copy-13 text-gray-600 text-center">
-              Light surface — deep ink via text-brand-deep-blue.
+              Document-following surface — deep ink via text-brand-deep-blue.
             </span>
           </div>
           <div className="px-4 py-2 border-t border-gray-alpha-200 bg-gray-alpha-100">
-            <span className="text-label-14 text-gray-700">Light theme</span>
+            <span className="text-label-14 text-gray-700">
+              Theme-following (uses current document theme)
+            </span>
           </div>
         </div>
 
-        <div className="border border-gray-alpha-300 rounded-card bg-[#08141C] overflow-hidden">
-          <div className="p-8 flex flex-col items-center justify-center gap-3 min-h-[120px]">
-            <NexusMark size={32} className="w-auto text-brand-cyan" />
-            <span className="text-copy-13 text-gray-300 text-center">
-              Dark surface —{' '}
+        <div className="border border-gray-alpha-300 rounded-card bg-background-100 overflow-hidden">
+          <div className="bg-background-100 p-8 flex flex-col items-center justify-center gap-3 min-h-[120px]">
+            <NexusMark size={32} className="w-auto text-brand-deep-blue dark:text-brand-cyan" />
+            <span className="text-copy-13 text-gray-600 text-center">
+              Same specimen — theme-following paint: deep ink on light,{' '}
               <code className="text-copy-13-mono bg-gray-alpha-200 px-1 rounded">
                 text-brand-cyan
-              </code>
-              .
+              </code>{' '}
+              (dark `#8EB1F4`) on dark. Compare shows both themes.
             </span>
           </div>
-          <div className="px-4 py-2 border-t border-white/10 bg-[#0D1B26]">
-            <span className="text-label-14 text-gray-300">Dark theme</span>
+          <div className="px-4 py-2 border-t border-gray-alpha-200 bg-gray-alpha-100">
+            <span className="text-label-14 text-gray-700">
+              Theme-following (uses current document theme)
+            </span>
           </div>
         </div>
       </div>
@@ -499,10 +550,12 @@ function SpecimensSection() {
     <section>
       <SectionHeading id="brand-specimens">Theme specimens</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
+        <strong className="font-medium text-gray-1000">Historical geometry/pigment references.</strong>{' '}
         Studio-only <code className="font-mono bg-gray-alpha-100 px-1 rounded">&lt;NexusLogoVariant&gt;</code>{' '}
         specimens driven by palette props (defaults in{' '}
-        <code className="font-mono bg-gray-alpha-100 px-1 rounded">logoVariantPalettes</code>). Not a
-        product theme switcher — gallery reference only.
+        <code className="font-mono bg-gray-alpha-100 px-1 rounded">logoVariantPalettes</code>). The four
+        elegant / nature / parchment / scifi palettes are <em>frozen historical references</em>, not the
+        active document theme — they sit on a fixed reference plate and are not live token swatches.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -546,13 +599,25 @@ function SpecimensSection() {
 /* ---------- Theme CSS swatches ---------- */
 
 function ThemeCssSwatches() {
+  const { resolvedTheme } = useTheme();
+  const [values, setValues] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const cs = getComputedStyle(document.documentElement);
+    setValues(
+      Object.fromEntries(THEME_CSS_SWATCHES.map((s) => [s.varName, cs.getPropertyValue(s.varName).trim()])),
+    );
+  }, [resolvedTheme]);
+
   return (
     <section>
       <SectionHeading id="brand-theme-css">Theme variables</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
         Brand CSS custom properties exported by{' '}
         <code className="font-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui/theme.css</code>.
-        These are static brand-identity values (no per-theme variants).
+        Values are generated <strong>light/default snapshots</strong> from the DESIGN pair —
+        theme-aware UI reads <code className="font-mono bg-gray-alpha-100 px-1 rounded">var()</code>{' '}
+        (via <code className="font-mono bg-gray-alpha-100 px-1 rounded">@nexus/design-tokens</code>),
+        not these constants. Swatches below read the live computed value.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -560,11 +625,13 @@ function ThemeCssSwatches() {
           <div key={s.varName} className="flex flex-col gap-3">
             <div
               className="w-full aspect-[3/2] rounded-card border border-gray-alpha-400"
-              style={{ backgroundColor: s.hex }}
+              style={{ backgroundColor: `var(${s.varName})` }}
             />
             <div className="flex flex-col gap-0.5">
               <code className="text-label-14 font-mono text-gray-1000 break-all">{s.varName}</code>
-              <span className="text-copy-13-mono text-gray-600">{s.hex}</span>
+              <span className="text-copy-13-mono text-gray-600">
+                {values[s.varName] || `var(${s.varName})`}
+              </span>
               <span className="text-copy-13 text-gray-600">{s.description}</span>
             </div>
           </div>
@@ -621,7 +688,7 @@ function ClearSpaceSection() {
             clearance
           </span>
           <span className="text-copy-13 text-gray-600">
-            Dashed cyan box = exclusion zone ({clearancePx}px on each side at this size).
+            Dashed cobalt box = exclusion zone ({clearancePx}px on each side at this size).
           </span>
         </div>
       </div>
@@ -640,9 +707,10 @@ export function BrandPage() {
       <p className="text-copy-16 text-gray-700 mb-6">
         <code className="font-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code> VI —
         Chronos timeline logo system (wide mark, no N-network lockup), shell placement, theme
-        specimens, and clear-space guidance. Cyan is signal; deep blue is ink structure. Toggle
+        specimens, and clear-space guidance. Cobalt is signal; deep blue is ink structure. Toggle
         light/dark to verify theme-aware shell fixtures.
       </p>
+      <SurfaceSourceBadges importPaths={["@42ch/nexus-ui", "@/fixtures/vi-aesthetic-retune-fixtures"]} />
       <SubNav />
 
       <LogoGrid />
@@ -652,23 +720,28 @@ export function BrandPage() {
       <ThemeCssSwatches />
       <ClearSpaceSection />
 
-      <section id="brand-vi-acceptance" className="scroll-mt-16">
-        <h3 className="text-heading-20 font-semibold text-gray-1000 mb-2 pt-8">
-          VI acceptance (P2)
+      <section id="brand-vi-acceptance" className="scroll-mt-sticky-header">
+        <h3
+          id="brand-vi-acceptance-heading"
+          className="text-heading-20 font-semibold text-gray-1000 mb-2 pt-8 scroll-mt-sticky-header"
+        >
+          VI acceptance fixtures
         </h3>
         <p
           data-testid="brand-vi-acceptance-note"
           className="text-copy-16 text-gray-700 mb-6"
         >
-          Target states for VI-003, VI-004, and VI-005 — compact timeline mark scale, app icon
-          opaque full-bleed compose, and plain vs{' '}
+          Shipped acceptance specimens for VI-003, VI-004, and VI-005 — compact timeline mark
+          scale, app icon opaque full-bleed compose, and plain vs{' '}
           <code className="font-mono bg-gray-alpha-100 px-1 rounded">*-square</code> asset split.
-          Toggle light/dark in the chrome. App wiring follows Studio acceptance (T3+).
+          These use a scoped dark reference panel (fixed, not the session theme) so each asset
+          split is inspectable on both a light and a dark backing without wrapping the whole
+          document in a second theme.
         </p>
         <ViBrandAcceptanceFixtures />
       </section>
 
-      <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
+      <p className="text-copy-13 text-gray-700 mt-12 pt-8 border-t border-gray-alpha-200">
         Assets from <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>
         — SVG marks, inline <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">NexusMark</code>
         , and palette-driven{' '}

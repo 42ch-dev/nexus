@@ -15,6 +15,19 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer utilities {
+  .scroll-mt-sticky-header {
+    scroll-margin-top: var(--studio-sticky-header-offset, 3rem);
+  }
+
+  /** Bounded local horizontal scroll for wide Surfaces fixtures at narrow viewports. */
+  .studio-fixture-boundary {
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+  }
+}
+
 @layer base {
   html {
     font-family: var(--font-sans);

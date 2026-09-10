@@ -30,14 +30,23 @@ pnpm add @42ch/nexus-ui --workspace
 | `NexusLogo` | `import { NexusLogo } from '@42ch/nexus-ui'` | `variant`, `src`, `size?`, `label?`, `className?`, `draggable?` | Bundler-agnostic `<img>`; plate lockups + wide marks + wordmark; set `draggable={false}` in titlebar chrome to avoid native image ghost-drag |
 | `NexusMark` | `import { NexusMark } from '@42ch/nexus-ui'` | `size`, `label`, `className` | Inline timeline mark; `currentColor`; height-driven / `w-auto` |
 | `NexusLogoVariant` | `import { NexusLogoVariant } from '@42ch/nexus-ui'` | `theme` (`elegant`, `nature`, `parchment`, `scifi`) + optional `palette` | Studio-only specimens; no assets; not a product theme switcher |
-| `Button` | `import { Button } from '@42ch/nexus-ui'` | `variant` (`primary`, `secondary`, `tertiary`, `destructive`) + `size` (`small`, `default`, `large`) + `asChild` | Presentational only; **primary is theme-split** — light shell: deep ink fill + white label; dark shell: cyan fill + deep label (VI-002) |
+| `Button` | `import { Button } from '@42ch/nexus-ui'` | `variant` (`primary`, `secondary`, `tertiary`, `destructive`) + `size` (`tiny`, `small`, `default`, `large`) + `asChild` | Presentational only; primary uses blue-700/800/900 with theme-split label contrast |
 | `Badge` | `import { Badge } from '@42ch/nexus-ui'` | `variant` (`neutral`, `running`, `queued`, `warning`, `error`, `preset`) + `tone` (`soft`, `solid`; default `soft`) | 24px status pill; soft = tinted fill + strengthened border; solid = semantic fill + high-contrast text (opt-in) |
 | `Card` | `import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@42ch/nexus-ui'` | Five related sub-primitives; no variant axis | `Card` wraps content with border + shadow; `CardHeader`/`CardContent` layout helpers |
 | `Input` | `import { Input } from '@42ch/nexus-ui'` | `invalid?: boolean` + native input attrs | V1.100 form-field contract; app owns id/describedby/copy |
 | `Label` | `import { Label } from '@42ch/nexus-ui'` | Native label attrs (`htmlFor`) | Presentational `<label>`; app owns association IDs |
 | `Textarea` | `import { Textarea } from '@42ch/nexus-ui'` | `invalid?: boolean` + native textarea attrs | Same invalid/`aria-invalid` pattern as Input |
 | `Select` | `import { Select } from '@42ch/nexus-ui'` | `invalid?: boolean` + native select attrs | V1.101 native `<select>`; app owns `<option>` children; no Radix compound parts |
-| `Tabs` | `import { Tabs, TabsList, TabsTrigger, TabsContent } from '@42ch/nexus-ui'` | Controlled (`value` + `onValueChange`) or uncontrolled (`defaultValue`) compound | V1.137 React context tabs; a11y roles on list/trigger/panel |
+| `Tabs` | `import { Tabs, TabsList, TabsTrigger, TabsContent } from '@42ch/nexus-ui'` | Controlled (`value` + `onValueChange`) or uncontrolled (`defaultValue`) compound | V1.137 React context tabs; a11y roles on list/trigger/panel; TabsTrigger has no disabled prop |
+| `Toast` | `import { ToastProvider, Toaster, useToast } from '@42ch/nexus-ui'` | `toast(input)` returns id; `dismiss(id)` removes; variants success/error/warning/info | Context-driven queue with body portal; no action-CTA or update API |
+| `TransportErrorBlock` | `import { TransportErrorBlock } from '@42ch/nexus-ui'` | `kind` + optional `onRetry` / `onOpenSettings` callbacks | Six transport-failure kinds; compact text-link CTAs (not filled Button) |
+| `RunFormFields` | `import { RunFormFields } from '@42ch/nexus-ui'` | Schema-driven invocation form; caller-owned `values` / `onChange` / `copy` | Derives entity pickers, enum selects, booleans, numbers, strings; unsupported kinds noted |
+| `EntityPickerField` | `import { EntityPickerField } from '@42ch/nexus-ui'` | `entries`, `value`, `onChange`, optional `disabled` / `invalid` | Single-entity picker; empty-state when no entries |
+| `ProposalSections` | `import { ProposalSections } from '@42ch/nexus-ui'` | `proposals`, `copy`, optional event selection callbacks | Run proposal inspector: report, knowledge updates, timeline events, new knowledge |
+| `RunStatusBadge` | `import { RunStatusBadge } from '@42ch/nexus-ui'` | `status` + caller-owned `label` | Maps wire lifecycle status to semantic Badge variant |
+| `RunsTable` | `import { RunsTable } from '@42ch/nexus-ui'` | `rows`, `copy`, optional `onOpenRun` | Runs history table; empty state when no rows |
+| `ComputeResultNodeChrome` | `import { ComputeResultNodeChrome } from '@42ch/nexus-ui'` | Resolved strings + optional `runId` | Narrative-layer compute node body chrome |
+| `ComputeInspectorSections` | `import { ComputeInspectorSections } from '@42ch/nexus-ui'` | Module/report/params/affected/run sections; optional `onOpenRun` | Compute result node inspector content |
 
 All primitives are named root exports — no deep subpath imports. Variant helpers (`buttonVariants`, `badgeVariants`) are internal implementation details; do not import them from the package.
 
@@ -222,7 +231,7 @@ pnpm --filter @42ch/nexus-ui run typecheck
 ### Current API (0.2.0)
 
 - **React brand components**: `<NexusLogo variant="..." src="...">` (presentational, explicit variant, `<img>`-based) and `<NexusMark>` (inline mono SVG, `currentColor`). React 19+ peer deps.
-- **UI primitives**: `<Button>`, `<Badge>`, `<Card>`, `<Input>`, `<Label>`, `<Textarea>`, `<Select>`, `<Tabs>` — pure presentational, token-driven, compatible with both `apps/web` and `apps/design-studio`. Variant helpers stay internal; no deep subpath exports.
+- **UI primitives**: `<Button>`, `<Badge>`, `<Card>`, `<Input>`, `<Label>`, `<Textarea>`, `<Select>`, `<Tabs>`, `<Toast>`, `<TransportErrorBlock>`, compute Run Studio composites (`RunFormFields`, `EntityPickerField`, `ProposalSections`, `RunStatusBadge`, `RunsTable`), and compute Timeline composites (`ComputeResultNodeChrome`, `ComputeInspectorSections`) — pure presentational, token-driven, compatible with both `apps/web` and `apps/design-studio`. Variant helpers stay internal; no deep subpath exports.
 - **Class composition**: package-local `cn` helper with DESIGN.md token class-group extension via `tailwind-merge` (public `cn` export).
 
 ### Deferred

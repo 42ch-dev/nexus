@@ -7,6 +7,9 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
  * values swap (see index.css). Dark mode applies the `.dark` class on `<html>`
  * (Tailwind `class` strategy). Preference persists in localStorage and defaults
  * to the OS `prefers-color-scheme` via the `'system'` state.
+ *
+ * When `forcedTheme` is set (iframe embed), storage and OS listeners are
+ * bypassed so parent chrome cannot overwrite the frame theme.
  */
 export type Theme = 'light' | 'dark' | 'system';
 
@@ -19,7 +22,7 @@ interface ThemeContextValue {
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
-const STORAGE_KEY = 'nexus-studio-theme';
+export const STORAGE_KEY = 'nexus-studio-theme';
 
 function readStoredTheme(): Theme | null {
   if (typeof window === 'undefined') return null;
@@ -34,40 +37,64 @@ function resolveTheme(theme: Theme): 'light' | 'dark' {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
-export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(() => readStoredTheme() ?? 'system');
-  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>(() => resolveTheme(theme));
+export function ThemeProvider({
+  children,
+  forcedTheme,
+}: {
+  children: ReactNode;
+  forcedTheme?: 'light' | 'dark';
+}) {
+  const isForced = forcedTheme === 'light' || forcedTheme === 'dark';
+  const [theme, setThemeState] = useState<Theme>(() =>
+    isForced ? forcedTheme : readStoredTheme() ?? 'system',
+  );
+  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>(() =>
+    isForced ? forcedTheme : resolveTheme(theme),
+  );
+
+  useEffect(() => {
+    if (isForced) {
+      setThemeState(forcedTheme);
+      setResolvedTheme(forcedTheme);
+      return;
+    }
+    setResolvedTheme(resolveTheme(theme));
+  }, [forcedTheme, isForced, theme]);
 
   useEffect(() => {
     const root = document.documentElement;
     root.classList.toggle('dark', resolvedTheme === 'dark');
+    root.style.colorScheme = resolvedTheme;
+    if (isForced) return;
     window.localStorage.setItem(STORAGE_KEY, theme);
-  }, [theme, resolvedTheme]);
+  }, [theme, resolvedTheme, isForced]);
 
   useEffect(() => {
-    if (theme !== 'system') return;
+    if (isForced || theme !== 'system') return;
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const handler = () => setResolvedTheme(media.matches ? 'dark' : 'light');
     handler();
     media.addEventListener('change', handler);
     return () => media.removeEventListener('change', handler);
-  }, [theme]);
+  }, [theme, isForced]);
 
   const value = useMemo<ThemeContextValue>(
     () => ({
-      theme,
-      resolvedTheme,
+      theme: isForced ? forcedTheme : theme,
+      resolvedTheme: isForced ? forcedTheme : resolvedTheme,
       setTheme: (next) => {
+        if (isForced) return;
         setThemeState(next);
         setResolvedTheme(resolveTheme(next));
       },
       toggleTheme: () => {
+        if (isForced) return;
         const next = resolvedTheme === 'dark' ? 'light' : 'dark';
         setThemeState(next);
         setResolvedTheme(next);
       },
     }),
-    [theme, resolvedTheme],
+    [forcedTheme, isForced, resolvedTheme, theme],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

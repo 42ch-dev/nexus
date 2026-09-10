@@ -13,10 +13,12 @@ describe('ComputeRunStudioFixtures', () => {
       'run-studio-variant-form-kitchen-sink',
       'run-studio-variant-form-empty',
       'run-studio-variant-picker-empty',
+      'run-studio-variant-picker-states',
       'run-studio-variant-inspector-success',
       'run-studio-variant-inspector-truncated',
       'run-studio-variant-inspector-failed',
       'run-studio-variant-runs-populated',
+      'run-studio-variant-runs-overflow',
       'run-studio-variant-runs-empty',
     ] as const;
     for (const testId of variants) {

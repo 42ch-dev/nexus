@@ -18,6 +18,8 @@ import {
   TabsTrigger,
   TabsContent,
 } from '@42ch/nexus-ui';
+
+import { SurfaceSourceBadges } from '@/components/surface-source-badge';
 import { Dialog, DialogTrigger, DialogContent } from '@web-ui/dialog'; // transitional — keep-web (Radix portal/focus-trap beyond presentational scope)
 import { Spinner, LoadingState, EmptyState, ErrorState } from '@web-ui/states'; // transitional — keep-web (lucide-react asset boundary; product copy & app-composition callbacks)
 import { ToastFixtures } from '@/fixtures/toast-fixtures';
@@ -51,7 +53,7 @@ function SectionHeading({
   return (
     <h3
       id={id}
-      className="text-heading-20 font-semibold text-gray-1000 mb-4 pt-8 scroll-mt-16"
+      className="text-heading-20 font-semibold text-gray-1000 mb-4 pt-8 scroll-mt-sticky-header"
     >
       {children}
     </h3>
@@ -78,7 +80,7 @@ function MatrixCard({
 
 function VariantLabel({ label }: { label: string }) {
   return (
-    <span className="text-copy-13 text-gray-600 font-medium shrink-0 min-w-[80px]">
+    <span className="text-copy-13 text-gray-700 font-medium shrink-0 min-w-[80px]">
       {label}
     </span>
   );
@@ -393,16 +395,15 @@ function ButtonSection() {
         data-testid="button-chronos-note"
         className="text-copy-14 text-gray-700 mb-4 max-w-prose"
       >
-        Chronos primary is theme-split: light shell uses{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">bg-brand-cyan-1000</code>{' '}
-        +{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">text-brand-white</code>;
-        dark shell keeps{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">bg-brand-cyan</code> +{' '}
+        Primary cobalt uses{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">blue-700/800/900</code>{' '}
+        rest/hover/active with{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">text-brand-white</code>{' '}
+        in light and{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           text-brand-deep-blue
-        </code>
-        . Toggle the theme to confirm both shells.
+        </code>{' '}
+        on the lighter cobalt fill in dark. Toggle the theme to confirm both shells.
       </p>
 
       <p className="text-label-14 text-gray-900 mb-4">
@@ -452,7 +453,7 @@ function ButtonSection() {
           <Button variant="tertiary">focus me</Button>
           <Button variant="destructive">focus me</Button>
         </div>
-        <p className="text-copy-13 text-gray-500 mt-4">
+        <p className="text-copy-13 text-gray-700 mt-4">
           Press <kbd className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">Tab</kbd> to cycle
           through — the two-layer focus ring is applied globally via{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">{'src/index.css'}</code>.
@@ -516,6 +517,32 @@ function CardSection() {
       </MatrixCard>
 
       <p className="text-label-14 text-gray-900 mb-4">
+        Interactive focus — a focusable consumer card keeps the two-layer ring
+      </p>
+      <MatrixCard className="mb-6">
+        <div className="flex flex-wrap items-start gap-6">
+          <div className="flex flex-col items-center gap-2">
+            <Card
+              data-testid="card-interactive-focus"
+              interactive
+              tabIndex={0}
+              aria-label="Focusable interactive card"
+              className="w-72"
+            >
+              <CardHeader>
+                <CardTitle>Focusable card</CardTitle>
+                <CardDescription>
+                  Native tabIndex keeps the shared surface gap + cobalt band
+                  visible over the elevation recipe.
+                </CardDescription>
+              </CardHeader>
+            </Card>
+            <VariantLabel label="interactive focus-visible" />
+          </div>
+        </div>
+      </MatrixCard>
+
+      <p className="text-label-14 text-gray-900 mb-4">
         Title voice — interface (default) vs content (creative entities)
       </p>
       <MatrixCard>
@@ -540,7 +567,7 @@ function CardSection() {
                   The Lost City
                 </CardTitle>
                 <CardDescription>
-                  Serif display-20 — reserved for creative-entity cards
+                  Sans display-20 — reserved for creative-entity cards
                   (work/world).
                 </CardDescription>
               </CardHeader>
@@ -564,17 +591,21 @@ function DialogSection() {
     <section data-testid="dialog-fixtures">
       <SectionHeading id="comp-dialog">Dialog</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
-        Modal dialog — built on Radix for focus trap, escape close, and ARIA.
+        Modal dialog — built on Radix for focus trap, Escape close, and ARIA.
         The overlay uses the{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">bg-scrim</code>{' '}
         token and the panel{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">shadow-elevation-4</code>{' '}
-        (V1.121 scrim convergence). Click the trigger to open.
+        (V1.121 scrim convergence). Open the dialog, press{' '}
+        <kbd className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">Escape</kbd>{' '}
+        to close, and focus returns to the trigger.
       </p>
       <MatrixCard>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
-            <Button variant="primary">Open dialog</Button>
+            <Button variant="primary" data-testid="dialog-open-trigger">
+              Open dialog
+            </Button>
           </DialogTrigger>
           <DialogContent
             title="Example dialog"
@@ -596,9 +627,11 @@ function DialogSection() {
             </div>
           </DialogContent>
         </Dialog>
-        <p className="text-copy-13 text-gray-500 mt-4">
-          Uses Radix <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">Dialog.Portal</code> for
-          body-level overlay and scroll lock.
+        <p className="text-copy-13 text-gray-700 mt-4">
+          Transitional{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@web-ui/dialog</code>{' '}
+          — Radix portal, focus trap, and scroll lock. Keyboard: Tab cycles
+          trapped controls; Escape closes and restores focus to the trigger.
         </p>
       </MatrixCard>
     </section>
@@ -614,21 +647,56 @@ function InputSection() {
     <section>
       <SectionHeading id="comp-input">Input</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
-        Text input — default, disabled, and invalid states.
+        Text input — default, hover, focus-visible, disabled, and invalid states.
       </p>
       <MatrixCard>
         <div className="flex flex-col gap-4 max-w-md">
           <MatrixRow>
             <VariantLabel label="default" />
-            <Input placeholder="Default input..." className="flex-1" />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="input-default">Project codename</Label>
+              <Input id="input-default" placeholder="Default input…" />
+            </div>
+          </MatrixRow>
+          <MatrixRow>
+            <VariantLabel label="focus-visible" />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="input-focus">Focus target</Label>
+              <Input id="input-focus" data-testid="input-focus" defaultValue="Tab or click to focus" />
+            </div>
+          </MatrixRow>
+          <MatrixRow>
+            <VariantLabel label="hover" />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="input-hover">Hover target</Label>
+              <Input
+                id="input-hover"
+                data-testid="input-fixture-hover"
+                defaultValue="Point at the field"
+              />
+            </div>
           </MatrixRow>
           <MatrixRow>
             <VariantLabel label="disabled" />
-            <Input placeholder="Disabled input..." disabled className="flex-1" />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="input-disabled">Archived field</Label>
+              <Input id="input-disabled" placeholder="Disabled input…" disabled />
+            </div>
           </MatrixRow>
           <MatrixRow>
             <VariantLabel label="invalid" />
-            <Input placeholder="Invalid input..." invalid className="flex-1" defaultValue="bad value" />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="input-invalid">Executor label 执行器标签</Label>
+              <Input
+                id="input-invalid"
+                invalid
+                aria-describedby="input-invalid-error"
+                defaultValue="bad value"
+              />
+              <p id="input-invalid-error" role="alert" className="text-copy-13 text-red-700">
+                Choose a valid executor.
+              </p>
+            </div>
           </MatrixRow>
         </div>
       </MatrixCard>
@@ -647,6 +715,7 @@ function LabelSection() {
       <p className="text-copy-16 text-gray-700 mb-6">
         Form label — label-14 weight 500, gray-1000 text. Wired to its control via{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">htmlFor</code>.
+        Labels expose no disabled/invalid state of their own; the associated control shows it.
       </p>
       <MatrixCard>
         <div className="flex flex-col gap-3 max-w-md">
@@ -655,8 +724,8 @@ function LabelSection() {
             <Input id="demo-input" placeholder="Click the label to focus this input" />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label>Disabled label (visual only)</Label>
-            <Input placeholder="Disabled input" disabled />
+            <Label htmlFor="label-disabled-control">Bio (associated disabled control)</Label>
+            <Input id="label-disabled-control" placeholder="Disabled input" disabled />
           </div>
         </div>
       </MatrixCard>
@@ -717,7 +786,7 @@ function SelectSection() {
         </code>
         .
       </p>
-      <p className="text-copy-13 text-gray-500 mb-6">
+      <p className="text-copy-13 text-gray-700 mb-6">
         Open listbox chrome is UA-owned — Tab to the control, then Space /
         Enter / Alt+↓ (platform-dependent) to open. Automated Studio tests do
         not drive OS listbox UI.
@@ -744,15 +813,18 @@ function SelectSection() {
           </MatrixRow>
           <MatrixRow>
             <VariantLabel label="disabled" />
-            <Select
-              disabled
-              data-testid="select-fixture-disabled"
-              className="flex-1"
-              defaultValue="Option A"
-              aria-label="Disabled select fixture"
-            >
-              <SelectOptionList options={options} />
-            </Select>
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="studio-select-disabled">Retired profile</Label>
+              <Select
+                id="studio-select-disabled"
+                disabled
+                data-testid="select-fixture-disabled"
+                className="w-full"
+                defaultValue="Option A"
+              >
+                <SelectOptionList options={options} />
+              </Select>
+            </div>
           </MatrixRow>
           <MatrixRow>
             <VariantLabel label="invalid" />
@@ -791,7 +863,7 @@ function SelectSection() {
             <SelectOptionList options={options} />
           </Select>
         </div>
-        <p className="text-copy-13 text-gray-500 mt-4">
+        <p className="text-copy-13 text-gray-700 mt-4">
           Press{' '}
           <kbd className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">Tab</kbd>{' '}
           onto the control — package class{' '}
@@ -804,6 +876,23 @@ function SelectSection() {
           </code>
           .
         </p>
+      </MatrixCard>
+
+      <p className="text-label-14 text-gray-900 mb-4">
+        Hover (point at the control — background-200 fill wash, gray-500 border preserved)
+      </p>
+      <MatrixCard className="mb-6">
+        <div className="flex flex-col gap-1.5 max-w-md">
+          <Label htmlFor="studio-select-hover">Hover target</Label>
+          <Select
+            id="studio-select-hover"
+            data-testid="select-fixture-hover"
+            className="w-full"
+            defaultValue="Option B"
+          >
+            <SelectOptionList options={options} />
+          </Select>
+        </div>
       </MatrixCard>
 
       <p className="text-label-14 text-gray-900 mb-4">
@@ -821,7 +910,7 @@ function SelectSection() {
             <SelectOptionList options={options} />
           </Select>
         </div>
-        <p className="text-copy-13 text-gray-500 mt-4">
+        <p className="text-copy-13 text-gray-700 mt-4">
           With the control focused, open the native list (Space / Enter /
           Alt+↓). There is no package{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
@@ -899,7 +988,7 @@ function StatesSection() {
         {retries > 0 && (
           <p
             data-testid="states-error-retry-count"
-            className="text-copy-13 text-gray-500 mt-4"
+            className="text-copy-13 text-gray-700 mt-4"
           >
             Retry requested {retries} {retries === 1 ? 'time' : 'times'}.
           </p>
@@ -918,41 +1007,54 @@ function TableSection() {
     { id: 'work-01', title: 'The Lost City', profile: 'Novel', status: 'Active' },
     { id: 'work-02', title: 'Echo Protocol', profile: 'Script', status: 'Archived' },
     { id: 'work-03', title: 'Starfall', profile: 'Novel', status: 'Draft' },
+    {
+      id: 'work-04-very-long-correlation-id-for-overflow',
+      title:
+        'A deliberately long work title that exercises horizontal scroll inside the table wrapper without forcing document-wide overflow',
+      profile: 'Novel with an extended profile label',
+      status: 'Active',
+    },
   ];
 
   return (
-    <section>
+    <section data-testid="table-fixtures">
       <SectionHeading id="comp-table">Table</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
         Data table — header with label-12 font, body with copy-14, hover row
-        highlighting, and overflow-x scroll container.
+        highlighting, and a local{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">overflow-x-auto</code>{' '}
+        scroll container. Wide rows scroll inside the matrix card; the page
+        itself must not gain horizontal overflow.
       </p>
-      <MatrixCard className="p-0">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>ID</TableHead>
-              <TableHead>Title</TableHead>
-              <TableHead>Profile</TableHead>
-              <TableHead>Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((r) => (
-              <TableRow key={r.id}>
-                <TableCell className="text-copy-13-mono text-gray-700">
-                  {r.id}
-                </TableCell>
-                <TableCell>{r.title}</TableCell>
-                <TableCell>{r.profile}</TableCell>
-                <TableCell>{r.status}</TableCell>
+      <MatrixCard className="p-0 overflow-hidden" data-testid="table-overflow-wrapper">
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>ID</TableHead>
+                <TableHead>Title</TableHead>
+                <TableHead>Profile</TableHead>
+                <TableHead>Status</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-        <p className="text-copy-13 text-gray-500 p-4">
+            </TableHeader>
+            <TableBody>
+              {rows.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell className="text-copy-13-mono text-gray-700 whitespace-nowrap">
+                    {r.id}
+                  </TableCell>
+                  <TableCell className="min-w-[280px]">{r.title}</TableCell>
+                  <TableCell className="whitespace-nowrap">{r.profile}</TableCell>
+                  <TableCell>{r.status}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+        <p className="text-copy-13 text-gray-700 p-4">
           Row hover triggers background-200; header uses background-200 with
-          bottom border gray-alpha-400.
+          bottom border gray-alpha-400. The last row carries long copy to prove
+          local horizontal scroll.
         </p>
       </MatrixCard>
     </section>
@@ -969,16 +1071,23 @@ function TabsSection() {
   return (
     <section data-testid="tabs-fixtures">
       <SectionHeading id="comp-tabs">Tabs</SectionHeading>
-      <p className="text-copy-16 text-gray-700 mb-6">
-        Tab set — interactive, two panels. V1.137 P2 promotion: imported from{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>
-        ; web keeps a thin re-export under{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          apps/web/src/components/ui/tabs.tsx
-        </code>
-        . Active tab uses background-100 + shadow-card; inactive tabs are hover-responsive.
+      <p className="text-copy-16 text-gray-700 mb-2">
+        Controlled tab set with roving focus, automatic keyboard activation, and
+        per-instance trigger/panel associations.{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">TabsTrigger</code>{' '}
+        has no disabled prop — label that state unsupported rather than simulating it.
       </p>
-      <MatrixCard>
+      <p className="text-copy-13 text-gray-700 mb-6">
+        Focus a tab, then use{' '}
+        <kbd className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">←</kbd> /{' '}
+        <kbd className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">→</kbd>,{' '}
+        <kbd className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">Home</kbd>, or{' '}
+        <kbd className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">End</kbd> to move
+        selection.
+      </p>
+
+      <p className="text-label-14 text-gray-900 mb-4">Controlled — hover, focus, keyboard</p>
+      <MatrixCard className="mb-6" data-testid="tabs-controlled-fixture">
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList>
             <TabsTrigger value="tab1">Overview</TabsTrigger>
@@ -986,21 +1095,43 @@ function TabsSection() {
           </TabsList>
           <TabsContent value="tab1">
             <p className="text-copy-14 text-gray-900">
-              Overview panel — click Details to switch tabs. The Tabs component
-              supports both controlled (<code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">value</code>{' '}
-              + <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">onValueChange</code>) and
-              uncontrolled (<code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">defaultValue</code>) modes.
+              Overview panel — pointer or keyboard selection. Controlled via{' '}
+              <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">value</code> +{' '}
+              <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">onValueChange</code>.
             </p>
           </TabsContent>
           <TabsContent value="tab2">
             <p className="text-copy-14 text-gray-900">
-              Details panel — the active tab trigger has a raised card
-              appearance with <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">shadow-card</code>.
-              Hovering an inactive trigger applies a subtle gray-alpha-100
-              background.
+              Details panel — active trigger uses{' '}
+              <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">shadow-card</code>;
+              inactive triggers respond to real hover.
             </p>
           </TabsContent>
         </Tabs>
+      </MatrixCard>
+
+      <p className="text-label-14 text-gray-900 mb-4">
+        Uncontrolled + duplicate values (two independent instances)
+      </p>
+      <MatrixCard>
+        <div className="flex flex-col gap-6">
+          <Tabs defaultValue="shared">
+            <TabsList>
+              <TabsTrigger value="shared">Instance A</TabsTrigger>
+              <TabsTrigger value="other">Other</TabsTrigger>
+            </TabsList>
+            <TabsContent value="shared">Instance A — shared value panel</TabsContent>
+            <TabsContent value="other">Instance A — other panel</TabsContent>
+          </Tabs>
+          <Tabs defaultValue="shared">
+            <TabsList>
+              <TabsTrigger value="shared">Instance B</TabsTrigger>
+              <TabsTrigger value="other">Other</TabsTrigger>
+            </TabsList>
+            <TabsContent value="shared">Instance B — shared value panel</TabsContent>
+            <TabsContent value="other">Instance B — other panel</TabsContent>
+          </Tabs>
+        </div>
       </MatrixCard>
     </section>
   );
@@ -1015,31 +1146,57 @@ function TextareaSection() {
     <section>
       <SectionHeading id="comp-textarea">Textarea</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
-        Multi-line text input — min-height 96px, default, disabled, and invalid
-        states.
+        Multi-line text input — min-height 96px, default, hover, focus-visible,
+        disabled, and invalid states.
       </p>
       <MatrixCard>
         <div className="flex flex-col gap-4 max-w-lg">
           <MatrixRow>
             <VariantLabel label="default" />
-            <Textarea placeholder="Default textarea…" className="flex-1" />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="textarea-default">Notes</Label>
+              <Textarea id="textarea-default" placeholder="Default textarea…" />
+            </div>
+          </MatrixRow>
+          <MatrixRow>
+            <VariantLabel label="focus-visible" />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="textarea-focus">Focus target</Label>
+              <Textarea id="textarea-focus" data-testid="textarea-focus" defaultValue="Tab or click to focus" />
+            </div>
+          </MatrixRow>
+          <MatrixRow>
+            <VariantLabel label="hover" />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="textarea-hover">Hover target</Label>
+              <Textarea
+                id="textarea-hover"
+                data-testid="textarea-fixture-hover"
+                defaultValue="Point at the field"
+              />
+            </div>
           </MatrixRow>
           <MatrixRow>
             <VariantLabel label="disabled" />
-            <Textarea
-              placeholder="Disabled textarea…"
-              disabled
-              className="flex-1"
-            />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="textarea-disabled">Locked draft</Label>
+              <Textarea id="textarea-disabled" placeholder="Disabled textarea…" disabled />
+            </div>
           </MatrixRow>
           <MatrixRow>
             <VariantLabel label="invalid" />
-            <Textarea
-              placeholder="Invalid textarea…"
-              invalid
-              className="flex-1"
-              defaultValue="content with errors"
-            />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="textarea-invalid">Synopsis 概要</Label>
+              <Textarea
+                id="textarea-invalid"
+                invalid
+                aria-describedby="textarea-invalid-error"
+                defaultValue="content with errors"
+              />
+              <p id="textarea-invalid-error" role="alert" className="text-copy-13 text-red-700">
+                Synopsis must be at least 20 characters.
+              </p>
+            </div>
           </MatrixRow>
         </div>
       </MatrixCard>
@@ -1082,7 +1239,7 @@ function FormFieldSection() {
           <Input
             id={fieldId}
             invalid={hasError}
-            aria-describedby={`${helperId} ${errorId}`}
+            aria-describedby={hasError ? `${helperId} ${errorId}` : helperId}
             placeholder="Enter work title…"
             defaultValue="The Lost City"
           />
@@ -1160,12 +1317,16 @@ function ToastSection() {
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @42ch/nexus-ui
         </code>{' '}
-        Toast primitives. Variants: success, error, warning, info. Each toast
-        shows a title and optional description; error toasts use{' '}
+        Toast primitives. Variants: success, error, warning, info. Use the
+        fixture controls to queue toasts through the public{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">toast()</code>{' '}
+        API and dismiss via the close button or{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">dismiss(id)</code>.
+        Error toasts use{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           role=&quot;alert&quot;
         </code>
-        .
+        . There is no action-CTA field or update operation on the public contract.
       </p>
       <ToastFixtures />
     </section>
@@ -1217,9 +1378,10 @@ function RunStudioSection() {
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">RunStatusBadge</code>,{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">RunsTable</code>.
         Schema-driven form variants (basic-combat pickers, kitchen sink,
-        missing-schema empty state), proposal inspector variants (success with
-        all four parts, truncated, failed), and Runs history variants (all
-        statuses, empty). All copy is caller-owned literal English (studio is
+        missing-schema empty state, picker selected/disabled/invalid),
+        proposal inspector variants (success with all four parts, truncated,
+        failed), and Runs history variants (all statuses, empty, long
+        correlation id, read-only rows without Open Run). All copy is caller-owned literal English (studio is
         developer-auxiliary). Toggle the theme to verify light + dark.
       </p>
       <ComputeRunStudioFixtures />
@@ -1246,7 +1408,7 @@ function ComputeTimelineSection() {
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@web-canvas/*</code>{' '}
         node shell. Variants: compute node alongside KB events (direct run /
         preset / summary-less / selected / dragging), inspector (direct /
-        preset / sparse), Run Module entry chrome (toolbar + empty-state
+        preset / sparse / read-only), Run Module entry chrome (toolbar + empty-state
         hint), and Brief-layer-unaffected evidence. All copy is caller-owned
         literal English (studio is developer-auxiliary). Toggle the theme to
         verify light + dark.
@@ -1277,6 +1439,7 @@ export function ComponentsPage() {
         focus-visible, disabled, and loading states are live; toggle the theme
         to verify both light and dark (V1.121 states matrix).
       </p>
+      <SurfaceSourceBadges importPaths={["@42ch/nexus-ui", "@web-ui/dialog", "@web-ui/states", "@web-ui/table"]} /> {/* transitional — badge path labels (not imports) */}
       <SubNav />
 
       <BadgeSection />
@@ -1297,7 +1460,7 @@ export function ComponentsPage() {
       <RunStudioSection />
       <ComputeTimelineSection />
 
-      <section id="comp-vi-acceptance" data-testid="comp-vi-acceptance" className="scroll-mt-16">
+      <section id="comp-vi-acceptance" data-testid="comp-vi-acceptance" className="scroll-mt-sticky-header">
         <SectionHeading id="comp-vi-acceptance-heading">VI acceptance (P2)</SectionHeading>
         <p
           data-testid="comp-vi-acceptance-note"
@@ -1310,7 +1473,7 @@ export function ComponentsPage() {
         <ViTransportErrorAcceptanceFixtures />
       </section>
 
-      <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
+      <p className="text-copy-13 text-gray-700 mt-12 pt-8 border-t border-gray-alpha-200">
         17 promoted (Badge, Button, Card, Input, Label, Textarea, Select, Toast,
         TransportErrorBlock, Tabs, RunFormFields, EntityPickerField,
         ProposalSections, RunStatusBadge, RunsTable, ComputeResultNodeChrome,

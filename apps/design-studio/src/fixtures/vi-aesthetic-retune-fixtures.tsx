@@ -1,7 +1,9 @@
 /**
- * Studio fixtures for V1.132 P2 VI aesthetic retune — visual acceptance targets.
+ * Studio fixtures for VI aesthetic acceptance — visual acceptance targets.
  *
- * Proves VI-001..VI-005 acceptance states in light + dark (T3+ wires real primitives).
+ * Proves VI-001..VI-005 acceptance states. Brand specimens use a scoped dark
+ * reference panel so each asset split is inspectable on a light and a dark
+ * backing without wrapping the document in a second theme.
  */
 
 import type { ReactNode } from 'react';
@@ -88,14 +90,16 @@ function ThemePair({
         data-testid={`${testId}-light`}
         className="rounded-card border border-gray-alpha-300 bg-background-100 p-4"
       >
-        <p className="mb-3 text-label-14 font-medium text-gray-1000">Light shell</p>
+        <p className="mb-3 text-label-14 font-medium text-gray-1000">Fixed reference plate (light)</p>
         {light}
       </div>
       <div
         data-testid={`${testId}-dark`}
-        className="rounded-card border border-gray-alpha-300 bg-[#08141C] p-4"
+        className="dark rounded-card border border-gray-alpha-300 bg-background-100 p-4 dark:bg-background-100"
       >
-        <p className="mb-3 text-label-14 font-medium text-brand-cyan">Dark shell</p>
+        <p className="mb-3 text-label-14 font-medium text-gray-1000 dark:text-brand-cyan">
+          Dark reference
+        </p>
         {dark}
       </div>
     </div>
@@ -122,7 +126,7 @@ function ViSection({
     <section
       id={id}
       data-testid={sectionTestId ?? `vi-section-${ledgerId.toLowerCase()}`}
-      className="scroll-mt-16 border-t border-gray-alpha-200 pt-8 first:border-t-0 first:pt-0"
+      className="scroll-mt-sticky-header border-t border-gray-alpha-200 pt-8 first:border-t-0 first:pt-0"
     >
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <ViLedgerBadge id={ledgerId} />
@@ -328,7 +332,7 @@ function SquircleIconFrame({
 
   return (
     <div className="flex flex-col items-center gap-2" data-testid={testId}>
-      <div className="relative flex h-24 w-24 items-center justify-center overflow-hidden rounded-[22%] bg-[#1a1a1a] shadow-elevation-2">
+      <div className="relative flex h-24 w-24 items-center justify-center overflow-hidden rounded-[22%] bg-gray-900 dark:bg-background-300 shadow-elevation-2">
         <img
           src={logoPrimarySquareSrc}
           alt=""
@@ -370,7 +374,7 @@ export function ViBrandAppIconFixture() {
           </div>
         }
         dark={
-          <div className="flex flex-wrap items-start justify-center gap-8 rounded-card border border-gray-alpha-300 bg-[#08141C] p-6">
+          <div className="flex flex-wrap items-start justify-center gap-8 rounded-card border border-gray-alpha-300 bg-background-100 p-6">
             <SquircleIconFrame
               variant="full-bleed"
               label="Target — opaque full-bleed (macOS squircle)"
@@ -414,7 +418,7 @@ export function ViButtonAcceptanceFixtures() {
       id="vi-002-primary-button"
       ledgerId="VI-002"
       title="Theme-aware primary Button"
-      description="Light-shell primary uses mid-teal cyan-1000 fill + white label; dark shell keeps the strong cyan CTA."
+      description="Primary uses the P0 blue-700/800/900 recipe — white label in light, deep-blue label in dark. Toggle the document theme to verify both shells."
     >
       <ThemeFollowSpecimen testId="vi-002-primary-button">
         <Button variant="primary" data-testid="vi-002-primary">

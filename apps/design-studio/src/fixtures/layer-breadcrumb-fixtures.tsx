@@ -47,7 +47,7 @@ function VariantChip({
 }) {
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-label-12 font-medium text-gray-500">{label}</span>
+      <span className="text-label-12 font-medium text-gray-700">{label}</span>
       <div className="rounded-card border border-gray-alpha-200 bg-canvas-surface px-3 py-2">
         {children}
       </div>
@@ -205,7 +205,7 @@ function WorkBreadcrumbMatrix() {
  */
 export function LayerBreadcrumbFixtures() {
   return (
-    <div data-testid="layer-breadcrumb-fixtures">
+    <div className="studio-fixture-boundary" data-testid="layer-breadcrumb-fixtures">
       <WorldBreadcrumbMatrix />
       <WorkBreadcrumbMatrix />
     </div>

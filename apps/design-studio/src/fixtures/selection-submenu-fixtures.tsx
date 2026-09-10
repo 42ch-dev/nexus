@@ -29,7 +29,9 @@ function VariantFrame({
 }) {
   return (
     <div
-      className="rounded-card border border-gray-alpha-300 bg-background-100 p-4"
+      id={testId}
+      tabIndex={-1}
+      className="rounded-card border border-gray-alpha-300 bg-background-100 p-4 scroll-mt-sticky-header"
       data-testid={testId}
     >
       <p className="text-label-14 font-medium text-gray-1000 mb-1">{label}</p>
@@ -170,6 +172,8 @@ function InlineModalHost({
         type="button"
         className="mb-3 rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-1.5 text-button-12 text-gray-900 hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
         onClick={() => setOpen(true)}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         data-testid="selection-submenu-agent-dialog-open"
       >
         {openLabel}
@@ -204,7 +208,7 @@ function AgentDialogPanel({ onClose }: { onClose: () => void }) {
             </span>
             <div className="flex-1">
               <span className="font-medium text-gray-1000">Claude</span>
-              <span className="ml-2 text-label-12 text-gray-500">claude-native</span>
+              <span className="ml-2 text-label-12 text-gray-700">claude-native</span>
             </div>
           </button>
           <button
@@ -216,7 +220,7 @@ function AgentDialogPanel({ onClose }: { onClose: () => void }) {
             </span>
             <div className="flex-1">
               <span className="font-medium text-gray-1000">GPT-4</span>
-              <span className="ml-2 text-label-12 text-gray-500">openai-gpt4</span>
+              <span className="ml-2 text-label-12 text-gray-700">openai-gpt4</span>
             </div>
           </button>
         </div>
@@ -251,19 +255,6 @@ function AgentDialogFixture() {
               <span className="truncate font-heading text-copy-14 font-semibold text-gray-1000">
                 My Fantasy World
               </span>
-              <button
-                type="button"
-                aria-haspopup="menu"
-                aria-expanded="false"
-                aria-label="Open menu for My Fantasy World"
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-gray-400 hover:bg-gray-alpha-200 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-1"
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-                  <circle cx="8" cy="3" r="1.5" fill="currentColor" />
-                  <circle cx="8" cy="8" r="1.5" fill="currentColor" />
-                  <circle cx="8" cy="13" r="1.5" fill="currentColor" />
-                </svg>
-              </button>
             </div>
             {open ? <AgentDialogPanel onClose={() => setOpen(false)} /> : null}
           </>
@@ -275,10 +266,10 @@ function AgentDialogFixture() {
 
 export function SelectionSubmenuStubFixtures() {
   return (
-    <div data-testid="selection-submenu-fixtures">
+    <div className="studio-fixture-boundary" data-testid="selection-submenu-fixtures">
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
         <VariantFrame
-          label="World row + submenu open (light)"
+          label="World row + submenu open"
           description="World row with submenu showing 4 items: Open Timeline, Open KB, Agent, Rename"
           testId="selection-submenu-world-light"
         >
@@ -286,17 +277,15 @@ export function SelectionSubmenuStubFixtures() {
         </VariantFrame>
 
         <VariantFrame
-          label="World row + submenu open (dark)"
-          description="Same as light, with dark theme"
+          label="World row + submenu open (document theme)"
+          description="Same World row specimen — follows the document theme (use Compare for light/dark parity)"
           testId="selection-submenu-world-dark"
         >
-          <div className="dark">
-            <WorldRowFixture />
-          </div>
+          <WorldRowFixture />
         </VariantFrame>
 
         <VariantFrame
-          label="Work row + submenu open (light)"
+          label="Work row + submenu open"
           description="Work row with submenu showing 4 items: Open Timeline, Open Outline, Agent, Rename"
           testId="selection-submenu-work-light"
         >
@@ -304,13 +293,11 @@ export function SelectionSubmenuStubFixtures() {
         </VariantFrame>
 
         <VariantFrame
-          label="Work row + submenu open (dark)"
-          description="Same as light, with dark theme"
+          label="Work row + submenu open (document theme)"
+          description="Same Work row specimen — follows the document theme (use Compare for light/dark parity)"
           testId="selection-submenu-work-dark"
         >
-          <div className="dark">
-            <WorkRowFixture />
-          </div>
+          <WorkRowFixture />
         </VariantFrame>
 
         <VariantFrame

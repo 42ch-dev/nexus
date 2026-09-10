@@ -1,3 +1,5 @@
+import { useCallback, useState } from 'react';
+
 import { TransportErrorBlock, type TransportErrorKind } from '@42ch/nexus-ui';
 
 /**
@@ -26,13 +28,31 @@ const KIND_MATRIX: Array<{
   { kind: 'unknown', ctaNote: 'Retry primary · Open Settings secondary' },
 ];
 
-function noop() {
-  /* Studio fixture only — clicks have nowhere to go. */
-}
-
 export function TransportErrorBlockFixtures() {
+  const [retryCount, setRetryCount] = useState(0);
+  const [lastRetryKind, setLastRetryKind] = useState<TransportErrorKind | null>(null);
+
+  const handleRetry = useCallback((kind: TransportErrorKind) => {
+    setRetryCount((count) => count + 1);
+    setLastRetryKind(kind);
+  }, []);
+
+  const handleOpenSettings = useCallback(() => {
+    /* Studio fixture only — settings navigation is out of scope. */
+  }, []);
+
   return (
     <div data-testid="transport-error-block-fixtures" className="grid gap-6">
+      <p
+        data-testid="transport-error-retry-outcome"
+        className="text-copy-13 text-gray-700"
+        aria-live="polite"
+      >
+        {retryCount > 0
+          ? `Retry invoked ${retryCount} time${retryCount === 1 ? '' : 's'} (last: ${lastRetryKind})`
+          : 'Retry not invoked yet'}
+      </p>
+
       <div data-testid="transport-error-block-full-matrix" className="grid gap-6">
         {KIND_MATRIX.map(({ kind, ctaNote }) => (
           <div key={kind} data-testid={`transport-error-block-row-${kind}`} className="space-y-2">
@@ -46,8 +66,8 @@ export function TransportErrorBlockFixtures() {
             </div>
             <TransportErrorBlock
               kind={kind}
-              onRetry={noop}
-              onOpenSettings={noop}
+              onRetry={() => handleRetry(kind)}
+              onOpenSettings={handleOpenSettings}
             />
           </div>
         ))}
@@ -82,7 +102,7 @@ export function TransportErrorBlockFixtures() {
         <TransportErrorBlock
           kind="daemon_down"
           detail="Last daemon exit code: 1 (subprocess crashed during boot)"
-          onRetry={noop}
+          onRetry={() => handleRetry('daemon_down')}
         />
       </div>
     </div>

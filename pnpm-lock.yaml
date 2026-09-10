@@ -343,6 +343,9 @@ importers:
       tailwindcss:
         specifier: ^3.4.0
         version: 3.4.19(yaml@2.9.0)
+      yaml:
+        specifier: ^2.6.1
+        version: 2.9.0
     devDependencies:
       typescript:
         specifier: 7.0.2

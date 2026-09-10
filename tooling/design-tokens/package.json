@@ -13,10 +13,13 @@
     "./tokens.css": "./src/tokens.css"
   },
   "scripts": {
-    "build": "tsc --noEmit -p tsconfig.json && node scripts/check-tokens.mjs"
+    "build": "tsc --noEmit -p tsconfig.json && node scripts/check-tokens.mjs",
+    "generate": "node scripts/generate-tokens.mjs",
+    "check": "node scripts/check-tokens.mjs"
   },
   "dependencies": {
-    "@42ch/nexus-ui": "workspace:*"
+    "@42ch/nexus-ui": "workspace:*",
+    "yaml": "^2.6.1"
   },
   "devDependencies": {
     "typescript": "7.0.2"

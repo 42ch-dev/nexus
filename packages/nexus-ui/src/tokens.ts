@@ -2,13 +2,14 @@
  * Nexus brand token constants — V1.83 foundation slice.
  * Normative cross-application values are defined in root DESIGN.md (P1);
  * this module exposes machine-consumable brand primitives for package consumers.
+ *
+ * `brandColors` is a generated light/default numeric snapshot produced by
+ * @nexus/design-tokens (repo-root DESIGN.md §Brand Colors). Theme-aware UI
+ * reads CSS (--nexus-brand-* / --color-brand-*) rather than these constants.
  */
+import { brandColors } from './generated-brand';
 
-export const brandColors = {
-  deepBlue: '#0D2B3E',
-  cyan: '#25D1E0',
-  white: '#FFFFFF',
-} as const;
+export { brandColors };
 
 export type BrandColorName = keyof typeof brandColors;
 

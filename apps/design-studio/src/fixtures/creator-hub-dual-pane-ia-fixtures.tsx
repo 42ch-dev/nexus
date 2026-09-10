@@ -5,7 +5,8 @@
  * - Create in shell sidebar menu slot (`ShellSidebarChrome.panelContent`)
  * - V1.136: inline create zone (World|Work tabs + form + submit), not dashed cards
  * - Content = World / Work tabs + card list / empty only — no content-left create
- * - World / Work × empty / populated × light / dark (8 variants)
+ * - World / Work × empty / populated × 2 theme slots (8 variants) — every cell
+ *   follows the document theme; Compare provides light/dark parity
  *
  * Composes `@web-layout/shell-sidebar-chrome`, `@web-layout/creator-shell-content`,
  * `@web-layout/hub-tab-bar`, and `@web-layout/hub-card-list-pane` without App providers.
@@ -182,6 +183,10 @@ function ThemePair({
   light: ReactNode;
   dark: ReactNode;
 }) {
+  // Both cells follow the document theme — no nested `.dark` scope. Light/dark
+  // parity comes from the Compare view (paired light/dark documents); the
+  // second cell repeats the same specimen so existing deep links and test ids
+  // stay stable.
   return (
     <div
       data-testid={testId}
@@ -191,14 +196,14 @@ function ThemePair({
         data-testid={`${testId}-light`}
         className="rounded-card border border-gray-alpha-300 bg-background-100 p-2"
       >
-        <p className="mb-2 px-2 pt-2 text-label-14 font-medium text-gray-1000">Light</p>
+        <p className="mb-2 px-2 pt-2 text-label-14 font-medium text-gray-1000">Document theme</p>
         {light}
       </div>
       <div
         data-testid={`${testId}-dark`}
-        className="dark rounded-card border border-gray-alpha-300 bg-background-100 p-2"
+        className="rounded-card border border-gray-alpha-300 bg-background-100 p-2"
       >
-        <p className="mb-2 px-2 pt-2 text-label-14 font-medium text-brand-cyan">Dark</p>
+        <p className="mb-2 px-2 pt-2 text-label-14 font-medium text-gray-1000">Document theme — parity slot</p>
         {dark}
       </div>
     </div>
@@ -323,13 +328,16 @@ function VariantMatrixCell({
   const slug = state.label.toLowerCase().replace(/[^a-z0-9]+/g, '-');
   const testId = `creator-hub-dual-pane-ia-matrix-${slug}-${theme}`;
 
+  // Both theme slots follow the document theme (no nested `.dark` scope);
+  // the `theme` prop only keeps the cell test id stable. Light/dark parity
+  // comes from the Compare view.
   return (
     <div
-      className={theme === 'dark' ? 'dark rounded-card border border-gray-alpha-300 bg-background-100 p-2' : 'rounded-card border border-gray-alpha-300 bg-background-100 p-2'}
+      className="rounded-card border border-gray-alpha-300 bg-background-100 p-2"
       data-testid={testId}
     >
       <p className="mb-2 px-2 pt-2 text-label-12 font-medium text-gray-700">
-        {state.label} · {theme}
+        {state.label} · document theme
       </p>
       <HubSidebarBrowseFrame
         activeTab={state.activeTab}
@@ -345,7 +353,7 @@ function VariantMatrixCell({
 
 export function CreatorHubDualPaneIaFixtures() {
   return (
-    <div data-testid="creator-hub-dual-pane-ia-fixtures">
+    <div className="studio-fixture-boundary" data-testid="creator-hub-dual-pane-ia-fixtures">
       <FixtureFrame
         title="Hub IA — sidebar inline create + content browse (World tab)"
         description="V1.136 P1: sidebar hosts World|Work create tabs + inline form + submit. Content is browse-only: World/Work tab bar + card list or empty — no content-left create form."
@@ -477,8 +485,8 @@ export function CreatorHubDualPaneIaFixtures() {
       </FixtureFrame>
 
       <FixtureFrame
-        title="8-variant acceptance matrix (2 tabs × 2 content × 2 themes)"
-        description="PAC-5 minimum matrix. Each cell: sidebar-create-panel with create-inline mode; browse-only content; no workspace-pane-inline-form."
+        title="8-variant acceptance matrix (2 tabs × 2 content × 2 theme slots)"
+        description="PAC-5 minimum matrix. Each cell: sidebar-create-panel with create-inline mode; browse-only content; no workspace-pane-inline-form. Cells follow the document theme — light/dark parity comes from the Compare view."
         testId="creator-hub-dual-pane-ia-fixture-matrix"
       >
         <div

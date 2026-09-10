@@ -8,6 +8,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "pnpm --filter @nexus/design-tokens generate && pnpm --filter @42ch/nexus-ui build",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
