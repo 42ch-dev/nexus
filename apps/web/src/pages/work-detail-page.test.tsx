@@ -172,13 +172,14 @@ describe('WorkDetailPage archive destructive context (V1.117 AC-P4-6)', () => {
 
 // V1.121 v0.4 — voice-split discipline (DESIGN.md §Design Concept).
 //
-// Pins both directions of the serif contract on the Work detail page:
-//   - the Work entity title (CardTitle) → content voice (serif display-20 via
-//     CardTitle voice="content") — the canonical creative-entity title surface;
+// Pins both directions of the voice contract on the Work detail page:
+//   - the Work entity title (CardTitle) → content voice (larger sans display
+//     tier via CardTitle voice="content") — the canonical creative-entity
+//     title surface;
 //   - all sibling chrome (Update button, status badges, labels, shortId) →
-//     interface voice (sans) — no `font-display` leaks into chrome.
+//     interface voice (sans) — no display-tier leaks into chrome.
 describe('WorkDetailPage voice-split (V1.121 v0.4)', () => {
-  it('renders the Work entity title in the content voice (serif display-20)', async () => {
+  it('renders the Work entity title in the content voice (sans display-20 tier)', async () => {
     useHandlers(
       workDetailFixture('w-123', {
         title: 'Serif Work Title',
@@ -191,11 +192,13 @@ describe('WorkDetailPage voice-split (V1.121 v0.4)', () => {
     renderWorkDetail();
 
     const title = await screen.findByRole('heading', { name: 'Serif Work Title' });
-    // Content voice (serif display tier) per DESIGN.md components.card.title.voice.
-    expect(title.className).toMatch(/\bfont-display\b/);
+    // Content voice (larger sans display tier) per DESIGN.md components.card.title.voice.
+    expect(title.tagName).toBe('H3');
     expect(title.className).toMatch(/\btext-display-20\b/);
+    expect(title.className).toMatch(/\bfont-heading\b/);
+    // Retired serif treatment and the interface-voice size tier are absent.
+    expect(title.className).not.toMatch(/\bfont-display\b/);
     expect(title.className).not.toMatch(/\btext-heading-16\b/);
-    expect(title.className).not.toMatch(/\bfont-heading\b/);
   });
 
   it('keeps the Update button and Findings section header in the interface voice', async () => {

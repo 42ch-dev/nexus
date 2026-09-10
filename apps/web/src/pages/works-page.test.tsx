@@ -153,13 +153,13 @@ describe('WorksPage', () => {
 
 // V1.121 v0.4 — voice-split discipline (DESIGN.md §Design Concept).
 //
-// Pins both directions of the serif contract on the Works list page:
-//   - creative-entity title (CardTitle "Works") → content voice (serif
-//     display-20 via CardTitle voice="content");
+// Pins both directions of the voice contract on the Works list page:
+//   - creative-entity title (CardTitle "Works") → content voice (larger sans
+//     display tier via CardTitle voice="content");
 //   - all page chrome (table headers, buttons, refresh control, filter input)
-//     → interface voice (sans) — no `font-display` leaks into chrome.
+//     → interface voice (sans) — no display-tier leaks into chrome.
 describe('WorksPage voice-split (V1.121 v0.4)', () => {
-  it('renders the Works CardTitle in the content voice (serif display-20)', async () => {
+  it('renders the Works CardTitle in the content voice (sans display-20 tier)', async () => {
     useHandlers(
       http.get('/v1/daemon/works', () =>
         HttpResponse.json({
@@ -181,12 +181,13 @@ describe('WorksPage voice-split (V1.121 v0.4)', () => {
     renderWorks();
 
     const title = await screen.findByRole('heading', { name: 'Works' });
-    // Content voice (serif display tier) per DESIGN.md components.card.title.voice.
-    expect(title.className).toMatch(/\bfont-display\b/);
+    // Content voice (larger sans display tier) per DESIGN.md components.card.title.voice.
+    expect(title.tagName).toBe('H3');
     expect(title.className).toMatch(/\btext-display-20\b/);
-    // Interface-voice heading treatment is absent.
+    expect(title.className).toMatch(/\bfont-heading\b/);
+    // Retired serif treatment and the interface-voice size tier are absent.
+    expect(title.className).not.toMatch(/\bfont-display\b/);
     expect(title.className).not.toMatch(/\btext-heading-16\b/);
-    expect(title.className).not.toMatch(/\bfont-heading\b/);
   });
 
   it('keeps table headers and buttons in the interface voice (sans)', async () => {
