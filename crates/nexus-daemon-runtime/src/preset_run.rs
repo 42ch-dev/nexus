@@ -637,7 +637,7 @@ pub struct RunControlResult {
 /// outcome as success instead of a conflict that would contradict the
 /// durable truth. A run that settled `completed`/`failed` (or is still
 /// live) keeps the conflict: the cancel genuinely did not happen.
-fn cancel_fence_loss_accomplished(status: &SessionStatus, cancel_requested: bool) -> bool {
+const fn cancel_fence_loss_accomplished(status: &SessionStatus, cancel_requested: bool) -> bool {
     // `Cancelled` is the confirmed A5 outcome. `Interrupted` only counts when
     // the durable state carries the cancel intent: an `interrupted` produced
     // by a failed state transition (no `cancel_requested`) is NOT proof that
@@ -2193,6 +2193,10 @@ impl WorkflowRunCoordinator {
     /// wait token (no mutation), [`RunControlError::StateConflict`] for a
     /// wrong current state, and other [`RunControlError`] variants for
     /// storage/engine failures.
+    // Signal dispatch is one linear match over the five public signals; the
+    // branches share the same CAS/settlement discipline, so splitting would
+    // duplicate it.
+    #[allow(clippy::too_many_lines)]
     pub async fn signal_run(
         &self,
         session_id: &SessionId,
