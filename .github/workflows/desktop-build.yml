@@ -44,7 +44,7 @@ jobs:
     # which caused the previous x86_64 job to hang at "Waiting for a runner...".
     timeout-minutes: 75
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
         with:
           # Git LFS — brand PNG provenance (packages/nexus-ui/assets/logos/*.png, apps/desktop/src-tauri/icons/source/*.png)
           lfs: true
@@ -102,7 +102,7 @@ jobs:
     # instead of desktop + smoke.
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
         with:
           # Git LFS — brand PNG provenance (packages/nexus-ui/assets/logos/*.png, apps/desktop/src-tauri/icons/source/*.png)
           lfs: true
