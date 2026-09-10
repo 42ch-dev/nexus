@@ -20,6 +20,10 @@ const ENTRIES: readonly GalleryEntry[] = [
     importPaths: ['@nexus/design-tokens'],
   },
 ];
+function getPoliteStatus() {
+  return screen.getByText((_, element) => element?.getAttribute('aria-live') === 'polite');
+}
+
 
 describe('SectionIndex', () => {
   it('filters entries by trimmed case-insensitive substring', () => {
@@ -29,7 +33,8 @@ describe('SectionIndex', () => {
 
     expect(screen.getByRole('link', { name: 'Motion' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Colors' })).not.toBeInTheDocument();
-    expect(screen.getByText('1 matching section')).toBeInTheDocument();
+    expect(getPoliteStatus()).toHaveTextContent(/\b1\b/);
+    expect(getPoliteStatus().textContent?.toLowerCase()).toContain('matching');
   });
 
   it('supports keyboard recovery and Enter selection callbacks', () => {
@@ -42,7 +47,8 @@ describe('SectionIndex', () => {
     expect(onNavigate).toHaveBeenCalledWith(ENTRIES[0]);
 
     fireEvent.change(input, { target: { value: 'missing' } });
-    expect(screen.getByText('No results for “missing”.')).toBeInTheDocument();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    expect(getPoliteStatus().textContent?.toLowerCase()).toMatch(/no matching/);
 
     fireEvent.keyDown(input, { key: 'Escape' });
     expect(input).toHaveValue('');
@@ -57,6 +63,7 @@ describe('SectionIndex', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
 
     expect(input).toHaveValue('');
-    expect(screen.getByText('2 sections')).toBeInTheDocument();
+    expect(getPoliteStatus()).toHaveTextContent(/\b2\b/);
+    expect(screen.getAllByRole('link')).toHaveLength(2);
   });
 });

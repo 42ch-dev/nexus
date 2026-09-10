@@ -84,7 +84,9 @@ describe('App landing page', () => {
   it('renders the read-only SSOT hint in footer', async () => {
     mockMatchMedia(false);
     await renderStudio();
-    expect(screen.getByText(/Read-only/)).toBeInTheDocument();
+    const footer = screen.getByRole('contentinfo');
+    expect(within(footer).getByText(/Read-only/)).toBeInTheDocument();
+    expect(within(footer).getByText('DESIGN.md')).toBeInTheDocument();
   });
 
   it('renders navigation links for all five gallery sections', async () => {
