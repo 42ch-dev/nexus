@@ -1,15 +1,28 @@
 ---
 module: nexus-ui
 date: 2026-07-08
-last_updated: 2026-07-20
-problem_type: architecture_decision
+last_updated: 2026-09-10
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [nexus-ui, component-promotion, design-studio, presentational-primitives, package-boundary, agent-picker, select, studio-first]
-applies_when: promoting a UI primitive from app ownership into @42ch/nexus-ui, or deciding where a new UI component should live
+tags:
+  - nexus-ui
+  - component-promotion
+  - design-studio
+  - presentational-primitives
+  - package-boundary
+  - agent-picker
+  - select
+  - studio-first
+applies_when:
+  - "promoting a UI primitive from app ownership into @42ch/nexus-ui"
+  - "deciding where a new UI component should live"
+  - "labeling or classifying a Studio import source tier (promoted / extract / transitional / studio-local)"
 ---
 
 # UI Component Promotion Workflow
+
+**Updated 2026-09-10** — V1.187 replaces the two-tier labels with the normative four-tier source classification (promoted / app presentational extract / transitional / studio-local) and exact-root boundary rules; see the V1.187 extension below.
 
 ## Context
 
@@ -159,3 +172,24 @@ Daemon Surfaces sections that only compose promoted primitives must badge `@42ch
 NLE Timeline chrome (`nle-timeline-chrome`, V1.128 P1) is an `@web-canvas/*` presentational extract — **must not** import `@xyflow/react`. App RF hosts (`timeline-canvas.tsx`, `work-timeline-canvas.tsx`) mount a thin overlay (`nle-timeline-band-overlay.tsx`) that projects RF node data into extract props. Pull-off demo stays Studio fixture local state only; App adopt is chrome swap, not new RF DnD scope.
 
 **Normative iteration detail:** `web-alias-clarity.md` · `nle-timeline-canvas.md`.
+
+## V1.187 Extension — Four source tiers, exact-root boundaries, fail-safe fallback
+
+V1.187 P2 turned the two-tier model into a normative **four-tier** taxonomy (spec §3.2) and made the classifier's boundaries mechanically exact. The tiers:
+
+| Tier | Pattern | Badge |
+| --- | --- | --- |
+| **Promoted primitive** | exactly `@42ch/nexus-ui` or an exported subpath | `Promoted primitive` |
+| **App presentational extract** | one of the six recognized roots: `@web-layout`, `@web-canvas`, `@web-setup`, `@web-settings`, `@web-global-timeline`, `@web-shell` (root or subpath) | `App presentational extract` |
+| **Transitional primitive** | `@web-ui/<name>` only | `Transitional primitive` |
+| **Studio-local** | `@/fixtures/*`, `@/components/*`, `@/pages/*`, `@/lib/*`, `DESIGN.md`/`DESIGN.dark.md`, relative composition paths | `Studio-local fixture` |
+
+Rules that matter when you touch the classifier (`classifySurfaceImport` in `apps/design-studio/src/components/surface-source-badge.tsx`):
+
+1. **Exact-root/subpath matching, never `startsWith`.** The check is `path === root || path.startsWith(root + '/')`, so lookalike prefixes (`@42ch/nexus-ui-legacy`, `@web-ui-legacy/dialog`, `@web-layouts/not-a-root`) never match a package tier.
+2. **Locked precedence** — promoted → transitional → extract → studio-local — evaluated in that order.
+3. **Fail safe, not flattering.** Any unrecognized path (arbitrary `@web-foo`, utility aliases such as `@web-lib/utils` or `@web-locales/*`) falls back to **studio-local**; a wrong label must understate provenance, never claim package/promoted status.
+4. **Utility/locale aliases are not presentational extracts.** `@web-lib/utils` and `@web-locales/*` are plumbing, not `apps/web` chrome.
+5. **Catalog + docs stay in lockstep.** Studio catalog entries carry `importPaths` for the badges; `apps/design-studio/README.md` and `AGENTS.md` import tables must list the same four tiers and the same six extract roots — copy drift is a QC finding.
+
+Regression coverage: `apps/design-studio/src/components/__tests__/surface-source-badge.test.tsx` covers all six extract roots, lookalike-prefix rejection and the unknown-path fallback; those cases fail against the earlier `startsWith` implementation.
