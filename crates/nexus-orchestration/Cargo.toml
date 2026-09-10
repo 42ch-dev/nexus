@@ -11,7 +11,7 @@ description = "Orchestration engine (graph-flow adapter + capability registry + 
 workspace = true
 
 [dependencies]
-graph-flow = "=0.2.3"                                    # rig feature NOT enabled (per best-practices §1.2 pin policy)
+graph-flow = "=0.8.0"                                    # rig feature NOT enabled (per best-practices §1.2 pin policy)
 async-trait = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "process", "io-util", "time", "net"] }
 # sqlx: workspace dep is declared + feature-gated by WS8 T1 (runtime-tokio, sqlite, macros, migrate, chrono, uuid).

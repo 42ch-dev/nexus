@@ -2196,9 +2196,9 @@ dependencies = [
 
 [[package]]
 name = "graph-flow"
-version = "0.2.3"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28137641d9817e20a7eef1c2c7677aab6c70a5e61dbd0c92cb41abefd8de9c10"
+checksum = "1ee2eb0ef17ab6e136088885c92108b241c2baca8c8579518d5aa5ab9b53a45c"
 dependencies = [
  "anyhow",
  "async-trait",
