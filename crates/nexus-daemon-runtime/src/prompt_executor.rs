@@ -1312,6 +1312,7 @@ mod tests {
             .mark_step_in_flight(
                 &session_id,
                 record.state_revision,
+                Some(record.graph_version),
                 nexus_orchestration::run_state::RunCheckpoint {
                     root: &pre_step_root,
                     children: &[],
@@ -1443,6 +1444,7 @@ mod tests {
             .mark_step_in_flight(
                 &session_id,
                 record.state_revision,
+                Some(record.graph_version),
                 nexus_orchestration::run_state::RunCheckpoint {
                     root: &pre_step_root,
                     children: &[],
@@ -1642,6 +1644,7 @@ mod tests {
             .mark_step_in_flight(
                 &session_id,
                 record.state_revision,
+                Some(record.graph_version),
                 nexus_orchestration::run_state::RunCheckpoint {
                     root: &pre_step_root,
                     children: &[],

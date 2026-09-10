@@ -1022,6 +1022,7 @@ async fn in_flight_marker_fences_control_signals_and_stale_transition() {
         .mark_step_in_flight(
             &sid,
             1,
+            None,
             RunCheckpoint {
                 root: &root,
                 children: &[],
@@ -4316,6 +4317,7 @@ async fn step_in_flight_persisted_before_effect_dispatch() {
         .mark_step_in_flight(
             &parent_sid,
             1, // start_run wrote revision 1
+            None,
             RunCheckpoint {
                 root: &pre,
                 children: &[],
@@ -4794,6 +4796,7 @@ async fn stale_mark_step_in_flight_against_waiting_row_leaves_wait_untouched() {
         .mark_step_in_flight(
             &session_id,
             2, // matches persisted revision
+            None,
             RunCheckpoint {
                 root: &pre,
                 children: &[],
@@ -6215,6 +6218,7 @@ async fn negative_or_max_graph_version_is_hard_storage_error_across_writers() {
             .mark_step_in_flight(
                 &session_id,
                 1,
+                None,
                 RunCheckpoint {
                     root: &root,
                     children: &[],
@@ -6343,6 +6347,7 @@ async fn graph_version_clock_monotonic_across_writers_and_untouched_by_prompt_at
         .mark_step_in_flight(
             &session_id,
             1,
+            None,
             RunCheckpoint {
                 root: &pre,
                 children: &[],

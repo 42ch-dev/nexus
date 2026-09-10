@@ -964,7 +964,10 @@ mod tests {
             session_id: &nexus_orchestration::engine::SessionId,
             expected_revision: u64,
             pre_step: &graph_flow::Session,
-        ) -> Result<(), nexus_orchestration::engine::EngineError> {
+        ) -> Result<
+            nexus_orchestration::run_state::RunRecord,
+            nexus_orchestration::engine::EngineError,
+        > {
             self.inner
                 .restore_pre_step(session_id, expected_revision, pre_step)
                 .await
@@ -974,11 +977,21 @@ mod tests {
             &self,
             session_id: &nexus_orchestration::engine::SessionId,
             expected_revision: u64,
+            expected_graph_version: Option<u64>,
             checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
             step_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<(), nexus_orchestration::engine::EngineError> {
+        ) -> Result<
+            nexus_orchestration::run_state::RunRecord,
+            nexus_orchestration::engine::EngineError,
+        > {
             self.inner
-                .mark_step_in_flight(session_id, expected_revision, checkpoint, step_state)
+                .mark_step_in_flight(
+                    session_id,
+                    expected_revision,
+                    expected_graph_version,
+                    checkpoint,
+                    step_state,
+                )
                 .await
         }
 

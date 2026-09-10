@@ -2030,7 +2030,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         session_id: &SessionId,
         expected_revision: u64,
         pre_step: &graph_flow::Session,
-    ) -> Result<(), EngineError> {
+    ) -> Result<RunRecord, EngineError> {
         let now = chrono::Utc::now().timestamp();
         let id = session_id.0.clone();
         let context_bytes = serde_json::to_vec(&pre_step.context).map_err(|e| {
@@ -2051,6 +2051,14 @@ impl WorkflowStateStore for SqliteSessionStorage {
             ..RunStateV1::default()
         };
         let state_bytes = serialize_blob(&cleared_state)?;
+
+        let mut tx = nexus_local_db::begin_immediate(&self.pool)
+            .await
+            .map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "restore_pre_step begin tx: {e}"
+                )))
+            })?;
 
         // ONE atomic operation: restore only when the persisted revision still
         // matches AND the row is a status that may actually be stepped
@@ -2077,7 +2085,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
             id,
             expected_revision_i64
         )
-        .execute(&*self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
@@ -2100,7 +2108,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
                  WHERE session_id = ?",
                 session_id.0
             )
-            .fetch_optional(&*self.pool)
+            .fetch_optional(&mut *tx)
             .await
             .map_err(|e| {
                 EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
@@ -2151,7 +2159,50 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 ))),
             };
         }
-        Ok(())
+
+        // Exact post-restore clocks, read back INSIDE the transaction: the
+        // restore advances only the graph clock, and this record is the
+        // operation-owned anchor a failed step's witness must adopt.
+        let (post_graph_version, post_status): (i64, String) = sqlx::query_as(
+            "SELECT graph_version, status FROM orchestration_sessions WHERE session_id = ?",
+        )
+        .bind(&session_id.0)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "restore_pre_step read post-restore clocks: {e}"
+            )))
+        })?;
+        let graph_version = u64::try_from(post_graph_version).map_err(|_| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "restore_pre_step '{}': negative post-restore graph_version                  {post_graph_version} (non-replayable)",
+                session_id.0
+            )))
+        })?;
+        let status = crate::engine::SessionStatus::from_db_str(&post_status).ok_or_else(|| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "restore_pre_step '{}': unknown/corrupt status {post_status:?}                  (non-replayable)",
+                session_id.0
+            )))
+        })?;
+        let descriptor = read_root_descriptor(&mut tx, &session_id.0).await?;
+
+        tx.commit().await.map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "restore_pre_step commit: {e}"
+            )))
+        })?;
+
+        Ok(RunRecord {
+            session_id: SessionId(session_id.0.clone()),
+            status,
+            state_revision: expected_revision,
+            execution_version: 1,
+            descriptor,
+            state: Some(cleared_state),
+            graph_version,
+        })
     }
 
     /// Persist the in-flight (current-position safety) intent BEFORE an
@@ -2162,9 +2213,10 @@ impl WorkflowStateStore for SqliteSessionStorage {
         &self,
         session_id: &SessionId,
         expected_revision: u64,
+        expected_graph_version: Option<u64>,
         checkpoint: RunCheckpoint<'_>,
         step_state: &RunStateV1,
-    ) -> Result<(), EngineError> {
+    ) -> Result<RunRecord, EngineError> {
         let now = chrono::Utc::now().timestamp();
         let id = session_id.0.clone();
         let current_task_id = checkpoint.root.current_task_id.clone();
@@ -2176,13 +2228,35 @@ impl WorkflowStateStore for SqliteSessionStorage {
         })?;
         let state_bytes = serialize_blob(step_state)?;
 
+        let mut tx = nexus_local_db::begin_immediate(&self.pool)
+            .await
+            .map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "mark_step_in_flight begin tx: {e}"
+                )))
+            })?;
+
         // Fence to the statuses that may actually be stepped (`running` or
-        // `paused`) and `state_revision = expected`. `waiting_for_input` and
-        // unknown statuses are excluded so a stale step cannot overwrite a
-        // durable wait. Advancing the revision in the same write makes the
-        // in-flight marker a CAS boundary: a control signal loaded before this
-        // marker cannot subsequently erase it.
+        // `paused`), `state_revision = expected`, and the loaded GRAPH
+        // preimage. `waiting_for_input` and unknown statuses are excluded so a
+        // stale step cannot overwrite a durable wait. The graph predicate
+        // closes the last stale-checkpoint window: a graph-only writer that
+        // advanced the session clock while keeping the workflow revision made
+        // the pre-step context stale, so the marker must lose the CAS rather
+        // than clobber the winner's context. Advancing BOTH clocks in the same
+        // write makes the marker a CAS boundary on the ownership pair, and the
+        // returned record carries the exact clocks the step transition and any
+        // failure witness must anchor to.
         let expected_revision_i64 = expected_revision as i64;
+        let expected_graph_i64: Option<i64> = expected_graph_version
+            .map(i64::try_from)
+            .transpose()
+            .map_err(|_| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "mark_step_in_flight '{}': expected graph_version out of range",
+                    session_id.0
+                )))
+            })?;
         let result = sqlx::query!(
             r"
             UPDATE orchestration_sessions
@@ -2192,15 +2266,18 @@ impl WorkflowStateStore for SqliteSessionStorage {
             WHERE session_id = ? AND status IN ('running', 'paused')
               AND state_revision = ?
               AND graph_version >= 0 AND graph_version < 9223372036854775807
+              AND (? IS NULL OR graph_version = ?)
             ",
             current_task_id,
             context_bytes,
             now,
             state_bytes,
             id,
-            expected_revision_i64
+            expected_revision_i64,
+            expected_graph_i64,
+            expected_graph_i64
         )
-        .execute(&*self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
@@ -2210,14 +2287,16 @@ impl WorkflowStateStore for SqliteSessionStorage {
         })?;
 
         if result.rows_affected() == 0 {
-            // The pre-step row is no longer running or its revision moved —
-            // the external effect must not run on an unmarked row.
+            // The pre-step row is no longer running, its revision moved, or a
+            // graph-only winner owns the session clock — the external effect
+            // must not run on an unmarked row, and none of these may be
+            // overwritten.
             let current = sqlx::query!(
                 "SELECT status, state_revision, graph_version FROM orchestration_sessions \
                  WHERE session_id = ?",
                 session_id.0
             )
-            .fetch_optional(&*self.pool)
+            .fetch_optional(&mut *tx)
             .await
             .map_err(|e| {
                 EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
@@ -2248,36 +2327,69 @@ impl WorkflowStateStore for SqliteSessionStorage {
                         found: u64::try_from(row.state_revision).unwrap_or(0),
                     }
                 }
+                // Graph-clock fence loss with an intact workflow revision: a
+                // graph-only winner owns the session clock — the same typed
+                // ownership loss as a revision mismatch, never an overwrite.
+                Some(row)
+                    if expected_graph_i64
+                        .is_some_and(|expected| row.graph_version != expected) =>
+                {
+                    EngineError::RevisionMismatch {
+                        session_id: session_id.0.clone(),
+                        expected: expected_revision,
+                        found: u64::try_from(row.state_revision).unwrap_or(0),
+                    }
+                }
                 Some(_) => EngineError::TerminalState(session_id.0.clone()),
                 None => EngineError::SessionNotFound(session_id.0.clone()),
             });
         }
-        Ok(())
+
+        // Exact marker-owned clocks, read back INSIDE the transaction: the
+        // step transition and any failure witness anchor here.
+        let (post_graph_version, post_status): (i64, String) = sqlx::query_as(
+            "SELECT graph_version, status FROM orchestration_sessions WHERE session_id = ?",
+        )
+        .bind(&session_id.0)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "mark_step_in_flight read post-marker clocks: {e}"
+            )))
+        })?;
+        let graph_version = u64::try_from(post_graph_version).map_err(|_| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "mark_step_in_flight '{}': negative post-marker graph_version                  {post_graph_version} (non-replayable)",
+                session_id.0
+            )))
+        })?;
+        let status = crate::engine::SessionStatus::from_db_str(&post_status).ok_or_else(|| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "mark_step_in_flight '{}': unknown/corrupt status {post_status:?} \
+                 (non-replayable)",
+                session_id.0
+            )))
+        })?;
+        let descriptor = read_root_descriptor(&mut tx, &session_id.0).await?;
+
+        tx.commit().await.map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "mark_step_in_flight commit: {e}"
+            )))
+        })?;
+
+        Ok(RunRecord {
+            session_id: SessionId(session_id.0.clone()),
+            status,
+            state_revision: expected_revision + 1,
+            execution_version: 1,
+            descriptor,
+            state: Some(step_state.clone()),
+            graph_version,
+        })
     }
 
-    /// Persist the durable `PromptAttempt` dispatch intent (A2/A5) BEFORE
-    /// the external Host effect, and update it to `Active` once the Host
-    /// session/operation IDs are known.
-    ///
-    /// Revision-linearized write: merges `in_flight` into the current
-    /// `run_state_json` fenced on `state_revision = expected_revision` AND
-    /// (when `expected_step` is `Some`) the current step marker
-    /// `step_in_flight = expected_step`, plus step-able status
-    /// (`running`/`paused`). The revision is NOT advanced so the engine's
-    /// step transition CAS anchor is preserved. A stale prompt invocation
-    /// whose loaded revision/step were superseded by a control transition
-    /// fails the CAS and is rejected — a post-transition prompt can never
-    /// replace newer state. A crash after the effect but before the result
-    /// checkpoint leaves the attempt persisted and the run recovers as
-    /// `Interrupted` (never auto-replayed). The engine's terminal/wait
-    /// `commit_transition` clears `in_flight` on success.
-    ///
-    /// **Durable attempt ownership**: when `expected_attempt_id` is `Some`,
-    /// the row must either have no `in_flight` attempt yet (Dispatching
-    /// claims the empty slot) or already carry exactly this operation's
-    /// attempt id (Active updates the SAME operation). Same-anchor
-    /// concurrent prompts can never overwrite or replace the durable
-    /// in-flight attempt with another operation's ids.
     async fn persist_prompt_attempt(
         &self,
         session_id: &SessionId,

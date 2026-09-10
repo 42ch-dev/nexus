@@ -273,41 +273,39 @@ async fn settle_drive_failure(
     witness: Option<&FailedStepWitness>,
 ) -> FailureSettlement {
     let authoritative = record_driver_failure(workflow_store, session_id, error, witness).await;
-    let context = if workflow_store.is_some() {
-        if authoritative.disposition == FailurePersistenceDisposition::Committed {
-            FailurePersistenceDisposition::Committed
-        } else {
-            FailurePersistenceDisposition::NoAuthority
-        }
-    } else {
+    // The legacy context-only contract is selected from the PERSISTED
+    // execution version (or the genuine absence of a workflow store) — a v0
+    // row driven with a store handle still owns its `_run_status`/`_run_error`
+    // record and the ordinary cancel cleanup.
+    let legacy_mode = workflow_store.is_none() || authoritative.legacy_v0;
+    let context = if legacy_mode {
         persist_failure(storage, session_id, error).await
+    } else if authoritative.disposition == FailurePersistenceDisposition::Committed {
+        FailurePersistenceDisposition::Committed
+    } else {
+        FailurePersistenceDisposition::NoAuthority
     };
-    let cleanup = if workflow_store.is_some() {
-        if authoritative.disposition.permits_terminal_cleanup()
-            && context.permits_terminal_cleanup()
-        {
-            // The anchor is the commit's OWN returned clocks: the coupled
-            // failure commit advanced the workflow revision AND the graph
-            // clock, and no later read may substitute for it.
-            match &authoritative.committed {
-                Some(record) => {
-                    cleanup_failed_run(
-                        engine,
-                        session_id,
-                        record.state_revision,
-                        record.graph_version,
-                    )
-                    .await
-                }
-                // A retry/duplicate that found the failure already durable
-                // owns no commit clocks, so it must not cancel anything.
-                None => FailurePersistenceDisposition::NoAuthority,
-            }
+    let cleanup = if legacy_mode {
+        if context.permits_terminal_cleanup() {
+            cleanup_failed_run_legacy(engine, session_id).await
         } else {
             FailurePersistenceDisposition::NoAuthority
         }
-    } else if context.permits_terminal_cleanup() {
-        cleanup_failed_run_legacy(engine, session_id).await
+    } else if authoritative.disposition.permits_terminal_cleanup()
+        && context.permits_terminal_cleanup()
+    {
+        // The anchor is the commit's OWN returned clocks: the coupled
+        // failure commit advanced the workflow revision AND the graph clock,
+        // and no later read may substitute for it.
+        match &authoritative.committed {
+            Some(record) => {
+                cleanup_failed_run(engine, session_id, record.state_revision, record.graph_version)
+                    .await
+            }
+            // A retry/duplicate that found the failure already durable owns
+            // no commit clocks, so it must not cancel anything.
+            None => FailurePersistenceDisposition::NoAuthority,
+        }
     } else {
         FailurePersistenceDisposition::NoAuthority
     };
@@ -327,6 +325,11 @@ async fn settle_drive_failure(
 struct AuthoritativeSettlement {
     disposition: FailurePersistenceDisposition,
     committed: Option<nexus_orchestration::run_state::RunRecord>,
+    /// True ONLY when the durable row was positively read as a legacy v0
+    /// (`execution_version < 1`) run. The v0 context-only failure contract is
+    /// selected from this persisted fact, never from whether a workflow-store
+    /// handle happens to be present.
+    legacy_v0: bool,
 }
 
 /// Persist the authoritative v1 [`RunFailure`] at the witnessed revision and
@@ -340,27 +343,48 @@ async fn record_driver_failure(
     let no_authority = AuthoritativeSettlement {
         disposition: FailurePersistenceDisposition::NoAuthority,
         committed: None,
+        legacy_v0: false,
     };
     let failed = |disposition| AuthoritativeSettlement {
         disposition,
         committed: None,
-    };
-    let witness = match witness {
-        Some(w) => w,
-        None => return no_authority,
+        legacy_v0: false,
     };
     let Some(store) = workflow_store else {
         return no_authority;
     };
-    // The load below only CLASSIFIES the current durable shape and builds
-    // the next state; authority comes exclusively from the CAS the coupled
-    // commit performs on the witness clocks.
+    // Classify the PERSISTED shape first: the legacy v0 contract is selected
+    // from the durable execution version, so it holds even when this attempt
+    // has no step witness (a scripted/legacy runner failure) — and never from
+    // the mere presence of a workflow-store handle. This read only classifies;
+    // authority comes exclusively from the CAS the coupled commit performs on
+    // the witness clocks.
+    match store.load_run(session_id).await {
+        Ok(Some(record)) if record.execution_version < 1 => {
+            return AuthoritativeSettlement {
+                disposition: FailurePersistenceDisposition::NoAuthority,
+                committed: None,
+                legacy_v0: true,
+            };
+        }
+        Ok(Some(_)) => {}
+        // An absent or unreadable row is never treated as legacy: the v1 path
+        // fails closed (the owner is fenced by the caller).
+        Ok(None) | Err(_) => {}
+    }
+    let witness = match witness {
+        Some(w) => w,
+        None => return no_authority,
+    };
     let Ok(Some(record)) = store.load_run(session_id).await else {
         return failed(FailurePersistenceDisposition::PersistenceFailed);
     };
     if record.execution_version < 1 {
-        // Legacy v0 rows are never v1 authority: fail closed, no write.
-        return failed(FailurePersistenceDisposition::NoAuthority);
+        return AuthoritativeSettlement {
+            disposition: FailurePersistenceDisposition::NoAuthority,
+            committed: None,
+            legacy_v0: true,
+        };
     }
     if record.state.is_none() {
         // Missing/corrupt v1 state stays untouched (never sanitized via a
@@ -433,6 +457,7 @@ async fn record_driver_failure(
         Ok(record) => AuthoritativeSettlement {
             disposition: FailurePersistenceDisposition::Committed,
             committed: Some(record),
+            legacy_v0: false,
         },
         Err(EngineError::RevisionMismatch { .. }) | Err(EngineError::TerminalState(_)) => {
             failed(FailurePersistenceDisposition::OwnershipLost)
@@ -468,7 +493,30 @@ async fn cleanup_failed_run(
         )
         .await
     {
-        Ok(_) => FailurePersistenceDisposition::Committed,
+        // The signal's `Ok` is a claim, not proof: mechanically confirm the
+        // run actually reached a terminal status. An engine that reports
+        // success without settling the row must FENCE (not have its claim
+        // laundered into a durable terminal write by the caller).
+        Ok(_) => match engine.get_status(session_id).await {
+            Ok(status) if status.is_terminal() => FailurePersistenceDisposition::Committed,
+            Ok(status) => {
+                tracing::warn!(
+                    session_id = %session_id.0,
+                    status = ?status,
+                    "preset-run driver: anchored cleanup returned success but the run is not \
+                     terminal; fencing instead of claiming cleanup"
+                );
+                FailurePersistenceDisposition::PersistenceFailed
+            }
+            Err(e) => {
+                tracing::warn!(
+                    session_id = %session_id.0,
+                    error = %e,
+                    "preset-run driver: could not verify anchored cleanup terminal proof"
+                );
+                FailurePersistenceDisposition::PersistenceFailed
+            }
+        },
         Err(EngineError::RevisionMismatch { .. }) | Err(EngineError::TerminalState(_)) => {
             FailurePersistenceDisposition::OwnershipLost
         }
@@ -1370,15 +1418,13 @@ impl WorkflowRunCoordinator {
         if settlement.cleanup != FailurePersistenceDisposition::Committed {
             return false;
         }
-        let owned_revision = match settlement.owned_revision {
-            Some(r) => r,
-            None => return false,
-        };
         let store = self.workflow_store.clone();
         let Ok(Some(record)) = store.load_run(session_id).await else {
             return false;
         };
         if record.execution_version < 1 {
+            // Legacy v0 rows carry the context-only failure record; there is
+            // no v1 terminal transition to claim.
             return true;
         }
         let has_authoritative_failure = record
@@ -1389,46 +1435,14 @@ impl WorkflowRunCoordinator {
         if !has_authoritative_failure {
             return false;
         }
-        if record.status.is_terminal() {
-            // `mark_failed` may have settled `Cancelled` after the authoritative
-            // failure record was written — both are durable success.
-            return true;
-        }
-        let expected_revision = owned_revision.saturating_add(1);
-        if record.state_revision != expected_revision {
-            return false;
-        }
-        let mut next_state = record.state.unwrap_or_default();
-        next_state.in_flight = None;
-        next_state.step_in_flight = None;
-        let Ok(Some(root)) = self.storage.get(&session_id.0).await else {
-            return false;
-        };
-        let checkpoint = nexus_orchestration::run_state::RunCheckpoint {
-            root: &root,
-            children: &[],
-        };
-        match store
-            .commit_transition(
-                session_id,
-                expected_revision,
-                checkpoint,
-                SessionStatus::Failed,
-                &next_state,
-            )
-            .await
-        {
-            Ok(_) => true,
-            Err(EngineError::RevisionMismatch { .. }) | Err(EngineError::TerminalState(_)) => false,
-            Err(e) => {
-                tracing::warn!(
-                    session_id = %session_id.0,
-                    error = %e,
-                    "coordinator: could not persist durable drive failure;                      fencing the failed owner against re-entry"
-                );
-                false
-            }
-        }
+        // Mechanical terminal proof: the anchored cleanup settles the durable
+        // run itself (verified at the store boundary before it reports
+        // `Committed`), so a terminal row IS the successful outcome and a
+        // non-terminal row means no owner actually committed the cleanup.
+        // There is deliberately no coordinator-side terminal write: the
+        // previous revision-only fallback could rebase onto a newer
+        // graph-only or revision winner.
+        record.status.is_terminal()
     }
 
     /// Settle the schedule whose `current_session_id` equals a terminal run
@@ -2950,6 +2964,124 @@ mod tests {
     use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
 
 
+
+    /// Test wrapper: `signal` reports success WITHOUT settling the run (a
+    /// custom engine whose cleanup claim is false). Everything else delegates
+    /// to the real engine, so the durable row stays exactly where the real
+    /// failure commit left it.
+    struct LyingCleanupEngine {
+        inner: Arc<dyn OrchestrationEngine>,
+    }
+
+    impl LyingCleanupEngine {
+        fn new(inner: Arc<dyn OrchestrationEngine>) -> Self {
+            Self { inner }
+        }
+    }
+
+    #[async_trait]
+    impl OrchestrationEngine for LyingCleanupEngine {
+        async fn run_step(&self, session_id: &SessionId) -> Result<StepOutcome, EngineError> {
+            self.inner.run_step(session_id).await
+        }
+
+        async fn new_session(
+            &self,
+            key: SessionKey,
+            ctx: Context,
+        ) -> Result<SessionId, EngineError> {
+            self.inner.new_session(key, ctx).await
+        }
+
+        async fn start_session_with_graph(
+            &self,
+            id_prefix: &str,
+            graph: Arc<graph_flow::Graph>,
+        ) -> Result<SessionId, EngineError> {
+            self.inner.start_session_with_graph(id_prefix, graph).await
+        }
+
+        async fn get_status(&self, session_id: &SessionId) -> Result<SessionStatus, EngineError> {
+            self.inner.get_status(session_id).await
+        }
+
+        async fn has_runner(&self, session_id: &SessionId) -> bool {
+            self.inner.has_runner(session_id).await
+        }
+
+        async fn recover_sessions(&self, summaries: Vec<SessionSummary>) {
+            self.inner.recover_sessions(summaries).await
+        }
+
+        async fn ensure_recovered_runner(&self, session_id: &SessionId) -> Result<(), EngineError> {
+            self.inner.ensure_recovered_runner(session_id).await
+        }
+
+        async fn signal(
+            &self,
+            _session_id: &SessionId,
+            _signal: EngineSignal,
+        ) -> Result<(), EngineError> {
+            // A cleanup claim with NO settlement behind it.
+            Ok(())
+        }
+
+        async fn list_active(
+            &self,
+            filter: SessionFilter,
+        ) -> Result<Vec<SessionSummary>, EngineError> {
+            self.inner.list_active(filter).await
+        }
+
+        async fn spawn_child_session(
+            &self,
+            params: ChildSessionParams,
+        ) -> Result<SessionId, EngineError> {
+            self.inner.spawn_child_session(params).await
+        }
+
+        async fn attach_existing_child_session(
+            &self,
+            parent_session_id: &str,
+            inner_graph: Arc<graph_flow::Graph>,
+        ) -> Result<Option<SessionId>, EngineError> {
+            self.inner
+                .attach_existing_child_session(parent_session_id, inner_graph)
+                .await
+        }
+
+        async fn get_context(
+            &self,
+            session_id: &SessionId,
+        ) -> Result<graph_flow::Context, EngineError> {
+            self.inner.get_context(session_id).await
+        }
+
+        async fn get_current_task_id(
+            &self,
+            session_id: &SessionId,
+        ) -> Result<Option<String>, EngineError> {
+            self.inner.get_current_task_id(session_id).await
+        }
+
+        async fn start_session_with_preset(
+            &self,
+            loaded: &nexus_orchestration::preset::LoadedPreset,
+        ) -> Result<SessionId, EngineError> {
+            self.inner.start_session_with_preset(loaded).await
+        }
+
+        async fn start_session_with_preset_for_creator(
+            &self,
+            loaded: &nexus_orchestration::preset::LoadedPreset,
+            creator_id: &str,
+        ) -> Result<SessionId, EngineError> {
+            self.inner
+                .start_session_with_preset_for_creator(loaded, creator_id)
+                .await
+        }
+    }
+
     /// Test wrapper: fail the next `get_status` call, then delegate.
     struct FailGetStatusOnce {
         inner: Arc<dyn OrchestrationEngine>,
@@ -4021,6 +4153,11 @@ mod tests {
         }
         let (storage, sqlite) = a7_storage(&db_path).await;
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let pool = Arc::new(
+            nexus_local_db::open_pool(&db_path)
+                .await
+                .expect("open verification pool"),
+        );
         let engine =
             ScriptedEngine::with_script(vec![Ok(StepOutcome::Completed { response: None })]);
         // The summary status the boot recovery filter produced.
@@ -4088,6 +4225,11 @@ mod tests {
         }
         let (storage, sqlite) = a7_storage(&db_path).await;
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let pool = Arc::new(
+            nexus_local_db::open_pool(&db_path)
+                .await
+                .expect("open verification pool"),
+        );
         let engine =
             ScriptedEngine::with_script(vec![Ok(StepOutcome::Completed { response: None })]);
         let sums = vec![
@@ -4170,6 +4312,11 @@ mod tests {
         }
         let (storage, sqlite) = a7_storage(&db_path).await;
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let pool = Arc::new(
+            nexus_local_db::open_pool(&db_path)
+                .await
+                .expect("open verification pool"),
+        );
         let engine =
             ScriptedEngine::with_script(vec![Ok(StepOutcome::Completed { response: None })]);
         let sum = SessionSummary {
@@ -4231,6 +4378,11 @@ mod tests {
         }
         let (storage, sqlite) = a7_storage(&db_path).await;
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let pool = Arc::new(
+            nexus_local_db::open_pool(&db_path)
+                .await
+                .expect("open verification pool"),
+        );
         let engine =
             ScriptedEngine::with_script(vec![Ok(StepOutcome::Completed { response: None })]);
         // Stale summary: says Running with live join keys; the durable row
@@ -4311,6 +4463,11 @@ mod tests {
         }
         let (storage, sqlite) = a7_storage(&db_path).await;
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let pool = Arc::new(
+            nexus_local_db::open_pool(&db_path)
+                .await
+                .expect("open verification pool"),
+        );
         let engine =
             ScriptedEngine::with_script(vec![Ok(StepOutcome::Completed { response: None })]);
         // Stale summary: says Running with live join keys (chain context
@@ -4395,6 +4552,11 @@ mod tests {
         }
         let (storage, sqlite) = a7_storage(&db_path).await;
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let pool = Arc::new(
+            nexus_local_db::open_pool(&db_path)
+                .await
+                .expect("open verification pool"),
+        );
         let engine =
             ScriptedEngine::with_script(vec![Ok(StepOutcome::Completed { response: None })]);
         let config = PresetRunConfig {
@@ -4590,7 +4752,7 @@ mod tests {
             session_id: &SessionId,
             expected_revision: u64,
             pre_step: &graph_flow::Session,
-        ) -> Result<(), EngineError> {
+        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
             self.inner
                 .restore_pre_step(session_id, expected_revision, pre_step)
                 .await
@@ -4600,11 +4762,18 @@ mod tests {
             &self,
             session_id: &SessionId,
             expected_revision: u64,
+            expected_graph_version: Option<u64>,
             checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
             step_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<(), EngineError> {
+        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
             self.inner
-                .mark_step_in_flight(session_id, expected_revision, checkpoint, step_state)
+                .mark_step_in_flight(
+                session_id,
+                expected_revision,
+                expected_graph_version,
+                checkpoint,
+                step_state,
+            )
                 .await
         }
 
@@ -4653,8 +4822,17 @@ mod tests {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum BoundaryFault {
         /// The coupled authoritative failure commit fails with a storage
-        /// error at `commit_transition_with_graph_fence`.
+        /// error at `commit_transition_with_graph_fence` (matched on the
+        /// failure-carrying state, so the step transition is untouched).
         FailFailureCommit,
+        /// The STEP transition (the post-run commit carrying no failure)
+        /// fails with a storage error: the attempt must keep its marker
+        /// witness so the durable failure record is still written.
+        FailStepCommit,
+        /// A graph-only writer wins between the pre-step root load and the
+        /// STEP MARKER, so the stale pre-step checkpoint must lose the
+        /// marker CAS instead of clobbering the winner's context.
+        GraphOnlyWinnerBeatsStepMarker,
         /// A graph-only writer (same workflow revision, advanced graph
         /// clock) wins between the step marker and the failure commit.
         GraphOnlyWinnerBeatsFailureCommit,
@@ -4667,6 +4845,9 @@ mod tests {
         /// A competing owner wins `mark_step_in_flight` first (pre-marker
         /// winner).
         WinnerBeatsStepMarker,
+        /// Another owner settles the run `Cancelled` right after the anchored
+        /// phase-1 cancel-intent fence and before the final settlement.
+        WinnerSettlesCancelledAfterPhaseOne,
         /// The v1 run-state blob is corrupted in the DB on the step's load.
         CorruptStateOnStepLoad,
     }
@@ -4798,9 +4979,18 @@ mod tests {
             next_state: &nexus_orchestration::run_state::RunStateV1,
         ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
             match self.fault {
-                BoundaryFault::FailFailureCommit if self.file_once() => {
+                BoundaryFault::FailFailureCommit
+                    if next_state.failure.is_some() && self.file_once() =>
+                {
                     return Err(Self::injected(
                         "injected authoritative failure-commit storage fault",
+                    ));
+                }
+                BoundaryFault::FailStepCommit
+                    if next_state.failure.is_none() && self.file_once() =>
+                {
+                    return Err(Self::injected(
+                        "injected step-transition storage fault",
                     ));
                 }
                 BoundaryFault::GraphOnlyWinnerBeatsFailureCommit if self.file_once() => {
@@ -4866,7 +5056,8 @@ mod tests {
                 }
                 _ => {}
             }
-            self.inner
+            let committed = self
+                .inner
                 .commit_transition_with_graph_fence(
                     session_id,
                     expected_revision,
@@ -4875,7 +5066,43 @@ mod tests {
                     next_status,
                     next_state,
                 )
-                .await
+                .await?;
+            if self.fault == BoundaryFault::WinnerSettlesCancelledAfterPhaseOne
+                && next_state.cancel_requested
+                && next_state.failure.is_some()
+                && self.file_once()
+            {
+                // This commit WAS the anchored phase-1 cancel-intent fence: a
+                // different owner now settles the row Cancelled (a real
+                // settlement at the new clocks) before the failed drive's
+                // final settlement reloads it.
+                let mut winner_root = self
+                    .storage
+                    .get(&session_id.0)
+                    .await
+                    .expect("winner root session")
+                    .expect("winner root exists");
+                winner_root
+                    .context
+                    .set("winner.marker", "phase1-cancelled")
+                    .expect("winner context write");
+                let mut winner_state = committed.state.clone().unwrap_or_default();
+                winner_state.cancel_requested = true;
+                self.inner
+                    .settle_cancelled(
+                        session_id,
+                        committed.state_revision,
+                        None,
+                        nexus_orchestration::run_state::RunCheckpoint {
+                            root: &winner_root,
+                            children: &[],
+                        },
+                        &winner_state,
+                    )
+                    .await
+                    .expect("concurrent owner settles Cancelled after phase 1");
+            }
+            Ok(committed)
         }
 
         async fn settle_cancelled(
@@ -4905,7 +5132,7 @@ mod tests {
             session_id: &SessionId,
             expected_revision: u64,
             pre_step: &graph_flow::Session,
-        ) -> Result<(), EngineError> {
+        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
             self.inner
                 .restore_pre_step(session_id, expected_revision, pre_step)
                 .await
@@ -4915,16 +5142,39 @@ mod tests {
             &self,
             session_id: &SessionId,
             expected_revision: u64,
+            expected_graph_version: Option<u64>,
             checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
             step_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<(), EngineError> {
+        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            if self.fault == BoundaryFault::GraphOnlyWinnerBeatsStepMarker && self.file_once() {
+                // A real graph-only writer (context save advancing only the
+                // session clock) wins after the engine loaded the pre-step
+                // root and before this marker executes. The marker's graph
+                // predicate must reject the stale checkpoint.
+                let mut winner = self
+                    .storage
+                    .get(&session_id.0)
+                    .await
+                    .expect("winner root session")
+                    .expect("winner root exists");
+                winner
+                    .context
+                    .set("winner.marker", "graph-only-before-marker")
+                    .expect("winner context write");
+                self.storage
+                    .save(winner)
+                    .await
+                    .expect("graph-only winner save wins the OCC");
+            }
             if self.fault == BoundaryFault::WinnerBeatsStepMarker && self.file_once() {
                 // A competing owner wins the REAL marker CAS at the same
-                // expected revision; the delegated marker then loses.
+                // expected revision AND graph preimage; the delegated marker
+                // then loses.
                 self.inner
                     .mark_step_in_flight(
                         session_id,
                         expected_revision,
+                        expected_graph_version,
                         nexus_orchestration::run_state::RunCheckpoint {
                             root: checkpoint.root,
                             children: checkpoint.children,
@@ -4935,7 +5185,13 @@ mod tests {
                     .expect("competing owner wins the step marker");
             }
             self.inner
-                .mark_step_in_flight(session_id, expected_revision, checkpoint, step_state)
+                .mark_step_in_flight(
+                    session_id,
+                    expected_revision,
+                    expected_graph_version,
+                    checkpoint,
+                    step_state,
+                )
                 .await
         }
 
@@ -6650,6 +6906,575 @@ mod tests {
                 .expect("ensure_driving"),
             DriveDisposition::NotDriving,
             "a corrupt-state failure must fence the owner against re-entry"
+        );
+    }
+
+
+
+    /// C4 (real boundary): a v0/legacy row driven WITH a workflow-store handle
+    /// and WITHOUT any pre-existing failure keys must still write the legacy
+    /// context-only failure record (`_run_status`/`_run_error`) and clean up
+    /// with the ordinary cancel. The legacy mode is chosen from the persisted
+    /// execution version, never from the store handle's presence.
+    #[tokio::test]
+    async fn v0_drive_with_store_handle_writes_legacy_context_failure_record() {
+        let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let _ = &tmp;
+        let (storage, sqlite) = a7_storage(&db_path).await;
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let pool = Arc::new(
+            nexus_local_db::open_pool(&db_path)
+                .await
+                .expect("open verification pool"),
+        );
+
+        // A genuine v0 row: `SessionStorage::save` inserts with the legacy
+        // `execution_version = 0` marker and no `_run_status`/`_run_error`.
+        let mut session = graph_flow::Session::new_from_task("v0:no-keys".to_string(), "task_1");
+        session
+            .context
+            .set("_join_wait_start_task_1", 1_756_990_000_i64)
+            .expect("seed v0 context");
+        storage.save(session).await.expect("seed v0 row");
+
+        let engine = ScriptedEngine::with_script(vec![Err(EngineError::GraphFlow(
+            graph_flow::GraphError::TaskExecutionFailed("v0 legacy drive failure".to_string()),
+        ))]);
+        let session_id = SessionId("v0:no-keys".to_string());
+
+        let outcome = drive_preset_run(
+            &engine,
+            Some(&storage),
+            Some(&store),
+            &session_id,
+            &PresetRunConfig::default(),
+            None,
+        )
+        .await;
+        let PresetRunOutcome::Failed {
+            settlement, error, ..
+        } = outcome
+        else {
+            panic!("expected Failed, got {outcome:?}");
+        };
+        assert!(error.contains("v0 legacy drive failure"), "{error}");
+        assert_eq!(
+            settlement.authoritative,
+            FailurePersistenceDisposition::NoAuthority,
+            "a v0 row has no v1 authority to claim"
+        );
+        assert_eq!(
+            settlement.context,
+            FailurePersistenceDisposition::Committed,
+            "the legacy context-only record must be written even with a store handle"
+        );
+        assert_eq!(
+            settlement.cleanup,
+            FailurePersistenceDisposition::Committed,
+            "legacy cleanup is the ordinary cancel"
+        );
+
+        // Durable evidence: the context keys landed on the v0 row and nothing
+        // promoted it to v1 or wrote a RunFailure.
+        let root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get")
+            .expect("root");
+        assert_eq!(
+            root.context.get::<String>("_run_status").as_deref(),
+            Some("failed"),
+            "the v0 legacy failure record must be durable"
+        );
+        assert!(
+            root.context
+                .get::<String>("_run_error")
+                .as_deref()
+                .is_some_and(|e| e.contains("v0 legacy drive failure")),
+            "the v0 legacy error text must be durable verbatim: {:?}",
+            root.context.get::<String>("_run_error")
+        );
+        let (execution_version, revision): (i64, i64) = sqlx::query_as(
+            "SELECT execution_version, state_revision FROM orchestration_sessions \
+             WHERE session_id = ?",
+        )
+        .bind("v0:no-keys")
+        .fetch_one(&*pool)
+        .await
+        .expect("read v0 row");
+        assert_eq!(execution_version, 0, "the row stays legacy");
+        assert_eq!(revision, 0, "no v1 transition touched the v0 row");
+        let record = store.load_run(&session_id).await.expect("load").expect("row");
+        assert!(
+            record
+                .state
+                .as_ref()
+                .and_then(|s| s.failure.as_ref())
+                .is_none(),
+            "no v1 RunFailure may be written for a v0 row"
+        );
+    }
+
+
+    /// C5 (real boundary): a custom engine whose cleanup signal reports
+    /// success WITHOUT settling the row must FENCE — the coordinator has no
+    /// terminal-write fallback that could rebase onto a newer winner, and the
+    /// durable row must be untouched by the false claim.
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn coordinator_false_cleanup_claim_fences_and_writes_nothing() {
+        let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let _ = &tmp;
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("open pool");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let real_store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+
+        struct FailingTask;
+        #[async_trait]
+        impl graph_flow::Task for FailingTask {
+            fn id(&self) -> &str {
+                "fail"
+            }
+            async fn run(
+                &self,
+                _context: graph_flow::Context,
+            ) -> Result<graph_flow::TaskResult, graph_flow::GraphError> {
+                Err(graph_flow::GraphError::TaskExecutionFailed(
+                    "false cleanup claim failure".to_string(),
+                ))
+            }
+        }
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("coord-false-cleanup-graph")
+                .add_task(Arc::new(FailingTask))
+                .build()
+                .expect("graph"),
+        );
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let real_engine = Arc::new(
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+                storage.clone(),
+                real_store.clone(),
+                caps,
+            ),
+        );
+        let session_id = real_engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        let engine: Arc<nexus_orchestration::GraphFlowEngine> = real_engine.clone();
+        let coordinator = WorkflowRunCoordinator::new(
+            engine,
+            storage.clone(),
+            pool.clone(),
+            Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        );
+        // Swap in the lying engine through the same boundary the daemon uses.
+        let lying: Arc<dyn OrchestrationEngine> = Arc::new(LyingCleanupEngine::new(
+            real_engine.clone() as Arc<dyn OrchestrationEngine>,
+        ));
+        let outcome = drive_preset_run(
+            &*lying,
+            Some(&storage),
+            Some(&real_store),
+            &session_id,
+            &PresetRunConfig::default(),
+            None,
+        )
+        .await;
+        let PresetRunOutcome::Failed { settlement, .. } = outcome else {
+            panic!("expected Failed, got {outcome:?}");
+        };
+        assert_eq!(
+            settlement.authoritative,
+            FailurePersistenceDisposition::Committed
+        );
+        assert_eq!(
+            settlement.cleanup,
+            FailurePersistenceDisposition::PersistenceFailed,
+            "a cleanup claim with no settlement behind it must not be Committed"
+        );
+        assert!(
+            !coordinator
+                .persist_drive_failure(&session_id, &settlement)
+                .await,
+            "the coordinator must fence a false cleanup claim instead of writing a terminal claim"
+        );
+
+        let record = real_store.load_run(&session_id).await.expect("load").expect("row");
+        assert_ne!(
+            record.status,
+            SessionStatus::Cancelled,
+            "no terminal claim may be minted for a false cleanup"
+        );
+        assert_ne!(record.status, SessionStatus::Failed);
+        assert_eq!(
+            record.state_revision, 3,
+            "marker (2) + failure commit (3): the false claim and the coordinator add no write"
+        );
+        assert!(
+            record
+                .state
+                .as_ref()
+                .and_then(|s| s.failure.as_ref())
+                .is_some_and(|f| f.code == "driver_failed"),
+            "the durable authoritative failure record stands"
+        );
+    }
+
+    /// C1 (real boundary): a graph-only writer wins between the pre-step root
+    /// load and the STEP MARKER. The marker's graph predicate must reject the
+    /// stale checkpoint — the winner's context/clock survive, no step is
+    /// dispatched, and the losing owner is fenced.
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn coordinator_graph_only_winner_before_step_marker_is_not_clobbered() {
+        use std::sync::atomic::AtomicUsize;
+
+        let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let _ = &tmp;
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("open pool");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let real_store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+
+        struct CountingTask {
+            dispatched: Arc<AtomicUsize>,
+        }
+        #[async_trait]
+        impl graph_flow::Task for CountingTask {
+            fn id(&self) -> &str {
+                "count"
+            }
+            async fn run(
+                &self,
+                _context: graph_flow::Context,
+            ) -> Result<graph_flow::TaskResult, graph_flow::GraphError> {
+                self.dispatched.fetch_add(1, Ordering::SeqCst);
+                Ok(graph_flow::TaskResult::new(
+                    Some("done".to_string()),
+                    graph_flow::NextAction::Continue,
+                ))
+            }
+        }
+        let dispatched = Arc::new(AtomicUsize::new(0));
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("coord-graph-only-marker-graph")
+                .add_task(Arc::new(CountingTask {
+                    dispatched: dispatched.clone(),
+                }))
+                .build()
+                .expect("graph"),
+        );
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = Arc::new(
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+                storage.clone(),
+                Arc::new(BoundaryFaultStore::new(
+                    real_store.clone(),
+                    storage.clone(),
+                    pool.clone(),
+                    BoundaryFault::GraphOnlyWinnerBeatsStepMarker,
+                )),
+                caps,
+            ),
+        );
+        let session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let coordinator = WorkflowRunCoordinator::new(
+            engine.clone(),
+            storage.clone(),
+            pool.clone(),
+            session_cancels,
+        );
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        coordinator
+            .ensure_driving(&session_id)
+            .await
+            .expect("start coordinator drive");
+
+        wait_until("failed owner fence", || coordinator.is_fenced(&session_id)).await;
+
+        assert_eq!(
+            dispatched.load(Ordering::SeqCst),
+            0,
+            "no external step may be dispatched when the marker lost its graph fence"
+        );
+        let record = real_store.load_run(&session_id).await.expect("load").expect("row");
+        assert_eq!(
+            record.state_revision, 1,
+            "the rejected marker wrote nothing (the winner kept the revision)"
+        );
+        assert!(
+            record
+                .state
+                .as_ref()
+                .is_some_and(|s| s.step_in_flight.is_none()),
+            "no in-flight marker may be persisted over the winner"
+        );
+        assert!(
+            record
+                .state
+                .as_ref()
+                .and_then(|s| s.failure.as_ref())
+                .is_none(),
+            "a graph-only marker loss has no authority to write a failure"
+        );
+        let root = storage.get(&session_id.0).await.expect("get").expect("root");
+        assert_eq!(
+            root.context.get::<String>("winner.marker").as_deref(),
+            Some("graph-only-before-marker"),
+            "the winner's context survives verbatim"
+        );
+        assert!(root.context.get::<String>("_run_status").is_none());
+        assert_eq!(
+            coordinator
+                .ensure_driving(&session_id)
+                .await
+                .expect("ensure_driving"),
+            DriveDisposition::NotDriving,
+            "a no-authority marker loser must be fenced, never re-driven"
+        );
+    }
+
+    /// C2 (real boundary): the STEP transition fails after the marker. The
+    /// attempt must retain its marker witness, restore the pre-step boundary,
+    /// and still write the coupled authoritative failure + context keys.
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn coordinator_step_commit_fault_keeps_marker_witness_and_settles() {
+        let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let _ = &tmp;
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("open pool");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let real_store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+
+        struct PausingTask;
+        #[async_trait]
+        impl graph_flow::Task for PausingTask {
+            fn id(&self) -> &str {
+                "pause"
+            }
+            async fn run(
+                &self,
+                _context: graph_flow::Context,
+            ) -> Result<graph_flow::TaskResult, graph_flow::GraphError> {
+                Ok(graph_flow::TaskResult::new(
+                    Some("paused".to_string()),
+                    graph_flow::NextAction::Continue,
+                ))
+            }
+        }
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("coord-step-commit-fault-graph")
+                .add_task(Arc::new(PausingTask))
+                .build()
+                .expect("graph"),
+        );
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = Arc::new(
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+                storage.clone(),
+                Arc::new(BoundaryFaultStore::new(
+                    real_store.clone(),
+                    storage.clone(),
+                    pool.clone(),
+                    BoundaryFault::FailStepCommit,
+                )),
+                caps,
+            ),
+        );
+        let session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let coordinator = WorkflowRunCoordinator::new(
+            engine.clone(),
+            storage.clone(),
+            pool.clone(),
+            session_cancels,
+        );
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        coordinator
+            .ensure_driving(&session_id)
+            .await
+            .expect("start coordinator drive");
+
+        wait_until("durable authoritative failure", || async {
+            match real_store.load_run(&session_id).await {
+                Ok(Some(record)) => record
+                    .state
+                    .as_ref()
+                    .and_then(|s| s.failure.as_ref())
+                    .is_some_and(|f| f.code == "driver_failed"),
+                _ => false,
+            }
+        })
+        .await;
+
+        let record = real_store.load_run(&session_id).await.expect("load").expect("row");
+        assert_eq!(
+            record.status,
+            SessionStatus::Cancelled,
+            "the failed drive settles through the anchored cleanup"
+        );
+        assert!(
+            record
+                .state
+                .as_ref()
+                .is_some_and(|s| s.step_in_flight.is_none()),
+            "the restored pre-step boundary clears the in-flight marker"
+        );
+        let root = storage.get(&session_id.0).await.expect("get").expect("root");
+        assert_eq!(
+            root.context.get::<String>("_run_status").as_deref(),
+            Some("failed"),
+            "the coupled context keys land with the authoritative failure commit"
+        );
+        assert!(
+            !coordinator.is_fenced(&session_id).await,
+            "a settled failure is not fenced"
+        );
+    }
+
+    /// C3 (real boundary): another owner settles the run `Cancelled` right
+    /// after the anchored phase-1 fence. The failed drive's final settlement
+    /// must treat the moved clocks as ownership loss — never adopt the newer
+    /// Cancelled row as its own cleanup success.
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn coordinator_newer_cancelled_after_phase_one_is_not_adopted_as_cleanup() {
+        let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let _ = &tmp;
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("open pool");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let real_store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+
+        struct FailingTask;
+        #[async_trait]
+        impl graph_flow::Task for FailingTask {
+            fn id(&self) -> &str {
+                "fail"
+            }
+            async fn run(
+                &self,
+                _context: graph_flow::Context,
+            ) -> Result<graph_flow::TaskResult, graph_flow::GraphError> {
+                Err(graph_flow::GraphError::TaskExecutionFailed(
+                    "phase-1 winner failure".to_string(),
+                ))
+            }
+        }
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("coord-phase1-winner-graph")
+                .add_task(Arc::new(FailingTask))
+                .build()
+                .expect("graph"),
+        );
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        // The phase-1 cancel-intent fence is committed by the ENGINE's store
+        // (the coordinator's store handles the drive/failure commit), so the
+        // boundary fixture must wrap the engine's store.
+        let engine = Arc::new(
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+                storage.clone(),
+                Arc::new(BoundaryFaultStore::new(
+                    real_store.clone(),
+                    storage.clone(),
+                    pool.clone(),
+                    BoundaryFault::WinnerSettlesCancelledAfterPhaseOne,
+                )),
+                caps,
+            ),
+        );
+        let session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let coordinator = WorkflowRunCoordinator::new(
+            engine.clone(),
+            storage.clone(),
+            pool.clone(),
+            session_cancels,
+        );
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        coordinator
+            .ensure_driving(&session_id)
+            .await
+            .expect("start coordinator drive");
+
+        wait_until("phase-1 winner settlement", || async {
+            let root = storage
+                .get(&session_id.0)
+                .await
+                .expect("get")
+                .expect("root");
+            root.context.get::<String>("winner.marker").as_deref() == Some("phase1-cancelled")
+        })
+        .await;
+        coordinator.abort_all_drives().await;
+
+        let record = real_store.load_run(&session_id).await.expect("load").expect("row");
+        assert_eq!(
+            record.status,
+            SessionStatus::Cancelled,
+            "the newer owner's terminal outcome stands"
+        );
+        assert_eq!(
+            record.state_revision, 5,
+            "start (1) + marker (2) + failure commit (3) + phase-1 fence (4) + winner settle (5); \
+             the failed drive's final settlement must add no write of its own"
+        );
+        let root = storage.get(&session_id.0).await.expect("get").expect("root");
+        assert_eq!(
+            root.context.get::<String>("winner.marker").as_deref(),
+            Some("phase1-cancelled"),
+            "the newer owner's context survives the losing cleanup"
+        );
+        assert!(
+            !coordinator.is_fenced(&session_id).await,
+            "an ownership loss to a live winner must not fence"
         );
     }
 

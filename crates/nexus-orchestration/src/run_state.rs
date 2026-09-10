@@ -409,6 +409,10 @@ pub trait WorkflowStateStore: Send + Sync {
     /// between a check and a save is never overwritten — this leaves the row
     /// untouched and returns [`EngineError::RevisionMismatch`].
     ///
+    /// Returns the restored row's [`RunRecord`] — the commit-owned clocks of
+    /// THIS operation, which a failed step's witness must adopt (the restore
+    /// advances only the graph clock; the workflow revision is unchanged).
+    ///
     /// # Errors
     /// Returns [`EngineError::RevisionMismatch`] when the persisted revision no
     /// longer equals `expected_revision`; [`EngineError::TerminalState`] when
@@ -418,7 +422,7 @@ pub trait WorkflowStateStore: Send + Sync {
         session_id: &SessionId,
         expected_revision: u64,
         pre_step: &graph_flow::Session,
-    ) -> Result<(), EngineError>;
+    ) -> Result<RunRecord, EngineError>;
 
     /// Persist the in-flight (current-position safety) intent BEFORE an
     /// external effect dispatch (A2/A7 Important 5), so a crash after an
@@ -426,23 +430,31 @@ pub trait WorkflowStateStore: Send + Sync {
     /// replayable) run.
     ///
     /// Writes `step_state` (with `step_in_flight` set) plus the current step
-    /// position/context, fenced to `status IN ('running', 'paused')` and
-    /// `state_revision = expected_revision`. The marker atomically advances
-    /// the revision by one, so a concurrently loaded control signal cannot
-    /// erase it. The subsequent transition CAS anchors to that new revision.
-    /// Fails when the pre-step row is no longer step-able or its revision
-    /// moved — the external effect must not run on an unmarked row.
+    /// position/context, fenced to `status IN ('running', 'paused')`,
+    /// `state_revision = expected_revision`, and (when
+    /// `expected_graph_version` is `Some`) the persisted `graph_version`.
+    /// The marker atomically advances the revision AND the graph clock by
+    /// one, so a concurrently loaded control signal cannot erase it and a
+    /// graph-only writer that advanced the session clock without the
+    /// workflow revision cannot be overwritten by the stale pre-step
+    /// checkpoint. The subsequent transition CAS anchors to the RETURNED
+    /// record's clocks.
+    ///
+    /// Fails when the pre-step row is no longer step-able, its revision
+    /// moved, or (with a graph fence) a graph-only winner owns the clock —
+    /// the external effect must not run on an unmarked or clobbered row.
     ///
     /// # Errors
-    /// Returns [`EngineError`] on storage failure or when the fence does not
-    /// match.
+    /// Returns [`EngineError`] on storage failure, revision/graph mismatch,
+    /// or a non-step-able status.
     async fn mark_step_in_flight(
         &self,
         session_id: &SessionId,
         expected_revision: u64,
+        expected_graph_version: Option<u64>,
         checkpoint: RunCheckpoint<'_>,
         step_state: &RunStateV1,
-    ) -> Result<(), EngineError>;
+    ) -> Result<RunRecord, EngineError>;
 
     /// Persist the durable `PromptAttempt` dispatch intent (A2/A5) BEFORE
     /// the external Host effect, and update it to `Active` once the Host
