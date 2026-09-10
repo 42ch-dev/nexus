@@ -31,7 +31,10 @@ nexus-moment-context-assembly = { path = "../nexus-moment-context-assembly" }
 # `SpokeResult`, `SpokeRejectCode`) come from this crate (spec §7 — single
 # boundary that crosses into spoke standard objects).
 nexus-spoke-adapter = { path = "../nexus-spoke-adapter" }
-graph-flow = "=0.2.3"
+# 2026-09-10 dependency sweep (#276): 0.2.3 → 0.8.0. default-features=false
+# disables upstream's new `postgres` default (production storage is the
+# custom SQLite SessionStorage, not upstream PostgreSQL); `rig` stays off.
+graph-flow = { version = "=0.8.0", default-features = false }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -101,17 +104,17 @@ tokio-tungstenite = { workspace = true, optional = true }
 # graph unchanged.
 spoke-schemas = { workspace = true, optional = true }
 # V1.174 P0 T2 (AR-67): persistent Ed25519 identity seed generation.
-# getrandom 0.2 is the already-locked default-graph CSPRNG stack (uuid et
-# al.); optional keeps the feature-off graph unchanged.
-getrandom = { version = "0.2", optional = true }
+# 2026-09-10 dependency sweep (#273): 0.2 → 0.4 (`getrandom::fill`; uuid 1.26
+# from #269 selects the same getrandom 0.4.3). Optional keeps the
+# feature-off graph unchanged.
+getrandom = { version = "0.4", optional = true }
 # V1.179 P0 T1 (DF-88): embedded MCP server (Model B) — in-process rmcp
 # over sink/stream. Optional + wired to `connect-client` (the shared
 # bridge core compiles there); the embedded server module compiles only
-# under the nested `embedded-mcp` feature. rmcp 1.8's
-# `transport::sink_stream` is an ungated core module — no new crate
-# features. Pinned exactly `=1.8.0` (AR-73: exactly-one-version, already
-# in the default graph via agent-client-protocol).
-rmcp = { version = "=1.8.0", default-features = false, features = ["server"], optional = true }
+# under the nested `embedded-mcp` feature. Pinned exactly `=3.2.0`
+# (2026-09-10 dependency sweep #280; ACP 2.1.0 core no longer carries rmcp,
+# so feature-on is exactly-one 3.2.0 and feature-off is absent).
+rmcp = { version = "=3.2.0", default-features = false, features = ["server"], optional = true }
 # V1.174 P0 T3 (AR-68): pure tool manifest/ABI helpers for the PeerToolTable
 # admission chain (`validate_manifest_tools`, `parse_tool_capability_id`,
 # `validate_tool_arguments`) AND for the user-capability catalog grammar
@@ -123,10 +126,10 @@ spoke-operations = { workspace = true }
 
 [dev-dependencies]
 axum-test = "15"
-graph-flow = "=0.2.3"
+graph-flow = { version = "=0.8.0", default-features = false }
 nexus-orchestration = { path = "../nexus-orchestration" }
 serial_test = "3"
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 tokio-rustls = "0.26"
 # `wat` compiles WebAssembly text → binary for integration tests that exercise
 # sandbox-limit paths (mirrors nexus-wasm-host's own test convention).
@@ -140,10 +143,10 @@ parking_lot = "0.12"
 # the default graph via nexus-spoke-adapter — no graph change.
 spoke-operations = { workspace = true }
 # V1.179 P0 T1 (DF-88): in-process rmcp CLIENT for the embedded-server e2e
-# (`tests/embedded_mcp_e2e.rs`) — dev-only, tests-only. The shipped graph
-# keeps exactly one rmcp 1.8.0 with `server` only; graph pins use
-# `--edges normal`, dev-deps excluded (AR-74 caveat).
-rmcp = { version = "=1.8.0", default-features = false, features = ["client"] }
+# (`tests/embedded_mcp_e2e.rs`) — dev-only, tests-only. The feature-on
+# shipped graph keeps exactly one rmcp 3.2.0 with `server` only; graph pins
+# use `--edges normal`, dev-deps excluded (AR-74 caveat).
+rmcp = { version = "=3.2.0", default-features = false, features = ["client"] }
 
 [[bench]]
 name = "dispatch_latency"
