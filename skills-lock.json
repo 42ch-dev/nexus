@@ -23,7 +23,7 @@
       "source": "framara/react-flow-skill",
       "sourceType": "github",
       "skillPath": ".agents/skills/react-flow/SKILL.md",
-      "computedHash": "75278f1efd93f093248e0ed5eaee0cfd477dd1ae321b52b0a12664d2f0bc5d13"
+      "computedHash": "78dd464b0c1b11e78620d630f3a613950ad1616d74dadf447cd6072bf288ef9b"
     },
     "tauri-v2": {
       "source": "nodnarbnitram/claude-code-extensions",
