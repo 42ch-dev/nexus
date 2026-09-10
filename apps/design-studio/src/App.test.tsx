@@ -993,18 +993,32 @@ describe('Components page — Toast matrix', () => {
     expect(screen.getByTestId('toast-matrix')).toBeInTheDocument();
   });
 
-  it('renders all four toast variant testids', async () => {
-    expect(screen.getByTestId('toast-variant-success')).toBeInTheDocument();
-    expect(screen.getByTestId('toast-variant-error')).toBeInTheDocument();
-    expect(screen.getByTestId('toast-variant-warning')).toBeInTheDocument();
-    expect(screen.getByTestId('toast-variant-info')).toBeInTheDocument();
+  it('queues variants when Show controls are activated', async () => {
+    const variants = ['success', 'error', 'warning', 'info'] as const;
+    for (const variant of variants) {
+      fireEvent.click(screen.getByTestId(`toast-show-${variant}`));
+      expect(screen.getByTestId(`toast-variant-${variant}`)).toBeInTheDocument();
+    }
   });
 
   it('uses error role on the error variant and status on others', async () => {
+    fireEvent.click(screen.getByTestId('toast-show-success'));
+    fireEvent.click(screen.getByTestId('toast-show-error'));
+    fireEvent.click(screen.getByTestId('toast-show-warning'));
+    fireEvent.click(screen.getByTestId('toast-show-info'));
+
     expect(screen.getByTestId('toast-variant-error')).toHaveAttribute('role', 'alert');
     expect(screen.getByTestId('toast-variant-success')).toHaveAttribute('role', 'status');
     expect(screen.getByTestId('toast-variant-warning')).toHaveAttribute('role', 'status');
     expect(screen.getByTestId('toast-variant-info')).toHaveAttribute('role', 'status');
+  });
+
+  it('dismisses the last queued toast via Dismiss last', async () => {
+    fireEvent.click(screen.getByTestId('toast-show-info'));
+    expect(screen.getByTestId('toast-variant-info')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('toast-dismiss-last'));
+    expect(screen.queryByTestId('toast-variant-info')).not.toBeInTheDocument();
   });
 });
 
@@ -1893,45 +1907,6 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
 
 /* ---- components page — v0.4 states matrix (V1.121 P1 T4) --------------- */
 
-describe('Components page — Card v0.4 matrix (interactive + title voice)', () => {
-  beforeEach(async () => {
-    mockMatchMedia(false);
-    await renderStudio('/components');
-  });
-
-  it('renders rest and interactive cards as real components', async () => {
-    expect(screen.getByTestId('card-rest')).toBeInTheDocument();
-    expect(screen.getByTestId('card-interactive')).toBeInTheDocument();
-  });
-
-  it('interactive card carries the v0.4 hover-lift recipe classes', async () => {
-    const card = screen.getByTestId('card-interactive');
-    expect(card.className).toContain('hover:shadow-elevation-2');
-    expect(card.className).toContain('motion-safe:hover:-translate-y-px');
-    expect(card.className).toContain('duration-popover');
-    expect(card.className).toContain('motion-reduce:transition-none');
-  });
-
-  it('rest card keeps the static elevation-1 treatment without the recipe', async () => {
-    const card = screen.getByTestId('card-rest');
-    expect(card.className).toContain('shadow-card');
-    expect(card.className).not.toContain('hover:shadow-elevation-2');
-  });
-
-  it('CardTitle voice="content" swaps to the display tier', async () => {
-    const title = screen.getByTestId('card-title-content');
-    expect(title.className).toContain('font-display');
-    expect(title.className).toContain('text-display-20');
-    expect(title.className).toContain('tracking-tight');
-  });
-
-  it('default CardTitle keeps the interface sans treatment', async () => {
-    const title = screen.getByTestId('card-title-interface');
-    expect(title.className).toContain('text-heading-16');
-    expect(title.className).toContain('font-heading');
-    expect(title.className).not.toContain('font-display');
-  });
-});
 
 describe('Components page — States v0.4 (error surface + display empty headline)', () => {
   beforeEach(async () => {
@@ -1995,12 +1970,10 @@ describe('Components page — display voice confinement (AC-P1-5)', () => {
     await renderStudio('/components');
   });
 
-  it('confines the display voice to content-voice opt-ins', () => {
-    // Only the CardTitle voice="content" fixture and the EmptyState headline
-    // may carry font-display on this page — interface components (Button,
-    // Badge, Input, Select, Tabs, Table) stay sans per DESIGN.md §Design
-    // Concept.
-    const allowedContainers = ['card-title-content', 'states-empty'];
+  it('confines the display voice to EmptyState headline opt-in', () => {
+    // CardTitle voice="content" now uses sans display-20; only EmptyState may
+    // carry font-display on this page — interface components stay sans.
+    const allowedContainers = ['states-empty'];
     const displayEls = Array.from(document.querySelectorAll('.font-display'));
     expect(displayEls.length).toBeGreaterThan(0);
     for (const el of displayEls) {

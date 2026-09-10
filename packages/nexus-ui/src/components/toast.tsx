@@ -121,8 +121,6 @@ export function Toaster() {
 
   return createPortal(
     <div
-      aria-live="polite"
-      aria-atomic="false"
       className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-full max-w-[360px] flex-col gap-2"
     >
       {toasts.map((t) => (
@@ -175,7 +173,8 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number)
       data-testid={testId}
       role={variant === 'error' ? 'alert' : 'status'}
       className={cn(
-        'pointer-events-auto flex overflow-hidden rounded-popover border border-gray-alpha-400 bg-background-100 shadow-popover',
+        'flex overflow-hidden rounded-popover border border-gray-alpha-400 bg-background-100 shadow-popover',
+        motion === 'exit' ? 'pointer-events-none' : 'pointer-events-auto',
         'transition-[opacity,transform] motion-reduce:transition-none',
         motion === 'enter' && 'translate-y-2 opacity-0',
         motion === 'shown' && 'translate-y-0 opacity-100 duration-enter ease-standard',

@@ -429,7 +429,7 @@ function VariantBlock({
         <h4 className="text-heading-16 font-heading text-gray-1000">{title}</h4>
         {note && <p className="mt-0.5 text-copy-13 text-gray-700">{note}</p>}
       </div>
-      <div data-testid={testId} className="rounded-card border border-gray-alpha-300 bg-background-100 p-6">
+      <div data-testid={testId} className="min-w-0 rounded-card border border-gray-alpha-300 bg-background-100 p-6">
         {children}
       </div>
     </div>
@@ -485,6 +485,42 @@ export function ComputeRunStudioFixtures() {
       </VariantBlock>
 
       <VariantBlock
+        title="Picker — selected, disabled, and invalid"
+        note="Controlled picker states exposed by EntityPickerField: selected value, native disabled, and invalid with aria-invalid."
+        testId="run-studio-variant-picker-states"
+      >
+        <div className="grid max-w-xl gap-4">
+          <EntityPickerField
+            id="fixture-picker-selected"
+            label="Attacker (selected)"
+            entries={CHARACTERS}
+            value="char-aria"
+            onChange={noop}
+            placeholder={FORM_COPY.entityPlaceholder}
+          />
+          <EntityPickerField
+            id="fixture-picker-disabled"
+            label="Defender (disabled)"
+            entries={CHARACTERS}
+            value="char-brann"
+            onChange={noop}
+            disabled
+            placeholder={FORM_COPY.entityPlaceholder}
+          />
+          <EntityPickerField
+            id="fixture-picker-invalid"
+            label="Attacker (invalid)"
+            entries={CHARACTERS}
+            value={null}
+            onChange={noop}
+            invalid
+            helperText="Choose a character before running."
+            placeholder={FORM_COPY.entityPlaceholder}
+          />
+        </div>
+      </VariantBlock>
+
+      <VariantBlock
         title="Inspector — succeeded, all four proposal parts"
         note="Report / Knowledge updates / Timeline events / New knowledge; per-event selection is the spec §2 opt-in. Accept / Discard are explicit author actions."
         testId="run-studio-variant-inspector-success"
@@ -519,6 +555,28 @@ export function ComputeRunStudioFixtures() {
           <RunsFilterChrome />
           <RunsTable rows={RUN_ROWS} copy={RUNS_COPY} onOpenRun={noop} />
         </div>
+      </VariantBlock>
+
+      <VariantBlock
+        title="Runs — long correlation id + read-only rows"
+        note="Long run IDs stay inside the table overflow region. Omitting onOpenRun hides the row action column."
+        testId="run-studio-variant-runs-overflow"
+      >
+        <RunsTable
+          rows={[
+            {
+              runId: 'run_9f3a2c1b8e7d6a5049382716c5b4a392f0e1d',
+              moduleName: 'Basic Combat',
+              moduleVersion: '1.0.0',
+              worldTitle: 'The Lost City',
+              status: 'succeeded',
+              statusLabel: STATUS_LABELS.succeeded,
+              startedAt: '2026-07-31 13:47',
+              finishedAt: '2026-07-31 13:47',
+            },
+          ]}
+          copy={RUNS_COPY}
+        />
       </VariantBlock>
 
       <VariantBlock

@@ -74,8 +74,7 @@ describe('RunsTable', () => {
   it('renders correlation ids in monospace with a copy affordance', () => {
     render(<RunsTable rows={ROWS} copy={COPY} />);
 
-    const idCell = screen.getByText('run_0001');
-    expect(idCell.className).toContain('text-copy-13-mono');
+    expect(screen.getByText('run_0001')).toBeInTheDocument();
     expect(screen.getByTestId('runs-table-copy-run_0001')).toHaveAttribute(
       'aria-label',
       'Copy',

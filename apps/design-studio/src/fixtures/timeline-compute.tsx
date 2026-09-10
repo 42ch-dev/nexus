@@ -331,6 +331,20 @@ function ComputeInspectorFrame() {
             copy={INSPECTOR_COPY}
           />
         </InspectorVariant>
+
+        <InspectorVariant
+          testId="timeline-compute-inspector-readonly"
+          chipLabel="Read-only (no Open Run)"
+        >
+          <ComputeInspectorSections
+            moduleName={RUN_EVENT.moduleName}
+            moduleVersion={RUN_EVENT.moduleVersion}
+            reportDigest={RUN_EVENT.summary}
+            runId={RUN_EVENT.runId}
+            provenanceLabel={PROVENANCE_DIRECT}
+            copy={INSPECTOR_COPY}
+          />
+        </InspectorVariant>
       </div>
     </FixtureFrame>
   );

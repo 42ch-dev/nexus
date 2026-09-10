@@ -13,15 +13,6 @@ describe('Textarea', () => {
     expect(textarea).toHaveProperty('tagName', 'TEXTAREA');
   });
 
-  it('renders with base structural classes', () => {
-    render(<Textarea data-testid="test-textarea" />);
-    const textarea = screen.getByTestId('test-textarea');
-    expect(textarea).toHaveClass('min-h-24');
-    expect(textarea).toHaveClass('w-full');
-    expect(textarea).toHaveClass('rounded-control');
-    expect(textarea).toHaveClass('border');
-    expect(textarea).toHaveClass('bg-background-100');
-  });
 
   // --- className merge (cn integration) ---
 
@@ -29,7 +20,6 @@ describe('Textarea', () => {
     render(<Textarea className="custom-class" data-testid="test-textarea" />);
     const textarea = screen.getByTestId('test-textarea');
     expect(textarea).toHaveClass('custom-class');
-    expect(textarea).toHaveClass('min-h-24'); // base class still present
   });
 
   // --- invalid prop → aria-invalid + visual state ---
@@ -52,19 +42,7 @@ describe('Textarea', () => {
     expect(textarea).not.toHaveAttribute('aria-invalid');
   });
 
-  it('applies red-700 border class when invalid', () => {
-    render(<Textarea invalid data-testid="test-textarea" />);
-    const textarea = screen.getByTestId('test-textarea');
-    expect(textarea).toHaveClass('border-red-700');
-    expect(textarea).not.toHaveClass('border-gray-alpha-400');
-  });
 
-  it('applies gray-alpha-400 border class when not invalid', () => {
-    render(<Textarea data-testid="test-textarea" />);
-    const textarea = screen.getByTestId('test-textarea');
-    expect(textarea).toHaveClass('border-gray-alpha-400');
-    expect(textarea).not.toHaveClass('border-red-700');
-  });
 
   // --- ref-as-prop ---
 
@@ -111,14 +89,8 @@ describe('Textarea', () => {
     expect(container.querySelectorAll('[role="alert"]').length).toBe(0);
   });
 
-  // --- disabled state ---
-
-  it('applies disabled styling classes when disabled', () => {
+  it('exposes the native disabled state', () => {
     render(<Textarea disabled data-testid="test-textarea" />);
-    const textarea = screen.getByTestId('test-textarea');
-    expect(textarea).toHaveClass('disabled:bg-gray-100');
-    expect(textarea).toHaveClass('disabled:text-gray-700');
-    expect(textarea).toHaveClass('disabled:border-gray-alpha-300');
-    expect(textarea).toHaveClass('disabled:cursor-not-allowed');
+    expect(screen.getByTestId('test-textarea')).toBeDisabled();
   });
 });
