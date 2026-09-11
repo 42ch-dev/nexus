@@ -363,11 +363,15 @@ pub enum EngineError {
     SessionNotFound(String),
     #[error("graph-flow error: {0}")]
     GraphFlow(#[from] graph_flow::GraphError),
-    #[error("no graph loaded — run_step requires a graph (set via start_session or system preset)")]
+    #[error(
+        "no graph loaded — run_step requires a graph (set via start_session or system preset)"
+    )]
     NoGraphLoaded,
     /// A revision compare-and-swap failed: the persisted `state_revision` no
     /// longer equals the expected value (a concurrent transition won).
-    #[error("state revision mismatch for session {session_id}: expected {expected}, found {found}")]
+    #[error(
+        "state revision mismatch for session {session_id}: expected {expected}, found {found}"
+    )]
     RevisionMismatch {
         /// Session id.
         session_id: String,
@@ -471,7 +475,7 @@ pub trait OrchestrationEngine: Send + Sync {
 
     /// Send a control signal (pause / resume / cancel / advance) to a session.
     async fn signal(&self, session_id: &SessionId, signal: EngineSignal)
-    -> Result<(), EngineError>;
+        -> Result<(), EngineError>;
 
     /// List sessions that are still active (running / paused / waiting).
     async fn list_active(&self, filter: SessionFilter) -> Result<Vec<SessionSummary>, EngineError>;
@@ -504,7 +508,7 @@ pub trait OrchestrationEngine: Send + Sync {
 
     /// Retrieve the context for a session.
     async fn get_context(&self, session_id: &SessionId)
-    -> Result<graph_flow::Context, EngineError>;
+        -> Result<graph_flow::Context, EngineError>;
 
     /// Retrieve the current task id for a session (authoritative persisted
     /// cursor). `Ok(None)` when no session snapshot exists or the call is

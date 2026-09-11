@@ -5669,13 +5669,11 @@ mod tests {
         );
         assert!(after_root.context.get::<String>("_run_status").is_none());
         assert!(after_root.context.get::<String>("_run_error").is_none());
-        assert!(
-            after
-                .state
-                .as_ref()
-                .and_then(|s| s.failure.as_ref())
-                .is_none()
-        );
+        assert!(after
+            .state
+            .as_ref()
+            .and_then(|s| s.failure.as_ref())
+            .is_none());
     }
 
     /// Critical 1 regression: ordinary task error AFTER a concurrent winner
@@ -5824,13 +5822,11 @@ mod tests {
             Some("ordinary-failure-race")
         );
         assert!(after_root.context.get::<String>("_run_status").is_none());
-        assert!(
-            after
-                .state
-                .as_ref()
-                .and_then(|s| s.failure.as_ref())
-                .is_none()
-        );
+        assert!(after
+            .state
+            .as_ref()
+            .and_then(|s| s.failure.as_ref())
+            .is_none());
     }
 
     /// Recovery path: same ordinary-failure ownership loss as `ensure_driving`.
@@ -5982,13 +5978,11 @@ mod tests {
             after_root.context.get::<String>("winner.marker").as_deref(),
             Some("recovery-ordinary-race")
         );
-        assert!(
-            after
-                .state
-                .as_ref()
-                .and_then(|s| s.failure.as_ref())
-                .is_none()
-        );
+        assert!(after
+            .state
+            .as_ref()
+            .and_then(|s| s.failure.as_ref())
+            .is_none());
     }
 
     /// Coordinator path (assignment proof): an ordinary driver failure through
