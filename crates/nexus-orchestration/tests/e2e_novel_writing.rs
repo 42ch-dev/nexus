@@ -109,7 +109,6 @@ async fn run_until_wait_or_terminal(
             outcome,
             nexus_orchestration::engine::StepOutcome::Completed { .. }
                 | nexus_orchestration::engine::StepOutcome::WaitingForInput { .. }
-                | nexus_orchestration::engine::StepOutcome::Error(_)
         );
         outcomes.push(outcome);
         if is_done {

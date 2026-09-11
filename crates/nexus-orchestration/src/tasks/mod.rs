@@ -336,7 +336,6 @@ impl Task for InnerGraphTask {
         // 4. Poll child session to completion (only for a non-terminal child —
         //    a terminal reattached child is consumed, never re-stepped,
         //    Round-5 Important 1).
-        let mut last_error = None;
         let mut child_wait = None;
         if !child_terminal {
             for _ in 0..256 {
@@ -378,10 +377,6 @@ impl Task for InnerGraphTask {
                         // child's durable token is then consumed by the matching
                         // authorized continue, never by boot or the poller.
                         child_wait = Some((child_sid.0.clone(), response));
-                        break;
-                    }
-                    crate::engine::StepOutcome::Error(e) => {
-                        last_error = Some(e);
                         break;
                     }
                 }
@@ -447,32 +442,18 @@ impl Task for InnerGraphTask {
             child_sid.0,
         )?;
 
-        last_error.map_or_else(
-            || {
-                Ok(TaskResult::new(
-                    Some(format!(
-                        "inner graph '{}' completed, output: {}",
-                        self.inner_graph.id,
-                        if output_value.len() > 80 {
-                            format!("{}...", &output_value[..80])
-                        } else {
-                            output_value.clone()
-                        }
-                    )),
-                    NextAction::Continue,
-                ))
-            },
-            |err| {
-                Ok(TaskResult::new_with_status(
-                    Some(format!(
-                        "inner graph '{}' completed with error: {}",
-                        self.inner_graph.id, err
-                    )),
-                    NextAction::Continue,
-                    Some(err),
-                ))
-            },
-        )
+        Ok(TaskResult::new(
+            Some(format!(
+                "inner graph '{}' completed, output: {}",
+                self.inner_graph.id,
+                if output_value.len() > 80 {
+                    format!("{}...", &output_value[..80])
+                } else {
+                    output_value
+                }
+            )),
+            NextAction::Continue,
+        ))
     }
 }
 

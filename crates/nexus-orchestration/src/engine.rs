@@ -179,7 +179,9 @@ impl SessionStatus {
     }
 }
 
-/// Outcome of a single engine step.
+/// Successful stopping point of a single engine step.
+///
+/// Failures use [`EngineError`], retaining any owned step witness.
 #[derive(Debug, Clone)]
 pub enum StepOutcome {
     Completed {
@@ -192,7 +194,6 @@ pub enum StepOutcome {
     WaitingForInput {
         response: Option<String>,
     },
-    Error(String),
 }
 
 impl StepOutcome {
@@ -1325,10 +1326,10 @@ impl EngineSharedState {
                         interrupted_state.in_flight = None;
                         // A manual cleanup retry must not replace the
                         // original driver error with a teardown error.
-                        if !interrupted_state
+                        if interrupted_state
                             .failure
                             .as_ref()
-                            .is_some_and(|f| f.code == "driver_failed")
+                            .is_none_or(|f| f.code != "driver_failed")
                         {
                             interrupted_state.failure = Some(RunFailure {
                                 code: if cleanup_terminal == SessionStatus::Failed {
@@ -2932,10 +2933,6 @@ impl OrchestrationEngine for EngineProxy {
             ExecutionStatus::WaitingForInput => StepOutcome::WaitingForInput {
                 response: result.response,
             },
-            // graph-flow 0.8: no upstream `ExecutionStatus::Error`; task
-            // failures surface as `Err(EngineError::GraphFlow)` instead.
-            // `StepOutcome::Error` remains the Nexus-owned variant produced by
-            // other `OrchestrationEngine` implementations/consumers.
         };
 
         Ok(outcome)
@@ -4240,8 +4237,6 @@ impl OrchestrationEngine for GraphFlowEngine {
             ExecutionStatus::WaitingForInput => StepOutcome::WaitingForInput {
                 response: result.response,
             },
-            // graph-flow 0.8: no upstream `ExecutionStatus::Error`; task
-            // failures surface as `Err(EngineError::GraphFlow)` instead.
         };
 
         Ok(outcome)

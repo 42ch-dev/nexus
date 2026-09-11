@@ -103,7 +103,6 @@ async fn inner_graph_runs_to_completion_and_exports_output() {
 
         match out {
             StepOutcome::Completed { .. } => break,
-            StepOutcome::Error(e) => panic!("engine error after {steps} steps: {e}"),
             StepOutcome::WaitingForInput { .. } => {
                 // Inner graphs shouldn't wait for input; resume.
                 engine

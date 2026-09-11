@@ -120,11 +120,10 @@ pub enum PresetRunOutcome {
 ///   `WaitingForInput` stops unless [`PresetRunConfig::resume_waiting`].
 /// - `StepOutcome::Paused` is the normal inter-task boundary — the loop
 ///   keeps stepping.
-/// - On a terminal engine error the tracker status is flipped to `Failed`
-///   via a `Cancel` signal (see module docs) and, when `storage` is `Some`,
-///   the failure is written into the persisted session context
-///   (`_run_status` / `_run_error`). Persistence is best-effort; storage
-///   failures are logged, not returned (the step-loop already failed).
+/// - A witnessed v1 engine error commits its failure, then cleans up owned
+///   resources and settles durable `Failed`. Lost ownership or unconfirmed
+///   persistence fences the owner instead of claiming settlement. Legacy
+///   no-store handling retains best-effort session-context evidence.
 /// - The `cancel` token is checked before every step, including before the
 ///   first.
 ///
@@ -189,12 +188,6 @@ pub async fn drive_preset_run(
                 return PresetRunOutcome::WaitingForInput {
                     steps: steps.saturating_add(1),
                 };
-            }
-            Ok(StepOutcome::Error(msg)) => {
-                let settlement =
-                    settle_drive_failure(engine, workflow_store, storage, session_id, &msg, None)
-                        .await;
-                return failed_outcome(steps.saturating_add(1), msg, &settlement);
             }
             // graph-flow 0.8 conflict disposition: a SessionConflict means a
             // concurrent authoritative writer (control cancel, settle, or a
