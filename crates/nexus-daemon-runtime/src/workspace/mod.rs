@@ -767,7 +767,7 @@ impl WorkspaceState {
                 Arc::new(crate::workspace::executor::DaemonWorkspaceExecutor::new(
                     mgr,
                     self.workspace_path_handle(),
-                ))
+                )) as Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>
             });
             let deps = nexus_orchestration::capability::CapabilityRuntimeDeps {
                 pool: Some(pool_arc.as_ref().clone()),

@@ -791,7 +791,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         std::sync::Arc::new(crate::workspace::executor::DaemonWorkspaceExecutor::new(
             mgr,
             state.workspace_path_handle(),
-        ))
+        )) as std::sync::Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>
     });
 
     let runtime_deps = CapabilityRuntimeDeps {

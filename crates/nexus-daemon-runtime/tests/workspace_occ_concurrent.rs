@@ -16,6 +16,7 @@
 //! does not depend on it). This is the correct home for the test.
 
 #![allow(clippy::unwrap_used)]
+use base64::Engine;
 
 use nexus_daemon_runtime::workspace::session::{
     compute_content_hashes, occ_conflict_total, ChangeEntry, ChangeOp, SessionError, SessionId,
@@ -238,7 +239,9 @@ async fn validate_changes_manifest_rejects_symlink_in_modify_path() {
         path: "real.txt".to_string(),
         op: ChangeOp::Modify,
         expected_hash: Some(stored_hash),
-        content_base64: None,
+        content_base64: Some(
+            base64::engine::general_purpose::STANDARD.encode(b"placeholder"),
+        ),
     }];
     let err = mgr
         .validate_contract_manifest(&session_id, &changes, &ws_root)
@@ -268,7 +271,7 @@ async fn recoverable_create_modify_delete_and_idempotent_retry() {
         path: "note.txt".to_string(),
         op: ChangeOp::Create,
         expected_hash: None,
-        content_base64: Some(create_b64),
+        content_base64: Some(create_b64.clone()),
     }];
     let first = mgr
         .commit_session_durable(&session_id, &create_changes, &ws_root)

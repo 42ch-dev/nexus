@@ -667,7 +667,7 @@ impl WorkspaceSessionManager {
                             session_id: session_id.clone(),
                             path: change.path.clone(),
                             expected_hash: stored_hash.clone(),
-                            actual_hash: provided.clone(),
+                            actual_hash: provided.to_string(),
                         });
                     }
                 }

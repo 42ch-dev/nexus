@@ -342,6 +342,17 @@ fn map_session_error(
             code: "SESSION_ERROR".into(),
             message: msg,
         },
+        SessionError::ManifestInvalid(reason) => NexusApiError::InvalidInput {
+            field: "changes".into(),
+            reason,
+        },
+        SessionError::RecoveryConflict(root) => NexusApiError::Conflict(format!(
+            "workspace recovery conflict: {root}"
+        )),
+        SessionError::Internal(msg) => NexusApiError::Internal {
+            code: "SESSION_INTERNAL".into(),
+            message: msg,
+        },
         SessionError::PathEscape {
             path,
             workspace_root,

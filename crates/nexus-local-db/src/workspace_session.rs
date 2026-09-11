@@ -90,34 +90,28 @@ pub async fn get_session(
     pool: &SqlitePool,
     session_id: &str,
 ) -> Result<Option<WorkspaceSessionRow>, LocalDbError> {
-    // SAFETY: compile-time checked — reads all columns from workspace_sessions table.
-    let row = sqlx::query!(
+    // Runtime query: `claimed_by_revision` lands in v1.188 P3 migration before sqlx cache refresh.
+    let row = sqlx::query(
         "SELECT session_id, workspace_root, relative_path, existed, file_hashes_json, \
          created_at, expires_at, consumed, claimed_by_revision \
          FROM workspace_sessions WHERE session_id = ?",
-        session_id
     )
+    .bind(session_id)
     .fetch_optional(pool)
     .await?;
 
     Ok(row.map(|r| {
-        // session_id is TEXT PRIMARY KEY NOT NULL — guaranteed non-null by schema.
-        // Explicit unwrap is safe; clippy::missing_panics_doc is waived because
-        // this is a schema invariant, not a runtime condition.
-        #[allow(clippy::missing_panics_doc)]
-        let session_id = r
-            .session_id
-            .unwrap_or_else(|| unreachable!("session_id is PRIMARY KEY NOT NULL"));
+        use sqlx::Row;
         WorkspaceSessionRow {
-            session_id,
-            workspace_root: r.workspace_root,
-            relative_path: r.relative_path,
-            existed: r.existed != 0,
-            file_hashes_json: r.file_hashes_json,
-            created_at: r.created_at,
-            expires_at: r.expires_at,
-            consumed: r.consumed != 0,
-            claimed_by_revision: r.claimed_by_revision,
+            session_id: r.get("session_id"),
+            workspace_root: r.get("workspace_root"),
+            relative_path: r.get("relative_path"),
+            existed: r.get::<i64, _>("existed") != 0,
+            file_hashes_json: r.get("file_hashes_json"),
+            created_at: r.get("created_at"),
+            expires_at: r.get("expires_at"),
+            consumed: r.get::<i64, _>("consumed") != 0,
+            claimed_by_revision: r.get("claimed_by_revision"),
         }
     }))
 }
