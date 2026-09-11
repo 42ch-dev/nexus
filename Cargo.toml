@@ -119,7 +119,7 @@ chrono-tz = "0.10"
 # Version pinned to match the sibling spoke repo + typify 0.3 (0.10.5) for
 # cross-repo consistency. Referenced as `regress.workspace = true` by
 # `crates/nexus-contracts` (generated code only).
-regress = "0.10"
+regress = "0.12"
 # V1.139 T1: SPOKE foundation deps. Lockstep exact pin at 0.6.0 across both
 # Rust crates and both npm packages (compass Q14). The `=` prefix forces an
 # exact resolution (no caret/tilde range). Published on crates.io at 0.10.0.
