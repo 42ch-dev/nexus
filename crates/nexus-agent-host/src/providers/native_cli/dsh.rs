@@ -3707,6 +3707,7 @@ mod tests {
     /// Trust model: excludes mutation by OTHER users via group/world
     /// writability; same-uid adversaries are out of scope (architecture
     /// §3.4).
+    #[cfg(unix)]
     #[test]
     fn sealed_home_rejects_unsafe_permission_boundary() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
