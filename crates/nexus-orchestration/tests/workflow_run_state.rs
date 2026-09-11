@@ -20,13 +20,13 @@
 #![allow(clippy::significant_drop_tightening)] // tests read state snapshots; early-drop noise without contention value
 
 use graph_flow::{Session, SessionStorage};
+use nexus_orchestration::OrchestrationEngine;
 use nexus_orchestration::engine::{SessionId, SessionStatus};
 use nexus_orchestration::run_state::{
     AgentBinding, ChildCheckpoint, PresetSourceIdentity, RunCheckpoint, RunDescriptorV1,
     RunStateV1, WorkflowStateStore,
 };
 use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
-use nexus_orchestration::OrchestrationEngine;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -3974,7 +3974,7 @@ async fn terminal_child_is_reattached_not_respawned() {
         assert_eq!(children[0].status, SessionStatus::Completed);
         child_sid = children[0].session_id.clone();
     } // pool drops — simulates a crash AFTER the child checkpoint is durable
-      // but BEFORE the parent commits past this inner graph.
+    // but BEFORE the parent commits past this inner graph.
 
     {
         let pool = nexus_local_db::open_pool(db.path())
@@ -6322,10 +6322,10 @@ async fn negative_or_max_graph_version_is_hard_storage_error_across_writers() {
             .expect_err("commit_transition must refuse");
         assert_hard_storage_error(&err, "commit_transition");
 
-        // settle_cancelled at the correct revision: hard storage error.
+        // Cleanup settlement at the correct revision: hard storage error.
         let root = root_session(&session_id.0, "task_b");
         let err = storage
-            .settle_cancelled(
+            .settle_cleanup(
                 &session_id,
                 1,
                 None,
@@ -6334,10 +6334,11 @@ async fn negative_or_max_graph_version_is_hard_storage_error_across_writers() {
                     children: &[],
                 },
                 &RunStateV1::default(),
+                SessionStatus::Cancelled,
             )
             .await
-            .expect_err("settle_cancelled must refuse");
-        assert_hard_storage_error(&err, "settle_cancelled");
+            .expect_err("cleanup settlement must refuse");
+        assert_hard_storage_error(&err, "cleanup settlement");
 
         // restore_pre_step at the correct revision: hard storage error.
         let pre = root_session(&session_id.0, "task_a");
@@ -6450,7 +6451,7 @@ async fn corrupt_child_graph_version_fails_parent_transition_closed() {
 
 /// Review gap 3: the graph-version clock advances exactly once per
 /// authoritative cursor/context write (`start_run` -> `mark_step_in_flight` ->
-/// runner save -> `commit_transition` -> `restore_pre_step` -> `settle_cancelled`)
+/// runner save -> `commit_transition` -> `restore_pre_step` -> `settle_cleanup`)
 /// while durable prompt-attempt writes deliberately leave it unchanged.
 #[tokio::test]
 async fn graph_version_clock_monotonic_across_writers_and_untouched_by_prompt_attempts() {
@@ -6588,10 +6589,10 @@ async fn graph_version_clock_monotonic_across_writers_and_untouched_by_prompt_at
         "restore keeps the workflow revision"
     );
 
-    // settle_cancelled: revision 3->4, graph clock 5->6, status cancelled.
+    // Cleanup settlement: revision 3->4, graph clock 5->6, status cancelled.
     let root = storage.get(&session_id.0).await.expect("get").expect("row");
     storage
-        .settle_cancelled(
+        .settle_cleanup(
             &session_id,
             3,
             None,
@@ -6600,13 +6601,14 @@ async fn graph_version_clock_monotonic_across_writers_and_untouched_by_prompt_at
                 children: &[],
             },
             &RunStateV1::default(),
+            SessionStatus::Cancelled,
         )
         .await
-        .expect("settle_cancelled");
+        .expect("cleanup settlement");
     assert_eq!(
         db_graph_version(&pool, &session_id.0).await,
         6,
-        "settle_cancelled advances"
+        "cleanup settlement advances"
     );
     let record = storage
         .load_run(&session_id)

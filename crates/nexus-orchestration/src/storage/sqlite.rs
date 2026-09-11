@@ -540,11 +540,11 @@ async fn child_cas_outcome(
             let found_rev = row.state_revision;
             let status = row.status;
             if crate::engine::SessionStatus::from_db_str(&status).is_none() {
-                return Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
-                    format!(
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
                         "child CAS outcome for '{child_id}': unknown/corrupt status {status:?}                          (non-replayable)"
-                    ),
-                )));
+                    )),
+                ));
             }
             let terminal = matches!(
                 status.as_str(),
@@ -560,14 +560,14 @@ async fn child_cas_outcome(
                 if status == submitted_status.as_db_str() {
                     None
                 } else {
-                    Some(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
-                        format!(
+                    Some(EngineError::GraphFlow(
+                        graph_flow::GraphError::StorageError(format!(
                             "child '{child_id}' is terminal '{status}' at revision {expected_revision} \
                              but the parent submitted '{}' (ChildCheckpoint status/state \
                              mismatch, non-replayable confirmation)",
                             submitted_status.as_db_str()
-                        ),
-                    )))
+                        )),
+                    ))
                 }
             } else if terminal {
                 Some(EngineError::TerminalState(child_id.to_string()))
@@ -578,9 +578,11 @@ async fn child_cas_outcome(
                     found: u64::try_from(found_rev).unwrap_or(0),
                 })
             } else {
-                Some(EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                    "child CAS failed for '{child_id}' (revision {expected_revision}, status {status})"
-                ))))
+                Some(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "child CAS failed for '{child_id}' (revision {expected_revision}, status {status})"
+                    )),
+                ))
             }
         }
         None => Some(EngineError::GraphFlow(
@@ -693,8 +695,8 @@ fn checked_load_clocks(
     if state_revision_raw < 0 {
         return Err(EngineError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
-            "{op} '{session_id}': negative state_revision {state_revision_raw} (non-replayable)"
-        )),
+                "{op} '{session_id}': negative state_revision {state_revision_raw} (non-replayable)"
+            )),
         ));
     }
     let state_revision = u64::try_from(state_revision_raw).unwrap_or(0);
@@ -1132,7 +1134,7 @@ async fn read_post_commit_graph_version(
 }
 
 /// Serialized row payload shared by v1 transition writers (`commit_transition`,
-/// `settle_cancelled`).
+/// `settle_cleanup`).
 struct V1TransitionPayload {
     id: String,
     current_task_id: String,
@@ -1278,22 +1280,23 @@ async fn run_commit_transition_cas(
     Ok(())
 }
 
-/// Revision + optional graph-clock CAS for [`WorkflowStateStore::settle_cancelled`].
-async fn run_settle_cancelled_cas(
+/// Revision + optional graph-clock CAS for [`WorkflowStateStore::settle_cleanup`].
+async fn run_settle_cleanup_cas(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     session_id: &SessionId,
     payload: &V1TransitionPayload,
     expected_revision: u64,
     expected_graph_version: Option<u64>,
+    terminal_status: &str,
 ) -> Result<(), EngineError> {
     let expected_revision_i64 =
-        checked_expected_revision("settle_cancelled", session_id, expected_revision)?;
+        checked_expected_revision("settle_cleanup", session_id, expected_revision)?;
     let expected_graph_i64 =
-        checked_expected_graph_i64("settle_cancelled", session_id, expected_graph_version)?;
+        checked_expected_graph_i64("settle_cleanup", session_id, expected_graph_version)?;
     let result = sqlx::query!(
         r"
         UPDATE orchestration_sessions
-        SET status = 'cancelled', current_task_id = ?, context_json = ?,
+        SET status = ?, current_task_id = ?, context_json = ?,
             updated_at = ?, state_revision = state_revision + 1,
             run_state_json = ?,
             graph_version = graph_version + 1
@@ -1303,6 +1306,7 @@ async fn run_settle_cancelled_cas(
           AND graph_version >= 0 AND graph_version < 9223372036854775807
           AND (? IS NULL OR graph_version = ?)
         ",
+        terminal_status,
         payload.current_task_id,
         payload.context_bytes,
         payload.now,
@@ -1316,7 +1320,7 @@ async fn run_settle_cancelled_cas(
     .await
     .map_err(|e| {
         EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-            "settle_cancelled '{}': {e}",
+            "settle_cleanup '{}': {e}",
             session_id.0
         )))
     })?;
@@ -1327,7 +1331,7 @@ async fn run_settle_cancelled_cas(
             expected_revision,
             expected_revision_i64,
             expected_graph_i64,
-            "settle_cancelled",
+            "settle_cleanup",
             false,
         )
         .await?);
@@ -2276,31 +2280,43 @@ impl WorkflowStateStore for SqliteSessionStorage {
         Ok(record)
     }
 
-    async fn settle_cancelled(
+    async fn settle_cleanup(
         &self,
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
         checkpoint: RunCheckpoint<'_>,
         next_state: &RunStateV1,
+        terminal_status: SessionStatus,
     ) -> Result<RunRecord, EngineError> {
+        let status = match &terminal_status {
+            SessionStatus::Cancelled => "cancelled",
+            SessionStatus::Failed => "failed",
+            _ => {
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "cleanup cannot settle to {terminal_status:?}"
+                    )),
+                ));
+            }
+        };
         let payload = prepare_v1_transition_payload(session_id, checkpoint.root, next_state)?;
 
         let mut tx = nexus_local_db::begin_immediate(&self.pool)
             .await
             .map_err(|e| {
                 EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                    "settle_cancelled begin tx: {e}"
+                    "settle_cleanup begin tx: {e}"
                 )))
             })?;
 
-        // A5 settlement fence (see `run_settle_cancelled_cas`).
-        run_settle_cancelled_cas(
+        run_settle_cleanup_cas(
             &mut tx,
             session_id,
             &payload,
             expected_revision,
             expected_graph_version,
+            status,
         )
         .await?;
 
@@ -2309,13 +2325,13 @@ impl WorkflowStateStore for SqliteSessionStorage {
             session_id,
             checkpoint,
             payload.now,
-            "settle_cancelled",
+            "settle_cleanup",
         )
         .await?;
 
         let record = RunRecord {
             session_id: SessionId(session_id.0.clone()),
-            status: SessionStatus::Cancelled,
+            status: terminal_status,
             state_revision: expected_revision + 1,
             execution_version,
             descriptor,
@@ -2325,7 +2341,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
 
         tx.commit().await.map_err(|e| {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                "settle_cancelled commit: {e}"
+                "settle_cleanup commit: {e}"
             )))
         })?;
 

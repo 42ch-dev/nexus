@@ -369,16 +369,15 @@ pub trait WorkflowStateStore: Send + Sync {
         next_state: &RunStateV1,
     ) -> Result<RunRecord, EngineError>;
 
-    /// Atomically settle a run to terminal `Cancelled` (A5).
+    /// Atomically settle confirmed cleanup to `Cancelled` or `Failed` (A5).
     ///
-    /// The A5 cancel settlement is the ONLY transition that may move an
-    /// `Interrupted` run (a durable cancel intent whose owned-Host cleanup
-    /// was previously unconfirmed) to `Cancelled` — the bounded, owner-scoped
-    /// cleanup retry. The write is revision-fenced and refuses every other
-    /// terminal status (`completed`/`failed`/`cancelled`), so a retry can
-    /// never overwrite a newer terminal outcome. The run is terminal and
-    /// never re-driven; this method is used only by the cancel path after
-    /// `finalize_run` confirms cleanup.
+    /// Execution failure remains `Failed`; stopping its resources must not
+    /// turn it into user cancellation. This is the ONLY transition that may
+    /// move an `Interrupted` run with previously unconfirmed owned-Host cleanup
+    /// to either outcome. The write is revision-fenced and refuses every other
+    /// terminal status, so a retry cannot overwrite a newer terminal outcome.
+    /// The run is never re-driven; callers use this only after `finalize_run`
+    /// confirms cleanup.
     ///
     /// When `expected_graph_version` is `Some`, the settlement CAS additionally
     /// requires the persisted `graph_version` to equal it, protecting the
@@ -389,14 +388,15 @@ pub trait WorkflowStateStore: Send + Sync {
     ///
     /// # Errors
     /// Returns [`EngineError`] on storage failure, revision/graph mismatch,
-    /// or a terminal status other than `Interrupted`.
-    async fn settle_cancelled(
+    /// an invalid cleanup outcome, or a terminal status other than `Interrupted`.
+    async fn settle_cleanup(
         &self,
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
         checkpoint: RunCheckpoint<'_>,
         next_state: &RunStateV1,
+        terminal_status: SessionStatus,
     ) -> Result<RunRecord, EngineError>;
 
     /// Atomically restore a pre-step root snapshot via ONE revision-fenced

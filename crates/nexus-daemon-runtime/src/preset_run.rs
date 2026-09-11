@@ -37,9 +37,9 @@
 //! from `GraphError::TaskExecutionFailed` surfaces verbatim in that text.
 //! When a [`graph_flow::SessionStorage`] handle is supplied, the driver
 //! also lands the failure in the persisted session context (`_run_status` =
-//! `"failed"`, `_run_error` = error text) and flips the daemon-visible
-//! tracker status to `Failed` via a `Cancel` signal — the only failure
-//! status-flip the engine signal surface exposes.
+//! `"failed"`, `_run_error` = error text). Authoritative v1 cleanup preserves
+//! durable `Failed` status after stopping owned resources; user cancellation
+//! remains a distinct outcome.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -505,17 +505,16 @@ async fn cleanup_failed_run(
         .await
     {
         // The signal's `Ok` is a claim, not proof: mechanically confirm the
-        // run actually reached a terminal status. An engine that reports
-        // success without settling the row must FENCE (not have its claim
-        // laundered into a durable terminal write by the caller).
+        // run actually reached Failed. Another terminal status is not proof
+        // of successful failure settlement and must not release dependencies.
         Ok(()) => match engine.get_status(session_id).await {
-            Ok(status) if status.is_terminal() => FailurePersistenceDisposition::Committed,
+            Ok(SessionStatus::Failed) => FailurePersistenceDisposition::Committed,
             Ok(status) => {
                 tracing::warn!(
                     session_id = %session_id.0,
                     status = ?status,
-                    "preset-run driver: anchored cleanup returned success but the run is not \
-                     terminal; fencing instead of claiming cleanup"
+                    "preset-run driver: anchored cleanup returned success without a Failed \
+                     outcome; fencing instead of claiming failure settlement"
                 );
                 FailurePersistenceDisposition::PersistenceFailed
             }
@@ -944,7 +943,9 @@ pub enum RunControlError {
     #[error("no active creator workspace: {0}")]
     NoWorkspace(String),
     /// A human-wait continuation token was stale, consumed, or wrong (A4).
-    #[error("wait conflict for session {session_id}: current status {status}, current_wait_id {current_wait_id:?}")]
+    #[error(
+        "wait conflict for session {session_id}: current status {status}, current_wait_id {current_wait_id:?}"
+    )]
     WaitConflict {
         /// Session id.
         session_id: String,
@@ -1447,12 +1448,12 @@ impl WorkflowRunCoordinator {
         }
         // Mechanical terminal proof: the anchored cleanup settles the durable
         // run itself (verified at the store boundary before it reports
-        // `Committed`), so a terminal row IS the successful outcome and a
-        // non-terminal row means no owner actually committed the cleanup.
+        // `Committed`). Only Failed preserves the execution error; another
+        // terminal status cannot substitute for this failure settlement.
         // There is deliberately no coordinator-side terminal write: the
         // previous revision-only fallback could rebase onto a newer
         // graph-only or revision winner.
-        record.status.is_terminal()
+        record.status == SessionStatus::Failed
     }
 
     /// Settle the schedule whose `current_session_id` equals a terminal run
@@ -1473,9 +1474,8 @@ impl WorkflowRunCoordinator {
     ///   `execution.recovery_class: "interrupted"` from the durable session.
     ///   Boot reconciliation skips the same class.
     ///
-    /// This keeps schedule and session inspect in agreement even when the
-    /// engine's failure surface committed `cancelled` for a failed drive
-    /// (the durable record is authoritative over the outcome).
+    /// Schedule and session inspect use the same durable terminal cause;
+    /// execution failure never becomes a satisfied cancellation dependency.
     ///
     /// Only the schedule whose `current_session_id` matches the run is
     /// updated — a different schedule (or none) is left untouched. The
@@ -3526,12 +3526,8 @@ mod tests {
         );
     }
 
-    /// graph-flow 0.8 OCC (Critical fix): a NON-conflict drive failure must
-    /// leave a durable failure record. The driver persists
-    /// `_run_status`/`_run_error` BEFORE the terminal cancellation fence —
-    /// after cancel settles, the protected-row save fence would refuse the
-    /// write. Real SQLite + real engine prove the record survives terminal
-    /// settlement while cleanup semantics (terminal cancel) are retained.
+    /// A task error survives cleanup as durable Failed, including schedule
+    /// reconciliation and downstream dependency admission.
     #[tokio::test]
     async fn failed_drive_persists_failure_record_before_terminal_settlement() {
         struct FailingTask;
@@ -3614,17 +3610,16 @@ mod tests {
         assert_eq!(run_status, "failed");
         assert!(run_error.contains("deterministic failure"), "{run_error}");
 
-        // Cleanup semantics retained: the cancellation path still settled the
-        // row terminal (the failure record was written BEFORE that fence).
+        // Resource cleanup must not change the execution outcome to Cancelled.
         let record = store
             .load_run(&session_id)
             .await
             .expect("load run")
             .expect("run exists");
-        assert!(
-            record.status.is_terminal(),
-            "row must be terminal after the failure path: {:?}",
-            record.status
+        assert_eq!(
+            record.status,
+            SessionStatus::Failed,
+            "execution failure must not settle as user cancellation"
         );
         let failure = record
             .state
@@ -3635,6 +3630,69 @@ mod tests {
         assert!(
             failure.message.contains("deterministic failure"),
             "{failure:?}"
+        );
+
+        assert_failed_schedule_blocks_dependents(&pool, &session_id).await;
+    }
+
+    async fn assert_failed_schedule_blocks_dependents(
+        pool: &Arc<sqlx::SqlitePool>,
+        session_id: &SessionId,
+    ) {
+        // Reconcile a checkpoint-before-settlement restart through the real
+        // supervisor, then exercise the shared dependency admission gate.
+        for (schedule_id, status, current_session_id) in [
+            (
+                "failed-prerequisite",
+                "running",
+                Some(session_id.0.as_str()),
+            ),
+            ("dependent", "pending", None),
+        ] {
+            // SAFETY: test-only minimal drive-enabled schedule fixtures.
+            sqlx::query(
+                "INSERT INTO creator_schedules
+                 (schedule_id, creator_id, preset_id, preset_version, status,
+                  concurrency_kind, current_core_context_version,
+                  created_at, updated_at, execution_policy, current_session_id)
+                 VALUES (?, 'test-creator', 'novel-writing', 1, ?, 'serial', 0,
+                         0, 0, 'driven_v1', ?)",
+            )
+            .bind(schedule_id)
+            .bind(status)
+            .bind(current_session_id)
+            .execute(pool.as_ref())
+            .await
+            .expect("schedule fixture");
+        }
+        // SAFETY: test-only dependency fixture.
+        sqlx::query(
+            "INSERT INTO schedule_dependencies (schedule_id, depends_on)
+             VALUES ('dependent', 'failed-prerequisite')",
+        )
+        .execute(pool.as_ref())
+        .await
+        .expect("dependency fixture");
+        let supervisor =
+            nexus_orchestration::schedule::supervisor::ScheduleSupervisor::new(pool.clone());
+        assert_eq!(supervisor.reconcile_terminal_schedules().await.unwrap(), 1);
+        assert_eq!(
+            supervisor.status_of("failed-prerequisite").await.unwrap(),
+            nexus_contracts::local::schedule::ScheduleStatus::Failed,
+        );
+        // SAFETY: test-only load of the real admission projection.
+        let dependent = sqlx::query_as::<_, ScheduleAdmissionRow>(
+            "SELECT schedule_id, creator_id, preset_id, status,
+                    current_core_context_version, current_session_id,
+                    execution_policy, work_id, execution_descriptor_json
+             FROM creator_schedules WHERE schedule_id = 'dependent'",
+        )
+        .fetch_one(pool.as_ref())
+        .await
+        .expect("dependent admission row");
+        assert!(
+            !schedule_eligible(pool.as_ref(), &dependent).await.unwrap(),
+            "failed prerequisite must keep downstream work blocked"
         );
     }
 
@@ -4671,21 +4729,23 @@ mod tests {
             .await
         }
 
-        async fn settle_cancelled(
+        async fn settle_cleanup(
             &self,
             session_id: &SessionId,
             expected_revision: u64,
             expected_graph_version: Option<u64>,
             checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
             next_state: &nexus_orchestration::run_state::RunStateV1,
+            terminal_status: SessionStatus,
         ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
             self.inner
-                .settle_cancelled(
+                .settle_cleanup(
                     session_id,
                     expected_revision,
                     expected_graph_version,
                     checkpoint,
                     next_state,
+                    terminal_status,
                 )
                 .await
         }
@@ -4782,7 +4842,7 @@ mod tests {
         /// A winner commits immediately AFTER the failure commit and before
         /// the anchored cleanup runs.
         WinnerBetweenCommitAndCleanup,
-        /// The anchored cleanup write (`settle_cancelled`) fails with a
+        /// The anchored cleanup write (`settle_cleanup`) fails with a
         /// storage error.
         FailCleanupSettle,
         /// A competing owner wins `mark_step_in_flight` first (pre-marker
@@ -4909,7 +4969,7 @@ mod tests {
             let mut winner_state = committed.state.clone().unwrap_or_default();
             winner_state.cancel_requested = true;
             self.inner
-                .settle_cancelled(
+                .settle_cleanup(
                     session_id,
                     committed.state_revision,
                     None,
@@ -4918,6 +4978,7 @@ mod tests {
                         children: &[],
                     },
                     &winner_state,
+                    SessionStatus::Cancelled,
                 )
                 .await
                 .expect("concurrent owner settles Cancelled after phase 1");
@@ -5077,24 +5138,26 @@ mod tests {
             Ok(committed)
         }
 
-        async fn settle_cancelled(
+        async fn settle_cleanup(
             &self,
             session_id: &SessionId,
             expected_revision: u64,
             expected_graph_version: Option<u64>,
             checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
             next_state: &nexus_orchestration::run_state::RunStateV1,
+            terminal_status: SessionStatus,
         ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
             if self.fault == BoundaryFault::FailCleanupSettle && self.file_once() {
                 return Err(Self::injected("injected cleanup-settle storage fault"));
             }
             self.inner
-                .settle_cancelled(
+                .settle_cleanup(
                     session_id,
                     expected_revision,
                     expected_graph_version,
                     checkpoint,
                     next_state,
+                    terminal_status,
                 )
                 .await
         }
@@ -5567,11 +5630,13 @@ mod tests {
         );
         assert!(after_root.context.get::<String>("_run_status").is_none());
         assert!(after_root.context.get::<String>("_run_error").is_none());
-        assert!(after
-            .state
-            .as_ref()
-            .and_then(|s| s.failure.as_ref())
-            .is_none());
+        assert!(
+            after
+                .state
+                .as_ref()
+                .and_then(|s| s.failure.as_ref())
+                .is_none()
+        );
     }
 
     /// Critical 1 regression: ordinary task error AFTER a concurrent winner
@@ -5720,11 +5785,13 @@ mod tests {
             Some("ordinary-failure-race")
         );
         assert!(after_root.context.get::<String>("_run_status").is_none());
-        assert!(after
-            .state
-            .as_ref()
-            .and_then(|s| s.failure.as_ref())
-            .is_none());
+        assert!(
+            after
+                .state
+                .as_ref()
+                .and_then(|s| s.failure.as_ref())
+                .is_none()
+        );
     }
 
     /// Recovery path: same ordinary-failure ownership loss as `ensure_driving`.
@@ -5876,11 +5943,13 @@ mod tests {
             after_root.context.get::<String>("winner.marker").as_deref(),
             Some("recovery-ordinary-race")
         );
-        assert!(after
-            .state
-            .as_ref()
-            .and_then(|s| s.failure.as_ref())
-            .is_none());
+        assert!(
+            after
+                .state
+                .as_ref()
+                .and_then(|s| s.failure.as_ref())
+                .is_none()
+        );
     }
 
     /// Coordinator path (assignment proof): an ordinary driver failure through
@@ -5976,10 +6045,10 @@ mod tests {
             .await
             .expect("load")
             .expect("row");
-        assert!(
-            record.status.is_terminal(),
-            "terminal settlement expected: {:?}",
-            record.status
+        assert_eq!(
+            record.status,
+            SessionStatus::Failed,
+            "coordinator failure must remain a failed prerequisite"
         );
         let failure = record
             .state
@@ -7654,7 +7723,7 @@ mod tests {
         wait_until("anchored settlement", || async {
             match real_store.load_run(&session_id).await {
                 Ok(Some(record)) => {
-                    record.status == SessionStatus::Cancelled
+                    record.status == SessionStatus::Failed
                         && record
                             .state
                             .as_ref()
@@ -7673,8 +7742,8 @@ mod tests {
             .expect("row");
         assert_eq!(
             record.status,
-            SessionStatus::Cancelled,
-            "the failed drive settles through the anchored cleanup"
+            SessionStatus::Failed,
+            "the failed drive preserves its cause through anchored cleanup"
         );
         assert!(
             record
