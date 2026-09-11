@@ -3466,8 +3466,10 @@ mod tests {
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let child = temp_dir.path().join("nexus").join("lease123");
         let lease = provision_sealed_home_fd(&child).expect("provision");
+        // The lease resolves its anchor exactly once; assertions run
+        // against the RESOLVED path (e.g. macOS `/var` symlinks).
         let lease_path = lease.path.clone();
-        let blocked = child.join("blocked");
+        let blocked = lease_path.join("blocked");
         std::fs::create_dir_all(&blocked).expect("blocked subdir");
         std::fs::write(blocked.join("state"), b"state").expect("state file");
         std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o500))
