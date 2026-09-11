@@ -399,6 +399,25 @@ pub trait WorkflowStateStore: Send + Sync {
         next_state: &RunStateV1,
     ) -> Result<RunRecord, EngineError>;
 
+    /// Atomically settle a run to terminal `Failed` after confirmed cleanup.
+    ///
+    /// Mirrors [`WorkflowStateStore::settle_cancelled`] (same `Interrupted`
+    /// cleanup-retry admission and anchored graph-clock CAS), but the
+    /// confirmed terminal status is `failed` so schedule dependency gates
+    /// remain blocked.
+    ///
+    /// # Errors
+    /// Returns [`EngineError`] on storage failure, revision/graph mismatch,
+    /// or a terminal status other than `Interrupted` (cleanup-retry shape).
+    async fn settle_failed(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_graph_version: Option<u64>,
+        checkpoint: RunCheckpoint<'_>,
+        next_state: &RunStateV1,
+    ) -> Result<RunRecord, EngineError>;
+
     /// Atomically restore a pre-step root snapshot via ONE revision-fenced
     /// storage operation (Important 3).
     ///

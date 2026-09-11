@@ -497,7 +497,7 @@ async fn cleanup_failed_run(
     match engine
         .signal(
             session_id,
-            EngineSignal::CancelAnchored {
+            EngineSignal::FailAnchored {
                 expected_revision: commit_revision,
                 expected_graph_version: commit_graph_version,
             },
@@ -3228,6 +3228,8 @@ mod tests {
                 EngineSignal::Cancel | EngineSignal::CancelAnchored { .. }
             ) {
                 *self.status.lock() = SessionStatus::Cancelled;
+            } else if matches!(signal, EngineSignal::FailAnchored { .. }) {
+                *self.status.lock() = SessionStatus::Failed;
             }
             Ok(())
         }
@@ -3621,10 +3623,10 @@ mod tests {
             .await
             .expect("load run")
             .expect("run exists");
-        assert!(
-            record.status.is_terminal(),
-            "row must be terminal after the failure path: {:?}",
-            record.status
+        assert_eq!(
+            record.status,
+            SessionStatus::Failed,
+            "driver/task failures must settle durable Failed (not Cancelled) for dependency admission"
         );
         let failure = record
             .state
@@ -4690,6 +4692,25 @@ mod tests {
                 .await
         }
 
+        async fn settle_failed(
+            &self,
+            session_id: &SessionId,
+            expected_revision: u64,
+            expected_graph_version: Option<u64>,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            next_state: &nexus_orchestration::run_state::RunStateV1,
+        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            self.inner
+                .settle_failed(
+                    session_id,
+                    expected_revision,
+                    expected_graph_version,
+                    checkpoint,
+                    next_state,
+                )
+                .await
+        }
+
         async fn restore_pre_step(
             &self,
             session_id: &SessionId,
@@ -5090,6 +5111,28 @@ mod tests {
             }
             self.inner
                 .settle_cancelled(
+                    session_id,
+                    expected_revision,
+                    expected_graph_version,
+                    checkpoint,
+                    next_state,
+                )
+                .await
+        }
+
+        async fn settle_failed(
+            &self,
+            session_id: &SessionId,
+            expected_revision: u64,
+            expected_graph_version: Option<u64>,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            next_state: &nexus_orchestration::run_state::RunStateV1,
+        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            if self.fault == BoundaryFault::FailCleanupSettle && self.file_once() {
+                return Err(Self::injected("injected cleanup-settle storage fault"));
+            }
+            self.inner
+                .settle_failed(
                     session_id,
                     expected_revision,
                     expected_graph_version,

@@ -958,6 +958,28 @@ mod tests {
                 .await
         }
 
+        async fn settle_failed(
+            &self,
+            session_id: &nexus_orchestration::engine::SessionId,
+            expected_revision: u64,
+            expected_graph_version: Option<u64>,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            next_state: &nexus_orchestration::run_state::RunStateV1,
+        ) -> Result<
+            nexus_orchestration::run_state::RunRecord,
+            nexus_orchestration::engine::EngineError,
+        > {
+            self.inner
+                .settle_failed(
+                    session_id,
+                    expected_revision,
+                    expected_graph_version,
+                    checkpoint,
+                    next_state,
+                )
+                .await
+        }
+
         async fn restore_pre_step(
             &self,
             session_id: &nexus_orchestration::engine::SessionId,
