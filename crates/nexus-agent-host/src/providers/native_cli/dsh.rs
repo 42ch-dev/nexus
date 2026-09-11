@@ -332,7 +332,9 @@ async fn wait_delivery_failure(
 /// sender clone during `Session::run`).
 struct StreamConsumerDropGuard {
     stream_finished: Arc<AtomicBool>,
-    consumer_dropped: Arc<Notify>,
+    consumer_dropped: Arc<AtomicBool>,
+    consumer_drop_notify: Arc<Notify>,
+    closing: Arc<AtomicBool>,
 }
 
 impl StreamConsumerDropGuard {
@@ -344,8 +346,27 @@ impl StreamConsumerDropGuard {
 impl Drop for StreamConsumerDropGuard {
     fn drop(&mut self) {
         if !self.stream_finished.load(Ordering::Acquire) {
-            self.consumer_dropped.notify_waiters();
+            // Latch synchronously so a drop before the producer enters
+            // `select!` still wins over a nearly simultaneous run/terminal
+            // completion, and subsequent executes fail immediately via
+            // `closing` without waiting for async invalidation.
+            self.consumer_dropped.store(true, Ordering::Release);
+            self.closing.store(true, Ordering::Release);
+            self.consumer_drop_notify.notify_waiters();
         }
+    }
+}
+
+fn consumer_drop_signaled(consumer_dropped: &AtomicBool) -> bool {
+    consumer_dropped.load(Ordering::Acquire)
+}
+
+async fn wait_consumer_drop(consumer_dropped: &AtomicBool, consumer_drop_notify: &Notify) {
+    loop {
+        if consumer_drop_signaled(consumer_dropped) {
+            return;
+        }
+        consumer_drop_notify.notified().await;
     }
 }
 
@@ -1463,11 +1484,16 @@ impl DshNativeProvider {
         let (terminal_tx, terminal_rx) = mpsc::channel(1);
 
         let budget_for_observer = Arc::clone(&budget);
-        let consumer_dropped = Arc::new(Notify::new());
+        let consumer_dropped = Arc::new(AtomicBool::new(false));
+        let consumer_drop_notify = Arc::new(Notify::new());
         let stream_finished = Arc::new(AtomicBool::new(false));
         let consumer_dropped_for_task = Arc::clone(&consumer_dropped);
+        let consumer_drop_notify_for_task = Arc::clone(&consumer_drop_notify);
+        let closing_for_task = Arc::clone(&closing);
         tokio::spawn(async move {
             let consumer_dropped = consumer_dropped_for_task;
+            let consumer_drop_notify = consumer_drop_notify_for_task;
+            let closing = closing_for_task;
             let (tail_events, invalidate) = {
                 let reconciliation = Arc::new(StdMutex::new(RunReconciliation::new()));
                 let classifier_failed = Arc::new(AtomicBool::new(false));
@@ -1523,6 +1549,8 @@ impl DshNativeProvider {
                     &delivery_failed,
                 ) {
                     RunSelectOutcome::FailureSignal
+                } else if consumer_drop_signaled(&consumer_dropped) {
+                    RunSelectOutcome::ReceiverClosed
                 } else {
                     tokio::select! {
                         biased;
@@ -1531,7 +1559,9 @@ impl DshNativeProvider {
                             &classifier_failed,
                             &delivery_failed,
                         ) => RunSelectOutcome::FailureSignal,
-                        _ = consumer_dropped.notified() => RunSelectOutcome::ReceiverClosed,
+                        _ = wait_consumer_drop(&consumer_dropped, &consumer_drop_notify) => {
+                            RunSelectOutcome::ReceiverClosed
+                        }
                         result = tokio::time::timeout(run_timeout, run) => match result {
                             Ok(inner) => RunSelectOutcome::Run(inner),
                             Err(_elapsed) => RunSelectOutcome::TimedOut,
@@ -1581,7 +1611,19 @@ impl DshNativeProvider {
                         true,
                     ),
                     RunSelectOutcome::Run(Ok(result)) => {
-                        if classifier_failed.load(Ordering::Acquire) {
+                        if consumer_drop_signaled(&consumer_dropped) {
+                            (
+                                vec![HostEvent::OpFailed(OperationFailedEvent {
+                                    session_id: session_id.clone(),
+                                    op_id: op_id.clone(),
+                                    error_category: "stream_closed".to_string(),
+                                    error_message:
+                                        "dsh event stream closed before the turn completed"
+                                            .to_string(),
+                                })],
+                                true,
+                            )
+                        } else if classifier_failed.load(Ordering::Acquire) {
                             (
                                 vec![HostEvent::OpFailed(operation_protocol_failure(
                                     &session_id,
@@ -1648,6 +1690,8 @@ impl DshNativeProvider {
 
         let stream_finished_for_guard = Arc::clone(&stream_finished);
         let consumer_dropped_for_guard = Arc::clone(&consumer_dropped);
+        let consumer_drop_notify_for_guard = Arc::clone(&consumer_drop_notify);
+        let closing_for_guard = Arc::clone(&closing);
         futures_util::stream::unfold(
             (
                 false,
@@ -1661,6 +1705,8 @@ impl DshNativeProvider {
                 StreamConsumerDropGuard {
                     stream_finished: stream_finished_for_guard,
                     consumer_dropped: consumer_dropped_for_guard,
+                    consumer_drop_notify: consumer_drop_notify_for_guard,
+                    closing: closing_for_guard,
                 },
             ),
             |(
