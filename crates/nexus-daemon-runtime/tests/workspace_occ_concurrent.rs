@@ -244,7 +244,7 @@ async fn validate_changes_manifest_rejects_symlink_in_modify_path() {
         ),
     }];
     let err = mgr
-        .validate_contract_manifest(&session_id, &changes, &ws_root)
+        .validate_contract_manifest(&session_id, &changes)
         .await
         .expect_err("symlink must be rejected");
     assert!(

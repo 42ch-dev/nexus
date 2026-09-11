@@ -1501,30 +1501,19 @@ impl StateCompositeTask {
             return Ok(());
         }
 
-        let ws_state = self.workspace_state.clone().unwrap_or_else(|| {
-            serde_json::json!({
-                "session_id": "",
-                "revision": "",
-                "committed": false,
-                "change_count": 0,
-                "workspace_root": ""
-            })
-        });
-
+        if self.workspace_state.is_none() {
+            tracing::debug!(
+                state_id = %self.id,
+                "workspace context unavailable: no capability output"
+            );
+            return Ok(());
+        }
+        let ws_state = self.workspace_state.clone().expect("checked above");
         tracing::debug!(
             state_id = %self.id,
-            source = if self.workspace_state.is_some() { "hook" } else { "default" },
-            committed = %ws_state
-                .get("committed")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false),
-            change_count = %ws_state
-                .get("change_count")
-                .and_then(serde_json::Value::as_i64)
-                .unwrap_or(0),
+            source = "hook",
             "injecting workspace context for expression evaluation"
         );
-
         context.set("__workspace_state", ws_state)?;
         Ok(())
     }

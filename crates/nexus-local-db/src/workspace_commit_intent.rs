@@ -1,4 +1,4 @@
-//! Durable workspace commit intents (v1.188 P3).
+//! Durable workspace commit intents (v1.188 P3 L2).
 
 use crate::LocalDbError;
 use serde::{Deserialize, Serialize};
@@ -59,6 +59,15 @@ pub struct CommitIntentRow {
     pub state: IntentState,
     pub entries: Vec<IntentEntryJson>,
     pub error_category: Option<String>,
+    pub entries_json_raw: String,
+}
+
+impl CommitIntentRow {
+    /// True when durable entry metadata was parsed successfully.
+    #[must_use]
+    pub fn entries_metadata_valid(&self) -> bool {
+        serde_json::from_str::<Vec<IntentEntryJson>>(&self.entries_json_raw).is_ok()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -150,7 +159,7 @@ pub async fn get_committed_intent_by_digest(
     .bind(request_digest)
     .fetch_optional(pool)
     .await?;
-    Ok(row.map(IntentRowRaw::into_row))
+    row.map(|r| r.try_into_row()).transpose()
 }
 
 pub async fn get_intent_by_revision(
@@ -164,7 +173,7 @@ pub async fn get_intent_by_revision(
     .bind(revision)
     .fetch_optional(pool)
     .await?;
-    Ok(row.map(IntentRowRaw::into_row))
+    row.map(|r| r.try_into_row()).transpose()
 }
 
 pub async fn update_intent_state(
@@ -254,6 +263,26 @@ pub async fn release_session_claim(
     Ok(())
 }
 
+
+async fn decode_intent_rows(pool: &SqlitePool, rows: Vec<IntentRowRaw>) -> Result<Vec<CommitIntentRow>, LocalDbError> {
+    let mut out = Vec::new();
+    for raw in rows {
+        let revision = raw.revision.clone();
+        match raw.try_into_row() {
+            Ok(row) => out.push(row),
+            Err(_) => {
+                let _ = sqlx::query(
+                    "UPDATE workspace_commit_intents SET state = 'recovery_conflict', error_category = 'corrupt_entries_json',                      updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE revision = ?",
+                )
+                .bind(&revision)
+                .execute(pool)
+                .await;
+            }
+        }
+    }
+    Ok(out)
+}
+
 pub async fn list_unsettled_intents(
     pool: &SqlitePool,
     workspace_root: &str,
@@ -266,7 +295,18 @@ pub async fn list_unsettled_intents(
     .bind(workspace_root)
     .fetch_all(pool)
     .await?;
-    Ok(rows.into_iter().map(IntentRowRaw::into_row).collect())
+    decode_intent_rows(pool, rows).await
+}
+
+pub async fn list_all_unsettled_intents(pool: &SqlitePool) -> Result<Vec<CommitIntentRow>, LocalDbError> {
+    let rows = sqlx::query_as::<_, IntentRowRaw>(
+        "SELECT session_id, workspace_root, revision, request_digest, state, entries_json, error_category \
+         FROM workspace_commit_intents \
+         WHERE state IN ('applying', 'rolling_back', 'recovery_conflict')",
+    )
+    .fetch_all(pool)
+    .await?;
+    decode_intent_rows(pool, rows).await
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -281,10 +321,17 @@ struct IntentRowRaw {
 }
 
 impl IntentRowRaw {
-    fn into_row(self) -> CommitIntentRow {
-        let entries: Vec<IntentEntryJson> =
-            serde_json::from_str(&self.entries_json).unwrap_or_default();
-        CommitIntentRow {
+    fn try_into_row(self) -> Result<CommitIntentRow, LocalDbError> {
+        let entries: Vec<IntentEntryJson> = match serde_json::from_str(&self.entries_json) {
+            Ok(v) => v,
+            Err(e) => {
+                return Err(LocalDbError::Sqlx(sqlx::Error::Decode(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("corrupt intent entries_json: {e}"),
+                )))));
+            }
+        };
+        Ok(CommitIntentRow {
             session_id: self.session_id,
             workspace_root: self.workspace_root,
             revision: self.revision,
@@ -292,6 +339,7 @@ impl IntentRowRaw {
             state: IntentState::parse(&self.state).unwrap_or(IntentState::RecoveryConflict),
             entries,
             error_category: self.error_category,
-        }
+            entries_json_raw: self.entries_json,
+        })
     }
 }

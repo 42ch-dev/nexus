@@ -10,9 +10,11 @@
 
 pub mod actor_sessions;
 pub mod authority;
+pub mod bounds;
 pub mod commit_fs;
 pub mod executor;
 pub mod manager;
+pub mod scope;
 pub mod session;
 pub mod session_commit;
 
@@ -576,6 +578,10 @@ impl WorkspaceState {
             if let (Some(db), Some(db_path), Some(narrative_gateway), Some(session_manager)) =
                 (db, db_path, narrative_gateway, session_manager)
             {
+                session_manager
+                    .startup_recovery()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("workspace startup recovery failed: {e}"))?;
                 {
                     let mut slot = self.creator_db_write();
                     if slot.db.is_none() {
@@ -763,11 +769,13 @@ impl WorkspaceState {
         let holder = {
             let workspace_executor: Option<
                 Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>,
-            > = self.session_manager().map(|mgr| {
-                Arc::new(crate::workspace::executor::DaemonWorkspaceExecutor::new(
-                    mgr,
-                    self.workspace_path_handle(),
-                )) as Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>
+            > = self.session_manager().and_then(|mgr| {
+                self.workspace_path().map(|root| {
+                    Arc::new(crate::workspace::executor::DaemonWorkspaceExecutor::new(
+                        mgr,
+                        root,
+                    )) as Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>
+                })
             });
             let deps = nexus_orchestration::capability::CapabilityRuntimeDeps {
                 pool: Some(pool_arc.as_ref().clone()),

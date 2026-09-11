@@ -342,6 +342,9 @@ fn map_session_error(
             code: "SESSION_ERROR".into(),
             message: msg,
         },
+        SessionError::CorruptSnapshot(reason) => NexusApiError::Conflict(format!(
+            "corrupt workspace snapshot: {reason}"
+        )),
         SessionError::ManifestInvalid(reason) => NexusApiError::InvalidInput {
             field: "changes".into(),
             reason,

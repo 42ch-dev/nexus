@@ -1,19 +1,36 @@
-//! Recoverable multi-file workspace commit (v1.188 P3).
+//! Recoverable multi-file workspace commit (v1.188 P3 L2).
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use nexus_contracts::local::orchestration::{WorkspaceChangeEntry, WorkspaceChangeOp};
 use nexus_local_db as db;
 use sha2::{Digest, Sha256};
 
 use super::commit_fs::{
-    atomic_create, atomic_delete, atomic_replace, backup_file, cleanup_temp, decode_base64,
-    hash_bytes, restore_preimage, write_stage_file, MAX_CHANGES, MAX_FILE_BYTES, MAX_TOTAL_BYTES,
+    atomic_create, atomic_delete_verified, atomic_replace_verified, backup_file, cleanup_temp,
+    decode_base64, hash_bytes, restore_preimage_verified, write_stage_file, MAX_CHANGES,
+    MAX_FILE_BYTES, MAX_TOTAL_BYTES,
 };
 use super::session::{
     canonicalize_workspace_root, enforce_path_boundary, SessionError, SessionId,
     WorkspaceSessionManager,
 };
+
+/// Test-only crash barrier labels (integration tests simulate interruption).
+static TEST_CRASH_POINT: Mutex<Option<&'static str>> = Mutex::new(None);
+
+/// Set the next commit crash point (`None` disables simulation).
+pub fn set_test_crash_point(point: Option<&'static str>) {
+    *TEST_CRASH_POINT.lock().expect("crash point lock") = point;
+}
+
+fn test_crash_if(point: &str) -> Result<(), SessionError> {
+    if *TEST_CRASH_POINT.lock().expect("crash point lock") == Some(point) {
+        return Err(SessionError::Internal(format!("test_crash:{point}")));
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitOutcome {
@@ -47,7 +64,15 @@ async fn rollback_intent(
     workspace_root: &str,
     intent: &db::CommitIntentRow,
 ) -> Result<(), SessionError> {
+    if !intent.entries_metadata_valid() {
+        return Err(SessionError::RecoveryConflict(workspace_root.to_string()));
+    }
+
     let canonical_root = canonicalize_workspace_root(Path::new(workspace_root)).await?;
+    let session_id = SessionId(intent.session_id.clone());
+    let row = mgr.validate_session(&session_id).await?;
+    let scope_dir = super::scope::scope_directory(&canonical_root, &row.relative_path)?;
+
     let _guard = mgr.lock_mutation().await;
     db::update_intent_state(
         mgr.pool().as_ref(),
@@ -58,9 +83,12 @@ async fn rollback_intent(
     .await
     .map_err(|e| SessionError::Database(e.to_string()))?;
 
+    test_crash_if("during_rollback")?;
+
     let mut temps = Vec::new();
     for entry in &intent.entries {
-        let target = canonical_root.join(&entry.path);
+        let target = super::scope::resolve_in_scope(&scope_dir, &entry.path)?;
+        enforce_path_boundary(&target, &canonical_root)?;
         let backup = entry
             .backup_basename
             .as_ref()
@@ -69,8 +97,13 @@ async fn rollback_intent(
             temps.push(backup_path.clone());
         }
         temps.push(target.with_file_name(&entry.stage_basename));
-        restore_preimage(&target, backup.as_deref())
-            .map_err(|e| SessionError::Io(e.to_string()))?;
+        restore_preimage_verified(
+            &target,
+            backup.as_deref(),
+            entry.pre_hash.as_deref(),
+            entry.post_hash.as_deref(),
+        )
+        .map_err(|e| SessionError::Io(e.to_string()))?;
     }
     cleanup_temp(&temps);
     db::finalize_rolled_back_intent(
@@ -84,6 +117,9 @@ async fn rollback_intent(
 }
 
 pub fn validate_manifest(changes: &[WorkspaceChangeEntry]) -> Result<(), SessionError> {
+    if changes.is_empty() {
+        return Err(SessionError::ManifestInvalid("changes must not be empty".into()));
+    }
     if changes.len() > MAX_CHANGES {
         return Err(SessionError::ManifestInvalid(format!(
             "too many changes (max {MAX_CHANGES})"
@@ -194,13 +230,19 @@ pub async fn commit_recoverable(
     mgr: &WorkspaceSessionManager,
     session_id: &SessionId,
     changes: &[WorkspaceChangeEntry],
-    workspace_root: &str,
 ) -> Result<CommitOutcome, SessionError> {
     if mgr.recoverable_config().is_none() {
-        return Err(SessionError::Database("recoverable commit not configured".into()));
+        return Err(SessionError::Internal(
+            "recoverable workspace authority required".into(),
+        ));
     }
 
-    recover_unsettled(mgr, workspace_root).await?;
+    let row = mgr.validate_session(session_id).await?;
+    let canonical_root = canonicalize_workspace_root(Path::new(&row.workspace_root)).await?;
+    let workspace_root = canonical_root.to_string_lossy().into_owned();
+    let scope_dir = super::scope::scope_directory(&canonical_root, &row.relative_path)?;
+
+    recover_unsettled(mgr, &workspace_root).await?;
     validate_manifest(changes)?;
 
     let digest = request_digest(&session_id.to_string(), changes);
@@ -218,22 +260,16 @@ pub async fn commit_recoverable(
         });
     }
 
-    if changes.is_empty() {
-        mgr.validate_session(session_id).await?;
-    } else {
-        mgr.validate_contract_manifest(session_id, changes, workspace_root)
-            .await?;
-    }
+    mgr.validate_contract_manifest(session_id, changes).await?;
 
     let revision = new_revision();
-    let canonical_root = canonicalize_workspace_root(Path::new(workspace_root)).await?;
     let _guard = mgr.lock_mutation().await;
 
     let claim = db::claim_session_and_insert_intent(
         mgr.pool().as_ref(),
         &session_id.to_string(),
         &revision,
-        workspace_root,
+        &workspace_root,
         &digest,
         "[]",
     )
@@ -268,18 +304,18 @@ pub async fn commit_recoverable(
         db::ClaimSessionResult::Expired => return Err(SessionError::Expired(session_id.clone())),
     }
 
+    test_crash_if("after_intent")?;
+
     let mut entries_json: Vec<db::IntentEntryJson> = Vec::new();
     let mut stage_paths: Vec<PathBuf> = Vec::new();
     let mut backup_paths: Vec<PathBuf> = Vec::new();
     let rev_tag = revision.replace("rev_", "");
 
     for (idx, change) in changes.iter().enumerate() {
-        let target = canonical_root.join(&change.path);
+        let target = super::scope::resolve_in_scope(&scope_dir, &change.path)?;
         enforce_path_boundary(&target, &canonical_root)?;
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| SessionError::Io(e.to_string()))?;
-        }
+        super::commit_fs::require_parent_exists(&target)
+            .map_err(|e| SessionError::ManifestInvalid(e.to_string()))?;
         let stage_basename = format!(".nexus-stage-{}-{}", rev_tag, idx);
         let stage = target.with_file_name(&stage_basename);
         let backup_basename = if target.exists() {
@@ -345,37 +381,47 @@ pub async fn commit_recoverable(
         .await
         .map_err(|e| SessionError::Database(e.to_string()))?;
 
+    test_crash_if("after_entries_persisted")?;
+
     for (idx, change) in changes.iter().enumerate() {
-        let target = canonical_root.join(&change.path);
+        let target = super::scope::resolve_in_scope(&scope_dir, &change.path)?;
         let stage = target.with_file_name(&entries_json[idx].stage_basename);
+        let meta = &entries_json[idx];
         let result = match change.op {
             WorkspaceChangeOp::Create => atomic_create(&target, &stage),
-            WorkspaceChangeOp::Modify => atomic_replace(&target, &stage),
-            WorkspaceChangeOp::Delete => atomic_delete(&target),
+            WorkspaceChangeOp::Modify => atomic_replace_verified(
+                &target,
+                &stage,
+                meta.pre_hash.as_deref().unwrap_or(""),
+            ),
+            WorkspaceChangeOp::Delete => atomic_delete_verified(
+                &target,
+                meta.pre_hash.as_deref().unwrap_or(""),
+            ),
         };
         if let Err(e) = result {
-            let intent = db::CommitIntentRow {
-                session_id: session_id.to_string(),
-                workspace_root: workspace_root.to_string(),
-                revision: revision.clone(),
-                request_digest: digest.clone(),
-                state: db::IntentState::Applying,
-                entries: entries_json.clone(),
-                error_category: None,
-            };
-            let _ = db::update_intent_state(
+            db::update_intent_state(
                 mgr.pool().as_ref(),
                 &revision,
                 db::IntentState::RollingBack,
                 Some("apply_failed"),
             )
-            .await;
-            let _ = rollback_intent(mgr, workspace_root, &intent).await;
+            .await
+            .map_err(|db_err| SessionError::Database(db_err.to_string()))?;
+            if let Some(intent) = db::get_intent_by_revision(mgr.pool().as_ref(), &revision)
+                .await
+                .map_err(|db_err| SessionError::Database(db_err.to_string()))?
+            {
+                rollback_intent(mgr, &workspace_root, &intent).await?;
+            }
             cleanup_temp(&stage_paths);
             cleanup_temp(&backup_paths);
             return Err(SessionError::Io(e.to_string()));
         }
+        test_crash_if("after_file_apply")?;
     }
+
+    test_crash_if("before_finalize")?;
 
     cleanup_temp(&stage_paths);
     cleanup_temp(&backup_paths);
@@ -402,4 +448,29 @@ pub async fn commit_recoverable(
         revision,
         committed: true,
     })
+}
+
+/// Durable commit on an `Arc` manager; retains ownership through caller cancellation.
+pub async fn commit_recoverable_owned(
+    mgr: Arc<WorkspaceSessionManager>,
+    session_id: SessionId,
+    changes: Vec<WorkspaceChangeEntry>,
+) -> Result<CommitOutcome, SessionError> {
+    commit_recoverable(&mgr, &session_id, &changes).await
+}
+
+pub async fn startup_recovery_all(mgr: &WorkspaceSessionManager) -> Result<(), SessionError> {
+    let _guard = mgr.lock_mutation().await;
+    let intents = db::list_all_unsettled_intents(mgr.pool().as_ref())
+        .await
+        .map_err(|e| SessionError::Database(e.to_string()))?;
+    for intent in intents {
+        if intent.state == db::IntentState::RecoveryConflict {
+            return Err(SessionError::RecoveryConflict(intent.workspace_root.clone()));
+        }
+        if matches!(intent.state, db::IntentState::Applying | db::IntentState::RollingBack) {
+            recover_unsettled(mgr, &intent.workspace_root).await?;
+        }
+    }
+    Ok(())
 }

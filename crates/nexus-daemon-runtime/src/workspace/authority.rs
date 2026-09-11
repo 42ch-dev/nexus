@@ -1,4 +1,4 @@
-//! Manager-lifetime advisory lease beside the creator DB (v1.188 P3).
+//! Manager-lifetime advisory lease beside the creator DB (v1.188 P3 L2).
 
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -24,10 +24,16 @@ impl WorkspaceAuthorityLease {
             .open(&path)?;
         #[cfg(unix)]
         {
-            use nix::fcntl::{flock, FlockArg};
             use std::os::unix::io::AsRawFd;
-            flock(file.as_raw_fd(), FlockArg::LockExclusiveNonblock)
-                .map_err(io::Error::from)?;
+            #[allow(deprecated)]
+            {
+                if let Err(e) = nix::fcntl::flock(
+                    file.as_raw_fd(),
+                    nix::fcntl::FlockArg::LockExclusiveNonblock,
+                ) {
+                    return Err(io::Error::other(e));
+                }
+            }
         }
         Ok(Arc::new(Self {
             path,
@@ -46,9 +52,11 @@ impl Drop for WorkspaceAuthorityLease {
         if let Some(file) = self.file.take() {
             #[cfg(unix)]
             {
-                use nix::fcntl::{flock, FlockArg};
                 use std::os::unix::io::AsRawFd;
-                let _ = flock(file.as_raw_fd(), FlockArg::Unlock);
+                #[allow(deprecated)]
+                {
+                    let _ = nix::fcntl::flock(file.as_raw_fd(), nix::fcntl::FlockArg::Unlock);
+                }
             }
             drop(file);
         }

@@ -785,13 +785,21 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // (no creator DB) keeps `pool: None` and defers the pool-backed
     // registry to Profile attach (`publish_lazy_attach_bundle`).
 
+    if let Some(mgr) = state.session_manager() {
+        mgr.startup_recovery()
+            .await
+            .map_err(|e| anyhow::anyhow!("workspace startup recovery failed: {e}"))?;
+    }
+
     let workspace_executor: Option<
         std::sync::Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>,
-    > = state.session_manager().map(|mgr| {
-        std::sync::Arc::new(crate::workspace::executor::DaemonWorkspaceExecutor::new(
-            mgr,
-            state.workspace_path_handle(),
-        )) as std::sync::Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>
+    > = state.session_manager().and_then(|mgr| {
+        state.workspace_path().map(|root| {
+            std::sync::Arc::new(crate::workspace::executor::DaemonWorkspaceExecutor::new(
+                mgr,
+                root,
+            )) as std::sync::Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>
+        })
     });
 
     let runtime_deps = CapabilityRuntimeDeps {

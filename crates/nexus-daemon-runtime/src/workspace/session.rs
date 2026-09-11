@@ -81,6 +81,8 @@ pub enum SessionError {
         expected_hash: String,
         actual_hash: String,
     },
+    /// Persisted session snapshot JSON is corrupt (v1.188 P3 L2).
+    CorruptSnapshot(String),
     /// Manifest shape or bounds violation (v1.188 P3).
     ManifestInvalid(String),
     /// Unsettled commit intent blocks new writes (v1.188 P3).
@@ -119,6 +121,7 @@ impl fmt::Display for SessionError {
                      expected {expected_hash}, got {actual_hash}"
                 )
             }
+            Self::CorruptSnapshot(msg) => write!(f, "corrupt session snapshot: {msg}"),
             Self::ManifestInvalid(msg) => write!(f, "manifest invalid: {msg}"),
             Self::RecoveryConflict(root) => {
                 write!(f, "workspace recovery conflict blocks writes: {root}")
@@ -148,6 +151,19 @@ pub use nexus_contracts::local::orchestration::{
 #[derive(Debug, Clone, Default)]
 pub struct FileSnapshots {
     pub hashes: std::collections::HashMap<String, String>,
+}
+
+
+/// Parse persisted snapshot hashes; fail closed on corrupt JSON.
+pub fn parse_snapshot_hashes(json: &str) -> Result<std::collections::HashMap<String, String>, SessionError> {
+    let value: serde_json::Value = serde_json::from_str(json)
+        .map_err(|e| SessionError::CorruptSnapshot(e.to_string()))?;
+    if !value.is_object() {
+        return Err(SessionError::CorruptSnapshot("snapshot must be object".into()));
+    }
+    let map: std::collections::HashMap<String, String> = serde_json::from_value(value)
+        .map_err(|e| SessionError::CorruptSnapshot(e.to_string()))?;
+    Ok(map)
 }
 
 // ── Content hashing ─────────────────────────────────────────────────────────
@@ -298,6 +314,7 @@ async fn compute_content_hashes_inner(
 ///   [`SessionError::HashConflict`].
 /// - The session is atomically consumed (marked `consumed = 1`) only if all
 ///   change entries validate. This guarantees single-consumer semantics.
+
 /// Recoverable commit configuration (v1.188 P3).
 pub struct RecoverableCommitConfig {
     pub db_path: PathBuf,
@@ -463,16 +480,15 @@ impl WorkspaceSessionManager {
         &self,
         session_id: &SessionId,
         changes: &[WorkspaceChangeEntry],
-        workspace_root: &str,
     ) -> Result<(), SessionError> {
         super::session_commit::validate_manifest(changes)?;
         let row = self.validate_session(session_id).await?;
-        let stored_hashes: std::collections::HashMap<String, String> =
-            serde_json::from_str(&row.file_hashes_json).unwrap_or_default();
-        let canonical_root = canonicalize_workspace_root(Path::new(workspace_root)).await?;
+        let stored_hashes = parse_snapshot_hashes(&row.file_hashes_json)?;
+        let canonical_root = Path::new(&row.workspace_root);
+        let scope_dir = super::scope::scope_directory(canonical_root, &row.relative_path)?;
 
         for change in changes {
-            let file_path = Path::new(workspace_root).join(&change.path);
+            let file_path = super::scope::resolve_in_scope(&scope_dir, &change.path)?;
             if file_path.exists() {
                 let meta = tokio::fs::symlink_metadata(&file_path)
                     .await
@@ -480,11 +496,10 @@ impl WorkspaceSessionManager {
                 if meta.file_type().is_symlink() {
                     return Err(SessionError::PathEscape {
                         path: change.path.clone(),
-                        workspace_root: workspace_root.to_string(),
+                        workspace_root: row.workspace_root.clone(),
                     });
                 }
-                let logical_target = canonical_root.join(&change.path);
-                enforce_path_boundary(&logical_target, &canonical_root)?;
+                enforce_path_boundary(&file_path, &canonical_root)?;
             }
 
             match change.op {
@@ -574,8 +589,7 @@ impl WorkspaceSessionManager {
         let row = self.validate_session(session_id).await?;
 
         // Parse stored file hashes
-        let stored_hashes: std::collections::HashMap<String, String> =
-            serde_json::from_str(&row.file_hashes_json).unwrap_or_default();
+        let stored_hashes = parse_snapshot_hashes(&row.file_hashes_json)?;
 
         // V1.58 P0 T2 (QC3 F-003 fix): canonicalize the workspace root ONCE
         // per `validate_changes_manifest` call. Previously the root was
@@ -599,15 +613,14 @@ impl WorkspaceSessionManager {
                 if meta.file_type().is_symlink() {
                     return Err(SessionError::PathEscape {
                         path: change.path.clone(),
-                        workspace_root: workspace_root.to_string(),
+                        workspace_root: row.workspace_root.clone(),
                     });
                 }
                 // Defense-in-depth: enforce the logical join of the change
                 // path against the canonical root stays within the boundary.
                 // With symlinks rejected above and the root already canonical,
                 // the joined path cannot escape the workspace.
-                let logical_target = canonical_root.join(&change.path);
-                enforce_path_boundary(&logical_target, &canonical_root)?;
+                enforce_path_boundary(&file_path, &canonical_root)?;
             }
 
             match change.op {
@@ -646,7 +659,7 @@ impl WorkspaceSessionManager {
                     if pre_open_meta.file_type().is_symlink() {
                         return Err(SessionError::PathEscape {
                             path: change.path.clone(),
-                            workspace_root: workspace_root.to_string(),
+                            workspace_root: row.workspace_root.clone(),
                         });
                     }
 
@@ -784,16 +797,11 @@ impl WorkspaceSessionManager {
         &self,
         session_id: &SessionId,
         changes: &[ChangeEntry],
-        workspace_root: &str,
+        _workspace_root: &str,
     ) -> Result<db::WorkspaceSessionRow, SessionError> {
         if self.recoverable.is_some() {
-            let _outcome = super::session_commit::commit_recoverable(
-                self,
-                session_id,
-                changes,
-                workspace_root,
-            )
-            .await?;
+            let _outcome =
+                super::session_commit::commit_recoverable(self, session_id, changes).await?;
             return db::get_session(&self.pool, &session_id.to_string())
                 .await
                 .map_err(|e| SessionError::Database(e.to_string()))?
@@ -802,7 +810,7 @@ impl WorkspaceSessionManager {
 
         if !changes.is_empty() {
             if let Err(err) = self
-                .validate_contract_manifest(session_id, changes, workspace_root)
+                .validate_contract_manifest(session_id, changes)
                 .await
             {
                 if matches!(err, SessionError::HashConflict { .. }) {
@@ -825,22 +833,28 @@ impl WorkspaceSessionManager {
         &self,
         session_id: &SessionId,
         changes: &[ChangeEntry],
-        workspace_root: &str,
+        _workspace_root: &str,
     ) -> Result<super::session_commit::CommitOutcome, SessionError> {
-        if self.recoverable.is_some() {
-            return super::session_commit::commit_recoverable(
-                self,
-                session_id,
-                changes,
-                workspace_root,
-            )
-            .await;
+        if self.recoverable.is_none() {
+            return Err(SessionError::Internal(
+                "recoverable workspace authority required".into(),
+            ));
         }
-        self.commit_session(session_id, changes, workspace_root).await?;
-        Ok(super::session_commit::CommitOutcome {
-            revision: format!("rev_{}", uuid::Uuid::new_v4()),
-            committed: true,
-        })
+        super::session_commit::commit_recoverable(self, session_id, changes).await
+    }
+
+    /// Durable commit on an `Arc` manager; retains ownership through caller cancellation.
+    pub async fn commit_session_durable_owned(
+        self_arc: Arc<Self>,
+        session_id: SessionId,
+        changes: Vec<ChangeEntry>,
+    ) -> Result<super::session_commit::CommitOutcome, SessionError> {
+        super::session_commit::commit_recoverable_owned(self_arc, session_id, changes).await
+    }
+
+    /// Run startup recovery for all unsettled intents (call before publishing executor).
+    pub async fn startup_recovery(&self) -> Result<(), SessionError> {
+        super::session_commit::startup_recovery_all(self).await
     }
 
     /// Get the underlying database pool.
@@ -854,7 +868,7 @@ impl WorkspaceSessionManager {
 ///
 /// Uses `tokio::fs` so the function is safe to call from async context
 /// (V1.58 P0 T4 — R-V156P0-M004).
-async fn compute_single_file_hash(path: &Path) -> Result<String, SessionError> {
+pub(crate) async fn compute_single_file_hash(path: &Path) -> Result<String, SessionError> {
     use sha2::{Digest, Sha256};
     use tokio::io::AsyncReadExt;
 
@@ -1022,10 +1036,10 @@ mod tests {
 
     #[test]
     fn change_entry_deserialization() {
-        let json = r#"{"path":"test.txt","contentHash":"abc123","op":"modify"}"#;
+        let json = r#"{"path":"test.txt","expectedHash":"abc123","op":"modify","contentBase64":"YQ=="}"#;
         let entry: ChangeEntry = serde_json::from_str(json).expect("deserialize");
         assert_eq!(entry.path, "test.txt");
-        assert_eq!(entry.content_hash, "abc123");
+        assert_eq!(entry.expected_hash.as_deref(), Some("abc123"));
         assert!(matches!(entry.op, ChangeOp::Modify));
     }
 }
