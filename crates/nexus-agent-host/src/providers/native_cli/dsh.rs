@@ -161,6 +161,9 @@ const DSCH_MAX_EMITTED_TEXT_BYTES: usize = 4 * 1024 * 1024;
 struct DeliveryBudget {
     pending: StdMutex<usize>,
     emitted: StdMutex<usize>,
+    /// Accepted message deltas this turn (queue depth can shrink while the
+    /// consumer drains; overflow is keyed off total accepts, not buffer fill).
+    accepted_messages: StdMutex<usize>,
 }
 
 impl DeliveryBudget {
@@ -170,12 +173,20 @@ impl DeliveryBudget {
         }
         let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
         let mut emitted = self.emitted.lock().unwrap_or_else(|e| e.into_inner());
+        let mut accepted_messages = self
+            .accepted_messages
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if *accepted_messages >= DSCH_MAX_QUEUED_MESSAGES {
+            return false;
+        }
         if *pending + bytes > DSCH_MAX_PENDING_PAYLOAD_BYTES {
             return false;
         }
         if *emitted + bytes > DSCH_MAX_EMITTED_TEXT_BYTES {
             return false;
         }
+        *accepted_messages += 1;
         *pending += bytes;
         *emitted += bytes;
         true
@@ -291,6 +302,62 @@ impl StreamObserver {
             }
             Err(ClassifyNotificationError::Protocol(_)) => self.signal_failure(true, false),
             Err(ClassifyNotificationError::EventTooLarge(_)) => self.signal_failure(false, true),
+        }
+    }
+}
+
+
+fn delivery_failure_signaled(
+    classifier_failed: &AtomicBool,
+    delivery_failed: &AtomicBool,
+) -> bool {
+    classifier_failed.load(Ordering::Acquire) || delivery_failed.load(Ordering::Acquire)
+}
+
+async fn wait_delivery_failure(
+    failure_notify: &Notify,
+    classifier_failed: &AtomicBool,
+    delivery_failed: &AtomicBool,
+) {
+    loop {
+        if delivery_failure_signaled(classifier_failed, delivery_failed) {
+            return;
+        }
+        failure_notify.notified().await;
+    }
+}
+
+/// Signals the producer when the consumer drops the stream before normal
+/// completion (`content_tx` stays open while the observer still holds a
+/// sender clone during `Session::run`).
+struct StreamConsumerDropGuard {
+    stream_finished: Arc<AtomicBool>,
+    consumer_dropped: Arc<Notify>,
+}
+
+impl StreamConsumerDropGuard {
+    fn mark_stream_finished(&self) {
+        self.stream_finished.store(true, Ordering::Release);
+    }
+}
+
+impl Drop for StreamConsumerDropGuard {
+    fn drop(&mut self) {
+        if !self.stream_finished.load(Ordering::Acquire) {
+            self.consumer_dropped.notify_waiters();
+        }
+    }
+}
+
+async fn reunify_run_harness(
+    run_harness: &Mutex<Option<DeepSeekHarness>>,
+    state: &Mutex<ClientState>,
+) {
+    let harness = run_harness.lock().await.take();
+    if let Some(harness) = harness {
+        let mut guard = state.lock().await;
+        if !guard.closed && guard.harness.is_none() {
+            guard.harness = Some(harness);
         }
     }
 }
@@ -1396,7 +1463,11 @@ impl DshNativeProvider {
         let (terminal_tx, terminal_rx) = mpsc::channel(1);
 
         let budget_for_observer = Arc::clone(&budget);
+        let consumer_dropped = Arc::new(Notify::new());
+        let stream_finished = Arc::new(AtomicBool::new(false));
+        let consumer_dropped_for_task = Arc::clone(&consumer_dropped);
         tokio::spawn(async move {
+            let consumer_dropped = consumer_dropped_for_task;
             let (tail_events, invalidate) = {
                 let reconciliation = Arc::new(StdMutex::new(RunReconciliation::new()));
                 let classifier_failed = Arc::new(AtomicBool::new(false));
@@ -1408,8 +1479,11 @@ impl DshNativeProvider {
                     *slot = Some(run_timing.lock().unwrap_or_else(|e| e.into_inner()).clone());
                 }
 
+                let run_harness = Arc::new(Mutex::new(None::<DeepSeekHarness>));
+                let run_harness_for_run = Arc::clone(&run_harness);
+
                 let run = async {
-                    let (root_session_id, mut harness) = {
+                    let root_session_id = {
                         let mut guard = state.lock().await;
                         if guard.closed || closing.load(Ordering::Acquire) {
                             return Err(RunError::SessionGone);
@@ -1418,7 +1492,8 @@ impl DshNativeProvider {
                         let Some(harness) = guard.harness.take() else {
                             return Err(RunError::SessionGone);
                         };
-                        (root_session_id, harness)
+                        *run_harness_for_run.lock().await = Some(harness);
+                        root_session_id
                     };
 
                     let observer = Arc::new(StreamObserver {
@@ -1434,30 +1509,37 @@ impl DshNativeProvider {
                         run_timing: Arc::clone(&run_timing),
                     });
                     let obs = Arc::clone(&observer);
+                    let mut slot = run_harness_for_run.lock().await;
+                    let harness = slot.as_mut().ok_or(RunError::SessionGone)?;
                     let session = harness.start_session(Some(root_session_id));
-                    let run_result = session
+                    session
                         .run(Input::Text(prompt_text), Some(&|n| obs.observe(n)))
                         .await
-                        .map_err(RunError::Sdk);
+                        .map_err(RunError::Sdk)
+                };
 
-                    {
-                        let mut guard = state.lock().await;
-                        if !guard.closed && guard.harness.is_none() {
-                            guard.harness = Some(harness);
-                        }
+                let run_outcome = if delivery_failure_signaled(
+                    &classifier_failed,
+                    &delivery_failed,
+                ) {
+                    RunSelectOutcome::FailureSignal
+                } else {
+                    tokio::select! {
+                        biased;
+                        _ = wait_delivery_failure(
+                            &failure_notify,
+                            &classifier_failed,
+                            &delivery_failed,
+                        ) => RunSelectOutcome::FailureSignal,
+                        _ = consumer_dropped.notified() => RunSelectOutcome::ReceiverClosed,
+                        result = tokio::time::timeout(run_timeout, run) => match result {
+                            Ok(inner) => RunSelectOutcome::Run(inner),
+                            Err(_elapsed) => RunSelectOutcome::TimedOut,
+                        },
                     }
-                    run_result
                 };
 
-                let run_outcome = tokio::select! {
-                    biased;
-                    _ = failure_notify.notified() => RunSelectOutcome::FailureSignal,
-                    _ = content_tx.closed() => RunSelectOutcome::ReceiverClosed,
-                    result = tokio::time::timeout(run_timeout, run) => match result {
-                        Ok(inner) => RunSelectOutcome::Run(inner),
-                        Err(_elapsed) => RunSelectOutcome::TimedOut,
-                    },
-                };
+                reunify_run_harness(&run_harness, &state).await;
 
                 match run_outcome {
                     RunSelectOutcome::FailureSignal => {
@@ -1499,10 +1581,6 @@ impl DshNativeProvider {
                         true,
                     ),
                     RunSelectOutcome::Run(Ok(result)) => {
-                        {
-                            let mut timing = run_timing.lock().unwrap_or_else(|e| e.into_inner());
-                            timing.run_completed = Some(Instant::now());
-                        }
                         if classifier_failed.load(Ordering::Acquire) {
                             (
                                 vec![HostEvent::OpFailed(operation_protocol_failure(
@@ -1520,6 +1598,11 @@ impl DshNativeProvider {
                                 true,
                             )
                         } else {
+                            {
+                                let mut timing =
+                                    run_timing.lock().unwrap_or_else(|e| e.into_inner());
+                                timing.run_completed = Some(Instant::now());
+                            }
                             let snapshot = reconciliation.lock().unwrap().clone();
                             match finalize_successful_run(
                                 &result,
@@ -1563,6 +1646,8 @@ impl DshNativeProvider {
             }
         });
 
+        let stream_finished_for_guard = Arc::clone(&stream_finished);
+        let consumer_dropped_for_guard = Arc::clone(&consumer_dropped);
         futures_util::stream::unfold(
             (
                 false,
@@ -1573,6 +1658,10 @@ impl DshNativeProvider {
                 VecDeque::<HostEvent>::new(),
                 op_id_for_stream.clone(),
                 session_id_for_stream.clone(),
+                StreamConsumerDropGuard {
+                    stream_finished: stream_finished_for_guard,
+                    consumer_dropped: consumer_dropped_for_guard,
+                },
             ),
             |(
                 started,
@@ -1583,6 +1672,7 @@ impl DshNativeProvider {
                 mut pending,
                 op_id,
                 session_id,
+                drop_guard,
             )| async move {
                 if let Some(event) = pending.pop_front() {
                     return Some((
@@ -1596,10 +1686,12 @@ impl DshNativeProvider {
                             pending,
                             op_id,
                             session_id,
+                            drop_guard,
                         ),
                     ));
                 }
                 if finished {
+                    drop_guard.mark_stream_finished();
                     return None;
                 }
                 if !started {
@@ -1617,6 +1709,7 @@ impl DshNativeProvider {
                             pending,
                             op_id,
                             session_id,
+                            drop_guard,
                         ),
                     ));
                 }
@@ -1634,6 +1727,7 @@ impl DshNativeProvider {
                             pending,
                             op_id,
                             session_id,
+                            drop_guard,
                         ),
                     ));
                 }
@@ -1652,6 +1746,7 @@ impl DshNativeProvider {
                                 pending,
                                 op_id,
                                 session_id,
+                                drop_guard,
                             ),
                         ))
                     }
@@ -1674,9 +1769,11 @@ impl DshNativeProvider {
                                     pending,
                                     op_id,
                                     session_id,
+                                drop_guard,
                                 ),
                             ))
                         } else {
+                            drop_guard.mark_stream_finished();
                             None
                         }
                     }
