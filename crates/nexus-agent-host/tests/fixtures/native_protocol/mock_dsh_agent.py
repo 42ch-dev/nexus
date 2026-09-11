@@ -200,6 +200,9 @@ def handle_request(req):
                 "type": "turn/end",
                 "data": {"reason": {}},
             })
+            # Root idle ends the SDK activity interval even when turn/end is
+            # malformed; without idle Session::run waits forever.
+            session_status(session_id, "idle")
         else:
             session_event(session_id, {
                 "type": "turn/end",
