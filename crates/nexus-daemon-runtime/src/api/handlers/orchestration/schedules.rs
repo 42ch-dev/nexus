@@ -2946,7 +2946,7 @@ mod tests {
         .await
         .expect("seed running session");
         cancel_running_session_invalidating_graph(
-            &mut *pool.acquire().await.expect("acquire cancel connection"),
+            &mut pool.acquire().await.expect("acquire cancel connection"),
             "sess-sched-del",
         )
         .await
@@ -2962,7 +2962,7 @@ mod tests {
 
         // A non-running row is a benign no-op (the newer state owns it).
         cancel_running_session_invalidating_graph(
-            &mut *pool.acquire().await.expect("acquire cancel connection"),
+            &mut pool.acquire().await.expect("acquire cancel connection"),
             "sess-sched-del",
         )
         .await
@@ -2985,7 +2985,7 @@ mod tests {
         .await
         .expect("seed max-counter session");
         let err = cancel_running_session_invalidating_graph(
-            &mut *pool.acquire().await.expect("acquire cancel connection"),
+            &mut pool.acquire().await.expect("acquire cancel connection"),
             "sess-sched-max",
         )
         .await

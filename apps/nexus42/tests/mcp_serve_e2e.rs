@@ -16,7 +16,7 @@
 //!   (`details.wire_code` typed path, AR-70 #4), `invalid_input` names the
 //!   spine code, unroutable (`unsupported tool:` prefix) → `METHOD_NOT_FOUND`,
 //!   daemon-down → bounded `INTERNAL_ERROR`;
-//! - `prompts/list` + `resources/list` assert EMPTY LISTS (rmcp 1.8.0
+//! - `prompts/list` + `resources/list` assert EMPTY LISTS (rmcp 3.2.0
 //!   reality — the bridge keeps SDK defaults; NOT protocol errors).
 
 #![cfg(feature = "connect-client")]
@@ -477,7 +477,7 @@ async fn call_tool_daemon_down_is_bounded_internal_error() {
     let _ = child.start_kill();
 }
 
-// ── prompts / resources: EMPTY lists (rmcp 1.8.0 reality) ─────────────────
+// ── prompts / resources: EMPTY lists (rmcp 3.2.0 reality) ─────────────────
 
 #[tokio::test]
 async fn prompts_and_resources_are_empty_lists_not_errors() {

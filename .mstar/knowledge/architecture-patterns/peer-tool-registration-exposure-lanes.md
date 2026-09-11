@@ -31,7 +31,7 @@ DF-85 (consumer side) landed in V1.174 as a **two-lane product**: a
 with a spoke `RemoteAdapter` and register arbitrary custom tools (advertised
 via their hello manifest `tools[]`, admitted fail-closed into a
 `PeerToolTable`), and an **exposure lane** where nexus serves a scoped
-**tools-only MCP server** (`tools/list` + `tools/call`, rmcp 1.8.0, stdio)
+**tools-only MCP server** (`tools/list` + `tools/call`, rmcp 3.2.0, stdio)
 over the **full registry** — builtin `nexus.*` rows, user capabilities, and
 admitted peer tools — consumable by any MCP client (ACP `newSession.mcp_servers`,
 native CLI `--mcp-config`, third-party).
