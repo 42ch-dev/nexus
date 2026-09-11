@@ -97,6 +97,10 @@ fn orchestration_routes() -> Router<WorkspaceState> {
             post(handlers::orchestration::sessions::signal_session),
         )
         .route(
+            "/v1/daemon/orchestration/sessions/{session_id}/events",
+            get(handlers::orchestration::sessions::session_events),
+        )
+        .route(
             "/v1/daemon/orchestration/capabilities",
             get(handlers::orchestration::capabilities::list_capabilities),
         )

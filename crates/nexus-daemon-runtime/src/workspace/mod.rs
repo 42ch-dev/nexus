@@ -130,6 +130,8 @@ pub struct WorkspaceState {
     session_cancels: Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
+    /// Bounded workflow-run SSE registry (P4 §6.3).
+    run_event_registry: Arc<crate::run_events::RunEventRegistry>,
     /// One async initialization gate for the lazy-attach runtime bundle
     /// (N-2): concurrent `ensure_creator_pool` callers serialize here and
     /// re-check; only the winner opens the pool and publishes the bundle.
@@ -258,6 +260,7 @@ impl WorkspaceState {
             run_coordinator: Arc::new(RwLock::new(None)),
             prompt_executor: Arc::new(RwLock::new(None)),
             session_cancels: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            run_event_registry: Arc::new(crate::run_events::RunEventRegistry::new()),
             bundle_gate: Arc::new(tokio::sync::Mutex::new(())),
             runtime_bundle: Arc::new(RwLock::new(None)),
             agent_host: Arc::new(None),
@@ -363,6 +366,7 @@ impl WorkspaceState {
             run_coordinator: Arc::new(RwLock::new(None)),
             prompt_executor: Arc::new(RwLock::new(None)),
             session_cancels: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            run_event_registry: Arc::new(crate::run_events::RunEventRegistry::new()),
             bundle_gate: Arc::new(tokio::sync::Mutex::new(())),
             runtime_bundle: Arc::new(RwLock::new(None)),
             agent_host: Arc::new(None),
@@ -817,6 +821,7 @@ impl WorkspaceState {
         {
             coordinator_builder = coordinator_builder.with_binding_provider(provider_id);
         }
+        coordinator_builder = coordinator_builder.with_run_events(self.run_event_registry());
         let coordinator = Arc::new(coordinator_builder);
 
         // Schedule supervisor with the daemon admission callback.
@@ -1120,6 +1125,10 @@ impl WorkspaceState {
 
     /// Get the shared per-run cancellation tokens (A1).
     #[must_use]
+    pub fn run_event_registry(&self) -> Arc<crate::run_events::RunEventRegistry> {
+        Arc::clone(&self.run_event_registry)
+    }
+
     pub fn session_cancels(
         &self,
     ) -> Arc<

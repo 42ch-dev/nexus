@@ -90,6 +90,7 @@ pub struct HostPromptExecutor {
     /// request cannot race a successor's launch. The future P2 coordinator
     /// shares this mechanism as its per-run operation admission lock.
     op_locks: std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    run_events: Option<Arc<crate::run_events::RunEventRegistry>>,
 }
 
 impl HostPromptExecutor {
@@ -100,6 +101,16 @@ impl HostPromptExecutor {
         workflow_store: Arc<dyn WorkflowStateStore>,
         timeouts: TimeoutConfig,
     ) -> Self {
+        Self::new_with_run_events(host, workflow_store, timeouts, None)
+    }
+
+    #[must_use]
+    pub fn new_with_run_events(
+        host: Arc<dyn HostFacade>,
+        workflow_store: Arc<dyn WorkflowStateStore>,
+        timeouts: TimeoutConfig,
+        run_events: Option<Arc<crate::run_events::RunEventRegistry>>,
+    ) -> Self {
         Self {
             host,
             workflow_store,
@@ -107,6 +118,7 @@ impl HostPromptExecutor {
             sessions: tokio::sync::RwLock::new(HashMap::new()),
             creation_locks: std::sync::Mutex::new(HashMap::new()),
             op_locks: std::sync::Mutex::new(HashMap::new()),
+            run_events,
         }
     }
 
@@ -754,7 +766,21 @@ impl PromptExecutor for HostPromptExecutor {
                     match event {
                         Some(Ok(HostEvent::MessageDelta(delta))) => {
                             if !cancel_triggered {
+                                const MAX_PROMPT_BYTES: usize = 4 * 1024 * 1024;
+                                if full_text.len() + delta.text.len() > MAX_PROMPT_BYTES {
+                                    break Err(CapabilityError::TransientExternal(
+                                        "prompt result exceeded 4 MiB bound".to_string(),
+                                    ));
+                                }
                                 full_text.push_str(&delta.text);
+                            }
+                            if let Some(registry) = &self.run_events {
+                                registry.publish_host_event_for_run(
+                                    &request.run_id,
+                                    expected_step.as_deref().unwrap_or("prompt"),
+                                    &attempt_id,
+                                    &HostEvent::MessageDelta(delta.clone()),
+                                );
                             }
                         }
                         Some(Ok(HostEvent::OpFinished(finished))) => {
@@ -781,9 +807,15 @@ impl PromptExecutor for HostPromptExecutor {
                                 "host operation failed".to_string(),
                             ));
                         }
-                        Some(Ok(_)) => {
-                            // Ignore non-message events (thoughts, tool calls,
-                            // status, plan updates).
+                        Some(Ok(other)) => {
+                            if let Some(registry) = &self.run_events {
+                                registry.publish_host_event_for_run(
+                                    &request.run_id,
+                                    expected_step.as_deref().unwrap_or("prompt"),
+                                    &attempt_id,
+                                    &other,
+                                );
+                            }
                         }
                         Some(Err(e)) => {
                             if cancel_triggered {
