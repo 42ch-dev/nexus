@@ -1,89 +1,219 @@
 //! `HostEvent` mapping for the `deepseek_harness_sdk` high-level surface
-//! (locks § AR-1 dsh table, AR-6, AR-7; v1.188 P0 SDK 0.2 cutover).
+//! (v1.188 P1 message-level streaming conformance).
 //!
-//! Converts one `Session::run` outcome into `HostEvent`s. `completed` is
-//! the ONLY successful finish reason: it becomes exactly one
-//! `MessageDelta(final_response)` plus one terminal `OpFinished(EndTurn)`
-//! (AR-6: no incremental deltas on this surface). A missing, unknown,
-//! `max-tokens` or `error` finish reason is a failed turn and maps to
-//! exactly one terminal `OpFailed` — never `OpFinished`. A run error
-//! becomes exactly one `OpFailed` with the AR-7 category tokens. The
-//! crate owns the runtime spawn, the stdio JSON-RPC wire parser, and the
-//! inbox-receipt / root-idle algorithm (`Session::run`); Nexus owns only
-//! the event normalization. Consumed by the dsh provider execute loop.
+//! Classifies SDK 0.2 tree notifications, emits complete root
+//! `assistant/message` units during `Session::run`, and reconciles the
+//! high-level `RunResult` with a boolean `emitted_root_text` (no cumulative
+//! transcript). Consumed by the dsh provider execute loop and producer.
 
-use deepseek_harness_sdk::{Error, RunResult};
+use deepseek_harness_sdk::api::extract_finish_reason;
+use deepseek_harness_sdk::{Error, Notification, RunResult};
+use serde_json::Value;
 
 use crate::capability::model::{
     FinishReason, HostEvent, OperationFailedEvent, OperationFinishedEvent, TextDeltaEvent,
 };
 use crate::ids::{HostOperationId, HostSessionId};
 
-/// Map one dsh turn result into host events (AR-1 dsh table, AR-6).
+/// Outcome of classifying one SDK tree notification for the dsh adapter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DshNotificationClass {
+    /// Known non-content, nested, or forward-compatible noise.
+    Ignore,
+    /// One complete root assistant message with non-empty prose.
+    RootText(String),
+}
+
+/// Classifier failure for a recognized wire envelope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DshProtocolFailure;
+
+/// Tracks whether any root message delta was emitted during the run.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RunReconciliation {
+    pub emitted_root_text: bool,
+}
+
+impl RunReconciliation {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            emitted_root_text: false,
+        }
+    }
+
+    pub fn note_root_text_emitted(&mut self) {
+        self.emitted_root_text = true;
+    }
+}
+
+/// Classify one notification delivered to the `Session::run` observer.
 ///
-/// `completed` is the only successful SDK 0.2 `turn/end` kind: exactly
-/// one `MessageDelta` carrying `final_response` (which may be empty — the
-/// SDK derives it from the last `assistant/message` event and never falls
-/// back to an earlier one), followed by exactly one terminal
-/// `OpFinished(EndTurn)`. Anything else — an absent `finish_reason`, an
-/// unknown token, `max-tokens`, or `error` — cannot become `EndTurn`:
-/// the turn failed and maps to exactly one terminal `OpFailed` with a
-/// stable category token and static diagnostic text (result payloads are
-/// never echoed into diagnostics).
+/// Root equality uses the SDK session id passed to `start_session`, not the
+/// host UUID. Malformed recognized envelopes fail; unknown well-formed event
+/// types are ignored.
 #[must_use]
-pub fn map_run_result(
+pub fn classify_notification(
+    notification: &Notification,
+    root_session_id: &str,
+) -> Result<DshNotificationClass, DshProtocolFailure> {
+    match notification.method.as_str() {
+        "session.event" => {
+            let event = notification
+                .session_event()
+                .ok_or(DshProtocolFailure)?
+                .map_err(|_| DshProtocolFailure)?;
+            if event.session_id != root_session_id {
+                return Ok(DshNotificationClass::Ignore);
+            }
+            classify_root_session_event(&event.event)
+        }
+        "session.status" => {
+            notification
+                .session_status()
+                .ok_or(DshProtocolFailure)?
+                .map_err(|_| DshProtocolFailure)?;
+            Ok(DshNotificationClass::Ignore)
+        }
+        "subagent.started" => {
+            notification
+                .subagent_started()
+                .ok_or(DshProtocolFailure)?
+                .map_err(|_| DshProtocolFailure)?;
+            Ok(DshNotificationClass::Ignore)
+        }
+        "subagent.finished" => {
+            notification
+                .subagent_finished()
+                .ok_or(DshProtocolFailure)?
+                .map_err(|_| DshProtocolFailure)?;
+            Ok(DshNotificationClass::Ignore)
+        }
+        _ => Ok(DshNotificationClass::Ignore),
+    }
+}
+
+fn classify_root_session_event(event: &Value) -> Result<DshNotificationClass, DshProtocolFailure> {
+    if event.get("type").and_then(Value::as_str) != Some("assistant/message") {
+        return Ok(DshNotificationClass::Ignore);
+    }
+    let text = extract_assistant_message_text(event)?;
+    if text.is_empty() {
+        Ok(DshNotificationClass::Ignore)
+    } else {
+        Ok(DshNotificationClass::RootText(text))
+    }
+}
+
+/// Extract prose for one `assistant/message` event (SDK `final_response` walk).
+fn extract_assistant_message_text(event: &Value) -> Result<String, DshProtocolFailure> {
+    let content = if event.pointer("/data/message").is_some_and(Value::is_object) {
+        event.pointer("/data/message/content")
+    } else {
+        event.pointer("/data/content")
+    };
+    let Some(blocks) = content.and_then(Value::as_array) else {
+        return Ok(String::new());
+    };
+    let mut out = String::new();
+    for block in blocks {
+        if block.get("type").and_then(Value::as_str) != Some("text") {
+            continue;
+        }
+        match block.get("text") {
+            None | Some(Value::Null) => {}
+            Some(Value::String(text)) => out.push_str(text),
+            Some(_) => return Err(DshProtocolFailure),
+        }
+    }
+    Ok(out)
+}
+
+/// Build terminal (and optional fallback delta) events after a successful
+/// `Session::run`. Streaming deltas emitted during the run are not repeated.
+#[must_use]
+pub fn finalize_successful_run(
     result: &RunResult,
+    reconciliation: &RunReconciliation,
     session_id: &HostSessionId,
     op_id: &HostOperationId,
-) -> Vec<HostEvent> {
-    match result.finish_reason.as_deref() {
-        Some("completed") => vec![
-            HostEvent::MessageDelta(TextDeltaEvent {
-                session_id: session_id.clone(),
-                op_id: op_id.clone(),
-                text: result.final_response.clone(),
-            }),
-            HostEvent::OpFinished(OperationFinishedEvent {
+) -> Result<Vec<HostEvent>, OperationFailedEvent> {
+    let finish_reason = match extract_finish_reason(&result.events) {
+        Ok(reason) => reason,
+        Err(_) => {
+            return Err(failed_turn(
+                session_id,
+                op_id,
+                "decode_error",
+                "dsh turn ended with a malformed finish reason",
+            ));
+        }
+    };
+
+    match finish_reason.as_deref() {
+        Some("completed") => {
+            let mut events = Vec::new();
+            if !reconciliation.emitted_root_text {
+                if result.final_response.is_empty() {
+                    return Err(failed_turn(
+                        session_id,
+                        op_id,
+                        "provider_error",
+                        "dsh turn completed without any assistant text",
+                    ));
+                }
+                events.push(message_delta(
+                    session_id,
+                    op_id,
+                    result.final_response.clone(),
+                ));
+            }
+            events.push(HostEvent::OpFinished(OperationFinishedEvent {
                 session_id: session_id.clone(),
                 op_id: op_id.clone(),
                 reason: FinishReason::EndTurn,
-            }),
-        ],
-        Some("max-tokens") => vec![HostEvent::OpFailed(OperationFailedEvent {
-            session_id: session_id.clone(),
-            op_id: op_id.clone(),
-            error_category: "max_tokens".to_string(),
-            error_message: "dsh turn reached the maximum token limit".to_string(),
-        })],
-        _ => vec![HostEvent::OpFailed(OperationFailedEvent {
-            session_id: session_id.clone(),
-            op_id: op_id.clone(),
-            error_category: "provider_error".to_string(),
-            error_message: "dsh turn ended without a completed finish reason".to_string(),
-        })],
+            }));
+            Ok(events)
+        }
+        Some("max-tokens") => Err(failed_turn(
+            session_id,
+            op_id,
+            "max_tokens",
+            "dsh turn reached the maximum token limit",
+        )),
+        _ => Err(failed_turn(
+            session_id,
+            op_id,
+            "provider_error",
+            "dsh turn ended without a completed finish reason",
+        )),
+    }
+}
+
+fn message_delta(session_id: &HostSessionId, op_id: &HostOperationId, text: String) -> HostEvent {
+    HostEvent::MessageDelta(TextDeltaEvent {
+        session_id: session_id.clone(),
+        op_id: op_id.clone(),
+        text,
+    })
+}
+
+fn failed_turn(
+    session_id: &HostSessionId,
+    op_id: &HostOperationId,
+    category: &str,
+    message: &str,
+) -> OperationFailedEvent {
+    OperationFailedEvent {
+        session_id: session_id.clone(),
+        op_id: op_id.clone(),
+        error_category: category.to_string(),
+        error_message: message.to_string(),
     }
 }
 
 /// Classify a `deepseek_harness_sdk` start/run error into the one terminal
 /// `OpFailed` event of the failed turn (PD-3, AR-7 category tokens).
-///
-/// Every SDK 0.2 variant is matched explicitly — a newly added variant
-/// fails the build instead of silently degrading into a generic bucket.
-/// The SDK surfaces typed-decode and protocol violations as
-/// `Error::SdkProtocol` (malformed `session.event` / `session.status`
-/// payloads during `Session::run`, `turn/end` reason extraction failures,
-/// missing server identity / message id); `JsonRpc` is a JSON-RPC error
-/// response from the runtime; `TransportClosed` is the stdio transport
-/// dying; `RequestTimeout` is a request that never got a response;
-/// `Config` is a local launch-configuration rejection; `Io` /
-/// `RuntimeNotFound` are spawn/stdio launch failures; `Json` is
-/// (de)serialization failure.
-///
-/// Diagnostics are static category text plus — for `RequestTimeout` only —
-/// an allowlisted wire-method identifier. The raw SDK `Display`/`Debug`,
-/// stderr tails, JSON-RPC `message`/`data`, and source errors are never
-/// exported: they may embed credentials, filesystem paths, or raw wire
-/// payloads (v1.188 P0 safe-diagnostics contract).
 #[must_use]
 pub fn classify_run_error(
     error: &Error,
@@ -101,12 +231,7 @@ pub fn classify_run_error(
 
 /// The `(category, safe message)` pair for one SDK error, shared by the
 /// turn classifier and the provider's launch/probe error mapping (v1.188
-/// P0 T2): one classification site keeps the launch-class and turn-class
-/// diagnostics identical. Every SDK 0.2 variant is matched explicitly — a
-/// newly added variant fails the build instead of silently degrading into
-/// a generic bucket. The message is static category text plus — for
-/// `RequestTimeout` only — an allowlisted wire-method identifier; raw SDK
-/// payloads never leave this function.
+/// P0 T2).
 #[must_use]
 pub(crate) fn classify_error_parts(error: &Error) -> (&'static str, String) {
     match error {
@@ -118,9 +243,6 @@ pub(crate) fn classify_error_parts(error: &Error) -> (&'static str, String) {
             "stream_closed",
             "dsh runtime closed the transport before the turn completed".to_string(),
         ),
-        // The method is the wire method name; only the allowlisted
-        // identifiers the SDK client can actually time out on may appear
-        // in the diagnostic.
         Error::RequestTimeout { method, .. } => (
             "timeout",
             match method.as_str() {
@@ -130,10 +252,6 @@ pub(crate) fn classify_error_parts(error: &Error) -> (&'static str, String) {
                 _ => "dsh request timed out".to_string(),
             },
         ),
-        // AR-7: io_error covers spawn/stdio failures; RuntimeNotFound is
-        // the dsh analogue of claude's BinaryNotFound. Config is a local
-        // launch-configuration rejection surfaced before spawn; JsonRpc /
-        // Json are provider-side failures.
         Error::Io(_) | Error::RuntimeNotFound(_) => (
             "io_error",
             "dsh runtime could not be launched or its stdio failed".to_string(),
@@ -149,259 +267,221 @@ pub(crate) fn classify_error_parts(error: &Error) -> (&'static str, String) {
     }
 }
 
+/// Static failure for classifier/protocol/overflow detected during streaming.
+#[must_use]
+pub fn operation_protocol_failure(
+    session_id: &HostSessionId,
+    op_id: &HostOperationId,
+) -> OperationFailedEvent {
+    failed_turn(
+        session_id,
+        op_id,
+        "decode_error",
+        "dsh runtime violated the wire protocol",
+    )
+}
+
+/// Static failure when Nexus-owned delivery bounds are exceeded.
+#[must_use]
+pub fn operation_delivery_overflow_failure(
+    session_id: &HostSessionId,
+    op_id: &HostOperationId,
+) -> OperationFailedEvent {
+    failed_turn(
+        session_id,
+        op_id,
+        "provider_error",
+        "dsh operation exceeded Nexus delivery bounds",
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use serde_json::Value;
-    use uuid::Uuid;
+    use deepseek_harness_sdk::Notification;
+    use serde_json::{json, Map};
 
     use super::*;
-    use crate::ids::{HostOperationId, HostSessionId};
 
     fn ids() -> (HostSessionId, HostOperationId) {
         (
-            HostSessionId(Uuid::new_v4()),
-            HostOperationId(Uuid::new_v4()),
+            HostSessionId(uuid::Uuid::new_v4()),
+            HostOperationId(uuid::Uuid::new_v4()),
         )
     }
 
-    fn run_result(finish_reason: Option<&str>) -> RunResult {
-        RunResult {
-            session_id: "session-test".to_string(),
-            final_response: "hello from dsh".to_string(),
-            finish_reason: finish_reason.map(str::to_string),
-            events: Vec::new(),
+    fn notification(method: &str, payload: Map<String, Value>) -> Notification {
+        Notification {
+            method: method.to_string(),
+            payload,
+        }
+    }
+
+    fn root_event(event: Value) -> Notification {
+        let mut payload = Map::new();
+        payload.insert("sessionId".to_string(), json!("root-sess"));
+        payload.insert("event".to_string(), event);
+        notification("session.event", payload)
+    }
+
+    #[test]
+    fn root_assistant_message_becomes_root_text() {
+        let n = root_event(json!({
+            "type": "assistant/message",
+            "data": {"message": {"content": [{"type": "text", "text": "hello"}]}}
+        }));
+        assert_eq!(
+            classify_notification(&n, "root-sess"),
+            Ok(DshNotificationClass::RootText("hello".to_string()))
+        );
+    }
+
+    #[test]
+    fn nested_assistant_message_is_ignored() {
+        let mut payload = Map::new();
+        payload.insert("sessionId".to_string(), json!("child-sess"));
+        payload.insert(
+            "event".to_string(),
+            json!({
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": "nested"}]}
+            }),
+        );
+        let n = notification("session.event", payload);
+        assert_eq!(
+            classify_notification(&n, "root-sess"),
+            Ok(DshNotificationClass::Ignore)
+        );
+    }
+
+    #[test]
+    fn subagent_last_assistant_message_is_never_root_text() {
+        let mut payload = Map::new();
+        payload.insert("provider".to_string(), json!("deepseek"));
+        payload.insert("agentId".to_string(), json!("a1"));
+        payload.insert("parentSessionId".to_string(), json!("root-sess"));
+        payload.insert("childSessionId".to_string(), json!("child"));
+        payload.insert("status".to_string(), json!("ok"));
+        payload.insert("stopReason".to_string(), json!("completed"));
+        payload.insert(
+            "lastAssistantMessage".to_string(),
+            json!([{"type": "text", "text": "child prose"}]),
+        );
+        let n = notification("subagent.finished", payload);
+        assert_eq!(
+            classify_notification(&n, "root-sess"),
+            Ok(DshNotificationClass::Ignore)
+        );
+    }
+
+    #[test]
+    fn malformed_session_event_is_protocol_failure() {
+        let mut payload = Map::new();
+        payload.insert("sessionId".to_string(), json!(7));
+        payload.insert("event".to_string(), json!({"type": "assistant/message"}));
+        let n = notification("session.event", payload);
+        assert!(classify_notification(&n, "root-sess").is_err());
+    }
+
+    #[test]
+    fn non_string_text_block_is_protocol_failure() {
+        let n = root_event(json!({
+            "type": "assistant/message",
+            "data": {"content": [{"type": "text", "text": 123}]}
+        }));
+        assert!(classify_notification(&n, "root-sess").is_err());
+    }
+
+    #[test]
+    fn completed_run_with_emitted_text_ignores_final_response() {
+        let (session_id, op_id) = ids();
+        let result = RunResult {
+            session_id: "root-sess".to_string(),
+            final_response: "different final".to_string(),
+            finish_reason: Some("completed".to_string()),
+            events: vec![json!({
+                "type": "turn/end",
+                "data": {"reason": {"kind": "completed"}}
+            })],
             notifications: Vec::new(),
-        }
-    }
-
-    fn terminal_count(events: &[HostEvent]) -> usize {
-        events
-            .iter()
-            .filter(|e| matches!(e, HostEvent::OpFinished(_) | HostEvent::OpFailed(_)))
-            .count()
-    }
-
-    /// `finish_reason` `"completed"` → exactly one
-    /// `MessageDelta(final_response)` + one terminal `OpFinished(EndTurn)`
-    /// (AR-1 dsh table, AR-6; SDK 0.2 `turn/end` vocabulary).
-    #[test]
-    fn completed_reason_maps_to_single_delta_and_end_turn() {
-        let (session_id, op_id) = ids();
-        let result = run_result(Some("completed"));
-
-        let events = map_run_result(&result, &session_id, &op_id);
-
-        assert_eq!(events.len(), 2, "one delta + one terminal: {events:?}");
-        assert!(
-            matches!(
-                &events[0],
-                HostEvent::MessageDelta(d)
-                    if d.text == "hello from dsh" && d.session_id == session_id && d.op_id == op_id
-            ),
-            "final_response must map to exactly one MessageDelta: {events:?}"
-        );
-        assert!(
-            matches!(&events[1], HostEvent::OpFinished(f) if f.reason == FinishReason::EndTurn),
-            "completed must end the turn cleanly: {events:?}"
-        );
-        assert_eq!(terminal_count(&events), 1);
-    }
-
-    /// `finish_reason` `"max-tokens"` is NOT a success (v1.188 P0): the
-    /// turn maps to exactly one terminal `OpFailed(max_tokens)` — never
-    /// `OpFinished`.
-    #[test]
-    fn max_tokens_reason_is_a_failed_turn() {
-        let (session_id, op_id) = ids();
-        let result = run_result(Some("max-tokens"));
-
-        let events = map_run_result(&result, &session_id, &op_id);
-
-        assert_eq!(events.len(), 1, "one terminal, no delta: {events:?}");
-        assert!(
-            matches!(&events[0], HostEvent::OpFailed(f) if f.error_category == "max_tokens"),
-            "max-tokens must fail the turn: {events:?}"
-        );
-        assert_eq!(terminal_count(&events), 1);
-    }
-
-    /// An absent `finish_reason` is NOT a success (v1.188 P0): exactly one
-    /// terminal `OpFailed(provider_error)` — never `OpFinished(EndTurn)`.
-    #[test]
-    fn missing_finish_reason_is_a_failed_turn() {
-        let (session_id, op_id) = ids();
-        let result = run_result(None);
-
-        let events = map_run_result(&result, &session_id, &op_id);
-
-        assert_eq!(events.len(), 1, "one terminal, no delta: {events:?}");
-        assert!(
-            matches!(&events[0], HostEvent::OpFailed(f) if f.error_category == "provider_error"),
-            "a missing finish reason must fail the turn: {events:?}"
-        );
-        assert_eq!(terminal_count(&events), 1);
-    }
-
-    /// An unknown or retired `finish_reason` token (e.g. the 0.1-era
-    /// `"stop"`) is NOT a success (v1.188 P0): exactly one terminal
-    /// `OpFailed(provider_error)` — never `OpFinished(EndTurn)`.
-    #[test]
-    fn unknown_finish_reason_is_a_failed_turn() {
-        let (session_id, op_id) = ids();
-        let result = run_result(Some("stop"));
-
-        let events = map_run_result(&result, &session_id, &op_id);
-
-        assert_eq!(events.len(), 1, "one terminal, no delta: {events:?}");
-        assert!(
-            matches!(&events[0], HostEvent::OpFailed(f) if f.error_category == "provider_error"),
-            "an unknown finish reason must fail the turn: {events:?}"
-        );
-        assert_eq!(terminal_count(&events), 1);
-    }
-
-    /// AR-7 category tokens for the run-error classifier, exhaustive over
-    /// the SDK 0.2 variants: `SdkProtocol` → `decode_error`,
-    /// `TransportClosed` → `stream_closed`, `RequestTimeout` → `timeout`,
-    /// `Io` / `RuntimeNotFound` → `io_error`, `Config` / `JsonRpc` /
-    /// `Json` → `provider_error`.
-    #[tokio::test]
-    async fn classifies_run_errors_to_ar7_tokens() {
-        let (session_id, op_id) = ids();
-        let elapsed = tokio::time::timeout(std::time::Duration::ZERO, std::future::pending::<()>())
-            .await
-            .expect_err("a zero-duration timeout on pending must elapse immediately");
-
-        let cases: Vec<(Error, &str)> = vec![
-            (
-                Error::SdkProtocol {
-                    message: "malformed session.event".to_string(),
-                },
-                "decode_error",
-            ),
-            (
-                Error::TransportClosed("exit status 1".to_string()),
-                "stream_closed",
-            ),
-            (
-                Error::RequestTimeout {
-                    method: "session/prompt".to_string(),
-                    source: elapsed,
-                    profile: Some("sdk".to_string()),
-                },
-                "timeout",
-            ),
-            (Error::Io(std::io::Error::other("pipe")), "io_error"),
-            (Error::RuntimeNotFound("no runtime".to_string()), "io_error"),
-            (
-                Error::Config("profile must not be empty".to_string()),
-                "provider_error",
-            ),
-            (
-                Error::JsonRpc {
-                    code: Some(-32000),
-                    message: "server error".to_string(),
-                    data: None,
-                },
-                "provider_error",
-            ),
-            (
-                Error::Json(serde_json::from_str::<Value>("{").expect_err("malformed json")),
-                "provider_error",
-            ),
-        ];
-
-        for (error, expected) in cases {
-            let failed = classify_run_error(&error, &session_id, &op_id);
-            assert_eq!(failed.error_category, expected, "for error {error}");
-        }
-    }
-
-    /// Safe diagnostics (v1.188 P0): `error_message` is static category
-    /// text — it must never echo the raw SDK payloads (protocol violation
-    /// detail, stderr tail, JSON-RPC message/data, io detail), which may
-    /// embed credentials, paths, or wire content.
-    #[tokio::test]
-    async fn run_error_diagnostics_never_echo_raw_sdk_payloads() {
-        let (session_id, op_id) = ids();
-        let elapsed = tokio::time::timeout(std::time::Duration::ZERO, std::future::pending::<()>())
-            .await
-            .expect_err("a zero-duration timeout on pending must elapse immediately");
-        let secret = "sk-live-credential-9f27";
-
-        let cases: Vec<Error> = vec![
-            Error::SdkProtocol {
-                message: format!("malformed session.event: {secret}"),
-            },
-            Error::TransportClosed(format!("exit status 1, stderr tail: {secret}")),
-            Error::RequestTimeout {
-                method: "session/prompt".to_string(),
-                source: elapsed,
-                profile: Some(secret.to_string()),
-            },
-            Error::Io(std::io::Error::other(format!("spawn failed: {secret}"))),
-            Error::RuntimeNotFound(format!("hint: {secret}")),
-            Error::Config(format!("invalid: {secret}")),
-            Error::JsonRpc {
-                code: Some(-32000),
-                message: format!("server error: {secret}"),
-                data: Some(serde_json::json!({ "detail": secret })),
-            },
-        ];
-
-        for error in cases {
-            let failed = classify_run_error(&error, &session_id, &op_id);
-            assert!(
-                !failed.error_message.contains(secret),
-                "error_message must not echo raw SDK payloads: {failed:?}"
-            );
-            assert!(
-                !failed.error_message.is_empty(),
-                "error_message carries static diagnostic text: {failed:?}"
-            );
-        }
-    }
-
-    /// Safe diagnostics (v1.188 P0): a `RequestTimeout` names the
-    /// allowlisted wire-method identifier; an unexpected method string
-    /// collapses to static text instead of being echoed.
-    #[tokio::test]
-    async fn request_timeout_names_only_allowlisted_methods() {
-        let (session_id, op_id) = ids();
-        let elapsed = || async {
-            tokio::time::timeout(std::time::Duration::ZERO, std::future::pending::<()>())
-                .await
-                .expect_err("zero-duration timeout elapses")
         };
+        let reconciliation = RunReconciliation {
+            emitted_root_text: true,
+        };
+        let events = finalize_successful_run(&result, &reconciliation, &session_id, &op_id)
+            .expect("completed turn");
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], HostEvent::OpFinished(_)));
+    }
 
-        let allowlisted = classify_run_error(
-            &Error::RequestTimeout {
-                method: "initialize".to_string(),
-                source: elapsed().await,
-                profile: Some("sdk".to_string()),
+    #[test]
+    fn fallback_emits_final_once_when_no_streamed_text() {
+        let (session_id, op_id) = ids();
+        let result = RunResult {
+            session_id: "root-sess".to_string(),
+            final_response: "only final".to_string(),
+            finish_reason: Some("completed".to_string()),
+            events: vec![
+                json!({"type": "assistant/message", "data": {"content": [{"type": "text", "text": "only final"}]}}),
+                json!({"type": "turn/end", "data": {"reason": {"kind": "completed"}}}),
+            ],
+            notifications: Vec::new(),
+        };
+        let events = finalize_successful_run(
+            &result,
+            &RunReconciliation::default(),
+            &session_id,
+            &op_id,
+        )
+        .expect("fallback turn");
+        assert_eq!(events.len(), 2);
+        assert!(matches!(&events[0], HostEvent::MessageDelta(d) if d.text == "only final"));
+        assert!(matches!(&events[1], HostEvent::OpFinished(_)));
+    }
+
+    #[test]
+    fn empty_completed_run_fails() {
+        let (session_id, op_id) = ids();
+        let result = RunResult {
+            session_id: "root-sess".to_string(),
+            final_response: String::new(),
+            finish_reason: Some("completed".to_string()),
+            events: vec![json!({
+                "type": "turn/end",
+                "data": {"reason": {"kind": "completed"}}
+            })],
+            notifications: Vec::new(),
+        };
+        assert!(finalize_successful_run(
+            &result,
+            &RunReconciliation::default(),
+            &session_id,
+            &op_id
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn max_tokens_finish_is_failed_turn() {
+        let (session_id, op_id) = ids();
+        let result = RunResult {
+            session_id: "root-sess".to_string(),
+            final_response: "partial".to_string(),
+            finish_reason: Some("max-tokens".to_string()),
+            events: vec![json!({
+                "type": "turn/end",
+                "data": {"reason": {"kind": "max-tokens"}}
+            })],
+            notifications: Vec::new(),
+        };
+        let err = finalize_successful_run(
+            &result,
+            &RunReconciliation {
+                emitted_root_text: true,
             },
             &session_id,
             &op_id,
-        );
-        assert_eq!(allowlisted.error_category, "timeout");
-        assert!(
-            allowlisted.error_message.contains("initialize"),
-            "an allowlisted method identifier may be named: {allowlisted:?}"
-        );
-
-        let unexpected = classify_run_error(
-            &Error::RequestTimeout {
-                method: "session/prompt; rm -rf /".to_string(),
-                source: elapsed().await,
-                profile: None,
-            },
-            &session_id,
-            &op_id,
-        );
-        assert_eq!(unexpected.error_category, "timeout");
-        assert!(
-            !unexpected.error_message.contains("rm -rf"),
-            "an unexpected method string must not be echoed: {unexpected:?}"
-        );
+        )
+        .expect_err("max-tokens is not success");
+        assert_eq!(err.error_category, "max_tokens");
     }
 }
