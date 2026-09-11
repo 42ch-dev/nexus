@@ -46,7 +46,8 @@ pub use preset::resolve_preset;
 pub use run_state::{
     AgentBinding, ChildCheckpoint, OwnedProcessIdentity, PresetSourceIdentity, PromptAttempt,
     PromptPhase, RunCheckpoint, RunDescriptorV1, RunFailure, RunRecord, RunStateV1, WaitKind,
-    WaitRecord, WorkflowStateStore,
+    WaitRecord, WorkflowStateStore, SettlementResult, TerminalSettlementTarget,
+    durable_cancel_outcome_accomplished,
 };
 pub use scheduler::{ClockSource, MockClock, Scheduler, SystemClock};
 pub use stage_gates::{

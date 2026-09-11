@@ -23,7 +23,7 @@ use graph_flow::{Session, SessionStorage};
 use nexus_orchestration::engine::{SessionId, SessionStatus};
 use nexus_orchestration::run_state::{
     AgentBinding, ChildCheckpoint, PresetSourceIdentity, RunCheckpoint, RunDescriptorV1,
-    RunStateV1, WorkflowStateStore,
+    RunStateV1, TerminalSettlementTarget, WorkflowStateStore,
 };
 use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
 use nexus_orchestration::OrchestrationEngine;
@@ -6325,7 +6325,7 @@ async fn negative_or_max_graph_version_is_hard_storage_error_across_writers() {
         // settle_cancelled at the correct revision: hard storage error.
         let root = root_session(&session_id.0, "task_b");
         let err = storage
-            .settle_cancelled(
+            .settle_run(
                 &session_id,
                 1,
                 None,
@@ -6334,6 +6334,7 @@ async fn negative_or_max_graph_version_is_hard_storage_error_across_writers() {
                     children: &[],
                 },
                 &RunStateV1::default(),
+                TerminalSettlementTarget::Cancelled,
             )
             .await
             .expect_err("settle_cancelled must refuse");
@@ -6591,7 +6592,7 @@ async fn graph_version_clock_monotonic_across_writers_and_untouched_by_prompt_at
     // settle_cancelled: revision 3->4, graph clock 5->6, status cancelled.
     let root = storage.get(&session_id.0).await.expect("get").expect("row");
     storage
-        .settle_cancelled(
+        .settle_run(
             &session_id,
             3,
             None,
@@ -6600,6 +6601,7 @@ async fn graph_version_clock_monotonic_across_writers_and_untouched_by_prompt_at
                 children: &[],
             },
             &RunStateV1::default(),
+            TerminalSettlementTarget::Cancelled,
         )
         .await
         .expect("settle_cancelled");
