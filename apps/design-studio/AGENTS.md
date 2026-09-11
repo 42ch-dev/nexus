@@ -95,7 +95,7 @@ No daemon or Tauri required.
 
 ## Conventions
 
-- TypeScript strict; match `apps/web` toolchain (Vite 6, React 19, Tailwind 4, react-router v8 (declarative mode))
+- TypeScript strict; match `apps/web` toolchain (Vite 8, React 19, Tailwind 4, react-router v8 (declarative mode))
 - Theme toggle: `class` strategy on `<html>` — mirrors web `theme-provider` behavior
 - Read-only gallery — no YAML write-back, no localStorage token overrides
 - App chrome shows **Read-only · edit `DESIGN.md`** (repo-root SSOT helper)

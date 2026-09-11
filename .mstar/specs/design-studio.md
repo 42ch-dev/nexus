@@ -88,12 +88,12 @@ Guardrail: `tooling/check-ui-guardrails.sh`.
 
 | Concern | `apps/web` | `apps/design-studio` |
 | --- | --- | --- |
-| Bundler | Vite 6 | Vite 6 (same major) |
+| Bundler | Vite 8 | Vite 8 (same major) |
 | React | 19.2 | 19.2 |
 | TypeScript | 7.0 strict, `@/*` alias | 7.0 strict, `@/*` + `@web-ui/*` aliases |
-| Tailwind | v3.4, `class` darkMode | v3.4 — **shared preset** from `@nexus/design-tokens` |
+| Tailwind | v4.3, `class` darkMode | v4.3 — **shared preset** from `@nexus/design-tokens` |
 | CSS tokens | `@nexus/design-tokens/tokens.css` | Same import — no second transcription |
-| Test runner | Vitest 4 | Vitest 4 |
+| Test runner | Vitest 5 | Vitest 5 |
 | Contracts | `@42ch/nexus-contracts` required | **Not used** — dev surface only |
 | Dev server port | 5173 | 5174 (document in README; avoid clash) |
 
