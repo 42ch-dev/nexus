@@ -36,7 +36,7 @@ pub mod user_preset_dir;
 pub use capability::{
     Capability, CapabilityError, CapabilityRegistry, CapabilityRegistryHolder,
     CapabilityRuntimeDeps, PromptExecutor, PromptPermissionScope, PromptRequest, PromptResult,
-    ToolPolicy,
+    ToolPolicy, WorkspaceExecutor,
 };
 pub use engine::{
     ChildSessionParams, EngineError, FailedStepWitness, FailurePersistenceDisposition,

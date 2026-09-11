@@ -784,12 +784,23 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // normal boot aggregate, never a pool-less placeholder. Tier-0 boot
     // (no creator DB) keeps `pool: None` and defers the pool-backed
     // registry to Profile attach (`publish_lazy_attach_bundle`).
+
+    let workspace_executor: Option<
+        std::sync::Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>,
+    > = state.session_manager().map(|mgr| {
+        std::sync::Arc::new(crate::workspace::executor::DaemonWorkspaceExecutor::new(
+            mgr,
+            state.workspace_path_handle(),
+        ))
+    });
+
     let runtime_deps = CapabilityRuntimeDeps {
         pool: state.pool().cloned(),
         prompt_executor: prompt_executor.clone(),
         session_cancels: session_cancels.clone(),
         daemon_tool_dispatch: None,
         cdn_config,
+        workspace_executor,
     };
     // V1.172 P0 T3 (AR-35): user capabilities live under
     // `~/.nexus42/capabilities/`. nexus-home-layout helpers take the RAW user
@@ -2187,6 +2198,7 @@ mod tests {
             )),
             daemon_tool_dispatch: None,
             cdn_config: None,
+        workspace_executor: None,
         }
     }
 

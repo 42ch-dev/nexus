@@ -964,7 +964,7 @@ impl StateCompositeTask {
     /// (`build_outer_graph` / `build_wired_outer_graph`) does not call it,
     /// so `self.workspace_state` is `None` at runtime. When `None`,
     /// `inject_workspace_context` falls back to a minimal synthetic default
-    /// (`session_id: ""`, `conflict_detected: false`, `changes_applied: 0`).
+    /// (`session_id: ""`, `committed: false`, `change_count: 0`).
     ///
     /// Production activation requires wiring the engine to inject real
     /// workspace session state per schedule tick (e.g. via a context key
@@ -1504,8 +1504,9 @@ impl StateCompositeTask {
         let ws_state = self.workspace_state.clone().unwrap_or_else(|| {
             serde_json::json!({
                 "session_id": "",
-                "conflict_detected": false,
-                "changes_applied": 0,
+                "revision": "",
+                "committed": false,
+                "change_count": 0,
                 "workspace_root": ""
             })
         });
@@ -1513,12 +1514,12 @@ impl StateCompositeTask {
         tracing::debug!(
             state_id = %self.id,
             source = if self.workspace_state.is_some() { "hook" } else { "default" },
-            conflict_detected = %ws_state
-                .get("conflict_detected")
+            committed = %ws_state
+                .get("committed")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false),
-            changes_applied = %ws_state
-                .get("changes_applied")
+            change_count = %ws_state
+                .get("change_count")
                 .and_then(serde_json::Value::as_i64)
                 .unwrap_or(0),
             "injecting workspace context for expression evaluation"
@@ -3120,6 +3121,7 @@ mod tests {
             session_cancels: session_cancels_with_default(),
             daemon_tool_dispatch: None,
             cdn_config: None,
+        workspace_executor: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -3164,6 +3166,7 @@ mod tests {
             session_cancels: session_cancels_with_default(),
             daemon_tool_dispatch: None,
             cdn_config: None,
+        workspace_executor: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -3258,6 +3261,7 @@ mod tests {
             session_cancels: map,
             daemon_tool_dispatch: None,
             cdn_config: None,
+        workspace_executor: None,
         };
         Arc::new(CapabilityRegistry::with_runtime_deps(&deps))
     }
@@ -3494,6 +3498,7 @@ mod tests {
             session_cancels: session_cancels_with_default(),
             daemon_tool_dispatch: None,
             cdn_config: None,
+        workspace_executor: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -3547,6 +3552,7 @@ mod tests {
             session_cancels: session_cancels_with_default(),
             daemon_tool_dispatch: None,
             cdn_config: None,
+        workspace_executor: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -4153,6 +4159,7 @@ mod tests {
             session_cancels,
             daemon_tool_dispatch: None,
             cdn_config: None,
+        workspace_executor: None,
         };
         Arc::new(CapabilityRegistry::with_runtime_deps(&deps))
     }
@@ -4952,12 +4959,12 @@ mod tests {
 
     #[tokio::test]
     async fn workspace_no_conflict_continues() {
-        // When no conflict, `_context.workspace.conflict_detected` is false,
-        // so `!_context.workspace.conflict_detected` should be true → continue.
+        // When no conflict, `_context.workspace.committed` is false,
+        // so `!_context.workspace.committed` should be true → continue.
         let task = make_branches_task(
             "check_workspace",
             vec![ConditionalRule {
-                when: "!_context.workspace.conflict_detected".to_string(),
+                when: "!_context.workspace.committed".to_string(),
                 target: "continue_state".to_string(),
             }],
             "resolve_conflict_state",
@@ -4968,8 +4975,8 @@ mod tests {
             "__workspace_state",
             serde_json::json!({
                 "session_id": "ws_test1",
-                "conflict_detected": false,
-                "changes_applied": 0,
+                "committed": false,
+                "change_count": 0,
                 "workspace_root": "/tmp/ws"
             }),
         )
@@ -4986,11 +4993,11 @@ mod tests {
 
     #[tokio::test]
     async fn workspace_conflict_resolves() {
-        // When conflict_detected is true, route to resolve_conflict.
+        // When committed is true, route to resolve_conflict.
         let task = make_branches_task(
             "check_workspace",
             vec![ConditionalRule {
-                when: "_context.workspace.conflict_detected".to_string(),
+                when: "_context.workspace.committed".to_string(),
                 target: "resolve_conflict_state".to_string(),
             }],
             "continue_state",
@@ -5001,8 +5008,8 @@ mod tests {
             "__workspace_state",
             serde_json::json!({
                 "session_id": "ws_test2",
-                "conflict_detected": true,
-                "changes_applied": 0,
+                "committed": true,
+                "change_count": 0,
                 "workspace_root": "/tmp/ws"
             }),
         )
@@ -5019,11 +5026,11 @@ mod tests {
 
     #[tokio::test]
     async fn workspace_changes_count_threshold() {
-        // changes_applied > 3 → route to review_state.
+        // change_count > 3 → route to review_state.
         let task = make_branches_task(
             "check_workspace",
             vec![ConditionalRule {
-                when: "_context.workspace.changes_applied > 3".to_string(),
+                when: "_context.workspace.change_count > 3".to_string(),
                 target: "review_state".to_string(),
             }],
             "continue_state",
@@ -5034,8 +5041,8 @@ mod tests {
             "__workspace_state",
             serde_json::json!({
                 "session_id": "ws_test3",
-                "conflict_detected": false,
-                "changes_applied": 5,
+                "committed": false,
+                "change_count": 5,
                 "workspace_root": "/tmp/ws"
             }),
         )
@@ -5045,18 +5052,18 @@ mod tests {
 
         assert!(
             matches!(result.next_action, NextAction::GoTo(ref t) if t == "review_state"),
-            "changes_applied > 3 should route to review_state, got {:?}",
+            "change_count > 3 should route to review_state, got {:?}",
             result.next_action
         );
     }
 
     #[tokio::test]
     async fn workspace_changes_count_below_threshold_goes_default() {
-        // changes_applied > 3 should NOT match when changes_applied is 2.
+        // change_count > 3 should NOT match when change_count is 2.
         let task = make_branches_task(
             "check_workspace",
             vec![ConditionalRule {
-                when: "_context.workspace.changes_applied > 3".to_string(),
+                when: "_context.workspace.change_count > 3".to_string(),
                 target: "review_state".to_string(),
             }],
             "continue_state",
@@ -5067,8 +5074,8 @@ mod tests {
             "__workspace_state",
             serde_json::json!({
                 "session_id": "ws_test4",
-                "conflict_detected": false,
-                "changes_applied": 2,
+                "committed": false,
+                "change_count": 2,
                 "workspace_root": "/tmp/ws"
             }),
         )
@@ -5078,7 +5085,7 @@ mod tests {
 
         assert!(
             matches!(result.next_action, NextAction::GoTo(ref t) if t == "continue_state"),
-            "changes_applied <= 3 should route to default, got {:?}",
+            "change_count <= 3 should route to default, got {:?}",
             result.next_action
         );
     }
@@ -5086,11 +5093,11 @@ mod tests {
     #[tokio::test]
     async fn workspace_default_state_when_no_state_injected() {
         // When no workspace state is set, the default values should be used:
-        // conflict_detected = false, so `_context.workspace.conflict_detected` is false.
+        // committed = false, so `_context.workspace.committed` is false.
         let task = make_branches_task(
             "check_workspace",
             vec![ConditionalRule {
-                when: "_context.workspace.conflict_detected".to_string(),
+                when: "_context.workspace.committed".to_string(),
                 target: "resolve_conflict_state".to_string(),
             }],
             "continue_state",

@@ -9,8 +9,12 @@
 //! preferable to a hard crash.
 
 pub mod actor_sessions;
+pub mod authority;
+pub mod commit_fs;
+pub mod executor;
 pub mod manager;
 pub mod session;
+pub mod session_commit;
 
 use crate::api::errors::NexusApiError;
 use crate::db::pool::{DbPool, PoolConfig};
@@ -225,7 +229,13 @@ impl WorkspaceState {
             .await
             .expect("Failed to create test database pool");
         let narrative_gateway = Arc::new(SqliteNarrativeGateway::new(db.pool().clone()));
-        let session_manager = Arc::new(WorkspaceSessionManager::new(Arc::new(db.pool().clone())));
+        let session_manager = Arc::new(
+            WorkspaceSessionManager::new_recoverable(
+                Arc::new(db.pool().clone()),
+                db_path.clone(),
+            )
+            .expect("workspace authority lease"),
+        );
         let creator_db = Arc::new(RwLock::new(CreatorDbSlot {
             db: Some(db),
             db_path: Some(db_path.clone()),
@@ -497,7 +507,13 @@ impl WorkspaceState {
         };
 
         let narrative_gateway = Arc::new(SqliteNarrativeGateway::new(db.pool().clone()));
-        let session_manager = Arc::new(WorkspaceSessionManager::new(Arc::new(db.pool().clone())));
+        let session_manager = Arc::new(
+            WorkspaceSessionManager::new_recoverable(
+                Arc::new(db.pool().clone()),
+                db_path.clone(),
+            )
+            .expect("workspace authority lease"),
+        );
         CreatorDbOutcome {
             db: Some(db),
             db_path: Some(db_path),
@@ -745,12 +761,21 @@ impl WorkspaceState {
         // (`with_runtime_deps_and_user_caps`), so user capabilities and the
         // daemon-wide WASM singleton are preserved.
         let holder = {
+            let workspace_executor: Option<
+                Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>,
+            > = self.session_manager().map(|mgr| {
+                Arc::new(crate::workspace::executor::DaemonWorkspaceExecutor::new(
+                    mgr,
+                    self.workspace_path_handle(),
+                ))
+            });
             let deps = nexus_orchestration::capability::CapabilityRuntimeDeps {
                 pool: Some(pool_arc.as_ref().clone()),
                 prompt_executor: prompt_executor.clone(),
                 session_cancels: self.session_cancels(),
                 daemon_tool_dispatch: self.daemon_tool_dispatch(),
                 cdn_config: None,
+                workspace_executor,
             };
             let scan_dir = crate::boot::user_capabilities_scan_dir(self);
             let (registry, _outcome) = match (self.wasm_engine(), self.module_cache()) {
@@ -1321,6 +1346,13 @@ impl WorkspaceState {
                 poisoned.into_inner()
             })
             .is_some()
+    }
+
+    /// Get workspace path.
+    #[must_use]
+    #[must_use]
+    pub fn workspace_path_handle(&self) -> Arc<std::sync::Mutex<Option<String>>> {
+        Arc::clone(&self.workspace_path)
     }
 
     /// Get workspace path.

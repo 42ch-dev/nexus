@@ -205,7 +205,7 @@ pub struct WorkspaceCommitRequest {
     pub session_id: String,
     /// Manifest of changes to commit, each with path, content hash, and operation.
     #[serde(default)]
-    pub changes: Vec<crate::workspace::session::ChangeEntry>,
+    pub changes: Vec<nexus_contracts::local::orchestration::WorkspaceChangeEntry>,
 }
 
 /// Response for `workspace.commit`.
@@ -276,20 +276,19 @@ pub async fn commit_workspace(
     // consume_session) left a TOCTOU window; `commit_session` closes it by
     // binding the two into a single transaction-guarded operation.
     match session_mgr
-        .commit_session(&session_id, &req.changes, &workspace_root)
+        .commit_session_durable(&session_id, &req.changes, &workspace_root)
         .await
     {
-        Ok(_info) => {
-            let revision = format!("rev_{}", uuid::Uuid::new_v4());
+        Ok(outcome) => {
             info!(
                 session_id = %session_id,
-                %revision,
+                revision = %outcome.revision,
                 change_count = req.changes.len(),
                 "Workspace commit accepted"
             );
             Ok(Json(WorkspaceCommitResponse {
-                revision,
-                committed: true,
+                revision: outcome.revision,
+                committed: outcome.committed,
             }))
         }
         Err(SessionError::HashConflict {
