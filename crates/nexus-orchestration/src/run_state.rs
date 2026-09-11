@@ -353,8 +353,8 @@ pub trait WorkflowStateStore: Send + Sync {
     /// commit CAS additionally requires the persisted `graph_version` to
     /// equal it, so a graph-only writer that advanced the session clock
     /// without the workflow revision cannot be overwritten by a stale
-    /// owner. Used by the failed-step settlement and anchored cleanup
-    /// paths, which must never rebase onto a winner of either clock.
+    /// owner. Control signals fence their loaded snapshot; ordinary cancel
+    /// may reload and retry, while failed-step anchored cleanup never rebases.
     ///
     /// # Errors
     /// Returns [`EngineError`] on storage failure or revision/graph
@@ -380,12 +380,12 @@ pub trait WorkflowStateStore: Send + Sync {
     /// never re-driven; this method is used only by the cancel path after
     /// `finalize_run` confirms cleanup.
     ///
-    /// When `expected_graph_version` is `Some` (anchored failed-step
-    /// cleanup), the settlement CAS additionally requires the persisted
-    /// `graph_version` to equal it: a graph-only writer that advanced the
-    /// session clock between the caller's load and this settlement loses
-    /// the write exactly like a revision winner, and is never overwritten.
-    /// `None` keeps the revision-only CAS (ordinary user cancel).
+    /// When `expected_graph_version` is `Some`, the settlement CAS additionally
+    /// requires the persisted `graph_version` to equal it, protecting the
+    /// checkpoint from a graph-only writer. Ordinary user cancellation passes
+    /// the loaded snapshot's version and may reload and retry after a conflict;
+    /// anchored cleanup passes its commit-owned clock and never rebases.
+    /// `None` provides an explicitly revision-only authoritative write.
     ///
     /// # Errors
     /// Returns [`EngineError`] on storage failure, revision/graph mismatch,

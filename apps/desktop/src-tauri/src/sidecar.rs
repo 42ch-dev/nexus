@@ -2052,29 +2052,36 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn probe_health_returns_none_on_refused_connection() {
-        // Nothing listens on this port: connect is refused → None.
-        assert!(probe_health(63410).await.is_none());
+        // Reserve an ephemeral port without listening for connections.
+        let socket = tokio::net::TcpSocket::new_v4().expect("test socket");
+        socket
+            .bind("127.0.0.1:0".parse().unwrap())
+            .expect("bind test socket");
+        let port = socket.local_addr().unwrap().port();
+        assert!(probe_health(port).await.is_none());
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn probe_health_returns_none_on_non_success_status() {
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 63411))
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
             .expect("test listener should bind");
+        let port = listener.local_addr().unwrap().port();
         let server = tokio::spawn(serve_once(
             listener,
             "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
                 .to_owned(),
         ));
-        assert!(probe_health(63411).await.is_none());
+        assert!(probe_health(port).await.is_none());
         server.await.expect("server task");
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn probe_health_returns_none_on_malformed_json() {
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 63412))
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
             .expect("test listener should bind");
+        let port = listener.local_addr().unwrap().port();
         let body = "this is not json";
         let response = format!(
             "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
@@ -2082,7 +2089,7 @@ mod tests {
             body
         );
         let server = tokio::spawn(serve_once(listener, response));
-        assert!(probe_health(63412).await.is_none());
+        assert!(probe_health(port).await.is_none());
         server.await.expect("server task");
     }
 
@@ -2091,9 +2098,10 @@ mod tests {
         // Headers arrive (with a content-length that never completes) but the
         // body stalls: the 2-second TOTAL request timeout must still fire and
         // the probe must return None rather than hang.
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 63413))
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
             .expect("test listener should bind");
+        let port = listener.local_addr().unwrap().port();
         let server = tokio::spawn(async move {
             if let Ok((mut socket, _)) = listener.accept().await {
                 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -2109,7 +2117,7 @@ mod tests {
             }
         });
         let start = std::time::Instant::now();
-        assert!(probe_health(63413).await.is_none());
+        assert!(probe_health(port).await.is_none());
         let elapsed = start.elapsed();
         assert!(
             elapsed >= HEALTH_PROBE_TIMEOUT,
@@ -2124,9 +2132,10 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn probe_health_parses_success_json() {
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 63414))
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
             .expect("test listener should bind");
+        let port = listener.local_addr().unwrap().port();
         let body = r#"{"status":"ok","version":"9.9.9"}"#;
         let response = format!(
             "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
@@ -2134,7 +2143,7 @@ mod tests {
             body
         );
         let server = tokio::spawn(serve_once(listener, response));
-        let health = probe_health(63414).await.expect("valid health JSON parses");
+        let health = probe_health(port).await.expect("valid health JSON parses");
         assert_eq!(health.version, "9.9.9");
         server.await.expect("server task");
     }

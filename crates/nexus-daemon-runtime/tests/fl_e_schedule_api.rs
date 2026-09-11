@@ -152,6 +152,91 @@ async fn seed_work(db_path: &Path, work_id: &str, creator_id: &str) {
         .expect("seed_work: create_work failed");
 }
 
+#[tokio::test]
+async fn schedule_delete_rolls_back_session_and_schedule_on_database_failure() {
+    let ctx = test_ctx().await;
+    let pool = nexus_local_db::open_pool(&ctx.db_path).await.unwrap();
+    let context = serde_json::to_vec(&graph_flow::Context::new()).unwrap();
+    sqlx::query(
+        "INSERT INTO orchestration_sessions
+         (session_id, creator_id, preset_id, preset_version, status,
+          context_json, created_at, updated_at, graph_version)
+         VALUES ('sess-delete-rollback', 'ctr_test', 'memory-augmented', 1,
+                 'running', ?, 10, 10, 4)",
+    )
+    .bind(context.as_slice())
+    .execute(&pool)
+    .await
+    .unwrap();
+    // The legacy-inert schedule fixture never admits background provider work.
+    sqlx::query(
+        "INSERT INTO creator_schedules
+         (schedule_id, creator_id, preset_id, preset_version, status,
+          concurrency_kind, current_core_context_version, current_session_id,
+          created_at, updated_at)
+         VALUES ('SCH_delete_rollback', 'ctr_test', 'memory-augmented', 1,
+                 'running', 'serial', 0, 'sess-delete-rollback', 10, 10)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let session_snapshot = async || -> (String, i64, i64, Vec<u8>) {
+        sqlx::query_as(
+            "SELECT status, graph_version, updated_at, context_json
+             FROM orchestration_sessions WHERE session_id = 'sess-delete-rollback'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    };
+    let schedule_snapshot = async || -> (String, Option<String>, Option<i64>, i64) {
+        sqlx::query_as(
+            "SELECT status, current_session_id, terminated_at, updated_at
+             FROM creator_schedules WHERE schedule_id = 'SCH_delete_rollback'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    };
+    let before_session = session_snapshot().await;
+    let before_schedule = schedule_snapshot().await;
+    sqlx::query(
+        "CREATE TRIGGER reject_schedule_delete BEFORE DELETE ON creator_schedules
+         WHEN OLD.schedule_id = 'SCH_delete_rollback'
+         BEGIN SELECT RAISE(ABORT, 'injected schedule delete failure'); END",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    ctx.server
+        .delete("/v1/daemon/orchestration/schedules/SCH_delete_rollback")
+        .await
+        .assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(session_snapshot().await, before_session);
+    assert_eq!(schedule_snapshot().await, before_schedule);
+
+    sqlx::query("DROP TRIGGER reject_schedule_delete")
+        .execute(&pool)
+        .await
+        .unwrap();
+    ctx.server
+        .delete("/v1/daemon/orchestration/schedules/SCH_delete_rollback")
+        .await
+        .assert_status(StatusCode::OK);
+    let remaining: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM creator_schedules WHERE schedule_id = 'SCH_delete_rollback'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(remaining, 0);
+    let cancelled = session_snapshot().await;
+    assert_eq!(cancelled.0, "cancelled");
+    assert_eq!(cancelled.1, before_session.1 + 1);
+    assert_eq!(cancelled.3, before_session.3);
+}
+
 // ── Test 1: Schedule creation with correct AddScheduleRequest DTO ────────────
 
 #[tokio::test]

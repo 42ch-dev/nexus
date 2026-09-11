@@ -182,7 +182,7 @@ connect-client = [
 # shared bridge core (`connect/mcp_bridge.rs`) but NOT the embedded server
 # (`connect/mcp_embedded.rs`); `--features connect-client,embedded-mcp`
 # compiles both. Deps: `dep:futures-channel` (the sink/stream transport
-# channels) — rmcp 1.8's `transport::sink_stream` is an ungated core
+# channels) — rmcp 3.2's `transport::sink_stream` is an ungated core
 # module, no extra rmcp features.
 embedded-mcp = ["connect-client", "dep:futures-channel"]
 # V1.153 P2 (DF-73): embedded Web UI (rust-embed SPA bytes) — default ON so

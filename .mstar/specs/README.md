@@ -134,7 +134,7 @@
 130:
 131:| Document | Class | Status |
 132:| --- | --- | --- |
-133:| [acp-client-tech-spec.md](acp-client-tech-spec.md) | Master | **Shipped** — official `agent-client-protocol = "=0.11.1"` behind Nexus-owned DTOs; daemon-orchestrated ACP sessions in per-creator `nexus42 acp-worker` children; route-facing HostManager registers installed native CLI providers; reconciled through V1.183 |
+133:| [acp-client-tech-spec.md](acp-client-tech-spec.md) | Master | **Shipped** — official `agent-client-protocol = "=2.1.0"` stable-v1 behind Nexus-owned DTOs; daemon-orchestrated ACP sessions in per-creator `nexus42 acp-worker` children; route-facing HostManager registers installed native CLI providers; reconciled through V1.183, SDK pin updated by the dependency sweep |
 134:| [acp-capability-set.md](acp-capability-set.md) | Master | Normative |
 135:| [agent-host.md](agent-host.md) | Master | Normative — current route, provider, worker, and ACP boundaries reconciled through V1.183; **V1.186 product lock (Prepare, not shipped)** — HostFacade production prompts; lazy session-scoped generic ACP; all prompt consumers off echo |
 136:| [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) | Master | Master (V1.57 P-last promote — bridge Master promotion; shipped V1.34) |

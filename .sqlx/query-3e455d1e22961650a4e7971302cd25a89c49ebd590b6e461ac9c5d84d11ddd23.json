@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO orchestration_sessions\n               (session_id, creator_id, preset_id, preset_version, status,\n                context_json, created_at, updated_at, graph_version)\n               VALUES ('sess-sched-del', 'creator-1', 'memory-augmented', 1, 'running',\n                       ?, ?, ?, 4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "3e455d1e22961650a4e7971302cd25a89c49ebd590b6e461ac9c5d84d11ddd23"
+}

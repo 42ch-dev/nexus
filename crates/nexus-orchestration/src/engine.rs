@@ -1029,16 +1029,17 @@ impl EngineSharedState {
 
             // Clear the root wait and make the run runnable. The child
             // checkpoint (when nested) is committed atomically with the
-            // root under the root revision CAS.
+            // root under both the workflow and graph snapshot clocks.
             next_state.wait = None;
             let checkpoint = RunCheckpoint {
                 root: &root,
                 children: &children,
             };
             store
-                .commit_transition(
+                .commit_transition_with_graph_fence(
                     session_id,
                     expected_revision,
+                    Some(root.version),
                     checkpoint,
                     SessionStatus::Running,
                     &next_state,
@@ -1110,35 +1111,20 @@ impl EngineSharedState {
                         root: &fence_root,
                         children: &[],
                     };
-                    // Anchored cleanup fences BOTH clocks at the fence
-                    // commit: a graph-only winner between the anchor check
-                    // and this write loses the CAS exactly like a revision
-                    // winner (no rebase is possible in anchored mode).
-                    let fence_result = match cancel_anchor {
-                        Some((_, anchor_graph)) => {
-                            store
-                                .commit_transition_with_graph_fence(
-                                    session_id,
-                                    fence_revision,
-                                    Some(anchor_graph),
-                                    fence_checkpoint,
-                                    fence_status.clone(),
-                                    &fence_state,
-                                )
-                                .await
-                        }
-                        None => {
-                            store
-                                .commit_transition(
-                                    session_id,
-                                    fence_revision,
-                                    fence_checkpoint,
-                                    fence_status.clone(),
-                                    &fence_state,
-                                )
-                                .await
-                        }
-                    };
+                    // Ordinary cancellation fences the snapshot it read and
+                    // retries a graph-only winner; anchored cleanup retains
+                    // the caller's exact ownership clock without rebasing.
+                    let fence_graph = cancel_anchor.map_or(fence_root.version, |(_, graph)| graph);
+                    let fence_result = store
+                        .commit_transition_with_graph_fence(
+                            session_id,
+                            fence_revision,
+                            Some(fence_graph),
+                            fence_checkpoint,
+                            fence_status.clone(),
+                            &fence_state,
+                        )
+                        .await;
                     match fence_result {
                         Ok(record) => {
                             if cancel_anchor.is_some() {
@@ -1349,32 +1335,17 @@ impl EngineSharedState {
                         // loads below only build the state/root the write
                         // carries.
                         let (interrupted_revision, interrupted_graph) =
-                            anchored_clocks.unwrap_or((current_revision, current.graph_version));
-                        let interrupted_result = match anchored_clocks {
-                            Some(_) => {
-                                store
-                                    .commit_transition_with_graph_fence(
-                                        session_id,
-                                        interrupted_revision,
-                                        Some(interrupted_graph),
-                                        interrupted_checkpoint,
-                                        SessionStatus::Interrupted,
-                                        &interrupted_state,
-                                    )
-                                    .await
-                            }
-                            None => {
-                                store
-                                    .commit_transition(
-                                        session_id,
-                                        interrupted_revision,
-                                        interrupted_checkpoint,
-                                        SessionStatus::Interrupted,
-                                        &interrupted_state,
-                                    )
-                                    .await
-                            }
-                        };
+                            anchored_clocks.unwrap_or((current_revision, interrupted_root.version));
+                        let interrupted_result = store
+                            .commit_transition_with_graph_fence(
+                                session_id,
+                                interrupted_revision,
+                                Some(interrupted_graph),
+                                interrupted_checkpoint,
+                                SessionStatus::Interrupted,
+                                &interrupted_state,
+                            )
+                            .await;
                         if let Ok(record) = &interrupted_result {
                             anchored_clocks = Some((record.state_revision, record.graph_version));
                         }
@@ -1499,12 +1470,12 @@ impl EngineSharedState {
                 // revision winner since that write loses the CAS and the
                 // winner is left untouched (no rebase in anchored mode).
                 let (settle_revision, settle_graph) =
-                    anchored_clocks.unwrap_or((current_revision, current.graph_version));
+                    anchored_clocks.unwrap_or((current_revision, settle_root.version));
                 match store
                     .settle_cancelled(
                         session_id,
                         settle_revision,
-                        anchored_clocks.map(|_| settle_graph),
+                        Some(settle_graph),
                         settle_checkpoint,
                         &cancelled_state,
                     )
@@ -1551,11 +1522,12 @@ impl EngineSharedState {
             return Ok(SessionStatus::Cancelled);
         }
 
-        // Non-cancel signals: single commit as before.
+        // Non-cancel signals refuse a graph-only winner rather than rebasing.
         store
-            .commit_transition(
+            .commit_transition_with_graph_fence(
                 session_id,
                 expected_revision,
+                Some(root.version),
                 checkpoint,
                 target_status.clone(),
                 &next_state,

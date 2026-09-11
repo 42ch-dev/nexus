@@ -183,7 +183,7 @@ impl E2eDaemon {
             write_capability_dir(scan.path(), USER_CAP);
         }
         let scan_dir = scan.path().join("capabilities");
-        let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         let deps = CapabilityRuntimeDeps {
             pool: None,
             prompt_executor: None,

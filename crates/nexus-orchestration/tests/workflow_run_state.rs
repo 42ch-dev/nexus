@@ -2211,6 +2211,137 @@ fn fresh_engine(
     (storage, engine)
 }
 
+/// A real graph-only save interleaved after an engine snapshot read.
+struct GraphSaveAfterRead {
+    inner: Arc<SqliteSessionStorage>,
+    reads_until_save: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl SessionStorage for GraphSaveAfterRead {
+    async fn save(&self, session: Session) -> graph_flow::Result<()> {
+        self.inner.save(session).await
+    }
+
+    async fn get(&self, id: &str) -> graph_flow::Result<Option<Session>> {
+        use std::sync::atomic::Ordering;
+        let snapshot = self.inner.get(id).await?;
+        if self
+            .reads_until_save
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            == Ok(1)
+        {
+            // A second load is essential: Session::clone shares its Context,
+            // which would accidentally modify the engine's stale snapshot too.
+            let winner = self
+                .inner
+                .get(id)
+                .await?
+                .ok_or_else(|| graph_flow::GraphError::SessionNotFound(id.to_string()))?;
+            winner.context.set("concurrent_graph_output", "preserved")?;
+            self.inner.save(winner).await?;
+        }
+        Ok(snapshot)
+    }
+
+    async fn delete(&self, id: &str) -> graph_flow::Result<()> {
+        self.inner.delete(id).await
+    }
+}
+
+#[tokio::test]
+async fn ordinary_cancel_rebases_graph_winners_at_intent_and_settlement() {
+    use nexus_orchestration::engine::EngineSignal;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    // Distinct writes: fencing only cancel intent leaves terminal settlement vulnerable.
+    for (boundary, snapshot_read) in [("cancel intent", 2), ("cancel settlement", 3)] {
+        let (pool, _db) = fresh_pool().await;
+        let storage = Arc::new(SqliteSessionStorage::new(pool));
+        let racing = Arc::new(GraphSaveAfterRead {
+            inner: storage.clone(),
+            reads_until_save: AtomicUsize::new(0),
+        });
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+            racing.clone(),
+            storage.clone(),
+            caps,
+        );
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("cancel-graph-race")
+                .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph"),
+        );
+        let sid = engine.start_session("novel-writing", graph).await.unwrap();
+        racing
+            .reads_until_save
+            .store(snapshot_read, Ordering::SeqCst);
+        engine.signal(&sid, EngineSignal::Cancel).await.unwrap();
+        let record = storage.load_run(&sid).await.unwrap().unwrap();
+        assert_eq!(record.status, SessionStatus::Cancelled, "{boundary}");
+        let saved = storage.get(&sid.0).await.unwrap().unwrap();
+        assert_eq!(
+            saved
+                .context
+                .get::<String>("concurrent_graph_output")
+                .as_deref(),
+            Some("preserved"),
+            "{boundary} must retain the graph writer's output"
+        );
+    }
+}
+
+#[tokio::test]
+async fn ordinary_pause_refuses_a_stale_graph_snapshot() {
+    use nexus_orchestration::engine::{EngineError, EngineSignal};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let (pool, _db) = fresh_pool().await;
+    let storage = Arc::new(SqliteSessionStorage::new(pool));
+    let racing = Arc::new(GraphSaveAfterRead {
+        inner: storage.clone(),
+        reads_until_save: AtomicUsize::new(0),
+    });
+    let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+        nexus_orchestration::CapabilityRegistry::with_builtins(),
+    ));
+    let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+        racing.clone(),
+        storage.clone(),
+        caps,
+    );
+    let graph = Arc::new(
+        graph_flow::GraphBuilder::new("pause-graph-race")
+            .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+            .build()
+            .expect("test graph"),
+    );
+    let sid = engine.start_session("novel-writing", graph).await.unwrap();
+    racing.reads_until_save.store(1, Ordering::SeqCst);
+    let error = engine
+        .signal(&sid, EngineSignal::Pause)
+        .await
+        .expect_err("a non-rebasing control signal must lose a stale graph snapshot");
+    assert!(matches!(error, EngineError::RevisionMismatch { .. }));
+    assert_eq!(
+        storage.load_run(&sid).await.unwrap().unwrap().status,
+        SessionStatus::Running
+    );
+    assert_eq!(
+        storage
+            .get(&sid.0)
+            .await
+            .unwrap()
+            .unwrap()
+            .context
+            .get::<String>("concurrent_graph_output")
+            .as_deref(),
+        Some("preserved")
+    );
+}
+
 // Important 1: an InnerGraphTask child actually runs to completion, and the
 // parent's commit_transition succeeds (the child checkpoint revision is
 // synchronized from each child transition).

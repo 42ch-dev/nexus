@@ -154,6 +154,15 @@ impl InvocationState {
     }
 }
 
+fn new_engine() -> Result<Engine, MiniHostError> {
+    // Match the real host's admission set in both invocations and ABI probes.
+    let mut config = Config::new();
+    config.wasm_gc(false);
+    config.wasm_function_references(false);
+    config.wasm_exceptions(false);
+    Engine::new(&config).map_err(|e| MiniHostError::Instantiation(e.to_string()))
+}
+
 /// Run one stateless compute invocation against a module's compiled bytes.
 ///
 /// # Errors
@@ -165,15 +174,7 @@ pub fn run(
     manifest: &ModuleManifest,
     input: &ComputeInput,
 ) -> Result<ComputeOutput, MiniHostError> {
-    // Wasmtime 47+ enables the GC, function-references and exceptions
-    // proposals by default; the real host (nexus-wasm-host) keeps them off.
-    // Pin the same admission set here so the mini-host never accepts a module
-    // the real host would reject (aligned-48 cutover, T3).
-    let mut config = Config::new();
-    config.wasm_gc(false);
-    config.wasm_function_references(false);
-    config.wasm_exceptions(false);
-    let engine = Engine::new(&config).map_err(|e| MiniHostError::Instantiation(e.to_string()))?;
+    let engine = new_engine()?;
     let module = Module::new(&engine, wasm_bytes)
         .map_err(|e| MiniHostError::Instantiation(e.to_string()))?;
 
@@ -475,7 +476,7 @@ mod tests {
         manifest: &ModuleManifest,
         input: &ComputeInput,
     ) -> Result<i64, MiniHostError> {
-        let engine = Engine::default();
+        let engine = new_engine()?;
         let module =
             Module::new(&engine, wasm).map_err(|e| MiniHostError::Instantiation(e.to_string()))?;
         let mut store = Store::new(&engine, InvocationState::from_input(input));
@@ -611,7 +612,7 @@ mod tests {
         input: &ComputeInput,
         addr: usize,
     ) -> (i64, Vec<u8>) {
-        let engine = Engine::default();
+        let engine = new_engine().expect("engine initializes");
         let module = Module::new(&engine, wasm).expect("module compiles");
         let mut store = Store::new(&engine, InvocationState::from_input(input));
         let mut linker = Linker::<InvocationState>::new(&engine);

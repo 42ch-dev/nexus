@@ -32,9 +32,9 @@
 //! mechanism has been removed and will be replaced with a proper DTO-wrapped
 //! streaming API in a future task.
 //!
-//! # SDK v0.11.0 Architecture
+//! # SDK v2.1 stable-v1 Architecture
 //!
-//! The ACP SDK v0.11.0 uses a component/channel-based architecture:
+//! The ACP SDK v2.1 stable-v1 API uses a component/channel-based architecture:
 //! - `Client` is a zero-sized role struct (no longer a trait).
 //! - Connections are created via `Client.builder().connect_with(transport, |cx| {...})`.
 //! - The `ConnectionTo<Agent>` handle is Clone + Send, allowing it to be stored
