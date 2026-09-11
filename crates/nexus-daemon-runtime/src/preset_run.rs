@@ -1002,13 +1002,8 @@ pub struct RunControlResult {
 /// outcome as success instead of a conflict that would contradict the
 /// durable truth. A run that settled `completed`/`failed` (or is still
 /// live) keeps the conflict: the cancel genuinely did not happen.
-const fn cancel_fence_loss_accomplished(status: &SessionStatus, cancel_requested: bool) -> bool {
-    // `Cancelled` is the confirmed A5 outcome. `Interrupted` only counts when
-    // the durable state carries the cancel intent: an `interrupted` produced
-    // by a failed state transition (no `cancel_requested`) is NOT proof that
-    // this cancel succeeded, so it must stay a conflict (Greptile P1).
-    matches!(status, SessionStatus::Cancelled)
-        || (matches!(status, SessionStatus::Interrupted) && cancel_requested)
+fn cancel_fence_loss_accomplished(record: &nexus_orchestration::run_state::RunRecord) -> bool {
+    nexus_orchestration::run_state::durable_cancel_outcome_accomplished(record)
 }
 
 /// One cancellation/join owner per (Creator DB identity, session) (A3).
@@ -1075,6 +1070,10 @@ pub struct WorkflowRunCoordinator {
             Option<Arc<nexus_orchestration::schedule::supervisor::ScheduleSupervisor>>,
         >,
     >,
+    /// Bounded per-run SSE rings (P4 §6.3).
+    run_events: Option<Arc<crate::run_events::RunEventRegistry>>,
+    /// Active run event sinks registered before drive spawn.
+    run_event_sinks: Arc<tokio::sync::Mutex<std::collections::HashMap<String, crate::run_events::RunEventSink>>>,
 }
 
 /// An in-flight (or completed) drive owner for one session.
@@ -1214,6 +1213,8 @@ impl WorkflowRunCoordinator {
             workflow_store,
             config: PresetRunConfig::default(),
             schedule_supervisor: std::sync::Arc::new(std::sync::RwLock::new(None)),
+            run_events: None,
+            run_event_sinks: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         }
     }
 
@@ -1225,6 +1226,24 @@ impl WorkflowRunCoordinator {
         self.workflow_store = store;
         self
     }
+    /// Attach the bounded run-event registry (P4 §6.3).
+    #[must_use]
+    pub fn with_run_events(mut self, registry: Arc<crate::run_events::RunEventRegistry>) -> Self {
+        self.run_events = Some(registry);
+        self
+    }
+
+    async fn publish_durable_run_state(&self, session_id: &SessionId) {
+        if let Some(registry) = &self.run_events {
+            if let Ok(Some(record)) = self.workflow_store.load_run(session_id).await {
+                registry.publish_run_state(&session_id.0, &record);
+                if record.status.is_terminal() {
+                    registry.mark_terminal(&session_id.0);
+                }
+            }
+        }
+    }
+
     /// Attach the schedule supervisor for terminal settlement (T3, A3).
     ///
     /// The supervisor is constructed AFTER the coordinator (it needs the
@@ -1668,6 +1687,15 @@ impl WorkflowRunCoordinator {
         // Register (or refresh) the run's cancellation token in the shared
         // map so the prompt executor and out-of-band cancel resolve the SAME
         // token the drive loop checks.
+        if let Some(registry) = &self.run_events {
+            if let Some(sink) = registry.try_register_live(&session_id.0) {
+                self.run_event_sinks
+                    .lock()
+                    .await
+                    .insert(session_id.0.clone(), sink);
+            }
+        }
+
         let cancel = tokio_util::sync::CancellationToken::new();
         self.session_cancels
             .write()
@@ -1706,6 +1734,8 @@ impl WorkflowRunCoordinator {
             // `current_session_id` equals this run is updated; a
             // checkpoint-before-settlement crash is reconciled at boot.
             coordinator.settle_terminal_schedule(&sid, &outcome).await;
+            coordinator.publish_durable_run_state(&sid).await;
+            coordinator.run_event_sinks.lock().await.remove(&sid.0);
             tracing::debug!(
                 session_id = %sid.0,
                 outcome = ?outcome,
@@ -2611,7 +2641,19 @@ impl WorkflowRunCoordinator {
             RunSignal::Resume => EngineSignal::Resume,
         };
 
-        let engine_result = self.engine.signal(session_id, engine_signal).await;
+        let mut engine_result = self.engine.signal(session_id, engine_signal).await;
+        if matches!(signal, RunSignal::Cancel) {
+            if matches!(
+                &engine_result,
+                Err(nexus_orchestration::engine::EngineError::TerminalState(_))
+            ) {
+                if let Ok(Some(record)) = self.workflow_store.load_run(session_id).await {
+                    if cancel_fence_loss_accomplished(&record) {
+                        engine_result = Ok(());
+                    }
+                }
+            }
+        }
         let engine_result = match engine_result {
             Ok(()) => Ok(()),
             // Finding 2: a CAS/revision loss is a linearized control race —
@@ -2623,12 +2665,9 @@ impl WorkflowRunCoordinator {
             // cancel-requested/terminal/incompatible state is
             // `workflow_state_conflict`.
             Err(nexus_orchestration::engine::EngineError::RevisionMismatch {
-                session_id, ..
+                session_id: lost_sid, ..
             }) => {
-                let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
-                    self.pool.clone(),
-                );
-                match store.load_run(&SessionId(session_id.clone())).await {
+                match self.workflow_store.load_run(session_id).await {
                     Ok(Some(record)) => {
                         let state = record.state.as_ref();
                         let cancel_requested = state.is_some_and(|s| s.cancel_requested);
@@ -2638,7 +2677,7 @@ impl WorkflowRunCoordinator {
                         // concurrent winner — project the persisted outcome
                         // as success, never a conflict.
                         if matches!(signal, RunSignal::Cancel)
-                            && cancel_fence_loss_accomplished(&record.status, cancel_requested)
+                            && cancel_fence_loss_accomplished(&record)
                         {
                             Ok(())
                         } else if record.status == SessionStatus::WaitingForInput
@@ -2648,13 +2687,13 @@ impl WorkflowRunCoordinator {
                                 .and_then(|s| s.wait.as_ref())
                                 .map(|w| w.wait_id.clone());
                             Err(RunControlError::WaitConflict {
-                                session_id,
+                                session_id: lost_sid,
                                 status: record.status.as_db_str().to_string(),
                                 current_wait_id,
                             })
                         } else {
                             Err(RunControlError::StateConflict(
-                                session_id,
+                                lost_sid,
                                 format!(
                                     "revision moved; current status is {}",
                                     record.status.as_db_str()
@@ -2662,7 +2701,7 @@ impl WorkflowRunCoordinator {
                             ))
                         }
                     }
-                    Ok(None) => Err(RunControlError::ScheduleNotFound(session_id)),
+                    Ok(None) => Err(RunControlError::ScheduleNotFound(lost_sid)),
                     Err(e) => Err(RunControlError::Drive(e.to_string())),
                 }
             }
@@ -2937,20 +2976,49 @@ mod tests {
     /// live, or settled completed/failed) keeps the conflict — the cancel
     /// genuinely did not happen.
     #[test]
+    /// P4 T1: durable Failed+cancel_requested+driver_failed counts as cancel outcome
+    /// (concurrent cancel vs drive-failure race — R-V1186P3-004).
+    #[test]
+    fn cancel_fence_accepts_failed_driver_failed_when_cancel_requested() {
+        use nexus_orchestration::run_state::{RunFailure, RunRecord, RunStateV1};
+        let record = RunRecord {
+            session_id: SessionId("s".into()),
+            status: SessionStatus::Failed,
+            state_revision: 3,
+            execution_version: 1,
+            descriptor: None,
+            state: Some(RunStateV1 {
+                cancel_requested: true,
+                failure: Some(RunFailure {
+                    code: "driver_failed".into(),
+                    message: "drive lost".into(),
+                }),
+                ..RunStateV1::default()
+            }),
+            graph_version: 4,
+        };
+        assert!(cancel_fence_loss_accomplished(&record));
+    }
+
     fn cancel_fence_loss_accomplished_only_for_cancel_outcomes() {
-        assert!(cancel_fence_loss_accomplished(
-            &SessionStatus::Cancelled,
-            false
-        ));
-        // Interrupted only counts with the durable cancel intent (Greptile P1).
-        assert!(cancel_fence_loss_accomplished(
-            &SessionStatus::Interrupted,
-            true
-        ));
-        assert!(!cancel_fence_loss_accomplished(
-            &SessionStatus::Interrupted,
-            false
-        ));
+        use nexus_orchestration::run_state::{RunRecord, RunStateV1};
+        let mk = |status, cancel_requested: bool| -> RunRecord {
+            RunRecord {
+                session_id: SessionId("s".into()),
+                status,
+                state_revision: 1,
+                execution_version: 1,
+                descriptor: None,
+                state: Some(RunStateV1 {
+                    cancel_requested,
+                    ..RunStateV1::default()
+                }),
+                graph_version: 1,
+            }
+        };
+        assert!(cancel_fence_loss_accomplished(&mk(SessionStatus::Cancelled, false)));
+        assert!(cancel_fence_loss_accomplished(&mk(SessionStatus::Interrupted, true)));
+        assert!(!cancel_fence_loss_accomplished(&mk(SessionStatus::Interrupted, false)));
         for status in [
             SessionStatus::Running,
             SessionStatus::Paused,
@@ -2959,7 +3027,7 @@ mod tests {
             SessionStatus::Failed,
         ] {
             assert!(
-                !cancel_fence_loss_accomplished(&status, true),
+                !cancel_fence_loss_accomplished(&mk(status.clone(), true)),
                 "{status:?} must keep the conflict"
             );
         }
@@ -4725,40 +4793,23 @@ mod tests {
             .await
         }
 
-        async fn settle_cancelled(
+        async fn settle_run(
             &self,
             session_id: &SessionId,
             expected_revision: u64,
             expected_graph_version: Option<u64>,
             checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
             next_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            terminal_target: nexus_orchestration::run_state::TerminalSettlementTarget,
+        ) -> Result<nexus_orchestration::run_state::SettlementResult, EngineError> {
             self.inner
-                .settle_cancelled(
+                .settle_run(
                     session_id,
                     expected_revision,
                     expected_graph_version,
                     checkpoint,
                     next_state,
-                )
-                .await
-        }
-
-        async fn settle_failed(
-            &self,
-            session_id: &SessionId,
-            expected_revision: u64,
-            expected_graph_version: Option<u64>,
-            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-            next_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
-            self.inner
-                .settle_failed(
-                    session_id,
-                    expected_revision,
-                    expected_graph_version,
-                    checkpoint,
-                    next_state,
+                    terminal_target,
                 )
                 .await
         }
@@ -4982,7 +5033,7 @@ mod tests {
             let mut winner_state = committed.state.clone().unwrap_or_default();
             winner_state.cancel_requested = true;
             self.inner
-                .settle_cancelled(
+                .settle_run(
                     session_id,
                     committed.state_revision,
                     None,
@@ -4991,9 +5042,12 @@ mod tests {
                         children: &[],
                     },
                     &winner_state,
+                    nexus_orchestration::run_state::TerminalSettlementTarget::Cancelled,
                 )
                 .await
-                .expect("concurrent owner settles Cancelled after phase 1");
+                .expect("concurrent owner settles Cancelled after phase 1")
+                .record()
+                .clone();
         }
     }
 
@@ -5150,46 +5204,23 @@ mod tests {
             Ok(committed)
         }
 
-        async fn settle_cancelled(
+        async fn settle_run(
             &self,
             session_id: &SessionId,
             expected_revision: u64,
             expected_graph_version: Option<u64>,
             checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
             next_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
-            if self.fault == BoundaryFault::FailCleanupSettle && self.file_once() {
-                return Err(Self::injected("injected cleanup-settle storage fault"));
-            }
+            terminal_target: nexus_orchestration::run_state::TerminalSettlementTarget,
+        ) -> Result<nexus_orchestration::run_state::SettlementResult, EngineError> {
             self.inner
-                .settle_cancelled(
+                .settle_run(
                     session_id,
                     expected_revision,
                     expected_graph_version,
                     checkpoint,
                     next_state,
-                )
-                .await
-        }
-
-        async fn settle_failed(
-            &self,
-            session_id: &SessionId,
-            expected_revision: u64,
-            expected_graph_version: Option<u64>,
-            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-            next_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
-            if self.fault == BoundaryFault::FailCleanupSettle && self.file_once() {
-                return Err(Self::injected("injected cleanup-settle storage fault"));
-            }
-            self.inner
-                .settle_failed(
-                    session_id,
-                    expected_revision,
-                    expected_graph_version,
-                    checkpoint,
-                    next_state,
+                    terminal_target,
                 )
                 .await
         }

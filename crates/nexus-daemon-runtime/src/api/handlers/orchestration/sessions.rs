@@ -8,9 +8,13 @@ use crate::api::sort::{compare_by_terms, parse_sort_terms};
 use crate::workspace::WorkspaceState;
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
+    response::sse::{Event, KeepAlive, Sse},
     Json,
 };
+use futures_util::stream;
+use std::convert::Infallible;
+use tokio_stream::Stream;
 use nexus_contracts::local::orchestration::http::{
     CreateSessionRequest, CreateSessionResponse, GetSessionResponse, ListSessionsQuery,
     ListSessionsResponse, SessionSummary, SignalSessionRequest,
@@ -936,46 +940,23 @@ mod tests {
             .await
         }
 
-        async fn settle_cancelled(
+        async fn settle_run(
             &self,
             session_id: &nexus_orchestration::engine::SessionId,
             expected_revision: u64,
             expected_graph_version: Option<u64>,
             checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
             next_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<
-            nexus_orchestration::run_state::RunRecord,
-            nexus_orchestration::engine::EngineError,
-        > {
+            terminal_target: nexus_orchestration::run_state::TerminalSettlementTarget,
+        ) -> Result<nexus_orchestration::run_state::SettlementResult, nexus_orchestration::engine::EngineError> {
             self.inner
-                .settle_cancelled(
+                .settle_run(
                     session_id,
                     expected_revision,
                     expected_graph_version,
                     checkpoint,
                     next_state,
-                )
-                .await
-        }
-
-        async fn settle_failed(
-            &self,
-            session_id: &nexus_orchestration::engine::SessionId,
-            expected_revision: u64,
-            expected_graph_version: Option<u64>,
-            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-            next_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<
-            nexus_orchestration::run_state::RunRecord,
-            nexus_orchestration::engine::EngineError,
-        > {
-            self.inner
-                .settle_failed(
-                    session_id,
-                    expected_revision,
-                    expected_graph_version,
-                    checkpoint,
-                    next_state,
+                    terminal_target,
                 )
                 .await
         }
@@ -1217,3 +1198,43 @@ mod tests {
         );
     }
 }
+
+/// `GET /v1/daemon/orchestration/sessions/{session_id}/events` — bounded SSE replay.
+pub async fn session_events(
+    State(state): State<WorkspaceState>,
+    Path(session_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, NexusApiError> {
+    let _engine = state
+        .engine()
+        .ok_or_else(|| NexusApiError::service_unavailable("engine not available"))?;
+    let inspect_url = format!("/v1/daemon/orchestration/sessions/{session_id}");
+    let last_event_id = headers
+        .get("last-event-id")
+        .and_then(|v| v.to_str().ok());
+    let registry = state.run_event_registry();
+    let frames = match registry.subscribe(&session_id, last_event_id, inspect_url) {
+        Ok(frames) => frames,
+        Err(crate::run_events::SubscribeError::MalformedCursor)
+        | Err(crate::run_events::SubscribeError::FutureCursor) => {
+            return Err(NexusApiError::BadRequest {
+                code: "invalid_cursor".into(),
+                message: "malformed or future Last-Event-ID".into(),
+            });
+        }
+        Err(crate::run_events::SubscribeError::HistoryUnavailable(body)) => {
+            return Err(NexusApiError::NotFound(
+                serde_json::to_string(&body).unwrap_or_else(|_| body.inspect_url),
+            ));
+        }
+    };
+    let events = frames.into_iter().map(|frame| {
+        Ok(Event::default()
+            .id(frame.id)
+            .event(frame.event)
+            .data(frame.data))
+    });
+    let stream = stream::iter(events);
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
