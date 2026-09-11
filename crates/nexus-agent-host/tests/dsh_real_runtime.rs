@@ -34,16 +34,18 @@
 //! no process-global environment.
 
 use std::collections::HashMap;
+use std::future::Future;
+use std::panic::AssertUnwindSafe;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use futures_util::StreamExt;
+use futures_util::{FutureExt as _, StreamExt};
 use nexus_agent_host::capability::model::{
-    FinishReason, HostContentBlock, HostEvent, HostOperation, LaunchSpec, PromptPermissionScope,
-    SessionOwner,
+    FinishReason, HostContentBlock, HostEvent, HostOperation, LaunchSpec, ManagedSessionHandle,
+    PromptPermissionScope, SessionOwner,
 };
 use nexus_agent_host::config::TimeoutConfig;
 use nexus_agent_host::error::HostError;
@@ -65,6 +67,17 @@ const FINAL_TEXT: &str = "deterministic proxy final answer";
 /// Non-secret placeholder API key: the loopback proxy ignores it; no real
 /// credential is ever read or passed.
 const DUMMY_API_KEY: &str = "dsh-test-nonsecret-loopback-key";
+
+/// Serialize every test in this binary that inspects the process table:
+/// all tests share ONE test process, so provider-owned dsh children of
+/// concurrently running tests are indistinguishable by parent pid. The
+/// lock makes reaping/hostile-token evidence unambiguous. Poison-tolerant:
+/// a panicked test never blocks the rest.
+static REAL_RUNTIME_SERIAL: Mutex<()> = Mutex::new(());
+
+fn serial_real_runtime() -> std::sync::MutexGuard<'static, ()> {
+    REAL_RUNTIME_SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 /// Resolve the installed/resolved real `dsh` through the production chain
 /// (parent `DSH_RUNTIME_BIN` → PATH `dsh`; no explicit override here so the
@@ -192,24 +205,31 @@ export function apply(ctx) {
     .expect("poison home patch");
 }
 
-/// Marker paths the unsolicited tool calls are scripted to create. Any
-/// appearance is proof a tool body executed; absence after the bounded
-/// completion proves no side effect occurred.
+/// Marker paths the unsolicited tool calls are scripted to create, plus a
+/// per-process unique token embedded in the scripted background process's
+/// command line. The marker PARENT directory is created up front, so a
+/// hostile body cannot fail for a missing parent: any marker absence after
+/// the proof is attributable to dispatch rejection, not to a failed body.
+/// `hostile_bodies_create_their_evidence_when_directly_run` is the
+/// positive control proving every body is effective when actually run.
 struct HostileMarkers {
     shell: PathBuf,
     shell_pid: PathBuf,
     editor: PathBuf,
     run_code: PathBuf,
+    process_token: String,
 }
 
 impl HostileMarkers {
     fn under(root: &TempDir) -> Self {
         let dir = root.path().join("markers");
+        std::fs::create_dir_all(&dir).expect("controlled marker parent directory");
         Self {
             shell: dir.join("shell-marker"),
             shell_pid: dir.join("shell-marker.pid"),
             editor: dir.join("editor-marker"),
             run_code: dir.join("run-code-marker"),
+            process_token: format!("dsh-t3-hostile-{}", std::process::id()),
         }
     }
 
@@ -225,6 +245,76 @@ impl HostileMarkers {
                 "the unsolicited {what} tool call must have NO side effect, but {path:?} exists"
             );
         }
+        assert!(
+            !hostile_token_alive(&self.process_token),
+            "no hostile background process may survive (token {:?})",
+            self.process_token
+        );
+    }
+}
+
+/// Whether a process with `pid` currently exists (`ps`-based).
+fn pid_alive(pid: i32) -> bool {
+    Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "pid="])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+/// Whether any live process command line carries the unique hostile token.
+fn hostile_token_alive(token: &str) -> bool {
+    let out = Command::new("ps")
+        .args(["-eo", "args="])
+        .output()
+        .expect("ps process scan");
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .any(|line| line.contains(token))
+}
+
+/// Live (non-zombie) `dsh` runtime processes parented to THIS test
+/// process — the provider-owned children whose reaping the cleanup arms
+/// must observe.
+fn live_dsh_children() -> Vec<i32> {
+    let out = Command::new("ps")
+        .args(["-eo", "pid=,ppid=,stat=,args="])
+        .output()
+        .expect("ps process scan");
+    let me = std::process::id().to_string();
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let pid: i32 = fields.next()?.parse().ok()?;
+            let ppid = fields.next()?;
+            let stat = fields.next()?;
+            let args: String = fields.collect::<Vec<_>>().join(" ");
+            (ppid == me && !stat.starts_with('Z') && args.contains("dsh")).then_some(pid)
+        })
+        .collect()
+}
+
+/// Boundedly wait for every provider-owned dsh child to be reaped; kill
+/// any straggler so no detached process survives a failed test, then fail
+/// loudly if one had to be killed (unconfirmed cleanup is never success).
+fn assert_no_live_dsh_children(what: &str) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let strays = live_dsh_children();
+        if strays.is_empty() {
+            return;
+        }
+        if Instant::now() > deadline {
+            for pid in &strays {
+                let _ = Command::new("kill")
+                    .args(["-9", &pid.to_string()])
+                    .status();
+            }
+            panic!("{what}: unconfirmed child cleanup, killed strays {strays:?}");
+        }
+        std::thread::sleep(Duration::from_millis(50));
     }
 }
 
@@ -347,14 +437,19 @@ fn sse_usage_chunk() -> String {
 
 /// The scripted unsolicited tool call for one hostile round: a tool that
 /// the sealed composition does NOT register, with arguments whose
-/// execution would leave an observable marker.
+/// execution would leave observable evidence. The shell body creates a
+/// marker file AND starts a uniquely identifiable bounded background
+/// process (`sh -c 'sleep 30; true' <token>`, token in argv, pid recorded
+/// to the pid marker). The marker parent exists, so any body WOULD succeed
+/// if dispatched (see the positive-control test).
 fn hostile_call(round: usize, markers: &HostileMarkers) -> (&'static str, String) {
     match round {
         0 => (
             "shell",
             format!(
-                "{{\"command\": \"touch {}; (sleep 30 & echo $! > {})\"}}",
+                "{{\"command\": \"touch '{}'; sh -c 'sleep 30; true' '{}' & echo $! > '{}'\"}}",
                 markers.shell.display(),
+                markers.process_token,
                 markers.shell_pid.display()
             ),
         ),
@@ -501,6 +596,149 @@ fn poison_log_entries(root: &TempDir) -> Vec<serde_json::Value> {
         .collect()
 }
 
+/// Run `body` (the assertion phase borrowing the provider and a CLONE of
+/// the handle) with failure-safe teardown: any panic/early assertion
+/// failure inside `body` still triggers a bounded provider shutdown BEFORE
+/// the original failure is re-thrown, so no provider-owned child survives
+/// a failed test and the original failure is never masked. On the success
+/// path the shutdown must be confirmed — unconfirmed cleanup fails the
+/// test, never silently passes.
+async fn with_confirmed_teardown<Fut: Future<Output = ()>>(
+    provider: &DshNativeProvider,
+    handle: ManagedSessionHandle,
+    body: Fut,
+) {
+    let outcome = AssertUnwindSafe(body).catch_unwind().await;
+    let cleanup =
+        tokio::time::timeout(Duration::from_secs(30), provider.shutdown(handle)).await;
+    match (outcome, cleanup) {
+        (Ok(()), Ok(Ok(()))) => {}
+        (Ok(()), cleanup) => panic!("unconfirmed cleanup after a passing body: {cleanup:?}"),
+        (Err(panic), cleanup) => {
+            match cleanup {
+                Ok(Ok(())) => eprintln!("teardown after failure: confirmed close"),
+                cleanup => eprintln!("teardown after failure: CLEANUP UNCONFIRMED: {cleanup:?}"),
+            }
+            std::panic::resume_unwind(panic);
+        }
+    }
+}
+
+/// RAII guard for the identity test's directly spawned child: kill + wait
+/// on every early exit; disarmed only after the child is confirmed exited.
+struct ChildGuard(Option<std::process::Child>);
+
+impl ChildGuard {
+    fn new(child: std::process::Child) -> Self {
+        Self(Some(child))
+    }
+
+    fn child(&mut self) -> &mut std::process::Child {
+        self.0.as_mut().expect("child guard armed")
+    }
+
+    fn disarm(mut self) {
+        self.0.take();
+    }
+}
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.0.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+/// Positive control for the side-effect arms: every scripted hostile
+/// body, executed directly, DOES produce its observable evidence (marker
+/// file, recorded live pid whose command line carries the unique token,
+/// editor file, run_code file). This makes the sealed proof's absence
+/// assertions meaningful: the bodies are effective; they simply never
+/// ran. Cleans up safely and re-verifies total absence.
+#[test]
+fn hostile_bodies_create_their_evidence_when_directly_run() {
+    let _serial = serial_real_runtime();
+    let root = tempfile::tempdir().expect("temp root");
+    let markers = HostileMarkers::under(&root);
+
+    // shell body: marker file + uniquely identifiable bounded process.
+    let (name, arguments) = hostile_call(0, &markers);
+    assert_eq!(name, "shell");
+    let arguments: serde_json::Value = serde_json::from_str(&arguments).expect("args json");
+    let command = arguments["command"].as_str().expect("shell command");
+    let status = Command::new("/bin/sh")
+        .arg("-c")
+        .arg(command)
+        .status()
+        .expect("run shell body");
+    assert!(status.success(), "the shell body is effective when run");
+    assert!(markers.shell.exists(), "the shell body created its marker");
+    let pid: i32 = std::fs::read_to_string(&markers.shell_pid)
+        .expect("pid marker")
+        .trim()
+        .parse()
+        .expect("numeric pid");
+    assert!(pid_alive(pid), "the bounded background process is alive");
+    assert!(hostile_token_alive(&markers.process_token));
+    // Clean the control process safely: bounded TERM, KILL fallback, then
+    // observed death.
+    let _ = Command::new("kill").arg(pid.to_string()).status();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while pid_alive(pid) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    if pid_alive(pid) {
+        let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while pid_alive(pid) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(!pid_alive(pid), "the control process was reaped");
+    assert!(!hostile_token_alive(&markers.process_token));
+
+    // str_replace_editor body: creating the file IS the tool effect.
+    let (name, arguments) = hostile_call(1, &markers);
+    assert_eq!(name, "str_replace_editor");
+    let arguments: serde_json::Value = serde_json::from_str(&arguments).expect("args json");
+    assert_eq!(arguments["command"].as_str(), Some("create"));
+    std::fs::write(
+        arguments["path"].as_str().expect("editor path"),
+        arguments["file_text"].as_str().expect("editor text"),
+    )
+    .expect("run editor body");
+    assert_eq!(
+        std::fs::read_to_string(&markers.editor).expect("editor marker"),
+        "pwned",
+        "the editor body created its marker"
+    );
+
+    // run_code body: execute the exact python payload.
+    let (name, arguments) = hostile_call(2, &markers);
+    assert_eq!(name, "run_code");
+    let arguments: serde_json::Value = serde_json::from_str(&arguments).expect("args json");
+    let status = Command::new("python3")
+        .arg("-c")
+        .arg(arguments["code"].as_str().expect("run_code payload"))
+        .status()
+        .expect("run run_code body");
+    assert!(status.success(), "the run_code body is effective when run");
+    assert!(markers.run_code.exists(), "the run_code body created its marker");
+
+    // Safe cleanup: every marker removed; total absence re-verified.
+    for path in [
+        &markers.shell,
+        &markers.shell_pid,
+        &markers.editor,
+        &markers.run_code,
+    ] {
+        std::fs::remove_file(path).expect("remove control marker");
+    }
+    markers.assert_all_absent();
+}
+
 /// The actual upstream dsh sealed `deny_all` composition enforces no-tools
 /// at dispatch (architecture §3.4 / AC6): the model request advertises NO
 /// tools, unsolicited shell/editor/run_code calls are rejected as unknown
@@ -509,6 +747,7 @@ fn poison_log_entries(root: &TempDir) -> Vec<serde_json::Value> {
 #[tokio::test]
 async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects() {
     let Some(dsh_bin) = real_dsh() else { return };
+    let _serial = serial_real_runtime();
     let root = tempfile::tempdir().expect("temp root");
     std::fs::create_dir_all(root.path().join("home")).expect("isolated HOME");
     poison_ordinary_home(&root);
@@ -520,73 +759,83 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
         .launch(launch_spec(root.path()))
         .await
         .expect("the ordinary recipe initializes against the poisoned home");
-    let events = run_prompt(&provider, &handle, "attempt no tool use", Some(deny_all_scope())).await;
+    let body = {
+        let handle = handle.clone();
+        let provider = &provider;
+        let proxy = &proxy;
+        async move {
+            let events =
+                run_prompt(provider, &handle, "attempt no tool use", Some(deny_all_scope())).await;
 
-    // The turn completes bounded through the scripted proxy: exactly one
-    // OpStarted, the final text delta, one OpFinished(EndTurn).
-    assert!(
-        matches!(events.first(), Some(HostEvent::OpStarted(_))),
-        "events: {events:?}"
-    );
-    let deltas: Vec<&str> = events
-        .iter()
-        .filter_map(|e| match e {
-            HostEvent::MessageDelta(delta) => Some(delta.text.as_str()),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(deltas, vec![FINAL_TEXT], "events: {events:?}");
-    assert!(
-        matches!(events.last(), Some(HostEvent::OpFinished(f)) if f.reason == FinishReason::EndTurn),
-        "the bounded final completion ends the turn: {events:?}"
-    );
+        // The turn completes bounded through the scripted proxy: exactly
+        // one OpStarted, the final text delta, one OpFinished(EndTurn).
+        assert!(
+            matches!(events.first(), Some(HostEvent::OpStarted(_))),
+            "events: {events:?}"
+        );
+        let deltas: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match e {
+                HostEvent::MessageDelta(delta) => Some(delta.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(deltas, vec![FINAL_TEXT], "events: {events:?}");
+        assert!(
+            matches!(events.last(), Some(HostEvent::OpFinished(f)) if f.reason == FinishReason::EndTurn),
+            "the bounded final completion ends the turn: {events:?}"
+        );
 
-    // Exactly the scripted model calls happened: three hostile tool-call
-    // responses, then the bounded final completion.
+        // Exactly the scripted model calls happened: three hostile
+        // tool-call responses, then the bounded final completion.
+        let records = proxy.records();
+        assert_eq!(
+            records.len(),
+            4,
+            "three rejected tool calls plus the final completion: {records:?}"
+        );
+        for (index, record) in records.iter().enumerate() {
+            assert_eq!(record.path, "/chat/completions");
+            assert!(
+                !record.model.is_empty(),
+                "the runtime names the model it calls: {record:?}"
+            );
+            assert!(
+                record.message_count == record.roles.len()
+                    && record.message_count
+                        == records
+                            .first()
+                            .map_or(record.message_count, |first| {
+                                first.message_count + 2 * index
+                            }),
+                "conversation history grows by one assistant+tool pair per rejection: {record:?}"
+            );
+            assert!(record.stream, "the dsh LLM client always streams");
+            assert!(
+                !record.has_tools_key && record.tools_len == 0,
+                "request {} must advertise NO tools (the `tools` key is absent): {record:?}",
+                index + 1
+            );
+            assert!(
+                !record.system_mentions_poison,
+                "request {} must not carry the poisoned home layer: {record:?}",
+                index + 1
+            );
+        }
+        assert_eq!(
+            records[0].roles,
+            vec!["system".to_string(), "user".to_string()],
+            "the sealed composition sends a minimal first request: {:?}",
+            records[0].roles
+        );
+        }
+    };
+    with_confirmed_teardown(&provider, handle, body).await;
+
+    // After the bounded model completion AND the confirmed provider
+    // shutdown, separately prove the dispatch-level rejections and the
+    // absence of every side effect (file, pid file, live process).
     let records = proxy.records();
-    assert_eq!(
-        records.len(),
-        4,
-        "three rejected tool calls plus the final completion: {records:?}"
-    );
-    for (index, record) in records.iter().enumerate() {
-        assert_eq!(record.path, "/chat/completions");
-        assert!(
-            !record.model.is_empty(),
-            "the runtime names the model it calls: {record:?}"
-        );
-        assert!(
-            record.message_count == record.roles.len()
-                && record.message_count
-                    == records
-                        .first()
-                        .map_or(record.message_count, |first| {
-                            first.message_count + 2 * index
-                        }),
-            "conversation history grows by one assistant+tool pair per rejection: {record:?}"
-        );
-        assert!(record.stream, "the dsh LLM client always streams");
-        assert!(
-            !record.has_tools_key && record.tools_len == 0,
-            "request {} must advertise NO tools (the `tools` key is absent): {record:?}",
-            index + 1
-        );
-        assert!(
-            !record.system_mentions_poison,
-            "request {} must not carry the poisoned home layer: {record:?}",
-            index + 1
-        );
-    }
-    assert_eq!(
-        records[0].roles,
-        vec!["system".to_string(), "user".to_string()],
-        "the sealed composition sends a minimal first request: {:?}",
-        records[0].roles
-    );
-    // Each rejection came back as a tool-role message naming the rejected
-    // tool; conversation history accumulates, so each LATER request must
-    // contain the corresponding rejection (dispatch rejected BEFORE any
-    // tool body ran).
     for (index, tool) in [
         (1usize, "shell"),
         (2usize, "str_replace_editor"),
@@ -602,10 +851,8 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
             records[index].rejected_unknown_tools
         );
     }
-
-
-    // No side effects: no marker file, no background-process pid file.
     markers.assert_all_absent();
+    assert_no_live_dsh_children("sealed deny_all shutdown");
 
     // The poisoned marker plugin booted ONLY in the ordinary launch (the
     // provider initializes the ordinary recipe at launch); the sealed
@@ -628,9 +875,8 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
         );
     }
 
-    // Confirmed shutdown: the sealed child home lease is deleted (the
-    // `nexus` subtree holds no remaining lease).
-    provider.shutdown(handle).await.expect("confirmed close");
+    // Confirmed shutdown deleted the sealed child home lease (the `nexus`
+    // subtree holds no remaining lease).
     let nexus_dir = dsh_home.join("nexus");
     let lease_remains = nexus_dir.exists()
         && std::fs::read_dir(&nexus_dir)
@@ -641,7 +887,6 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
         !lease_remains,
         "the confirmed close deleted the sealed child home lease"
     );
-    markers.assert_all_absent();
 }
 
 /// Non-vacuity arm for the sealed proof: the SAME poisoned layers
@@ -652,6 +897,7 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
 #[tokio::test]
 async fn real_dsh_poisoned_layers_reach_ordinary_runtime() {
     let Some(dsh_bin) = real_dsh() else { return };
+    let _serial = serial_real_runtime();
     let root = tempfile::tempdir().expect("temp root");
     std::fs::create_dir_all(root.path().join("home")).expect("isolated HOME");
     poison_ordinary_home(&root);
@@ -663,32 +909,41 @@ async fn real_dsh_poisoned_layers_reach_ordinary_runtime() {
         .launch(launch_spec(root.path()))
         .await
         .expect("the ordinary recipe initializes against the poisoned home");
-    let events = run_prompt(&provider, &handle, "ordinary turn", None).await;
-    assert!(
-        matches!(events.last(), Some(HostEvent::OpFinished(f)) if f.reason == FinishReason::EndTurn),
-        "the ordinary turn completes: {events:?}"
-    );
+    let body = {
+        let handle = handle.clone();
+        let provider = &provider;
+        let proxy = &proxy;
+        let root = &root;
+        async move {
+            let events = run_prompt(provider, &handle, "ordinary turn", None).await;
+        assert!(
+            matches!(events.last(), Some(HostEvent::OpFinished(f)) if f.reason == FinishReason::EndTurn),
+            "the ordinary turn completes: {events:?}"
+        );
 
-    let records = proxy.records();
-    assert_eq!(records.len(), 1, "one scripted completion: {records:?}");
-    assert!(
-        records[0].has_tools_key && records[0].tools_len > 0,
-        "the ordinary runtime DOES advertise tools (contrast with the sealed proof): {:?}",
-        records[0]
-    );
-    assert!(
-        records[0].system_mentions_poison,
-        "the poisoned home layer reached the ordinary model request: {:?}",
-        records[0]
-    );
+        let records = proxy.records();
+        assert_eq!(records.len(), 1, "one scripted completion: {records:?}");
+        assert!(
+            records[0].has_tools_key && records[0].tools_len > 0,
+            "the ordinary runtime DOES advertise tools (contrast with the sealed proof): {:?}",
+            records[0]
+        );
+        assert!(
+            records[0].system_mentions_poison,
+            "the poisoned home layer reached the ordinary model request: {:?}",
+            records[0]
+        );
 
-    let poison = poison_log_entries(&root);
-    assert_eq!(
-        poison.len(),
-        2,
-        "the poison plugin booted in the ordinary runtime: {poison:?}"
-    );
-    provider.shutdown(handle).await.expect("confirmed close");
+        let poison = poison_log_entries(root);
+        assert_eq!(
+            poison.len(),
+            2,
+            "the poison plugin booted in the ordinary runtime: {poison:?}"
+        );
+        }
+    };
+    with_confirmed_teardown(&provider, handle, body).await;
+    assert_no_live_dsh_children("ordinary poison shutdown");
 }
 
 /// A missing required plugin package is a STOP, never an ordinary
@@ -698,6 +953,7 @@ async fn real_dsh_poisoned_layers_reach_ordinary_runtime() {
 #[tokio::test]
 async fn real_dsh_missing_plugin_package_fails_closed() {
     let Some(dsh_bin) = real_dsh() else { return };
+    let _serial = serial_real_runtime();
     let root = tempfile::tempdir().expect("temp root");
     std::fs::create_dir_all(root.path().join("home")).expect("isolated HOME");
     let profile = root.path().join("dsh-home").join("profiles").join("sdk");
@@ -720,6 +976,22 @@ async fn real_dsh_missing_plugin_package_fails_closed() {
         proxy.records().is_empty(),
         "no model call ever happened on the failed launch"
     );
+    // Launch failure is not proven cleanup until the failed-init child is
+    // observed reaped and no Nexus sealed lease survives; this arm fails
+    // closed if cleanup is unconfirmed (strays are killed, then the test
+    // fails loudly).
+    assert_no_live_dsh_children("missing plugin package launch");
+    let nexus_dir = root.path().join("dsh-home").join("nexus");
+    let lease_remains = nexus_dir.exists()
+        && std::fs::read_dir(&nexus_dir)
+            .expect("read nexus dir")
+            .next()
+            .is_some();
+    assert!(
+        !lease_remains,
+        "no Nexus sealed lease remains after the failed launch"
+    );
+    markers.assert_all_absent();
 }
 
 /// Record the actual runtime identity without reading credentials: CLI
@@ -729,6 +1001,7 @@ async fn real_dsh_missing_plugin_package_fails_closed() {
 #[test]
 fn real_dsh_runtime_identity_is_recorded() {
     let Some(dsh_bin) = real_dsh() else { return };
+    let _serial = serial_real_runtime();
 
     // CLI version (non-secret).
     let version_out = Command::new(&dsh_bin)
@@ -762,19 +1035,21 @@ fn real_dsh_runtime_identity_is_recorded() {
     let dsh_home = root.path().join("dsh-home");
     std::fs::create_dir_all(&home).expect("home");
     std::fs::create_dir_all(&dsh_home).expect("dsh home");
-    let mut child = Command::new(&dsh_bin)
-        .args(["--profile", "sdk"])
-        .env("HOME", &home)
-        .env("DSH_HOME", &dsh_home)
-        .env("DSH_TELEMETRY_DISABLED", "1")
-        .current_dir(root.path())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn dsh for identity handshake");
-    let mut stdin = child.stdin.take().expect("stdin");
-    let mut stdout = child.stdout.take().expect("stdout");
+    let mut guard = ChildGuard::new(
+        Command::new(&dsh_bin)
+            .args(["--profile", "sdk"])
+            .env("HOME", &home)
+            .env("DSH_HOME", &dsh_home)
+            .env("DSH_TELEMETRY_DISABLED", "1")
+            .current_dir(root.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn dsh for identity handshake"),
+    );
+    let mut stdin = guard.child().stdin.take().expect("stdin");
+    let mut stdout = guard.child().stdout.take().expect("stdout");
     let (reply_tx, reply_rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         use std::io::Read as _;
@@ -840,15 +1115,18 @@ fn real_dsh_runtime_identity_is_recorded() {
     drop(stdin);
     let exit_deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        if let Ok(Some(_status)) = child.try_wait() {
+        if let Ok(Some(_status)) = guard.child().try_wait() {
             break;
         }
-        if Instant::now() > exit_deadline {
-            let _ = child.kill();
-            panic!("dsh did not exit after shutdown + stdin EOF");
-        }
+        assert!(
+            Instant::now() <= exit_deadline,
+            "dsh did not exit after shutdown + stdin EOF"
+        );
         std::thread::sleep(Duration::from_millis(50));
     }
+    // The child is confirmed exited; disarm so the guard does not kill a
+    // reaped pid.
+    guard.disarm();
 
     eprintln!(
         "actual dsh runtime identity: cli_version={cli_version} package={package_name}@{package_version} protocol_server={server_name}/{protocol_version} bin={}",
