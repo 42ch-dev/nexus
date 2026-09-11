@@ -51,6 +51,14 @@ pub mod soul_narrative;
 pub mod spoke_rules;
 pub mod work_chapters;
 pub mod works;
+pub mod workspace_commit_intent;
+
+pub use workspace_commit_intent::{
+    claim_session_and_insert_intent, finalize_committed_intent, finalize_rolled_back_intent,
+    get_committed_intent_by_digest, get_intent_by_revision, list_unsettled_intents,
+    release_session_claim, update_intent_state, ClaimSessionResult, CommitIntentRow,
+    IntentEntryJson, IntentState,
+};
 pub mod workspace_session;
 pub mod world_findings;
 pub mod world_stories;

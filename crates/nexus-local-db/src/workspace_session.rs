@@ -18,6 +18,8 @@ pub struct WorkspaceSessionRow {
     pub created_at: String,
     pub expires_at: String,
     pub consumed: bool,
+    /// In-flight commit revision holding this session, if any.
+    pub claimed_by_revision: Option<String>,
 }
 
 /// Parameters for creating a new workspace session.
@@ -91,7 +93,7 @@ pub async fn get_session(
     // SAFETY: compile-time checked — reads all columns from workspace_sessions table.
     let row = sqlx::query!(
         "SELECT session_id, workspace_root, relative_path, existed, file_hashes_json, \
-         created_at, expires_at, consumed \
+         created_at, expires_at, consumed, claimed_by_revision \
          FROM workspace_sessions WHERE session_id = ?",
         session_id
     )
@@ -115,6 +117,7 @@ pub async fn get_session(
             created_at: r.created_at,
             expires_at: r.expires_at,
             consumed: r.consumed != 0,
+            claimed_by_revision: r.claimed_by_revision,
         }
     }))
 }
