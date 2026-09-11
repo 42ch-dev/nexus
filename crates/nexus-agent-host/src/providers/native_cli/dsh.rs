@@ -89,6 +89,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use deepseek_harness_sdk::{Config, DeepSeekHarness, Error as DshError, Input};
@@ -264,46 +265,85 @@ fn recipe_for_scope(
 /// (the raw SDK close error embeds stderr tails and is never exported).
 type CleanupWait = Shared<BoxFuture<'static, Result<(), String>>>;
 
-/// Start the retained close owner for one harness plus its sealed-home
-/// lease: the SDK close ladder runs on a spawned task; the sealed lease is
-/// deleted ONLY after a confirmed close. An unconfirmed (failed) close
-/// retains the lease — a deadline or ladder error never deletes a running
-/// child's files.
-fn start_close(mut harness: Option<DeepSeekHarness>, sealed_home: Option<PathBuf>) -> CleanupWait {
-    let cleanup = async move {
-        let result = match harness.as_mut() {
-            Some(harness) => harness.close().await,
-            None => Ok(()),
-        };
-        match result {
-            Ok(()) => {
-                if let Some(home) = sealed_home {
-                    // Confirmed close: the owner-only child home lease ends
-                    // here and its files are removed. A removal failure is
-                    // evidence retention, not a cleanup failure.
-                    if std::fs::remove_dir_all(&home).is_err() {
-                        tracing::warn!(
-                            "sealed dsh home could not be removed after a confirmed close; \
-                             the directory is retained"
-                        );
-                    }
+/// Close one harness through the SDK ladder and — ONLY after a confirmed
+/// close — delete its sealed-home lease. Every failure is an unconfirmed
+/// cleanup (`Err` with safe static text): a ladder error retains the
+/// lease, and a lease-removal failure is NOT success (fix wave: lease
+/// deletion truth — removal failure prevents session removal/Ready and
+/// retains owner/path/evidence). The raw SDK close error is never
+/// exported: its Display embeds stderr tails that may carry secrets.
+async fn close_and_reap(
+    mut harness: Option<DeepSeekHarness>,
+    sealed_home: Option<PathBuf>,
+) -> Result<(), String> {
+    let result = match harness.as_mut() {
+        Some(harness) => harness.close().await,
+        None => Ok(()),
+    };
+    match result {
+        Ok(()) => {
+            if let Some(home) = sealed_home {
+                // Confirmed close ends the lease; a removal failure keeps
+                // the evidence AND fails the cleanup — the caller must not
+                // remove the session record or report health.
+                if std::fs::remove_dir_all(&home).is_err() {
+                    return Err(
+                        "dsh close completed but the sealed home could not be removed; \
+                         cleanup is unconfirmed and the lease evidence is retained"
+                            .to_string(),
+                    );
                 }
-                Ok(())
             }
-            Err(_sdk_error) => {
-                // Safe diagnostics (v1.188 P0): never export the raw SDK
-                // close error — its Display embeds stderr tails that may
-                // carry secrets. The lease is retained for reconciliation.
-                Err("dsh close ladder reported an error; cleanup is unconfirmed and the \
-                     session evidence is retained"
-                    .to_string())
-            }
+            Ok(())
         }
+        Err(_sdk_error) => {
+            // The lease is retained for reconciliation; never delete a
+            // possibly-live child's files.
+            Err("dsh close ladder reported an error; cleanup is unconfirmed and the \
+                 session evidence is retained"
+                .to_string())
+        }
+    }
+}
+
+/// Spawn one retained close owner for an already-owned harness/lease
+/// pair (recipe switch and probe closes): the close runs on a dedicated
+/// task so a caller-side timeout never cancels it (architecture §3.2).
+fn start_close(harness: Option<DeepSeekHarness>, sealed_home: Option<PathBuf>) -> CleanupWait {
+    let cleanup = close_and_reap(harness, sealed_home).boxed().shared();
+    // Drive the close to completion independently of any waiter.
+    tokio::spawn(cleanup.clone());
+    cleanup
+}
+
+/// Start the retained FINAL close owner for a session (fix wave: the
+/// shutdown close is admitted without waiting behind an active
+/// `Session::run`). The spawned task itself acquires the per-session
+/// mutex — unbounded, because it IS the retained owner — marks the
+/// session closed, takes any pending switch close plus the current
+/// harness/lease, resolves the pending close first (a failed switch's
+/// ordinary close is the only remaining cleanup and its result
+/// propagates), then closes whatever harness the session currently runs.
+fn start_final_close(state: Arc<Mutex<ClientState>>) -> CleanupWait {
+    let cleanup = async move {
+        let (pending, harness, sealed_home) = {
+            let mut guard = state.lock().await;
+            guard.closed = true;
+            (
+                guard.cleanup.take(),
+                guard.harness.take(),
+                guard.sealed_home.take(),
+            )
+        };
+        if let Some(pending) = pending {
+            // A pending (switch) close must resolve before the final
+            // close completes; its failure IS the unconfirmed result.
+            pending.await?;
+        }
+        close_and_reap(harness, sealed_home).await
     }
     .boxed()
     .shared();
-    // Drive the close to completion independently of any waiter: a caller
-    // timeout must never cancel the retained cleanup task (§3.2).
     tokio::spawn(cleanup.clone());
     cleanup
 }
@@ -333,8 +373,24 @@ fn selected_dsh_home(env: &HashMap<String, String>) -> PathBuf {
 /// home's own files are never rewritten — only the `nexus/` subtree is
 /// created. Returns the child path, which the caller holds as a lease
 /// until the sealed runtime's close is confirmed.
+///
+/// Path safety (fix wave): the selected home MUST resolve to an absolute
+/// path; a symlinked or non-directory `nexus` component is rejected; the
+/// unique leaf is created with one atomic `create_dir` (never a
+/// race-prone recursive create) and made owner-only BEFORE any content is
+/// written; the created leaf is revalidated (canonical parent equality +
+/// per-component no-symlink re-check) before writes so a
+/// check/create/write escape lands nowhere; and the returned patch path
+/// is asserted absolute and inside the leaf. Unsupported safe primitives
+/// fail closed.
 fn provision_sealed_home(env: &HashMap<String, String>) -> Result<PathBuf, String> {
-    let child = selected_dsh_home(env)
+    let selected = selected_dsh_home(env);
+    let selected = std::path::absolute(&selected)
+        .map_err(|_io| "sealed dsh home selection could not be made absolute".to_string())?;
+    if !selected.is_absolute() {
+        return Err("sealed dsh home selection is not absolute".to_string());
+    }
+    let child = selected
         .join(SEALED_HOME_SUBDIR)
         .join(uuid::Uuid::new_v4().simple().to_string());
     provision_sealed_home_at(&child)?;
@@ -342,26 +398,72 @@ fn provision_sealed_home(env: &HashMap<String, String>) -> Result<PathBuf, Strin
 }
 
 /// Create one sealed child home at `child` with the exact recipe layout:
-/// owner-only directory (reject an existing or symlink path), the
-/// empty-bundles startup-frozen `sdk` manifest, empty profile and home
-/// patch layers, and the embedded no-tools patch asset. On any failure the
-/// partial directory is removed — a failed provision leaves no lease.
+/// absolute path, symlink-free parent components, one atomic owner-only
+/// leaf create, the empty-bundles startup-frozen `sdk` manifest, empty
+/// profile and home patch layers, and the embedded no-tools patch asset.
+/// On any failure the partial directory is removed — a failed provision
+/// leaves no lease.
 fn provision_sealed_home_at(child: &Path) -> Result<(), String> {
-    // Exclusive: reject an existing path (including a symlink) outright —
-    // the recipe never writes into a directory it did not create.
-    if child.symlink_metadata().is_ok() {
-        return Err("sealed dsh home path already exists".to_string());
+    if !child.is_absolute() {
+        return Err("sealed dsh home path is not absolute".to_string());
     }
+    // Reject a symlinked (or non-directory) `nexus` parent component
+    // outright; create it when absent. The selected home above it is the
+    // user's own anchor (the SDK would create/use it identically).
+    let Some(nexus_dir) = child.parent() else {
+        return Err("sealed dsh home path has no parent".to_string());
+    };
+    match std::fs::symlink_metadata(nexus_dir) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(
+                    "sealed dsh home parent is a symlink or not a directory".to_string()
+                );
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir_all(nexus_dir)
+                .map_err(|_io| "failed to create the sealed dsh home parent".to_string())?;
+        }
+        Err(_error) => {
+            return Err("sealed dsh home parent could not be inspected".to_string());
+        }
+    }
+    // Atomic unique-leaf create: fails if the path already exists (a
+    // symlink at the leaf included) — no check-then-create window.
+    std::fs::create_dir(child)
+        .map_err(|_io| "failed to create the sealed dsh home leaf".to_string())?;
     let provision = || -> std::io::Result<()> {
-        let profile_dir = child.join("profiles").join("sdk");
-        std::fs::create_dir_all(&profile_dir)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            // Owner-only: the child home holds the sealed recipe and may
-            // accumulate runtime state; it is never group/world readable.
+            // Owner-only BEFORE any content lands: the child home holds
+            // the sealed recipe and may accumulate runtime state.
             std::fs::set_permissions(child, std::fs::Permissions::from_mode(0o700))?;
         }
+        // Revalidation: the freshly created leaf must still resolve
+        // inside the (canonical) `nexus` parent with no symlink
+        // components — a swapped parent/leaf between create and write is
+        // caught here, before any file is written.
+        let canonical_nexus = std::fs::canonicalize(nexus_dir)?;
+        let canonical_child = std::fs::canonicalize(child)?;
+        if canonical_child.parent() != Some(canonical_nexus.as_path()) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "sealed dsh home leaf escaped its parent",
+            ));
+        }
+        for component in child.ancestors().take(2) {
+            let metadata = std::fs::symlink_metadata(component)?;
+            if metadata.file_type().is_symlink() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "sealed dsh home path contains a symlink component",
+                ));
+            }
+        }
+        let profile_dir = child.join("profiles").join("sdk");
+        std::fs::create_dir_all(&profile_dir)?;
         std::fs::write(
             profile_dir.join("package.json"),
             format!("{SEALED_PROFILE_MANIFEST}\n"),
@@ -369,6 +471,16 @@ fn provision_sealed_home_at(child: &Path) -> Result<(), String> {
         std::fs::write(profile_dir.join("cordis.patch.yml"), EMPTY_PATCH_LAYER)?;
         std::fs::write(child.join("cordis.patch.yml"), EMPTY_PATCH_LAYER)?;
         std::fs::write(child.join(DENY_ALL_PATCH_FILENAME), DENY_ALL_PATCH)?;
+        // Final assertion: the patch handed to the SDK is absolute and
+        // remains inside the freshly created leaf.
+        let patch = child.join(DENY_ALL_PATCH_FILENAME);
+        let canonical_patch = std::fs::canonicalize(&patch)?;
+        if !patch.is_absolute() || !canonical_patch.starts_with(&canonical_child) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "sealed dsh patch path escaped the child home",
+            ));
+        }
         Ok(())
     };
     if let Err(_io_error) = provision() {
@@ -391,10 +503,11 @@ struct ClientState {
     /// session); started inside `launch()` before the Ready handle is
     /// returned. Taken by the retained close owner on switch/shutdown.
     harness: Option<DeepSeekHarness>,
-    /// Set by `shutdown()` under the lock so a run that already cloned the
-    /// state can never start a fresh harness after the close, and an
-    /// execute observes the torn-down session. Also set when a recipe
-    /// switch fails — a failed switch fails closed (STOP, never fallback).
+    /// Set by the final close task (or a failed recipe switch) under the
+    /// lock so a run that already cloned the state can never start a
+    /// fresh harness after the close, and an execute observes the
+    /// torn-down session. A failed switch fails closed (STOP, never
+    /// fallback).
     closed: bool,
     /// The recipe this session runs (ordinary by default; sealed after a
     /// first deny-all prompt closes the ordinary harness).
@@ -406,17 +519,31 @@ struct ClientState {
     /// The exclusive owner-only child DSH_HOME lease of the sealed recipe,
     /// retained until its runtime close is confirmed.
     sealed_home: Option<PathBuf>,
-    /// The ONE retained cleanup owner/result for the close currently in
-    /// flight (switch or shutdown); concurrent/retried waiters observe the
-    /// same shared completion. Cleared only after the switch path consumes
-    /// a confirmed close.
+    /// A close currently in flight that the FINAL close must resolve
+    /// first: the recipe switch stores its ordinary close here (consumed
+    /// on confirmed success); the final close task takes and awaits it so
+    /// a failed switch never leaves an ownerless close. The final close
+    /// itself lives in [`NativeSession::cleanup_slot`], outside this
+    /// mutex, so shutdown admission never waits behind an active run.
     cleanup: Option<CleanupWait>,
 }
 
 /// Internal state for a managed dsh native session.
 struct NativeSession {
-    /// Per-session lock around the crate harness and session metadata (B-2).
+    /// Per-session lock around the crate harness and session metadata
+    /// (B-2). A run holds it across `Session::run`; shutdown admission
+    /// never acquires it on the caller path (fix wave).
     state: Arc<Mutex<ClientState>>,
+    /// Shutdown intent, set WITHOUT the per-session mutex so new executes
+    /// are rejected immediately even while a run holds the lock (fix
+    /// wave: the configured shutdown deadline covers lock acquisition;
+    /// admission never waits behind an active `Session::run`).
+    closing: Arc<AtomicBool>,
+    /// The ONE retained final-close owner/result, behind a synchronous
+    /// cell held only for an atomic check-and-insert (never across an
+    /// await, never behind the run mutex): concurrent/retried shutdowns
+    /// observe the same shared completion.
+    cleanup_slot: Arc<std::sync::Mutex<Option<CleanupWait>>>,
     /// Working directory for the runtime, retained from `LaunchSpec::cwd`
     /// (N-1).
     cwd: PathBuf,
@@ -431,6 +558,7 @@ impl std::fmt::Debug for NativeSession {
         let mut debug = f.debug_struct("NativeSession");
         debug.field("cwd", &self.cwd.display());
         debug.field("executable", &self.executable.display());
+        debug.field("closing", &self.closing.load(Ordering::Acquire));
         match self.state.try_lock() {
             Ok(state) => {
                 debug
@@ -612,8 +740,13 @@ impl DshNativeProvider {
     /// Probe both recipes without a model call (P0 T2): resolve the
     /// executable, initialize + close the ordinary harness, then
     /// provision, initialize, close and delete the sealed child home. Any
-    /// failure leaves the provider unavailable with a safe static reason;
-    /// an unconfirmed close retains the lease evidence.
+    /// failure leaves the provider unavailable with a safe static reason.
+    /// Every close runs through a RETAINED spawned cleanup owner (fix
+    /// wave): the caller's probe deadline can drop the wait, never the
+    /// close itself, and availability requires a CONFIRMED close of both
+    /// recipes — a close error or a lease-removal failure reports
+    /// unavailable with the evidence retained, never healthy with a
+    /// leaked lease.
     async fn probe_recipes(&self) -> HostResult<ProviderHealth> {
         let unavailable = |message: String| ProviderHealth {
             provider_id: self.provider_id.clone(),
@@ -630,7 +763,7 @@ impl DshNativeProvider {
         let cwd = std::env::current_dir()
             .map_err(|_io| HostError::internal("probe could not resolve the current directory"))?;
 
-        let mut ordinary = match self
+        let ordinary = match self
             .start_harness(self.sdk_config(&cwd, &executable, None))
             .await
         {
@@ -641,13 +774,13 @@ impl DshNativeProvider {
                 )));
             }
         };
-        if ordinary.close().await.is_err() {
-            return Ok(unavailable(
-                "ordinary dsh recipe close was not confirmed".to_string(),
-            ));
+        if let Err(message) = start_close(Some(ordinary), None).await {
+            return Ok(unavailable(format!(
+                "ordinary dsh recipe close was not confirmed: {message}"
+            )));
         }
 
-        let (mut sealed, child) = match self.start_sealed_harness(&cwd, &executable).await {
+        let (sealed, child) = match self.start_sealed_harness(&cwd, &executable).await {
             Ok(pair) => pair,
             Err(error) => {
                 return Ok(unavailable(format!(
@@ -655,16 +788,15 @@ impl DshNativeProvider {
                 )));
             }
         };
-        if sealed.close().await.is_err() {
-            // Unconfirmed close: retain the lease evidence (never delete a
-            // possibly-live child's files) and report unavailable.
-            return Ok(unavailable(
-                "sealed dsh recipe close was not confirmed; the owned home is retained"
-                    .to_string(),
-            ));
+        // The sealed close owner also owns the lease: deletion happens
+        // only after a confirmed close, a deletion failure is an
+        // unconfirmed result (never a healthy probe with a leaked lease),
+        // and a probe-deadline drop keeps the owner running.
+        if let Err(message) = start_close(Some(sealed), Some(child)).await {
+            return Ok(unavailable(format!(
+                "sealed dsh recipe cleanup was not confirmed: {message}"
+            )));
         }
-        // Confirmed close ends the probe's lease.
-        let _ = std::fs::remove_dir_all(&child);
 
         Ok(ProviderHealth {
             provider_id: self.provider_id.clone(),
@@ -701,6 +833,7 @@ impl DshNativeProvider {
         session_id: HostSessionId,
         prompt_text: String,
         state: Arc<Mutex<ClientState>>,
+        closing: Arc<AtomicBool>,
     ) -> HostEventStream {
         let sessions = Arc::clone(&self.sessions);
         let run_timeout = self.timeouts.prompt_duration();
@@ -709,6 +842,7 @@ impl DshNativeProvider {
         futures_util::stream::unfold(
             (
                 state,
+                closing,
                 sessions,
                 op_id,
                 session_id,
@@ -721,6 +855,7 @@ impl DshNativeProvider {
             ),
             |(
                 state,
+                closing,
                 sessions,
                 op_id,
                 session_id,
@@ -738,6 +873,7 @@ impl DshNativeProvider {
                         Ok(event),
                         (
                             state,
+                            closing,
                             sessions,
                             op_id,
                             session_id,
@@ -764,6 +900,7 @@ impl DshNativeProvider {
                         })),
                         (
                             state,
+                            closing,
                             sessions,
                             op_id,
                             session_id,
@@ -787,12 +924,14 @@ impl DshNativeProvider {
                 #[allow(clippy::significant_drop_tightening)]
                 let run = {
                     let state = Arc::clone(&state);
+                    let closing = Arc::clone(&closing);
                     let prompt_text = prompt_text.clone();
                     async move {
                         let mut guard = state.lock().await;
-                        if guard.closed {
-                            // shutdown() closed this session before the run:
-                            // never run on a torn-down session.
+                        if guard.closed || closing.load(Ordering::Acquire) {
+                            // Shutdown intent landed before the run: never
+                            // run on a torn-down session (the final close
+                            // owns the harness now).
                             return Err(RunError::SessionGone);
                         }
                         let dsh_session_id = guard.dsh_session_id.clone();
@@ -846,6 +985,7 @@ impl DshNativeProvider {
                     Ok(first),
                     (
                         state,
+                        closing,
                         sessions,
                         op_id,
                         session_id,
@@ -987,6 +1127,8 @@ impl ProviderAdapter for DshNativeProvider {
                         sealed_home: None,
                         cleanup: None,
                     })),
+                    closing: Arc::new(AtomicBool::new(false)),
+                    cleanup_slot: Arc::new(std::sync::Mutex::new(None)),
                     cwd: spec.cwd.clone(),
                     executable,
                 },
@@ -1055,7 +1197,7 @@ impl ProviderAdapter for DshNativeProvider {
 
         // Fetch the session state under a short registry read (B-2), then
         // admit under the per-session lock only.
-        let (state, cwd, executable) = {
+        let (state, closing, cwd, executable) = {
             let sessions = self.sessions.read().await;
             let native_session = sessions.get(&session.session_id).ok_or_else(|| {
                 HostError::internal(format!(
@@ -1065,16 +1207,27 @@ impl ProviderAdapter for DshNativeProvider {
             })?;
             (
                 Arc::clone(&native_session.state),
+                Arc::clone(&native_session.closing),
                 native_session.cwd.clone(),
                 native_session.executable.clone(),
             )
         };
 
+        // Shutdown intent rejects new executes IMMEDIATELY (fix wave):
+        // the flag is set without the per-session mutex, so a run in
+        // flight can never delay this rejection.
+        if closing.load(Ordering::Acquire) {
+            return Err(HostError::internal(format!(
+                "dsh session {} is closing or closed",
+                session.session_id
+            )));
+        }
+
         {
             let mut guard = state.lock().await;
-            if guard.closed {
+            if guard.closed || closing.load(Ordering::Acquire) {
                 return Err(HostError::internal(format!(
-                    "dsh session {} is closed",
+                    "dsh session {} is closing or closed",
                     session.session_id
                 )));
             }
@@ -1126,10 +1279,20 @@ impl ProviderAdapter for DshNativeProvider {
                         .with_session(session.session_id.clone()));
                     }
                 }
-                let (sealed, child) = self
-                    .start_sealed_harness(&cwd, &executable)
-                    .await
-                    .map_err(|error| error.with_session(session.session_id.clone()))?;
+                let (sealed, child) = match self.start_sealed_harness(&cwd, &executable).await
+                {
+                    Ok(pair) => pair,
+                    Err(error) => {
+                        // Every sealed-home/start failure permanently
+                        // closes the session (fix wave): no retryable
+                        // half-switched state, no ordinary fallback, and
+                        // later None/deny executes are rejected
+                        // immediately. The switch cleanup/result state is
+                        // preserved for the final close owner.
+                        guard.closed = true;
+                        return Err(error.with_session(session.session_id.clone()));
+                    }
+                };
                 guard.harness = Some(sealed);
                 guard.sealed_home = Some(child);
                 guard.recipe = Recipe::SealedDenyAll;
@@ -1151,7 +1314,13 @@ impl ProviderAdapter for DshNativeProvider {
             "dsh turn started"
         );
 
-        Ok(self.build_event_stream(op_id, session.session_id.clone(), prompt_text, state))
+        Ok(self.build_event_stream(
+            op_id,
+            session.session_id.clone(),
+            prompt_text,
+            state,
+            closing,
+        ))
     }
 
     async fn cancel(
@@ -1173,32 +1342,53 @@ impl ProviderAdapter for DshNativeProvider {
     }
 
     async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()> {
-        // P0 T2 lifecycle ownership: the session/cleanup record stays
-        // registered until a CONFIRMED close. The close runs as the
-        // retained shared owner (a waiter timeout never cancels it and
-        // never deletes the session or sealed-home lease); the caller waits
-        // at most `shutdown_ms` — the SDK ladder is 1+6+3s plus an
-        // unbounded final kill/wait, so no bounded-reap claim is made.
-        // Close errors propagate; concurrent/retried shutdowns observe the
-        // same completion. Only a confirmed close removes the session.
-        let state = {
+        // P0 T2 lifecycle ownership (fix wave): close admission happens
+        // IMMEDIATELY — the shutdown intent is set and the retained final
+        // close owner is established WITHOUT acquiring the per-session
+        // mutex a run may be holding, so the configured `shutdown_ms`
+        // waiter deadline covers everything the caller waits on. The
+        // spawned final-close task itself acquires that mutex unbounded
+        // (it is the retained owner), marks the session closed, resolves
+        // any pending switch close, then closes the current harness and
+        // reaps the lease. A waiter timeout never cancels the cleanup
+        // task, never deletes the session record or lease, and
+        // concurrent/retried shutdowns observe the SAME shared
+        // completion; only a confirmed close removes the session.
+        let session_parts = {
             let sessions = self.sessions.read().await;
-            sessions.get(&session.session_id).map(|ns| Arc::clone(&ns.state))
+            sessions
+                .get(&session.session_id)
+                .map(|native_session| {
+                    (
+                        Arc::clone(&native_session.state),
+                        Arc::clone(&native_session.closing),
+                        Arc::clone(&native_session.cleanup_slot),
+                    )
+                })
         };
-        let Some(state) = state else {
+        let Some((state, closing, cleanup_slot)) = session_parts else {
             // A previous shutdown already observed the confirmed close and
             // removed the record: this is the retained completed result,
             // never a new reap of an already-closed client.
             return Ok(());
         };
+        // Reject new executes immediately, before any waiting.
+        closing.store(true, Ordering::Release);
+        // Establish (or observe) the ONE final-close owner atomically:
+        // this synchronous cell is never held across an await and never
+        // behind the run mutex.
         let cleanup = {
-            let mut guard = state.lock().await;
-            guard.closed = true;
-            match &guard.cleanup {
+            let mut slot = cleanup_slot.lock().unwrap_or_else(|error| {
+                // A poisoned cell can only mean a panic between
+                // check-and-insert; recover the value rather than
+                // abandoning the cleanup contract.
+                error.into_inner()
+            });
+            match &*slot {
                 Some(cleanup) => cleanup.clone(),
                 None => {
-                    let cleanup = start_close(guard.harness.take(), guard.sealed_home.take());
-                    guard.cleanup = Some(cleanup.clone());
+                    let cleanup = start_final_close(state);
+                    *slot = Some(cleanup.clone());
                     cleanup
                 }
             }
@@ -1778,6 +1968,28 @@ mod tests {
         // Upstream platform conditions survive verbatim.
         assert!(DENY_ALL_PATCH.contains("process.platform === 'win32'"));
         assert!(DENY_ALL_PATCH.contains("process.platform !== 'win32'"));
+    }
+
+    /// The COMPLETE serialized asset contract (fix wave, architecture
+    /// §3.4): order, package names, injections, configs and conditions are
+    /// pinned by the SHA-256 of the embedded bytes — any drift (a renamed
+    /// package, a reordered row, a changed injection or condition) fails
+    /// this guard, while the allowlist/pin assertions above keep the
+    /// intent readable. Update the constant only with a reviewed,
+    /// source-grounded asset change.
+    #[test]
+    fn deny_all_asset_serialized_contract_is_pinned() {
+        use sha2::Digest;
+        use std::fmt::Write as _;
+        let digest = sha2::Sha256::digest(DENY_ALL_PATCH.as_bytes());
+        let mut digest_hex = String::with_capacity(64);
+        for byte in digest {
+            let _ = write!(digest_hex, "{byte:02x}");
+        }
+        assert_eq!(
+            digest_hex, "d24cd62315fd82f27cf2684bb34e4374bb96a253b02d1e4dc5c01fda9ab40398",
+            "the sealed deny_all asset drifted from the pinned upstream-derived contract"
+        );
     }
 
     #[test]
@@ -2595,6 +2807,286 @@ mod tests {
         assert!(
             !entries.iter().any(|value| value["method"] == "session/prompt"),
             "no prompt was admitted: {entries:?}"
+        );
+    }
+
+    // ── Fix wave: lifecycle/security corrections ────────────────────────
+
+    /// Finding 1 (critical): shutdown admission must NOT wait behind an
+    /// active `Session::run`. With the fixture holding the turn open
+    /// (2s prompt budget), shutdown (200ms budget) returns
+    /// cleanup-unconfirmed in well under the prompt budget — the closed
+    /// intent and retained final-close owner are established immediately;
+    /// a new execute is rejected at once; the retained close completes
+    /// after the run's timeout releases the mutex; a retried shutdown
+    /// observes the SAME completion and removes the record.
+    #[tokio::test]
+    async fn shutdown_does_not_wait_behind_an_active_run() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = temp_dir.path().join("reqs.jsonl");
+        let timeouts = TimeoutConfig {
+            prompt_ms: 2000,
+            shutdown_ms: 200,
+            ..TimeoutConfig::default()
+        };
+        let mut env = stub_env(&req_log, &temp_dir.path().join("dsh-home"));
+        env.insert("HOLD_TURN".to_string(), "1".to_string());
+        let provider = stub_provider_with_timeouts("test-dsh-race", env, timeouts);
+        let handle = launch_hermetic(&provider).await;
+
+        // Start a turn and drive the stream on a task so the run holds
+        // the per-session mutex.
+        let stream = {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+                .lock()
+                .expect("lock env tests");
+            provider
+                .execute(
+                    &handle,
+                    HostOperation::Prompt {
+                        op_id: HostOperationId::new(),
+                        content: vec![HostContentBlock::Text {
+                            text: "held turn".to_string(),
+                        }],
+                        permission_scope: None,
+                    },
+                )
+                .await
+                .expect("execute")
+        };
+        let turn = tokio::spawn(collect_events(stream));
+        // Let the run start (fixture reply is prompt; the turn then
+        // holds open).
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        let started = std::time::Instant::now();
+        let first = provider.shutdown(handle.clone()).await;
+        let waited = started.elapsed();
+        assert!(
+            matches!(first, Err(HostError::CleanupUnconfirmed { .. })),
+            "the waiter deadline must fire: {first:?}"
+        );
+        assert!(
+            waited < std::time::Duration::from_millis(1500),
+            "shutdown admission must not wait behind the active run \
+             (waited {waited:?} of a 2s prompt budget)"
+        );
+        // The session record survives the unconfirmed close...
+        {
+            let sessions = provider.sessions.read().await;
+            assert!(sessions.contains_key(&handle.session_id));
+        }
+        // ...and a new execute is rejected IMMEDIATELY (closing intent
+        // was set without the run mutex).
+        let rejected = provider
+            .execute(
+                &handle,
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "too late".to_string(),
+                    }],
+                    permission_scope: None,
+                },
+            )
+            .await;
+        assert!(
+            matches!(rejected, Err(HostError::InternalHostError { .. })),
+            "execute after shutdown intent must be rejected"
+        );
+
+        // The run's 2s timeout releases the mutex; the retained close
+        // then completes. A retried shutdown observes the SAME shared
+        // completion and removes the record.
+        let events = turn.await.expect("turn task");
+        assert_eq!(terminal_count(&events), 1);
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        provider
+            .shutdown(handle.clone())
+            .await
+            .expect("the retained close completes and the retry observes it");
+        let sessions = provider.sessions.read().await;
+        assert!(
+            !sessions.contains_key(&handle.session_id),
+            "a confirmed close removes the session record"
+        );
+    }
+
+    /// Finding 2: a sealed-home provisioning failure on the first
+    /// deny-all prompt permanently closes the session — no retryable
+    /// half-switched state, no ordinary fallback; later `None` and
+    /// deny-all executes are both rejected immediately, and no prompt is
+    /// ever sent. (The `nexus` component is a FILE, so the exclusive
+    /// leaf create fails.)
+    #[tokio::test]
+    async fn sealed_provision_failure_closes_session_permanently() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = temp_dir.path().join("reqs.jsonl");
+        let dsh_home = temp_dir.path().join("dsh-home");
+        std::fs::create_dir_all(&dsh_home).expect("home dir");
+        std::fs::write(dsh_home.join(SEALED_HOME_SUBDIR), b"not a dir").expect("blocker");
+        let provider = stub_provider("test-dsh-sealfail", stub_env(&req_log, &dsh_home));
+        let handle = launch_hermetic(&provider).await;
+
+        let failed =
+            run_turn_scoped(&provider, &handle, "seal me", Some(deny_all_scope())).await;
+        assert!(
+            matches!(failed, Err(HostError::LaunchFailed { .. })),
+            "provisioning failure is the typed launch-class error: {failed:?}"
+        );
+
+        // The session is permanently closed: both scope variants are
+        // rejected immediately (never a retried switch or an ordinary
+        // admission).
+        for scope in [None, Some(deny_all_scope())] {
+            let rejected = run_turn_scoped(&provider, &handle, "again", scope).await;
+            assert!(
+                matches!(rejected, Err(HostError::InternalHostError { .. })),
+                "scope {scope:?} must be rejected on the closed session: {rejected:?}"
+            );
+        }
+        // The record is retained (closed) and only the ordinary launch
+        // spawn ever happened — zero prompts, zero sealed spawns.
+        {
+            let sessions = provider.sessions.read().await;
+            assert!(
+                sessions.contains_key(&handle.session_id),
+                "the closed session record is retained as evidence"
+            );
+        }
+        let entries = req_log_entries(&req_log);
+        assert_eq!(spawn_records(&entries).len(), 1, "no sealed spawn happened");
+        assert!(
+            !entries.iter().any(|value| value["method"] == "session/prompt"),
+            "no prompt was admitted: {entries:?}"
+        );
+
+        // A later shutdown still completes (nothing left to close) and
+        // removes the record.
+        {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+                .lock()
+                .expect("lock env tests");
+            provider.shutdown(handle).await.expect("final close completes");
+        }
+    }
+
+    /// Finding 3: sealed-home path safety — a relative child path, a
+    /// symlinked `nexus` parent, and a non-directory `nexus` parent are
+    /// all rejected, and nothing is written through the symlink.
+    #[test]
+    fn sealed_home_rejects_unsafe_paths() {
+        assert!(
+            provision_sealed_home_at(Path::new("relative/nexus/leaf")).is_err(),
+            "a relative child path must be rejected"
+        );
+
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        // Non-directory `nexus` component.
+        let blocked = temp_dir.path().join("blocked");
+        std::fs::create_dir_all(&blocked).expect("blocked dir");
+        std::fs::write(blocked.join("nexus"), b"not a dir").expect("blocker file");
+        assert!(
+            provision_sealed_home_at(&blocked.join("nexus").join("leaf")).is_err(),
+            "a non-directory nexus parent must be rejected"
+        );
+
+        // Symlinked `nexus` parent: rejected, and the link target stays
+        // empty (no escape writes).
+        #[cfg(unix)]
+        {
+            let anchor = temp_dir.path().join("anchor");
+            let elsewhere = temp_dir.path().join("elsewhere");
+            std::fs::create_dir_all(&anchor).expect("anchor dir");
+            std::fs::create_dir_all(&elsewhere).expect("elsewhere dir");
+            std::os::unix::fs::symlink(&elsewhere, anchor.join("nexus")).expect("symlink");
+            assert!(
+                provision_sealed_home_at(&anchor.join("nexus").join("leaf")).is_err(),
+                "a symlinked nexus parent must be rejected"
+            );
+            assert!(
+                std::fs::read_dir(&elsewhere)
+                    .expect("read elsewhere")
+                    .next()
+                    .is_none(),
+                "nothing may be written through the symlink"
+            );
+        }
+    }
+
+    /// Finding 4: a lease-removal failure after a CONFIRMED close is an
+    /// unconfirmed cleanup (never success), and the lease evidence is
+    /// retained. (A 0500 subdirectory makes `remove_dir_all` fail on
+    /// Unix.)
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn lease_removal_failure_is_unconfirmed_cleanup() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let child = temp_dir.path().join("nexus").join("lease123");
+        provision_sealed_home_at(&child).expect("provision");
+        let blocked = child.join("blocked");
+        std::fs::create_dir_all(&blocked).expect("blocked subdir");
+        std::fs::write(blocked.join("state"), b"state").expect("state file");
+        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o500))
+            .expect("chmod 0500");
+
+        let result = start_close(None, Some(child.clone())).await;
+        assert!(
+            result.is_err(),
+            "removal failure must be an unconfirmed cleanup, not success"
+        );
+        assert!(
+            child.exists(),
+            "the lease evidence is retained on removal failure"
+        );
+
+        // Restore permissions so the tempdir cleanup can remove the tree.
+        if blocked.exists() {
+            let _ = std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    /// Finding 5: a probe deadline that expires during the sealed close
+    /// drops the WAIT, never the cleanup owner — the retained spawned
+    /// close still finishes and deletes the sealed lease afterwards.
+    #[tokio::test]
+    async fn probe_deadline_drop_keeps_sealed_cleanup_owner() {
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = temp_dir.path().join("reqs.jsonl");
+        let dsh_home = temp_dir.path().join("dsh-home");
+        let mut env = stub_env(&req_log, &dsh_home);
+        // 600ms close delay: the ordinary close (starting near t=0)
+        // completes within the 800ms probe budget; the sealed close
+        // (starting after the sealed init) cannot — the probe deadline
+        // expires mid-sealed-close.
+        env.insert("SHUTDOWN_DELAY_MS".to_string(), "600".to_string());
+        let provider = stub_provider("test-dsh-probetimeout", env);
+
+        let probe = provider
+            .probe(crate::capability::model::ProbeRequest { timeout_ms: 800 })
+            .await;
+        assert!(
+            matches!(probe, Err(HostError::OperationTimeout { .. })),
+            "the probe deadline fires during the sealed close: {probe:?}"
+        );
+
+        // The retained sealed close owner keeps running past the dropped
+        // wait: after the 600ms delay lands, the lease is deleted.
+        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+        let entries = req_log_entries(&req_log);
+        let spawns = spawn_records(&entries);
+        assert_eq!(spawns.len(), 2, "both recipes were spawned: {entries:?}");
+        let sealed_home = PathBuf::from(
+            spawns[1]["dsh_home"].as_str().expect("sealed dsh_home logged"),
+        );
+        assert!(
+            !sealed_home.exists(),
+            "the retained cleanup owner deleted the lease after the dropped wait"
         );
     }
 }

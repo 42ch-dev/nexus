@@ -114,7 +114,7 @@ pub fn scan_path_in(
             CapabilityDescriptor::native_cli_limited()
         };
 
-        let mut push_row = |command: String| {
+        let mut push_row = |command: String, health: ProviderHealth| {
             entries.push(ProviderCatalogEntry {
                 provider_id: pid.clone(),
                 display_name: format!("{cmd} (native CLI)"),
@@ -127,29 +127,46 @@ pub fn scan_path_in(
                 source: DiscoverySource::PathScan,
                 trust: TrustLevel::LocalPath,
                 capabilities: capabilities.clone(),
-                health: ProviderHealth {
-                    provider_id: pid.clone(),
-                    available: true,
-                    latency_ms: None,
-                    message: None,
-                },
+                health,
             });
+        };
+        let available = |message: Option<String>| ProviderHealth {
+            provider_id: pid.clone(),
+            available: true,
+            latency_ms: None,
+            message,
+        };
+        let unavailable = |message: String| ProviderHealth {
+            provider_id: pid.clone(),
+            available: false,
+            latency_ms: None,
+            message: Some(message),
         };
 
         // Search the provided dirs (and process PATH as a which fallback).
         if let Some(found_path) = find_command(path_dirs, cmd) {
-            push_row(found_path.to_string_lossy().into_owned());
+            push_row(found_path.to_string_lossy().into_owned(), available(None));
         } else if cmd == "dsh" {
             // Env route (PD-4): a non-empty `DSH_RUNTIME_BIN` counts as
             // present even when `dsh` is not on PATH — same catalog row,
-            // same fields (the launch command carries the env value; the
-            // provider's resolution chain re-validates the override when
-            // a session is spawned from this entry). Only reached when
-            // the PATH lookup missed, so the two routes can never
-            // duplicate the row.
+            // same fields. The override is VALIDATED through the same
+            // Nexus-owned resolution chain as launch/boot (fix wave): an
+            // invalid override yields an unavailable row with a safe
+            // static reason, never a healthy row the provider cannot
+            // launch. Only reached when the PATH lookup missed, so the
+            // two routes can never duplicate the row.
             if let Some(env_bin) = std::env::var_os("DSH_RUNTIME_BIN") {
-                if !env_bin.is_empty() {
-                    push_row(env_bin.to_string_lossy().into_owned());
+                if !env_bin.to_string_lossy().trim().is_empty() {
+                    match crate::providers::native_cli::dsh::resolve_dsh_executable(None) {
+                        Ok(resolved) => push_row(
+                            resolved.to_string_lossy().into_owned(),
+                            available(Some("DSH_RUNTIME_BIN is set".to_string())),
+                        ),
+                        Err(reason) => push_row(
+                            env_bin.to_string_lossy().into_owned(),
+                            unavailable(reason),
+                        ),
+                    }
                 }
             }
         }
@@ -508,11 +525,10 @@ mod tests {
         }
     }
 
-    /// B-1 env-only case: with `dsh` NOT on the scanned dirs
-    /// but `DSH_RUNTIME_BIN` set-and-nonempty, `scan_path_in` still emits
-    /// the `dsh-native` catalog row (PD-4 parity with daemon boot) — same
-    /// fields as the PATH row, with the env value as the launch command
-    /// and the AR-6 descriptor.
+    /// B-1 env-only case: with `dsh` NOT on the scanned dirs but
+    /// `DSH_RUNTIME_BIN` set to a VALID executable, `scan_path_in` emits
+    /// the `dsh-native` catalog row (PD-4 parity with daemon boot) — the
+    /// validated, canonical command, available, with the AR-6 descriptor.
     #[test]
     fn scan_path_in_emits_env_route_dsh_row_when_env_set() {
         let _lock = crate::test_support::PROCESS_ENV_LOCK
@@ -520,8 +536,15 @@ mod tests {
             .expect("lock env tests");
 
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
-        let _path_guard = PathGuard::isolate(temp_dir.path());
-        let _env_guard = DshEnvGuard::set("/opt/dsh/dsh");
+        let bin_dir = temp_dir.path().join("env-bin");
+        std::fs::create_dir_all(&bin_dir).expect("create env-bin dir");
+        let stub = bin_dir.join("dsh-env-stub");
+        std::fs::write(&stub, "#!/bin/sh\necho stub\n").expect("write stub");
+        set_executable(&stub);
+        let empty_path = temp_dir.path().join("empty-path");
+        std::fs::create_dir_all(&empty_path).expect("create empty-path dir");
+        let _path_guard = PathGuard::isolate(&empty_path);
+        let _env_guard = DshEnvGuard::set(&stub.to_string_lossy());
 
         let config = AgentHostConfig::default();
         let entries = scan_path_in(&config, &[], &[temp_dir.path().to_path_buf()])
@@ -537,11 +560,18 @@ mod tests {
         assert_eq!(dsh.protocol_kind, ProtocolKind::NativeCli);
         assert_eq!(dsh.source, DiscoverySource::PathScan);
         assert_eq!(dsh.trust, TrustLevel::LocalPath);
-        assert!(dsh.health.available);
+        assert!(dsh.health.available, "a valid override is available");
         let LaunchStrategy::NativeCli { command, args, env } = &dsh.launch else {
             panic!("dsh row must be a NativeCli launch");
         };
-        assert_eq!(command, "/opt/dsh/dsh");
+        assert_eq!(
+            command,
+            &std::fs::canonicalize(&stub)
+                .expect("canonical stub")
+                .to_string_lossy()
+                .into_owned(),
+            "the row carries the validated canonical executable"
+        );
         assert!(args.is_empty());
         assert!(env.is_empty());
         assert!(
@@ -553,6 +583,45 @@ mod tests {
             "dsh row must not claim cancellation (AR-6)"
         );
         assert!(dsh.capabilities.session_restore);
+    }
+
+    /// Fix wave: a non-empty but INVALID `DSH_RUNTIME_BIN` (missing,
+    /// non-file, or non-executable) must NOT yield a healthy row —
+    /// discovery applies the same validated resolution as launch/boot and
+    /// marks the row unavailable with a safe static reason.
+    #[test]
+    fn scan_path_in_marks_invalid_env_override_unavailable() {
+        let _lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
+
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let _path_guard = PathGuard::isolate(temp_dir.path());
+        let _env_guard = DshEnvGuard::set("/definitely/missing/dsh-runtime");
+
+        let config = AgentHostConfig::default();
+        let entries = scan_path_in(&config, &[], &[temp_dir.path().to_path_buf()])
+            .expect("scan_path_in should succeed");
+
+        assert_eq!(
+            entries.len(),
+            1,
+            "the invalid override still surfaces as a row: {entries:?}"
+        );
+        let dsh = &entries[0];
+        assert_eq!(dsh.provider_id.0, "dsh-native");
+        assert!(
+            !dsh.health.available,
+            "an invalid override must not claim availability"
+        );
+        assert!(
+            dsh.health
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("not an executable file")),
+            "the row carries the safe static resolution reason: {:?}",
+            dsh.health.message
+        );
     }
 
     /// B-1 absent case: no `dsh` on the scanned dirs and
