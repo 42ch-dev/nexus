@@ -334,7 +334,6 @@ struct StreamConsumerDropGuard {
     stream_finished: Arc<AtomicBool>,
     consumer_dropped: Arc<AtomicBool>,
     consumer_drop_notify: Arc<Notify>,
-    closing: Arc<AtomicBool>,
 }
 
 impl StreamConsumerDropGuard {
@@ -346,12 +345,9 @@ impl StreamConsumerDropGuard {
 impl Drop for StreamConsumerDropGuard {
     fn drop(&mut self) {
         if !self.stream_finished.load(Ordering::Acquire) {
-            // Latch synchronously so a drop before the producer enters
-            // `select!` still wins over a nearly simultaneous run/terminal
-            // completion, and subsequent executes fail immediately via
-            // `closing` without waiting for async invalidation.
+            // Latch synchronously so a real owner drop before the producer
+            // enters `select!` is never lost (Notify alone is not enough).
             self.consumer_dropped.store(true, Ordering::Release);
-            self.closing.store(true, Ordering::Release);
             self.consumer_drop_notify.notify_waiters();
         }
     }
@@ -1489,11 +1485,9 @@ impl DshNativeProvider {
         let stream_finished = Arc::new(AtomicBool::new(false));
         let consumer_dropped_for_task = Arc::clone(&consumer_dropped);
         let consumer_drop_notify_for_task = Arc::clone(&consumer_drop_notify);
-        let closing_for_task = Arc::clone(&closing);
         tokio::spawn(async move {
             let consumer_dropped = consumer_dropped_for_task;
             let consumer_drop_notify = consumer_drop_notify_for_task;
-            let closing = closing_for_task;
             let (tail_events, invalidate) = {
                 let reconciliation = Arc::new(StdMutex::new(RunReconciliation::new()));
                 let classifier_failed = Arc::new(AtomicBool::new(false));
@@ -1611,19 +1605,7 @@ impl DshNativeProvider {
                         true,
                     ),
                     RunSelectOutcome::Run(Ok(result)) => {
-                        if consumer_drop_signaled(&consumer_dropped) {
-                            (
-                                vec![HostEvent::OpFailed(OperationFailedEvent {
-                                    session_id: session_id.clone(),
-                                    op_id: op_id.clone(),
-                                    error_category: "stream_closed".to_string(),
-                                    error_message:
-                                        "dsh event stream closed before the turn completed"
-                                            .to_string(),
-                                })],
-                                true,
-                            )
-                        } else if classifier_failed.load(Ordering::Acquire) {
+                        if classifier_failed.load(Ordering::Acquire) {
                             (
                                 vec![HostEvent::OpFailed(operation_protocol_failure(
                                     &session_id,
@@ -1691,7 +1673,6 @@ impl DshNativeProvider {
         let stream_finished_for_guard = Arc::clone(&stream_finished);
         let consumer_dropped_for_guard = Arc::clone(&consumer_dropped);
         let consumer_drop_notify_for_guard = Arc::clone(&consumer_drop_notify);
-        let closing_for_guard = Arc::clone(&closing);
         futures_util::stream::unfold(
             (
                 false,
@@ -1706,7 +1687,6 @@ impl DshNativeProvider {
                     stream_finished: stream_finished_for_guard,
                     consumer_dropped: consumer_dropped_for_guard,
                     consumer_drop_notify: consumer_drop_notify_for_guard,
-                    closing: closing_for_guard,
                 },
             ),
             |(
@@ -4596,20 +4576,21 @@ mod tests {
             stub_env_scenario(&req_log, &dsh_home, "hold_turn"),
         );
         let handle = launch_hermetic(&provider).await;
-        let stream = provider
-            .execute(
-                &handle,
-                HostOperation::Prompt {
-                    op_id: HostOperationId::new(),
-                    content: vec![HostContentBlock::Text {
-                        text: "hold".to_string(),
-                    }],
-                    permission_scope: None,
-                },
-            )
-            .await
-            .expect("execute");
-        let mut stream = std::pin::pin!(stream);
+        let mut stream = Box::pin(
+            provider
+                .execute(
+                    &handle,
+                    HostOperation::Prompt {
+                        op_id: HostOperationId::new(),
+                        content: vec![HostContentBlock::Text {
+                            text: "hold".to_string(),
+                        }],
+                        permission_scope: None,
+                    },
+                )
+                .await
+                .expect("execute"),
+        );
         let first = stream.next().await.expect("op started").expect("ok");
         assert!(matches!(first, HostEvent::OpStarted(_)));
         drop(stream);
