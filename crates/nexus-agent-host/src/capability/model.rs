@@ -446,14 +446,11 @@ impl CapabilityDescriptor {
     /// Native CLI descriptor for the `DeepSeek Harness` runtime
     /// (`dsh-native`) — the documented narrower descriptor (locks § AR-6).
     ///
-    /// `streaming` and `cancellation` are honest `false`: the chosen
-    /// high-level surface (`DeepSeekHarness` + `Session::run`, AR-2)
-    /// returns only after the root session reports idle and derives
-    /// `final_response` from the last `assistant/message` event — the SDK
-    /// has no incremental delta API, no token-delta notification
-    /// vocabulary, and no cancel/session-close RPC. Raising either field
-    /// later needs an upstream delta vocabulary or a low-level
-    /// `HarnessClient` rewrite (Durable Roadmap in the P2 plan).
+    /// `streaming` is `true` after v1.188 P1: root `assistant/message`
+    /// notifications are mapped into `MessageDelta` while `Session::run`
+    /// is in flight (message-level units, not token/chunk streaming).
+    /// `cancellation` stays honest `false` — the SDK has no cancel/session-close
+    /// RPC (`cancel()` is a documented no-op).
     ///
     /// `session_restore` stays true (AR-2/AR-5): `start_session(Some(id))`
     /// reuses the host-generated session id across executes, and a session
@@ -464,7 +461,7 @@ impl CapabilityDescriptor {
     pub const fn dsh_limited() -> Self {
         Self {
             text_prompt: true,
-            streaming: false,
+            streaming: true,
             cancellation: false,
             session_restore: true,
             structured_tool_calls: false,
@@ -703,9 +700,8 @@ mod descriptor_audit_tests {
         let desc = CapabilityDescriptor::dsh_limited();
         assert!(desc.text_prompt, "dsh_limited must support text_prompt");
         assert!(
-            !desc.streaming,
-            "dsh_limited must not claim streaming: Session::run returns only \
-             after the root session is idle (AR-6)"
+            desc.streaming,
+            "dsh_limited claims message-level streaming after v1.188 P1 timing proof"
         );
         assert!(
             !desc.cancellation,

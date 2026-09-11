@@ -484,4 +484,32 @@ mod tests {
         .expect_err("max-tokens is not success");
         assert_eq!(err.error_category, "max_tokens");
     }
+
+    #[test]
+    fn a_then_b_finalize_emits_only_end_turn_when_text_already_streamed() {
+        let (session_id, op_id) = ids();
+        let result = RunResult {
+            session_id: "root-sess".to_string(),
+            final_response: "B".to_string(),
+            finish_reason: Some("completed".to_string()),
+            events: vec![
+                json!({"type": "assistant/message", "data": {"content": [{"type": "text", "text": "A"}]}}),
+                json!({"type": "assistant/message", "data": {"content": [{"type": "text", "text": "B"}]}}),
+                json!({"type": "turn/end", "data": {"reason": {"kind": "completed"}}}),
+            ],
+            notifications: Vec::new(),
+        };
+        let events = finalize_successful_run(
+            &result,
+            &RunReconciliation {
+                emitted_root_text: true,
+            },
+            &session_id,
+            &op_id,
+        )
+        .expect("completed");
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], HostEvent::OpFinished(_)));
+    }
+
 }

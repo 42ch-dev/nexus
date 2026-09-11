@@ -65,26 +65,23 @@
 //! close; an unconfirmed close retains every byte of evidence. A session
 //! is never removed before confirmed close.
 //!
-//! # No streaming, no cancel (AR-6)
+//! # Message-level streaming, no cancel (P1 / AR-6)
 //!
-//! `Session::run` returns only after the root session reports idle and
-//! `final_response` is derived from the last `assistant/message` event —
-//! the SDK has no incremental delta API and no cancel / session-close RPC.
-//! `dsh-native` therefore ships the documented narrower descriptor
-//! [`CapabilityDescriptor::dsh_limited`] (`streaming: false`,
-//! `cancellation: false`) and `cancel()` is an honest no-op. The turn
-//! emits exactly one `OpStarted` before content (P0 conformance cutover),
-//! then the mapped result events.
+//! v1.188 P1 maps root `assistant/message` notifications into
+//! `MessageDelta` events through a bounded retained producer while
+//! `Session::run` is in flight. [`CapabilityDescriptor::dsh_limited`]
+//! advertises `streaming: true` only after the actual-dsh timing proof in
+//! `tests/dsh_real_runtime.rs`; `cancellation` stays `false` (no cancel
+//! RPC). Each turn emits exactly one `OpStarted` before content, then
+//! mapped deltas and exactly one terminal.
 //!
-//! # Timeout behavior (B-3)
+//! # Timeout / failure behavior (P1 T2)
 //!
 //! The per-turn `tokio::time::timeout` wraps the whole run coroutine. When
-//! it fires, the SDK coroutine is dropped but the runtime keeps executing
-//! the already-sent prompt — no cancel RPC exists — so the turn completes
-//! in the runtime with side effects the caller believes failed (a
-//! "zombie" turn). The stored `dsh_session_id` is therefore rotated on
-//! timeout ([`rotate_dsh_session_id`]): the next execute starts a fresh
-//! agent+session pair and can never be spliced into the abandoned turn.
+//! it fires, the SDK coroutine is dropped but the runtime may keep the
+//! abandoned prompt alive — no cancel RPC exists. The host emits one
+//! `OpFailed(timeout)` and transfers the session to retained close; there
+//! is no zombie-session reuse on the same handle.
 
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -1328,7 +1325,6 @@ impl DshNativeProvider {
         state: Arc<Mutex<ClientState>>,
         closing: Arc<AtomicBool>,
     ) -> HostEventStream {
-        let sessions = Arc::clone(&self.sessions);
         let retained = Arc::clone(&self.retained_leases);
         let run_timeout = self.timeouts.prompt_duration();
         let prompt_ms = self.timeouts.prompt_ms;
@@ -1420,18 +1416,15 @@ impl DshNativeProvider {
                         ))],
                         true,
                     ),
-                    Err(_elapsed) => {
-                        rotate_dsh_session_id(&sessions, &session_id).await;
-                        (
-                            vec![HostEvent::OpFailed(OperationFailedEvent {
-                                session_id: session_id.clone(),
-                                op_id: op_id.clone(),
-                                error_category: "timeout".to_string(),
-                                error_message: format!("dsh turn timed out after {prompt_ms}ms"),
-                            })],
-                            true,
-                        )
-                    }
+                    Err(_elapsed) => (
+                        vec![HostEvent::OpFailed(OperationFailedEvent {
+                            session_id: session_id.clone(),
+                            op_id: op_id.clone(),
+                            error_category: "timeout".to_string(),
+                            error_message: format!("dsh turn timed out after {prompt_ms}ms"),
+                        })],
+                        true,
+                    ),
                 }
             };
 
@@ -1503,74 +1496,63 @@ impl DshNativeProvider {
                     ));
                 }
 
-                loop {
-                    tokio::select! {
-                        maybe = content_rx.recv() => {
-                            match maybe {
-                                Some((event, bytes)) => {
-                                    budget.release(bytes);
-                                    break Some((
-                                        Ok(event),
-                                        (
-                                            started,
-                                            finished,
-                                            content_rx,
-                                            terminal_rx,
-                                            budget,
-                                            pending,
-                                            op_id,
-                                            session_id,
-                                        ),
-                                    ));
-                                }
-                                None => {
-                                    if let Some(event) = terminal_rx.recv().await {
-                                        pending.push_back(event);
-                                        while let Ok(more) = terminal_rx.try_recv() {
-                                            pending.push_back(more);
-                                        }
-                                        finished = true;
-                                        let next = pending.pop_front().expect("terminal batch");
-                                        break Some((
-                                            Ok(next),
-                                            (
-                                                started,
-                                                finished,
-                                                content_rx,
-                                                terminal_rx,
-                                                budget,
-                                                pending,
-                                                op_id,
-                                                session_id,
-                                            ),
-                                        ));
-                                    }
-                                    break None;
-                                }
+                if let Ok((event, bytes)) = content_rx.try_recv() {
+                    budget.release(bytes);
+                    return Some((
+                        Ok(event),
+                        (
+                            started,
+                            finished,
+                            content_rx,
+                            terminal_rx,
+                            budget,
+                            pending,
+                            op_id,
+                            session_id,
+                        ),
+                    ));
+                }
+
+                match content_rx.recv().await {
+                    Some((event, bytes)) => {
+                        budget.release(bytes);
+                        Some((
+                            Ok(event),
+                            (
+                                started,
+                                finished,
+                                content_rx,
+                                terminal_rx,
+                                budget,
+                                pending,
+                                op_id,
+                                session_id,
+                            ),
+                        ))
+                    }
+                    None => {
+                        if let Some(event) = terminal_rx.recv().await {
+                            pending.push_back(event);
+                            while let Ok(more) = terminal_rx.try_recv() {
+                                pending.push_back(more);
                             }
-                        }
-                        maybe = terminal_rx.recv() => {
-                            if let Some(event) = maybe {
-                                pending.push_back(event);
-                                while let Ok(more) = terminal_rx.try_recv() {
-                                    pending.push_back(more);
-                                }
-                                finished = true;
-                                let next = pending.pop_front().expect("terminal batch");
-                                break Some((
-                                    Ok(next),
-                                    (
-                                        started,
-                                        finished,
-                                        content_rx,
-                                        terminal_rx,
-                                        budget,
-                                        pending,
-                                        op_id,
-                                        session_id,
-                                    ),
-                                ));
-                            }
+                            finished = true;
+                            let next = pending.pop_front().expect("terminal batch");
+                            Some((
+                                Ok(next),
+                                (
+                                    started,
+                                    finished,
+                                    content_rx,
+                                    terminal_rx,
+                                    budget,
+                                    pending,
+                                    op_id,
+                                    session_id,
+                                ),
+                            ))
+                        } else {
+                            None
                         }
                     }
                 }
@@ -1581,39 +1563,6 @@ impl DshNativeProvider {
 
 }
 
-/// Rotate the stored DSH session id after a turn timeout (B-3).
-///
-/// The timeout drops the `Session::run` coroutine, but the runtime keeps
-/// running the already-sent prompt under the old id (no cancel RPC —
-/// AR-6). Replacing the stored id makes the next `execute` start a fresh
-/// agent+session pair (the runtime lazily creates unknown ids), so a
-/// retry can never be spliced into the abandoned "zombie" turn. Runs
-/// under the per-session lock, which the timed-out coroutine released
-/// when it was dropped, so this never waits on the zombie turn. A session
-/// already removed by `shutdown()` makes this a no-op.
-// The guard must be held across the mutation (the rotation is the point
-// of the function); dropping it "earlier" would drop it before the
-// write. The significant_drop_tightening suggestion is a false positive
-// for this tail-of-function drop.
-#[allow(clippy::significant_drop_tightening)]
-async fn rotate_dsh_session_id(
-    sessions: &Arc<RwLock<HashMap<HostSessionId, NativeSession>>>,
-    session_id: &HostSessionId,
-) {
-    let state = {
-        let guard = sessions.read().await;
-        guard.get(session_id).map(|ns| Arc::clone(&ns.state))
-    };
-    let Some(state) = state else {
-        return;
-    };
-    let mut guard = state.lock().await;
-    guard.dsh_session_id = uuid::Uuid::new_v4().to_string();
-    tracing::info!(
-        session_id = %session_id,
-        "dsh turn timed out; rotated dsh session id so a retry starts a fresh session",
-    );
-}
 
 /// Failure of the turn's `Session::run` attempt.
 enum RunError {
@@ -3016,13 +2965,12 @@ mod tests {
         );
     }
 
-    /// Timeout arm over the fixture stub (B-3): with the stub holding the
-    /// turn open, the provider timeout emits exactly one
-    /// `OpFailed(timeout)` AND rotates the stored `dsh_session_id`, so a
-    /// retry starts a fresh agent+session pair instead of being spliced
-    /// into the abandoned (zombie) turn.
+    /// Timeout arm over the fixture stub (P1 T2): with the stub holding the
+    /// turn open, the provider timeout emits exactly one `OpFailed(timeout)`
+    /// and transfers the host session to retained close — no retry on the
+    /// same handle (no zombie-session reuse).
     #[tokio::test]
-    async fn dsh_timeout_arm_fails_turn_and_rotates_session() {
+    async fn dsh_timeout_arm_fails_turn_and_closes_session() {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
         let req_log = req_log_dir.path().join("reqs.jsonl");
         let timeouts = TimeoutConfig {
@@ -3033,7 +2981,6 @@ mod tests {
         env.insert("HOLD_TURN".to_string(), "1".to_string());
         let provider = stub_provider_with_timeouts("test-dsh-timeout", env, timeouts);
         let handle = launch_hermetic(&provider).await;
-        let first_id = stored_dsh_session_id(&provider, &handle.session_id).await;
 
         let events = run_turn(&provider, &handle, "slow turn 1").await;
         assert_eq!(terminal_count(&events), 1);
@@ -3044,29 +2991,27 @@ mod tests {
             "timeout arm must emit OpFailed(timeout): {events:?}"
         );
 
-        let second_id = stored_dsh_session_id(&provider, &handle.session_id).await;
-        assert_ne!(
-            second_id, first_id,
-            "a timed-out turn must rotate the dsh session id"
-        );
-
-        // A retry on the same host session must also be bounded (fresh
-        // session, same zombie-avoidance) and rotate again.
-        let events = run_turn(&provider, &handle, "slow turn 2").await;
-        assert_eq!(terminal_count(&events), 1);
+        let retry = provider
+            .execute(
+                &handle,
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "slow turn 2".to_string(),
+                    }],
+                    permission_scope: None,
+                },
+            )
+            .await;
         assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, HostEvent::OpFailed(f) if f.error_category == "timeout")),
-            "second timeout arm must emit OpFailed(timeout): {events:?}"
+            retry.is_err(),
+            "a timed-out turn must close the session before another execute"
         );
-        let third_id = stored_dsh_session_id(&provider, &handle.session_id).await;
-        assert_ne!(third_id, second_id, "each timeout rotates again");
-        assert_ne!(third_id, first_id);
+        assert!(
+            matches!(retry, Err(HostError::InternalHostError { .. })),
+            "closed session must reject execute with InternalHostError"
+        );
 
-        // At least one prompt must have reached the stub over the wire
-        // (the exact count depends on whether a timeout caught the cold
-        // harness start, which this test does not need to pin).
         let methods = method_sequence(&req_log_entries(&req_log));
         assert!(
             methods.iter().any(|m| m == "session/prompt"),
@@ -4231,7 +4176,135 @@ mod tests {
     /// OpFinished(EndTurn); and the confirmed shutdown reaps the sealed
     /// child pid and deletes the lease.
     #[cfg(unix)]
+    fn stub_env_scenario(req_log: &Path, home: &Path, scenario: &str) -> HashMap<String, String> {
+        let mut env = stub_env(req_log, home);
+        env.insert("SCENARIO".to_string(), scenario.to_string());
+        env
+    }
+
+    fn message_texts(events: &[HostEvent]) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                HostEvent::MessageDelta(delta) => Some(delta.text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn terminal_of(events: &[HostEvent]) -> Option<&HostEvent> {
+        events.iter().rev().find(|event| {
+            matches!(event, HostEvent::OpFinished(_) | HostEvent::OpFailed(_))
+        })
+    }
+
     #[tokio::test]
+    async fn dsh_two_messages_emit_a_then_b_without_duplicate_final() {
+        let req_log_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = req_log_dir.path().join("reqs.jsonl");
+        let dsh_home = req_log_dir.path().join("dsh-home");
+        let provider = stub_provider(
+            "test-dsh-two-msgs",
+            stub_env_scenario(&req_log, &dsh_home, "two_messages"),
+        );
+        let handle = launch_hermetic(&provider).await;
+        let events = run_turn(&provider, &handle, "two").await;
+        assert_eq!(message_texts(&events), vec!["A", "B"], "{events:?}");
+        assert!(matches!(
+            terminal_of(&events),
+            Some(HostEvent::OpFinished(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn dsh_nested_assistant_message_is_ignored() {
+        let req_log_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = req_log_dir.path().join("reqs.jsonl");
+        let dsh_home = req_log_dir.path().join("dsh-home");
+        let provider = stub_provider(
+            "test-dsh-nested",
+            stub_env_scenario(&req_log, &dsh_home, "nested"),
+        );
+        let handle = launch_hermetic(&provider).await;
+        let events = run_turn(&provider, &handle, "nested").await;
+        assert_eq!(message_texts(&events), vec!["mock dsh reply"], "{events:?}");
+    }
+
+    #[tokio::test]
+    async fn dsh_malformed_text_block_fails_after_partial_delivery() {
+        let req_log_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = req_log_dir.path().join("reqs.jsonl");
+        let dsh_home = req_log_dir.path().join("dsh-home");
+        let provider = stub_provider(
+            "test-dsh-malformed-text",
+            stub_env_scenario(&req_log, &dsh_home, "malformed_text"),
+        );
+        let handle = launch_hermetic(&provider).await;
+        let events = run_turn(&provider, &handle, "bad").await;
+        assert!(
+            matches!(
+                terminal_of(&events),
+                Some(HostEvent::OpFailed(f)) if f.error_category == "decode_error"
+            ),
+            "{events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn dsh_non_success_after_streamed_text_still_fails() {
+        let req_log_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = req_log_dir.path().join("reqs.jsonl");
+        let dsh_home = req_log_dir.path().join("dsh-home");
+        let provider = stub_provider(
+            "test-dsh-partial-fail",
+            stub_env_scenario(&req_log, &dsh_home, "partial_then_fail"),
+        );
+        let handle = launch_hermetic(&provider).await;
+        let events = run_turn(&provider, &handle, "partial").await;
+        assert_eq!(message_texts(&events), vec!["partial"], "{events:?}");
+        assert!(
+            matches!(
+                terminal_of(&events),
+                Some(HostEvent::OpFailed(f)) if f.error_category == "max_tokens"
+            ),
+            "{events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn dsh_lag_fixture_still_delivers_message_before_terminal() {
+        let req_log_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = req_log_dir.path().join("reqs.jsonl");
+        let dsh_home = req_log_dir.path().join("dsh-home");
+        let mut env = stub_env_scenario(&req_log, &dsh_home, "lag");
+        env.insert("LAG_MS".to_string(), "100".to_string());
+        let provider = stub_provider("test-dsh-lag", env);
+        let handle = launch_hermetic(&provider).await;
+        let stream = provider
+            .execute(
+                &handle,
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "lag".to_string(),
+                    }],
+                    permission_scope: None,
+                },
+            )
+            .await
+            .expect("execute");
+        let mut stream = std::pin::pin!(stream);
+        let started = stream.next().await.expect("started").expect("ok");
+        assert!(matches!(started, HostEvent::OpStarted(_)));
+        let delta = stream.next().await.expect("delta").expect("ok");
+        assert!(matches!(delta, HostEvent::MessageDelta(_)));
+        let terminal = stream.next().await.expect("terminal").expect("ok");
+        assert!(matches!(terminal, HostEvent::OpFinished(_)));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+
     async fn wire_child_named_dsh_full_handshake_and_confirmed_exit() {
         // This test holds the env lock itself (PATH isolation must cover
         // resolution AND spawn), so it cannot call the locking helpers —

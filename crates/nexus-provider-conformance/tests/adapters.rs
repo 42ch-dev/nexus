@@ -576,9 +576,8 @@ async fn dsh_cancel_is_honest_noop() {
         .await
         .expect("execute");
 
-    // Exactly one OpStarted precedes content (P0 T2); the dsh surface is
-    // non-streaming (AR-6), so the next event is the MessageDelta of an
-    // already-completed run.
+    // Exactly one OpStarted precedes content (P0 T2); P1 maps committed
+    // assistant/message units into MessageDelta before the terminal.
     let first = stream.next().await.expect("first event").expect("ok");
     assert!(matches!(first, HostEvent::OpStarted(_)));
 
@@ -605,3 +604,68 @@ async fn dsh_cancel_is_honest_noop() {
     let report = run_conformance(stream_of(events), ConformanceConfig::default()).await;
     assert!(report.passed(), "the honest-noop turn conforms: {report}");
 }
+
+fn message_texts(events: &[HostEvent]) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            HostEvent::MessageDelta(delta) => Some(delta.text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn dsh_two_messages_conforms() {
+    let (env, log, home) = dsh_env("two_messages", "dsh-two-msgs");
+    let provider = DshNativeProvider::new(
+        ProviderId::new("conformance-dsh"),
+        "Conformance".to_string(),
+        Some(DSH_FIXTURE.to_string()),
+        Vec::new(),
+        env,
+        TimeoutConfig::default(),
+    )
+    .expect("empty native args");
+    let handle = provider.launch(launch_spec()).await.expect("launch");
+    let stream = provider
+        .execute(&handle, prompt_op())
+        .await
+        .expect("execute");
+    let events = collect(stream).await;
+    assert_eq!(message_texts(&events), vec!["A", "B"], "{events:?}");
+    let report = run_conformance(stream_of(events), ConformanceConfig::default()).await;
+    assert!(report.passed(), "two committed messages conform: {report}");
+    assert_ordinary_launch_identity(&log, &home);
+}
+
+#[tokio::test]
+async fn dsh_partial_then_fail_conforms_with_one_terminal() {
+    let (env, _log, _home) = dsh_env("partial_then_fail", "dsh-partial-fail");
+    let provider = DshNativeProvider::new(
+        ProviderId::new("conformance-dsh"),
+        "Conformance".to_string(),
+        Some(DSH_FIXTURE.to_string()),
+        Vec::new(),
+        env,
+        TimeoutConfig::default(),
+    )
+    .expect("empty native args");
+    let handle = provider.launch(launch_spec()).await.expect("launch");
+    let stream = provider
+        .execute(&handle, prompt_op())
+        .await
+        .expect("execute");
+    let events = collect(stream).await;
+    assert_eq!(message_texts(&events), vec!["partial"], "{events:?}");
+    assert!(
+        matches!(
+            terminal_of(&events),
+            Some(HostEvent::OpFailed(f)) if f.error_category == "max_tokens"
+        ),
+        "{events:?}"
+    );
+    // P1 maps non-success finish reasons to typed OpFailed categories; the
+    // neutral runner's closed error_category set is unchanged in P1.
+}
+

@@ -30,6 +30,7 @@ Behavior knobs (env vars):
 
 import json
 import os
+import time
 import sys
 
 _msg_counter = 0
@@ -110,20 +111,53 @@ def handle_request(req):
             "data": {"inserted": [{"id": message_id}]},
         })
         scenario = os.environ.get("SCENARIO", "happy")
-        session_event(session_id, {
-            "type": "assistant/message",
-            "data": {"message": {"content": [{"type": "text", "text": "mock dsh reply"}]}},
-        })
+        if scenario == "hold_turn" or os.environ.get("HOLD_TURN") == "1":
+            return
+        if scenario == "lag":
+            time.sleep(int(os.environ.get("LAG_MS", "150")) / 1000.0)
+        if scenario == "nested":
+            session_event("child-session", {
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": "nested-only"}]},
+            })
+        if scenario == "two_messages":
+            session_event(session_id, {
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": "A"}]},
+            })
+            session_event(session_id, {
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": "B"}]},
+            })
+        elif scenario == "empty_only":
+            session_event(session_id, {
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": ""}]},
+            })
+        elif scenario == "malformed_text":
+            session_event(session_id, {
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": 1}]},
+            })
+        elif scenario == "partial_then_fail":
+            session_event(session_id, {
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": "partial"}]},
+            })
+        else:
+            session_event(session_id, {
+                "type": "assistant/message",
+                "data": {"message": {"content": [{"type": "text", "text": "mock dsh reply"}]}},
+            })
         if scenario == "tool_call":
-            # A tool-call-shaped event: the SDK collects it as raw noise
-            # (AR-6 — no tool surface on this adapter).
             session_event(session_id, {
                 "type": "tool/call",
                 "data": {"tool": "bash", "input": {"command": "echo hi"}},
             })
+        finish_kind = "completed"
+        if scenario == "partial_then_fail":
+            finish_kind = "max-tokens"
         if scenario == "malformed":
-            # turn/end without a string data.reason.kind -> the SDK fails
-            # the run with SdkProtocol (the dsh decode-error surface).
             session_event(session_id, {
                 "type": "turn/end",
                 "data": {"reason": {}},
@@ -131,9 +165,9 @@ def handle_request(req):
         else:
             session_event(session_id, {
                 "type": "turn/end",
-                "data": {"reason": {"kind": "completed"}},
+                "data": {"reason": {"kind": finish_kind}},
             })
-        session_status(session_id, "idle")
+            session_status(session_id, "idle")
         return
 
     if method == "shutdown":
