@@ -75,8 +75,8 @@ impl DaemonHsm {
 // even when no await is needed in the method body.
 #[statig::state_machine(
     initial = "State::starting()",
-    on_dispatch = "Self::on_dispatch",
-    on_transition = "Self::on_transition",
+    before_dispatch = "Self::before_dispatch",
+    after_transition = "Self::after_transition",
     state(derive(Debug)),
     superstate(derive(Debug))
 )]
@@ -91,7 +91,7 @@ impl DaemonHsm {
     /// Handles `ShutdownRequested` → `Stopping` (abort-on-start).
     /// Handles `FatalError` → `Failed`.
     #[state(entry_action = "enter_starting", exit_action = "exit_starting")]
-    async fn starting(&mut self, event: &Event) -> Response<State> {
+    async fn starting(&mut self, event: &Event) -> Outcome<State> {
         match event {
             Event::SubsystemUp(kind) => {
                 self.up_subsystems.insert(*kind);
@@ -161,7 +161,7 @@ impl DaemonHsm {
         entry_action = "enter_running",
         exit_action = "exit_running"
     )]
-    async fn running(&mut self, event: &Event) -> Response<State> {
+    async fn running(&mut self, event: &Event) -> Outcome<State> {
         match event {
             Event::HealthDegraded { kind, reason } => {
                 tracing::warn!("health degraded: {} ({:?})", reason, kind);
@@ -182,7 +182,7 @@ impl DaemonHsm {
         entry_action = "enter_degraded",
         exit_action = "exit_degraded"
     )]
-    async fn degraded(&mut self, event: &Event) -> Response<State> {
+    async fn degraded(&mut self, event: &Event) -> Outcome<State> {
         match event {
             Event::HealthRestored { kind } => {
                 self.degraded_subsystems.remove(kind);
@@ -214,7 +214,7 @@ impl DaemonHsm {
     /// Handles `ShutdownRequested` → `Stopping` and `FatalError` → `Failed`
     /// for both child states.
     #[superstate]
-    async fn alive(&mut self, event: &Event) -> Response<State> {
+    async fn alive(&mut self, event: &Event) -> Outcome<State> {
         match event {
             Event::ShutdownRequested { source } => {
                 tracing::info!("shutdown requested from alive: {}", source);
@@ -235,7 +235,7 @@ impl DaemonHsm {
     /// Handles `ShutdownDrained` → `Failed` (exit 0, graceful completion).
     /// Handles `ShutdownTimeout` → `Failed` (exit 1).
     #[state(entry_action = "enter_stopping")]
-    async fn stopping(&mut self, event: &Event) -> Response<State> {
+    async fn stopping(&mut self, event: &Event) -> Outcome<State> {
         match event {
             Event::ShutdownDrained => {
                 tracing::info!("shutdown drained → graceful exit (0)");
@@ -261,7 +261,7 @@ impl DaemonHsm {
     /// All events are ignored (Super → Top drops them).
     #[state(entry_action = "enter_failed")]
     #[allow(clippy::needless_pass_by_ref_mut)] // statig macro requires &mut self
-    async fn failed(&mut self, event: &Event) -> Response<State> {
+    async fn failed(&mut self, event: &Event) -> Outcome<State> {
         let _ = event; // Suppress unused warning - terminal state ignores all events
         tracing::debug!("event ignored in terminal Failed state");
         Super
@@ -355,14 +355,19 @@ impl DaemonHsm {
 
     // --- Introspection callbacks ---
 
-    fn on_transition(&mut self, source: &State, target: &State) {
+    fn after_transition(&mut self, source: &State, target: &State, _context: &mut ()) {
         tracing::debug!("transition: {:?} → {:?}", source, target);
     }
 
     /// Statig callback for dispatch events.
     /// Note: Signature is dictated by statig macro; cannot take state by reference.
     #[allow(clippy::needless_pass_by_value)]
-    fn on_dispatch(&mut self, state: statig::StateOrSuperstate<Self>, event: &Event) {
+    fn before_dispatch(
+        &mut self,
+        state: statig::StateOrSuperstate<Self>,
+        event: &Event,
+        _context: &mut (),
+    ) {
         tracing::trace!("dispatch: {:?} → {:?}", event, state);
     }
 }
