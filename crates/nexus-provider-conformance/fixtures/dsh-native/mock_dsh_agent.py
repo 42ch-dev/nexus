@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Scripted `dsh-jsonrpc-agent` runtime speaker for nexus-provider-conformance (v1.180 P0 T2).
+"""Scripted `dsh` runtime speaker for nexus-provider-conformance (v1.188 P0 T2 cutover).
 
 Speaks the newline-delimited JSON-RPC 2.0 stdio subset that the
 deepseek-harness-sdk uses (client/core.rs `request` / api.rs
 `Session::run`): `initialize` (the result must carry the wire-stable
-server identity `deepseek-harness-sdk-runtime` plus a version),
-`session/prompt` (result carries a durable message id, then the
+server identity `deepseek-harness-sdk-runtime`; the reported protocol
+version is `0.0.1`, NOT the crate version `0.2.0`), `session/prompt`
+(result carries a durable message id, then the
 notifications `Session::run` waits for: the `agent/inbox/spliced` inbox
 receipt, an `assistant/message`, a `turn/end`, and root
 `session.status == "idle"`), and `shutdown` (respond, then exit on stdin
@@ -23,7 +24,8 @@ Behavior knobs (env vars):
   - cancel:    same as happy — the dsh adapter's cancel is an honest no-op
                (AR-6), so the turn runs to completion
 - REQ_LOG=<path>  append one JSON object per received request
-  ({"method": ..., "sessionId": ...}).
+  ({"method": ..., "sessionId": ...}), plus one startup `_spawn` record
+  ({"argv": ..., "dsh_home": ...}) for launch-identity assertions.
 """
 
 import json
@@ -49,6 +51,19 @@ def log_request(req):
     with open(path, "a") as f:
         f.write(json.dumps(entry) + "\n")
 
+
+
+def log_spawn():
+    path = os.environ.get("REQ_LOG")
+    if not path:
+        return
+    entry = {
+        "method": "_spawn",
+        "argv": sys.argv[1:],
+        "dsh_home": os.environ.get("DSH_HOME", ""),
+    }
+    with open(path, "a") as f:
+        f.write(json.dumps(entry) + "\n")
 
 def reply(req, result):
     send({"jsonrpc": "2.0", "id": req["id"], "result": result})
@@ -80,7 +95,7 @@ def handle_request(req):
         reply(req, {
             "serverInfo": {
                 "name": "deepseek-harness-sdk-runtime",
-                "version": "0.1.0-mock",
+                "version": "0.0.1",
             }
         })
         return
@@ -129,6 +144,7 @@ def handle_request(req):
 
 
 def main():
+    log_spawn()
     for line in sys.stdin:
         line = line.strip()
         if not line:

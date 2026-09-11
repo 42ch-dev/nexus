@@ -1,9 +1,10 @@
 //! PATH-based discovery for native CLI providers.
 //!
 //! Scans the `PATH` environment variable for known commands (`claude`,
-//! `codex`, `dsh-jsonrpc-agent`). Native CLI entries use distinct
-//! `provider_ids` (e.g., `claude-native`) to avoid collision with ACP
-//! registry's `claude` (R-004, R-008).
+//! `codex`, `dsh` — the ordinary upstream executable since the v1.188 P0
+//! T2 cutover; the retired `dsh-jsonrpc-agent` helper name is gone).
+//! Native CLI entries use distinct `provider_ids` (e.g., `claude-native`)
+//! to avoid collision with ACP registry's `claude` (R-004, R-008).
 //!
 //! # Cross-platform probe (DF-26)
 //!
@@ -29,15 +30,16 @@ use crate::{DiscoverySource, LaunchStrategy, ProviderCatalogEntry, TrustLevel};
 /// Known CLI commands and their provider ID mappings.
 ///
 /// Each entry maps a command name to a distinct `provider_id` that won't collide
-/// with ACP registry agent IDs. `dsh-jsonrpc-agent` maps to `dsh-native`
-/// (PD-4): the same command is also honored via the `DSH_RUNTIME_BIN` env
-/// var, and the scan emits a `dsh-native` row for that route too — a
-/// non-empty `DSH_RUNTIME_BIN` counts as present even when the command is
-/// not on PATH (same catalog fields, same dedup/suppression rules).
+/// with ACP registry agent IDs. `dsh` maps to `dsh-native` (PD-4): the
+/// same binary is also honored via the `DSH_RUNTIME_BIN` env var, and the
+/// scan emits a `dsh-native` row for that route too — a non-empty
+/// `DSH_RUNTIME_BIN` counts as present even when the command is not on
+/// PATH (same catalog fields, same dedup/suppression rules). Explicit
+/// configured overrides are validated at provider launch, not here.
 const KNOWN_COMMANDS: &[(&str, &str)] = &[
     ("claude", "claude-native"),
     ("codex", "codex-native"),
-    ("dsh-jsonrpc-agent", "dsh-native"),
+    ("dsh", "dsh-native"),
 ];
 
 /// Discover native CLI providers by scanning PATH.
@@ -137,14 +139,14 @@ pub fn scan_path_in(
         // Search the provided dirs (and process PATH as a which fallback).
         if let Some(found_path) = find_command(path_dirs, cmd) {
             push_row(found_path.to_string_lossy().into_owned());
-        } else if cmd == "dsh-jsonrpc-agent" {
+        } else if cmd == "dsh" {
             // Env route (PD-4): a non-empty `DSH_RUNTIME_BIN` counts as
-            // present even when the command is not on PATH — same catalog
-            // row, same fields (the launch command carries the env value;
-            // the SDK resolves the env var itself when a provider is
-            // spawned from this entry, `resolve_runtime` order 3). Only
-            // reached when the PATH lookup missed, so the two routes can
-            // never duplicate the row.
+            // present even when `dsh` is not on PATH — same catalog row,
+            // same fields (the launch command carries the env value; the
+            // provider's resolution chain re-validates the override when
+            // a session is spawned from this entry). Only reached when
+            // the PATH lookup missed, so the two routes can never
+            // duplicate the row.
             if let Some(env_bin) = std::env::var_os("DSH_RUNTIME_BIN") {
                 if !env_bin.is_empty() {
                     push_row(env_bin.to_string_lossy().into_owned());
@@ -422,7 +424,7 @@ mod tests {
     ///
     /// **PATH isolation (qc1 W-002):** `find_command` has a fallback that
     /// calls `which::which(command)` against the process PATH. If the host has
-    /// real `codex`/`claude`/`dsh-jsonrpc-agent` installed, that fallback
+    /// real `codex`/`claude`/`dsh` installed, that fallback
     /// would make the test pass even without the stubs. `PathGuard::isolate(temp_dir)`
     /// replaces PATH with the temp directory for the test scope so the test
     /// genuinely depends on the stubs.
@@ -436,7 +438,7 @@ mod tests {
 
         let claude_path = temp_dir.path().join("claude");
         let codex_path = temp_dir.path().join("codex");
-        let dsh_path = temp_dir.path().join("dsh-jsonrpc-agent");
+        let dsh_path = temp_dir.path().join("dsh");
         std::fs::write(&claude_path, "#!/bin/sh\necho hello\n").expect("write claude stub");
         std::fs::write(&codex_path, "#!/bin/sh\necho hello\n").expect("write codex stub");
         std::fs::write(&dsh_path, "#!/bin/sh\necho hello\n").expect("write dsh stub");
@@ -446,12 +448,12 @@ mod tests {
         set_executable(&dsh_path);
 
         // Isolate PATH so the test depends on the stubs, not on any real
-        // codex/claude/dsh-jsonrpc-agent that might be installed on the host
+        // codex/claude/dsh that might be installed on the host
         // (qc1 W-002).
         let _path_guard = PathGuard::isolate(temp_dir.path());
         // A set `DSH_RUNTIME_BIN` must not duplicate the PATH-found dsh
         // row (the PATH route wins; the env route only fires on a miss).
-        let _env_guard = DshEnvGuard::set("/opt/dsh/dsh-jsonrpc-agent");
+        let _env_guard = DshEnvGuard::set("/opt/dsh/dsh");
 
         let config = AgentHostConfig::default();
         let entries = scan_path_in(&config, &[], &[temp_dir.path().to_path_buf()])
@@ -460,7 +462,7 @@ mod tests {
         assert_eq!(
             entries.len(),
             3,
-            "codex, claude, and dsh-jsonrpc-agent should all be discovered"
+            "codex, claude, and dsh should all be discovered"
         );
 
         let ids: Vec<&str> = entries.iter().map(|e| e.provider_id.0.as_str()).collect();
@@ -506,7 +508,7 @@ mod tests {
         }
     }
 
-    /// B-1 env-only case: with `dsh-jsonrpc-agent` NOT on the scanned dirs
+    /// B-1 env-only case: with `dsh` NOT on the scanned dirs
     /// but `DSH_RUNTIME_BIN` set-and-nonempty, `scan_path_in` still emits
     /// the `dsh-native` catalog row (PD-4 parity with daemon boot) — same
     /// fields as the PATH row, with the env value as the launch command
@@ -519,7 +521,7 @@ mod tests {
 
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
         let _path_guard = PathGuard::isolate(temp_dir.path());
-        let _env_guard = DshEnvGuard::set("/opt/dsh/dsh-jsonrpc-agent");
+        let _env_guard = DshEnvGuard::set("/opt/dsh/dsh");
 
         let config = AgentHostConfig::default();
         let entries = scan_path_in(&config, &[], &[temp_dir.path().to_path_buf()])
@@ -539,7 +541,7 @@ mod tests {
         let LaunchStrategy::NativeCli { command, args, env } = &dsh.launch else {
             panic!("dsh row must be a NativeCli launch");
         };
-        assert_eq!(command, "/opt/dsh/dsh-jsonrpc-agent");
+        assert_eq!(command, "/opt/dsh/dsh");
         assert!(args.is_empty());
         assert!(env.is_empty());
         assert!(
@@ -553,7 +555,7 @@ mod tests {
         assert!(dsh.capabilities.session_restore);
     }
 
-    /// B-1 absent case: no `dsh-jsonrpc-agent` on the scanned dirs and
+    /// B-1 absent case: no `dsh` on the scanned dirs and
     /// `DSH_RUNTIME_BIN` unset/empty → no `dsh-native` row at all.
     #[test]
     fn scan_path_in_omits_dsh_row_when_command_absent_and_env_unset() {
@@ -586,7 +588,7 @@ mod tests {
 
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
         let _path_guard = PathGuard::isolate(temp_dir.path());
-        let _env_guard = DshEnvGuard::set("/opt/dsh/dsh-jsonrpc-agent");
+        let _env_guard = DshEnvGuard::set("/opt/dsh/dsh");
 
         let config = AgentHostConfig::default();
         let entries = scan_path_in(
@@ -625,13 +627,13 @@ mod tests {
     #[test]
     fn known_commands_mapping() {
         // Verify the mapping: claude -> claude-native, codex -> codex-native,
-        // dsh-jsonrpc-agent -> dsh-native
+        // dsh -> dsh-native
         assert_eq!(KNOWN_COMMANDS.len(), 3);
         assert_eq!(KNOWN_COMMANDS[0].0, "claude");
         assert_eq!(KNOWN_COMMANDS[0].1, "claude-native");
         assert_eq!(KNOWN_COMMANDS[1].0, "codex");
         assert_eq!(KNOWN_COMMANDS[1].1, "codex-native");
-        assert_eq!(KNOWN_COMMANDS[2].0, "dsh-jsonrpc-agent");
+        assert_eq!(KNOWN_COMMANDS[2].0, "dsh");
         assert_eq!(KNOWN_COMMANDS[2].1, "dsh-native");
     }
 

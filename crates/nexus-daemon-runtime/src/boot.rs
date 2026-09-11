@@ -587,53 +587,38 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         }
 
         // dsh-native (PD-4): bring-your-own runtime, same skip-if-missing
-        // rule as claude/codex. Discovery: PATH command `dsh-jsonrpc-agent`
-        // OR a non-empty `DSH_RUNTIME_BIN` env var (the SDK treats empty as
-        // absent).
-        //
-        // Runtime handoff (P2 plan T2): PATH-discovered → the resolved
-        // absolute path is handed to the provider as `Config::dsh_bin`;
-        // env-only → `dsh_bin` stays unset so the SDK's own resolution
-        // (`DSH_RUNTIME_BIN` from the parent environment) picks the
-        // binary (SDK 0.2 `resolve_runtime`: dsh_bin → DSH_RUNTIME_BIN →
-        // RuntimeNotFound).
-        if let Ok(dsh_path) = which::which("dsh-jsonrpc-agent") {
-            manager
-                .register_provider(
-                    Arc::new(DshNativeProvider::with_dsh_bin(Some(
-                        dsh_path.to_string_lossy().into_owned(),
-                    ))),
-                    nexus_agent_host::LaunchStrategy::NativeCli {
-                        command: "dsh-jsonrpc-agent".to_string(),
-                        args: vec![],
-                        env: std::collections::HashMap::new(),
-                    },
-                )
-                .await;
-            providers_registered += 1;
-            tracing::info!(provider = "dsh-native", "registered native agent provider");
-        } else if std::env::var_os("DSH_RUNTIME_BIN").is_some_and(|value| !value.is_empty()) {
-            manager
-                .register_provider(
-                    Arc::new(DshNativeProvider::with_dsh_bin(None)),
-                    nexus_agent_host::LaunchStrategy::NativeCli {
-                        command: "dsh-jsonrpc-agent".to_string(),
-                        args: vec![],
-                        env: std::collections::HashMap::new(),
-                    },
-                )
-                .await;
-            providers_registered += 1;
-            tracing::info!(
-                provider = "dsh-native",
-                "registered native agent provider via DSH_RUNTIME_BIN"
-            );
-        } else {
-            tracing::warn!(
-                provider = "dsh-native",
-                "runtime not found on PATH (dsh-jsonrpc-agent) or DSH_RUNTIME_BIN; \
-                 skipping registration"
-            );
+        // rule as claude/codex. One Nexus-owned resolution (v1.188 P0 T2,
+        // `resolve_dsh_executable`): explicit configured command/path →
+        // nonblank parent `DSH_RUNTIME_BIN` → PATH `dsh`; bare commands
+        // resolve through PATH, relative paths with separators are
+        // rejected, and an invalid explicit/env override fails closed
+        // (skip, never a fallback to another binary). The canonical
+        // absolute executable is handed to the provider and passed to the
+        // SDK as `Config::dsh_bin` (the SDK never default-searches `dsh`).
+        match nexus_agent_host::providers::native_cli::dsh::resolve_dsh_executable(None) {
+            Ok(dsh_executable) => {
+                manager
+                    .register_provider(
+                        Arc::new(DshNativeProvider::with_dsh_bin(Some(
+                            dsh_executable.to_string_lossy().into_owned(),
+                        ))),
+                        nexus_agent_host::LaunchStrategy::NativeCli {
+                            command: dsh_executable.to_string_lossy().into_owned(),
+                            args: vec![],
+                            env: std::collections::HashMap::new(),
+                        },
+                    )
+                    .await;
+                providers_registered += 1;
+                tracing::info!(provider = "dsh-native", "registered native agent provider");
+            }
+            Err(reason) => {
+                // Safe static category text only (no environment dumps).
+                tracing::warn!(
+                    provider = "dsh-native",
+                    "runtime resolution failed ({reason}); skipping registration"
+                );
+            }
         }
 
         // Configured generic ACP providers (V1.186): register launch recipes

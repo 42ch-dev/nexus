@@ -1,24 +1,69 @@
-//! `DeepSeek Harness` native provider adapter (`deepseek-harness-sdk`).
+//! `DeepSeek Harness` native provider adapter (`deepseek-harness-sdk` 0.2).
 //!
-//! Implements a native provider for the `dsh` runtime through the SDK's
-//! `Python`-parity high-level surface (AR-2): ONE [`DeepSeekHarness`] per
-//! provider session, started lazily on the first `execute()` and closed on
-//! `shutdown()`; each execute runs `start_session(Some(host_generated_id))`
-//! and `Session::run(Input::Text, None)` wrapped in `tokio::time::timeout`
-//! (the SDK's inbox-receipt / root-idle waits are unbounded by design; the
-//! 0.2 notification observer stays `None` in P0 — P1 owns it). Nexus
-//! owns only the `HostEvent` normalization (`map_dsh`); the crate owns the
-//! runtime spawn, the stdio JSON-RPC wire parser, and the close ladder.
+//! Implements a native provider for the official `dsh` runtime through the
+//! SDK's high-level surface: ONE [`DeepSeekHarness`] per provider session
+//! recipe, initialized eagerly inside `launch()` (a managed Ready handle is
+//! never returned before initialization — v1.188 P0 T2), driven by
+//! `start_session(Some(host_generated_id))` + `Session::run(Input::Text,
+//! None)` wrapped in `tokio::time::timeout` (the SDK's inbox-receipt /
+//! root-idle waits are unbounded by design; the 0.2 notification observer
+//! stays `None` in P0 — P1 owns it). Nexus owns only the `HostEvent`
+//! normalization (`map_dsh`); the crate owns the runtime spawn, the stdio
+//! JSON-RPC wire parser, argv composition, and the close ladder.
 //!
-//! # Session Model
+//! # Executable resolution (P0 T2)
 //!
-//! Each `launch()` registers a host session with a host-generated DSH
-//! session id and no harness yet. The first `execute()` lazily starts the
-//! harness and runs on `start_session(Some(id))`; a session id unknown to
-//! the runtime lazily creates the agent+session pair, and reusing the id
-//! across executes resumes the conversation (AR-2/AR-5 —
-//! `session_restore` stays honest). The harness lives until `shutdown()`,
-//! which runs the SDK close ladder ([`DeepSeekHarness::close`]).
+//! [`resolve_dsh_executable`] is the single resolution site: an explicit
+//! configured command/path wins, then a nonblank parent `DSH_RUNTIME_BIN`,
+//! then the bare command `dsh` resolved through PATH. Bare commands resolve
+//! via PATH; a relative path containing separators is rejected rather than
+//! resolved against an accidental daemon cwd; a valid explicit absolute
+//! path is preserved (canonicalized). An invalid explicit or env override
+//! fails without fallback to another binary. The canonical absolute
+//! executable is handed to the SDK as `Config.dsh_bin` (the SDK itself
+//! never default-searches `dsh`, and `Config.env` is not an executable
+//! override).
+//!
+//! # Home/profile behavior (P0 T2)
+//!
+//! Ordinary argv is exactly `--profile sdk` (the SDK owns argv
+//! construction); the sealed deny-all recipe adds exactly one
+//! `--patch <owned absolute asset>` pair. Home selection is the SDK's:
+//! explicit `Config.dsh_home` → caller env `DSH_HOME` → parent `DSH_HOME`
+//! → parent `~/.dsh`, one spawn-environment merge with no process-global
+//! mutation. The retired `DSH_CWD`/`DSH_SESSION_ROOT`/`DSH_CORDIS_CONFIG`
+//! keys are gone; the SDK strips them from the child environment.
+//!
+//! # Sealed deny-all recipe (architecture §3.4)
+//!
+//! An all-false `PromptPermissionScope` selects the sealed recipe BEFORE
+//! operation admission: the already-initialized ordinary harness is closed
+//! through the retained cleanup owner, an exclusive owner-only child
+//! DSH_HOME is provisioned under `<selected home>/nexus/<random id>`
+//! (empty-bundles `sdk` manifest, startup-frozen reload, empty profile/home
+//! patch layers), and the sealed harness is initialized with the
+//! Nexus-owned closed no-tool Cordis asset (`deny_all.cordis.patch.yml`,
+//! embedded beside this file) as its only patch — no user/plugin/MCP layer
+//! enters that runtime. The prompt is never sent to the ordinary runtime.
+//! The selected recipe is retained for the session; once a prompt has been
+//! admitted, any scope change (deny_all ↔ None included) is rejected
+//! rather than losing the conversation or escalating permissions. `None`
+//! preserves the existing ordinary policy — it is not a tool-isolation
+//! claim; partially permissive scopes stay `not_supported`.
+//!
+//! # Lifecycle ownership (P0 T2)
+//!
+//! Each session retains its harness, selected recipe, sealed-home lease,
+//! and ONE cleanup owner/result. `shutdown()` never removes the session
+//! before a confirmed close: the close runs as a retained shared task, the
+//! caller waits at most `shutdown_ms` (the SDK ladder is 1+6+3s plus an
+//! unbounded final kill/wait, so no "5s guaranteed reap" claim exists), a
+//! waiter timeout returns cleanup-unconfirmed WITHOUT cancelling the
+//! cleanup task or deleting the session/home lease, close errors
+//! propagate, and concurrent/retried shutdowns observe the same shared
+//! completion. The sealed-home lease is deleted only after a confirmed
+//! close; an unconfirmed close retains every byte of evidence. A session
+//! is never removed before confirmed close.
 //!
 //! # No streaming, no cancel (AR-6)
 //!
@@ -27,39 +72,311 @@
 //! the SDK has no incremental delta API and no cancel / session-close RPC.
 //! `dsh-native` therefore ships the documented narrower descriptor
 //! [`CapabilityDescriptor::dsh_limited`] (`streaming: false`,
-//! `cancellation: false`) and `cancel()` is an honest no-op: killing the
-//! runtime mid-turn would abandon the turn, not cancel it.
+//! `cancellation: false`) and `cancel()` is an honest no-op. The turn
+//! emits exactly one `OpStarted` before content (P0 conformance cutover),
+//! then the mapped result events.
 //!
 //! # Timeout behavior (B-3)
 //!
-//! The per-turn `tokio::time::timeout` wraps the whole run coroutine
-//! (lazy harness start + `Session::run`). When it fires, the SDK
-//! coroutine is dropped but the runtime keeps executing the already-sent
-//! prompt — no cancel RPC exists — so the turn completes in the runtime
-//! with side effects the caller believes failed (a "zombie" turn). The
-//! stored `dsh_session_id` is therefore rotated on timeout
-//! ([`rotate_dsh_session_id`]): the next execute starts a fresh
-//! agent+session pair (unknown ids are lazily created by the runtime) and
-//! can never be spliced into the abandoned turn. Sessions are cheap; the
-//! zombie turn finishes harmlessly in the background under the old id.
+//! The per-turn `tokio::time::timeout` wraps the whole run coroutine. When
+//! it fires, the SDK coroutine is dropped but the runtime keeps executing
+//! the already-sent prompt — no cancel RPC exists — so the turn completes
+//! in the runtime with side effects the caller believes failed (a
+//! "zombie" turn). The stored `dsh_session_id` is therefore rotated on
+//! timeout ([`rotate_dsh_session_id`]): the next execute starts a fresh
+//! agent+session pair and can never be spliced into the abandoned turn.
 
 use std::collections::{HashMap, VecDeque};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use deepseek_harness_sdk::{Config, DeepSeekHarness, Error as DshError, Input};
+use futures_util::future::{BoxFuture, FutureExt, Shared};
 use futures_util::StreamExt;
 use tokio::sync::{Mutex, RwLock};
 
 use crate::capability::model::{
     CapabilityDescriptor, HostContentBlock, HostEvent, HostEventStream, ManagedSessionHandle,
-    OperationFailedEvent, ProtocolKind, ProviderDescriptor, ProviderHealth,
+    OperationFailedEvent, OperationStartedEvent, PromptPermissionScope, ProtocolKind,
+    ProviderDescriptor, ProviderHealth,
 };
 use crate::config::TimeoutConfig;
 use crate::error::{HostError, HostResult};
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
-use crate::providers::native_cli::map_dsh::{classify_run_error, map_run_result};
+use crate::providers::native_cli::map_dsh::{
+    classify_error_parts, classify_run_error, map_run_result,
+};
 use crate::ProviderAdapter;
+
+/// The bare command resolved through PATH when no explicit configured
+/// command/path and no nonblank parent `DSH_RUNTIME_BIN` exists (P0 T2: the
+/// ordinary upstream `dsh` executable — the retired `dsh-jsonrpc-agent`
+/// helper name is gone).
+const DEFAULT_DSH_COMMAND: &str = "dsh";
+
+/// The environment override honored between an explicit configured command
+/// and the PATH fallback.
+const DSH_RUNTIME_BIN_ENV: &str = "DSH_RUNTIME_BIN";
+
+/// Subdirectory under the selected DSH_HOME that owns every Nexus-managed
+/// child home (architecture §3.4: `<selected home>/nexus/<random id>`).
+const SEALED_HOME_SUBDIR: &str = "nexus";
+
+/// The sealed profile's manifest: an empty bundle list composed over an
+/// empty root, with startup-frozen patch reload (upstream
+/// `loadProfileDirectory` reads `bundles ?? []`; `loadProfile` initializes
+/// only an absent manifest; `normalizeShippedProfile` preserves a custom
+/// sdk empty tuple).
+const SEALED_PROFILE_MANIFEST: &str =
+    r#"{"private":true,"dsh":{"profile":{"bundles":[],"patchReload":"startup"}}}"#;
+
+/// An empty patch layer (the sealed profile's own patch file and the sealed
+/// home-level patch file): no user/plugin layer exists in the recipe.
+const EMPTY_PATCH_LAYER: &str = "[]\n";
+
+/// The embedded, reviewed closed no-tool Cordis asset (architecture §3.4):
+/// upstream sdk-minimal's complete service tree minus its three
+/// tool-producing entries, with tools native, empty agents and provider
+/// retry maxRetries 0. Copied into the owned sealed child home and passed
+/// as the single absolute `--patch` overlay.
+const DENY_ALL_PATCH: &str = include_str!("deny_all.cordis.patch.yml");
+
+/// File name of the copied no-tools patch inside the sealed child home.
+const DENY_ALL_PATCH_FILENAME: &str = "nexus-deny-all.cordis.patch.yml";
+
+/// Resolve the dsh runtime executable to a canonical absolute path.
+///
+/// Selection order (P0 T2): an explicit configured command/path (blank
+/// counts as absent, SDK truthiness parity), then a nonblank parent
+/// `DSH_RUNTIME_BIN`, then the bare command `dsh` resolved through PATH.
+///
+/// - Bare command names (no path separator) resolve through PATH.
+/// - A relative path containing a separator is rejected — never resolved
+///   against an accidental daemon cwd.
+/// - An absolute path must name an executable file; it is canonicalized
+///   and preserved.
+///
+/// An invalid explicit or env override is an error WITHOUT fallback to
+/// another binary (fail closed). The returned message is safe static
+/// category text (no environment dumps); only handshake proves readiness.
+pub fn resolve_dsh_executable(explicit: Option<&str>) -> Result<PathBuf, String> {
+    let override_value = explicit
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            std::env::var(DSH_RUNTIME_BIN_ENV)
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        });
+    match override_value {
+        Some(value) => resolve_override(&value),
+        None => resolve_bare_command(DEFAULT_DSH_COMMAND).ok_or_else(|| {
+            "dsh runtime not found: no configured command, DSH_RUNTIME_BIN unset, \
+             and `dsh` is not on PATH"
+                .to_string()
+        }),
+    }
+}
+
+/// Resolve one explicit/env override value: absolute path, or bare command
+/// name via PATH; a relative path with a separator fails closed.
+fn resolve_override(value: &str) -> Result<PathBuf, String> {
+    let path = Path::new(value);
+    if path.is_absolute() {
+        return canonicalize_executable(path)
+            .ok_or_else(|| "configured dsh runtime path is not an executable file".to_string());
+    }
+    if value.contains('/') || value.contains('\\') {
+        return Err(
+            "a relative dsh runtime path containing separators is rejected; use an absolute \
+             path or a bare command name"
+                .to_string(),
+        );
+    }
+    resolve_bare_command(value)
+        .ok_or_else(|| "configured dsh runtime command was not found on PATH".to_string())
+}
+
+/// Resolve a bare command name through PATH and canonicalize the hit.
+fn resolve_bare_command(command: &str) -> Option<PathBuf> {
+    let found = which::which(command).ok()?;
+    canonicalize_executable(&found)
+}
+
+/// Canonicalize an absolute (or PATH-resolved) executable, validating that
+/// it is an executable file. Only the initialize handshake proves
+/// readiness; this gate keeps bad overrides from ever reaching spawn.
+fn canonicalize_executable(path: &Path) -> Option<PathBuf> {
+    let canonical = std::fs::canonicalize(path).ok()?;
+    if !canonical.is_file() {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if canonical.metadata().ok()?.permissions().mode() & 0o111 == 0 {
+            return None;
+        }
+    }
+    Some(canonical)
+}
+
+/// The recipe a session runs (architecture §3.4). `Ordinary` is the
+/// upstream `dsh --profile sdk` composition; `SealedDenyAll` is the
+/// Nexus-owned closed no-tool composition in the exclusive child home.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Recipe {
+    Ordinary,
+    SealedDenyAll,
+}
+
+/// Map a requested prompt permission scope to the recipe it selects,
+/// BEFORE operation admission. `None` preserves the existing ordinary
+/// policy (never a tool-isolation claim); the all-false scope selects the
+/// sealed deny-all recipe; any partially permissive scope stays
+/// `not_supported` — it is rejected, never silently discarded.
+fn recipe_for_scope(
+    provider_id: &ProviderId,
+    scope: Option<PromptPermissionScope>,
+) -> HostResult<Recipe> {
+    match scope {
+        None => Ok(Recipe::Ordinary),
+        Some(scope)
+            if !scope.allow_read && !scope.allow_write && !scope.allow_destructive =>
+        {
+            Ok(Recipe::SealedDenyAll)
+        }
+        Some(_) => Err(HostError::capability_unsupported(
+            provider_id.clone(),
+            "prompt permission scope",
+            "only the all-false deny_all scope is enforceable on the dsh native provider; \
+             partially permissive scopes are unsupported",
+        )),
+    }
+}
+
+/// One retained close operation: a shared future every waiter observes,
+/// driven by a dedicated task so a caller-side timeout never cancels the
+/// close itself (architecture §3.2). The `Err` payload is safe static text
+/// (the raw SDK close error embeds stderr tails and is never exported).
+type CleanupWait = Shared<BoxFuture<'static, Result<(), String>>>;
+
+/// Start the retained close owner for one harness plus its sealed-home
+/// lease: the SDK close ladder runs on a spawned task; the sealed lease is
+/// deleted ONLY after a confirmed close. An unconfirmed (failed) close
+/// retains the lease — a deadline or ladder error never deletes a running
+/// child's files.
+fn start_close(mut harness: Option<DeepSeekHarness>, sealed_home: Option<PathBuf>) -> CleanupWait {
+    let cleanup = async move {
+        let result = match harness.as_mut() {
+            Some(harness) => harness.close().await,
+            None => Ok(()),
+        };
+        match result {
+            Ok(()) => {
+                if let Some(home) = sealed_home {
+                    // Confirmed close: the owner-only child home lease ends
+                    // here and its files are removed. A removal failure is
+                    // evidence retention, not a cleanup failure.
+                    if std::fs::remove_dir_all(&home).is_err() {
+                        tracing::warn!(
+                            "sealed dsh home could not be removed after a confirmed close; \
+                             the directory is retained"
+                        );
+                    }
+                }
+                Ok(())
+            }
+            Err(_sdk_error) => {
+                // Safe diagnostics (v1.188 P0): never export the raw SDK
+                // close error — its Display embeds stderr tails that may
+                // carry secrets. The lease is retained for reconciliation.
+                Err("dsh close ladder reported an error; cleanup is unconfirmed and the \
+                     session evidence is retained"
+                    .to_string())
+            }
+        }
+    }
+    .boxed()
+    .shared();
+    // Drive the close to completion independently of any waiter: a caller
+    // timeout must never cancel the retained cleanup task (§3.2).
+    tokio::spawn(cleanup.clone());
+    cleanup
+}
+
+/// Resolve the DSH_HOME the SDK would select for this environment
+/// (explicit `dsh_home` is never set on the ordinary path, so the chain is
+/// caller env `DSH_HOME` → parent `DSH_HOME` → parent `~/.dsh`). Uses the
+/// SDK's own resolution rather than re-implementing it; no process-global
+/// mutation.
+fn selected_dsh_home(env: &HashMap<String, String>) -> PathBuf {
+    let mut parent = HashMap::new();
+    if let Some(value) = std::env::var("DSH_HOME")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    {
+        parent.insert("DSH_HOME".to_string(), value);
+    }
+    let probe = Config {
+        env: Some(env.clone()),
+        ..Config::default()
+    };
+    probe.resolve_dsh_home(&parent)
+}
+
+/// Provision the exclusive owner-only sealed child DSH_HOME under
+/// `<selected home>/nexus/<random id>` (architecture §3.4). The selected
+/// home's own files are never rewritten — only the `nexus/` subtree is
+/// created. Returns the child path, which the caller holds as a lease
+/// until the sealed runtime's close is confirmed.
+fn provision_sealed_home(env: &HashMap<String, String>) -> Result<PathBuf, String> {
+    let child = selected_dsh_home(env)
+        .join(SEALED_HOME_SUBDIR)
+        .join(uuid::Uuid::new_v4().simple().to_string());
+    provision_sealed_home_at(&child)?;
+    Ok(child)
+}
+
+/// Create one sealed child home at `child` with the exact recipe layout:
+/// owner-only directory (reject an existing or symlink path), the
+/// empty-bundles startup-frozen `sdk` manifest, empty profile and home
+/// patch layers, and the embedded no-tools patch asset. On any failure the
+/// partial directory is removed — a failed provision leaves no lease.
+fn provision_sealed_home_at(child: &Path) -> Result<(), String> {
+    // Exclusive: reject an existing path (including a symlink) outright —
+    // the recipe never writes into a directory it did not create.
+    if child.symlink_metadata().is_ok() {
+        return Err("sealed dsh home path already exists".to_string());
+    }
+    let provision = || -> std::io::Result<()> {
+        let profile_dir = child.join("profiles").join("sdk");
+        std::fs::create_dir_all(&profile_dir)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // Owner-only: the child home holds the sealed recipe and may
+            // accumulate runtime state; it is never group/world readable.
+            std::fs::set_permissions(child, std::fs::Permissions::from_mode(0o700))?;
+        }
+        std::fs::write(
+            profile_dir.join("package.json"),
+            format!("{SEALED_PROFILE_MANIFEST}\n"),
+        )?;
+        std::fs::write(profile_dir.join("cordis.patch.yml"), EMPTY_PATCH_LAYER)?;
+        std::fs::write(child.join("cordis.patch.yml"), EMPTY_PATCH_LAYER)?;
+        std::fs::write(child.join(DENY_ALL_PATCH_FILENAME), DENY_ALL_PATCH)?;
+        Ok(())
+    };
+    if let Err(_io_error) = provision() {
+        let _ = std::fs::remove_dir_all(child);
+        return Err("failed to provision the sealed dsh home".to_string());
+    }
+    Ok(())
+}
 
 /// Crate-client-scoped state for a managed dsh session, guarded by the
 /// per-session mutex (B-2): only this session's operations contend on it —
@@ -70,12 +387,30 @@ struct ClientState {
     /// reuses it across executes — the runtime lazily creates the
     /// agent+session pair on the first run and resumes it afterwards.
     dsh_session_id: String,
-    /// The lazily-started harness (one per provider session); `None` until
-    /// the first execute. Closed by `shutdown()` via the SDK close ladder.
+    /// The initialized harness for the selected recipe (one per provider
+    /// session); started inside `launch()` before the Ready handle is
+    /// returned. Taken by the retained close owner on switch/shutdown.
     harness: Option<DeepSeekHarness>,
     /// Set by `shutdown()` under the lock so a run that already cloned the
-    /// state can never start a fresh harness after the close.
+    /// state can never start a fresh harness after the close, and an
+    /// execute observes the torn-down session. Also set when a recipe
+    /// switch fails — a failed switch fails closed (STOP, never fallback).
     closed: bool,
+    /// The recipe this session runs (ordinary by default; sealed after a
+    /// first deny-all prompt closes the ordinary harness).
+    recipe: Recipe,
+    /// Set once the first prompt has been admitted: any later scope change
+    /// (deny_all ↔ None included) is rejected, never a conversation reset
+    /// or a permission escalation (architecture §3.4).
+    policy_locked: bool,
+    /// The exclusive owner-only child DSH_HOME lease of the sealed recipe,
+    /// retained until its runtime close is confirmed.
+    sealed_home: Option<PathBuf>,
+    /// The ONE retained cleanup owner/result for the close currently in
+    /// flight (switch or shutdown); concurrent/retried waiters observe the
+    /// same shared completion. Cleared only after the switch path consumes
+    /// a confirmed close.
+    cleanup: Option<CleanupWait>,
 }
 
 /// Internal state for a managed dsh native session.
@@ -84,17 +419,24 @@ struct NativeSession {
     state: Arc<Mutex<ClientState>>,
     /// Working directory for the runtime, retained from `LaunchSpec::cwd`
     /// (N-1).
-    cwd: std::path::PathBuf,
+    cwd: PathBuf,
+    /// The canonical absolute runtime executable resolved at `launch()`;
+    /// reused for the sealed switch so a mid-session binary replacement
+    /// can never swap the runtime identity under a live session.
+    executable: PathBuf,
 }
 
 impl std::fmt::Debug for NativeSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut debug = f.debug_struct("NativeSession");
         debug.field("cwd", &self.cwd.display());
+        debug.field("executable", &self.executable.display());
         match self.state.try_lock() {
             Ok(state) => {
                 debug
                     .field("dsh_session_id", &state.dsh_session_id)
+                    .field("recipe", &state.recipe)
+                    .field("policy_locked", &state.policy_locked)
                     .field("harness_started", &state.harness.is_some())
                     .field("closed", &state.closed);
             }
@@ -108,8 +450,8 @@ impl std::fmt::Debug for NativeSession {
 
 /// `DeepSeek Harness` native provider.
 ///
-/// Spawns the `dsh` runtime (bring-your-own; PATH command
-/// `dsh-jsonrpc-agent` or `DSH_RUNTIME_BIN`) via the
+/// Spawns the official `dsh` runtime (bring-your-own: explicit configured
+/// command/path → nonblank parent `DSH_RUNTIME_BIN` → PATH `dsh`) via the
 /// `deepseek-harness-sdk` crate and normalizes each `Session::run` outcome
 /// into `HostEvent` items. Multi-turn continuity is the host-generated DSH
 /// session id reused via `start_session(Some(id))` (AR-2/AR-5).
@@ -118,14 +460,18 @@ pub struct DshNativeProvider {
     provider_id: ProviderId,
     /// Display name.
     display_name: String,
-    /// Runtime binary handed to the SDK as `Config::dsh_bin`. `Some`
-    /// with a resolved absolute path when discovery found the command on
-    /// PATH; `Some` with a bare command name spawns it via PATH; `None`
-    /// leaves the SDK's own resolution to `DSH_RUNTIME_BIN` (the SDK 0.2
-    /// `resolve_runtime` order: `dsh_bin` → `DSH_RUNTIME_BIN` →
-    /// `RuntimeNotFound`).
+    /// Explicit configured command/path override for the runtime
+    /// executable. `None` selects the normal chain (nonblank parent
+    /// `DSH_RUNTIME_BIN` → PATH `dsh`). Resolution and validation happen in
+    /// [`resolve_dsh_executable`] at launch/probe; the canonical absolute
+    /// result is passed to the SDK as `Config.dsh_bin`.
     dsh_bin: Option<String>,
-    /// Environment variables to inject into the runtime process.
+    /// Environment variables to inject into the runtime process (one
+    /// immutable snapshot handed to the SDK at harness start; the SDK owns
+    /// the spawn merge and DSH_HOME normalization). The dsh runtime argv
+    /// is exactly `--profile sdk [--patch <owned asset>]` composed by the
+    /// SDK, so any nonempty `native_args` at construction is unsupported
+    /// and rejected — never silently dropped, never stored.
     env: HashMap<String, String>,
     /// Active sessions: host session ID → native session state.
     sessions: Arc<RwLock<HashMap<HostSessionId, NativeSession>>>,
@@ -135,117 +481,254 @@ pub struct DshNativeProvider {
 
 impl DshNativeProvider {
     /// Create a new `DeepSeek Harness` provider with the given configuration.
-    #[must_use]
+    ///
+    /// # Errors
+    ///
+    /// Returns `HostError::CapabilityUnsupported` when `native_args` is
+    /// nonempty: the SDK composes the exact argv (`--profile sdk`, plus the
+    /// owned patch for the sealed recipe) and arbitrary native arguments
+    /// are unsupported — rejected at construction, never dropped.
     pub fn new(
         provider_id: ProviderId,
         display_name: String,
         dsh_bin: Option<String>,
+        native_args: Vec<String>,
         env: HashMap<String, String>,
         timeouts: TimeoutConfig,
-    ) -> Self {
-        Self {
+    ) -> HostResult<Self> {
+        if !native_args.is_empty() {
+            return Err(HostError::capability_unsupported(
+                provider_id,
+                "native args",
+                "dsh runtime argv is exactly `--profile sdk` (plus the owned deny-all patch); \
+                 native arguments are unsupported",
+            ));
+        }
+        Ok(Self {
             provider_id,
             display_name,
             dsh_bin,
             env,
             sessions: Arc::new(RwLock::new(HashMap::new())),
             timeouts,
-        }
+        })
     }
 
-    /// Create with default configuration for the `dsh-jsonrpc-agent` runtime.
-    ///
-    /// The bare command name is handed to the SDK as `Config::dsh_bin`,
-    /// which spawns it via PATH resolution.
+    /// Create with default configuration: no explicit executable override,
+    /// so resolution falls to a nonblank parent `DSH_RUNTIME_BIN` and then
+    /// the bare command `dsh` on PATH.
     #[must_use]
     pub fn default_config() -> Self {
         Self::new(
             ProviderId::new("dsh-native"),
             "DeepSeek Harness (native)".to_string(),
-            Some("dsh-jsonrpc-agent".to_string()),
+            None,
+            Vec::new(),
             HashMap::new(),
             TimeoutConfig::default(),
         )
+        .expect("empty native args are always accepted")
     }
 
-    /// Register-time constructor used by daemon boot (T2): `dsh_bin` is
-    /// the boot-resolved absolute path when discovery found
-    /// `dsh-jsonrpc-agent` on PATH, or `None` when discovery was via the
-    /// `DSH_RUNTIME_BIN` env var only — the SDK then resolves the env var
-    /// itself (its `resolve_runtime` falls through to `DSH_RUNTIME_BIN`),
-    /// which keeps the two discovery routes consistent at spawn time.
+    /// Register-time constructor used by daemon boot (P0 T2): `dsh_bin` is
+    /// the boot-resolved canonical executable (explicit/env/PATH chain
+    /// resolved once at registration), or `None` to resolve at launch.
     #[must_use]
     pub fn with_dsh_bin(dsh_bin: Option<String>) -> Self {
         Self::new(
             ProviderId::new("dsh-native"),
             "DeepSeek Harness (native)".to_string(),
             dsh_bin,
+            Vec::new(),
             HashMap::new(),
             TimeoutConfig::default(),
         )
+        .expect("empty native args are always accepted")
     }
 
-    /// Build the event stream for one turn.
+    /// Compose the SDK launch configuration for one recipe against the
+    /// canonical executable. Ordinary argv is exactly `--profile sdk`; the
+    /// sealed recipe adds the owned absolute no-tools patch and the
+    /// exclusive child `dsh_home`. The configured initialize budget
+    /// (default 15s) maps to `initialize_timeout` and the session/prompt
+    /// request budget to `request_timeout`; the full-run deadline is the
+    /// caller-side `tokio::time::timeout` around `Session::run`.
+    fn sdk_config(
+        &self,
+        cwd: &Path,
+        executable: &Path,
+        sealed_home: Option<&Path>,
+    ) -> Config {
+        Config {
+            cwd: Some(cwd.to_path_buf()),
+            dsh_bin: Some(executable.to_string_lossy().into_owned()),
+            env: Some(self.env.clone()),
+            initialize_timeout: Some(self.timeouts.initialize_duration()),
+            request_timeout: Some(self.timeouts.prompt_duration()),
+            dsh_home: sealed_home.map(Path::to_path_buf),
+            patches: sealed_home.map_or_else(Vec::new, |home| {
+                vec![home.join(DENY_ALL_PATCH_FILENAME)]
+            }),
+            ..Config::default()
+        }
+    }
+
+    /// Spawn and initialize one harness, mapping every SDK failure into
+    /// the typed launch-class error with safe static diagnostics (P0 T2:
+    /// recipe-initialization failure surfaces before any prompt admission;
+    /// P2 consumes this class for manager health).
+    async fn start_harness(&self, config: Config) -> HostResult<DeepSeekHarness> {
+        DeepSeekHarness::start(config).await.map_err(|error| {
+            let (_category, message) = classify_error_parts(&error);
+            HostError::launch_failed(self.provider_id.clone(), message, None)
+        })
+    }
+
+    /// Initialize the sealed deny-all harness: provision the exclusive
+    /// child home (its lease is retained until confirmed close), then
+    /// start the runtime against it. A failed start removes the fresh
+    /// lease — the SDK ran its close ladder over the failed boot, so the
+    /// child is reaped and no runtime can still reference the files.
+    async fn start_sealed_harness(
+        &self,
+        cwd: &Path,
+        executable: &Path,
+    ) -> HostResult<(DeepSeekHarness, PathBuf)> {
+        let child = provision_sealed_home(&self.env).map_err(|message| {
+            HostError::launch_failed(self.provider_id.clone(), message, None)
+        })?;
+        match self
+            .start_harness(self.sdk_config(cwd, executable, Some(&child)))
+            .await
+        {
+            Ok(harness) => Ok((harness, child)),
+            Err(error) => {
+                let _ = std::fs::remove_dir_all(&child);
+                Err(error)
+            }
+        }
+    }
+
+    /// Probe both recipes without a model call (P0 T2): resolve the
+    /// executable, initialize + close the ordinary harness, then
+    /// provision, initialize, close and delete the sealed child home. Any
+    /// failure leaves the provider unavailable with a safe static reason;
+    /// an unconfirmed close retains the lease evidence.
+    async fn probe_recipes(&self) -> HostResult<ProviderHealth> {
+        let unavailable = |message: String| ProviderHealth {
+            provider_id: self.provider_id.clone(),
+            available: false,
+            latency_ms: None,
+            message: Some(message),
+        };
+        // An unresolvable/invalid override is an unavailable health value
+        // (the pre-T2 probe contract), not a probe error.
+        let executable = match resolve_dsh_executable(self.dsh_bin.as_deref()) {
+            Ok(executable) => executable,
+            Err(message) => return Ok(unavailable(message)),
+        };
+        let cwd = std::env::current_dir()
+            .map_err(|_io| HostError::internal("probe could not resolve the current directory"))?;
+
+        let mut ordinary = match self
+            .start_harness(self.sdk_config(&cwd, &executable, None))
+            .await
+        {
+            Ok(harness) => harness,
+            Err(error) => {
+                return Ok(unavailable(format!(
+                    "ordinary dsh recipe failed to initialize: {error}"
+                )));
+            }
+        };
+        if ordinary.close().await.is_err() {
+            return Ok(unavailable(
+                "ordinary dsh recipe close was not confirmed".to_string(),
+            ));
+        }
+
+        let (mut sealed, child) = match self.start_sealed_harness(&cwd, &executable).await {
+            Ok(pair) => pair,
+            Err(error) => {
+                return Ok(unavailable(format!(
+                    "sealed dsh recipe failed to initialize: {error}"
+                )));
+            }
+        };
+        if sealed.close().await.is_err() {
+            // Unconfirmed close: retain the lease evidence (never delete a
+            // possibly-live child's files) and report unavailable.
+            return Ok(unavailable(
+                "sealed dsh recipe close was not confirmed; the owned home is retained"
+                    .to_string(),
+            ));
+        }
+        // Confirmed close ends the probe's lease.
+        let _ = std::fs::remove_dir_all(&child);
+
+        Ok(ProviderHealth {
+            provider_id: self.provider_id.clone(),
+            available: true,
+            latency_ms: None,
+            message: Some(format!(
+                "ordinary and sealed recipes initialized and closed via {}",
+                executable.display()
+            )),
+        })
+    }
+
+    /// Build the event stream for one admitted turn.
     ///
-    /// One turn = one `Session::run` on the session's harness, driven
-    /// lazily on the first stream poll under the per-session lock (B-2;
-    /// only this session's operations contend on it). The run is wrapped in
-    /// `tokio::time::timeout(prompt_duration)` because the SDK's
-    /// inbox-receipt / root-idle waits are unbounded by design (P2 plan;
-    /// the crate documents the wrapper as the caller's bound). Emits at
-    /// most one terminal event:
+    /// The admission (scope validation, recipe selection/switch, policy
+    /// lock) already happened in `execute`; one turn = one `Session::run`
+    /// on the session's harness, driven lazily on the first stream poll
+    /// under the per-session lock (B-2). Exactly one `OpStarted` precedes
+    /// the mapped result events (P0 conformance cutover); the run is
+    /// wrapped in `tokio::time::timeout(prompt_duration)` because the
+    /// SDK's inbox-receipt / root-idle waits are unbounded by design.
+    /// Emits at most one terminal event:
     ///
     /// - `Ok(RunResult)` → exactly one `MessageDelta(final_response)` + one
     ///   `OpFinished` (AR-1 dsh table / AR-6).
     /// - `tokio::time::error::Elapsed` → one `OpFailed(timeout)`.
     /// - `Err(DshError)` → one `OpFailed` from `classify_run_error` (AR-7).
-    /// - Session removed/closed by `shutdown()` before the run starts →
-    ///   one `OpFailed(stream_closed)` (stream-abort backstop).
-    ///
-    /// The harness is started lazily on the first poll (and only then) and
-    /// stays alive for the session until `shutdown()` closes it.
+    /// - Session closed by `shutdown()` before the run starts → one
+    ///   `OpFailed(stream_closed)` (stream-abort backstop).
     #[allow(clippy::too_many_lines)]
     fn build_event_stream(
         &self,
         op_id: HostOperationId,
         session_id: HostSessionId,
         prompt_text: String,
-        cwd: std::path::PathBuf,
+        state: Arc<Mutex<ClientState>>,
     ) -> HostEventStream {
         let sessions = Arc::clone(&self.sessions);
-        let provider_id = self.provider_id.clone();
-        let dsh_bin = self.dsh_bin.clone();
-        let env = self.env.clone();
         let run_timeout = self.timeouts.prompt_duration();
         let prompt_ms = self.timeouts.prompt_ms;
 
         futures_util::stream::unfold(
             (
+                state,
                 sessions,
-                provider_id,
-                dsh_bin,
-                env,
                 op_id,
                 session_id,
                 prompt_text,
-                cwd,
                 run_timeout,
                 prompt_ms,
                 VecDeque::new(),
                 false,
+                false,
             ),
             |(
+                state,
                 sessions,
-                provider_id,
-                dsh_bin,
-                env,
                 op_id,
                 session_id,
                 prompt_text,
-                cwd,
                 run_timeout,
                 prompt_ms,
                 mut pending,
+                started,
                 done,
             )| async move {
                 // Drain mapped events from the turn first: one successful
@@ -254,17 +737,15 @@ impl DshNativeProvider {
                     return Some((
                         Ok(event),
                         (
+                            state,
                             sessions,
-                            provider_id,
-                            dsh_bin,
-                            env,
                             op_id,
                             session_id,
                             prompt_text,
-                            cwd,
                             run_timeout,
                             prompt_ms,
                             pending,
+                            started,
                             done,
                         ),
                     ));
@@ -272,71 +753,53 @@ impl DshNativeProvider {
                 if done {
                     return None;
                 }
+                // Exactly one OpStarted precedes any op-scoped event
+                // (conformance LifecycleOrdering); it is emitted even when
+                // the turn then fails, because admission already happened.
+                if !started {
+                    return Some((
+                        Ok(HostEvent::OpStarted(OperationStartedEvent {
+                            op_id: op_id.clone(),
+                            session_id: session_id.clone(),
+                        })),
+                        (
+                            state,
+                            sessions,
+                            op_id,
+                            session_id,
+                            prompt_text,
+                            run_timeout,
+                            prompt_ms,
+                            pending,
+                            true,
+                            done,
+                        ),
+                    ));
+                }
 
                 // One turn = one Session::run under the per-session lock
                 // (B-2): other sessions' cancel/shutdown never wait on this
-                // run. The run coroutine takes clones: the tuple state must
-                // survive for the terminal-event return after the run.
-                // The `Session` borrows the harness, which borrows the
+                // run. The `Session` borrows the harness, which borrows the
                 // guard, so the guard must live across the whole run await;
                 // the significant_drop_tightening suggestion to drop it
                 // early is a false positive here (the borrow checker
                 // rejects it).
                 #[allow(clippy::significant_drop_tightening)]
                 let run = {
-                    let sessions = Arc::clone(&sessions);
-                    let session_id = session_id.clone();
-                    let provider_id = provider_id.clone();
+                    let state = Arc::clone(&state);
                     let prompt_text = prompt_text.clone();
-                    let cwd = cwd.clone();
-                    let dsh_bin = dsh_bin.clone();
-                    let env = env.clone();
                     async move {
-                        let state = {
-                            let guard = sessions.read().await;
-                            guard.get(&session_id).map(|ns| Arc::clone(&ns.state))
-                        };
-                        let Some(state) = state else {
-                            // Session removed by shutdown(): no harness to
-                            // run — the stream-abort backstop.
-                            return Err(RunError::SessionGone);
-                        };
                         let mut guard = state.lock().await;
                         if guard.closed {
-                            // shutdown() closed this session between the
-                            // registry read and the lock: never start a
-                            // fresh harness.
+                            // shutdown() closed this session before the run:
+                            // never run on a torn-down session.
                             return Err(RunError::SessionGone);
                         }
-                        if guard.harness.is_none() {
-                            // AR-2: lazy start, one harness per provider
-                            // session. The runtime handoff (T2): a
-                            // PATH-discovered provider carries the
-                            // boot-resolved absolute path here; an
-                            // env-only provider carries `None`, so the SDK
-                            // resolves DSH_RUNTIME_BIN itself. One provider
-                            // environment snapshot is handed over verbatim;
-                            // the SDK applies the documented spawn merge
-                            // (base keys, caller env, normalized DSH_HOME,
-                            // retired-key stripping).
-                            let config = Config {
-                                cwd: Some(cwd),
-                                dsh_bin: dsh_bin.clone(),
-                                env: Some(env),
-                                ..Config::default()
-                            };
-                            let harness = DeepSeekHarness::start(config)
-                                .await
-                                .map_err(RunError::Sdk)?;
-                            tracing::info!(
-                                session_id = %session_id,
-                                provider_id = %provider_id,
-                                "dsh harness started lazily",
-                            );
-                            guard.harness = Some(harness);
-                        }
                         let dsh_session_id = guard.dsh_session_id.clone();
-                        let harness = guard.harness.as_mut().expect("harness was just ensured");
+                        let harness = match guard.harness.as_mut() {
+                            Some(harness) => harness,
+                            None => return Err(RunError::SessionGone),
+                        };
                         let session = harness.start_session(Some(dsh_session_id));
                         session.run(Input::Text(prompt_text), None)
                             .await
@@ -382,17 +845,15 @@ impl DshNativeProvider {
                 Some((
                     Ok(first),
                     (
+                        state,
                         sessions,
-                        provider_id,
-                        dsh_bin,
-                        env,
                         op_id,
                         session_id,
                         prompt_text,
-                        cwd,
                         run_timeout,
                         prompt_ms,
                         pending,
+                        true,
                         true,
                     ),
                 ))
@@ -438,9 +899,9 @@ async fn rotate_dsh_session_id(
 
 /// Failure of the turn's `Session::run` attempt.
 enum RunError {
-    /// Session removed or closed by `shutdown()` before the turn could run.
+    /// Session closed by `shutdown()` before the turn could run.
     SessionGone,
-    /// SDK error from the lazy harness start or `Session::run`.
+    /// SDK error from `Session::run`.
     Sdk(DshError),
 }
 
@@ -457,80 +918,54 @@ impl ProviderAdapter for DshNativeProvider {
 
     async fn probe(
         &self,
-        _request: crate::capability::model::ProbeRequest,
+        request: crate::capability::model::ProbeRequest,
     ) -> HostResult<ProviderHealth> {
-        // Discovery (PD-4): the PATH command `dsh-jsonrpc-agent` OR the
-        // `DSH_RUNTIME_BIN` env var (non-empty; the SDK treats empty as
-        // absent). Cross-platform command lookup via the `which` crate, in
-        // spawn_blocking under the launch timeout (same shape as
-        // claude/codex). The lookup runs against the configured runtime
-        // binary — a resolved absolute path from PATH discovery, or a bare
-        // command name — and is skipped entirely when the provider was
-        // registered via `DSH_RUNTIME_BIN` only (`dsh_bin` is `None`;
-        // the env check below decides availability).
-        let dsh_bin = self.dsh_bin.clone();
-        let dsh_bin_for_msg = dsh_bin.clone();
-        let provider_id = self.provider_id.clone();
-        let launch_dur = self.timeouts.launch_duration();
-
-        let which_result = tokio::time::timeout(
-            launch_dur,
-            tokio::task::spawn_blocking(move || {
-                dsh_bin
-                    .as_ref()
-                    .map_or(Ok(None), |bin| which::which(bin).map(Some))
-            }),
+        // P0 T2: the probe initializes and closes BOTH recipes without a
+        // model call (bounded by the caller's probe budget). Resolution
+        // failures, recipe-initialization failures and unconfirmed closes
+        // all leave the provider unavailable with safe static text.
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(request.timeout_ms),
+            self.probe_recipes(),
         )
         .await
-        .map_err(|_| {
-            HostError::timeout(
+        {
+            Ok(result) => result,
+            Err(_elapsed) => Err(HostError::timeout(
                 "probe",
-                format!(
-                    "command lookup timed out after {}ms",
-                    self.timeouts.launch_ms
-                ),
+                format!("dsh recipe probe timed out after {}ms", request.timeout_ms),
             )
-            .with_provider(self.provider_id.clone())
-        })?;
-
-        let env_route = std::env::var_os("DSH_RUNTIME_BIN").is_some_and(|value| !value.is_empty());
-
-        let health = match (which_result, env_route) {
-            (Ok(Ok(Some(resolved_path))), _) => ProviderHealth {
-                provider_id,
-                available: true,
-                latency_ms: None,
-                message: Some(resolved_path.to_string_lossy().into_owned()),
-            },
-            (_, true) => ProviderHealth {
-                provider_id,
-                available: true,
-                latency_ms: None,
-                message: Some("DSH_RUNTIME_BIN is set".to_string()),
-            },
-            _ => {
-                let bin = dsh_bin_for_msg
-                    .as_deref()
-                    .unwrap_or("(none configured)");
-                ProviderHealth {
-                    provider_id,
-                    available: false,
-                    latency_ms: None,
-                    message: Some(format!(
-                        "runtime binary '{bin}' not found on PATH and DSH_RUNTIME_BIN unset"
-                    )),
-                }
-            }
-        };
-        Ok(health)
+            .with_provider(self.provider_id.clone())),
+        }
     }
 
     async fn launch(
         &self,
         spec: crate::capability::model::LaunchSpec,
     ) -> HostResult<ManagedSessionHandle> {
-        // Native provider launch only registers session state — the runtime
-        // spawns lazily on the first execute() (AR-2).
+        // Fail closed on injected MCP servers: the dsh runtime composition
+        // carries no MCP layer and Nexus never injects one.
+        if !spec.mcp_servers.is_empty() {
+            return Err(HostError::capability_unsupported(
+                self.provider_id.clone(),
+                "mcp servers",
+                "the dsh native provider does not accept MCP server injection",
+            ));
+        }
+
+        // Executable resolution (P0 T2): explicit configured command/path →
+        // nonblank parent DSH_RUNTIME_BIN → PATH `dsh`; an invalid override
+        // fails here without fallback. Only the initialize handshake below
+        // proves readiness.
+        let executable = resolve_dsh_executable(self.dsh_bin.as_deref())
+            .map_err(|message| HostError::provider_unavailable(self.provider_id.clone(), message))?;
+
+        // Initialize BEFORE returning the managed Ready handle (P0 T2): a
+        // failed spawn/initialize is the typed launch-class failure.
+        let harness = self
+            .start_harness(self.sdk_config(&spec.cwd, &executable, None))
+            .await?;
+
         let host_session_id = HostSessionId::new();
 
         // Host-generated DSH session id: start_session(Some(id)) reuses it
@@ -545,10 +980,15 @@ impl ProviderAdapter for DshNativeProvider {
                 NativeSession {
                     state: Arc::new(Mutex::new(ClientState {
                         dsh_session_id,
-                        harness: None,
+                        harness: Some(harness),
                         closed: false,
+                        recipe: Recipe::Ordinary,
+                        policy_locked: false,
+                        sealed_home: None,
+                        cleanup: None,
                     })),
                     cwd: spec.cwd.clone(),
+                    executable,
                 },
             );
         }
@@ -557,7 +997,7 @@ impl ProviderAdapter for DshNativeProvider {
             session_id = %host_session_id,
             provider_id = %self.provider_id,
             cwd = %spec.cwd.display(),
-            "dsh session registered (runtime spawns on first execute)"
+            "dsh session launched (ordinary recipe initialized)"
         );
 
         Ok(ManagedSessionHandle {
@@ -568,8 +1008,10 @@ impl ProviderAdapter for DshNativeProvider {
         })
     }
 
-    // One turn is a single Session::run driven by the event stream — no
-    // setup phase to split out; allow the line count here.
+    // One admission plus one turn; the recipe switch (close ordinary,
+    // initialize sealed) runs inline before the stream is built so a
+    // recipe-initialization failure returns as the typed execute error
+    // before prompt admission. Allow the line count here.
     #[allow(clippy::too_many_lines)]
     async fn execute(
         &self,
@@ -588,13 +1030,11 @@ impl ProviderAdapter for DshNativeProvider {
                 "Native CLI provider only supports Prompt operations",
             ));
         };
-        if permission_scope.is_some() {
-            return Err(HostError::capability_unsupported(
-                self.provider_id.clone(),
-                "prompt permission scope",
-                "Native CLI provider cannot enforce workflow permission scope",
-            ));
-        }
+
+        // Scope → recipe BEFORE operation admission (P0 T2): the all-false
+        // scope selects deny_all; partially permissive scopes are
+        // unsupported; None preserves the ordinary policy.
+        let desired = recipe_for_scope(&self.provider_id, permission_scope)?;
 
         // Build prompt text from content blocks.
         let prompt_text: String = content
@@ -613,10 +1053,9 @@ impl ProviderAdapter for DshNativeProvider {
             ));
         }
 
-        // Clone the session working directory under a short registry read
-        // (B-2, N-1); the run then proceeds under the per-session lock
-        // only, never the provider-global one.
-        let cwd = {
+        // Fetch the session state under a short registry read (B-2), then
+        // admit under the per-session lock only.
+        let (state, cwd, executable) = {
             let sessions = self.sessions.read().await;
             let native_session = sessions.get(&session.session_id).ok_or_else(|| {
                 HostError::internal(format!(
@@ -624,10 +1063,86 @@ impl ProviderAdapter for DshNativeProvider {
                     session.session_id
                 ))
             })?;
-            let cwd = native_session.cwd.clone();
-            drop(sessions);
-            cwd
+            (
+                Arc::clone(&native_session.state),
+                native_session.cwd.clone(),
+                native_session.executable.clone(),
+            )
         };
+
+        {
+            let mut guard = state.lock().await;
+            if guard.closed {
+                return Err(HostError::internal(format!(
+                    "dsh session {} is closed",
+                    session.session_id
+                )));
+            }
+            if guard.policy_locked && guard.recipe != desired {
+                // Once a prompt has been admitted the recipe is retained:
+                // reject policy changes (deny_all ↔ None included) rather
+                // than losing the conversation or escalating permissions.
+                return Err(HostError::policy_denied(
+                    "the permission scope cannot change after the first admitted prompt; \
+                     the session recipe is retained",
+                )
+                .with_provider(self.provider_id.clone())
+                .with_session(session.session_id.clone()));
+            }
+            if !guard.policy_locked && desired == Recipe::SealedDenyAll {
+                // First deny-all prompt: close the already-initialized
+                // ordinary harness through the retained cleanup owner and
+                // await a CONFIRMED close before initializing the sealed
+                // harness. The prompt is never sent to the ordinary
+                // runtime; any failure fails closed (never a normal-profile
+                // fallback).
+                let harness = guard.harness.take();
+                let cleanup = start_close(harness, guard.sealed_home.take());
+                guard.cleanup = Some(cleanup.clone());
+                let close_result = tokio::time::timeout(
+                    self.timeouts.shutdown_duration(),
+                    cleanup,
+                )
+                .await;
+                match close_result {
+                    Ok(Ok(())) => {
+                        // Consumed confirmed close: clear the record so a
+                        // later shutdown owns the sealed harness's close.
+                        guard.cleanup = None;
+                    }
+                    Ok(Err(message)) => {
+                        guard.closed = true;
+                        return Err(HostError::cleanup_unconfirmed(message)
+                            .with_provider(self.provider_id.clone())
+                            .with_session(session.session_id.clone()));
+                    }
+                    Err(_elapsed) => {
+                        guard.closed = true;
+                        return Err(HostError::cleanup_unconfirmed(
+                            "ordinary dsh harness close was not confirmed within the shutdown \
+                             budget; the cleanup owner is retained",
+                        )
+                        .with_provider(self.provider_id.clone())
+                        .with_session(session.session_id.clone()));
+                    }
+                }
+                let (sealed, child) = self
+                    .start_sealed_harness(&cwd, &executable)
+                    .await
+                    .map_err(|error| error.with_session(session.session_id.clone()))?;
+                guard.harness = Some(sealed);
+                guard.sealed_home = Some(child);
+                guard.recipe = Recipe::SealedDenyAll;
+                tracing::info!(
+                    session_id = %session.session_id,
+                    provider_id = %self.provider_id,
+                    "dsh session switched to the sealed deny_all recipe"
+                );
+            }
+            // The prompt is admitted: lock the recipe against later scope
+            // changes (first admitted prompt only).
+            guard.policy_locked = true;
+        }
 
         tracing::info!(
             session_id = %session.session_id,
@@ -636,7 +1151,7 @@ impl ProviderAdapter for DshNativeProvider {
             "dsh turn started"
         );
 
-        Ok(self.build_event_stream(op_id, session.session_id.clone(), prompt_text, cwd))
+        Ok(self.build_event_stream(op_id, session.session_id.clone(), prompt_text, state))
     }
 
     async fn cancel(
@@ -658,40 +1173,62 @@ impl ProviderAdapter for DshNativeProvider {
     }
 
     async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()> {
-        // Removing the session first stops new executes; the per-session
-        // lock is then awaited. An in-flight run holds it, so shutdown can
-        // wait up to `prompt_ms` behind an active turn (N-1): the SDK owns
-        // the runtime child and exposes no kill, so there is nothing to
-        // signal — the wait is bounded by the turn timeout, never
-        // unbounded. The harness is then closed via the SDK close ladder,
-        // which reaps the child even when a ladder tier reports an error.
-        let removed = {
-            let mut sessions = self.sessions.write().await;
-            sessions.remove(&session.session_id)
+        // P0 T2 lifecycle ownership: the session/cleanup record stays
+        // registered until a CONFIRMED close. The close runs as the
+        // retained shared owner (a waiter timeout never cancels it and
+        // never deletes the session or sealed-home lease); the caller waits
+        // at most `shutdown_ms` — the SDK ladder is 1+6+3s plus an
+        // unbounded final kill/wait, so no bounded-reap claim is made.
+        // Close errors propagate; concurrent/retried shutdowns observe the
+        // same completion. Only a confirmed close removes the session.
+        let state = {
+            let sessions = self.sessions.read().await;
+            sessions.get(&session.session_id).map(|ns| Arc::clone(&ns.state))
         };
-        if let Some(native_session) = removed {
-            let mut guard = native_session.state.lock().await;
+        let Some(state) = state else {
+            // A previous shutdown already observed the confirmed close and
+            // removed the record: this is the retained completed result,
+            // never a new reap of an already-closed client.
+            return Ok(());
+        };
+        let cleanup = {
+            let mut guard = state.lock().await;
             guard.closed = true;
-            if let Some(mut harness) = guard.harness.take() {
-                if let Err(_error) = harness.close().await {
-                    tracing::warn!(
-                        provider_id = %self.provider_id,
-                        session_id = %session.session_id,
-                        // Safe diagnostics (v1.188 P0): never log the raw
-                        // SDK error — its Display can embed stderr tails.
-                        "dsh close ladder reported an error; the runtime \
-                         child is still reaped",
-                    );
+            match &guard.cleanup {
+                Some(cleanup) => cleanup.clone(),
+                None => {
+                    let cleanup = start_close(guard.harness.take(), guard.sealed_home.take());
+                    guard.cleanup = Some(cleanup.clone());
+                    cleanup
                 }
             }
+        };
+        match tokio::time::timeout(self.timeouts.shutdown_duration(), cleanup).await {
+            Ok(Ok(())) => {
+                let mut sessions = self.sessions.write().await;
+                sessions.remove(&session.session_id);
+                tracing::info!(
+                    session_id = %session.session_id,
+                    provider_id = %self.provider_id,
+                    "dsh session shut down (close confirmed; session record removed)"
+                );
+                Ok(())
+            }
+            Ok(Err(message)) => {
+                // Propagate the failure; the session record and lease stay
+                // registered and a retry observes this same completion.
+                Err(HostError::cleanup_unconfirmed(message)
+                    .with_provider(self.provider_id.clone())
+                    .with_session(session.session_id.clone()))
+            }
+            Err(_elapsed) => Err(HostError::cleanup_unconfirmed(format!(
+                "dsh session close was not confirmed within {}ms; the cleanup owner, session \
+                 record and home lease are retained",
+                self.timeouts.shutdown_ms
+            ))
+            .with_provider(self.provider_id.clone())
+            .with_session(session.session_id.clone())),
         }
-
-        tracing::info!(
-            session_id = %session.session_id,
-            provider_id = %self.provider_id,
-            "dsh session shut down (harness closed via the SDK close ladder)"
-        );
-        Ok(())
     }
 
     fn capabilities(&self) -> CapabilityDescriptor {
@@ -712,7 +1249,7 @@ mod tests {
     #![allow(clippy::await_holding_lock)]
 
     use super::*;
-    use crate::capability::model::{FinishReason, HostOperation, LaunchSpec};
+    use crate::capability::model::{FinishReason, HostOperation, LaunchSpec, McpServerConfig};
 
     const MOCK_DSH_AGENT: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -731,6 +1268,99 @@ mod tests {
             },
             mcp_servers: vec![],
         }
+    }
+
+    /// Hermetic environment for stub-backed providers: the request log and
+    /// an isolated DSH_HOME (the SDK creates/resolves DSH_HOME at harness
+    /// start; the caller-env route keeps tests away from any real home).
+    fn stub_env(req_log: &Path, home: &Path) -> HashMap<String, String> {
+        HashMap::from([
+            (
+                "REQ_LOG".to_string(),
+                req_log.to_string_lossy().into_owned(),
+            ),
+            (
+                "DSH_HOME".to_string(),
+                home.to_string_lossy().into_owned(),
+            ),
+        ])
+    }
+
+    /// A provider backed by the python SDK-wire fixture as its explicit
+    /// executable (empty native args).
+    fn stub_provider(provider_id: &str, env: HashMap<String, String>) -> DshNativeProvider {
+        DshNativeProvider::new(
+            ProviderId::new(provider_id),
+            "Test".to_string(),
+            Some(MOCK_DSH_AGENT.to_string()),
+            Vec::new(),
+            env,
+            TimeoutConfig::default(),
+        )
+        .expect("empty native args are accepted")
+    }
+
+    fn stub_provider_with_timeouts(
+        provider_id: &str,
+        env: HashMap<String, String>,
+        timeouts: TimeoutConfig,
+    ) -> DshNativeProvider {
+        DshNativeProvider::new(
+            ProviderId::new(provider_id),
+            "Test".to_string(),
+            Some(MOCK_DSH_AGENT.to_string()),
+            Vec::new(),
+            env,
+            timeouts,
+        )
+        .expect("empty native args are accepted")
+    }
+
+    /// Launch under the env lock: launch() now initializes the runtime
+    /// eagerly, spawning the python fixture whose `#!/usr/bin/env python3`
+    /// shebang resolves python3 through PATH at execve time (see lib.rs
+    /// test_support).
+    #[allow(clippy::future_not_send)]
+    async fn launch_hermetic(provider: &DshNativeProvider) -> ManagedSessionHandle {
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
+        provider.launch(launch_spec()).await.expect("launch")
+    }
+
+    /// All REQ_LOG entries as parsed JSON values.
+    fn req_log_entries(req_log: &Path) -> Vec<serde_json::Value> {
+        std::fs::read_to_string(req_log)
+            .expect("REQ_LOG written")
+            .lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect()
+    }
+
+    /// The `_spawn` records (one per runtime process the provider started).
+    fn spawn_records(entries: &[serde_json::Value]) -> Vec<serde_json::Value> {
+        entries
+            .iter()
+            .filter(|value| value["method"] == "_spawn")
+            .cloned()
+            .collect()
+    }
+
+    /// The ordered wire-method sequence (including `_spawn` records).
+    fn method_sequence(entries: &[serde_json::Value]) -> Vec<String> {
+        entries
+            .iter()
+            .filter_map(|value| value["method"].as_str().map(str::to_string))
+            .collect()
+    }
+
+    fn argv_of(spawn: &serde_json::Value) -> Vec<String> {
+        spawn["argv"]
+            .as_array()
+            .expect("argv array")
+            .iter()
+            .filter_map(|arg| arg.as_str().map(str::to_string))
+            .collect()
     }
 
     async fn collect_events(stream: HostEventStream) -> Vec<HostEvent> {
@@ -757,9 +1387,6 @@ mod tests {
         handle: &ManagedSessionHandle,
         text: &str,
     ) -> Vec<HostEvent> {
-        // Serialize with the env-mutating discovery tests: the stub is
-        // spawned via `#!/usr/bin/env python3`, which resolves python3
-        // through PATH at execve time (see lib.rs test_support).
         let _env_lock = crate::test_support::PROCESS_ENV_LOCK
             .lock()
             .expect("lock env tests");
@@ -779,6 +1406,40 @@ mod tests {
         collect_events(stream).await
     }
 
+    /// The all-false deny_all scope (architecture §3.4 selection).
+    const fn deny_all_scope() -> PromptPermissionScope {
+        PromptPermissionScope {
+            allow_read: false,
+            allow_write: false,
+            allow_destructive: false,
+        }
+    }
+
+    /// Execute one prompt with an explicit permission scope.
+    #[allow(clippy::future_not_send)]
+    async fn run_turn_scoped(
+        provider: &DshNativeProvider,
+        handle: &ManagedSessionHandle,
+        text: &str,
+        scope: Option<PromptPermissionScope>,
+    ) -> HostResult<Vec<HostEvent>> {
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
+        let stream = provider.execute(
+            handle,
+            HostOperation::Prompt {
+                op_id: HostOperationId::new(),
+                content: vec![HostContentBlock::Text {
+                    text: text.to_string(),
+                }],
+                permission_scope: scope,
+            },
+        )
+        .await?;
+        Ok(collect_events(stream).await)
+    }
+
     /// Read the provider's stored DSH session id for a launched session
     /// (short registry read, then the per-session lock — same order as the
     /// production paths).
@@ -796,6 +1457,72 @@ mod tests {
             .await
             .dsh_session_id
             .clone()
+    }
+
+    /// RAII guard replacing `PATH` with a single directory on construction
+    /// and restoring the previous value on drop (mirrors the
+    /// discovery/path_scan.rs test guard).
+    struct PathGuard {
+        previous: Option<String>,
+    }
+
+    impl PathGuard {
+        fn isolate(dir: &std::path::Path) -> Self {
+            let previous = std::env::var("PATH").ok();
+            let new_path = std::env::join_paths([dir.to_path_buf()]).expect("valid PATH");
+            std::env::set_var("PATH", new_path);
+            Self { previous }
+        }
+    }
+
+    impl Drop for PathGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(p) => std::env::set_var("PATH", p),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+
+    /// RAII guard replacing `DSH_RUNTIME_BIN` on construction and restoring
+    /// the previous value on drop.
+    struct DshRuntimeBinGuard {
+        previous: Option<String>,
+    }
+
+    impl DshRuntimeBinGuard {
+        fn set(value: &Path) -> Self {
+            let previous = std::env::var(DSH_RUNTIME_BIN_ENV).ok();
+            std::env::set_var(DSH_RUNTIME_BIN_ENV, value);
+            Self { previous }
+        }
+        fn remove() -> Self {
+            let previous = std::env::var(DSH_RUNTIME_BIN_ENV).ok();
+            std::env::remove_var(DSH_RUNTIME_BIN_ENV);
+            Self { previous }
+        }
+    }
+
+    impl Drop for DshRuntimeBinGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => std::env::set_var(DSH_RUNTIME_BIN_ENV, value),
+                None => std::env::remove_var(DSH_RUNTIME_BIN_ENV),
+            }
+        }
+    }
+
+    /// Write an executable stub file (resolution tests only need the
+    /// executable bit, not a working runtime).
+    fn write_executable(path: &Path) {
+        std::fs::write(path, "#!/bin/sh\necho stub\n").expect("write stub");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(path).expect("stat").permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(path, perms).expect("chmod +x");
+        }
     }
 
     #[test]
@@ -823,81 +1550,331 @@ mod tests {
     }
 
     #[test]
-    fn default_config_dsh_bin() {
+    fn default_config_has_no_explicit_runtime_override() {
+        // P0 T2: the default provider carries NO explicit override — the
+        // resolution chain (nonblank parent DSH_RUNTIME_BIN → PATH `dsh`)
+        // decides at launch/probe time. The retired `dsh-jsonrpc-agent`
+        // helper name appears nowhere.
         let provider = DshNativeProvider::default_config();
-        assert_eq!(
-            provider.dsh_bin.as_deref(),
-            Some("dsh-jsonrpc-agent"),
-            "default config spawns the runtime by command name via PATH"
-        );
+        assert!(provider.dsh_bin.is_none());
         assert!(provider.env.is_empty());
+        assert_eq!(DEFAULT_DSH_COMMAND, "dsh");
     }
 
-    #[tokio::test]
-    async fn probe_unavailable_when_command_not_found_and_env_unset() {
-        // Serialize with the env-mutating discovery tests: this probe and
-        // its assertion both read the process-global `DSH_RUNTIME_BIN`.
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
-        let provider = DshNativeProvider::new(
-            ProviderId::new("nonexistent-dsh-xyz"),
-            "Fake".to_string(),
-            Some("nonexistent_dsh_runtime_xyz_12345".to_string()),
+    #[test]
+    fn nonempty_native_args_are_rejected_at_construction() {
+        let result = DshNativeProvider::new(
+            ProviderId::new("args-dsh"),
+            "Args".to_string(),
+            None,
+            vec!["--verbose".to_string()],
             HashMap::new(),
             TimeoutConfig::default(),
         );
+        assert!(
+            matches!(result, Err(HostError::CapabilityUnsupported { .. })),
+            "unsupported native args must fail closed at construction"
+        );
+    }
 
-        let health = provider
-            .probe(crate::capability::model::ProbeRequest { timeout_ms: 5000 })
-            .await
-            .expect("probe should succeed");
+    // ── Executable resolution (P0 T2) ────────────────────────────────────
 
-        if std::env::var_os("DSH_RUNTIME_BIN").is_some_and(|value| !value.is_empty()) {
-            // The env route (PD-4) counts as present even when PATH lacks
-            // the name — the environment decides, not this test.
+    #[test]
+    fn resolve_explicit_absolute_path_is_canonicalized() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let bin = temp_dir.path().join("dsh-custom");
+        write_executable(&bin);
+        let resolved =
+            resolve_dsh_executable(Some(bin.to_string_lossy().as_ref())).expect("absolute path");
+        assert!(resolved.is_absolute());
+        assert_eq!(
+            resolved,
+            std::fs::canonicalize(&bin).expect("canonical"),
+            "an explicit absolute path is preserved (canonicalized)"
+        );
+    }
+
+    #[test]
+    fn resolve_relative_path_with_separator_is_rejected() {
+        for value in ["./dsh", "bin/dsh", "../dsh", "some\\dsh"] {
             assert!(
-                health.available,
-                "DSH_RUNTIME_BIN is set; probe must report available"
-            );
-        } else {
-            assert!(!health.available);
-            assert!(
-                health.message.unwrap().contains("not found"),
-                "unavailable message must name the missing command"
+                resolve_dsh_executable(Some(value)).is_err(),
+                "relative path {value:?} must be rejected, never resolved against a daemon cwd"
             );
         }
     }
 
-    #[tokio::test]
-    async fn probe_available_when_env_route_set() {
-        // Serialize with the env-mutating discovery tests: this probe and
-        // its assertion both read the process-global `DSH_RUNTIME_BIN`.
+    #[test]
+    fn resolve_explicit_bare_command_uses_path() {
         let _env_lock = crate::test_support::PROCESS_ENV_LOCK
             .lock()
             .expect("lock env tests");
-        // The env route is only asserted when it is actually set; the test
-        // is a no-op otherwise (the unavailable case above covers the rest).
-        if std::env::var_os("DSH_RUNTIME_BIN").is_some_and(|value| !value.is_empty()) {
-            let provider = DshNativeProvider::new(
-                ProviderId::new("env-dsh-xyz"),
-                "Env".to_string(),
-                Some("nonexistent_dsh_runtime_xyz_12345".to_string()),
-                HashMap::new(),
-                TimeoutConfig::default(),
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let bin = temp_dir.path().join("dsh-custom");
+        write_executable(&bin);
+        let _path_guard = PathGuard::isolate(temp_dir.path());
+        let _bin_guard = DshRuntimeBinGuard::remove();
+
+        let resolved = resolve_dsh_executable(Some("dsh-custom")).expect("bare command");
+        assert_eq!(resolved, std::fs::canonicalize(&bin).expect("canonical"));
+
+        assert!(
+            resolve_dsh_executable(Some("definitely-missing-dsh-xyz")).is_err(),
+            "a missing bare command fails without fallback"
+        );
+    }
+
+    #[test]
+    fn resolve_invalid_explicit_override_never_falls_back() {
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let env_bin = temp_dir.path().join("env-dsh");
+        write_executable(&env_bin);
+        // Even with a VALID DSH_RUNTIME_BIN and a PATH `dsh`, an invalid
+        // explicit override fails without fallback to either.
+        let path_bin = temp_dir.path().join("dsh");
+        write_executable(&path_bin);
+        let _path_guard = PathGuard::isolate(temp_dir.path());
+        let _bin_guard = DshRuntimeBinGuard::set(&env_bin);
+
+        assert!(
+            resolve_dsh_executable(Some("/definitely/missing/dsh")).is_err(),
+            "invalid explicit absolute override must fail without fallback"
+        );
+        assert!(
+            resolve_dsh_executable(Some("definitely-missing-dsh-xyz")).is_err(),
+            "invalid explicit bare override must fail without fallback"
+        );
+    }
+
+    #[test]
+    fn resolve_env_route_then_path_fallback() {
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let env_bin = temp_dir.path().join("env-dsh");
+        write_executable(&env_bin);
+
+        // Nonblank DSH_RUNTIME_BIN wins over PATH when no explicit command.
+        {
+            let _path_guard = PathGuard::isolate(temp_dir.path());
+            let _bin_guard = DshRuntimeBinGuard::set(&env_bin);
+            let resolved = resolve_dsh_executable(None).expect("env route");
+            assert_eq!(resolved, std::fs::canonicalize(&env_bin).expect("canonical"));
+        }
+
+        // An invalid env override fails closed — no PATH fallback.
+        {
+            let empty_dir = temp_dir.path().join("empty");
+            std::fs::create_dir_all(&empty_dir).expect("empty dir");
+            let path_bin = temp_dir.path().join("dsh");
+            write_executable(&path_bin);
+            let _path_guard = PathGuard::isolate(temp_dir.path());
+            let _bin_guard = DshRuntimeBinGuard::set(Path::new("/definitely/missing/dsh"));
+            assert!(
+                resolve_dsh_executable(None).is_err(),
+                "an invalid DSH_RUNTIME_BIN override must fail without PATH fallback"
             );
-            let health = provider
-                .probe(crate::capability::model::ProbeRequest { timeout_ms: 5000 })
-                .await
-                .expect("probe should succeed");
-            assert!(health.available);
+        }
+
+        // PATH `dsh` is the last resort.
+        {
+            let path_bin = temp_dir.path().join("dsh");
+            let _path_guard = PathGuard::isolate(temp_dir.path());
+            let _bin_guard = DshRuntimeBinGuard::remove();
+            let resolved = resolve_dsh_executable(None).expect("PATH dsh");
+            assert_eq!(resolved, std::fs::canonicalize(&path_bin).expect("canonical"));
+
+            let empty_dir = temp_dir.path().join("nothing-here");
+            std::fs::create_dir_all(&empty_dir).expect("empty dir");
+            let _empty_path_guard = PathGuard::isolate(&empty_dir);
+            assert!(
+                resolve_dsh_executable(None).is_err(),
+                "no override and no PATH `dsh` must fail"
+            );
         }
     }
 
+    #[test]
+    fn resolve_blank_values_count_as_absent() {
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let env_bin = temp_dir.path().join("env-dsh");
+        write_executable(&env_bin);
+        let _path_guard = PathGuard::isolate(temp_dir.path());
+        let _bin_guard = DshRuntimeBinGuard::set(&env_bin);
+        // SDK truthiness parity: a blank explicit value counts as absent,
+        // so the env route applies.
+        let resolved = resolve_dsh_executable(Some("   ")).expect("blank explicit is absent");
+        assert_eq!(resolved, std::fs::canonicalize(&env_bin).expect("canonical"));
+    }
+
+    // ── Sealed deny_all asset and home provisioning (architecture §3.4) ──
+
+    /// The embedded no-tools asset is exactly upstream sdk-minimal's closed
+    /// service allowlist minus its three tool producers, with the Nexus
+    /// pins (profile sdk, tools native, agents empty, retry maxRetries 0).
+    #[test]
+    fn deny_all_asset_is_the_closed_allowlist() {
+        let ids: Vec<&str> = DENY_ALL_PATCH
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("- id: "))
+            .collect();
+        let mut sorted = ids.clone();
+        sorted.sort_unstable();
+        let mut expected = vec![
+            "agent",
+            "agent-invariant",
+            "agent-loop",
+            "agent-loop-invariant",
+            "deepseek-llm-api-extensions",
+            "fs-local",
+            "invariants",
+            "jobs",
+            "llm",
+            "llm-deepseek",
+            "llm-retry",
+            "plugin-package-inventory-deepseek",
+            "pty",
+            "sandbox",
+            "sandbox-policy",
+            "sdk-app-startup",
+            "sdk-jsonrpc-server",
+            "session",
+            "session-invariant",
+            "session-log-deepseek",
+            "session-projection",
+            "session-title",
+            "sessions",
+            "scope-invariant",
+            "subprocess",
+            "system-prompt",
+            "terminal-bash",
+            "terminal-pwsh",
+            "timer",
+            "tools",
+        ];
+        expected.sort_unstable();
+        assert_eq!(
+            sorted, expected,
+            "the retained service IDs are exactly the architecture §3.4 allowlist"
+        );
+        for forbidden in ["persistent-bash", "persistent-pwsh", "str-replace-editor"] {
+            assert!(
+                !ids.contains(&forbidden),
+                "tool producer {forbidden} must not be a retained service id"
+            );
+        }
+        // The Nexus pins on the upstream tree.
+        assert!(DENY_ALL_PATCH.contains("profile: sdk"), "sdk-app-startup profile pin");
+        assert!(DENY_ALL_PATCH.contains("mode: native"), "tools native pin");
+        assert!(DENY_ALL_PATCH.contains("agents: []"), "empty agents pin");
+        assert!(DENY_ALL_PATCH.contains("maxRetries: 0"), "provider retry pin");
+        // Upstream platform conditions survive verbatim.
+        assert!(DENY_ALL_PATCH.contains("process.platform === 'win32'"));
+        assert!(DENY_ALL_PATCH.contains("process.platform !== 'win32'"));
+    }
+
+    #[test]
+    fn provision_sealed_home_layout_and_exclusivity() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let child = temp_dir.path().join("nexus").join("abc123");
+        provision_sealed_home_at(&child).expect("fresh child provisions");
+
+        assert_eq!(
+            std::fs::read_to_string(child.join("profiles/sdk/package.json"))
+                .expect("manifest"),
+            format!("{SEALED_PROFILE_MANIFEST}\n"),
+            "the sdk manifest is the exact empty-bundles startup-frozen tuple"
+        );
+        assert_eq!(
+            std::fs::read_to_string(child.join("profiles/sdk/cordis.patch.yml"))
+                .expect("profile patch"),
+            EMPTY_PATCH_LAYER,
+            "the profile patch layer is empty"
+        );
+        assert_eq!(
+            std::fs::read_to_string(child.join("cordis.patch.yml")).expect("home patch"),
+            EMPTY_PATCH_LAYER,
+            "the home patch layer is empty"
+        );
+        assert_eq!(
+            std::fs::read_to_string(child.join(DENY_ALL_PATCH_FILENAME)).expect("patch"),
+            DENY_ALL_PATCH,
+            "the copied patch is byte-identical to the embedded asset"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&child).expect("stat").permissions().mode() & 0o777;
+            assert_eq!(mode, 0o700, "the child home is owner-only");
+        }
+
+        // Existing path is rejected (exclusivity).
+        assert!(
+            provision_sealed_home_at(&child).is_err(),
+            "an existing child path must be rejected"
+        );
+
+        // A symlink at the child path is rejected.
+        #[cfg(unix)]
+        let link = temp_dir.path().join("nexus").join("link456");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(temp_dir.path(), &link).expect("symlink");
+            assert!(
+                provision_sealed_home_at(&link).is_err(),
+                "a symlink child path must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn selected_dsh_home_follows_sdk_precedence() {
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
+        // Caller env DSH_HOME wins over the parent value.
+        let previous = std::env::var("DSH_HOME").ok();
+        std::env::set_var("DSH_HOME", "/parent/dsh-home");
+        let caller = HashMap::from([("DSH_HOME".to_string(), "/caller/dsh-home".to_string())]);
+        assert_eq!(
+            selected_dsh_home(&caller),
+            PathBuf::from("/caller/dsh-home"),
+            "caller env DSH_HOME outranks the parent value"
+        );
+        // Parent DSH_HOME is used when the caller env is absent; a blank
+        // caller value falls through (SDK parity).
+        let blank = HashMap::from([("DSH_HOME".to_string(), "   ".to_string())]);
+        assert_eq!(
+            selected_dsh_home(&blank),
+            PathBuf::from("/parent/dsh-home"),
+            "a blank caller DSH_HOME falls through to the parent value"
+        );
+        match previous {
+            Some(value) => std::env::set_var("DSH_HOME", value),
+            None => std::env::remove_var("DSH_HOME"),
+        }
+    }
+
+    // ── Provider behavior over the SDK-wire fixture ─────────────────────
+
     #[tokio::test]
     async fn non_prompt_operation_is_capability_unsupported() {
-        let provider = DshNativeProvider::default_config();
-        let handle = provider.launch(launch_spec()).await.expect("launch");
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let provider = stub_provider(
+            "test-dsh-nonprompt",
+            stub_env(
+                &temp_dir.path().join("reqs.jsonl"),
+                &temp_dir.path().join("dsh-home"),
+            ),
+        );
+        let handle = launch_hermetic(&provider).await;
 
         let result = provider
             .execute(
@@ -916,8 +1893,15 @@ mod tests {
 
     #[tokio::test]
     async fn empty_prompt_is_protocol_error() {
-        let provider = DshNativeProvider::default_config();
-        let handle = provider.launch(launch_spec()).await.expect("launch");
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let provider = stub_provider(
+            "test-dsh-empty",
+            stub_env(
+                &temp_dir.path().join("reqs.jsonl"),
+                &temp_dir.path().join("dsh-home"),
+            ),
+        );
+        let handle = launch_hermetic(&provider).await;
 
         let result = provider
             .execute(
@@ -934,6 +1918,28 @@ mod tests {
             result,
             Err(HostError::ProviderProtocolError { .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn mcp_injection_is_rejected_at_launch() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let provider = stub_provider(
+            "test-dsh-mcp",
+            stub_env(
+                &temp_dir.path().join("reqs.jsonl"),
+                &temp_dir.path().join("dsh-home"),
+            ),
+        );
+        let mut spec = launch_spec();
+        spec.mcp_servers = vec![McpServerConfig::Http {
+            name: "injected".to_string(),
+            url: "http://127.0.0.1:9/".to_string(),
+        }];
+        let result = provider.launch(spec).await;
+        assert!(
+            matches!(result, Err(HostError::CapabilityUnsupported { .. })),
+            "injected MCP servers must fail closed at launch: {result:?}"
+        );
     }
 
     #[tokio::test]
@@ -964,8 +1970,15 @@ mod tests {
 
     #[tokio::test]
     async fn cancel_is_honest_noop() {
-        let provider = DshNativeProvider::default_config();
-        let handle = provider.launch(launch_spec()).await.expect("launch");
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let provider = stub_provider(
+            "test-dsh-cancel",
+            stub_env(
+                &temp_dir.path().join("reqs.jsonl"),
+                &temp_dir.path().join("dsh-home"),
+            ),
+        );
+        let handle = launch_hermetic(&provider).await;
 
         provider
             .cancel(&handle, HostOperationId::new())
@@ -973,26 +1986,29 @@ mod tests {
             .expect("cancel must be an honest Ok no-op (AR-6)");
     }
 
+    /// Confirmed close: shutdown removes the session record only after the
+    /// SDK close completes; a later execute fails and the wire log shows
+    /// the shutdown request. The launch happens under the env lock because
+    /// it initializes (spawns) the fixture eagerly.
     #[tokio::test]
-    async fn shutdown_without_harness_ok() {
-        let provider = DshNativeProvider::default_config();
-        let handle = provider.launch(launch_spec()).await.expect("launch");
+    async fn shutdown_confirmed_close_removes_session_and_blocks_new_execute() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = temp_dir.path().join("reqs.jsonl");
+        let provider = stub_provider(
+            "test-dsh-shutdown",
+            stub_env(&req_log, &temp_dir.path().join("dsh-home")),
+        );
+        let handle = launch_hermetic(&provider).await;
 
-        provider
-            .shutdown(handle)
-            .await
-            .expect("shutdown of an unstarted session must succeed");
-    }
-
-    #[tokio::test]
-    async fn shutdown_removes_session_and_blocks_new_execute() {
-        let provider = DshNativeProvider::default_config();
-        let handle = provider.launch(launch_spec()).await.expect("launch");
-
-        provider
-            .shutdown(handle.clone())
-            .await
-            .expect("shutdown must succeed");
+        {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+                .lock()
+                .expect("lock env tests");
+            provider
+                .shutdown(handle.clone())
+                .await
+                .expect("shutdown must succeed on a confirmed close");
+        }
 
         let result = provider
             .execute(
@@ -1009,45 +2025,101 @@ mod tests {
 
         assert!(
             matches!(result, Err(HostError::InternalHostError { .. })),
-            "execute after shutdown must fail"
+            "execute after a confirmed shutdown must fail"
+        );
+        let methods = method_sequence(&req_log_entries(&req_log));
+        assert!(
+            methods.contains(&"shutdown".to_string()),
+            "the runtime saw the cooperative shutdown request: {methods:?}"
+        );
+        // A retried shutdown observes the retained completed result.
+        provider
+            .shutdown(handle)
+            .await
+            .expect("shutdown after a confirmed close observes the same completion");
+    }
+
+    /// A caller-side close-wait timeout does NOT cancel the retained
+    /// cleanup task or remove the session (P0 T2): the first shutdown
+    /// returns cleanup-unconfirmed while the SDK close ladder is still in
+    /// flight (the fixture delays its shutdown reply), the session record
+    /// survives, and a retried shutdown observes the same completion — now
+    /// confirmed — and removes the record.
+    #[tokio::test]
+    async fn shutdown_waiter_timeout_retains_cleanup_owner_and_session() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = temp_dir.path().join("reqs.jsonl");
+        let mut env = stub_env(&req_log, &temp_dir.path().join("dsh-home"));
+        env.insert("SHUTDOWN_DELAY_MS".to_string(), "400".to_string());
+        let provider = stub_provider_with_timeouts(
+            "test-dsh-slow-close",
+            env,
+            TimeoutConfig {
+                shutdown_ms: 50,
+                ..TimeoutConfig::default()
+            },
+        );
+        let handle = launch_hermetic(&provider).await;
+
+        let first = {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+                .lock()
+                .expect("lock env tests");
+            provider.shutdown(handle.clone()).await
+        };
+        assert!(
+            matches!(first, Err(HostError::CleanupUnconfirmed { .. })),
+            "a waiter timeout must be cleanup-unconfirmed, never success: {first:?}"
+        );
+        // The session record was NOT removed before the confirmed close.
+        {
+            let sessions = provider.sessions.read().await;
+            assert!(
+                sessions.contains_key(&handle.session_id),
+                "the session record must survive an unconfirmed close"
+            );
+        }
+
+        // Let the fixture's delayed reply land so the retained cleanup task
+        // completes, then retry: the SAME completion is observed.
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+        {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+                .lock()
+                .expect("lock env tests");
+            provider
+                .shutdown(handle.clone())
+                .await
+                .expect("the retained close completes and the retry observes it");
+        }
+        let sessions = provider.sessions.read().await;
+        assert!(
+            !sessions.contains_key(&handle.session_id),
+            "a confirmed close removes the session record"
         );
     }
 
-    // ── B-4 / N-3: fake `dsh-jsonrpc-agent` stub coverage ────────────────
-
-    /// End-to-end success arm over the fixture stub (B-4): one turn maps
-    /// to exactly one `MessageDelta(final_response)` + one terminal
-    /// `OpFinished`, and the wire `session/prompt` carries the provider's
-    /// stored DSH session id.
+    /// End-to-end success arm over the fixture stub: `launch()` initializes
+    /// the ordinary runtime with exactly `--profile sdk`; one turn maps to
+    /// exactly one `OpStarted`, one `MessageDelta(final_response)` and one
+    /// terminal `OpFinished`; the wire `session/prompt` carries the
+    /// provider's stored DSH session id.
     #[tokio::test]
     async fn dsh_turn_completes_via_stub() {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
         let req_log = req_log_dir.path().join("reqs.jsonl");
-        let provider = DshNativeProvider::new(
-            ProviderId::new("test-dsh-stub"),
-            "Test".to_string(),
-            Some(MOCK_DSH_AGENT.to_string()),
-            HashMap::from([
-                (
-                    "REQ_LOG".to_string(),
-                    req_log.to_string_lossy().into_owned(),
-                ),
-                // SDK 0.2 creates/resolves DSH_HOME at harness start; keep
-                // the test hermetic via the documented caller-env route
-                // instead of writing the developer's real ~/.dsh.
-                (
-                    "DSH_HOME".to_string(),
-                    req_log_dir.path().join("dsh-home").to_string_lossy().into_owned(),
-                ),
-            ]),
-            TimeoutConfig::default(),
-        );
-        let handle = provider.launch(launch_spec()).await.expect("launch");
+        let dsh_home = req_log_dir.path().join("dsh-home");
+        let provider = stub_provider("test-dsh-stub", stub_env(&req_log, &dsh_home));
+        let handle = launch_hermetic(&provider).await;
         let stored_before = stored_dsh_session_id(&provider, &handle.session_id).await;
 
         let events = run_turn(&provider, &handle, "hello dsh").await;
 
         assert_eq!(terminal_count(&events), 1, "exactly one terminal event");
+        assert!(
+            matches!(events.first(), Some(HostEvent::OpStarted(_))),
+            "exactly one OpStarted precedes content: {events:?}"
+        );
         let deltas: Vec<&str> = events
             .iter()
             .filter_map(|e| match e {
@@ -1069,17 +2141,39 @@ mod tests {
             "turn/end kind 'completed' maps to EndTurn"
         );
 
+        let entries = req_log_entries(&req_log);
+        // Exactly one runtime was spawned, with exactly the ordinary argv
+        // and the caller-env DSH_HOME.
+        let spawns = spawn_records(&entries);
+        assert_eq!(spawns.len(), 1, "one runtime spawn: {entries:?}");
+        assert_eq!(
+            argv_of(&spawns[0]),
+            vec!["--profile".to_string(), "sdk".to_string()],
+            "ordinary argv is exactly --profile sdk"
+        );
+        assert_eq!(
+            spawns[0]["dsh_home"].as_str(),
+            Some(dsh_home.to_string_lossy().as_ref()),
+            "the child env carries the caller-env DSH_HOME"
+        );
+        // Initialize precedes the single prompt (eager launch init).
+        let methods = method_sequence(&entries);
+        assert_eq!(
+            methods,
+            vec![
+                "_spawn".to_string(),
+                "initialize".to_string(),
+                "session/prompt".to_string()
+            ],
+            "initialize-at-launch precedes the one wire prompt: {methods:?}"
+        );
         // The wire prompt must use the stored session id (multi-turn
         // continuity, AR-2/AR-5).
-        let log = std::fs::read_to_string(&req_log).expect("REQ_LOG written");
-        let prompts: Vec<serde_json::Value> = log
-            .lines()
-            .filter_map(|line| {
-                let value: serde_json::Value = serde_json::from_str(line).ok()?;
-                (value["method"] == "session/prompt").then_some(value)
-            })
+        let prompts: Vec<&serde_json::Value> = entries
+            .iter()
+            .filter(|value| value["method"] == "session/prompt")
             .collect();
-        assert_eq!(prompts.len(), 1, "one prompt on the wire: {log}");
+        assert_eq!(prompts.len(), 1);
         assert_eq!(
             prompts[0]["sessionId"].as_str(),
             Some(stored_before.as_str()),
@@ -1087,8 +2181,8 @@ mod tests {
         );
     }
 
-    /// Timeout arm over the fixture stub (B-4 + B-3): with the stub
-    /// holding the turn open, the provider timeout emits exactly one
+    /// Timeout arm over the fixture stub (B-3): with the stub holding the
+    /// turn open, the provider timeout emits exactly one
     /// `OpFailed(timeout)` AND rotates the stored `dsh_session_id`, so a
     /// retry starts a fresh agent+session pair instead of being spliced
     /// into the abandoned (zombie) turn.
@@ -1100,27 +2194,10 @@ mod tests {
             prompt_ms: 2000,
             ..TimeoutConfig::default()
         };
-        let provider = DshNativeProvider::new(
-            ProviderId::new("test-dsh-timeout"),
-            "Test".to_string(),
-            Some(MOCK_DSH_AGENT.to_string()),
-            HashMap::from([
-                (
-                    "REQ_LOG".to_string(),
-                    req_log.to_string_lossy().into_owned(),
-                ),
-                ("HOLD_TURN".to_string(), "1".to_string()),
-                // SDK 0.2 creates/resolves DSH_HOME at harness start; keep
-                // the test hermetic via the documented caller-env route
-                // instead of writing the developer's real ~/.dsh.
-                (
-                    "DSH_HOME".to_string(),
-                    req_log_dir.path().join("dsh-home").to_string_lossy().into_owned(),
-                ),
-            ]),
-            timeouts,
-        );
-        let handle = provider.launch(launch_spec()).await.expect("launch");
+        let mut env = stub_env(&req_log, &req_log_dir.path().join("dsh-home"));
+        env.insert("HOLD_TURN".to_string(), "1".to_string());
+        let provider = stub_provider_with_timeouts("test-dsh-timeout", env, timeouts);
+        let handle = launch_hermetic(&provider).await;
         let first_id = stored_dsh_session_id(&provider, &handle.session_id).await;
 
         let events = run_turn(&provider, &handle, "slow turn 1").await;
@@ -1155,35 +2232,41 @@ mod tests {
         // At least one prompt must have reached the stub over the wire
         // (the exact count depends on whether a timeout caught the cold
         // harness start, which this test does not need to pin).
-        let log = std::fs::read_to_string(&req_log).expect("REQ_LOG written");
+        let methods = method_sequence(&req_log_entries(&req_log));
         assert!(
-            log.lines().any(|line| line.contains("session/prompt")),
-            "at least one session/prompt must reach the stub: {log}"
+            methods.iter().any(|m| m == "session/prompt"),
+            "at least one session/prompt must reach the stub: {methods:?}"
         );
 
-        provider
-            .shutdown(handle)
-            .await
-            .expect("shutdown with a live harness must succeed");
+        {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+                .lock()
+                .expect("lock env tests");
+            provider
+                .shutdown(handle)
+                .await
+                .expect("shutdown with a live harness must succeed");
+        }
     }
 
-    /// Stream-abort backstop (B-4): a session closed by `shutdown()` before
-    /// the stream's first poll emits exactly one `OpFailed(stream_closed)`
-    /// — no harness is started for a gone session.
+    /// Stream-abort backstop: a session closed by `shutdown()` before the
+    /// stream's first poll emits `OpStarted` then exactly one
+    /// `OpFailed(stream_closed)` — no run happens on a torn-down session.
     #[tokio::test]
     async fn dsh_stream_abort_backstop_when_session_closed_before_run() {
-        let provider = DshNativeProvider::new(
-            ProviderId::new("test-dsh-backstop"),
-            "Test".to_string(),
-            Some(MOCK_DSH_AGENT.to_string()),
-            HashMap::new(),
-            TimeoutConfig::default(),
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let provider = stub_provider(
+            "test-dsh-backstop",
+            stub_env(
+                &temp_dir.path().join("reqs.jsonl"),
+                &temp_dir.path().join("dsh-home"),
+            ),
         );
-        let handle = provider.launch(launch_spec()).await.expect("launch");
+        let handle = launch_hermetic(&provider).await;
 
         // Create the stream while the session exists, then close the
-        // session before the stream is polled — the first poll finds no
-        // session and emits the stream-abort backstop.
+        // session before the stream is polled — the run finds the closed
+        // state and emits the stream-abort backstop.
         let stream = provider
             .execute(
                 &handle,
@@ -1198,10 +2281,19 @@ mod tests {
             .await
             .expect("execute");
 
-        provider.shutdown(handle).await.expect("shutdown");
+        {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+                .lock()
+                .expect("lock env tests");
+            provider.shutdown(handle).await.expect("shutdown");
+        }
 
         let events = collect_events(stream).await;
         assert_eq!(terminal_count(&events), 1);
+        assert!(
+            matches!(events.first(), Some(HostEvent::OpStarted(_))),
+            "OpStarted still precedes the backstop: {events:?}"
+        );
         assert!(
             events.iter().any(
                 |e| matches!(e, HostEvent::OpFailed(f) if f.error_category == "stream_closed")
@@ -1210,42 +2302,299 @@ mod tests {
         );
     }
 
-    /// N-3: the probe's PATH-found branch — a configured runtime binary
-    /// that `which` resolves must probe available, naming the resolved
-    /// path. Uses an absolute path to an executable file so the test is
-    /// deterministic and independent of the process environment (and the
-    /// resolved-path arm wins over any `DSH_RUNTIME_BIN`).
-    #[tokio::test]
-    async fn probe_available_when_dsh_bin_resolves_on_path() {
-        let temp_dir = tempfile::tempdir().expect("temp dir");
-        let bin = temp_dir.path().join("dsh-jsonrpc-agent");
-        std::fs::write(&bin, "#!/bin/sh\necho mock\n").expect("write stub");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&bin).expect("stat").permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&bin, perms).expect("chmod +x");
-        }
+    // ── Probe (P0 T2: both recipes, no model call) ──────────────────────
 
+    /// An invalid explicit override probes unavailable even when
+    /// `DSH_RUNTIME_BIN` points at a working runtime: explicit overrides
+    /// never fall back.
+    #[tokio::test]
+    async fn probe_unavailable_for_invalid_explicit_override() {
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
+        let _bin_guard = DshRuntimeBinGuard::set(Path::new(MOCK_DSH_AGENT));
         let provider = DshNativeProvider::new(
-            ProviderId::new("path-dsh-xyz"),
-            "Path".to_string(),
-            Some(bin.to_string_lossy().into_owned()),
+            ProviderId::new("nonexistent-dsh-xyz"),
+            "Fake".to_string(),
+            Some("nonexistent_dsh_runtime_xyz_12345".to_string()),
+            Vec::new(),
             HashMap::new(),
             TimeoutConfig::default(),
-        );
+        )
+        .expect("empty native args");
 
         let health = provider
             .probe(crate::capability::model::ProbeRequest { timeout_ms: 5000 })
             .await
+            .expect("probe should return a health value");
+
+        assert!(
+            !health.available,
+            "an invalid explicit override must be unavailable without env fallback"
+        );
+    }
+
+    /// Both recipes initialize and close without a model call: the wire log
+    /// shows the ordinary spawn (`--profile sdk` exactly), the sealed spawn
+    /// (`--profile sdk --patch <owned absolute asset>` inside the exclusive
+    /// child home under `<selected home>/nexus/`), and no prompt; the
+    /// probe's sealed lease is deleted after the confirmed close.
+    #[tokio::test]
+    async fn probe_initializes_and_closes_both_recipes() {
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = temp_dir.path().join("reqs.jsonl");
+        let dsh_home = temp_dir.path().join("dsh-home");
+        let provider = stub_provider("test-dsh-probe", stub_env(&req_log, &dsh_home));
+
+        let health = provider
+            .probe(crate::capability::model::ProbeRequest { timeout_ms: 30_000 })
+            .await
             .expect("probe should succeed");
-        assert!(health.available, "PATH-found runtime must probe available");
-        let bin_str = bin.to_string_lossy();
+        assert!(
+            health.available,
+            "both recipes initialize and close: {}",
+            health.message.unwrap_or_default()
+        );
+
+        let entries = req_log_entries(&req_log);
+        let spawns = spawn_records(&entries);
+        assert_eq!(spawns.len(), 2, "ordinary + sealed spawns: {entries:?}");
         assert_eq!(
-            health.message.as_deref(),
-            Some(bin_str.as_ref()),
-            "message names the resolved binary"
+            argv_of(&spawns[0]),
+            vec!["--profile".to_string(), "sdk".to_string()],
+            "ordinary argv is exactly --profile sdk"
+        );
+        let sealed_argv = argv_of(&spawns[1]);
+        assert_eq!(sealed_argv.len(), 4, "sealed argv adds one patch pair");
+        assert_eq!(sealed_argv[0..2], ["--profile".to_string(), "sdk".to_string()]);
+        assert_eq!(sealed_argv[2], "--patch");
+        let patch_path = PathBuf::from(&sealed_argv[3]);
+        assert!(patch_path.is_absolute(), "the patch is an absolute path");
+        let nexus_root = dsh_home.join(SEALED_HOME_SUBDIR);
+        assert!(
+            patch_path.starts_with(&nexus_root),
+            "the patch lives inside the owned child home: {patch_path:?}"
+        );
+        let sealed_home = PathBuf::from(
+            spawns[1]["dsh_home"].as_str().expect("sealed dsh_home logged"),
+        );
+        assert!(
+            sealed_home.starts_with(&nexus_root),
+            "the sealed child home sits under <selected home>/nexus: {sealed_home:?}"
+        );
+        let methods = method_sequence(&entries);
+        assert!(
+            !methods.iter().any(|m| m == "session/prompt"),
+            "the probe never sends a prompt: {methods:?}"
+        );
+        assert!(
+            !sealed_home.exists(),
+            "the confirmed close ended the probe's sealed lease"
+        );
+    }
+
+    // ── deny_all recipe admission (architecture §3.4) ───────────────────
+
+    /// First deny-all prompt: the ordinary harness (initialized at launch)
+    /// is closed through the retained owner, the sealed harness initializes
+    /// with the owned patch inside the exclusive child home, and the prompt
+    /// reaches ONLY the sealed runtime. A second identical-scope prompt
+    /// reuses the sealed recipe (no third spawn). The child-home lease is
+    /// deleted by the confirmed shutdown close.
+    #[tokio::test]
+    async fn deny_all_first_prompt_switches_to_sealed_recipe() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = temp_dir.path().join("reqs.jsonl");
+        let dsh_home = temp_dir.path().join("dsh-home");
+        let provider = stub_provider("test-dsh-denyall", stub_env(&req_log, &dsh_home));
+        let handle = launch_hermetic(&provider).await;
+
+        let events = run_turn_scoped(&provider, &handle, "no tools please", Some(deny_all_scope()))
+            .await
+            .expect("deny_all turn executes");
+        assert!(
+            matches!(events.last(), Some(HostEvent::OpFinished(_))),
+            "the sealed turn completes: {events:?}"
+        );
+
+        // A second identical-scope prompt reuses the sealed recipe.
+        let events = run_turn_scoped(&provider, &handle, "again", Some(deny_all_scope()))
+            .await
+            .expect("second deny_all turn executes");
+        assert!(matches!(events.last(), Some(HostEvent::OpFinished(_))));
+
+        let entries = req_log_entries(&req_log);
+        let spawns = spawn_records(&entries);
+        assert_eq!(
+            spawns.len(),
+            2,
+            "ordinary launch spawn + sealed switch spawn: {entries:?}"
+        );
+        assert_eq!(
+            argv_of(&spawns[0]),
+            vec!["--profile".to_string(), "sdk".to_string()],
+            "the launch spawn is the ordinary recipe"
+        );
+        let sealed_argv = argv_of(&spawns[1]);
+        assert_eq!(sealed_argv.len(), 4);
+        assert_eq!(sealed_argv[0..2], ["--profile".to_string(), "sdk".to_string()]);
+        assert_eq!(sealed_argv[2], "--patch");
+        let nexus_root = dsh_home.join(SEALED_HOME_SUBDIR);
+        let patch_path = PathBuf::from(&sealed_argv[3]);
+        assert!(patch_path.is_absolute() && patch_path.starts_with(&nexus_root));
+        let sealed_home = PathBuf::from(
+            spawns[1]["dsh_home"].as_str().expect("sealed dsh_home logged"),
+        );
+        assert!(sealed_home.starts_with(&nexus_root));
+        assert_ne!(
+            sealed_home,
+            dsh_home,
+            "the sealed runtime never uses the ordinary home"
+        );
+
+        // Order: ordinary spawn/init, cooperative close, sealed
+        // spawn/init, then the prompts — and prompts went ONLY to the
+        // sealed runtime (after its spawn).
+        let methods = method_sequence(&entries);
+        let prompt_count = methods.iter().filter(|m| *m == "session/prompt").count();
+        assert_eq!(prompt_count, 2, "exactly the two admitted prompts: {methods:?}");
+        let second_spawn = methods
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| *m == "_spawn")
+            .nth(1)
+            .map(|(index, _)| index)
+            .expect("second spawn recorded");
+        let first_prompt = methods
+            .iter()
+            .position(|m| m == "session/prompt")
+            .expect("a prompt was sent");
+        assert!(
+            first_prompt > second_spawn,
+            "no session/prompt reaches the ordinary runtime: {methods:?}"
+        );
+        let shutdown_index = methods
+            .iter()
+            .position(|m| m == "shutdown")
+            .expect("the ordinary harness was closed");
+        assert!(
+            shutdown_index < second_spawn,
+            "the ordinary close precedes the sealed initialization: {methods:?}"
+        );
+
+        // The lease is live while the session runs; the confirmed close of
+        // shutdown deletes it.
+        assert!(sealed_home.exists(), "the sealed lease is retained while live");
+        {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+                .lock()
+                .expect("lock env tests");
+            provider.shutdown(handle).await.expect("confirmed close");
+        }
+        assert!(
+            !sealed_home.exists(),
+            "the confirmed close deleted the sealed child home lease"
+        );
+    }
+
+    /// Once an ordinary prompt has been admitted, a deny_all scope change
+    /// is rejected — never a conversation reset or a permission switch.
+    #[tokio::test]
+    async fn ordinary_then_deny_all_scope_change_is_rejected() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = temp_dir.path().join("reqs.jsonl");
+        let provider = stub_provider(
+            "test-dsh-lock1",
+            stub_env(&req_log, &temp_dir.path().join("dsh-home")),
+        );
+        let handle = launch_hermetic(&provider).await;
+
+        let events = run_turn(&provider, &handle, "ordinary first").await;
+        assert!(matches!(events.last(), Some(HostEvent::OpFinished(_))));
+
+        let result =
+            run_turn_scoped(&provider, &handle, "deny now", Some(deny_all_scope())).await;
+        assert!(
+            matches!(result, Err(HostError::PolicyDenied { .. })),
+            "scope change after admission must be rejected: {result:?}"
+        );
+
+        let entries = req_log_entries(&req_log);
+        assert_eq!(spawn_records(&entries).len(), 1, "no sealed spawn happened");
+        let prompt_count = entries
+            .iter()
+            .filter(|value| value["method"] == "session/prompt")
+            .count();
+        assert_eq!(prompt_count, 1, "the rejected prompt never reached a runtime");
+    }
+
+    /// Once a deny_all prompt has been admitted, a `None` scope change is
+    /// rejected — `None` never escalates out of the sealed recipe.
+    #[tokio::test]
+    async fn deny_all_then_none_scope_change_is_rejected() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = temp_dir.path().join("reqs.jsonl");
+        let provider = stub_provider(
+            "test-dsh-lock2",
+            stub_env(&req_log, &temp_dir.path().join("dsh-home")),
+        );
+        let handle = launch_hermetic(&provider).await;
+
+        let events = run_turn_scoped(&provider, &handle, "sealed first", Some(deny_all_scope()))
+            .await
+            .expect("sealed turn executes");
+        assert!(matches!(events.last(), Some(HostEvent::OpFinished(_))));
+
+        let result = run_turn_scoped(&provider, &handle, "ordinary now", None).await;
+        assert!(
+            matches!(result, Err(HostError::PolicyDenied { .. })),
+            "deny_all → None after admission must be rejected: {result:?}"
+        );
+
+        let entries = req_log_entries(&req_log);
+        let prompt_count = entries
+            .iter()
+            .filter(|value| value["method"] == "session/prompt")
+            .count();
+        assert_eq!(prompt_count, 1, "the rejected prompt never reached a runtime");
+    }
+
+    /// A partially permissive scope is `not_supported` BEFORE admission:
+    /// no prompt is sent and no sealed switch happens.
+    #[tokio::test]
+    async fn partially_permissive_scope_is_unsupported_before_admission() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = temp_dir.path().join("reqs.jsonl");
+        let provider = stub_provider(
+            "test-dsh-scope",
+            stub_env(&req_log, &temp_dir.path().join("dsh-home")),
+        );
+        let handle = launch_hermetic(&provider).await;
+
+        let result = run_turn_scoped(
+            &provider,
+            &handle,
+            "read only please",
+            Some(PromptPermissionScope {
+                allow_read: true,
+                allow_write: false,
+                allow_destructive: false,
+            }),
+        )
+        .await;
+        assert!(
+            matches!(result, Err(HostError::CapabilityUnsupported { .. })),
+            "a partially permissive scope stays not_supported: {result:?}"
+        );
+
+        let entries = req_log_entries(&req_log);
+        assert_eq!(spawn_records(&entries).len(), 1, "no sealed spawn happened");
+        assert!(
+            !entries.iter().any(|value| value["method"] == "session/prompt"),
+            "no prompt was admitted: {entries:?}"
         );
     }
 }

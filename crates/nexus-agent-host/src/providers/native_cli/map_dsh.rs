@@ -90,7 +90,26 @@ pub fn classify_run_error(
     session_id: &HostSessionId,
     op_id: &HostOperationId,
 ) -> OperationFailedEvent {
-    let (category, message) = match error {
+    let (category, message) = classify_error_parts(error);
+    OperationFailedEvent {
+        session_id: session_id.clone(),
+        op_id: op_id.clone(),
+        error_category: category.to_string(),
+        error_message: message,
+    }
+}
+
+/// The `(category, safe message)` pair for one SDK error, shared by the
+/// turn classifier and the provider's launch/probe error mapping (v1.188
+/// P0 T2): one classification site keeps the launch-class and turn-class
+/// diagnostics identical. Every SDK 0.2 variant is matched explicitly — a
+/// newly added variant fails the build instead of silently degrading into
+/// a generic bucket. The message is static category text plus — for
+/// `RequestTimeout` only — an allowlisted wire-method identifier; raw SDK
+/// payloads never leave this function.
+#[must_use]
+pub(crate) fn classify_error_parts(error: &Error) -> (&'static str, String) {
+    match error {
         Error::SdkProtocol { .. } => (
             "decode_error",
             "dsh runtime violated the wire protocol".to_string(),
@@ -127,12 +146,6 @@ pub fn classify_run_error(
             "provider_error",
             "dsh runtime returned an error response".to_string(),
         ),
-    };
-    OperationFailedEvent {
-        session_id: session_id.clone(),
-        op_id: op_id.clone(),
-        error_category: category.to_string(),
-        error_message: message,
     }
 }
 
