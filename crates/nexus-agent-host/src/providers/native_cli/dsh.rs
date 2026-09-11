@@ -89,26 +89,29 @@
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
-use deepseek_harness_sdk::{Config, DeepSeekHarness, Error as DshError, Input};
+use deepseek_harness_sdk::{Config, DeepSeekHarness, Error as DshError, Input, Notification};
 use futures_util::future::{BoxFuture, FutureExt, Shared};
 use futures_util::StreamExt;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{mpsc, Mutex, RwLock};
 #[cfg(unix)]
 use super::sealed_fs;
 
 use crate::capability::model::{
     CapabilityDescriptor, HostContentBlock, HostEvent, HostEventStream, ManagedSessionHandle,
     OperationFailedEvent, OperationStartedEvent, PromptPermissionScope, ProtocolKind,
-    ProviderDescriptor, ProviderHealth,
+    ProviderDescriptor, ProviderHealth, TextDeltaEvent,
 };
 use crate::config::TimeoutConfig;
 use crate::error::{HostError, HostResult};
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
 use crate::providers::native_cli::map_dsh::{
-    classify_error_parts, classify_run_error, map_run_result,
+    classify_error_parts, classify_notification, classify_run_error, finalize_successful_run,
+    operation_delivery_overflow_failure, operation_protocol_failure, DshNotificationClass,
+    RunReconciliation,
 };
 use crate::ProviderAdapter;
 
@@ -147,6 +150,110 @@ const DENY_ALL_PATCH: &str = include_str!("deny_all.cordis.patch.yml");
 
 /// File name of the copied no-tools patch inside the sealed child home.
 const DENY_ALL_PATCH_FILENAME: &str = "nexus-deny-all.cordis.patch.yml";
+
+/// Nexus-owned delivery bounds (architecture §4.3).
+const DSCH_MAX_QUEUED_MESSAGES: usize = 64;
+const DSCH_MAX_EVENT_TEXT_BYTES: usize = 256 * 1024;
+const DSCH_MAX_PENDING_PAYLOAD_BYTES: usize = 1024 * 1024;
+const DSCH_MAX_EMITTED_TEXT_BYTES: usize = 4 * 1024 * 1024;
+
+#[derive(Default)]
+struct DeliveryBudget {
+    pending: StdMutex<usize>,
+    emitted: StdMutex<usize>,
+}
+
+impl DeliveryBudget {
+    fn try_reserve(&self, bytes: usize) -> bool {
+        if bytes > DSCH_MAX_EVENT_TEXT_BYTES {
+            return false;
+        }
+        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        let mut emitted = self.emitted.lock().unwrap_or_else(|e| e.into_inner());
+        if *pending + bytes > DSCH_MAX_PENDING_PAYLOAD_BYTES {
+            return false;
+        }
+        if *emitted + bytes > DSCH_MAX_EMITTED_TEXT_BYTES {
+            return false;
+        }
+        *pending += bytes;
+        *emitted += bytes;
+        true
+    }
+
+    fn release(&self, bytes: usize) {
+        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        *pending = pending.saturating_sub(bytes);
+    }
+}
+
+struct StreamObserver {
+    root_session_id: String,
+    session_id: HostSessionId,
+    op_id: HostOperationId,
+    content_tx: mpsc::Sender<(HostEvent, usize)>,
+    reconciliation: Arc<StdMutex<RunReconciliation>>,
+    classifier_failed: Arc<AtomicBool>,
+    delivery_failed: Arc<AtomicBool>,
+    budget: Arc<DeliveryBudget>,
+}
+
+impl StreamObserver {
+    fn observe(&self, notification: &Notification) {
+        if self.classifier_failed.load(Ordering::Acquire)
+            || self.delivery_failed.load(Ordering::Acquire)
+        {
+            return;
+        }
+        match classify_notification(notification, &self.root_session_id) {
+            Ok(DshNotificationClass::Ignore) => {}
+            Ok(DshNotificationClass::RootText(text)) => {
+                let bytes = text.len();
+                if !self.budget.try_reserve(bytes) {
+                    self.delivery_failed.store(true, Ordering::Release);
+                    return;
+                }
+                let event = HostEvent::MessageDelta(TextDeltaEvent {
+                    session_id: self.session_id.clone(),
+                    op_id: self.op_id.clone(),
+                    text,
+                });
+                match self.content_tx.try_send((event, bytes)) {
+                    Ok(()) => {
+                        self.reconciliation
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .note_root_text_emitted();
+                    }
+                    Err(_) => {
+                        self.budget.release(bytes);
+                        self.delivery_failed.store(true, Ordering::Release);
+                    }
+                }
+            }
+            Err(_) => {
+                self.classifier_failed.store(true, Ordering::Release);
+            }
+        }
+    }
+}
+
+async fn invalidate_session_after_failed_operation(
+    state: Arc<Mutex<ClientState>>,
+    retained: RetainedLeases,
+) {
+    let mut guard = state.lock().await;
+    if guard.closed {
+        return;
+    }
+    guard.closed = true;
+    let cleanup = start_close(
+        guard.harness.take(),
+        guard.sealed_home.take(),
+        Arc::clone(&retained),
+    );
+    guard.cleanup = Some(cleanup);
+}
 
 /// Resolve the dsh runtime executable to a canonical absolute path.
 ///
@@ -1222,62 +1329,161 @@ impl DshNativeProvider {
         closing: Arc<AtomicBool>,
     ) -> HostEventStream {
         let sessions = Arc::clone(&self.sessions);
+        let retained = Arc::clone(&self.retained_leases);
         let run_timeout = self.timeouts.prompt_duration();
         let prompt_ms = self.timeouts.prompt_ms;
+        let budget = Arc::new(DeliveryBudget::default());
+        let op_id_for_stream = op_id.clone();
+        let session_id_for_stream = session_id.clone();
+
+        let (content_tx, content_rx) = mpsc::channel(DSCH_MAX_QUEUED_MESSAGES);
+        let (terminal_tx, terminal_rx) = mpsc::channel(1);
+
+        let budget_for_observer = Arc::clone(&budget);
+        tokio::spawn(async move {
+            let (tail_events, invalidate) = {
+                let reconciliation = Arc::new(StdMutex::new(RunReconciliation::new()));
+                let classifier_failed = Arc::new(AtomicBool::new(false));
+                let delivery_failed = Arc::new(AtomicBool::new(false));
+
+                let run = async {
+                    let mut guard = state.lock().await;
+                    if guard.closed || closing.load(Ordering::Acquire) {
+                        return Err(RunError::SessionGone);
+                    }
+                    let root_session_id = guard.dsh_session_id.clone();
+                    let harness = guard.harness.as_mut().ok_or(RunError::SessionGone)?;
+                    let observer = Arc::new(StreamObserver {
+                        root_session_id: root_session_id.clone(),
+                        session_id: session_id.clone(),
+                        op_id: op_id.clone(),
+                        content_tx: content_tx.clone(),
+                        reconciliation: Arc::clone(&reconciliation),
+                        classifier_failed: Arc::clone(&classifier_failed),
+                        delivery_failed: Arc::clone(&delivery_failed),
+                        budget: Arc::clone(&budget_for_observer),
+                    });
+                    let obs = Arc::clone(&observer);
+                    let session = harness.start_session(Some(root_session_id));
+                    session
+                        .run(Input::Text(prompt_text), Some(&|n| obs.observe(n)))
+                        .await
+                        .map_err(RunError::Sdk)
+                };
+
+                match tokio::time::timeout(run_timeout, run).await {
+                    Ok(Ok(result)) => {
+                        if classifier_failed.load(Ordering::Acquire) {
+                            (
+                                vec![HostEvent::OpFailed(operation_protocol_failure(
+                                    &session_id,
+                                    &op_id,
+                                ))],
+                                true,
+                            )
+                        } else if delivery_failed.load(Ordering::Acquire) {
+                            (
+                                vec![HostEvent::OpFailed(operation_delivery_overflow_failure(
+                                    &session_id,
+                                    &op_id,
+                                ))],
+                                true,
+                            )
+                        } else {
+                            let snapshot = reconciliation.lock().unwrap().clone();
+                            match finalize_successful_run(
+                                &result,
+                                &snapshot,
+                                &session_id,
+                                &op_id,
+                            ) {
+                                Ok(events) => (events, false),
+                                Err(failed) => (vec![HostEvent::OpFailed(failed)], true),
+                            }
+                        }
+                    }
+                    Ok(Err(RunError::SessionGone)) => (
+                        vec![HostEvent::OpFailed(OperationFailedEvent {
+                            session_id: session_id.clone(),
+                            op_id: op_id.clone(),
+                            error_category: "stream_closed".to_string(),
+                            error_message: "dsh session closed before the turn completed"
+                                .to_string(),
+                        })],
+                        true,
+                    ),
+                    Ok(Err(RunError::Sdk(error))) => (
+                        vec![HostEvent::OpFailed(classify_run_error(
+                            &error,
+                            &session_id,
+                            &op_id,
+                        ))],
+                        true,
+                    ),
+                    Err(_elapsed) => {
+                        rotate_dsh_session_id(&sessions, &session_id).await;
+                        (
+                            vec![HostEvent::OpFailed(OperationFailedEvent {
+                                session_id: session_id.clone(),
+                                op_id: op_id.clone(),
+                                error_category: "timeout".to_string(),
+                                error_message: format!("dsh turn timed out after {prompt_ms}ms"),
+                            })],
+                            true,
+                        )
+                    }
+                }
+            };
+
+            if invalidate {
+                invalidate_session_after_failed_operation(state, retained).await;
+            }
+
+            drop(content_tx);
+            for event in tail_events {
+                let _ = terminal_tx.send(event).await;
+            }
+        });
 
         futures_util::stream::unfold(
             (
-                state,
-                closing,
-                sessions,
-                op_id,
-                session_id,
-                prompt_text,
-                run_timeout,
-                prompt_ms,
-                VecDeque::new(),
                 false,
                 false,
+                content_rx,
+                terminal_rx,
+                budget,
+                VecDeque::<HostEvent>::new(),
+                op_id_for_stream.clone(),
+                session_id_for_stream.clone(),
             ),
             |(
-                state,
-                closing,
-                sessions,
+                started,
+                mut finished,
+                mut content_rx,
+                mut terminal_rx,
+                budget,
+                mut pending,
                 op_id,
                 session_id,
-                prompt_text,
-                run_timeout,
-                prompt_ms,
-                mut pending,
-                started,
-                done,
             )| async move {
-                // Drain mapped events from the turn first: one successful
-                // run maps to a MessageDelta + a terminal.
                 if let Some(event) = pending.pop_front() {
                     return Some((
                         Ok(event),
                         (
-                            state,
-                            closing,
-                            sessions,
+                            started,
+                            finished,
+                            content_rx,
+                            terminal_rx,
+                            budget,
+                            pending,
                             op_id,
                             session_id,
-                            prompt_text,
-                            run_timeout,
-                            prompt_ms,
-                            pending,
-                            started,
-                            done,
                         ),
                     ));
                 }
-                if done {
+                if finished {
                     return None;
                 }
-                // Exactly one OpStarted precedes any op-scoped event
-                // (conformance LifecycleOrdering); it is emitted even when
-                // the turn then fails, because admission already happened.
                 if !started {
                     return Some((
                         Ok(HostEvent::OpStarted(OperationStartedEvent {
@@ -1285,108 +1491,94 @@ impl DshNativeProvider {
                             session_id: session_id.clone(),
                         })),
                         (
-                            state,
-                            closing,
-                            sessions,
+                            true,
+                            finished,
+                            content_rx,
+                            terminal_rx,
+                            budget,
+                            pending,
                             op_id,
                             session_id,
-                            prompt_text,
-                            run_timeout,
-                            prompt_ms,
-                            pending,
-                            true,
-                            done,
                         ),
                     ));
                 }
 
-                // One turn = one Session::run under the per-session lock
-                // (B-2): other sessions' cancel/shutdown never wait on this
-                // run. The `Session` borrows the harness, which borrows the
-                // guard, so the guard must live across the whole run await;
-                // the significant_drop_tightening suggestion to drop it
-                // early is a false positive here (the borrow checker
-                // rejects it).
-                #[allow(clippy::significant_drop_tightening)]
-                let run = {
-                    let state = Arc::clone(&state);
-                    let closing = Arc::clone(&closing);
-                    let prompt_text = prompt_text.clone();
-                    async move {
-                        let mut guard = state.lock().await;
-                        if guard.closed || closing.load(Ordering::Acquire) {
-                            // Shutdown intent landed before the run: never
-                            // run on a torn-down session (the final close
-                            // owns the harness now).
-                            return Err(RunError::SessionGone);
+                loop {
+                    tokio::select! {
+                        maybe = content_rx.recv() => {
+                            match maybe {
+                                Some((event, bytes)) => {
+                                    budget.release(bytes);
+                                    break Some((
+                                        Ok(event),
+                                        (
+                                            started,
+                                            finished,
+                                            content_rx,
+                                            terminal_rx,
+                                            budget,
+                                            pending,
+                                            op_id,
+                                            session_id,
+                                        ),
+                                    ));
+                                }
+                                None => {
+                                    if let Some(event) = terminal_rx.recv().await {
+                                        pending.push_back(event);
+                                        while let Ok(more) = terminal_rx.try_recv() {
+                                            pending.push_back(more);
+                                        }
+                                        finished = true;
+                                        let next = pending.pop_front().expect("terminal batch");
+                                        break Some((
+                                            Ok(next),
+                                            (
+                                                started,
+                                                finished,
+                                                content_rx,
+                                                terminal_rx,
+                                                budget,
+                                                pending,
+                                                op_id,
+                                                session_id,
+                                            ),
+                                        ));
+                                    }
+                                    break None;
+                                }
+                            }
                         }
-                        let dsh_session_id = guard.dsh_session_id.clone();
-                        let harness = match guard.harness.as_mut() {
-                            Some(harness) => harness,
-                            None => return Err(RunError::SessionGone),
-                        };
-                        let session = harness.start_session(Some(dsh_session_id));
-                        session.run(Input::Text(prompt_text), None)
-                            .await
-                            .map_err(RunError::Sdk)
+                        maybe = terminal_rx.recv() => {
+                            if let Some(event) = maybe {
+                                pending.push_back(event);
+                                while let Ok(more) = terminal_rx.try_recv() {
+                                    pending.push_back(more);
+                                }
+                                finished = true;
+                                let next = pending.pop_front().expect("terminal batch");
+                                break Some((
+                                    Ok(next),
+                                    (
+                                        started,
+                                        finished,
+                                        content_rx,
+                                        terminal_rx,
+                                        budget,
+                                        pending,
+                                        op_id,
+                                        session_id,
+                                    ),
+                                ));
+                            }
+                        }
                     }
-                };
-
-                let events =
-                    match tokio::time::timeout(run_timeout, run).await {
-                        Ok(Ok(result)) => map_run_result(&result, &session_id, &op_id),
-                        Ok(Err(RunError::SessionGone)) => {
-                            vec![HostEvent::OpFailed(OperationFailedEvent {
-                                session_id: session_id.clone(),
-                                op_id: op_id.clone(),
-                                error_category: "stream_closed".to_string(),
-                                error_message: "dsh session closed before the turn completed"
-                                    .to_string(),
-                            })]
-                        }
-                        Ok(Err(RunError::Sdk(error))) => vec![HostEvent::OpFailed(
-                            classify_run_error(&error, &session_id, &op_id),
-                        )],
-                        Err(_elapsed) => {
-                            // B-3: the timeout dropped the run coroutine
-                            // (and its per-session lock guard) but the
-                            // runtime keeps executing the prompt under
-                            // the OLD session id — a zombie turn. Rotate
-                            // the stored id so a retry starts a fresh
-                            // agent+session pair; the abandoned turn can
-                            // then never receive a spliced retry prompt.
-                            rotate_dsh_session_id(&sessions, &session_id).await;
-                            vec![HostEvent::OpFailed(OperationFailedEvent {
-                                session_id: session_id.clone(),
-                                op_id: op_id.clone(),
-                                error_category: "timeout".to_string(),
-                                error_message: format!("dsh turn timed out after {prompt_ms}ms"),
-                            })]
-                        }
-                    };
-                let mut iter = events.into_iter();
-                let first = iter.next().expect("the turn maps to at least one event");
-                pending.extend(iter);
-                Some((
-                    Ok(first),
-                    (
-                        state,
-                        closing,
-                        sessions,
-                        op_id,
-                        session_id,
-                        prompt_text,
-                        run_timeout,
-                        prompt_ms,
-                        pending,
-                        true,
-                        true,
-                    ),
-                ))
+                }
             },
         )
         .boxed()
     }
+
 }
 
 /// Rotate the stored DSH session id after a turn timeout (B-3).
