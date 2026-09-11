@@ -271,15 +271,10 @@ pub async fn commit_recoverable(
         return Err(SessionError::AlreadyCommitted(session_id.clone()));
     }
 
-    let sid = session_id.to_string();
-    let active = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM workspace_sessions          WHERE session_id = ? AND consumed = 0 AND expires_at > strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
-        sid
-    )
-    .fetch_one(mgr.pool().as_ref())
-    .await
-    .map_err(|e| SessionError::Database(e.to_string()))?;
-    if active == 0 {
+    if !db::is_session_active(mgr.pool().as_ref(), &session_id.to_string())
+        .await
+        .map_err(|e| SessionError::Database(e.to_string()))?
+    {
         return Err(SessionError::Expired(session_id.clone()));
     }
 

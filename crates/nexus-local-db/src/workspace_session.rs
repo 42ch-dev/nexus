@@ -136,15 +136,7 @@ pub async fn consume_session(
 
     // Check expiry using SQLite datetime comparison with RFC 3339 format.
     // Both expires_at and strftime output are in RFC 3339 format.
-    let active_count = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM workspace_sessions \
-         WHERE session_id = ? AND consumed = 0 AND expires_at > strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
-        session_id
-    )
-    .fetch_one(pool)
-    .await?;
-
-    if active_count == 0 {
+    if !is_session_active(pool, session_id).await? {
         // Re-read to determine the reason
         let Some(session) = get_session(pool, session_id).await? else {
             return Ok(ConsumeResult::NotFound);
@@ -198,6 +190,21 @@ pub async fn cleanup_expired_sessions(pool: &SqlitePool) -> Result<u64, LocalDbE
     .execute(pool)
     .await?;
     Ok(result.rows_affected())
+}
+
+/// Return whether a session is unconsumed and unexpired.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` on database failure.
+pub async fn is_session_active(pool: &SqlitePool, session_id: &str) -> Result<bool, LocalDbError> {
+    let active_count = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM workspace_sessions WHERE session_id = ? AND consumed = 0 AND expires_at > strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
+        session_id
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(active_count > 0)
 }
 
 /// Count active (unconsumed + unexpired) sessions.

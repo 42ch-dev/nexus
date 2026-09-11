@@ -457,17 +457,10 @@ impl WorkspaceSessionManager {
         // Use `SQLite` datetime comparison to check expiry — avoids timezone
         // format mismatch between chrono::Utc and `SQLite` datetime strings.
         // SAFETY: compile-time checked — simple COUNT query with parameters.
-        let sid = session_id.to_string();
-        let active = sqlx::query_scalar!(
-            "SELECT COUNT(*) FROM workspace_sessions \
-             WHERE session_id = ? AND consumed = 0 AND expires_at > strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
-            sid
-        )
-        .fetch_one(self.pool.as_ref())
-        .await
-        .map_err(|e| SessionError::Database(e.to_string()))?;
-
-        if active == 0 {
+        if !db::is_session_active(self.pool.as_ref(), &session_id.to_string())
+            .await
+            .map_err(|e| SessionError::Database(e.to_string()))?
+        {
             return Err(SessionError::Expired(session_id.clone()));
         }
 

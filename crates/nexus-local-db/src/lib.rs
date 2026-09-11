@@ -299,7 +299,7 @@ pub use compute_session::{
 
 // Re-export workspace_session types (V1.56 P0 DF-31)
 pub use workspace_session::{
-    cleanup_expired_sessions, consume_session, count_active_sessions, create_session, get_session,
+    cleanup_expired_sessions, consume_session, count_active_sessions, create_session, get_session, is_session_active,
     ConsumeResult, CreateSessionParams, WorkspaceSessionRow,
 };
 
