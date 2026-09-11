@@ -4207,28 +4207,142 @@ async fn settlement_restart_reconciles_no_second_child() {
 }
 
 
-/// P4 T4: durable Failed+cancel_requested+driver_failed must match the public
-/// inspect/cancel-idempotence contract (no generic conflict).
-#[test]
-fn p4_durable_cancel_failed_matches_public_inspect_projection() {
-    use nexus_orchestration::run_state::{RunFailure, RunRecord, RunStateV1};
-    use nexus_orchestration::engine::{SessionId, SessionStatus};
-    let record = RunRecord {
-        session_id: SessionId("cli-run".into()),
-        status: SessionStatus::Failed,
-        state_revision: 2,
-        execution_version: 1,
-        descriptor: None,
-        state: Some(RunStateV1 {
-            cancel_requested: true,
-            failure: Some(RunFailure {
-                code: "driver_failed".into(),
-                message: "lost race".into(),
-            }),
-            ..RunStateV1::default()
+/// P4 T4: cancel/inspect/events/DB agreement on the same run through the live daemon.
+#[tokio::test]
+async fn p4_cancel_inspect_events_db_journey() {
+    let host = BlockingHost::new();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": PUBLIC_PRESET,
+            "label": "p4-cancel-journey",
+            "seed": "p4-topic",
+            "input": { "keyword": "p4", "topic": "p4-topic" },
+            "agent_bindings": { "default": { "provider_id": MOCK_PROVIDER } }
         }),
-        graph_version: 3,
-    };
-    assert!(nexus_orchestration::run_state::durable_cancel_outcome_accomplished(&record));
-    assert_eq!(record.status.as_db_str(), "failed");
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id");
+    tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        while host.streams_started() < 1 {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("stream started");
+    let row = load_drive_row(&daemon, schedule_id).await;
+    let sid = row.current_session_id.as_deref().expect("session");
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "cancel" }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{body}");
+    assert_eq!(body["status"].as_str(), Some("cancelled"));
+    let (db_status, db_state) = wait_for_run_status(&daemon, sid, "cancelled", 15).await;
+    let inspect = reqwest::Client::new()
+        .get(format!("{}/v1/daemon/orchestration/sessions/{}", daemon.http_url, sid))
+        .send()
+        .await
+        .expect("inspect")
+        .json::<Value>()
+        .await
+        .expect("inspect json");
+    assert_eq!(inspect["status"].as_str(), Some("cancelled"));
+    assert_eq!(db_status, "cancelled");
+    assert_eq!(db_state["cancel_requested"].as_bool(), Some(true));
+    let events = reqwest::Client::new()
+        .get(format!(
+            "{}/v1/daemon/orchestration/sessions/{}/events",
+            daemon.http_url,
+            sid
+        ))
+        .send()
+        .await
+        .expect("events");
+    assert!(events.status().is_success(), "events route must succeed");
+    let text = events.text().await.expect("events body");
+    assert!(text.contains("run_state"), "SSE must include terminal run_state: {text}");
+}
+
+/// P4 T4: late subscribe after a fast terminal run still replays retained run_state.
+#[tokio::test]
+async fn p4_late_subscribe_replays_terminal_run_state() {
+    let host = MockHost::new();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let (status, body) = add_public(&daemon, "p4-fast-replay").await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id");
+    let _ = wait_for_prompts(&host, 15).await;
+    let row = load_drive_row(&daemon, schedule_id).await;
+    let sid = row.current_session_id.as_deref().expect("session");
+    let (run_status, _) = wait_for_run_status(&daemon, sid, "completed", 20).await;
+    assert_eq!(run_status, "completed");
+    let events = reqwest::Client::new()
+        .get(format!(
+            "{}/v1/daemon/orchestration/sessions/{}/events",
+            daemon.http_url,
+            sid
+        ))
+        .send()
+        .await
+        .expect("events");
+    assert!(events.status().is_success());
+    let text = events.text().await.expect("events body");
+    assert!(text.contains("run_state"), "late replay must retain run_state: {text}");
+}
+
+/// P4 T4: unconfirmed cleanup stays actionable Interrupted on inspect/DB.
+#[tokio::test]
+async fn p4_cleanup_failure_recovery_projection() {
+    let host = BlockingHost::non_cooperative();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": PUBLIC_PRESET,
+            "label": "p4-interrupted",
+            "seed": "p4-topic",
+            "input": { "keyword": "p4", "topic": "p4-topic" },
+            "agent_bindings": { "default": { "provider_id": MOCK_PROVIDER } }
+        }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id");
+    tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        while host.streams_started() < 1 {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("stream started");
+    host.release();
+    let row = load_drive_row(&daemon, schedule_id).await;
+    let sid = row.current_session_id.as_deref().expect("session");
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "cancel" }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{body}");
+    let (run_status, _) = wait_for_run_status(&daemon, sid, "interrupted", 20).await;
+    assert_eq!(run_status, "interrupted");
+    let inspect = reqwest::Client::new()
+        .get(format!("{}/v1/daemon/orchestration/sessions/{}", daemon.http_url, sid))
+        .send()
+        .await
+        .expect("inspect")
+        .json::<Value>()
+        .await
+        .expect("inspect json");
+    assert_eq!(inspect["status"].as_str(), Some("interrupted"));
 }

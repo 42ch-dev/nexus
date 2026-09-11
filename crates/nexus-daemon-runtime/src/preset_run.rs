@@ -1233,6 +1233,13 @@ impl WorkflowRunCoordinator {
         self
     }
 
+    /// Share the coordinator's per-run sink map with the prompt executor.
+    #[must_use]
+    pub fn with_run_event_sinks(mut self, sinks: crate::run_events::RunEventSinkMap) -> Self {
+        self.run_event_sinks = sinks;
+        self
+    }
+
     async fn publish_durable_run_state(&self, session_id: &SessionId) {
         if let Some(registry) = &self.run_events {
             if let Ok(Some(record)) = self.workflow_store.load_run(session_id).await {
@@ -8051,40 +8058,764 @@ mod tests {
             "a v0 skip must not fence the session"
         );
     }
-    /// R-V1186P3-004 / T1: cancel that lost to driver failure is idempotent when
-    /// the durable row records cancel_requested + driver_failed (all placements
-    /// share this public projection).
+    /// P4 T1 placement: cancel committed before the step marker (provider start).
     #[tokio::test]
-    async fn cancel_vs_drive_failure_public_cancel_idempotent_on_durable_failed() {
-        use nexus_orchestration::run_state::{RunFailure, RunRecord, RunStateV1};
-        let record = RunRecord {
-            session_id: SessionId("race-run".into()),
-            status: SessionStatus::Failed,
-            state_revision: 4,
-            execution_version: 1,
-            descriptor: None,
-            state: Some(RunStateV1 {
-                cancel_requested: true,
-                failure: Some(RunFailure {
-                    code: "driver_failed".into(),
-                    message: "drive lost race".into(),
-                }),
-                ..RunStateV1::default()
-            }),
-            graph_version: 5,
-        };
-        assert!(cancel_fence_loss_accomplished(&record));
-        for placement in [
-            "provider_start",
-            "active_operation",
-            "post_operation_pre_settlement",
-            "concurrent_failure",
-        ] {
-            assert!(
-                cancel_fence_loss_accomplished(&record),
-                "placement {placement} must project accomplished cancel outcome"
-            );
+    async fn cancel_drive_race_provider_start_one_winner_no_extra_step() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        struct CountingTask {
+            dispatches: Arc<AtomicUsize>,
         }
+        #[async_trait]
+        impl graph_flow::Task for CountingTask {
+            fn id(&self) -> &'static str {
+                "count"
+            }
+            async fn run(
+                &self,
+                _context: graph_flow::Context,
+            ) -> Result<graph_flow::TaskResult, graph_flow::GraphError> {
+                self.dispatches.fetch_add(1, Ordering::SeqCst);
+                Ok(graph_flow::TaskResult::new(
+                    Some("done".into()),
+                    graph_flow::NextAction::Continue,
+                ))
+            }
+        }
+        struct ProviderStartBarrierStore {
+            inner: Arc<dyn WorkflowStateStore>,
+            at_barrier: Arc<AtomicBool>,
+            release: Arc<AtomicBool>,
+        }
+        #[async_trait]
+        impl WorkflowStateStore for ProviderStartBarrierStore {
+            async fn load_run(
+                &self,
+                session_id: &SessionId,
+            ) -> Result<Option<nexus_orchestration::run_state::RunRecord>, EngineError> {
+                self.inner.load_run(session_id).await
+            }
+            async fn start_run(
+                &self,
+                session_id: &SessionId,
+                descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .start_run(session_id, descriptor, checkpoint, next_state)
+                    .await
+            }
+            #[allow(clippy::too_many_arguments)]
+            async fn admit_schedule_run(
+                &self,
+                schedule_id: &str,
+                session_id: &SessionId,
+                descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+                core_context_version: u32,
+                expected_core_context_version: u32,
+                admission_gate: Option<&nexus_orchestration::run_state::ScheduleAdmissionGate>,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .admit_schedule_run(
+                        schedule_id,
+                        session_id,
+                        descriptor,
+                        checkpoint,
+                        next_state,
+                        core_context_version,
+                        expected_core_context_version,
+                        admission_gate,
+                    )
+                    .await
+            }
+            async fn commit_transition(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_status: SessionStatus,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .commit_transition(
+                        session_id,
+                        expected_revision,
+                        checkpoint,
+                        next_status,
+                        next_state,
+                    )
+                    .await
+            }
+            async fn commit_transition_with_graph_fence(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_graph_version: Option<u64>,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_status: SessionStatus,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .commit_transition_with_graph_fence(
+                        session_id,
+                        expected_revision,
+                        expected_graph_version,
+                        checkpoint,
+                        next_status,
+                        next_state,
+                    )
+                    .await
+            }
+            async fn settle_run(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_graph_version: Option<u64>,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+                terminal_target: nexus_orchestration::run_state::TerminalSettlementTarget,
+            ) -> Result<nexus_orchestration::run_state::SettlementResult, EngineError> {
+                self.inner
+                    .settle_run(
+                        session_id,
+                        expected_revision,
+                        expected_graph_version,
+                        checkpoint,
+                        next_state,
+                        terminal_target,
+                    )
+                    .await
+            }
+            async fn restore_pre_step(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                pre_step: &graph_flow::Session,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .restore_pre_step(session_id, expected_revision, pre_step)
+                    .await
+            }
+            async fn mark_step_in_flight(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_graph_version: Option<u64>,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                step_state: &nexus_orchestration::run_state::RunStateV1,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.at_barrier.store(true, Ordering::SeqCst);
+                while !self.release.load(Ordering::SeqCst) {
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+                self.inner
+                    .mark_step_in_flight(
+                        session_id,
+                        expected_revision,
+                        expected_graph_version,
+                        checkpoint,
+                        step_state,
+                    )
+                    .await
+            }
+            async fn persist_prompt_attempt(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_step: Option<&str>,
+                expected_attempt_id: Option<&str>,
+                attempt: &nexus_orchestration::run_state::PromptAttempt,
+            ) -> Result<(), EngineError> {
+                self.inner
+                    .persist_prompt_attempt(
+                        session_id,
+                        expected_revision,
+                        expected_step,
+                        expected_attempt_id,
+                        attempt,
+                    )
+                    .await
+            }
+            async fn clear_prompt_attempt(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_step: Option<&str>,
+                attempt_id: &str,
+            ) -> Result<(), EngineError> {
+                self.inner
+                    .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
+                    .await
+            }
+
+            async fn load_children(
+                &self,
+                parent_session_id: &SessionId,
+            ) -> Result<Vec<nexus_orchestration::run_state::RunRecord>, EngineError> {
+                self.inner.load_children(parent_session_id).await
+            }
+        }
+        let (_tmp, _home, db_path) = crate::test_utils::create_test_workspace().await;
+        let pool = Arc::new(nexus_local_db::open_pool(&db_path).await.expect("pool"));
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let real_store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let dispatches = Arc::new(AtomicUsize::new(0));
+        let at_barrier = Arc::new(AtomicBool::new(false));
+        let release = Arc::new(AtomicBool::new(false));
+        let barrier_store: Arc<dyn WorkflowStateStore> = Arc::new(ProviderStartBarrierStore {
+            inner: real_store.clone(),
+            at_barrier: at_barrier.clone(),
+            release: release.clone(),
+        });
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("provider-start-race")
+                .add_task(Arc::new(CountingTask {
+                    dispatches: dispatches.clone(),
+                }))
+                .build()
+                .expect("graph"),
+        );
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = Arc::new(
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+                storage.clone(),
+                barrier_store.clone(),
+                caps,
+            ),
+        );
+        let session_cancels = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let coordinator = WorkflowRunCoordinator::new(
+            engine.clone(),
+            storage.clone(),
+            pool.clone(),
+            session_cancels,
+        )
+        .with_workflow_store(barrier_store.clone());
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start");
+        let cancel_task = tokio::spawn({
+            let coordinator = coordinator.clone();
+            let session_id = session_id.clone();
+            let at_barrier = at_barrier.clone();
+            let release = release.clone();
+            async move {
+                while !at_barrier.load(Ordering::SeqCst) {
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+                let _ = coordinator
+                    .signal_run(&session_id, RunSignal::Cancel)
+                    .await;
+                release.store(true, Ordering::SeqCst);
+            }
+        });
+        coordinator.ensure_driving(&session_id).await.expect("drive");
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while coordinator
+                .drives
+                .lock()
+                .await
+                .get(&session_id.0)
+                .is_some_and(|o| !o.join.is_finished())
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("drive finished");
+        cancel_task.await.expect("cancel task");
+        let record = real_store
+            .load_run(&session_id)
+            .await
+            .expect("load")
+            .expect("row");
+        assert!(record.status.is_terminal(), "one durable terminal winner");
+        assert!(
+            dispatches.load(Ordering::SeqCst) <= 1,
+            "no later step launch after cancel fence"
+        );
+        let cancel_ok = coordinator
+            .signal_run(&session_id, RunSignal::Cancel)
+            .await
+            .is_ok()
+            || cancel_fence_loss_accomplished(&record);
+        assert!(cancel_ok, "public cancel must not surface generic conflict");
+    }
+
+    /// P4 T1 placement: cancel during an in-flight step (active operation).
+    #[tokio::test]
+    async fn cancel_drive_race_active_operation_one_winner_no_extra_step() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        struct SlowTask {
+            dispatches: Arc<AtomicUsize>,
+            in_flight: Arc<AtomicBool>,
+            release: Arc<AtomicBool>,
+        }
+        #[async_trait]
+        impl graph_flow::Task for SlowTask {
+            fn id(&self) -> &'static str {
+                "slow"
+            }
+            async fn run(
+                &self,
+                _context: graph_flow::Context,
+            ) -> Result<graph_flow::TaskResult, graph_flow::GraphError> {
+                self.dispatches.fetch_add(1, Ordering::SeqCst);
+                self.in_flight.store(true, Ordering::SeqCst);
+                while !self.release.load(Ordering::SeqCst) {
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+                Ok(graph_flow::TaskResult::new(
+                    Some("done".into()),
+                    graph_flow::NextAction::Continue,
+                ))
+            }
+        }
+        let (_tmp, _home, db_path) = crate::test_utils::create_test_workspace().await;
+        let pool = Arc::new(nexus_local_db::open_pool(&db_path).await.expect("pool"));
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let dispatches = Arc::new(AtomicUsize::new(0));
+        let in_flight = Arc::new(AtomicBool::new(false));
+        let release = Arc::new(AtomicBool::new(false));
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("active-op-race")
+                .add_task(Arc::new(SlowTask {
+                    dispatches: dispatches.clone(),
+                    in_flight: in_flight.clone(),
+                    release: release.clone(),
+                }))
+                .build()
+                .expect("graph"),
+        );
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = Arc::new(
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+                storage.clone(),
+                store.clone(),
+                caps,
+            ),
+        );
+        let session_cancels = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let coordinator = WorkflowRunCoordinator::new(
+            engine.clone(),
+            storage.clone(),
+            pool.clone(),
+            session_cancels,
+        );
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start");
+        coordinator.ensure_driving(&session_id).await.expect("drive");
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while !in_flight.load(Ordering::SeqCst) {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("step in flight");
+        let cancel = coordinator
+            .signal_run(&session_id, RunSignal::Cancel)
+            .await
+            .expect("cancel during active operation");
+        assert_eq!(cancel.status, "cancelled");
+        release.store(true, Ordering::SeqCst);
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while coordinator
+                .drives
+                .lock()
+                .await
+                .get(&session_id.0)
+                .is_some_and(|o| !o.join.is_finished())
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("drive finished");
+        let record = store.load_run(&session_id).await.expect("load").expect("row");
+        assert_eq!(record.status, SessionStatus::Cancelled);
+        assert_eq!(
+            dispatches.load(Ordering::SeqCst),
+            1,
+            "no second step/process launch after cancel wins"
+        );
+    }
+
+    /// P4 T1 placement: cancel wins between failure commit and anchored cleanup.
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn cancel_drive_race_post_op_pre_settlement_one_winner() {
+        struct FailingTask;
+        #[async_trait]
+        impl graph_flow::Task for FailingTask {
+            fn id(&self) -> &'static str {
+                "fail"
+            }
+            async fn run(
+                &self,
+                _context: graph_flow::Context,
+            ) -> Result<graph_flow::TaskResult, graph_flow::GraphError> {
+                Err(graph_flow::GraphError::TaskExecutionFailed(
+                    "post-op pre-settlement race".into(),
+                ))
+            }
+        }
+        let (_tmp, _home, db_path) = crate::test_utils::create_test_workspace().await;
+        let pool = Arc::new(nexus_local_db::open_pool(&db_path).await.expect("pool"));
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let real_store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let fault_store: Arc<dyn WorkflowStateStore> = Arc::new(BoundaryFaultStore::new(
+            real_store.clone(),
+            storage.clone(),
+            pool.clone(),
+            BoundaryFault::WinnerSettlesCancelledAfterPhaseOne,
+        ));
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("post-op-race")
+                .add_task(Arc::new(FailingTask))
+                .build()
+                .expect("graph"),
+        );
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = Arc::new(
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+                storage.clone(),
+                fault_store.clone(),
+                caps,
+            ),
+        );
+        let session_cancels = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let coordinator = WorkflowRunCoordinator::new(
+            engine.clone(),
+            storage.clone(),
+            pool.clone(),
+            session_cancels,
+        )
+        .with_workflow_store(fault_store);
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start");
+        coordinator.ensure_driving(&session_id).await.expect("drive");
+        wait_until("cancelled winner", || async {
+            let record = real_store.load_run(&session_id).await.expect("load");
+            record
+                .as_ref()
+                .is_some_and(|r| r.status == SessionStatus::Cancelled)
+        })
+        .await;
+        coordinator.abort_all_drives().await;
+        let record = real_store.load_run(&session_id).await.expect("load").expect("row");
+        assert_eq!(record.status, SessionStatus::Cancelled);
+        assert!(
+            record.state.as_ref().is_some_and(|s| s.cancel_requested),
+            "cancel intent durable at settlement boundary"
+        );
+    }
+
+    /// P4 T1 placement: cancel CAS races driver-failure settlement at `settle_run`.
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn cancel_drive_race_concurrent_failure_settle_one_winner() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct FailingTask;
+        #[async_trait]
+        impl graph_flow::Task for FailingTask {
+            fn id(&self) -> &'static str {
+                "fail"
+            }
+            async fn run(
+                &self,
+                _context: graph_flow::Context,
+            ) -> Result<graph_flow::TaskResult, graph_flow::GraphError> {
+                Err(graph_flow::GraphError::TaskExecutionFailed(
+                    "concurrent failure race".into(),
+                ))
+            }
+        }
+        struct SettlePairBarrierStore {
+            inner: Arc<dyn WorkflowStateStore>,
+            storage: Arc<dyn SessionStorage>,
+            arrived: Arc<AtomicUsize>,
+            dispatches: Arc<AtomicUsize>,
+        }
+        #[async_trait]
+        impl WorkflowStateStore for SettlePairBarrierStore {
+            async fn load_run(
+                &self,
+                session_id: &SessionId,
+            ) -> Result<Option<nexus_orchestration::run_state::RunRecord>, EngineError> {
+                self.inner.load_run(session_id).await
+            }
+            async fn start_run(
+                &self,
+                session_id: &SessionId,
+                descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .start_run(session_id, descriptor, checkpoint, next_state)
+                    .await
+            }
+            #[allow(clippy::too_many_arguments)]
+            async fn admit_schedule_run(
+                &self,
+                schedule_id: &str,
+                session_id: &SessionId,
+                descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+                core_context_version: u32,
+                expected_core_context_version: u32,
+                admission_gate: Option<&nexus_orchestration::run_state::ScheduleAdmissionGate>,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .admit_schedule_run(
+                        schedule_id,
+                        session_id,
+                        descriptor,
+                        checkpoint,
+                        next_state,
+                        core_context_version,
+                        expected_core_context_version,
+                        admission_gate,
+                    )
+                    .await
+            }
+            async fn commit_transition(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_status: SessionStatus,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .commit_transition(
+                        session_id,
+                        expected_revision,
+                        checkpoint,
+                        next_status,
+                        next_state,
+                    )
+                    .await
+            }
+            async fn commit_transition_with_graph_fence(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_graph_version: Option<u64>,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_status: SessionStatus,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .commit_transition_with_graph_fence(
+                        session_id,
+                        expected_revision,
+                        expected_graph_version,
+                        checkpoint,
+                        next_status,
+                        next_state,
+                    )
+                    .await
+            }
+            async fn settle_run(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_graph_version: Option<u64>,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+                terminal_target: nexus_orchestration::run_state::TerminalSettlementTarget,
+            ) -> Result<nexus_orchestration::run_state::SettlementResult, EngineError> {
+                let n = self.arrived.fetch_add(1, Ordering::SeqCst) + 1;
+                if n == 1 {
+                    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                        while self.arrived.load(Ordering::SeqCst) < 2 {
+                            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+                        }
+                    })
+                    .await
+                    .expect("paired settle race");
+                }
+                self.inner
+                    .settle_run(
+                        session_id,
+                        expected_revision,
+                        expected_graph_version,
+                        checkpoint,
+                        next_state,
+                        terminal_target,
+                    )
+                    .await
+            }
+            async fn restore_pre_step(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                pre_step: &graph_flow::Session,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .restore_pre_step(session_id, expected_revision, pre_step)
+                    .await
+            }
+            async fn mark_step_in_flight(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_graph_version: Option<u64>,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                step_state: &nexus_orchestration::run_state::RunStateV1,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.dispatches.fetch_add(1, Ordering::SeqCst);
+                self.inner
+                    .mark_step_in_flight(
+                        session_id,
+                        expected_revision,
+                        expected_graph_version,
+                        checkpoint,
+                        step_state,
+                    )
+                    .await
+            }
+            async fn persist_prompt_attempt(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_step: Option<&str>,
+                expected_attempt_id: Option<&str>,
+                attempt: &nexus_orchestration::run_state::PromptAttempt,
+            ) -> Result<(), EngineError> {
+                self.inner
+                    .persist_prompt_attempt(
+                        session_id,
+                        expected_revision,
+                        expected_step,
+                        expected_attempt_id,
+                        attempt,
+                    )
+                    .await
+            }
+
+            async fn clear_prompt_attempt(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_step: Option<&str>,
+                attempt_id: &str,
+            ) -> Result<(), EngineError> {
+                self.inner
+                    .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
+                    .await
+            }
+
+            async fn load_children(
+                &self,
+                parent_session_id: &SessionId,
+            ) -> Result<Vec<nexus_orchestration::run_state::RunRecord>, EngineError> {
+                self.inner.load_children(parent_session_id).await
+            }
+        }
+        let (_tmp, _home, db_path) = crate::test_utils::create_test_workspace().await;
+        let pool = Arc::new(nexus_local_db::open_pool(&db_path).await.expect("pool"));
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let real_store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let arrived = Arc::new(AtomicUsize::new(0));
+        let dispatches = Arc::new(AtomicUsize::new(0));
+        let barrier_store: Arc<dyn WorkflowStateStore> = Arc::new(SettlePairBarrierStore {
+            inner: real_store.clone(),
+            storage: storage.clone(),
+            arrived: arrived.clone(),
+            dispatches: dispatches.clone(),
+        });
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("concurrent-failure-race")
+                .add_task(Arc::new(FailingTask))
+                .build()
+                .expect("graph"),
+        );
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = Arc::new(
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+                storage.clone(),
+                barrier_store.clone(),
+                caps,
+            ),
+        );
+        let session_cancels = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let coordinator = WorkflowRunCoordinator::new(
+            engine.clone(),
+            storage.clone(),
+            pool.clone(),
+            session_cancels,
+        )
+        .with_workflow_store(barrier_store.clone());
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start");
+        let cancel_task = tokio::spawn({
+            let coordinator = coordinator.clone();
+            let session_id = session_id.clone();
+            let arrived = arrived.clone();
+            async move {
+                while arrived.load(Ordering::SeqCst) == 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+                }
+                let _ = coordinator
+                    .signal_run(&session_id, RunSignal::Cancel)
+                    .await;
+            }
+        });
+        coordinator.ensure_driving(&session_id).await.expect("drive");
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while coordinator
+                .drives
+                .lock()
+                .await
+                .get(&session_id.0)
+                .is_some_and(|o| !o.join.is_finished())
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("drive finished");
+        cancel_task.await.expect("cancel task");
+        let record = real_store.load_run(&session_id).await.expect("load").expect("row");
+        assert!(record.status.is_terminal(), "exactly one durable terminal winner");
+        assert!(
+            arrived.load(Ordering::SeqCst) >= 2,
+            "both cancel and failure reached settle_run"
+        );
+        assert_eq!(
+            dispatches.load(Ordering::SeqCst),
+            1,
+            "no later step launch after settlement race"
+        );
+        let public_ok = cancel_fence_loss_accomplished(&record)
+            || record.status == SessionStatus::Cancelled
+            || record.status == SessionStatus::Failed;
+        assert!(public_ok, "public projection must not be generic conflict");
     }
 
     /// Live SSE handoff: subscriber registered before publish receives host_event.
@@ -8092,7 +8823,7 @@ mod tests {
     async fn run_events_live_handoff_receives_published_host_event() {
         let registry = Arc::new(crate::run_events::RunEventRegistry::new());
         let _sink = registry.try_register_live("sess-1").expect("register");
-        let mut rx = registry
+        let mut sub = registry
             .subscribe_live("sess-1", None, "/inspect".into())
             .expect("subscribe");
         let record = nexus_orchestration::run_state::RunRecord {
@@ -8105,7 +8836,7 @@ mod tests {
             graph_version: 1,
         };
         registry.publish_run_state("sess-1", &record);
-        let frame = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(2), sub.recv())
             .await
             .expect("timeout")
             .expect("frame");

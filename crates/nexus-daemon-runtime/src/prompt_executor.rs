@@ -90,7 +90,7 @@ pub struct HostPromptExecutor {
     /// request cannot race a successor's launch. The future P2 coordinator
     /// shares this mechanism as its per-run operation admission lock.
     op_locks: std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
-    run_events: Option<Arc<crate::run_events::RunEventRegistry>>,
+    run_event_sinks: Option<crate::run_events::RunEventSinkMap>,
 }
 
 impl HostPromptExecutor {
@@ -101,15 +101,15 @@ impl HostPromptExecutor {
         workflow_store: Arc<dyn WorkflowStateStore>,
         timeouts: TimeoutConfig,
     ) -> Self {
-        Self::new_with_run_events(host, workflow_store, timeouts, None)
+        Self::new_with_run_event_sinks(host, workflow_store, timeouts, None)
     }
 
     #[must_use]
-    pub fn new_with_run_events(
+    pub fn new_with_run_event_sinks(
         host: Arc<dyn HostFacade>,
         workflow_store: Arc<dyn WorkflowStateStore>,
         timeouts: TimeoutConfig,
-        run_events: Option<Arc<crate::run_events::RunEventRegistry>>,
+        run_event_sinks: Option<crate::run_events::RunEventSinkMap>,
     ) -> Self {
         Self {
             host,
@@ -118,7 +118,7 @@ impl HostPromptExecutor {
             sessions: tokio::sync::RwLock::new(HashMap::new()),
             creation_locks: std::sync::Mutex::new(HashMap::new()),
             op_locks: std::sync::Mutex::new(HashMap::new()),
-            run_events,
+            run_event_sinks,
         }
     }
 
@@ -720,6 +720,11 @@ impl PromptExecutor for HostPromptExecutor {
         // remove the session — no leaked Host session.
         let mut cancel_triggered = false;
         let mut cancel_unconfirmed = false;
+        let run_event_sink = if let Some(sinks) = &self.run_event_sinks {
+            sinks.lock().await.get(&request.run_id).cloned()
+        } else {
+            None
+        };
         let terminal = loop {
             tokio::select! {
                 biased;
@@ -765,9 +770,8 @@ impl PromptExecutor for HostPromptExecutor {
                 event = stream.next() => {
                     match event {
                         Some(Ok(ev)) => {
-                            if let Some(registry) = &self.run_events {
-                                registry.publish_host_event_for_run(
-                                    &request.run_id,
+                            if let Some(sink) = &run_event_sink {
+                                sink.publish_host_event(
                                     expected_step.as_deref().unwrap_or("prompt"),
                                     &attempt_id,
                                     &ev,
@@ -856,8 +860,17 @@ impl PromptExecutor for HostPromptExecutor {
                 let drain_result = tokio::time::timeout(self.timeouts.shutdown_duration(), async {
                     let mut drain = std::pin::pin!(stream);
                     while let Some(event) = drain.next().await {
-                        if let Ok(HostEvent::OpFinished(_) | HostEvent::OpFailed(_)) = event {
-                            break;
+                        if let Ok(ev) = event {
+                            if let Some(sink) = &run_event_sink {
+                                sink.publish_host_event(
+                                    expected_step.as_deref().unwrap_or("prompt"),
+                                    &attempt_id,
+                                    &ev,
+                                );
+                            }
+                            if matches!(ev, HostEvent::OpFinished(_) | HostEvent::OpFailed(_)) {
+                                break;
+                            }
                         }
                     }
                 })

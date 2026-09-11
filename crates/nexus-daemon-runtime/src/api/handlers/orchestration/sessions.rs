@@ -1236,7 +1236,7 @@ pub async fn session_events(
         .get("last-event-id")
         .and_then(|v| v.to_str().ok());
     let registry = state.run_event_registry();
-    let rx = match registry.subscribe_live(&session_id, last_event_id, inspect_url) {
+    let mut sub = match registry.subscribe_live(&session_id, last_event_id, inspect_url) {
         Ok(rx) => rx,
         Err(crate::run_events::SubscribeError::MalformedCursor)
         | Err(crate::run_events::SubscribeError::FutureCursor) => {
@@ -1262,14 +1262,14 @@ pub async fn session_events(
             });
         }
     };
-    let stream = futures_util::stream::unfold(rx, |mut rx| async move {
-        match rx.recv().await {
+    let stream = futures_util::stream::unfold(sub, |mut sub| async move {
+        match sub.recv().await {
             Some(frame) => {
                 let event = Event::default()
                     .id(frame.id)
                     .event(frame.event)
                     .data(frame.data);
-                Some((Ok(event), rx))
+                Some((Ok(event), sub))
             }
             None => None,
         }

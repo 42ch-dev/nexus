@@ -132,6 +132,7 @@ pub struct WorkspaceState {
     >,
     /// Bounded workflow-run SSE registry (P4 §6.3).
     run_event_registry: Arc<crate::run_events::RunEventRegistry>,
+    run_event_sinks: crate::run_events::RunEventSinkMap,
     /// One async initialization gate for the lazy-attach runtime bundle
     /// (N-2): concurrent `ensure_creator_pool` callers serialize here and
     /// re-check; only the winner opens the pool and publishes the bundle.
@@ -261,6 +262,7 @@ impl WorkspaceState {
             prompt_executor: Arc::new(RwLock::new(None)),
             session_cancels: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             run_event_registry: Arc::new(crate::run_events::RunEventRegistry::new()),
+            run_event_sinks: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             bundle_gate: Arc::new(tokio::sync::Mutex::new(())),
             runtime_bundle: Arc::new(RwLock::new(None)),
             agent_host: Arc::new(None),
@@ -367,6 +369,7 @@ impl WorkspaceState {
             prompt_executor: Arc::new(RwLock::new(None)),
             session_cancels: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             run_event_registry: Arc::new(crate::run_events::RunEventRegistry::new()),
+            run_event_sinks: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             bundle_gate: Arc::new(tokio::sync::Mutex::new(())),
             runtime_bundle: Arc::new(RwLock::new(None)),
             agent_host: Arc::new(None),
@@ -731,10 +734,11 @@ impl WorkspaceState {
             self.agent_host().map(|host| {
                 let host_config = self.agent_host_config();
                 let executor: Arc<dyn nexus_orchestration::capability::PromptExecutor> =
-                    Arc::new(crate::prompt_executor::HostPromptExecutor::new(
+                    Arc::new(crate::prompt_executor::HostPromptExecutor::new_with_run_event_sinks(
                         host,
                         workflow_store.clone(),
                         host_config.timeouts.clone(),
+                        Some(self.run_event_sinks()),
                     ));
                 executor
             });
@@ -821,7 +825,9 @@ impl WorkspaceState {
         {
             coordinator_builder = coordinator_builder.with_binding_provider(provider_id);
         }
-        coordinator_builder = coordinator_builder.with_run_events(self.run_event_registry());
+        coordinator_builder = coordinator_builder
+            .with_run_events(self.run_event_registry())
+            .with_run_event_sinks(self.run_event_sinks());
         let coordinator = Arc::new(coordinator_builder);
 
         // Schedule supervisor with the daemon admission callback.
@@ -1127,6 +1133,10 @@ impl WorkspaceState {
     #[must_use]
     pub fn run_event_registry(&self) -> Arc<crate::run_events::RunEventRegistry> {
         Arc::clone(&self.run_event_registry)
+    }
+
+    pub fn run_event_sinks(&self) -> crate::run_events::RunEventSinkMap {
+        Arc::clone(&self.run_event_sinks)
     }
 
     pub fn session_cancels(

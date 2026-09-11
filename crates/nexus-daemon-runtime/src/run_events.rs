@@ -4,6 +4,7 @@ use nexus_agent_host::capability::model::HostEvent;
 use nexus_orchestration::run_state::RunRecord;
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
@@ -16,6 +17,11 @@ pub const MAX_TERMINAL_RINGS: usize = 64;
 pub const MAX_SUBSCRIBERS_PER_RUN: usize = 16;
 pub const MAX_PENDING_FRAMES_PER_SUB: usize = 16;
 pub const MAX_PENDING_BYTES_PER_SUB: usize = 1024 * 1024;
+
+/// Shared map of per-run sinks registered before drive; the coordinator and
+/// [`crate::prompt_executor::HostPromptExecutor`] share this handle.
+pub type RunEventSinkMap =
+    Arc<tokio::sync::Mutex<std::collections::HashMap<String, RunEventSink>>>;
 
 #[derive(Clone)]
 pub struct RunEventSink {
@@ -34,6 +40,10 @@ impl RunEventSink {
             return;
         };
         registry.publish_host_event(&self.run_id, step_id, attempt_id, host_event);
+    }
+
+    pub fn run_id(&self) -> &str {
+        &self.run_id
     }
 }
 
@@ -93,6 +103,7 @@ pub struct RunEventRegistry {
 
 struct RunEventRegistryInner {
     state: Mutex<RegistryState>,
+    next_subscriber_id: AtomicU64,
 }
 
 struct RegistryState {
@@ -107,7 +118,8 @@ struct RunRing {
     records: VecDeque<StoredRecord>,
     total_bytes: usize,
     next_sequence: u64,
-    subscribers: Vec<Subscriber>,
+    subscribers: HashMap<u64, Subscriber>,
+    closed: bool,
 }
 
 struct StoredRecord {
@@ -122,6 +134,40 @@ struct Subscriber {
     pending_bytes: usize,
 }
 
+struct SubscriberRelease {
+    inner: Weak<RunEventRegistryInner>,
+    run_id: String,
+    subscriber_id: u64,
+}
+
+impl Drop for SubscriberRelease {
+    fn drop(&mut self) {
+        if let Some(inner) = self.inner.upgrade() {
+            inner.unregister_subscriber(&self.run_id, self.subscriber_id);
+        }
+    }
+}
+
+/// Live SSE subscription: replay is delivered first; subsequent frames arrive
+/// on [`recv`](Self::recv). Dropping releases the subscriber permit.
+pub struct LiveSubscription {
+    rx: mpsc::Receiver<SseFrame>,
+    inner: Weak<RunEventRegistryInner>,
+    run_id: String,
+    subscriber_id: u64,
+    _release: SubscriberRelease,
+}
+
+impl LiveSubscription {
+    pub async fn recv(&mut self) -> Option<SseFrame> {
+        let frame = self.rx.recv().await?;
+        if let Some(inner) = self.inner.upgrade() {
+            inner.decrement_subscriber_pending(&self.run_id, self.subscriber_id, frame.data.len());
+        }
+        Some(frame)
+    }
+}
+
 impl RunEventRegistry {
     #[must_use]
     pub fn new() -> Self {
@@ -132,6 +178,7 @@ impl RunEventRegistry {
                     terminal_order: VecDeque::new(),
                     terminal: HashMap::new(),
                 }),
+                next_subscriber_id: AtomicU64::new(1),
             }),
         }
     }
@@ -152,7 +199,8 @@ impl RunEventRegistry {
             records: VecDeque::new(),
             total_bytes: 0,
             next_sequence: 1,
-            subscribers: Vec::new(),
+            subscribers: HashMap::new(),
+            closed: false,
         });
         Some(RunEventSink {
             run_id: run_id.to_string(),
@@ -201,6 +249,7 @@ impl RunEventRegistry {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(mut ring) = state.live.remove(run_id) {
+            ring.closed = true;
             ring.subscribers.clear();
             state.terminal.insert(run_id.to_string(), ring);
             state.terminal_order.push_back(run_id.to_string());
@@ -209,6 +258,8 @@ impl RunEventRegistry {
                     state.terminal.remove(&evicted);
                 }
             }
+        } else if let Some(ring) = state.terminal.get_mut(run_id) {
+            ring.closed = true;
         }
     }
 
@@ -218,7 +269,7 @@ impl RunEventRegistry {
         run_id: &str,
         last_event_id: Option<&str>,
         inspect_url: String,
-    ) -> Result<mpsc::Receiver<SseFrame>, SubscribeError> {
+    ) -> Result<LiveSubscription, SubscribeError> {
         let (tx, rx) = mpsc::channel(MAX_PENDING_FRAMES_PER_SUB);
         let mut state = self
             .inner
@@ -260,29 +311,101 @@ impl RunEventRegistry {
             None
         };
         let replay = collect_from(ring, run_id, after_seq);
-        let pending_frames = replay.len();
-        let pending_bytes = replay.iter().map(|f| f.data.len()).sum();
         for frame in replay {
             if tx.try_send(frame).is_err() {
                 return Err(SubscribeError::TooManySubscribers);
             }
         }
         if is_terminal {
-            return Ok(rx);
+            return Ok(LiveSubscription {
+                rx,
+                inner: Arc::downgrade(&self.inner),
+                run_id: run_id.to_string(),
+                subscriber_id: 0,
+                _release: SubscriberRelease {
+                    inner: Weak::new(),
+                    run_id: run_id.to_string(),
+                    subscriber_id: 0,
+                },
+            });
         }
-        if ring.subscribers.len() >= MAX_SUBSCRIBERS_PER_RUN {
-            return Err(SubscribeError::TooManySubscribers);
-        }
-        ring.subscribers.push(Subscriber {
-            tx,
-            pending_frames,
-            pending_bytes,
-        });
-        Ok(rx)
+        let subscriber_id = self
+            .inner
+            .next_subscriber_id
+            .fetch_add(1, Ordering::SeqCst);
+        ring.subscribers.insert(
+            subscriber_id,
+            Subscriber {
+                tx,
+                pending_frames: 0,
+                pending_bytes: 0,
+            },
+        );
+        Ok(LiveSubscription {
+            rx,
+            inner: Arc::downgrade(&self.inner),
+            run_id: run_id.to_string(),
+            subscriber_id,
+            _release: SubscriberRelease {
+                inner: Arc::downgrade(&self.inner),
+                run_id: run_id.to_string(),
+                subscriber_id,
+            },
+        })
+    }
+
+    /// Current live subscriber count for a run (test/diagnostic).
+    #[cfg(test)]
+    pub fn live_subscriber_count(&self, run_id: &str) -> usize {
+        self.inner
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .live
+            .get(run_id)
+            .map(|r| r.subscribers.len())
+            .unwrap_or(0)
     }
 }
 
 impl RunEventRegistryInner {
+    fn unregister_subscriber(&self, run_id: &str, subscriber_id: u64) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(ring) = state.live.get_mut(run_id) {
+            ring.subscribers.remove(&subscriber_id);
+        }
+    }
+
+    fn decrement_subscriber_pending(&self, run_id: &str, subscriber_id: u64, byte_len: usize) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(ring) = state.live.get_mut(run_id) {
+            if let Some(sub) = ring.subscribers.get_mut(&subscriber_id) {
+                sub.pending_frames = sub.pending_frames.saturating_sub(1);
+                sub.pending_bytes = sub.pending_bytes.saturating_sub(byte_len);
+            }
+        }
+    }
+
+    fn ring_closed(&self, run_id: &str) -> bool {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(ring) = state.live.get(run_id) {
+            return ring.closed;
+        }
+        state
+            .terminal
+            .get(run_id)
+            .is_some_and(|ring| ring.closed)
+    }
+
     fn publish_host_event(
         &self,
         run_id: &str,
@@ -290,6 +413,9 @@ impl RunEventRegistryInner {
         attempt_id: &str,
         host_event: &HostEvent,
     ) {
+        if self.ring_closed(run_id) {
+            return;
+        }
         let wire = HostEventWire {
             run_id,
             epoch: 0,
@@ -302,19 +428,21 @@ impl RunEventRegistryInner {
     }
 
     fn append_json(&self, run_id: &str, event: &str, value: &impl Serialize) {
+        if self.ring_closed(run_id) {
+            return;
+        }
         let data = match serde_json::to_string(value) {
             Ok(s) => s,
             Err(_) => return,
         };
-        if data.len() > MAX_FRAME_BYTES {
-            self.append_gap_record(run_id);
-            return;
-        }
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let ring = if let Some(r) = state.live.get_mut(run_id) {
+            if r.closed {
+                return;
+            }
             r
         } else if let Some(r) = state.terminal.get_mut(run_id) {
             r
@@ -338,9 +466,56 @@ impl RunEventRegistryInner {
             event: event.to_string(),
             data: payload,
         };
-        let byte_len = frame.data.len();
+        if encoded_sse_frame_bytes(&frame) > MAX_FRAME_BYTES {
+            self.append_gap_record_locked(ring, run_id);
+            return;
+        }
+        self.push_record_locked(ring, frame);
+    }
+
+    fn append_gap_record(&self, run_id: &str) {
+        if self.ring_closed(run_id) {
+            return;
+        }
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let ring = if let Some(r) = state.live.get_mut(run_id) {
+            if r.closed {
+                return;
+            }
+            r
+        } else if let Some(r) = state.terminal.get_mut(run_id) {
+            r
+        } else {
+            return;
+        };
+        self.append_gap_record_locked(ring, run_id);
+    }
+
+    fn append_gap_record_locked(&self, ring: &mut RunRing, run_id: &str) {
+        let sequence = ring.next_sequence;
+        ring.next_sequence += 1;
+        let gap = GapWire {
+            run_id: run_id.to_string(),
+            epoch: ring.epoch,
+            from_sequence: sequence,
+            to_sequence: sequence,
+        };
+        let data = serde_json::to_string(&gap).unwrap_or_default();
+        let frame = SseFrame {
+            id: format!("{}:{}", ring.epoch, sequence),
+            event: "gap".to_string(),
+            data,
+        };
+        self.push_record_locked(ring, frame);
+    }
+
+    fn push_record_locked(&self, ring: &mut RunRing, frame: SseFrame) {
+        let byte_len = encoded_sse_frame_bytes(&frame);
         ring.records.push_back(StoredRecord {
-            sequence,
+            sequence: ring.next_sequence.saturating_sub(1),
             frame: frame.clone(),
             byte_len,
         });
@@ -352,71 +527,43 @@ impl RunEventRegistryInner {
         }
         fanout(ring, frame);
     }
+}
 
-    fn append_gap_record(&self, run_id: &str) {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let ring = if let Some(r) = state.live.get_mut(run_id) {
-            r
-        } else if let Some(r) = state.terminal.get_mut(run_id) {
-            r
-        } else {
-            return;
-        };
-        let sequence = ring.next_sequence;
-        ring.next_sequence += 1;
-        let gap = GapWire {
-            run_id: run_id.to_string(),
-            epoch: ring.epoch,
-            from_sequence: sequence,
-            to_sequence: sequence,
-        };
-        let data = serde_json::to_string(&gap).unwrap_or_default();
-        let byte_len = data.len();
-        let frame = SseFrame {
-            id: format!("{}:{}", ring.epoch, sequence),
-            event: "gap".to_string(),
-            data,
-        };
-        ring.records.push_back(StoredRecord {
-            sequence,
-            frame: frame.clone(),
-            byte_len,
-        });
-        fanout(ring, frame);
-    }
+fn encoded_sse_frame_bytes(frame: &SseFrame) -> usize {
+    // Wire estimate: `id:` + id + `\n` + `event:` + event + `\n` + `data:` + data + `\n\n`
+    frame.id.len() + frame.event.len() + frame.data.len() + 16
 }
 
 fn fanout(ring: &mut RunRing, frame: SseFrame) {
-    let byte_len = frame.data.len();
-    let mut i = 0;
-    while i < ring.subscribers.len() {
-        let sub = &mut ring.subscribers[i];
+    let byte_len = encoded_sse_frame_bytes(&frame);
+    let lag_sequence = ring.next_sequence.saturating_sub(1);
+    let mut remove = Vec::new();
+    for (id, sub) in &mut ring.subscribers {
         if sub.pending_frames >= MAX_PENDING_FRAMES_PER_SUB
             || sub.pending_bytes.saturating_add(byte_len) > MAX_PENDING_BYTES_PER_SUB
         {
-            let lag = lag_gap_frame(&ring.run_id, ring.epoch, ring.next_sequence.saturating_sub(1));
+            let lag = lag_gap_frame(&ring.run_id, ring.epoch, lag_sequence);
             let _ = sub.tx.try_send(lag);
-            ring.subscribers.remove(i);
+            remove.push(*id);
             continue;
         }
         match sub.tx.try_send(frame.clone()) {
             Ok(()) => {
                 sub.pending_frames += 1;
                 sub.pending_bytes += byte_len;
-                i += 1;
             }
             Err(mpsc::error::TrySendError::Full(_)) => {
-                let lag = lag_gap_frame(&ring.run_id, ring.epoch, ring.next_sequence.saturating_sub(1));
+                let lag = lag_gap_frame(&ring.run_id, ring.epoch, lag_sequence);
                 let _ = sub.tx.try_send(lag);
-                ring.subscribers.remove(i);
+                remove.push(*id);
             }
             Err(mpsc::error::TrySendError::Closed(_)) => {
-                ring.subscribers.remove(i);
+                remove.push(*id);
             }
         }
+    }
+    for id in remove {
+        ring.subscribers.remove(&id);
     }
 }
 
@@ -475,7 +622,19 @@ fn current_epoch() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_orchestration::engine::SessionStatus;
+    use nexus_orchestration::engine::{SessionId, SessionStatus};
+
+    fn mk_record(run_id: &str, status: SessionStatus, revision: u64) -> RunRecord {
+        RunRecord {
+            session_id: SessionId(run_id.into()),
+            status,
+            state_revision: revision,
+            execution_version: 1,
+            descriptor: None,
+            state: None,
+            graph_version: 1,
+        }
+    }
 
     #[test]
     fn gap_cursor_is_numeric_sequence() {
@@ -486,24 +645,25 @@ mod tests {
         assert_ne!(seq, "gap");
     }
 
+    #[test]
+    fn encoded_frame_cap_counts_wire_overhead() {
+        let frame = SseFrame {
+            id: "1:1".into(),
+            event: "host_event".into(),
+            data: "x".repeat(MAX_FRAME_BYTES),
+        };
+        assert!(encoded_sse_frame_bytes(&frame) > MAX_FRAME_BYTES);
+    }
+
     #[tokio::test]
     async fn live_subscriber_receives_post_replay_events() {
         let registry = RunEventRegistry::new();
         let _sink = registry.try_register_live("run-1").expect("register");
-        let mut rx = registry
+        let mut sub = registry
             .subscribe_live("run-1", None, "/inspect".into())
             .expect("subscribe");
-        let record = nexus_orchestration::run_state::RunRecord {
-            session_id: nexus_orchestration::engine::SessionId("run-1".into()),
-            status: SessionStatus::Running,
-            state_revision: 1,
-            execution_version: 1,
-            descriptor: None,
-            state: None,
-            graph_version: 1,
-        };
-        registry.publish_run_state("run-1", &record);
-        let frame = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+        registry.publish_run_state("run-1", &mk_record("run-1", SessionStatus::Running, 1));
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(1), sub.recv())
             .await
             .expect("timeout")
             .expect("frame");
@@ -511,25 +671,120 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn subscriber_permit_released_on_drop() {
+        let registry = RunEventRegistry::new();
+        let _sink = registry.try_register_live("run-1").expect("register");
+        let sub = registry
+            .subscribe_live("run-1", None, "/inspect".into())
+            .expect("subscribe");
+        assert_eq!(registry.live_subscriber_count("run-1"), 1);
+        drop(sub);
+        assert_eq!(registry.live_subscriber_count("run-1"), 0);
+    }
+
+    #[tokio::test]
+    async fn draining_subscriber_survives_many_events() {
+        let registry = RunEventRegistry::new();
+        let _sink = registry.try_register_live("run-1").expect("register");
+        let mut sub = registry
+            .subscribe_live("run-1", None, "/inspect".into())
+            .expect("subscribe");
+        for i in 0..32 {
+            registry.publish_run_state(
+                "run-1",
+                &mk_record("run-1", SessionStatus::Running, i as u64 + 1),
+            );
+        }
+        let mut received = 0usize;
+        while let Ok(Some(frame)) =
+            tokio::time::timeout(std::time::Duration::from_millis(200), sub.recv()).await
+        {
+            assert_eq!(frame.event, "run_state");
+            received += 1;
+        }
+        assert!(received >= 16, "expected live tail frames, got {received}");
+        assert_eq!(registry.live_subscriber_count("run-1"), 1);
+    }
+
+    #[tokio::test]
+    async fn replay_dedupes_with_last_event_id() {
+        let registry = RunEventRegistry::new();
+        let _sink = registry.try_register_live("run-1").expect("register");
+        registry.publish_run_state("run-1", &mk_record("run-1", SessionStatus::Running, 1));
+        registry.publish_run_state("run-1", &mk_record("run-1", SessionStatus::Running, 2));
+        let mut first = registry
+            .subscribe_live("run-1", None, "/inspect".into())
+            .expect("subscribe");
+        let f1 = first.recv().await.expect("first");
+        let f2 = first.recv().await.expect("second");
+        drop(first);
+        let mut second = registry
+            .subscribe_live("run-1", Some(&f1.id), "/inspect".into())
+            .expect("reconnect");
+        let only = second.recv().await.expect("tail");
+        assert_eq!(only.id, f2.id);
+        assert!(second.recv().await.is_some());
+    }
+
+    #[tokio::test]
     async fn terminal_ring_replay_then_closes() {
         let registry = RunEventRegistry::new();
         let _sink = registry.try_register_live("run-1").expect("register");
-        let record = nexus_orchestration::run_state::RunRecord {
-            session_id: nexus_orchestration::engine::SessionId("run-1".into()),
-            status: SessionStatus::Completed,
-            state_revision: 2,
-            execution_version: 1,
-            descriptor: None,
-            state: None,
-            graph_version: 1,
-        };
-        registry.publish_run_state("run-1", &record);
+        registry.publish_run_state("run-1", &mk_record("run-1", SessionStatus::Completed, 2));
         registry.mark_terminal("run-1");
-        let mut rx = registry
+        let mut sub = registry
             .subscribe_live("run-1", None, "/inspect".into())
             .expect("subscribe");
-        let first = rx.recv().await.expect("run_state");
+        let first = sub.recv().await.expect("run_state");
         assert_eq!(first.event, "run_state");
-        assert!(rx.recv().await.is_none());
+        assert!(sub.recv().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn post_terminal_publish_is_rejected() {
+        let registry = RunEventRegistry::new();
+        let sink = registry.try_register_live("run-1").expect("register");
+        registry.publish_run_state("run-1", &mk_record("run-1", SessionStatus::Completed, 1));
+        registry.mark_terminal("run-1");
+        sink.publish_host_event(
+            "step",
+            "attempt",
+            &nexus_agent_host::capability::model::HostEvent::MessageDelta(
+                nexus_agent_host::capability::model::TextDeltaEvent {
+                    session_id: nexus_agent_host::HostSessionId::new(),
+                    op_id: nexus_agent_host::HostOperationId::new(),
+                    text: "late".into(),
+                },
+            ),
+        );
+        let mut sub = registry
+            .subscribe_live("run-1", None, "/inspect".into())
+            .expect("subscribe");
+        let only = sub.recv().await.expect("run_state");
+        assert_eq!(only.event, "run_state");
+        assert!(sub.recv().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn oversize_payload_emits_gap_and_respects_ring_cap() {
+        let registry = RunEventRegistry::new();
+        let _sink = registry.try_register_live("run-1").expect("register");
+        let huge = "x".repeat(MAX_FRAME_BYTES);
+        for _ in 0..300 {
+            registry.inner.append_json(
+                "run-1",
+                "host_event",
+                &serde_json::json!({ "blob": huge }),
+            );
+        }
+        let state = registry
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let ring = state.live.get("run-1").expect("ring");
+        assert!(ring.records.len() <= MAX_RECORDS_PER_RUN);
+        assert!(ring.total_bytes <= MAX_BYTES_PER_RUN);
+        assert!(ring.records.iter().any(|r| r.frame.event == "gap"));
     }
 }
