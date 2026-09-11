@@ -107,9 +107,12 @@ use crate::error::{HostError, HostResult};
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
 use crate::providers::native_cli::map_dsh::{
     classify_error_parts, classify_notification, classify_run_error, finalize_successful_run,
-    operation_delivery_overflow_failure, operation_protocol_failure, DshNotificationClass,
-    RunReconciliation,
+    operation_delivery_overflow_failure, operation_protocol_failure, ClassifyNotificationError,
+    DshNotificationClass, RunReconciliation,
 };
+use deepseek_harness_sdk::RunResult;
+use std::time::Instant;
+use tokio::sync::Notify;
 use crate::ProviderAdapter;
 
 /// The bare command resolved through PATH when no explicit configured
@@ -184,18 +187,69 @@ impl DeliveryBudget {
     }
 }
 
+/// Monotonic instants for actual-runtime streaming proof (L2).
+#[derive(Default, Clone, Debug)]
+pub struct DshStreamingRunTiming {
+    pub first_callback: Option<Instant>,
+    pub run_completed: Option<Instant>,
+}
+
+pub static LAST_DSH_RUN_TIMING: StdMutex<Option<DshStreamingRunTiming>> = StdMutex::new(None);
+
+pub fn take_last_dsh_run_timing() -> Option<DshStreamingRunTiming> {
+    LAST_DSH_RUN_TIMING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take()
+}
+
+struct QueuedPayload {
+    event: Option<HostEvent>,
+    reservation: Option<usize>,
+    budget: Arc<DeliveryBudget>,
+}
+
+impl QueuedPayload {
+    fn into_event(mut self) -> HostEvent {
+        if let Some(bytes) = self.reservation.take() {
+            self.budget.release(bytes);
+        }
+        self.event.take().expect("queued payload consumed once")
+    }
+}
+
+impl Drop for QueuedPayload {
+    fn drop(&mut self) {
+        if let Some(bytes) = self.reservation.take() {
+            self.budget.release(bytes);
+        }
+    }
+}
+
 struct StreamObserver {
     root_session_id: String,
     session_id: HostSessionId,
     op_id: HostOperationId,
-    content_tx: mpsc::Sender<(HostEvent, usize)>,
+    content_tx: mpsc::Sender<QueuedPayload>,
     reconciliation: Arc<StdMutex<RunReconciliation>>,
     classifier_failed: Arc<AtomicBool>,
     delivery_failed: Arc<AtomicBool>,
     budget: Arc<DeliveryBudget>,
+    failure_notify: Arc<Notify>,
+    run_timing: Arc<StdMutex<DshStreamingRunTiming>>,
 }
 
 impl StreamObserver {
+    fn signal_failure(&self, classifier: bool, delivery: bool) {
+        if classifier {
+            self.classifier_failed.store(true, Ordering::Release);
+        }
+        if delivery {
+            self.delivery_failed.store(true, Ordering::Release);
+        }
+        self.failure_notify.notify_waiters();
+    }
+
     fn observe(&self, notification: &Notification) {
         if self.classifier_failed.load(Ordering::Acquire)
             || self.delivery_failed.load(Ordering::Acquire)
@@ -207,30 +261,36 @@ impl StreamObserver {
             Ok(DshNotificationClass::RootText(text)) => {
                 let bytes = text.len();
                 if !self.budget.try_reserve(bytes) {
-                    self.delivery_failed.store(true, Ordering::Release);
+                    self.signal_failure(false, true);
                     return;
+                }
+                {
+                    let mut timing = self.run_timing.lock().unwrap_or_else(|e| e.into_inner());
+                    if timing.first_callback.is_none() {
+                        timing.first_callback = Some(Instant::now());
+                    }
                 }
                 let event = HostEvent::MessageDelta(TextDeltaEvent {
                     session_id: self.session_id.clone(),
                     op_id: self.op_id.clone(),
                     text,
                 });
-                match self.content_tx.try_send((event, bytes)) {
+                match self.content_tx.try_send(QueuedPayload {
+                    event: Some(event),
+                    reservation: Some(bytes),
+                    budget: Arc::clone(&self.budget),
+                }) {
                     Ok(()) => {
                         self.reconciliation
                             .lock()
                             .unwrap_or_else(|e| e.into_inner())
                             .note_root_text_emitted();
                     }
-                    Err(_) => {
-                        self.budget.release(bytes);
-                        self.delivery_failed.store(true, Ordering::Release);
-                    }
+                    Err(_) => self.signal_failure(false, true),
                 }
             }
-            Err(_) => {
-                self.classifier_failed.store(true, Ordering::Release);
-            }
+            Err(ClassifyNotificationError::Protocol(_)) => self.signal_failure(true, false),
+            Err(ClassifyNotificationError::EventTooLarge(_)) => self.signal_failure(false, true),
         }
     }
 }
@@ -1341,14 +1401,26 @@ impl DshNativeProvider {
                 let reconciliation = Arc::new(StdMutex::new(RunReconciliation::new()));
                 let classifier_failed = Arc::new(AtomicBool::new(false));
                 let delivery_failed = Arc::new(AtomicBool::new(false));
+                let failure_notify = Arc::new(Notify::new());
+                let run_timing = Arc::new(StdMutex::new(DshStreamingRunTiming::default()));
+                {
+                    let mut slot = LAST_DSH_RUN_TIMING.lock().unwrap_or_else(|e| e.into_inner());
+                    *slot = Some(run_timing.lock().unwrap_or_else(|e| e.into_inner()).clone());
+                }
 
                 let run = async {
-                    let mut guard = state.lock().await;
-                    if guard.closed || closing.load(Ordering::Acquire) {
-                        return Err(RunError::SessionGone);
-                    }
-                    let root_session_id = guard.dsh_session_id.clone();
-                    let harness = guard.harness.as_mut().ok_or(RunError::SessionGone)?;
+                    let (root_session_id, mut harness) = {
+                        let mut guard = state.lock().await;
+                        if guard.closed || closing.load(Ordering::Acquire) {
+                            return Err(RunError::SessionGone);
+                        }
+                        let root_session_id = guard.dsh_session_id.clone();
+                        let Some(harness) = guard.harness.take() else {
+                            return Err(RunError::SessionGone);
+                        };
+                        (root_session_id, harness)
+                    };
+
                     let observer = Arc::new(StreamObserver {
                         root_session_id: root_session_id.clone(),
                         session_id: session_id.clone(),
@@ -1358,17 +1430,79 @@ impl DshNativeProvider {
                         classifier_failed: Arc::clone(&classifier_failed),
                         delivery_failed: Arc::clone(&delivery_failed),
                         budget: Arc::clone(&budget_for_observer),
+                        failure_notify: Arc::clone(&failure_notify),
+                        run_timing: Arc::clone(&run_timing),
                     });
                     let obs = Arc::clone(&observer);
                     let session = harness.start_session(Some(root_session_id));
-                    session
+                    let run_result = session
                         .run(Input::Text(prompt_text), Some(&|n| obs.observe(n)))
                         .await
-                        .map_err(RunError::Sdk)
+                        .map_err(RunError::Sdk);
+
+                    {
+                        let mut guard = state.lock().await;
+                        if !guard.closed && guard.harness.is_none() {
+                            guard.harness = Some(harness);
+                        }
+                    }
+                    run_result
                 };
 
-                match tokio::time::timeout(run_timeout, run).await {
-                    Ok(Ok(result)) => {
+                let run_outcome = tokio::select! {
+                    biased;
+                    _ = failure_notify.notified() => RunSelectOutcome::FailureSignal,
+                    _ = content_tx.closed() => RunSelectOutcome::ReceiverClosed,
+                    result = tokio::time::timeout(run_timeout, run) => match result {
+                        Ok(inner) => RunSelectOutcome::Run(inner),
+                        Err(_elapsed) => RunSelectOutcome::TimedOut,
+                    },
+                };
+
+                match run_outcome {
+                    RunSelectOutcome::FailureSignal => {
+                        if classifier_failed.load(Ordering::Acquire) {
+                            (
+                                vec![HostEvent::OpFailed(operation_protocol_failure(
+                                    &session_id,
+                                    &op_id,
+                                ))],
+                                true,
+                            )
+                        } else {
+                            (
+                                vec![HostEvent::OpFailed(operation_delivery_overflow_failure(
+                                    &session_id,
+                                    &op_id,
+                                ))],
+                                true,
+                            )
+                        }
+                    }
+                    RunSelectOutcome::ReceiverClosed => (
+                        vec![HostEvent::OpFailed(OperationFailedEvent {
+                            session_id: session_id.clone(),
+                            op_id: op_id.clone(),
+                            error_category: "stream_closed".to_string(),
+                            error_message: "dsh event stream closed before the turn completed"
+                                .to_string(),
+                        })],
+                        true,
+                    ),
+                    RunSelectOutcome::TimedOut => (
+                        vec![HostEvent::OpFailed(OperationFailedEvent {
+                            session_id: session_id.clone(),
+                            op_id: op_id.clone(),
+                            error_category: "timeout".to_string(),
+                            error_message: format!("dsh turn timed out after {prompt_ms}ms"),
+                        })],
+                        true,
+                    ),
+                    RunSelectOutcome::Run(Ok(result)) => {
+                        {
+                            let mut timing = run_timing.lock().unwrap_or_else(|e| e.into_inner());
+                            timing.run_completed = Some(Instant::now());
+                        }
                         if classifier_failed.load(Ordering::Acquire) {
                             (
                                 vec![HostEvent::OpFailed(operation_protocol_failure(
@@ -1398,7 +1532,7 @@ impl DshNativeProvider {
                             }
                         }
                     }
-                    Ok(Err(RunError::SessionGone)) => (
+                    RunSelectOutcome::Run(Err(RunError::SessionGone)) => (
                         vec![HostEvent::OpFailed(OperationFailedEvent {
                             session_id: session_id.clone(),
                             op_id: op_id.clone(),
@@ -1408,21 +1542,12 @@ impl DshNativeProvider {
                         })],
                         true,
                     ),
-                    Ok(Err(RunError::Sdk(error))) => (
+                    RunSelectOutcome::Run(Err(RunError::Sdk(error))) => (
                         vec![HostEvent::OpFailed(classify_run_error(
                             &error,
                             &session_id,
                             &op_id,
                         ))],
-                        true,
-                    ),
-                    Err(_elapsed) => (
-                        vec![HostEvent::OpFailed(OperationFailedEvent {
-                            session_id: session_id.clone(),
-                            op_id: op_id.clone(),
-                            error_category: "timeout".to_string(),
-                            error_message: format!("dsh turn timed out after {prompt_ms}ms"),
-                        })],
                         true,
                     ),
                 }
@@ -1496,8 +1621,8 @@ impl DshNativeProvider {
                     ));
                 }
 
-                if let Ok((event, bytes)) = content_rx.try_recv() {
-                    budget.release(bytes);
+                if let Ok(payload) = content_rx.try_recv() {
+                    let event = payload.into_event();
                     return Some((
                         Ok(event),
                         (
@@ -1514,8 +1639,8 @@ impl DshNativeProvider {
                 }
 
                 match content_rx.recv().await {
-                    Some((event, bytes)) => {
-                        budget.release(bytes);
+                    Some(payload) => {
+                        let event = payload.into_event();
                         Some((
                             Ok(event),
                             (
@@ -1563,6 +1688,13 @@ impl DshNativeProvider {
 
 }
 
+
+enum RunSelectOutcome {
+    FailureSignal,
+    ReceiverClosed,
+    TimedOut,
+    Run(Result<RunResult, RunError>),
+}
 
 /// Failure of the turn's `Session::run` attempt.
 enum RunError {
@@ -4272,6 +4404,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dsh_oversize_fixture_fails_delivery_bounds() {
+        let req_log_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = req_log_dir.path().join("reqs.jsonl");
+        let dsh_home = req_log_dir.path().join("dsh-home");
+        let provider = stub_provider(
+            "test-dsh-oversize",
+            stub_env_scenario(&req_log, &dsh_home, "oversize"),
+        );
+        let handle = launch_hermetic(&provider).await;
+        let events = run_turn(&provider, &handle, "big").await;
+        assert!(
+            matches!(
+                terminal_of(&events),
+                Some(HostEvent::OpFailed(f)) if f.error_category == "provider_error"
+            ),
+            "{events:?}"
+        );
+        assert_eq!(terminal_count(&events), 1);
+    }
+
+    #[tokio::test]
+    async fn dsh_flood_fixture_hits_delivery_overflow() {
+        let req_log_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = req_log_dir.path().join("reqs.jsonl");
+        let dsh_home = req_log_dir.path().join("dsh-home");
+        let mut env = stub_env_scenario(&req_log, &dsh_home, "flood_messages");
+        env.insert("FLOOD_COUNT".to_string(), "65".to_string());
+        let provider = stub_provider("test-dsh-flood", env);
+        let handle = launch_hermetic(&provider).await;
+        let events = run_turn(&provider, &handle, "flood").await;
+        assert!(
+            matches!(
+                terminal_of(&events),
+                Some(HostEvent::OpFailed(f)) if f.error_category == "provider_error"
+            ),
+            "{events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn dsh_receiver_drop_while_hold_turn_invalidates_session() {
+        let req_log_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = req_log_dir.path().join("reqs.jsonl");
+        let dsh_home = req_log_dir.path().join("dsh-home");
+        let provider = stub_provider(
+            "test-dsh-drop",
+            stub_env_scenario(&req_log, &dsh_home, "hold_turn"),
+        );
+        let handle = launch_hermetic(&provider).await;
+        let stream = provider
+            .execute(
+                &handle,
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "hold".to_string(),
+                    }],
+                    permission_scope: None,
+                },
+            )
+            .await
+            .expect("execute");
+        let mut stream = std::pin::pin!(stream);
+        let first = stream.next().await.expect("op started").expect("ok");
+        assert!(matches!(first, HostEvent::OpStarted(_)));
+        drop(stream);
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        assert!(
+            provider
+                .execute(
+                    &handle,
+                    HostOperation::Prompt {
+                        op_id: HostOperationId::new(),
+                        content: vec![HostContentBlock::Text {
+                            text: "after drop".to_string(),
+                        }],
+                        permission_scope: None,
+                    },
+                )
+                .await
+                .is_err(),
+            "session must be unusable after receiver drop"
+        );
+    }
+
     async fn dsh_lag_fixture_still_delivers_message_before_terminal() {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
         let req_log = req_log_dir.path().join("reqs.jsonl");

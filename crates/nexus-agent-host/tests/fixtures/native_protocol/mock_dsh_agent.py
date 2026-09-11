@@ -177,6 +177,19 @@ def handle_request(req):
                 "type": "assistant/message",
                 "data": {"content": [{"type": "text", "text": 1}]},
             })
+        elif scenario == "oversize":
+            big = "x" * (int(os.environ.get("OVERSIZE_BYTES", str(256 * 1024 + 1))))
+            session_event(session_id, {
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": big}]},
+            })
+        elif scenario == "flood_messages":
+            count = int(os.environ.get("FLOOD_COUNT", "65"))
+            for i in range(count):
+                session_event(session_id, {
+                    "type": "assistant/message",
+                    "data": {"content": [{"type": "text", "text": f"m{i}"}]},
+                })
         elif scenario == "partial_then_fail":
             session_event(session_id, {
                 "type": "assistant/message",

@@ -52,7 +52,7 @@ use nexus_agent_host::capability::model::{
 };
 use nexus_agent_host::config::TimeoutConfig;
 use nexus_agent_host::error::HostError;
-use nexus_agent_host::providers::native_cli::dsh::{DshNativeProvider, resolve_dsh_executable};
+use nexus_agent_host::providers::native_cli::dsh::{take_last_dsh_run_timing, DshNativeProvider, resolve_dsh_executable};
 use nexus_agent_host::{HostOperationId, ProviderAdapter, ProviderId};
 use tempfile::TempDir;
 use tokio::io::AsyncReadExt;
@@ -1254,13 +1254,26 @@ async fn real_dsh_message_delta_precedes_terminal_with_timing_evidence() {
             };
             assert!(
                 first_delta <= terminal_at,
-                "MessageDelta must not follow the terminal instant"
+                "consumer: MessageDelta must not follow the terminal instant"
             );
-            let lead_ms = terminal_at
-                .saturating_duration_since(first_delta)
+            let producer_timing = take_last_dsh_run_timing()
+                .expect("producer timing must be captured for actual-dsh proof");
+            let (Some(callback_at), Some(run_completed_at)) = (
+                producer_timing.first_callback,
+                producer_timing.run_completed,
+            ) else {
+                panic!("producer timing arms must be populated");
+            };
+            assert!(
+                callback_at < run_completed_at,
+                "committed callback must strictly precede Session::run completion                  (callback={callback_at:?}, run_completed={run_completed_at:?})"
+            );
+            let lead_ms = run_completed_at
+                .saturating_duration_since(callback_at)
                 .as_millis();
             eprintln!(
-                "P1 actual-dsh timing evidence: first MessageDelta observed {lead_ms}ms                  (monotonic Instant) before OpFinished/OpFailed on this host"
+                "P1 actual-dsh timing evidence: first callback observed {lead_ms}ms                  (monotonic Instant) before Session::run completion on this host;                  consumer delta lead {}ms before terminal",
+                terminal_at.saturating_duration_since(first_delta).as_millis()
             );
             assert_eq!(proxy.records().len(), 1, "one scripted model call");
         }

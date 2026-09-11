@@ -24,9 +24,21 @@ pub enum DshNotificationClass {
     RootText(String),
 }
 
+/// Per-root-message text bound enforced before allocation (architecture §4.3).
+pub(crate) const DSCH_MAX_ROOT_MESSAGE_TEXT_BYTES: usize = 256 * 1024;
+
 /// Classifier failure for a recognized wire envelope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DshProtocolFailure;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DshEventTooLarge;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClassifyNotificationError {
+    Protocol(DshProtocolFailure),
+    EventTooLarge(DshEventTooLarge),
+}
 
 /// Tracks whether any root message delta was emitted during the run.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -56,72 +68,100 @@ impl RunReconciliation {
 pub fn classify_notification(
     notification: &Notification,
     root_session_id: &str,
-) -> Result<DshNotificationClass, DshProtocolFailure> {
+) -> Result<DshNotificationClass, ClassifyNotificationError> {
     match notification.method.as_str() {
         "session.event" => {
             let event = notification
                 .session_event()
-                .ok_or(DshProtocolFailure)?
-                .map_err(|_| DshProtocolFailure)?;
+                .ok_or(ClassifyNotificationError::Protocol(DshProtocolFailure))?
+                .map_err(|_| ClassifyNotificationError::Protocol(DshProtocolFailure))?;
             if event.session_id != root_session_id {
                 return Ok(DshNotificationClass::Ignore);
             }
-            classify_root_session_event(&event.event)
+            classify_root_session_event(&event.event).map_err(|failure| match failure {
+                RootEventFailure::Protocol => ClassifyNotificationError::Protocol(DshProtocolFailure),
+                RootEventFailure::TooLarge => ClassifyNotificationError::EventTooLarge(DshEventTooLarge),
+            })
         }
         "session.status" => {
             notification
                 .session_status()
-                .ok_or(DshProtocolFailure)?
-                .map_err(|_| DshProtocolFailure)?;
+                .ok_or(ClassifyNotificationError::Protocol(DshProtocolFailure))?
+                .map_err(|_| ClassifyNotificationError::Protocol(DshProtocolFailure))?;
             Ok(DshNotificationClass::Ignore)
         }
         "subagent.started" => {
             notification
                 .subagent_started()
-                .ok_or(DshProtocolFailure)?
-                .map_err(|_| DshProtocolFailure)?;
+                .ok_or(ClassifyNotificationError::Protocol(DshProtocolFailure))?
+                .map_err(|_| ClassifyNotificationError::Protocol(DshProtocolFailure))?;
             Ok(DshNotificationClass::Ignore)
         }
         "subagent.finished" => {
             notification
                 .subagent_finished()
-                .ok_or(DshProtocolFailure)?
-                .map_err(|_| DshProtocolFailure)?;
+                .ok_or(ClassifyNotificationError::Protocol(DshProtocolFailure))?
+                .map_err(|_| ClassifyNotificationError::Protocol(DshProtocolFailure))?;
             Ok(DshNotificationClass::Ignore)
         }
         _ => Ok(DshNotificationClass::Ignore),
     }
 }
 
-fn classify_root_session_event(event: &Value) -> Result<DshNotificationClass, DshProtocolFailure> {
+enum RootEventFailure {
+    Protocol,
+    TooLarge,
+}
+
+fn classify_root_session_event(event: &Value) -> Result<DshNotificationClass, RootEventFailure> {
     if event.get("type").and_then(Value::as_str) != Some("assistant/message") {
         return Ok(DshNotificationClass::Ignore);
     }
-    let text = extract_assistant_message_text(event)?;
-    if text.is_empty() {
-        Ok(DshNotificationClass::Ignore)
-    } else {
-        Ok(DshNotificationClass::RootText(text))
+    let len = measure_assistant_message_text(event).map_err(|_| RootEventFailure::Protocol)?;
+    if len == 0 {
+        return Ok(DshNotificationClass::Ignore);
     }
+    if len > DSCH_MAX_ROOT_MESSAGE_TEXT_BYTES {
+        return Err(RootEventFailure::TooLarge);
+    }
+    let text = build_assistant_message_text(event).map_err(|_| RootEventFailure::Protocol)?;
+    Ok(DshNotificationClass::RootText(text))
 }
 
-/// Extract prose for one `assistant/message` event (SDK `final_response` walk).
-fn extract_assistant_message_text(event: &Value) -> Result<String, DshProtocolFailure> {
+fn assistant_message_content(event: &Value) -> Result<&Vec<Value>, DshProtocolFailure> {
     let content = if event.pointer("/data/message").is_some_and(Value::is_object) {
         event.pointer("/data/message/content")
     } else {
         event.pointer("/data/content")
     };
-    let Some(blocks) = content.and_then(Value::as_array) else {
-        return Ok(String::new());
-    };
+    content.and_then(Value::as_array).ok_or(DshProtocolFailure)
+}
+
+fn measure_assistant_message_text(event: &Value) -> Result<usize, DshProtocolFailure> {
+    let blocks = assistant_message_content(event)?;
+    let mut len = 0usize;
+    for block in blocks {
+        if block.get("type").and_then(Value::as_str) != Some("text") {
+            continue;
+        }
+        match block.get("text") {
+            None | Some(Value::Null) => return Err(DshProtocolFailure),
+            Some(Value::String(text)) => len += text.len(),
+            Some(_) => return Err(DshProtocolFailure),
+        }
+    }
+    Ok(len)
+}
+
+fn build_assistant_message_text(event: &Value) -> Result<String, DshProtocolFailure> {
+    let blocks = assistant_message_content(event)?;
     let mut out = String::new();
     for block in blocks {
         if block.get("type").and_then(Value::as_str) != Some("text") {
             continue;
         }
         match block.get("text") {
-            None | Some(Value::Null) => {}
+            None | Some(Value::Null) => return Err(DshProtocolFailure),
             Some(Value::String(text)) => out.push_str(text),
             Some(_) => return Err(DshProtocolFailure),
         }
@@ -379,6 +419,43 @@ mod tests {
         payload.insert("sessionId".to_string(), json!(7));
         payload.insert("event".to_string(), json!({"type": "assistant/message"}));
         let n = notification("session.event", payload);
+        assert!(classify_notification(&n, "root-sess").is_err());
+    }
+
+    #[test]
+    fn missing_content_array_is_protocol_failure() {
+        let n = root_event(json!({
+            "type": "assistant/message",
+            "data": {"content": null}
+        }));
+        assert!(classify_notification(&n, "root-sess").is_err());
+    }
+
+    #[test]
+    fn absent_content_is_protocol_failure() {
+        let n = root_event(json!({
+            "type": "assistant/message",
+            "data": {}
+        }));
+        assert!(classify_notification(&n, "root-sess").is_err());
+    }
+
+    #[test]
+    fn missing_text_field_is_protocol_failure() {
+        let n = root_event(json!({
+            "type": "assistant/message",
+            "data": {"content": [{"type": "text"}]}
+        }));
+        assert!(classify_notification(&n, "root-sess").is_err());
+    }
+
+    #[test]
+    fn oversize_root_message_fails_before_delivery() {
+        let huge = "x".repeat(DSCH_MAX_ROOT_MESSAGE_TEXT_BYTES + 1);
+        let n = root_event(json!({
+            "type": "assistant/message",
+            "data": {"content": [{"type": "text", "text": huge}]}
+        }));
         assert!(classify_notification(&n, "root-sess").is_err());
     }
 
