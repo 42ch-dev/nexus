@@ -31,6 +31,9 @@ Behavior knobs (env vars):
 - INIT_DELAY_MS=<ms>  delay the `initialize` reply, so a probe deadline
   can fire while the sealed runtime START is still in flight (retained
   init-ownership arm).
+- INIT_FAIL_SEALED=1  fail the `initialize` reply for sealed spawns
+  (`--patch` present) after planting a removal blocker inside DSH_HOME
+  (switch start+delete failure arm).
 """
 
 import json
@@ -98,6 +101,20 @@ def handle_request(req):
     log_request(req)
 
     if method == "initialize":
+        if os.environ.get("INIT_FAIL_SEALED") and "--patch" in sys.argv:
+            dsh_home = os.environ.get("DSH_HOME", "")
+            if dsh_home:
+                blocker = os.path.join(dsh_home, "blocker")
+                os.makedirs(blocker, exist_ok=True)
+                os.chmod(blocker, 0o500)
+                # Prevent anchored removal from unlinking the leaf entry.
+                os.chmod(dsh_home, 0o555)
+            send({
+                "jsonrpc": "2.0",
+                "id": req["id"],
+                "error": {"code": -32603, "message": "sealed init failed"},
+            })
+            return
         delay_ms = int(os.environ.get("INIT_DELAY_MS", "0"))
         if delay_ms > 0:
             time.sleep(delay_ms / 1000.0)

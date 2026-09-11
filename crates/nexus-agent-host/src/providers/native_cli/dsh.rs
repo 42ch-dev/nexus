@@ -295,8 +295,11 @@ fn retain_lease_path(retained: &RetainedLeases, path: PathBuf) {
         .insert(path);
 }
 
-/// Retry removal of every retained lease path (exact paths only); only
-/// a confirmed removal clears the record.
+/// Retry removal of every retained lease path (exact paths only) through
+/// descriptor-relative no-follow deletion rooted at the retained anchor
+/// (fix wave 3 — never a path-based `remove_dir_all` on a
+/// security-sensitive retained lease); only a confirmed removal clears
+/// the record.
 fn reconcile_retained_leases(retained: &RetainedLeases) {
     let paths: Vec<PathBuf> = retained
         .lock()
@@ -305,7 +308,7 @@ fn reconcile_retained_leases(retained: &RetainedLeases) {
         .cloned()
         .collect();
     for path in paths {
-        if std::fs::remove_dir_all(&path).is_ok() {
+        if remove_lease_at_path(&path).is_ok() {
             retained
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
@@ -315,15 +318,17 @@ fn reconcile_retained_leases(retained: &RetainedLeases) {
 }
 
 /// Close one harness through the SDK ladder and — ONLY after a confirmed
-/// close — delete its sealed-home lease. Every failure is an unconfirmed
-/// cleanup (`Err` with safe static text): a ladder error retains the
-/// lease, and a lease-removal failure is NOT success — the exact path is
-/// retained in `retained` for a later reconciliation attempt (fix wave
-/// 2). The raw SDK close error is never exported: its Display embeds
-/// stderr tails that may carry secrets.
+/// close — delete its sealed-home lease through the lease's PINNED
+/// anchor descriptors (fix wave 3: never a path-based removal on the
+/// security-sensitive lease). Every failure is an unconfirmed cleanup
+/// (`Err` with safe static text): a ladder error retains the lease, and
+/// a lease-removal failure is NOT success — the exact path is retained
+/// in `retained` for a later reconciliation attempt. The raw SDK close
+/// error is never exported: its Display embeds stderr tails that may
+/// carry secrets.
 async fn close_and_reap(
     mut harness: Option<DeepSeekHarness>,
-    sealed_home: Option<PathBuf>,
+    sealed_home: Option<SealedLease>,
     retained: &RetainedLeases,
 ) -> Result<(), CleanupError> {
     let result = match harness.as_mut() {
@@ -332,20 +337,20 @@ async fn close_and_reap(
     };
     match result {
         Ok(()) => {
-            if let Some(home) = sealed_home {
+            if let Some(lease) = sealed_home {
                 // Confirmed close ends the lease; a removal failure keeps
                 // the evidence AND fails the cleanup — the caller must
                 // not remove the session record or report health, and the
                 // exact path stays retained for a later retry.
-                if std::fs::remove_dir_all(&home).is_err() {
-                    retain_lease_path(retained, home.clone());
+                if remove_lease_tree(&lease).is_err() {
+                    retain_lease_path(retained, lease.path.clone());
                     return Err(CleanupError {
                         message:
                             "dsh close completed but the sealed home could not be removed; \
                              cleanup is unconfirmed and the lease evidence is retained"
                                 .to_string(),
                         close_confirmed: true,
-                        failed_lease: Some(home),
+                        failed_lease: Some(lease.path),
                     });
                 }
             }
@@ -360,7 +365,7 @@ async fn close_and_reap(
                           session evidence is retained"
                     .to_string(),
                 close_confirmed: false,
-                failed_lease: sealed_home,
+                failed_lease: sealed_home.map(|lease| lease.path),
             })
         }
     }
@@ -371,7 +376,7 @@ async fn close_and_reap(
 /// task so a caller-side timeout never cancels it (architecture §3.2).
 fn start_close(
     harness: Option<DeepSeekHarness>,
-    sealed_home: Option<PathBuf>,
+    sealed_home: Option<SealedLease>,
     retained: RetainedLeases,
 ) -> CleanupWait {
     let cleanup = async move { close_and_reap(harness, sealed_home, &retained).await }
@@ -389,15 +394,21 @@ fn start_close(
 /// harness/lease, resolves the pending close first (a failed switch's
 /// ordinary close is the only remaining cleanup and its result
 /// propagates), then closes whatever harness the session currently runs.
+/// After a confirmed harness close it reconciles the SESSION-associated
+/// failed lease (fix wave 2 finding: a sealed-switch start+delete
+/// failure retains its exact anchored lease in `ClientState`) — the
+/// session record may only be removed after that specific lease's
+/// confirmed deletion.
 fn start_final_close(state: Arc<Mutex<ClientState>>, retained: RetainedLeases) -> CleanupWait {
     let cleanup = async move {
-        let (pending, harness, sealed_home) = {
+        let (pending, harness, sealed_home, session_failed_lease) = {
             let mut guard = state.lock().await;
             guard.closed = true;
             (
                 guard.cleanup.take(),
                 guard.harness.take(),
                 guard.sealed_home.take(),
+                guard.failed_lease.take(),
             )
         };
         if let Some(pending) = pending {
@@ -405,7 +416,24 @@ fn start_final_close(state: Arc<Mutex<ClientState>>, retained: RetainedLeases) -
             // close completes; its failure IS the unconfirmed result.
             pending.await?;
         }
-        close_and_reap(harness, sealed_home, &retained).await
+        close_and_reap(harness, sealed_home, &retained).await?;
+        if let Some(path) = session_failed_lease {
+            // The session-associated lease must be confirmed deleted
+            // before the session may be removed; a failure retains the
+            // exact path and fails the cleanup.
+            if remove_lease_at_path(&path).is_err() {
+                retain_lease_path(&retained, path.clone());
+                return Err(CleanupError {
+                    message: "dsh close completed but the session-associated sealed home \
+                              could not be removed; cleanup is unconfirmed and the lease \
+                              evidence is retained"
+                        .to_string(),
+                    close_confirmed: true,
+                    failed_lease: Some(path),
+                });
+            }
+        }
+        Ok(())
     }
     .boxed()
     .shared();
@@ -454,7 +482,7 @@ fn selected_dsh_home(env: &HashMap<String, String>) -> PathBuf {
 /// with exclusive no-follow creates and fsynced. The returned patch path
 /// is asserted absolute and inside the leaf. Unsupported targets fail
 /// sealed provisioning closed rather than silently weakening it.
-fn provision_sealed_home(env: &HashMap<String, String>) -> Result<PathBuf, String> {
+fn provision_sealed_home(env: &HashMap<String, String>) -> Result<SealedLease, String> {
     let selected = selected_dsh_home(env);
     let selected = std::path::absolute(&selected)
         .map_err(|_io| "sealed dsh home selection could not be made absolute".to_string())?;
@@ -517,14 +545,137 @@ fn canonical_anchor(path: &Path) -> Result<(PathBuf, Vec<std::ffi::OsString>), S
     }
 }
 
+/// One provisioned sealed child home (the lease): the resolved absolute
+/// path PLUS the pinned descriptors of its `nexus` anchor parent and the
+/// owned leaf, retained for the WHOLE lease lifetime (fix wave 3). Every
+/// later operation — the pre-start revalidation and the eventual
+/// deletion — is anchored at these descriptors, so a swapped component
+/// can never redirect a write, the SDK handoff, or a removal.
+struct SealedLease {
+    /// Resolved absolute child path (symlink-free at provisioning).
+    path: PathBuf,
+    /// Leaf directory name (the random id; no separators).
+    leaf_name: String,
+    /// Pinned descriptor of the `nexus` anchor parent (deletion root).
+    #[cfg(unix)]
+    nexus_fd: rustix::fd::OwnedFd,
+    /// Pinned descriptor of the owned leaf itself (revalidation root).
+    #[cfg(unix)]
+    leaf_fd: rustix::fd::OwnedFd,
+}
+
+impl SealedLease {
+    /// Immediately before the SDK start handoff (fix wave 3): revalidate
+    /// through the pinned descriptors that the lexical absolute child
+    /// and patch still resolve to the OWNED inode/files (dev+ino
+    /// equality). Any swap fails closed.
+    #[cfg(unix)]
+    fn revalidate_for_start(&self) -> Result<(), String> {
+        let lexical = sealed_fs::open_dir_nofollow_absolute(&self.path)?;
+        if sealed_fs::inode_of(&lexical)? != sealed_fs::inode_of(&self.leaf_fd)? {
+            return Err(
+                "the sealed home path was swapped after provisioning; failing closed".to_string(),
+            );
+        }
+        let lexical_patch = sealed_fs::open_file_nofollow_at(&lexical, DENY_ALL_PATCH_FILENAME)?;
+        let pinned_patch =
+            sealed_fs::open_file_nofollow_at(&self.leaf_fd, DENY_ALL_PATCH_FILENAME)?;
+        if sealed_fs::inode_of(&lexical_patch)? != sealed_fs::inode_of(&pinned_patch)? {
+            return Err(
+                "the sealed patch was swapped after provisioning; failing closed".to_string(),
+            );
+        }
+        Ok(())
+    }
+
+    /// Non-unix counterpart: provisioning always fails closed, so a
+    /// lease can never exist; unreachable in practice.
+    #[cfg(not(unix))]
+    fn revalidate_for_start(&self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+/// Delete one sealed lease anchored at its PINNED descriptors — never a
+/// path-based removal that could follow a swapped lexical component
+/// (fix wave 3). An already-gone leaf is a confirmed removal.
+#[cfg(unix)]
+fn remove_lease_tree(lease: &SealedLease) -> Result<(), String> {
+    match sealed_fs::remove_tree_at(&lease.nexus_fd, &lease.leaf_name) {
+        Ok(()) => Ok(()),
+        Err(message) => {
+            if lease.path.try_exists().unwrap_or(true) {
+                Err(message)
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Non-unix targets never provision sealed leases (provisioning fails
+/// closed), so there is never a lease to remove.
+#[cfg(not(unix))]
+fn remove_lease_tree(_lease: &SealedLease) -> Result<(), String> {
+    Ok(())
+}
+
+/// Delete one retained lease by its exact retained path for
+/// reconciliation (fix wave 3): the path was RESOLVED (symlink-free) at
+/// provisioning, so it is walked no-follow WITHOUT any fresh
+/// canonicalization — a component swapped to a symlink fails the walk
+/// and the lease stays retained rather than deleting a swapped lexical
+/// target. An already-gone anchor/leaf is a confirmed removal.
+#[cfg(unix)]
+fn remove_lease_at_path(lease: &Path) -> Result<(), String> {
+    let Some(nexus_dir) = lease.parent() else {
+        return Err("retained lease path has no anchor parent".to_string());
+    };
+    let Some(leaf_name) = lease.file_name().and_then(|name| name.to_str()) else {
+        return Err("retained lease path has no leaf name".to_string());
+    };
+    let nexus_fd = match sealed_fs::open_dir_nofollow_absolute(nexus_dir) {
+        Ok(fd) => fd,
+        Err(message) => {
+            return if nexus_dir.try_exists().unwrap_or(true) {
+                Err(message)
+            } else {
+                Ok(())
+            };
+        }
+    };
+    match sealed_fs::remove_tree_at(&nexus_fd, leaf_name) {
+        Ok(()) => Ok(()),
+        Err(message) => {
+            if lease.try_exists().unwrap_or(true) {
+                Err(message)
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
+
+/// A sealed start failure (fix wave 3): the error to return, plus the
+/// exact anchored lease path when even the immediate anchored deletion
+/// failed — the caller (recipe switch) associates that path with the
+/// SESSION so the final shutdown must reconcile it before the session
+/// record may be removed.
+struct SealedStartFailure {
+    error: HostError,
+    undeleted_lease: Option<PathBuf>,
+}
+
 /// Unix implementation: descriptor-relative no-follow provisioning (see
 /// [`sealed_fs`]). The full selected-home ancestor chain is validated —
-/// the anchor's pre-existing symlinks are resolved exactly once, then
-/// every (resolved) component is opened no-follow from the root and
-/// pinned by descriptor, so a swapped component after validation cannot
-/// redirect any write. Returns the RESOLVED child path (the lease).
+/// the anchor's pre-existing symlinks are resolved exactly once, every
+/// (resolved) component is opened no-follow from the root and pinned by
+/// descriptor with the non-owner-mutation boundary enforced, and the
+/// selected home / `nexus` / leaf must additionally be owned by the
+/// effective uid (unsafe owner/mode fails closed). Returns the pinned
+/// lease.
 #[cfg(unix)]
-fn provision_sealed_home_fd(child: &Path) -> Result<PathBuf, String> {
+fn provision_sealed_home_fd(child: &Path) -> Result<SealedLease, String> {
     let Some(nexus_dir) = child.parent() else {
         return Err("sealed dsh home path has no parent".to_string());
     };
@@ -537,7 +688,8 @@ fn provision_sealed_home_fd(child: &Path) -> Result<PathBuf, String> {
     // Resolve + validate + pin the FULL selected-home ancestor chain;
     // create missing anchor-tail components; then ensure the `nexus`
     // parent (a symlinked one is rejected no-follow) and exclusively
-    // create the owner-only leaf.
+    // create the owner-only leaf. The selected home and everything below
+    // it must be owned by the effective uid.
     let (canonical_home, missing) = canonical_anchor(home_dir)?;
     let mut dir_fd = sealed_fs::ensure_dir_nofollow_absolute(&canonical_home)?;
     let mut resolved = canonical_home;
@@ -548,9 +700,12 @@ fn provision_sealed_home_fd(child: &Path) -> Result<PathBuf, String> {
         dir_fd = sealed_fs::ensure_dir_at(&dir_fd, name, 0o755)?;
         resolved.push(component);
     }
+    sealed_fs::check_dir_boundary(&dir_fd, true)?;
     let nexus_fd = sealed_fs::ensure_dir_at(&dir_fd, SEALED_HOME_SUBDIR, 0o755)?;
+    sealed_fs::check_dir_boundary(&nexus_fd, true)?;
     resolved.push(SEALED_HOME_SUBDIR);
     let leaf_fd = sealed_fs::mkdir_exclusive_at(&nexus_fd, leaf_name, 0o700)?;
+    sealed_fs::check_dir_boundary(&leaf_fd, true)?;
     sealed_fs::fsync_dir(&nexus_fd)?;
     resolved.push(leaf_name);
 
@@ -581,16 +736,23 @@ fn provision_sealed_home_fd(child: &Path) -> Result<PathBuf, String> {
         Ok(())
     };
     if provision().is_err() {
-        let _ = std::fs::remove_dir_all(&resolved);
+        // Anchored removal of the partial lease through the pinned
+        // descriptors — never a path-based removal.
+        let _ = sealed_fs::remove_tree_at(&nexus_fd, leaf_name);
         return Err("failed to provision the sealed dsh home".to_string());
     }
-    Ok(resolved)
+    Ok(SealedLease {
+        path: resolved,
+        leaf_name: leaf_name.to_string(),
+        nexus_fd,
+        leaf_fd,
+    })
 }
 
 /// Unsupported targets fail sealed provisioning CLOSED rather than
 /// silently weakening the no-follow contract.
 #[cfg(not(unix))]
-fn provision_sealed_home_fd(_child: &Path) -> Result<PathBuf, String> {
+fn provision_sealed_home_fd(_child: &Path) -> Result<SealedLease, String> {
     Err("sealed deny_all home provisioning is unsupported on this platform: \
          descriptor-relative no-follow filesystem primitives are required"
         .to_string())
@@ -622,9 +784,16 @@ struct ClientState {
     /// (deny_all ↔ None included) is rejected, never a conversation reset
     /// or a permission escalation (architecture §3.4).
     policy_locked: bool,
-    /// The exclusive owner-only child DSH_HOME lease of the sealed recipe,
-    /// retained until its runtime close is confirmed.
-    sealed_home: Option<PathBuf>,
+    /// The exclusive owner-only child DSH_HOME lease of the sealed recipe
+    /// (resolved path + pinned anchor/leaf descriptors), retained until
+    /// its runtime close is confirmed.
+    sealed_home: Option<SealedLease>,
+    /// Session-associated retained lease (fix wave 3): a sealed-switch
+    /// start whose immediate anchored deletion failed keeps its exact
+    /// anchored lease path HERE (not only in the provider-global set);
+    /// the final close must reconcile this specific lease before the
+    /// session record may be removed.
+    failed_lease: Option<PathBuf>,
     /// A close currently in flight that the FINAL close must resolve
     /// first: the recipe switch stores its ordinary close here (consumed
     /// on confirmed success); the final close task takes and awaits it so
@@ -822,41 +991,74 @@ impl DshNativeProvider {
         })
     }
 
+
     /// Initialize the sealed deny-all harness: provision the exclusive
-    /// child home (its lease is retained until confirmed close), then
-    /// start the runtime against it. A failed start removes the fresh
-    /// lease — the SDK ran its close ladder over the failed boot, so the
-    /// child is reaped and no runtime can still reference the files; a
-    /// removal failure there retains the exact path for reconciliation
-    /// (fix wave 2).
+    /// child home (its pinned lease is retained until confirmed close),
+    /// revalidate the anchor through the pinned descriptors IMMEDIATELY
+    /// before the SDK start handoff, then start the runtime against it.
+    /// A failed start removes the fresh lease through the anchored
+    /// pinned descriptors — the SDK ran its close ladder over the failed
+    /// boot, so the child is reaped and no runtime can still reference
+    /// the files; a removal failure there retains the exact path for
+    /// per-session reconciliation (fix wave 3).
     async fn start_sealed_harness(
         &self,
         cwd: &Path,
         executable: &Path,
-    ) -> HostResult<(DeepSeekHarness, PathBuf)> {
-        let child = provision_sealed_home(&self.env).map_err(|message| {
-            HostError::launch_failed(self.provider_id.clone(), message, None)
-        })?;
+    ) -> Result<(DeepSeekHarness, SealedLease), SealedStartFailure> {
+        let launch_error = |message: String| SealedStartFailure {
+            error: HostError::launch_failed(self.provider_id.clone(), message, None),
+            undeleted_lease: None,
+        };
+        let lease = provision_sealed_home(&self.env).map_err(&launch_error)?;
+        // The anchor guard must live through the SDK start handoff:
+        // revalidate that the lexical child/patch still resolve to the
+        // owned inode/files before the runtime is pointed at them.
+        if let Err(message) = lease.revalidate_for_start() {
+            let undeleted_lease = self.discard_failed_lease(lease);
+            return Err(SealedStartFailure {
+                error: HostError::launch_failed(self.provider_id.clone(), message, None),
+                undeleted_lease,
+            });
+        }
         match self
-            .start_harness(self.sdk_config(cwd, executable, Some(&child)))
+            .start_harness(self.sdk_config(cwd, executable, Some(&lease.path)))
             .await
         {
-            Ok(harness) => Ok((harness, child)),
+            Ok(harness) => Ok((harness, lease)),
             Err(error) => {
-                if std::fs::remove_dir_all(&child).is_err() {
-                    retain_lease_path(&self.retained_leases, child);
-                }
-                Err(error)
+                let undeleted_lease = self.discard_failed_lease(lease);
+                Err(SealedStartFailure { error, undeleted_lease })
             }
         }
     }
 
+    /// Delete a fresh lease whose sealed start failed, through the
+    /// anchored pinned descriptors. On removal failure the exact path is
+    /// retained in the provider reconciliation set AND returned so the
+    /// caller can associate it with its own scope (the session).
+    #[cfg(unix)]
+    fn discard_failed_lease(&self, lease: SealedLease) -> Option<PathBuf> {
+        if remove_lease_tree(&lease).is_err() {
+            retain_lease_path(&self.retained_leases, lease.path.clone());
+            return Some(lease.path);
+        }
+        None
+    }
+
+    /// Non-unix counterpart: sealed leases never exist (provisioning
+    /// fails closed); unreachable in practice.
+    #[cfg(not(unix))]
+    fn discard_failed_lease(&self, _lease: SealedLease) -> Option<PathBuf> {
+        None
+    }
+
     /// Probe both recipes without a model call (P0 T2): resolve the
     /// executable, initialize + close the ordinary harness, then
-    /// provision, initialize, close and delete the sealed child home. Any
-    /// failure leaves the provider unavailable with a safe static reason.
-    /// Retained ownership (fix waves): every close — and the WHOLE sealed
-    /// recipe from the moment its lease is provisioned — runs through a
+    /// provision, revalidate, initialize, close and delete the sealed child
+    /// home. Any failure leaves the provider unavailable with a safe static
+    /// reason. Retained ownership (fix waves): every close — and the WHOLE
+    /// sealed recipe from the moment its lease is provisioned — runs through a
     /// RETAINED spawned owner, so the probe deadline can drop the wait,
     /// never the owner: a timeout during sealed INITIALIZATION cannot
     /// drop the only path owner (confirmed child termination/close still
@@ -906,28 +1108,42 @@ impl DshNativeProvider {
         }
 
         // The sealed lease is provisioned synchronously so its exact
-        // path is owned from the first moment; the retained spawned
-        // owner then drives start -> confirmed close -> lease removal.
-        let child = match provision_sealed_home(&self.env) {
-            Ok(child) => child,
+        // path (and pinned anchor descriptors) are owned from the first
+        // moment; the retained spawned owner then drives revalidation ->
+        // start -> confirmed close -> anchored lease removal.
+        let lease = match provision_sealed_home(&self.env) {
+            Ok(lease) => lease,
             Err(message) => {
                 return Ok(unavailable(format!(
                     "sealed dsh recipe failed to initialize: {message}"
                 )));
             }
         };
-        let config = self.sdk_config(&cwd, &executable, Some(&child));
+        let config = self.sdk_config(&cwd, &executable, Some(&lease.path));
         let retained = Arc::clone(&self.retained_leases);
         let sealed_cleanup = async move {
+            // The anchor guard lives through the SDK start handoff:
+            // revalidate the owned inode/files immediately before start.
+            if let Err(message) = lease.revalidate_for_start() {
+                if remove_lease_tree(&lease).is_err() {
+                    retain_lease_path(&retained, lease.path.clone());
+                }
+                return Err(CleanupError {
+                    message: format!("sealed dsh recipe failed to initialize: {message}"),
+                    close_confirmed: true,
+                    failed_lease: None,
+                });
+            }
             match DeepSeekHarness::start(config).await {
-                Ok(sealed) => close_and_reap(Some(sealed), Some(child), &retained).await,
+                Ok(sealed) => close_and_reap(Some(sealed), Some(lease), &retained).await,
                 Err(error) => {
                     // The SDK ran its close ladder over the failed boot
-                    // (child reaped); remove the fresh lease, retaining
-                    // the exact path if even that removal fails.
+                    // (child reaped); remove the fresh lease through the
+                    // anchored pinned descriptors, retaining the exact
+                    // path if even that removal fails.
                     let (_category, message) = classify_error_parts(&error);
-                    if std::fs::remove_dir_all(&child).is_err() {
-                        retain_lease_path(&retained, child);
+                    if remove_lease_tree(&lease).is_err() {
+                        retain_lease_path(&retained, lease.path.clone());
                     }
                     Err(CleanupError {
                         message: format!("sealed dsh recipe failed to initialize: {message}"),
@@ -1271,6 +1487,7 @@ impl ProviderAdapter for DshNativeProvider {
                         recipe: Recipe::Ordinary,
                         policy_locked: false,
                         sealed_home: None,
+                        failed_lease: None,
                         cleanup: None,
                     })),
                     closing: Arc::new(AtomicBool::new(false)),
@@ -1429,22 +1646,29 @@ impl ProviderAdapter for DshNativeProvider {
                         .with_session(session.session_id.clone()));
                     }
                 }
-                let (sealed, child) = match self.start_sealed_harness(&cwd, &executable).await
+                let (sealed, lease) = match self.start_sealed_harness(&cwd, &executable).await
                 {
                     Ok(pair) => pair,
-                    Err(error) => {
+                    Err(failure) => {
                         // Every sealed-home/start failure permanently
                         // closes the session (fix wave): no retryable
                         // half-switched state, no ordinary fallback, and
                         // later None/deny executes are rejected
-                        // immediately. The switch cleanup/result state is
+                        // immediately. When even the immediate anchored
+                        // deletion failed, the exact lease is associated
+                        // with THIS session (fix wave 3): the final close
+                        // must reconcile it before the record may be
+                        // removed. The switch cleanup/result state is
                         // preserved for the final close owner.
+                        if let Some(path) = failure.undeleted_lease {
+                            guard.failed_lease = Some(path);
+                        }
                         guard.closed = true;
-                        return Err(error.with_session(session.session_id.clone()));
+                        return Err(failure.error.with_session(session.session_id.clone()));
                     }
                 };
                 guard.harness = Some(sealed);
-                guard.sealed_home = Some(child);
+                guard.sealed_home = Some(lease);
                 guard.recipe = Recipe::SealedDenyAll;
                 tracing::info!(
                     session_id = %session.session_id,
@@ -3217,14 +3441,15 @@ mod tests {
                 .expect("a symlinked home anchor is resolved, not followed blindly");
             let canonical_home = std::fs::canonicalize(&real_home).expect("canonical home");
             assert!(
-                resolved.starts_with(&canonical_home),
-                "the lease lands in the real anchor: {resolved:?} not under {canonical_home:?}"
+                resolved.path.starts_with(&canonical_home),
+                "the lease lands in the real anchor: {:?} not under {canonical_home:?}",
+                resolved.path
             );
             assert!(
-                resolved.join(DENY_ALL_PATCH_FILENAME).exists(),
+                resolved.path.join(DENY_ALL_PATCH_FILENAME).exists(),
                 "the layout was written inside the resolved lease"
             );
-            std::fs::remove_dir_all(&resolved).expect("cleanup");
+            remove_lease_tree(&resolved).expect("cleanup");
         }
     }
 
@@ -3240,7 +3465,8 @@ mod tests {
 
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let child = temp_dir.path().join("nexus").join("lease123");
-        provision_sealed_home_at(&child).expect("provision");
+        let lease = provision_sealed_home_fd(&child).expect("provision");
+        let lease_path = lease.path.clone();
         let blocked = child.join("blocked");
         std::fs::create_dir_all(&blocked).expect("blocked subdir");
         std::fs::write(blocked.join("state"), b"state").expect("state file");
@@ -3248,7 +3474,7 @@ mod tests {
             .expect("chmod 0500");
 
         let retained: RetainedLeases = Arc::new(std::sync::Mutex::new(BTreeSet::new()));
-        let result = start_close(None, Some(child.clone()), Arc::clone(&retained)).await;
+        let result = start_close(None, Some(lease), Arc::clone(&retained)).await;
         let failure = result.expect_err("removal failure is an unconfirmed cleanup");
         assert!(
             failure.close_confirmed,
@@ -3256,18 +3482,18 @@ mod tests {
         );
         assert_eq!(
             failure.failed_lease.as_deref(),
-            Some(child.as_path()),
+            Some(lease_path.as_path()),
             "the exact failed lease path is reported"
         );
         assert!(
-            child.exists(),
+            lease_path.exists(),
             "the lease evidence is retained on removal failure"
         );
         assert!(
             retained
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
-                .contains(&child),
+                .contains(&lease_path),
             "the exact failed path is retained for a later retry"
         );
 
@@ -3276,7 +3502,7 @@ mod tests {
         std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o755))
             .expect("restore perms");
         reconcile_retained_leases(&retained);
-        assert!(!child.exists(), "the reconciled lease is removed");
+        assert!(!lease_path.exists(), "the reconciled lease is removed");
         assert!(
             retained
                 .lock()
@@ -3472,4 +3698,166 @@ mod tests {
             "the retained-path record is cleared"
         );
     }
+    // ── Fix wave 3: anchor handoff + session-associated reconciliation ──
+
+    /// Finding 1 (fix wave 3): unsafe owner/permission boundaries on the
+    /// selected home are rejected before any sealed layout is written.
+    /// Trust model: excludes mutation by OTHER users via group/world
+    /// writability; same-uid adversaries are out of scope (architecture
+    /// §3.4).
+    #[test]
+    fn sealed_home_rejects_unsafe_permission_boundary() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let home = temp_dir.path().join("home");
+        std::fs::create_dir_all(&home).expect("home");
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o777))
+            .expect("chmod 0777");
+        assert!(
+            provision_sealed_home_fd(&home.join("nexus").join("leaf")).is_err(),
+            "a world-writable selected home without sticky must be rejected"
+        );
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755))
+            .expect("restore perms");
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o770))
+            .expect("chmod group-writable");
+        assert!(
+            provision_sealed_home_fd(&home.join("nexus").join("leaf")).is_err(),
+            "a group-writable selected home must be rejected"
+        );
+    }
+
+    /// Finding 1 (fix wave 3): the pinned anchor survives provisioning and
+    /// `revalidate_for_start` rejects a lexical path swap before SDK start.
+    #[cfg(unix)]
+    #[test]
+    fn revalidate_rejects_lexical_path_swap_before_sdk_start() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let child = temp_dir.path().join("nexus").join("leaf");
+        let lease = provision_sealed_home_fd(&child).expect("provision");
+        let elsewhere = temp_dir.path().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).expect("elsewhere");
+        std::fs::remove_dir_all(&child).expect("remove leaf");
+        std::os::unix::fs::symlink(&elsewhere, &child).expect("swap symlink");
+        assert!(
+            lease.revalidate_for_start().is_err(),
+            "a swapped lexical child must fail revalidation"
+        );
+    }
+
+    /// Finding 1 (fix wave 3): retained reconciliation deletes only the
+    /// anchored child entry and never follows a swapped lexical target.
+    #[cfg(unix)]
+    #[test]
+    fn retained_reconcile_targets_anchored_child_not_swapped_lexical_target() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let lease = provision_sealed_home_fd(&temp_dir.path().join("nexus").join("leaf"))
+            .expect("provision");
+        let path = lease.path.clone();
+        let victim = temp_dir.path().join("victim");
+        std::fs::create_dir_all(&victim).expect("victim");
+        std::fs::write(victim.join("keep"), b"keep").expect("victim file");
+        let nexus = path.parent().expect("nexus");
+        let leaf_name = path.file_name().expect("leaf");
+        std::fs::remove_dir_all(&path).expect("remove real leaf");
+        std::os::unix::fs::symlink(&victim, nexus.join(leaf_name)).expect("swap leaf");
+        let retained: RetainedLeases = Arc::new(std::sync::Mutex::new(BTreeSet::new()));
+        retain_lease_path(&retained, path.clone());
+        reconcile_retained_leases(&retained);
+        assert_eq!(
+            std::fs::read_to_string(victim.join("keep")).expect("victim survives"),
+            "keep",
+            "the swapped lexical target must never be deleted"
+        );
+        assert!(
+            !nexus.join(leaf_name).exists(),
+            "the anchored nexus entry is removed"
+        );
+        assert!(
+            retained
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .is_empty(),
+            "confirmed anchored removal clears the retained record"
+        );
+    }
+
+    /// Finding 2 (fix wave 3): a sealed-switch start failure whose immediate
+    /// anchored deletion also fails associates the exact lease with the
+    /// session; shutdown stays cleanup-unconfirmed until a targeted retry
+    /// confirms deletion and only then removes the session record.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn sealed_switch_start_delete_failure_retains_session_lease_until_shutdown_retry(
+    ) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = temp_dir.path().join("reqs.jsonl");
+        let dsh_home = temp_dir.path().join("dsh-home");
+        std::fs::create_dir_all(&dsh_home).expect("home");
+        let mut env = stub_env(&req_log, &dsh_home);
+        env.insert("INIT_FAIL_SEALED".to_string(), "1".to_string());
+        let provider = stub_provider("test-dsh-switchfail", env);
+        let handle = launch_hermetic(&provider).await;
+
+        let failed =
+            run_turn_scoped(&provider, &handle, "seal me", Some(deny_all_scope())).await;
+        assert!(
+            matches!(failed, Err(HostError::LaunchFailed { .. })),
+            "sealed start failure is the typed launch-class error: {failed:?}"
+        );
+
+        let lease = {
+            let sessions = provider.sessions.read().await;
+            let native = sessions.get(&handle.session_id).expect("session");
+            let guard = native.state.lock().await;
+            assert!(guard.closed, "the switch failure permanently closes the session");
+            guard.failed_lease.clone().expect("failed_lease is associated")
+        };
+        assert!(lease.exists(), "the undeleted anchored lease is retained");
+        let blocker = lease.join("blocker");
+        assert!(blocker.is_dir(), "the mock planted a removal blocker");
+        let leaf_mode = std::fs::metadata(&lease)
+            .expect("leaf stat")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(leaf_mode, 0o555, "the mock made the leaf unwritable for removal");
+
+        let first = {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+                .lock()
+                .expect("lock env tests");
+            provider.shutdown(handle.clone()).await
+        };
+        assert!(
+            matches!(first, Err(HostError::CleanupUnconfirmed { .. })),
+            "shutdown must stay cleanup-unconfirmed while the lease remains: {first:?}"
+        );
+        assert!(
+            provider.sessions.read().await.contains_key(&handle.session_id),
+            "the session record survives until confirmed lease removal"
+        );
+
+        std::fs::set_permissions(&lease, std::fs::Permissions::from_mode(0o700))
+            .expect("restore leaf perms");
+        std::fs::set_permissions(&blocker, std::fs::Permissions::from_mode(0o755))
+            .expect("restore blocker perms");
+        {
+            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+                .lock()
+                .expect("lock env tests");
+            provider
+                .shutdown(handle.clone())
+                .await
+                .expect("the retry confirms anchored deletion");
+        }
+        assert!(!lease.exists(), "the session-associated lease is removed");
+        assert!(
+            !provider.sessions.read().await.contains_key(&handle.session_id),
+            "only confirmed deletion removes the session record"
+        );
+    }
+
 }

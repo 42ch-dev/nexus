@@ -106,7 +106,7 @@ blake3 = "1"
 # 0.10.9 transitively via cranelift/sqlx — those are upstream constraints,
 # not a repo pin.
 sha2 = "0.11"
-rustix = { version = "1", features = ["fs"] }
+rustix = { version = "1", features = ["fs", "process"] }
 handlebars = "6"
 which = "8"
 regex = "1"
