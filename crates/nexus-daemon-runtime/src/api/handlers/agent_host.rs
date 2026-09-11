@@ -1518,7 +1518,7 @@ mod tests {
         let db_path = tmp.path().join("state.db");
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         let app = crate::api::create_router(state, DaemonApiConfig::keyless());
-        let server = TestServer::new(app).expect("TestServer should initialize");
+        let server = TestServer::new(app);
 
         (server, tmp)
     }
@@ -1572,7 +1572,7 @@ mod tests {
         let db_path = tmp.path().join("state.db");
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         let app = crate::api::create_router(state, DaemonApiConfig::keyless());
-        let server = TestServer::new(app).expect("TestServer should initialize");
+        let server = TestServer::new(app);
 
         (server, tmp)
     }
@@ -1636,7 +1636,7 @@ mod tests {
         let db_path = tmp.path().join("state.db");
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         let app = crate::api::create_router(state, DaemonApiConfig::keyless());
-        let server = TestServer::new(app).expect("TestServer should initialize");
+        let server = TestServer::new(app);
 
         (server, tmp)
     }

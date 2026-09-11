@@ -262,7 +262,7 @@ mod tests {
         let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         let app = build_router(state);
-        let server = TestServer::new(app).expect("TestServer should initialize");
+        let server = TestServer::new(app);
         TestApp { _tmp: tmp, server }
     }
 
@@ -279,7 +279,7 @@ mod tests {
         .await;
 
         let app = build_router(state);
-        let server = TestServer::new(app).expect("TestServer should initialize");
+        let server = TestServer::new(app);
         TestApp { _tmp: tmp, server }
     }
 
@@ -458,7 +458,7 @@ mod tests {
             .route_layer(axum_mw::from_fn(super::attach_request_id))
             .with_state(state);
 
-        let server = TestServer::new(routes).expect("TestServer should initialize");
+        let server = TestServer::new(routes);
         let _guard = tmp;
         let response = server.get("/v1/daemon/creators").await;
 
@@ -491,7 +491,7 @@ mod tests {
             .route_layer(axum_mw::from_fn(super::attach_request_id))
             .with_state(state);
 
-        let server = TestServer::new(routes).expect("TestServer should initialize");
+        let server = TestServer::new(routes);
         let _guard = tmp;
         let response = server
             .get("/v1/daemon/creators")
@@ -561,7 +561,7 @@ mod tests {
         assert!(state.pool().is_none());
 
         let app = crate::api::create_router(state, DaemonApiConfig::keyless());
-        let server = TestServer::new(app).expect("TestServer");
+        let server = TestServer::new(app);
         (tmp, server)
     }
 
@@ -666,7 +666,7 @@ mod tests {
 
         let state = WorkspaceState::initialize().await.expect("initialize");
         let app = crate::api::create_router(state, DaemonApiConfig::keyless());
-        let server = TestServer::new(app).expect("TestServer");
+        let server = TestServer::new(app);
 
         let before = server.get("/v1/daemon/references").await;
         assert_eq!(before.status_code(), 409);
@@ -714,7 +714,7 @@ mod tests {
 
         let state = WorkspaceState::initialize().await.expect("initialize");
         let app = crate::api::create_router(state, DaemonApiConfig::keyless());
-        let server = TestServer::new(app).expect("TestServer");
+        let server = TestServer::new(app);
 
         let response = server
             .get(&format!("/v1/daemon/creators/{CREATOR_ID}"))
@@ -751,7 +751,7 @@ mod tests {
 
         let state = WorkspaceState::initialize().await.expect("initialize");
         let app = crate::api::create_router(state, DaemonApiConfig::keyless());
-        let server = TestServer::new(app).expect("TestServer");
+        let server = TestServer::new(app);
 
         let set_resp = server
             .put("/v1/daemon/creators/active")

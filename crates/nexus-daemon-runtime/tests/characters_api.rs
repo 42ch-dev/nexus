@@ -40,8 +40,7 @@ async fn ctx() -> Ctx {
     let server = TestServer::new(api::create_router(
         state.clone(),
         DaemonApiConfig::keyless(),
-    ))
-    .expect("test server");
+    ));
     Ctx {
         _tmp: tmp,
         server,
@@ -555,8 +554,7 @@ async fn create_list_show_accept_real_local_creator_id() {
     .execute(&pool)
     .await
     .unwrap();
-    let server = TestServer::new(api::create_router(state, DaemonApiConfig::keyless()))
-        .expect("test server");
+    let server = TestServer::new(api::create_router(state, DaemonApiConfig::keyless()));
     let created = server
         .post("/v1/daemon/characters")
         .json(&json!({ "display_name": "LocalAva", "world_id": WORLD_A }))
@@ -1361,8 +1359,7 @@ async fn ctx_with_host() -> (Ctx, Arc<CountingHost>) {
     let server = TestServer::new(api::create_router(
         state.clone(),
         DaemonApiConfig::keyless(),
-    ))
-    .expect("test server");
+    ));
     let ctx = Ctx {
         _tmp: tmp,
         server,

@@ -485,7 +485,7 @@ mod tests {
         let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         let app = build_router(state, config);
-        let server = TestServer::new(app).expect("failed to create test server");
+        let server = TestServer::new(app);
         TestApp { _tmp: tmp, server }
     }
 

@@ -76,7 +76,7 @@ async fn test_server_with_engine() -> EngineCtx {
     let pool = state.pool().expect("workspace pool").clone();
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
-    let server = TestServer::new(app).expect("failed to create test server");
+    let server = TestServer::new(app);
     EngineCtx {
         _tmp: tmp,
         server,
@@ -206,7 +206,7 @@ async fn sessions_without_engine_returns_503_not_404() {
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
-    let server = TestServer::new(app).expect("failed to create test server");
+    let server = TestServer::new(app);
 
     let resp = server
         .get("/v1/daemon/orchestration/sessions?creator_id=test_creator")
@@ -245,7 +245,7 @@ async fn sessions_without_active_creator_returns_409_not_404() {
 
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
-    let server = TestServer::new(app).expect("failed to create test server");
+    let server = TestServer::new(app);
 
     let resp = server
         .get("/v1/daemon/orchestration/sessions?creator_id=test_creator")

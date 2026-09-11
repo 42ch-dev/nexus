@@ -36,8 +36,7 @@ async fn ctx() -> Ctx {
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
     let pool = state.pool().unwrap().clone();
     seed_world(&pool).await;
-    let server = TestServer::new(api::create_router(state, DaemonApiConfig::keyless()))
-        .expect("test server");
+    let server = TestServer::new(api::create_router(state, DaemonApiConfig::keyless()));
     Ctx {
         _tmp: tmp,
         server,

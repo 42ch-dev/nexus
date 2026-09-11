@@ -25,7 +25,7 @@ async fn service_unavailable_returns_canonical_envelope() {
 
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
-    let server = TestServer::new(app).expect("failed to create test server");
+    let server = TestServer::new(app);
     std::mem::forget(tmp);
 
     let resp = server
@@ -65,7 +65,7 @@ async fn preset_gates_failed_returns_canonical_envelope() {
 
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
-    let server = TestServer::new(app).expect("failed to create test server");
+    let server = TestServer::new(app);
     std::mem::forget(tmp);
 
     let req = AddScheduleRequest {

@@ -41,7 +41,7 @@ async fn test_ctx_with_active_creator(active_creator: &str) -> TestCtx {
     let pool = state.pool().unwrap().clone();
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
-    let server = TestServer::new(app).expect("failed to create test server");
+    let server = TestServer::new(app);
     TestCtx {
         _tmp: tmp,
         pool,
@@ -407,7 +407,7 @@ async fn test_ctx_without_creator() -> TestCtx {
     let pool = state.pool().unwrap().clone();
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
-    let server = TestServer::new(app).expect("failed to create test server");
+    let server = TestServer::new(app);
     TestCtx {
         _tmp: tmp,
         pool,

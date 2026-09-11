@@ -62,7 +62,7 @@ async fn ctx() -> Ctx {
     seed_foreign_world(&pool).await;
     seed_works(&pool).await;
     let app = api::create_router(state, DaemonApiConfig::keyless());
-    let server = TestServer::new(app).expect("test server");
+    let server = TestServer::new(app);
     Ctx {
         _tmp: tmp,
         server,
@@ -79,7 +79,7 @@ async fn ctx_keyed() -> Ctx {
     test_utils::seed_test_creator_and_world(&pool).await;
     seed_works(&pool).await;
     let app = api::create_router(state, DaemonApiConfig::keyed("test-key"));
-    let server = TestServer::new(app).expect("test server");
+    let server = TestServer::new(app);
     Ctx {
         _tmp: tmp,
         server,

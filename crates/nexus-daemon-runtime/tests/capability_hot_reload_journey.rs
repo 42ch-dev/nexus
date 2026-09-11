@@ -139,7 +139,7 @@ async fn rig(
     );
 
     let app = api::create_router(state.clone(), DaemonApiConfig::keyless());
-    let server = TestServer::new(app).expect("failed to create test server");
+    let server = TestServer::new(app);
     (tmp, server, state, shutdown, watcher)
 }
 

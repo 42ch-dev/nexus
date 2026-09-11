@@ -189,7 +189,7 @@ async fn start_server(
         );
     }
     let app = api::create_router(state, DaemonApiConfig::keyless());
-    let http = TestServer::new(app).expect("test server");
+    let http = TestServer::new(app);
 
     PeerTestServer {
         addr,

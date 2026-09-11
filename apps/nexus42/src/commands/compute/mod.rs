@@ -821,7 +821,7 @@ fn artifact_path(module_dir: &Path, profile: &str, crate_name: &str) -> PathBuf 
 /// names use underscores).
 fn crate_name_from_cargo_toml(module_dir: &Path) -> Option<String> {
     let text = std::fs::read_to_string(module_dir.join("Cargo.toml")).ok()?;
-    let value: toml::Value = text.parse().ok()?;
+    let value: toml::Table = text.parse().ok()?;
     let name = value.get("package")?.get("name")?.as_str()?;
     Some(name.replace('-', "_"))
 }
