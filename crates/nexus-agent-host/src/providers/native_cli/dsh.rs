@@ -2290,8 +2290,8 @@ mod tests {
         assert_eq!(desc.protocol_kind, ProtocolKind::NativeCli);
         assert!(desc.capabilities.text_prompt);
         assert!(
-            !desc.capabilities.streaming,
-            "dsh-native must not claim streaming (AR-6)"
+            desc.capabilities.streaming,
+            "dsh-native streams committed messages (v1.188 P1, AR-6)"
         );
         assert!(
             !desc.capabilities.cancellation,

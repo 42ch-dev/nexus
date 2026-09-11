@@ -691,8 +691,10 @@ mod descriptor_audit_tests {
     }
 
     /// `dsh_limited` is the documented narrower descriptor (locks § AR-6):
-    /// `streaming` and `cancellation` must be honest `false` (no incremental
-    /// delta API, no cancel RPC on the `Session::run` surface), while
+    /// `cancellation` must be honest `false` (no cancel RPC on the
+    /// `Session::run` surface); `streaming` is `true` since v1.188 P1 —
+    /// committed root `assistant/message` notifications are forwarded as
+    /// message-level deltas, proven against the actual dsh runtime in T3.
     /// `text_prompt` / `session_restore` stay true and every other field
     /// matches `native_cli_limited` — never silently claim more or less.
     #[test]
