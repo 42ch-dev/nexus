@@ -190,15 +190,18 @@ impl KnowledgeStore for SqliteKnowledgeStore {
             .unwrap_or(0);
 
         // Build and execute select query
-        let mut select_query = sqlx::query_as::<_, (
-            String,
-            String,
-            String,
-            String,
-            Option<String>,
-            String,
-            String,
-        )>(sqlx::AssertSqlSafe(select_sql));
+        let mut select_query = sqlx::query_as::<
+            _,
+            (
+                String,
+                String,
+                String,
+                String,
+                Option<String>,
+                String,
+                String,
+            ),
+        >(sqlx::AssertSqlSafe(select_sql));
         select_query = select_query.bind(&query.user_id);
         if let Some(ref text) = query.text {
             select_query = select_query.bind(format!("%{text}%"));

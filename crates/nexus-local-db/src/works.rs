@@ -623,7 +623,9 @@ async fn list_works_inner<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
          LIMIT ? OFFSET ?"
     );
 
-    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(creator_id).bind(workspace_slug);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(creator_id)
+        .bind(workspace_slug);
 
     if let Some(ref s) = filters.status {
         query = query.bind(s);
@@ -663,7 +665,9 @@ async fn count_works_inner<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
     // All user inputs are passed as bound parameters, not interpolated.
     let sql = format!("SELECT COUNT(*) AS cnt FROM works WHERE {where_sql}");
 
-    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(creator_id).bind(workspace_slug);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(creator_id)
+        .bind(workspace_slug);
 
     if let Some(ref s) = filters.status {
         query = query.bind(s);

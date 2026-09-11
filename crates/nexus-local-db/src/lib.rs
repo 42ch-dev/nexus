@@ -504,7 +504,6 @@ async fn apply_pending_migrations(
     }
     let table_name = migrator.table_name.as_ref();
 
-
     // Bookkeeping identical to Migrator::run_direct (ignore_missing = false):
     // fail on a dirty (partially applied) migration, then validate applied
     // versions/checksums against the source before applying anything new.
@@ -620,7 +619,7 @@ async fn apply_fk_suspension_tx(
     let start = std::time::Instant::now();
 
     let outcome: Result<(), LocalDbError> = async {
-        tx.execute(migration.sql.as_str())
+        tx.execute(migration.sql.clone())
             .await
             .map_err(|err| sqlx::migrate::MigrateError::ExecuteMigration(err, migration.version))?;
 

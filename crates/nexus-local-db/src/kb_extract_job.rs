@@ -962,7 +962,8 @@ pub async fn list_pending_for_world_after(
     }
     sql.push_str(" ORDER BY created_at ASC, job_id ASC LIMIT ?");
 
-    let mut query = sqlx::query_as::<_, KbExtractPromotion>(sqlx::AssertSqlSafe(sql)).bind(world_id);
+    let mut query =
+        sqlx::query_as::<_, KbExtractPromotion>(sqlx::AssertSqlSafe(sql)).bind(world_id);
     if has_cursor {
         query = query.bind(cursor_created_at).bind(cursor_job_id);
     }
