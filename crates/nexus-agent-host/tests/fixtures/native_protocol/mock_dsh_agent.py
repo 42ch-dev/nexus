@@ -18,8 +18,9 @@ the only successful finish reason (v1.188 P0 T1).
 Behavior knobs (env vars):
 - REQ_LOG=<path>  append one JSON object per received request
   ({"method": ..., "sessionId": ...}) for session-rotation assertions,
-  plus one startup `_spawn` record ({"argv": ..., "dsh_home": ...}) so
-  tests can assert the provider's launch identity (exact argv, DSH_HOME)
+  plus one startup `_spawn` record ({"argv": ..., "dsh_home": ...,
+  "pid": ...}) so tests can assert the provider's launch identity (exact
+  argv, DSH_HOME) and CONFIRMED child exit (pid liveness after close)
   without touching the wire protocol.
 - HOLD_TURN=1     after the `session/prompt` response, emit the inbox
   receipt but never the root idle — the SDK run hangs and the provider's
@@ -34,6 +35,12 @@ Behavior knobs (env vars):
 - INIT_FAIL_SEALED=1  fail the `initialize` reply for sealed spawns
   (`--patch` present) after planting a removal blocker inside DSH_HOME
   (switch start+delete failure arm).
+- WRONG_IDENTITY=1  answer `initialize` with a foreign server identity —
+  the SDK rejects the handshake (hard protocol error) and the launch
+  must fail closed (wrong-identity arm).
+- CLOSE_ERROR=1   answer the `shutdown` request with a JSON-RPC error.
+  The SDK treats a failed cooperative shutdown as diagnostic only; the
+  EOF/TERM/KILL ladder still reaps the child (close-error tolerance arm).
 """
 
 import json
@@ -70,6 +77,7 @@ def log_spawn():
         "method": "_spawn",
         "argv": sys.argv[1:],
         "dsh_home": os.environ.get("DSH_HOME", ""),
+        "pid": os.getpid(),
     }
     with open(path, "a") as f:
         f.write(json.dumps(entry) + "\n")
@@ -118,9 +126,14 @@ def handle_request(req):
         delay_ms = int(os.environ.get("INIT_DELAY_MS", "0"))
         if delay_ms > 0:
             time.sleep(delay_ms / 1000.0)
+        name = "deepseek-harness-sdk-runtime"
+        if os.environ.get("WRONG_IDENTITY"):
+            # A foreign runtime identity: the SDK rejects the handshake
+            # with a hard protocol error.
+            name = "not-the-dsh-sdk-runtime"
         reply(req, {
             "serverInfo": {
-                "name": "deepseek-harness-sdk-runtime",
+                "name": name,
                 "version": "0.0.1",
             }
         })
@@ -154,6 +167,15 @@ def handle_request(req):
         delay_ms = int(os.environ.get("SHUTDOWN_DELAY_MS", "0"))
         if delay_ms > 0:
             time.sleep(delay_ms / 1000.0)
+        if os.environ.get("CLOSE_ERROR"):
+            # A failed cooperative shutdown is diagnostic only for the
+            # SDK; the EOF/TERM/KILL ladder still reaps this process.
+            send({
+                "jsonrpc": "2.0",
+                "id": req["id"],
+                "error": {"code": -32603, "message": "cooperative shutdown failed"},
+            })
+            return
         reply(req, None)
         return
 

@@ -1,0 +1,857 @@
+//! Hermetic actual-upstream-`dsh` integration proof (v1.188 P0 Task 3).
+//!
+//! Unlike the SDK-wire fixture (`tests/fixtures/native_protocol/
+//! mock_dsh_agent.py`, exercised by the in-module `dsh::tests`), these tests
+//! drive the INSTALLED upstream `dsh` runtime (resolved through the
+//! production chain: explicit override → parent `DSH_RUNTIME_BIN` → PATH
+//! `dsh`) through the real `DshNativeProvider`, with a loopback
+//! deterministic **LLM protocol** proxy standing in for the DeepSeek API
+//! (`DEEPSEEK_BASE_URL` + a non-secret placeholder `DEEPSEEK_API_KEY`; no
+//! credential is read, copied, or logged, and no paid/model call leaves
+//! loopback). The proxy scripts a bounded completion and records only
+//! non-secret request structure/counts.
+//!
+//! Proofs:
+//!
+//! - sealed `deny_all`: every model request advertises NO tools (the
+//!   `tools` key is absent), unsolicited `shell` / `str_replace_editor` /
+//!   `run_code` calls are rejected by dispatch (`unknown tool`) with no
+//!   marker file/process/tool-body side effect, and the scripted final
+//!   completion bounds the turn (empty advertised tools alone would not
+//!   prove enforcement — the hostile calls are the enforcement arm);
+//! - a poisoned ordinary home/profile (marker plugin package + persona
+//!   override) observably enters the ORDINARY runtime but never the sealed
+//!   runtime;
+//! - a missing required plugin package fails launch closed (typed error,
+//!   zero model calls) — every incompatible/failed denial is a STOP, never
+//!   an ordinary fallback;
+//! - safe runtime identity (CLI version, npm package identity, wire
+//!   protocol server identity) is recorded without touching credentials.
+//!
+//! When no real `dsh` resolves on the host, each test skips with a loud
+//! note (never a fake proof); with `dsh` installed they are deterministic,
+//! bounded, isolated (own temp HOME/DSH_HOME, loopback ports), and mutate
+//! no process-global environment.
+
+use std::collections::HashMap;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use futures_util::StreamExt;
+use nexus_agent_host::capability::model::{
+    FinishReason, HostContentBlock, HostEvent, HostOperation, LaunchSpec, PromptPermissionScope,
+    SessionOwner,
+};
+use nexus_agent_host::config::TimeoutConfig;
+use nexus_agent_host::error::HostError;
+use nexus_agent_host::providers::native_cli::dsh::{DshNativeProvider, resolve_dsh_executable};
+use nexus_agent_host::{HostOperationId, ProviderAdapter, ProviderId};
+use tempfile::TempDir;
+use tokio::io::AsyncReadExt;
+use tokio::net::TcpListener;
+
+/// The persona token planted in the poisoned home patch layer. Its
+/// presence in a model request's system message proves the poisoned layer
+/// entered that runtime's composition; its absence from the sealed
+/// runtime's requests proves exclusion.
+const POISON_TOKEN: &str = "POISON-PERSONA-7f3a9c-via-home";
+
+/// The scripted final assistant text (the bounded completion).
+const FINAL_TEXT: &str = "deterministic proxy final answer";
+
+/// Non-secret placeholder API key: the loopback proxy ignores it; no real
+/// credential is ever read or passed.
+const DUMMY_API_KEY: &str = "dsh-test-nonsecret-loopback-key";
+
+/// Resolve the installed/resolved real `dsh` through the production chain
+/// (parent `DSH_RUNTIME_BIN` → PATH `dsh`; no explicit override here so the
+/// ambient chain is what a deployment would use). `None` = skip gate.
+fn real_dsh() -> Option<PathBuf> {
+    match resolve_dsh_executable(None) {
+        Ok(bin) => Some(bin),
+        Err(reason) => {
+            eprintln!("SKIP: no real upstream dsh runtime resolves on this host: {reason}");
+            None
+        }
+    }
+}
+
+/// The all-false deny_all scope (architecture §3.4 selection).
+const fn deny_all_scope() -> PromptPermissionScope {
+    PromptPermissionScope {
+        allow_read: false,
+        allow_write: false,
+        allow_destructive: false,
+    }
+}
+
+fn launch_spec(cwd: &Path) -> LaunchSpec {
+    LaunchSpec {
+        cwd: cwd.to_path_buf(),
+        model: None,
+        mode: None,
+        owner: SessionOwner {
+            creator_id: "ctr_dsh_real_test".to_string(),
+            workspace_root: cwd.to_path_buf(),
+            orchestration_run_id: None,
+        },
+        mcp_servers: vec![],
+    }
+}
+
+fn real_timeouts() -> TimeoutConfig {
+    TimeoutConfig {
+        initialize_ms: 30_000,
+        prompt_ms: 90_000,
+        shutdown_ms: 30_000,
+        ..TimeoutConfig::default()
+    }
+}
+
+/// The isolated child environment handed to the provider (the SDK merges
+/// it into the spawn environment): isolated parent HOME and DSH_HOME, the
+/// loopback model endpoint, the non-secret placeholder key, the poison
+/// marker log, and disabled telemetry so the proof never egresses.
+fn isolated_env(root: &TempDir, proxy_port: u16) -> HashMap<String, String> {
+    HashMap::from([
+        (
+            "HOME".to_string(),
+            root.path().join("home").to_string_lossy().into_owned(),
+        ),
+        (
+            "DSH_HOME".to_string(),
+            root.path().join("dsh-home").to_string_lossy().into_owned(),
+        ),
+        (
+            "DEEPSEEK_BASE_URL".to_string(),
+            format!("http://127.0.0.1:{proxy_port}"),
+        ),
+        ("DEEPSEEK_API_KEY".to_string(), DUMMY_API_KEY.to_string()),
+        (
+            "POISON_LOG".to_string(),
+            root.path().join("poison.jsonl").to_string_lossy().into_owned(),
+        ),
+        ("DSH_TELEMETRY_DISABLED".to_string(), "1".to_string()),
+    ])
+}
+
+fn real_provider(root: &TempDir, proxy_port: u16, dsh_bin: &Path) -> DshNativeProvider {
+    DshNativeProvider::new(
+        ProviderId::new("dsh-real-test"),
+        "Real upstream dsh (Task 3 proof)".to_string(),
+        Some(dsh_bin.to_string_lossy().into_owned()),
+        Vec::new(),
+        isolated_env(root, proxy_port),
+        real_timeouts(),
+    )
+    .expect("empty native args are accepted")
+}
+
+/// Plant the poison in the ordinary isolated home: a marker plugin
+/// package inserted through the profile patch layer (its module-load and
+/// apply side effects append their runtime's DSH_HOME to POISON_LOG), and
+/// a persona override through the home patch layer (reaches the composed
+/// system prompt). Both channels are verified effective against the
+/// ordinary profile by `real_dsh_poisoned_layers_reach_ordinary_runtime`.
+fn poison_ordinary_home(root: &TempDir) {
+    let dsh_home = root.path().join("dsh-home");
+    let profile = dsh_home.join("profiles").join("sdk");
+    let pkg = profile.join("node_modules").join("dsh-poison-marker");
+    std::fs::create_dir_all(&pkg).expect("poison package dir");
+    std::fs::write(
+        pkg.join("package.json"),
+        r#"{"name":"dsh-poison-marker","version":"0.0.0","type":"module","main":"index.js"}"#,
+    )
+    .expect("poison package manifest");
+    std::fs::write(
+        pkg.join("index.js"),
+        r#"import fs from "node:fs";
+const log = process.env.POISON_LOG;
+if (log) fs.appendFileSync(log, JSON.stringify({event: "plugin-module-loaded", dshHome: process.env.DSH_HOME ?? null}) + "\n");
+export const name = "dsh-poison-marker";
+export function apply(ctx) {
+  if (log) fs.appendFileSync(log, JSON.stringify({event: "plugin-applied", dshHome: process.env.DSH_HOME ?? null}) + "\n");
+}
+"#,
+    )
+    .expect("poison plugin module");
+    // The profile's own patch layer: insert the marker plugin service.
+    std::fs::write(
+        profile.join("cordis.patch.yml"),
+        "- insert:\n    - id: poison-marker\n      name: dsh-poison-marker\n",
+    )
+    .expect("poison profile patch");
+    // The home patch layer: persona override reaching the system prompt.
+    std::fs::write(
+        dsh_home.join("cordis.patch.yml"),
+        format!("- id: system-prompt\n  config:\n    personaPrefix: \"{POISON_TOKEN}\"\n"),
+    )
+    .expect("poison home patch");
+}
+
+/// Marker paths the unsolicited tool calls are scripted to create. Any
+/// appearance is proof a tool body executed; absence after the bounded
+/// completion proves no side effect occurred.
+struct HostileMarkers {
+    shell: PathBuf,
+    shell_pid: PathBuf,
+    editor: PathBuf,
+    run_code: PathBuf,
+}
+
+impl HostileMarkers {
+    fn under(root: &TempDir) -> Self {
+        let dir = root.path().join("markers");
+        Self {
+            shell: dir.join("shell-marker"),
+            shell_pid: dir.join("shell-marker.pid"),
+            editor: dir.join("editor-marker"),
+            run_code: dir.join("run-code-marker"),
+        }
+    }
+
+    fn assert_all_absent(&self) {
+        for (what, path) in [
+            ("shell", &self.shell),
+            ("shell background pid", &self.shell_pid),
+            ("editor", &self.editor),
+            ("run_code", &self.run_code),
+        ] {
+            assert!(
+                !path.exists(),
+                "the unsolicited {what} tool call must have NO side effect, but {path:?} exists"
+            );
+        }
+    }
+}
+
+/// Non-secret request structure recorded by the proxy (never bodies,
+/// headers, or credentials): endpoint shape, model id, tool advertisement
+/// shape, message-role structure, and derived booleans against the KNOWN
+/// test tokens (poison persona, `unknown tool "<name>"` rejections the
+/// script itself provoked).
+#[derive(Debug, Clone)]
+struct RequestRecord {
+    path: String,
+    model: String,
+    has_tools_key: bool,
+    tools_len: usize,
+    message_count: usize,
+    roles: Vec<String>,
+    stream: bool,
+    system_mentions_poison: bool,
+    rejected_unknown_tools: Vec<String>,
+}
+
+/// One scripted proxy: each of the first `hostile_rounds` requests gets a
+/// single unsolicited tool call (shell → editor → run_code) whose
+/// arguments would create marker files / spawn a background process; every
+/// later request gets the bounded final `stop` completion.
+struct Proxy {
+    port: u16,
+    records: Arc<Mutex<Vec<RequestRecord>>>,
+}
+
+impl Proxy {
+    async fn start(hostile_rounds: usize, markers: Arc<HostileMarkers>) -> Self {
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind loopback proxy");
+        let port = listener.local_addr().expect("proxy addr").port();
+        let records: Arc<Mutex<Vec<RequestRecord>>> = Arc::new(Mutex::new(Vec::new()));
+        let task_records = Arc::clone(&records);
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _peer)) = listener.accept().await else {
+                    return;
+                };
+                let conn_records = Arc::clone(&task_records);
+                let conn_markers = Arc::clone(&markers);
+                tokio::spawn(async move {
+                    serve_connection(&mut socket, hostile_rounds, conn_records, conn_markers)
+                        .await;
+                });
+            }
+        });
+        Self { port, records }
+    }
+
+    fn records(&self) -> Vec<RequestRecord> {
+        self.records.lock().expect("records").clone()
+    }
+}
+
+fn find_header_end(buf: &[u8]) -> Option<usize> {
+    buf.windows(4).position(|w| w == b"\r\n\r\n")
+}
+
+/// Read one HTTP request (head + content-length body) from a connection.
+async fn read_request(socket: &mut tokio::net::TcpStream) -> (String, Vec<u8>) {
+    let mut buf = Vec::with_capacity(8192);
+    let mut chunk = [0u8; 8192];
+    let header_end = loop {
+        if let Some(pos) = find_header_end(&buf) {
+            break pos;
+        }
+        let read = socket.read(&mut chunk).await.expect("read request head");
+        assert!(read > 0, "connection closed before request headers");
+        buf.extend_from_slice(&chunk[..read]);
+        assert!(buf.len() < (1 << 20), "request head unbounded");
+    };
+    let head = String::from_utf8_lossy(&buf[..header_end]).into_owned();
+    let content_length = head
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.trim()
+                .eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().expect("content-length"))
+        })
+        .expect("the dsh LLM client sends a content-length request body");
+    let mut body = buf[header_end + 4..].to_vec();
+    while body.len() < content_length {
+        let read = socket.read(&mut chunk).await.expect("read request body");
+        assert!(read > 0, "connection closed mid-body");
+        body.extend_from_slice(&chunk[..read]);
+    }
+    body.truncate(content_length);
+    (head, body)
+}
+
+/// One SSE chunk (`data: <json>\n\n`).
+fn sse_chunk(delta: serde_json::Value, finish_reason: Option<&str>) -> String {
+    let payload = serde_json::json!({
+        "id": "chatcmpl-dsh-t3-proxy",
+        "object": "chat.completion.chunk",
+        "created": 1_700_000_000,
+        "model": "deepseek-v4-flash",
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
+    });
+    format!("data: {payload}\n\n")
+}
+
+fn sse_usage_chunk() -> String {
+    let payload = serde_json::json!({
+        "id": "chatcmpl-dsh-t3-proxy",
+        "object": "chat.completion.chunk",
+        "created": 1_700_000_000,
+        "model": "deepseek-v4-flash",
+        "choices": [],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+    });
+    format!("data: {payload}\n\n")
+}
+
+/// The scripted unsolicited tool call for one hostile round: a tool that
+/// the sealed composition does NOT register, with arguments whose
+/// execution would leave an observable marker.
+fn hostile_call(round: usize, markers: &HostileMarkers) -> (&'static str, String) {
+    match round {
+        0 => (
+            "shell",
+            format!(
+                "{{\"command\": \"touch {}; (sleep 30 & echo $! > {})\"}}",
+                markers.shell.display(),
+                markers.shell_pid.display()
+            ),
+        ),
+        1 => (
+            "str_replace_editor",
+            format!(
+                "{{\"command\": \"create\", \"path\": \"{}\", \"file_text\": \"pwned\"}}",
+                markers.editor.display()
+            ),
+        ),
+        _ => (
+            "run_code",
+            format!(
+                "{{\"code\": \"open(r'{}', 'w').write('pwned')\"}}",
+                markers.run_code.display()
+            ),
+        ),
+    }
+}
+
+async fn serve_connection(
+    socket: &mut tokio::net::TcpStream,
+    hostile_rounds: usize,
+    records: Arc<Mutex<Vec<RequestRecord>>>,
+    markers: Arc<HostileMarkers>,
+) {
+    let (head, body) = read_request(socket).await;
+    let request_path = head
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .unwrap_or_default()
+        .to_string();
+    let parsed: serde_json::Value = serde_json::from_slice(&body).expect("request JSON");
+    let raw = String::from_utf8_lossy(&body).into_owned();
+    let messages = parsed["messages"].as_array().expect("messages array");
+    let request_index = {
+        let mut guard = records.lock().expect("records");
+        guard.push(RequestRecord {
+            path: request_path,
+            model: parsed["model"].as_str().unwrap_or_default().to_string(),
+            has_tools_key: parsed.get("tools").is_some(),
+            tools_len: parsed["tools"].as_array().map_or(0, Vec::len),
+            message_count: messages.len(),
+            roles: messages
+                .iter()
+                .filter_map(|m| m["role"].as_str().map(str::to_string))
+                .collect(),
+            stream: parsed["stream"].as_bool().unwrap_or(false),
+            system_mentions_poison: messages
+                .first()
+                .is_some_and(|m| m["role"].as_str() == Some("system"))
+                && raw.contains(POISON_TOKEN),
+            rejected_unknown_tools: ["shell", "str_replace_editor", "run_code"]
+                .into_iter()
+                .filter(|name| raw.contains(&format!("unknown tool \\\"{name}\\\"")))
+                .map(str::to_string)
+                .collect(),
+        });
+        guard.len()
+    };
+
+    let mut out = String::new();
+    if request_index <= hostile_rounds {
+        let (name, arguments) = hostile_call(request_index - 1, &markers);
+        out += &sse_chunk(
+            serde_json::json!({
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "index": 0,
+                    "id": format!("proxy-call-{request_index}"),
+                    "type": "function",
+                    "function": {"name": name, "arguments": arguments},
+                }],
+            }),
+            None,
+        );
+        out += &sse_chunk(serde_json::json!({}), Some("tool_calls"));
+    } else {
+        out += &sse_chunk(
+            serde_json::json!({"role": "assistant", "content": FINAL_TEXT}),
+            None,
+        );
+        out += &sse_chunk(serde_json::json!({}), Some("stop"));
+    }
+    out += &sse_usage_chunk();
+    out += "data: [DONE]\n\n";
+
+    let response = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncache-control: no-cache\r\nconnection: close\r\ncontent-length: {}\r\n\r\n{}",
+        out.len(),
+        out
+    );
+    use tokio::io::AsyncWriteExt;
+    socket
+        .write_all(response.as_bytes())
+        .await
+        .expect("write SSE response");
+    let _ = socket.shutdown().await;
+}
+
+/// Collect a turn's events, expecting a clean stream (no Err items).
+async fn collect_turn(stream: nexus_agent_host::capability::model::HostEventStream) -> Vec<HostEvent> {
+    let results: Vec<_> = stream.collect().await;
+    results
+        .into_iter()
+        .map(|r| r.expect("stream item should be Ok"))
+        .collect()
+}
+
+async fn run_prompt(
+    provider: &DshNativeProvider,
+    handle: &nexus_agent_host::capability::model::ManagedSessionHandle,
+    text: &str,
+    scope: Option<PromptPermissionScope>,
+) -> Vec<HostEvent> {
+    let stream = provider
+        .execute(
+            handle,
+            HostOperation::Prompt {
+                op_id: HostOperationId::new(),
+                content: vec![HostContentBlock::Text {
+                    text: text.to_string(),
+                }],
+                permission_scope: scope,
+            },
+        )
+        .await
+        .expect("prompt admission succeeds");
+    collect_turn(stream).await
+}
+
+/// Read the poison marker log as parsed JSON lines (empty when absent).
+fn poison_log_entries(root: &TempDir) -> Vec<serde_json::Value> {
+    let path = root.path().join("poison.jsonl");
+    if !path.exists() {
+        return Vec::new();
+    }
+    std::fs::read_to_string(path)
+        .expect("poison log")
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect()
+}
+
+/// The actual upstream dsh sealed `deny_all` composition enforces no-tools
+/// at dispatch (architecture §3.4 / AC6): the model request advertises NO
+/// tools, unsolicited shell/editor/run_code calls are rejected as unknown
+/// tools, and no marker file/process/tool-body side effect occurs before
+/// the scripted bounded completion.
+#[tokio::test]
+async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects() {
+    let Some(dsh_bin) = real_dsh() else { return };
+    let root = tempfile::tempdir().expect("temp root");
+    std::fs::create_dir_all(root.path().join("home")).expect("isolated HOME");
+    poison_ordinary_home(&root);
+    let markers = Arc::new(HostileMarkers::under(&root));
+    let proxy = Proxy::start(3, Arc::clone(&markers)).await;
+    let provider = real_provider(&root, proxy.port, &dsh_bin);
+
+    let handle = provider
+        .launch(launch_spec(root.path()))
+        .await
+        .expect("the ordinary recipe initializes against the poisoned home");
+    let events = run_prompt(&provider, &handle, "attempt no tool use", Some(deny_all_scope())).await;
+
+    // The turn completes bounded through the scripted proxy: exactly one
+    // OpStarted, the final text delta, one OpFinished(EndTurn).
+    assert!(
+        matches!(events.first(), Some(HostEvent::OpStarted(_))),
+        "events: {events:?}"
+    );
+    let deltas: Vec<&str> = events
+        .iter()
+        .filter_map(|e| match e {
+            HostEvent::MessageDelta(delta) => Some(delta.text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(deltas, vec![FINAL_TEXT], "events: {events:?}");
+    assert!(
+        matches!(events.last(), Some(HostEvent::OpFinished(f)) if f.reason == FinishReason::EndTurn),
+        "the bounded final completion ends the turn: {events:?}"
+    );
+
+    // Exactly the scripted model calls happened: three hostile tool-call
+    // responses, then the bounded final completion.
+    let records = proxy.records();
+    assert_eq!(
+        records.len(),
+        4,
+        "three rejected tool calls plus the final completion: {records:?}"
+    );
+    for (index, record) in records.iter().enumerate() {
+        assert_eq!(record.path, "/chat/completions");
+        assert!(
+            !record.model.is_empty(),
+            "the runtime names the model it calls: {record:?}"
+        );
+        assert!(
+            record.message_count == record.roles.len()
+                && record.message_count
+                    == records
+                        .first()
+                        .map_or(record.message_count, |first| {
+                            first.message_count + 2 * index
+                        }),
+            "conversation history grows by one assistant+tool pair per rejection: {record:?}"
+        );
+        assert!(record.stream, "the dsh LLM client always streams");
+        assert!(
+            !record.has_tools_key && record.tools_len == 0,
+            "request {} must advertise NO tools (the `tools` key is absent): {record:?}",
+            index + 1
+        );
+        assert!(
+            !record.system_mentions_poison,
+            "request {} must not carry the poisoned home layer: {record:?}",
+            index + 1
+        );
+    }
+    assert_eq!(
+        records[0].roles,
+        vec!["system".to_string(), "user".to_string()],
+        "the sealed composition sends a minimal first request: {:?}",
+        records[0].roles
+    );
+    // Each rejection came back as a tool-role message naming the rejected
+    // tool; conversation history accumulates, so each LATER request must
+    // contain the corresponding rejection (dispatch rejected BEFORE any
+    // tool body ran).
+    for (index, tool) in [
+        (1usize, "shell"),
+        (2usize, "str_replace_editor"),
+        (3usize, "run_code"),
+    ] {
+        assert!(
+            records[index]
+                .rejected_unknown_tools
+                .iter()
+                .any(|name| name == tool),
+            "the {tool} rejection is visible on request {}: {:?}",
+            index + 1,
+            records[index].rejected_unknown_tools
+        );
+    }
+
+
+    // No side effects: no marker file, no background-process pid file.
+    markers.assert_all_absent();
+
+    // The poisoned marker plugin booted ONLY in the ordinary launch (the
+    // provider initializes the ordinary recipe at launch); the sealed
+    // switch booted a runtime that never touched the poisoned layers.
+    let dsh_home = std::fs::canonicalize(root.path().join("dsh-home")).expect("canonical home");
+    let poison = poison_log_entries(&root);
+    assert_eq!(
+        poison.len(),
+        2,
+        "the poison plugin loads once (module + apply) in the ordinary boot only: {poison:?}"
+    );
+    for entry in &poison {
+        let booted_home = std::fs::canonicalize(
+            entry["dshHome"].as_str().expect("poison log carries dshHome"),
+        )
+        .expect("poison boot home resolves");
+        assert_eq!(
+            booted_home, dsh_home,
+            "the poison plugin only ever booted against the ordinary home: {entry:?}"
+        );
+    }
+
+    // Confirmed shutdown: the sealed child home lease is deleted (the
+    // `nexus` subtree holds no remaining lease).
+    provider.shutdown(handle).await.expect("confirmed close");
+    let nexus_dir = dsh_home.join("nexus");
+    let lease_remains = nexus_dir.exists()
+        && std::fs::read_dir(&nexus_dir)
+            .expect("read nexus dir")
+            .next()
+            .is_some();
+    assert!(
+        !lease_remains,
+        "the confirmed close deleted the sealed child home lease"
+    );
+    markers.assert_all_absent();
+}
+
+/// Non-vacuity arm for the sealed proof: the SAME poisoned layers
+/// observably enter the ORDINARY runtime — the model request carries the
+/// poison persona token and DOES advertise tools, and the marker plugin
+/// boots against the ordinary home. Without this arm, "absent from the
+/// sealed runtime" would prove nothing.
+#[tokio::test]
+async fn real_dsh_poisoned_layers_reach_ordinary_runtime() {
+    let Some(dsh_bin) = real_dsh() else { return };
+    let root = tempfile::tempdir().expect("temp root");
+    std::fs::create_dir_all(root.path().join("home")).expect("isolated HOME");
+    poison_ordinary_home(&root);
+    let markers = Arc::new(HostileMarkers::under(&root));
+    let proxy = Proxy::start(0, Arc::clone(&markers)).await;
+    let provider = real_provider(&root, proxy.port, &dsh_bin);
+
+    let handle = provider
+        .launch(launch_spec(root.path()))
+        .await
+        .expect("the ordinary recipe initializes against the poisoned home");
+    let events = run_prompt(&provider, &handle, "ordinary turn", None).await;
+    assert!(
+        matches!(events.last(), Some(HostEvent::OpFinished(f)) if f.reason == FinishReason::EndTurn),
+        "the ordinary turn completes: {events:?}"
+    );
+
+    let records = proxy.records();
+    assert_eq!(records.len(), 1, "one scripted completion: {records:?}");
+    assert!(
+        records[0].has_tools_key && records[0].tools_len > 0,
+        "the ordinary runtime DOES advertise tools (contrast with the sealed proof): {:?}",
+        records[0]
+    );
+    assert!(
+        records[0].system_mentions_poison,
+        "the poisoned home layer reached the ordinary model request: {:?}",
+        records[0]
+    );
+
+    let poison = poison_log_entries(&root);
+    assert_eq!(
+        poison.len(),
+        2,
+        "the poison plugin booted in the ordinary runtime: {poison:?}"
+    );
+    provider.shutdown(handle).await.expect("confirmed close");
+}
+
+/// A missing required plugin package is a STOP, never an ordinary
+/// fallback: the poisoned profile patch names a package that does not
+/// exist, the real runtime fails the initialize handshake, and the
+/// provider launch fails closed with a typed error and zero model calls.
+#[tokio::test]
+async fn real_dsh_missing_plugin_package_fails_closed() {
+    let Some(dsh_bin) = real_dsh() else { return };
+    let root = tempfile::tempdir().expect("temp root");
+    std::fs::create_dir_all(root.path().join("home")).expect("isolated HOME");
+    let profile = root.path().join("dsh-home").join("profiles").join("sdk");
+    std::fs::create_dir_all(&profile).expect("profile dir");
+    std::fs::write(
+        profile.join("cordis.patch.yml"),
+        "- insert:\n    - id: missing-plugin\n      name: dsh-missing-plugin-package-zzz\n",
+    )
+    .expect("missing-package profile patch");
+    let markers = Arc::new(HostileMarkers::under(&root));
+    let proxy = Proxy::start(0, Arc::clone(&markers)).await;
+    let provider = real_provider(&root, proxy.port, &dsh_bin);
+
+    let result = provider.launch(launch_spec(root.path())).await;
+    assert!(
+        matches!(result, Err(HostError::LaunchFailed { .. })),
+        "a missing plugin package fails the launch closed: {result:?}"
+    );
+    assert!(
+        proxy.records().is_empty(),
+        "no model call ever happened on the failed launch"
+    );
+}
+
+/// Record the actual runtime identity without reading credentials: CLI
+/// version output, the installed npm package identity (name/version), and
+/// the wire protocol server identity from a direct `initialize` handshake
+/// under an isolated HOME/DSH_HOME.
+#[test]
+fn real_dsh_runtime_identity_is_recorded() {
+    let Some(dsh_bin) = real_dsh() else { return };
+
+    // CLI version (non-secret).
+    let version_out = Command::new(&dsh_bin)
+        .arg("--version")
+        .env("DSH_TELEMETRY_DISABLED", "1")
+        .output()
+        .expect("run dsh --version");
+    assert!(version_out.status.success(), "dsh --version must succeed");
+    let cli_version = String::from_utf8_lossy(&version_out.stdout).trim().to_string();
+    assert!(!cli_version.is_empty(), "a version string is recorded");
+
+    // Installed package identity: the resolved executable is the package's
+    // `lib/bin.js`; its `package.json` is two directories up.
+    let canonical = std::fs::canonicalize(&dsh_bin).expect("canonical dsh");
+    let package_json_path = canonical
+        .parent()
+        .and_then(Path::parent)
+        .map(|dir| dir.join("package.json"))
+        .expect("package layout");
+    let package_json: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&package_json_path).expect("read package.json"),
+    )
+    .expect("parse package.json");
+    let package_name = package_json["name"].as_str().expect("package name");
+    let package_version = package_json["version"].as_str().expect("package version");
+    assert_eq!(package_name, "@deepseek-ai/dsh");
+
+    // Wire protocol identity: direct initialize handshake under isolation.
+    let root = tempfile::tempdir().expect("temp root");
+    let home = root.path().join("home");
+    let dsh_home = root.path().join("dsh-home");
+    std::fs::create_dir_all(&home).expect("home");
+    std::fs::create_dir_all(&dsh_home).expect("dsh home");
+    let mut child = Command::new(&dsh_bin)
+        .args(["--profile", "sdk"])
+        .env("HOME", &home)
+        .env("DSH_HOME", &dsh_home)
+        .env("DSH_TELEMETRY_DISABLED", "1")
+        .current_dir(root.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn dsh for identity handshake");
+    let mut stdin = child.stdin.take().expect("stdin");
+    let mut stdout = child.stdout.take().expect("stdout");
+    let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        use std::io::Read as _;
+        let mut line = Vec::new();
+        let mut byte = [0u8; 1];
+        loop {
+            match stdout.read(&mut byte) {
+                Ok(0) => break,
+                Ok(_) => {
+                    if byte[0] == b'\n' {
+                        let _ = reply_tx.send(String::from_utf8_lossy(&line).into_owned());
+                        line.clear();
+                    } else {
+                        line.push(byte[0]);
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+    let initialize = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": "t3-identity",
+        "method": "initialize",
+        "params": {
+            "cwd": root.path().to_string_lossy(),
+            "provider": "deepseek-official",
+            "model": "deepseek-v4-flash",
+        },
+    });
+    writeln!(stdin, "{initialize}").expect("write initialize");
+    stdin.flush().expect("flush");
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let reply = loop {
+        match reply_rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(line) => {
+                if line.contains("\"t3-identity\"") {
+                    break line;
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                assert!(Instant::now() < deadline, "initialize reply deadline");
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("dsh exited before the initialize reply")
+            }
+        }
+    };
+    let reply: serde_json::Value = serde_json::from_str(&reply).expect("initialize reply JSON");
+    let server_name = reply["result"]["serverInfo"]["name"]
+        .as_str()
+        .expect("server identity name");
+    let protocol_version = reply["result"]["serverInfo"]["version"]
+        .as_str()
+        .expect("server identity version");
+    assert_eq!(server_name, "deepseek-harness-sdk-runtime");
+    assert!(!protocol_version.is_empty());
+
+    // Cooperative shutdown + EOF; the child exits on its own.
+    writeln!(stdin, r#"{{"jsonrpc":"2.0","id":"t3-bye","method":"shutdown"}}"#)
+        .expect("write shutdown");
+    stdin.flush().expect("flush");
+    drop(stdin);
+    let exit_deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        if let Ok(Some(_status)) = child.try_wait() {
+            break;
+        }
+        if Instant::now() > exit_deadline {
+            let _ = child.kill();
+            panic!("dsh did not exit after shutdown + stdin EOF");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    eprintln!(
+        "actual dsh runtime identity: cli_version={cli_version} package={package_name}@{package_version} protocol_server={server_name}/{protocol_version} bin={}",
+        canonical.display()
+    );
+}

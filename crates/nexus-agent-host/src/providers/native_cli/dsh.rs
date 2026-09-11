@@ -3863,4 +3863,367 @@ mod tests {
         );
     }
 
+    // ── Task 3: real child-process SDK-wire proof extensions ───────────
+
+    /// The pid recorded by each `_spawn` entry (fixture-side `os.getpid()`).
+    fn spawn_pids(entries: &[serde_json::Value]) -> Vec<i32> {
+        spawn_records(entries)
+            .iter()
+            .map(|spawn| {
+                spawn["pid"]
+                    .as_i64()
+                    .expect("the _spawn record carries the child pid")
+                    .try_into()
+                    .expect("pid fits i32")
+            })
+            .collect()
+    }
+
+    /// Poll until `pid` is reaped (kill(0) → ESRCH) or the bound expires
+    /// (unix-only proof surface; the SDK close ladder reaps the direct
+    /// child before `close()` returns, so this settles fast).
+    #[cfg(unix)]
+    async fn assert_pid_reaped(pid: i32, what: &str) {
+        let raw = rustix::process::Pid::from_raw(pid).expect("valid pid");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            match rustix::process::test_kill_process(raw) {
+                Err(rustix::io::Errno::SRCH) => return,
+                _ if std::time::Instant::now() < deadline => {
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+                result => panic!("{what} pid {pid} must be reaped (kill(0) → ESRCH), got {result:?}"),
+            }
+        }
+    }
+
+    /// Copy the SDK-wire fixture into a fresh bin directory under the name
+    /// `dsh` (the production bare command), with a `python3` symlink beside
+    /// it so the fixture's `#!/usr/bin/env python3` shebang resolves under
+    /// an isolated PATH.
+    fn install_fixture_as_dsh(bin_dir: &Path) -> PathBuf {
+        std::fs::create_dir_all(bin_dir).expect("bin dir");
+        let dsh = bin_dir.join("dsh");
+        std::fs::copy(MOCK_DSH_AGENT, &dsh).expect("copy fixture as dsh");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&dsh, std::fs::Permissions::from_mode(0o755))
+                .expect("chmod +x dsh");
+            let python = which::which("python3").expect("python3 on the pre-isolation PATH");
+            std::os::unix::fs::symlink(python, bin_dir.join("python3"))
+                .expect("python3 symlink");
+        }
+        dsh
+    }
+
+    /// Full SDK-wire proof through a real child process whose executable
+    /// name is exactly `dsh`, resolved through an isolated PATH (no
+    /// explicit override, no DSH_RUNTIME_BIN): ordinary argv is exactly
+    /// `--profile sdk` with the caller-env DSH_HOME; the first deny_all
+    /// prompt closes the ordinary child (its pid is reaped BEFORE the
+    /// sealed turn), initializes the sealed child home with exactly one
+    /// owned `--patch`; the turn maps receipt → assistant delta →
+    /// `turn/end: completed` → root idle into OpStarted → MessageDelta →
+    /// OpFinished(EndTurn); and the confirmed shutdown reaps the sealed
+    /// child pid and deletes the lease.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn wire_child_named_dsh_full_handshake_and_confirmed_exit() {
+        // This test holds the env lock itself (PATH isolation must cover
+        // resolution AND spawn), so it cannot call the locking helpers —
+        // execute/collect inline instead.
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let bin_dir = temp_dir.path().join("bin");
+        install_fixture_as_dsh(&bin_dir);
+        let req_log = temp_dir.path().join("reqs.jsonl");
+        let dsh_home = temp_dir.path().join("dsh-home");
+        let _path_guard = PathGuard::isolate(&bin_dir);
+        let _bin_guard = DshRuntimeBinGuard::remove();
+        let provider = DshNativeProvider::new(
+            ProviderId::new("test-dsh-named"),
+            "Test".to_string(),
+            None,
+            Vec::new(),
+            stub_env(&req_log, &dsh_home),
+            TimeoutConfig::default(),
+        )
+        .expect("empty native args are accepted");
+        let handle = provider.launch(launch_spec()).await.expect("launch");
+        let stream = provider
+            .execute(
+                &handle,
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "seal me".to_string(),
+                    }],
+                    permission_scope: Some(deny_all_scope()),
+                },
+            )
+            .await
+            .expect("the sealed turn executes");
+        let events = collect_events(stream).await;
+
+        // Resolution picked the PATH entry named exactly `dsh`.
+        let resolved =
+            resolve_dsh_executable(None).expect("PATH dsh resolves under the isolated PATH");
+        assert_eq!(resolved.file_name().and_then(|n| n.to_str()), Some("dsh"));
+
+        // Turn mapping: exactly one OpStarted, the assistant text delta,
+        // one OpFinished(EndTurn) from `turn/end` kind `completed`.
+        assert!(matches!(events.first(), Some(HostEvent::OpStarted(_))));
+        let deltas: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match e {
+                HostEvent::MessageDelta(delta) => Some(delta.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(deltas, vec!["mock dsh reply"], "events: {events:?}");
+        assert_eq!(terminal_count(&events), 1);
+        assert!(
+            matches!(events.last(), Some(HostEvent::OpFinished(f)) if f.reason == FinishReason::EndTurn),
+            "turn/end kind 'completed' maps to EndTurn: {events:?}"
+        );
+
+        let entries = req_log_entries(&req_log);
+        let spawns = spawn_records(&entries);
+        assert_eq!(spawns.len(), 2, "ordinary launch + sealed switch: {entries:?}");
+        assert_eq!(
+            argv_of(&spawns[0]),
+            vec!["--profile".to_string(), "sdk".to_string()],
+            "ordinary argv is exactly --profile sdk"
+        );
+        assert_eq!(
+            spawns[0]["dsh_home"].as_str(),
+            Some(dsh_home.to_string_lossy().as_ref()),
+            "the ordinary child env carries the caller-env DSH_HOME"
+        );
+        let sealed_argv = argv_of(&spawns[1]);
+        assert_eq!(sealed_argv.len(), 4, "sealed argv adds one owned patch pair");
+        assert_eq!(sealed_argv[0..2], ["--profile".to_string(), "sdk".to_string()]);
+        assert_eq!(sealed_argv[2], "--patch");
+        let nexus_root = std::fs::canonicalize(&dsh_home)
+            .expect("canonical selected home")
+            .join(SEALED_HOME_SUBDIR);
+        assert!(
+            PathBuf::from(&sealed_argv[3]).starts_with(&nexus_root),
+            "the owned patch lives inside the sealed child home"
+        );
+        let sealed_home = PathBuf::from(spawns[1]["dsh_home"].as_str().expect("sealed home"));
+        assert!(sealed_home.starts_with(&nexus_root));
+
+        // Wire order: ordinary spawn+init, cooperative ordinary close,
+        // sealed spawn+init, then exactly one prompt (receipt/idle/
+        // completed observed by the completed run above).
+        let methods = method_sequence(&entries);
+        assert_eq!(
+            methods,
+            vec![
+                "_spawn".to_string(),
+                "initialize".to_string(),
+                "shutdown".to_string(),
+                "_spawn".to_string(),
+                "initialize".to_string(),
+                "session/prompt".to_string(),
+            ],
+            "the ordinary close precedes the sealed init and the one prompt: {methods:?}"
+        );
+
+        // Confirmed process exit: the ordinary child is reaped by the
+        // switch close (BEFORE the sealed turn completed); both pids are
+        // distinct real children.
+        let pids = spawn_pids(&entries);
+        assert_ne!(pids[0], pids[1], "distinct runtime children");
+        assert_pid_reaped(pids[0], "the ordinary child was reaped by the switch close").await;
+
+        // Confirmed shutdown: the sealed child pid is reaped and the
+        // lease is deleted.
+        provider.shutdown(handle).await.expect("confirmed close");
+        assert_pid_reaped(pids[1], "the sealed child was reaped by shutdown").await;
+        assert!(
+            !sealed_home.exists(),
+            "the confirmed close deleted the sealed child home lease"
+        );
+    }
+
+    /// Absent runtime: an explicit missing executable fails the launch
+    /// with the typed unavailable error — no session record, no spawn.
+    #[tokio::test]
+    async fn absent_runtime_fails_launch_without_session_or_spawn() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = temp_dir.path().join("reqs.jsonl");
+        let provider = DshNativeProvider::new(
+            ProviderId::new("test-dsh-absent"),
+            "Test".to_string(),
+            Some(
+                temp_dir
+                    .path()
+                    .join("definitely-missing-dsh")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+            Vec::new(),
+            stub_env(&req_log, &temp_dir.path().join("dsh-home")),
+            TimeoutConfig::default(),
+        )
+        .expect("empty native args are accepted");
+
+        let result = provider.launch(launch_spec()).await;
+        assert!(
+            matches!(result, Err(HostError::ProviderUnavailable { .. })),
+            "an absent runtime fails the launch closed: {result:?}"
+        );
+        assert!(
+            provider.sessions.read().await.is_empty(),
+            "no session record survives a failed launch"
+        );
+        assert!(!req_log.exists(), "no runtime was ever spawned");
+    }
+
+    /// Non-executable runtime: an explicit path naming a real but
+    /// non-executable file fails the launch closed — no session, no spawn.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn non_executable_runtime_fails_launch_without_session_or_spawn() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = temp_dir.path().join("reqs.jsonl");
+        let not_exec = temp_dir.path().join("dsh-not-executable");
+        std::fs::write(&not_exec, b"#!/bin/sh\n").expect("write file");
+        std::fs::set_permissions(&not_exec, std::fs::Permissions::from_mode(0o644))
+            .expect("chmod 0644");
+        let provider = DshNativeProvider::new(
+            ProviderId::new("test-dsh-notexec"),
+            "Test".to_string(),
+            Some(not_exec.to_string_lossy().into_owned()),
+            Vec::new(),
+            stub_env(&req_log, &temp_dir.path().join("dsh-home")),
+            TimeoutConfig::default(),
+        )
+        .expect("empty native args are accepted");
+
+        let result = provider.launch(launch_spec()).await;
+        assert!(
+            matches!(result, Err(HostError::ProviderUnavailable { .. })),
+            "a non-executable runtime fails the launch closed: {result:?}"
+        );
+        assert!(provider.sessions.read().await.is_empty());
+        assert!(!req_log.exists(), "no runtime was ever spawned");
+    }
+
+    /// Wrong server identity: the fixture answers `initialize` with a
+    /// foreign `serverInfo.name`; the SDK rejects the handshake, the
+    /// launch fails closed with the safe decode-category diagnostic, no
+    /// session is registered, and the spawned child is reaped by the
+    /// SDK's failed-boot close ladder.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn wrong_server_identity_fails_closed_and_reaps_child() {
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = temp_dir.path().join("reqs.jsonl");
+        let mut env = stub_env(&req_log, &temp_dir.path().join("dsh-home"));
+        env.insert("WRONG_IDENTITY".to_string(), "1".to_string());
+        let provider = stub_provider("test-dsh-wrongid", env);
+
+        let result = provider.launch(launch_spec()).await;
+        let Err(HostError::LaunchFailed { message, .. }) = &result else {
+            panic!("a foreign server identity must fail the launch: {result:?}");
+        };
+        assert_eq!(
+            message, "dsh runtime violated the wire protocol",
+            "the diagnostic is the safe static decode category: {message}"
+        );
+        assert!(
+            provider.sessions.read().await.is_empty(),
+            "no session record survives the rejected handshake"
+        );
+        let entries = req_log_entries(&req_log);
+        let pids = spawn_pids(&entries);
+        assert_eq!(pids.len(), 1, "the wrong-identity child was spawned once");
+        assert_pid_reaped(pids[0], "the failed-boot child was reaped").await;
+    }
+
+    /// Initialize timeout: with the fixture holding the `initialize`
+    /// reply past the configured handshake budget, the launch fails
+    /// closed with the safe timeout diagnostic, no session is registered,
+    /// and the child is reaped (the SDK close ladder runs over the
+    /// failed boot).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn initialize_timeout_fails_launch_and_reaps_child() {
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = temp_dir.path().join("reqs.jsonl");
+        let mut env = stub_env(&req_log, &temp_dir.path().join("dsh-home"));
+        env.insert("INIT_DELAY_MS".to_string(), "3000".to_string());
+        let provider = stub_provider_with_timeouts(
+            "test-dsh-inittimeout",
+            env,
+            TimeoutConfig {
+                initialize_ms: 150,
+                ..TimeoutConfig::default()
+            },
+        );
+
+        let result = provider.launch(launch_spec()).await;
+        let Err(HostError::LaunchFailed { message, .. }) = &result else {
+            panic!("an initialize timeout must fail the launch: {result:?}");
+        };
+        assert_eq!(
+            message, "dsh request timed out: initialize",
+            "the diagnostic names only the allowlisted wire method: {message}"
+        );
+        assert!(provider.sessions.read().await.is_empty());
+        let pids = spawn_pids(&req_log_entries(&req_log));
+        assert_eq!(pids.len(), 1);
+        assert_pid_reaped(pids[0], "the timed-out boot child was reaped").await;
+    }
+
+    /// Close error tolerance: the fixture answers the cooperative
+    /// `shutdown` request with a JSON-RPC error. Per the SDK close
+    /// ladder that failure is diagnostic only — EOF reaps the child —
+    /// so shutdown is still CONFIRMED (session record removed, child pid
+    /// reaped). A close that genuinely fails is never reported as
+    /// success (the unconfirmed arms above pin that direction).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn shutdown_rpc_error_is_diagnostic_and_close_is_confirmed() {
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = temp_dir.path().join("reqs.jsonl");
+        let mut env = stub_env(&req_log, &temp_dir.path().join("dsh-home"));
+        env.insert("CLOSE_ERROR".to_string(), "1".to_string());
+        let provider = stub_provider("test-dsh-closeerr", env);
+        let handle = provider.launch(launch_spec()).await.expect("launch");
+
+        provider
+            .shutdown(handle.clone())
+            .await
+            .expect("a shutdown RPC error is diagnostic; the ladder still confirms the close");
+        assert!(
+            !provider.sessions.read().await.contains_key(&handle.session_id),
+            "a confirmed close removes the session record"
+        );
+        let entries = req_log_entries(&req_log);
+        let methods = method_sequence(&entries);
+        assert!(
+            methods.contains(&"shutdown".to_string()),
+            "the runtime saw the cooperative shutdown request: {methods:?}"
+        );
+        let pids = spawn_pids(&entries);
+        assert_pid_reaped(pids[0], "the child was reaped after the failed shutdown RPC").await;
+    }
+
 }
