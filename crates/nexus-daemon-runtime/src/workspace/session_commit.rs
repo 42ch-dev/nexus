@@ -226,6 +226,24 @@ fn new_revision() -> String {
     format!("rev_{}", uuid::Uuid::new_v4())
 }
 
+async fn committed_replay_outcome(
+    mgr: &WorkspaceSessionManager,
+    session_id: &SessionId,
+    digest: &str,
+) -> Result<Option<CommitOutcome>, SessionError> {
+    let existing = db::get_committed_intent_by_digest(
+        mgr.pool().as_ref(),
+        &session_id.to_string(),
+        digest,
+    )
+    .await
+    .map_err(|e| SessionError::Database(e.to_string()))?;
+    Ok(existing.map(|row| CommitOutcome {
+        revision: row.revision,
+        committed: true,
+    }))
+}
+
 pub async fn commit_recoverable(
     mgr: &WorkspaceSessionManager,
     session_id: &SessionId,
@@ -237,28 +255,39 @@ pub async fn commit_recoverable(
         ));
     }
 
-    let row = mgr.validate_session(session_id).await?;
+    let row = db::get_session(mgr.pool().as_ref(), &session_id.to_string())
+        .await
+        .map_err(|e| SessionError::Database(e.to_string()))?
+        .ok_or_else(|| SessionError::NotFound(session_id.clone()))?;
+
+    validate_manifest(changes)?;
+    let digest = request_digest(&session_id.to_string(), changes);
+
+    if let Some(outcome) = committed_replay_outcome(mgr, session_id, &digest).await? {
+        return Ok(outcome);
+    }
+
+    if row.consumed {
+        return Err(SessionError::AlreadyCommitted(session_id.clone()));
+    }
+
+    let sid = session_id.to_string();
+    let active = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM workspace_sessions          WHERE session_id = ? AND consumed = 0 AND expires_at > strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
+        sid
+    )
+    .fetch_one(mgr.pool().as_ref())
+    .await
+    .map_err(|e| SessionError::Database(e.to_string()))?;
+    if active == 0 {
+        return Err(SessionError::Expired(session_id.clone()));
+    }
+
     let canonical_root = canonicalize_workspace_root(Path::new(&row.workspace_root)).await?;
     let workspace_root = canonical_root.to_string_lossy().into_owned();
     let scope_dir = super::scope::scope_directory(&canonical_root, &row.relative_path)?;
 
     recover_unsettled(mgr, &workspace_root).await?;
-    validate_manifest(changes)?;
-
-    let digest = request_digest(&session_id.to_string(), changes);
-    if let Some(existing) = db::get_committed_intent_by_digest(
-        mgr.pool().as_ref(),
-        &session_id.to_string(),
-        &digest,
-    )
-    .await
-    .map_err(|e| SessionError::Database(e.to_string()))?
-    {
-        return Ok(CommitOutcome {
-            revision: existing.revision,
-            committed: true,
-        });
-    }
 
     mgr.validate_contract_manifest(session_id, changes).await?;
 
@@ -279,26 +308,22 @@ pub async fn commit_recoverable(
     match claim {
         db::ClaimSessionResult::Claimed => {}
         db::ClaimSessionResult::DigestConflict => {
-            if let Some(existing) = db::get_committed_intent_by_digest(
-                mgr.pool().as_ref(),
-                &session_id.to_string(),
-                &digest,
-            )
-            .await
-            .map_err(|e| SessionError::Database(e.to_string()))?
-            {
-                return Ok(CommitOutcome {
-                    revision: existing.revision,
-                    committed: true,
-                });
+            if let Some(outcome) = committed_replay_outcome(mgr, session_id, &digest).await? {
+                return Ok(outcome);
             }
             return Err(SessionError::ManifestInvalid("digest conflict".into()));
         }
         db::ClaimSessionResult::AlreadyClaimed { revision: other } => {
+            if let Some(outcome) = committed_replay_outcome(mgr, session_id, &digest).await? {
+                return Ok(outcome);
+            }
             return Err(SessionError::AlreadyCommitted(SessionId(other)));
         }
         db::ClaimSessionResult::NotFound => return Err(SessionError::NotFound(session_id.clone())),
         db::ClaimSessionResult::AlreadyConsumed => {
+            if let Some(outcome) = committed_replay_outcome(mgr, session_id, &digest).await? {
+                return Ok(outcome);
+            }
             return Err(SessionError::AlreadyCommitted(session_id.clone()));
         }
         db::ClaimSessionResult::Expired => return Err(SessionError::Expired(session_id.clone())),

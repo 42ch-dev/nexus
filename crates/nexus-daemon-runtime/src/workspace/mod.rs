@@ -1358,7 +1358,6 @@ impl WorkspaceState {
 
     /// Get workspace path.
     #[must_use]
-    #[must_use]
     pub fn workspace_path_handle(&self) -> Arc<std::sync::Mutex<Option<String>>> {
         Arc::clone(&self.workspace_path)
     }

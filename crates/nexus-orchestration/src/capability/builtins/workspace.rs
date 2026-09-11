@@ -2,9 +2,7 @@
 
 use crate::capability::{Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
-use nexus_contracts::local::orchestration::{
-    WorkspaceCommitInput, WorkspaceCommitOutput, WorkspaceOpenInput, WorkspaceOpenOutput,
-};
+use nexus_contracts::local::orchestration::{WorkspaceCommitInput, WorkspaceOpenInput};
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -103,6 +101,9 @@ mod tests {
     use super::*;
     use crate::capability::WorkspaceExecutor;
     use async_trait::async_trait;
+    use nexus_contracts::local::orchestration::{
+        WorkspaceCommitOutput, WorkspaceOpenInput, WorkspaceOpenOutput,
+    };
 
     struct StubExecutor;
 
