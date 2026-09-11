@@ -43,8 +43,16 @@ jobs:
               - 'pnpm-workspace.yaml'
               - 'schemas/**'
               - 'packages/nexus-ui/assets/**'
+              - 'apps/web/**'
+              - 'apps/design-studio/**'
+              - 'packages/**'
+              - 'tooling/codegen/**'
+              - 'tooling/design-tokens/**'
+              - 'tooling/validation/**'
+              - 'strategy-samples/**'
               - '.github/workflows/ci.yml'
               - '.github/actions/**'
+              - '!**/*.md'
             rust:
               - '**/*.rs'
               - '**/Cargo.toml'
@@ -54,9 +62,15 @@ jobs:
               - 'rust-toolchain*'
               - 'schemas/**'
               - 'modules/**'
+              - 'crates/**'
+              - 'apps/nexus42/**'
+              - 'apps/desktop/src-tauri/**'
+              - '.sqlx/**'
+              - 'strategy-samples/**'
               - 'tooling/check-*.sh'
               - '.github/workflows/ci.yml'
               - '.github/actions/**'
+              - '!**/*.md'
             codegen:
               - 'schemas/**'
               - 'tooling/codegen/**'
@@ -64,12 +78,14 @@ jobs:
               - 'crates/nexus-contracts/src/generated/**'
               - 'tooling/check-codegen-callsite-coverage.sh'
               - '.github/workflows/ci.yml'
+              - '!**/*.md'
             module-dx:
               - 'modules/**'
               - 'schemas/daemon-api/compute/**'
               - 'crates/nexus-wasm-host/**'
               - 'tooling/check-module-sdk-drift.sh'
               - '.github/workflows/ci.yml'
+              - '!**/*.md'
 
   validate-schemas:
     name: Validate JSON Schemas

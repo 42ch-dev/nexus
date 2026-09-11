@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - 'apps/desktop/src-tauri/**'
+      - 'apps/desktop/package.json'
       - 'apps/nexus42/**'
       - 'crates/**'
       - 'modules/**'
@@ -19,6 +20,7 @@ on:
     branches: [main]
     paths:
       - 'apps/desktop/src-tauri/**'
+      - 'apps/desktop/package.json'
       - 'apps/nexus42/**'
       - 'crates/**'
       - 'modules/**'
