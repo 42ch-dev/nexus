@@ -102,7 +102,7 @@ impl Capability for OutboxFlush {
                 );
 
                 // Bind timestamp + each entry ID as owned values.
-                let mut query = sqlx::query(&sql).bind(now);
+                let mut query = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(now);
                 for id in &rows {
                     query = query.bind(id.clone());
                 }
@@ -278,12 +278,10 @@ mod tests {
         let now = chrono::Utc::now().to_rfc3339();
         let updated_val = updated_at.map_or_else(|| "NULL".to_string(), |u| format!("'{u}'"));
         // SAFETY: test-only DDL — dynamic SQL for flexible test helper.
-        sqlx::query(&format!(
-            "INSERT INTO outbox_entries
-             (outbox_entry_id, bundle_id, idempotency_key, delivery_state,
-              retry_count, created_at, updated_at)
-             VALUES ('{entry_id}', 'bdl_{entry_id}', 'idk_{entry_id}', '{state}', 0, '{now}', {updated_val})"
-        ))
+        sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO outbox_entries
+         (outbox_entry_id, bundle_id, idempotency_key, delivery_state,
+          retry_count, created_at, updated_at)
+         VALUES ('{entry_id}', 'bdl_{entry_id}', 'idk_{entry_id}', '{state}', 0, '{now}', {updated_val})")))
         .execute(pool)
         .await
         .expect("insert test entry");
@@ -385,12 +383,12 @@ mod tests {
         // Insert an entry with old updated_at
         let old_time = (chrono::Utc::now() - chrono::Duration::days(30)).to_rfc3339();
         // SAFETY: test-only DDL — insert with explicit updated_at for compaction test.
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "INSERT INTO outbox_entries
-             (outbox_entry_id, bundle_id, idempotency_key, delivery_state,
-              retry_count, created_at, updated_at)
-             VALUES ('obe_old', 'bdl_old', 'idk_old', 'acked', 0, '{old_time}', '{old_time}')"
-        ))
+         (outbox_entry_id, bundle_id, idempotency_key, delivery_state,
+          retry_count, created_at, updated_at)
+         VALUES ('obe_old', 'bdl_old', 'idk_old', 'acked', 0, '{old_time}', '{old_time}')"
+        )))
         .execute(&pool)
         .await
         .unwrap();
@@ -409,12 +407,12 @@ mod tests {
         let pool = test_pool().await;
         let recent = chrono::Utc::now().to_rfc3339();
         // SAFETY: test-only DDL — insert with explicit updated_at.
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "INSERT INTO outbox_entries
-             (outbox_entry_id, bundle_id, idempotency_key, delivery_state,
-              retry_count, created_at, updated_at)
-             VALUES ('obe_recent', 'bdl_r', 'idk_r', 'acked', 0, '{recent}', '{recent}')"
-        ))
+         (outbox_entry_id, bundle_id, idempotency_key, delivery_state,
+          retry_count, created_at, updated_at)
+         VALUES ('obe_recent', 'bdl_r', 'idk_r', 'acked', 0, '{recent}', '{recent}')"
+        )))
         .execute(&pool)
         .await
         .unwrap();

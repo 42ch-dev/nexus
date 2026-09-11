@@ -82,9 +82,12 @@ async fn w01_v142_migration_idempotent() {
         }
         // This should NOT fail — the DROP IF EXISTS guard ensures the
         // legacy table is cleaned up, and IF NOT EXISTS on indexes is safe.
-        sqlx::query(sql).execute(&pool).await.unwrap_or_else(|e| {
-            panic!("V1.42 migration re-run failed on statement:\n{sql}\nError: {e}");
-        });
+        sqlx::query(sqlx::AssertSqlSafe(sql))
+            .execute(&pool)
+            .await
+            .unwrap_or_else(|e| {
+                panic!("V1.42 migration re-run failed on statement:\n{sql}\nError: {e}");
+            });
     }
 
     // Verify data survived the re-run.

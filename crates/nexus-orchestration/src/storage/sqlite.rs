@@ -2778,7 +2778,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         };
         // SAFETY: dynamic SQL — the owner-CAS/step clauses are spliced at
         // runtime; compile-time macro not applicable.
-        let mut q = sqlx::query(&sql)
+        let mut q = sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(&attempt_json)
             .bind(chrono::Utc::now().timestamp())
             .bind(&id)
@@ -2857,7 +2857,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         };
         // SAFETY: dynamic SQL — the step-marker clause is spliced at
         // runtime; compile-time macro not applicable.
-        let mut q = sqlx::query(&sql)
+        let mut q = sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(chrono::Utc::now().timestamp())
             .bind(&id)
             .bind(expected_revision_i64);

@@ -481,7 +481,7 @@ pub async fn run_migrations(pool: &sqlx::SqlitePool) -> Result<(), LocalDbError>
 /// migration and gates its success row on an in-transaction
 /// `PRAGMA foreign_key_check`.
 ///
-/// SQLx 0.9 honors `-- no-transaction`, but its generic no-transaction
+/// `SQLx` 0.9 honors `-- no-transaction`, but its generic no-transaction
 /// runner cannot restore connection-local FK enforcement when a rebuild
 /// fails after `PRAGMA foreign_keys=OFF`. This custom path also makes the
 /// integrity check part of the migration's success gate.

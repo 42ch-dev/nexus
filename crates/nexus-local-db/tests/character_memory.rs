@@ -185,7 +185,7 @@ fn narrative(
 async fn table_count(pool: &SqlitePool, table: &str) -> i64 {
     // SAFETY: dynamic SQL — test-only row counting over a fixed set of table
     // names controlled by this file; no external input reaches `table`.
-    sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {table}")))
         .fetch_one(pool)
         .await
         .unwrap()
