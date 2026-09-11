@@ -1921,6 +1921,14 @@ impl WorkflowRunCoordinator {
                 }
                 drives.remove(&session_id.0);
             }
+            if let Some(registry) = &self.run_events {
+                if let Some(sink) = registry.try_register_live(&session_id.0) {
+                    self.run_event_sinks
+                        .lock()
+                        .await
+                        .insert(session_id.0.clone(), sink);
+                }
+            }
             let cancel = parent_cancel.child_token();
             self.session_cancels
                 .write()
@@ -1959,6 +1967,8 @@ impl WorkflowRunCoordinator {
                 // terminal session status (same boundary as
                 // `ensure_driving`).
                 coordinator.settle_terminal_schedule(&sid, &outcome).await;
+                coordinator.publish_durable_run_state(&sid).await;
+                coordinator.run_event_sinks.lock().await.remove(&sid.0);
                 tracing::debug!(
                     session_id = %sid.0,
                     outcome = ?outcome,
@@ -2749,6 +2759,9 @@ impl WorkflowRunCoordinator {
             .as_ref()
             .and_then(|s| s.wait.as_ref())
             .map(|w| w.wait_id.clone());
+        if record.status.is_terminal() {
+            self.publish_durable_run_state(session_id).await;
+        }
         Ok(RunControlResult {
             status: record.status.as_db_str().to_string(),
             current_wait_id,
@@ -8038,4 +8051,67 @@ mod tests {
             "a v0 skip must not fence the session"
         );
     }
+    /// R-V1186P3-004 / T1: cancel that lost to driver failure is idempotent when
+    /// the durable row records cancel_requested + driver_failed (all placements
+    /// share this public projection).
+    #[tokio::test]
+    async fn cancel_vs_drive_failure_public_cancel_idempotent_on_durable_failed() {
+        use nexus_orchestration::run_state::{RunFailure, RunRecord, RunStateV1};
+        let record = RunRecord {
+            session_id: SessionId("race-run".into()),
+            status: SessionStatus::Failed,
+            state_revision: 4,
+            execution_version: 1,
+            descriptor: None,
+            state: Some(RunStateV1 {
+                cancel_requested: true,
+                failure: Some(RunFailure {
+                    code: "driver_failed".into(),
+                    message: "drive lost race".into(),
+                }),
+                ..RunStateV1::default()
+            }),
+            graph_version: 5,
+        };
+        assert!(cancel_fence_loss_accomplished(&record));
+        for placement in [
+            "provider_start",
+            "active_operation",
+            "post_operation_pre_settlement",
+            "concurrent_failure",
+        ] {
+            assert!(
+                cancel_fence_loss_accomplished(&record),
+                "placement {placement} must project accomplished cancel outcome"
+            );
+        }
+    }
+
+    /// Live SSE handoff: subscriber registered before publish receives host_event.
+    #[tokio::test]
+    async fn run_events_live_handoff_receives_published_host_event() {
+        let registry = Arc::new(crate::run_events::RunEventRegistry::new());
+        let _sink = registry.try_register_live("sess-1").expect("register");
+        let mut rx = registry
+            .subscribe_live("sess-1", None, "/inspect".into())
+            .expect("subscribe");
+        let record = nexus_orchestration::run_state::RunRecord {
+            session_id: SessionId("sess-1".into()),
+            status: SessionStatus::Running,
+            state_revision: 1,
+            execution_version: 1,
+            descriptor: None,
+            state: None,
+            graph_version: 1,
+        };
+        registry.publish_run_state("sess-1", &record);
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("timeout")
+            .expect("frame");
+        assert_eq!(frame.event, "run_state");
+        let payload: serde_json::Value = serde_json::from_str(&frame.data).expect("json");
+        assert_eq!(payload["sequence"].as_u64(), Some(1));
+    }
+
 }

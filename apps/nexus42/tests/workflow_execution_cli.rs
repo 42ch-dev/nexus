@@ -4205,3 +4205,30 @@ async fn settlement_restart_reconciles_no_second_child() {
         "reconcile must not create a second session"
     );
 }
+
+
+/// P4 T4: durable Failed+cancel_requested+driver_failed must match the public
+/// inspect/cancel-idempotence contract (no generic conflict).
+#[test]
+fn p4_durable_cancel_failed_matches_public_inspect_projection() {
+    use nexus_orchestration::run_state::{RunFailure, RunRecord, RunStateV1};
+    use nexus_orchestration::engine::{SessionId, SessionStatus};
+    let record = RunRecord {
+        session_id: SessionId("cli-run".into()),
+        status: SessionStatus::Failed,
+        state_revision: 2,
+        execution_version: 1,
+        descriptor: None,
+        state: Some(RunStateV1 {
+            cancel_requested: true,
+            failure: Some(RunFailure {
+                code: "driver_failed".into(),
+                message: "lost race".into(),
+            }),
+            ..RunStateV1::default()
+        }),
+        graph_version: 3,
+    };
+    assert!(nexus_orchestration::run_state::durable_cancel_outcome_accomplished(&record));
+    assert_eq!(record.status.as_db_str(), "failed");
+}

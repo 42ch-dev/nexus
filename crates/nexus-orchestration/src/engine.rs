@@ -1523,9 +1523,14 @@ impl EngineSharedState {
                     )
                     .await;
                 match settle_result {
-                    Ok(SettlementResult::Applied(record) | SettlementResult::Observed(record)) => {
+                    Ok(SettlementResult::Applied(record)) => {
                         cleanup_terminal = record.status;
                         break;
+                    }
+                    Ok(SettlementResult::Observed(record)) => {
+                        // Durable winner is another owner — do not reclaim
+                        // tokens or infer cleanup from Observed (P4 §6.2).
+                        return Ok(record.status);
                     }
                     Err(EngineError::RevisionMismatch { .. }) => {
                         if !cancel_allow_rebase {
@@ -2026,18 +2031,47 @@ impl EngineSharedState {
                 // A graph-only writer landing after that snapshot loses the
                 // CAS instead of having its context clobbered by the stale
                 // step result.
-                let commit_result = store
-                    .commit_transition_with_graph_fence(
-                        session_id,
-                        transition_revision,
-                        Some(root.version),
-                        checkpoint,
-                        status.clone(),
-                        &next_state,
-                    )
-                    .await;
+                let commit_result: Result<(bool, SessionStatus), EngineError> =
+                    if status == SessionStatus::Completed {
+                        match store
+                            .settle_run(
+                                session_id,
+                                transition_revision,
+                                Some(root.version),
+                                checkpoint,
+                                &next_state,
+                                TerminalSettlementTarget::Completed,
+                            )
+                            .await
+                        {
+                            Ok(SettlementResult::Applied(record)) => {
+                                Ok((true, record.status))
+                            }
+                            Ok(SettlementResult::Observed(record)) => {
+                                Ok((false, record.status))
+                            }
+                            Err(e) => Err(e),
+                        }
+                    } else {
+                        store
+                            .commit_transition_with_graph_fence(
+                                session_id,
+                                transition_revision,
+                                Some(root.version),
+                                checkpoint,
+                                status.clone(),
+                                &next_state,
+                            )
+                            .await
+                            .map(|_| (true, status.clone()))
+                    };
                 match commit_result {
-                    Ok(_) => {
+                    Ok((owned_commit, durable_status)) => {
+                        status = durable_status;
+                        if !owned_commit {
+                            // Observed terminal winner — leave coordinator
+                            // cleanup to the owner that won the CAS.
+                        } else {
                         // The parent's `commit_transition` persisted each
                         // child checkpoint with `state_revision + 1` (the
                         // store's ON CONFLICT bump). Synchronize the
@@ -2117,6 +2151,7 @@ impl EngineSharedState {
                             }
                         }
                     }
+                        }
                     Err(commit_err) => {
                         if had_effect {
                             // A failed post-effect commit must NOT blindly rewind

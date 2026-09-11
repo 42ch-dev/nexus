@@ -764,7 +764,17 @@ impl PromptExecutor for HostPromptExecutor {
                 }
                 event = stream.next() => {
                     match event {
-                        Some(Ok(HostEvent::MessageDelta(delta))) => {
+                        Some(Ok(ev)) => {
+                            if let Some(registry) = &self.run_events {
+                                registry.publish_host_event_for_run(
+                                    &request.run_id,
+                                    expected_step.as_deref().unwrap_or("prompt"),
+                                    &attempt_id,
+                                    &ev,
+                                );
+                            }
+                            match ev {
+                        HostEvent::MessageDelta(delta) => {
                             if !cancel_triggered {
                                 const MAX_PROMPT_BYTES: usize = 4 * 1024 * 1024;
                                 if full_text.len() + delta.text.len() > MAX_PROMPT_BYTES {
@@ -774,16 +784,8 @@ impl PromptExecutor for HostPromptExecutor {
                                 }
                                 full_text.push_str(&delta.text);
                             }
-                            if let Some(registry) = &self.run_events {
-                                registry.publish_host_event_for_run(
-                                    &request.run_id,
-                                    expected_step.as_deref().unwrap_or("prompt"),
-                                    &attempt_id,
-                                    &HostEvent::MessageDelta(delta.clone()),
-                                );
-                            }
                         }
-                        Some(Ok(HostEvent::OpFinished(finished))) => {
+                        HostEvent::OpFinished(finished) => {
                             if cancel_triggered {
                                 break Err(CapabilityError::Cancelled);
                             }
@@ -799,7 +801,7 @@ impl PromptExecutor for HostPromptExecutor {
                                 finished.reason
                             )));
                         }
-                        Some(Ok(HostEvent::OpFailed(_))) => {
+                        HostEvent::OpFailed(_) => {
                             if cancel_triggered {
                                 break Err(CapabilityError::Cancelled);
                             }
@@ -807,14 +809,7 @@ impl PromptExecutor for HostPromptExecutor {
                                 "host operation failed".to_string(),
                             ));
                         }
-                        Some(Ok(other)) => {
-                            if let Some(registry) = &self.run_events {
-                                registry.publish_host_event_for_run(
-                                    &request.run_id,
-                                    expected_step.as_deref().unwrap_or("prompt"),
-                                    &attempt_id,
-                                    &other,
-                                );
+                        _ => {}
                             }
                         }
                         Some(Err(e)) => {

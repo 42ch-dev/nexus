@@ -1199,22 +1199,46 @@ mod tests {
     }
 }
 
-/// `GET /v1/daemon/orchestration/sessions/{session_id}/events` — bounded SSE replay.
+/// `GET /v1/daemon/orchestration/sessions/{session_id}/events` — live SSE replay.
 pub async fn session_events(
     State(state): State<WorkspaceState>,
     Path(session_id): Path<String>,
     headers: HeaderMap,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, NexusApiError> {
-    let _engine = state
+    let engine = state
         .engine()
         .ok_or_else(|| NexusApiError::service_unavailable("engine not available"))?;
+    let sid = nexus_orchestration::engine::SessionId(session_id.clone());
+    let sessions = engine
+        .list_active(nexus_orchestration::engine::SessionFilter::default())
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "ENGINE_ERROR".into(),
+            message: e.to_string(),
+        })?;
+    let known = sessions.iter().any(|s| s.session_id == sid)
+        || match state.pool() {
+            Some(pool) => {
+                let storage = SqliteSessionStorage::new(Arc::new(pool.clone()));
+                storage
+                    .get_checkpoint_row(&session_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .is_some()
+            }
+            None => false,
+        };
+    if !known {
+        return Err(NexusApiError::NotFound(session_id));
+    }
     let inspect_url = format!("/v1/daemon/orchestration/sessions/{session_id}");
     let last_event_id = headers
         .get("last-event-id")
         .and_then(|v| v.to_str().ok());
     let registry = state.run_event_registry();
-    let frames = match registry.subscribe(&session_id, last_event_id, inspect_url) {
-        Ok(frames) => frames,
+    let rx = match registry.subscribe_live(&session_id, last_event_id, inspect_url) {
+        Ok(rx) => rx,
         Err(crate::run_events::SubscribeError::MalformedCursor)
         | Err(crate::run_events::SubscribeError::FutureCursor) => {
             return Err(NexusApiError::BadRequest {
@@ -1222,19 +1246,35 @@ pub async fn session_events(
                 message: "malformed or future Last-Event-ID".into(),
             });
         }
+        Err(crate::run_events::SubscribeError::TooManySubscribers) => {
+            return Err(NexusApiError::ConflictCoded {
+                code: "sse_subscriber_limit".into(),
+                message: "too many concurrent SSE subscribers for this run".into(),
+            });
+        }
         Err(crate::run_events::SubscribeError::HistoryUnavailable(body)) => {
-            return Err(NexusApiError::NotFound(
-                serde_json::to_string(&body).unwrap_or_else(|_| body.inspect_url),
-            ));
+            return Err(NexusApiError::BadRequestCodedDetails {
+                code: "history_unavailable".into(),
+                message: "run event history is not available for replay".into(),
+                details: serde_json::json!({
+                    "run_id": body.run_id,
+                    "inspect_url": body.inspect_url,
+                }),
+            });
         }
     };
-    let events = frames.into_iter().map(|frame| {
-        Ok(Event::default()
-            .id(frame.id)
-            .event(frame.event)
-            .data(frame.data))
+    let stream = futures_util::stream::unfold(rx, |mut rx| async move {
+        match rx.recv().await {
+            Some(frame) => {
+                let event = Event::default()
+                    .id(frame.id)
+                    .event(frame.event)
+                    .data(frame.data);
+                Some((Ok(event), rx))
+            }
+            None => None,
+        }
     });
-    let stream = stream::iter(events);
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
