@@ -130,7 +130,7 @@ fn pch(id: &str, sess: &str, digest: &str, kind: &str, chr: &str) -> PendingRevi
 }
 
 async fn count(pool: &sqlx::SqlitePool, sql: &str, bind: &str) -> i64 {
-    let row: (i64,) = sqlx::query_as(sql)
+    let row: (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(sql))
         .bind(bind)
         .fetch_one(pool)
         .await
@@ -139,7 +139,10 @@ async fn count(pool: &sqlx::SqlitePool, sql: &str, bind: &str) -> i64 {
 }
 
 async fn count_all(pool: &sqlx::SqlitePool, sql: &str) -> i64 {
-    let row: (i64,) = sqlx::query_as(sql).fetch_one(pool).await.unwrap();
+    let row: (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .fetch_one(pool)
+        .await
+        .unwrap();
     row.0
 }
 
@@ -1218,10 +1221,10 @@ async fn review_failed_queue_advance_rolls_back_fragment_and_reports_no_success(
             "fail_pending_delete_character",
         ),
     ] {
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "CREATE TRIGGER {trigger} BEFORE DELETE ON {table} \
              BEGIN SELECT RAISE(FAIL, 'forced delete failure'); END;"
-        ))
+        )))
         .execute(&s.pool)
         .await
         .unwrap();
@@ -1287,7 +1290,7 @@ async fn review_failed_queue_advance_rolls_back_fragment_and_reports_no_success(
         "fail_pending_delete_creator",
         "fail_pending_delete_character",
     ] {
-        sqlx::query(&format!("DROP TRIGGER {trigger}"))
+        sqlx::query(sqlx::AssertSqlSafe(format!("DROP TRIGGER {trigger}")))
             .execute(&s.pool)
             .await
             .unwrap();
@@ -1381,10 +1384,10 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
             "fail_promote_delete_character",
         ),
     ] {
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "CREATE TRIGGER {trigger} BEFORE DELETE ON {table} \
              BEGIN SELECT RAISE(FAIL, 'forced delete failure'); END;"
-        ))
+        )))
         .execute(&s.pool)
         .await
         .unwrap();
@@ -1440,7 +1443,7 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
         "fail_promote_delete_creator",
         "fail_promote_delete_character",
     ] {
-        sqlx::query(&format!("DROP TRIGGER {trigger}"))
+        sqlx::query(sqlx::AssertSqlSafe(format!("DROP TRIGGER {trigger}")))
             .execute(&s.pool)
             .await
             .unwrap();
