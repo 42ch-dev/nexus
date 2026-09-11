@@ -1057,12 +1057,15 @@ impl DshNativeProvider {
     /// executable, initialize + close the ordinary harness, then
     /// provision, revalidate, initialize, close and delete the sealed child
     /// home. Any failure leaves the provider unavailable with a safe static
-    /// reason. Retained ownership (fix waves): every close — and the WHOLE
-    /// sealed recipe from the moment its lease is provisioned — runs through a
-    /// RETAINED spawned owner, so the probe deadline can drop the wait,
-    /// never the owner: a timeout during sealed INITIALIZATION cannot
-    /// drop the only path owner (confirmed child termination/close still
-    /// drives lease removal; no reliance on SDK `kill_on_drop`).
+    /// reason. Retained ownership (fix waves): each recipe's start +
+    /// confirmed close — and the WHOLE sealed recipe from the moment its
+    /// lease is provisioned — runs through a RETAINED spawned owner
+    /// installed before the first await the outer probe deadline can
+    /// cancel, so the probe deadline can drop the wait, never the owner:
+    /// a timeout during EITHER recipe's initialization cannot drop the
+    /// only path owner (confirmed child termination/close still reaps
+    /// the direct child and drives lease removal; no reliance on SDK
+    /// `kill_on_drop`).
     /// Availability requires a CONFIRMED close of both recipes — a close
     /// error or a lease-removal failure reports unavailable with the
     /// exact path retained for reconciliation, never healthy with a
@@ -1087,24 +1090,44 @@ impl DshNativeProvider {
         let cwd = std::env::current_dir()
             .map_err(|_io| HostError::internal("probe could not resolve the current directory"))?;
 
-        let ordinary = match self
-            .start_harness(self.sdk_config(&cwd, &executable, None))
-            .await
-        {
-            Ok(harness) => harness,
-            Err(error) => {
-                return Ok(unavailable(format!(
-                    "ordinary dsh recipe failed to initialize: {error}"
-                )));
+        // The ordinary recipe's start + confirmed close run as ONE
+        // retained spawned owner (tri-QC F-001, seat 2), installed before
+        // the first await the outer probe deadline can cancel — symmetric
+        // with the sealed owner below. A waiter timeout drops the wait,
+        // never the only owner of the spawned ordinary child; the owner
+        // still drives the start to completion and confirms the close,
+        // reaping the direct child.
+        let ordinary_config = self.sdk_config(&cwd, &executable, None);
+        let ordinary_retained = Arc::clone(&self.retained_leases);
+        let ordinary_cleanup = async move {
+            match DeepSeekHarness::start(ordinary_config).await {
+                Ok(ordinary) => close_and_reap(Some(ordinary), None, &ordinary_retained)
+                    .await
+                    .map_err(|failure| CleanupError {
+                        message: format!(
+                            "ordinary dsh recipe close was not confirmed: {}",
+                            failure.message
+                        ),
+                        ..failure
+                    }),
+                Err(error) => {
+                    // The SDK ran its close ladder over the failed boot
+                    // (child reaped); only the safe classified category
+                    // text leaves this boundary.
+                    let (_category, message) = classify_error_parts(&error);
+                    Err(CleanupError {
+                        message: format!("ordinary dsh recipe failed to initialize: {message}"),
+                        close_confirmed: true,
+                        failed_lease: None,
+                    })
+                }
             }
-        };
-        if let Err(failure) =
-            start_close(Some(ordinary), None, Arc::clone(&self.retained_leases)).await
-        {
-            return Ok(unavailable(format!(
-                "ordinary dsh recipe close was not confirmed: {}",
-                failure.message
-            )));
+        }
+        .boxed()
+        .shared();
+        tokio::spawn(ordinary_cleanup.clone());
+        if let Err(failure) = ordinary_cleanup.await {
+            return Ok(unavailable(failure.message));
         }
 
         // The sealed lease is provisioned synchronously so its exact
@@ -1164,10 +1187,11 @@ impl DshNativeProvider {
             provider_id: self.provider_id.clone(),
             available: true,
             latency_ms: None,
-            message: Some(format!(
-                "ordinary and sealed recipes initialized and closed via {}",
-                executable.display()
-            )),
+            // Static success text (tri-QC F-001, seat 1): this public
+            // serialized diagnostic must disclose neither the resolved
+            // executable path nor any runtime/caller home path
+            // (architecture §3.1).
+            message: Some("ordinary and sealed recipes initialized and closed".to_string()),
         })
     }
 
@@ -2958,6 +2982,10 @@ mod tests {
     /// (`--profile sdk --patch <owned absolute asset>` inside the exclusive
     /// child home under `<selected home>/nexus/`), and no prompt; the
     /// probe's sealed lease is deleted after the confirmed close.
+    /// Tri-QC F-001 (seat 1): the public success message is STATIC and
+    /// discloses neither the explicit runtime path nor the caller
+    /// DSH_HOME path — it is serialized verbatim into the daemon
+    /// provider-catalog response (`GET /v1/daemon/agent-host/providers`).
     #[tokio::test]
     async fn probe_initializes_and_closes_both_recipes() {
         let _env_lock = crate::test_support::PROCESS_ENV_LOCK
@@ -2975,7 +3003,24 @@ mod tests {
         assert!(
             health.available,
             "both recipes initialize and close: {}",
-            health.message.unwrap_or_default()
+            health.message.clone().unwrap_or_default()
+        );
+
+        // The public health diagnostic (copied verbatim into the daemon
+        // provider-catalog response) is static and path-free: neither the
+        // explicit runtime path nor the caller-selected DSH_HOME leaks.
+        let message = health.message.unwrap_or_default();
+        assert_eq!(
+            message, "ordinary and sealed recipes initialized and closed",
+            "the public success diagnostic is static text"
+        );
+        assert!(
+            !message.contains(MOCK_DSH_AGENT),
+            "no explicit runtime path disclosure: {message}"
+        );
+        assert!(
+            !message.contains(&dsh_home.to_string_lossy().into_owned()),
+            "no caller home path disclosure: {message}"
         );
 
         let entries = req_log_entries(&req_log);
@@ -3602,6 +3647,72 @@ mod tests {
             !sealed_home.exists(),
             "the retained init owner completed the close and removed the lease"
         );
+        assert!(
+            provider
+                .retained_leases
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .is_empty(),
+            "no lease path remains retained"
+        );
+    }
+
+    /// Tri-QC F-001 (seat 2): a probe deadline that expires during the
+    /// ORDINARY runtime START drops the wait, never the only owner of the
+    /// spawned ordinary child — the retained spawned owner (installed
+    /// before the first cancelable await, symmetric with the sealed owner
+    /// above) still drives the start to completion, confirms the close,
+    /// and the direct child is eventually reaped. (The fixture delays the
+    /// `initialize` reply so the deadline lands mid-ordinary-start; the
+    /// DISCRIMINATOR is the cooperative `shutdown` request on the wire —
+    /// only a live retained owner running `close()` sends it, while the
+    /// previous implementation's dropped wait left the child to the SDK's
+    /// drop-kill with no shutdown RPC, and this test fails.)
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn probe_init_timeout_retains_ordinary_owner_and_reaps_child() {
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = temp_dir.path().join("reqs.jsonl");
+        let dsh_home = temp_dir.path().join("dsh-home");
+        let mut env = stub_env(&req_log, &dsh_home);
+        // 600ms initialize delay against a 100ms probe budget: the
+        // deadline fires while the ORDINARY start is still in flight,
+        // before the sealed recipe is ever reached.
+        env.insert("INIT_DELAY_MS".to_string(), "600".to_string());
+        let provider = stub_provider("test-dsh-probeordinit", env);
+
+        let probe = provider
+            .probe(crate::capability::model::ProbeRequest { timeout_ms: 100 })
+            .await;
+        assert!(
+            matches!(probe, Err(HostError::OperationTimeout { .. })),
+            "the probe deadline fires during the ordinary start: {probe:?}"
+        );
+
+        // The retained ordinary owner keeps running past the dropped
+        // wait: the start completes, the close is CONFIRMED (the
+        // cooperative `shutdown` request reaches the child — a drop-kill
+        // would never send it), and the direct child is reaped. The
+        // sealed recipe never started, so no lease path can be retained.
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        let entries = req_log_entries(&req_log);
+        let spawns = spawn_records(&entries);
+        assert_eq!(
+            spawns.len(),
+            1,
+            "only the ordinary recipe was spawned: {entries:?}"
+        );
+        let methods = method_sequence(&entries);
+        assert!(
+            methods.iter().any(|m| m == "shutdown"),
+            "the retained owner ran the confirmed close (shutdown RPC) \
+             after the dropped wait: {methods:?}"
+        );
+        let pids = spawn_pids(&entries);
+        assert_pid_reaped(pids[0], "the ordinary child was reaped by the retained owner").await;
         assert!(
             provider
                 .retained_leases
