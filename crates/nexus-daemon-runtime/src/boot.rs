@@ -592,15 +592,15 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         // absent).
         //
         // Runtime handoff (P2 plan T2): PATH-discovered → the resolved
-        // absolute path is handed to the provider as `Config::runtime_bin`;
-        // env-only → `runtime_bin` stays unset so the SDK's own resolution
-        // order 3 (`DSH_RUNTIME_BIN` from the parent environment) picks the
-        // binary (`resolve_runtime`: launch_args_override → runtime_bin →
-        // DSH_RUNTIME_BIN → RuntimeNotFound).
+        // absolute path is handed to the provider as `Config::dsh_bin`;
+        // env-only → `dsh_bin` stays unset so the SDK's own resolution
+        // (`DSH_RUNTIME_BIN` from the parent environment) picks the
+        // binary (SDK 0.2 `resolve_runtime`: dsh_bin → DSH_RUNTIME_BIN →
+        // RuntimeNotFound).
         if let Ok(dsh_path) = which::which("dsh-jsonrpc-agent") {
             manager
                 .register_provider(
-                    Arc::new(DshNativeProvider::with_runtime_bin(Some(
+                    Arc::new(DshNativeProvider::with_dsh_bin(Some(
                         dsh_path.to_string_lossy().into_owned(),
                     ))),
                     nexus_agent_host::LaunchStrategy::NativeCli {
@@ -615,7 +615,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         } else if std::env::var_os("DSH_RUNTIME_BIN").is_some_and(|value| !value.is_empty()) {
             manager
                 .register_provider(
-                    Arc::new(DshNativeProvider::with_runtime_bin(None)),
+                    Arc::new(DshNativeProvider::with_dsh_bin(None)),
                     nexus_agent_host::LaunchStrategy::NativeCli {
                         command: "dsh-jsonrpc-agent".to_string(),
                         args: vec![],

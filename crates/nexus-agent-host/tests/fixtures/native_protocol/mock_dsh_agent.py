@@ -11,6 +11,9 @@ receipt, an `assistant/message`, a `turn/end`, and root
 `session.status == "idle"`), and `shutdown` (respond, then exit on stdin
 EOF so the SDK close ladder completes fast).
 
+The `turn/end` reason kind uses the SDK 0.2 vocabulary: `completed` is
+the only successful finish reason (v1.188 P0 T1).
+
 Behavior knobs (env vars):
 - REQ_LOG=<path>  append one JSON object per received request
   ({"method": ..., "sessionId": ...}) for session-rotation assertions.
@@ -98,7 +101,7 @@ def handle_request(req):
         })
         session_event(session_id, {
             "type": "turn/end",
-            "data": {"reason": {"kind": "stop"}},
+            "data": {"reason": {"kind": "completed"}},
         })
         session_status(session_id, "idle")
         return
