@@ -3830,6 +3830,7 @@ dependencies = [
  "nexus-contracts",
  "nexus-home-layout",
  "regex",
+ "rustix",
  "serde",
  "serde_json",
  "sha2 0.11.0",

@@ -28,6 +28,9 @@ Behavior knobs (env vars):
 - SHUTDOWN_DELAY_MS=<ms>  delay the `shutdown` reply, so the provider's
   close-wait timeout fires while the retained cleanup owner still runs
   (unconfirmed-close lifecycle arm).
+- INIT_DELAY_MS=<ms>  delay the `initialize` reply, so a probe deadline
+  can fire while the sealed runtime START is still in flight (retained
+  init-ownership arm).
 """
 
 import json
@@ -95,6 +98,9 @@ def handle_request(req):
     log_request(req)
 
     if method == "initialize":
+        delay_ms = int(os.environ.get("INIT_DELAY_MS", "0"))
+        if delay_ms > 0:
+            time.sleep(delay_ms / 1000.0)
         reply(req, {
             "serverInfo": {
                 "name": "deepseek-harness-sdk-runtime",
