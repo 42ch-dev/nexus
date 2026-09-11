@@ -86,9 +86,7 @@ impl Task for PresetCapabilityTask {
         match cap.run(Value::Null).await {
             Ok(_output) => {
                 // Store output in context for debugging.
-                context
-                    .set(format!("_{}_output", self.name.replace('.', "_")), true)
-                    .await;
+                context.set(format!("_{}_output", self.name.replace('.', "_")), true)?;
                 Ok(TaskResult::new(
                     Some(format!("{} completed", self.name)),
                     NextAction::Continue,
@@ -119,6 +117,13 @@ impl Task for PresetCapabilityTask {
 ///
 /// Each node is a [`PresetCapabilityTask`] wrapping the corresponding
 /// built-in capability. The terminal `End` node returns `NextAction::End`.
+/// graph-flow 0.8: assembled through the consuming `GraphBuilder`; the fixed
+/// internal topology below is an invariant, so `build()` failure is a bug,
+/// not user input — a checked `expect` documents that invariant.
+///
+/// # Panics
+/// Panics when the fixed `_system.maintenance` topology fails to build —
+/// an internal invariant violation, never user input.
 #[must_use]
 pub fn build(registry: Arc<CapabilityRegistry>) -> Arc<Graph> {
     let sync_pull = PresetCapabilityTask::new("sync.pull", "sync_pull", registry.clone());
@@ -127,18 +132,18 @@ pub fn build(registry: Arc<CapabilityRegistry>) -> Arc<Graph> {
         PresetCapabilityTask::new("registry.refresh", "registry_refresh", registry);
     let end: Arc<dyn Task> = Arc::new(EndTask);
 
-    let graph = Graph::new("_system.maintenance");
-    graph.add_task(sync_pull);
-    graph.add_task(outbox_flush);
-    graph.add_task(registry_refresh);
-    graph.add_task(end);
-
-    // Linear edges.
-    graph.add_edge("sync_pull", "outbox_flush");
-    graph.add_edge("outbox_flush", "registry_refresh");
-    graph.add_edge("registry_refresh", "end");
-
-    // Start task is set automatically (first task added = sync_pull).
+    let graph = graph_flow::GraphBuilder::new("_system.maintenance")
+        .add_task(sync_pull)
+        .add_task(outbox_flush)
+        .add_task(registry_refresh)
+        .add_task(end)
+        // Linear edges.
+        .add_edge("sync_pull", "outbox_flush")
+        .add_edge("outbox_flush", "registry_refresh")
+        .add_edge("registry_refresh", "end")
+        // Start task is set automatically (first task added = sync_pull).
+        .build()
+        .expect("fixed _system.maintenance topology must build");
 
     Arc::new(graph)
 }
@@ -168,7 +173,7 @@ mod tests {
     fn start_task_is_sync_pull() {
         let registry = Arc::new(CapabilityRegistry::with_builtins());
         let graph = build(registry);
-        assert_eq!(graph.start_task_id().as_deref(), Some("sync_pull"));
+        assert_eq!(graph.start_task_id(), Some("sync_pull"));
     }
 
     #[test]

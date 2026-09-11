@@ -31,29 +31,33 @@ const daemonProxy = {
 export default defineConfig({
   plugins: [react()],
   // Modern-only target: the local-first app ships in a current browser or a
-  // V1.65 Tauri system webview, so esbuild need not lower syntax. esbuild 0.28
-  // (pinned via the workspace override) fails its destructuring transform on
-  // the default `modules` target; `esnext` skips that pass everywhere esbuild
-  // runs (build, dev source transform, and dep pre-bundling).
-  esbuild: { target: 'esnext' },
+  // V1.65 Tauri system webview, so the transformer need not lower syntax.
+  // Vite 8 transforms with Oxc (build + dev source transform); `esnext` skips
+  // syntax lowering there. The historical esbuild destructuring failure is
+  // covered by `optimizeDeps.rolldownOptions.transform.target` below for dep
+  // pre-bundling; the workspace esbuild override stays for tsup and other
+  // esbuild consumers.
+  oxc: { target: 'esnext' },
   build: {
     target: 'esnext',
-    rollupOptions: {
+    rolldownOptions: {
       // Split large vendor trees into named chunks so no single minified chunk
       // exceeds Vite's 500 kB warning ceiling (`R-V175QC3-S001`). App + route
-      // code returns `undefined` and stays under Rollup's default route-level
-      // splitting. Group by dependency tree (TipTap pulls ProseMirror; React
-      // Markdown pulls unified/remark/micromark) so each chunk is cache-stable.
+      // code returns `undefined` and stays under Rolldown's default route-level
+      // splitting. Group by dependency tree (React Markdown pulls
+      // unified/remark/micromark) so each chunk is cache-stable. TipTap and its
+      // ProseMirror core use two groups: with the Vite 8 Oxc minifier the
+      // combined tree again exceeds 500 kB.
       output: {
-        manualChunks(id) {
+        codeSplitting: {
+          groups: [
+            {
+              name(id) {
           if (!id.includes('node_modules')) return undefined;
-          if (
-            id.includes('prosemirror') ||
-            id.includes('@tiptap') ||
-            id.includes('tiptap-markdown')
-          ) {
+          if (id.includes('@tiptap') || id.includes('tiptap-markdown')) {
             return 'tiptap';
           }
+          if (id.includes('prosemirror')) return 'prosemirror';
           if (id.includes('@xyflow')) return 'xyflow';
           if (id.includes('@tanstack')) return 'query';
           if (id.includes('react-router')) return 'router';
@@ -76,12 +80,15 @@ export default defineConfig({
             return 'react';
           }
           return undefined;
+              },
+            },
+          ],
         },
       },
     },
   },
   optimizeDeps: {
-    esbuildOptions: { target: 'esnext' },
+    rolldownOptions: { transform: { target: 'esnext' } },
   },
   resolve: {
     alias: {

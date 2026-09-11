@@ -50,7 +50,7 @@ exclude = ["modules/nexus-module-manifest"]
 
 ### 3. Never put them in the root `members` list
 
-No standalone crate is a workspace member. Consequences by construction: independent `version = "0.1.0"` in each manifest (`version.workspace = true` is impossible), and workspace-level pin inheritance is unavailable — standalone manifests carry literal pins that must be kept aligned with workspace pins manually (`sha2 = "0.10"` matching the workspace pin; `wasmtime = "46"` matching `nexus-wasm-host`).
+No standalone crate is a workspace member. Consequences by construction: independent `version = "0.1.0"` in each manifest (`version.workspace = true` is impossible), and workspace-level pin inheritance is unavailable — standalone manifests carry literal pins that must be kept aligned with workspace pins manually (`sha2 = "0.11"` matching the workspace pin; `wasmtime = "48"` matching `nexus-wasm-host`, both hosts resolving 48.0.1 in lockstep).
 
 ### 4. Consumption: crates.io form vs path form
 
@@ -93,7 +93,7 @@ dlmalloc = { version = "0.2", features = ["global"] }
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha2 = "0.10"
+sha2 = "0.11"
 
 [workspace]   # tail
 

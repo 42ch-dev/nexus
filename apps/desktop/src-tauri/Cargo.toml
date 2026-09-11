@@ -26,7 +26,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
 # OS keychain/credential-manager access for V1.92 P1 remote connection config.
-keyring = "2"
+# keyring 4 (default `v1` feature): Entry::new forces one-time native store
+# initialization; a failed init is cached for the process and Entry::new
+# returns NoDefaultStore — connection_config.rs routes that through the same
+# app-data fallback as operation failures. Identity is unchanged (service
+# `nexus42`, user `connection_config`, no explicit target), so v2-stored
+# credentials remain readable.
+keyring = "4"
 # Home-directory + config resolution for the workspace-root path guard (§5 #8).
 # Mirrors the daemon's workspace_root source (`apps/nexus42/src/config.rs`):
 # `~/.nexus42/config.toml` → `workspace_path`.
@@ -37,7 +43,7 @@ toml_edit = "0.22"
 # the custom `open_with`/`reveal_in_finder` commands AFTER the runtime path
 # guard accepts the path — calling it directly avoids coupling to the plugin's
 # Rust extension-trait API surface and is the canonical macOS mechanism.
-opener = "0.7"
+opener = "0.8.5"
 # The Tauri dialog plugin (Rust crate only — no JS package is added). Used by
 # the custom `pick_directory` command so the SPA can open a native folder picker
 # through the existing transport boundary.
@@ -45,7 +51,9 @@ tauri-plugin-dialog = "2"
 # Async runtime primitives for the sidecar lifecycle monitor (shared state + timers).
 tokio = { version = "1.35", features = ["sync", "time", "net", "rt", "macros"] }
 # Lightweight loopback health probe; reuses the same HTTP endpoint as the SPA.
-reqwest = { version = "0.12", features = ["json"] }
+# reqwest 0.13: default-features off — the probe is loopback HTTP/JSON only, so
+# TLS/query/form machinery is not selected.
+reqwest = { version = "0.13", default-features = false, features = ["json"] }
 # Observability for the sidecar lifecycle (backoff jitter, state transitions).
 tracing = "0.1"
 # Deterministic jitter for sidecar restart backoff (QC3-S5). Fast, no-std-friendly
@@ -57,7 +65,7 @@ uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]
 # Unix signal handling for graceful sidecar shutdown (SIGTERM). V1.66 is macOS-only.
-nix = { version = "0.28", features = ["signal", "process"] }
+nix = { version = "0.31.3", features = ["signal", "process"] }
 
 [dev-dependencies]
 # Path-guard unit tests build temp workspace trees.

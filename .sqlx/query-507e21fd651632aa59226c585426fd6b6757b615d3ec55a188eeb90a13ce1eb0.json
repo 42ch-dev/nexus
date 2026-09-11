@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT session_id as \"session_id!\", current_task_id, context_json\n             FROM orchestration_sessions WHERE session_id = ?",
+  "query": "SELECT session_id as \"session_id!\", current_task_id, context_json, graph_version\n             FROM orchestration_sessions WHERE session_id = ?",
   "describe": {
     "columns": [
       {
@@ -17,6 +17,11 @@
         "name": "context_json",
         "ordinal": 2,
         "type_info": "Blob"
+      },
+      {
+        "name": "graph_version",
+        "ordinal": 3,
+        "type_info": "Integer"
       }
     ],
     "parameters": {
@@ -25,8 +30,9 @@
     "nullable": [
       true,
       true,
+      false,
       false
     ]
   },
-  "hash": "626ee38c768c0bb44bc1c823b4da463f5dade296f2dab1682fa66e6fc79916b1"
+  "hash": "507e21fd651632aa59226c585426fd6b6757b615d3ec55a188eeb90a13ce1eb0"
 }

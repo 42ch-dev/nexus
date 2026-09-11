@@ -201,6 +201,12 @@ pub fn load_system_preset_from_dir(
                 message: format!("{e}"),
             });
         }
+        Err(PresetLoadError::GraphBuild(e)) => {
+            return Err(SystemPresetWarning {
+                dir_name: dir_name.to_string(),
+                message: format!("graph build error: {e}"),
+            });
+        }
     };
 
     // The qualified ID uses `_system.<dir_name>` convention.

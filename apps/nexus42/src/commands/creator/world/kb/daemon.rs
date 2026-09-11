@@ -280,10 +280,10 @@ async fn entity_patch(
                 })?;
             let v = match val {
                 serde_json::Value::Object(m) => {
-                    NexusWorldKbEntityPatchModulesValue::Variant0(m.clone())
+                    NexusWorldKbEntityPatchModulesValue::Object(m.clone())
                 }
                 serde_json::Value::Array(a) => {
-                    NexusWorldKbEntityPatchModulesValue::Variant1(a.clone())
+                    NexusWorldKbEntityPatchModulesValue::Array(a.clone())
                 }
                 _ => {
                     return Err(CliError::Other(format!(

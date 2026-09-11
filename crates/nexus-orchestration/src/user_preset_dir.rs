@@ -226,6 +226,12 @@ pub fn load_user_preset_from_dir(
                 message: format!("{e}"),
             });
         }
+        Err(PresetLoadError::GraphBuild(e)) => {
+            return Err(UserPresetWarning {
+                dir_name: dir_name.to_string(),
+                message: format!("graph build error: {e}"),
+            });
+        }
     };
 
     // A user preset is a directory bundle: it knows its source identity

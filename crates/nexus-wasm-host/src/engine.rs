@@ -70,6 +70,13 @@ impl WasmEngine {
         config.epoch_interruption(true);
         // Debug-info off for release-grade modules; speed over introspection.
         config.debug_info(false);
+        // Wasmtime 47+ enables the GC, function-references and exceptions
+        // proposals by default. Preserve the v46 module-admission set: the
+        // Nexus module ABI is core Wasm, and accepting these proposals would
+        // silently widen what the sandbox admits.
+        config.wasm_gc(false);
+        config.wasm_function_references(false);
+        config.wasm_exceptions(false);
 
         let engine = Engine::new(&config)?;
         Ok(Self {

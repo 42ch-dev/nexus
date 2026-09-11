@@ -93,7 +93,7 @@ function assertNoDuplicateKeys(source, doc) {
  * as a plain object, rejecting duplicate keys and any other YAML errors.
  * @param {string} file - absolute path
  * @param {string} sourceLabel
- * @returns {ThemeDoc}
+ * @returns {Promise<ThemeDoc>}
  */
 export async function parseFrontmatter(file, sourceLabel) {
   const text = await readFile(file, 'utf8');

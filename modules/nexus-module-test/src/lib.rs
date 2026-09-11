@@ -46,7 +46,9 @@ use std::collections::HashMap;
 use std::fmt;
 
 use nexus_module_sdk::{ComputeInput, ComputeOutput, HostFunction, ModuleManifest};
-use wasmtime::{Caller, Engine, Extern, Instance, Linker, Memory, Module, Store, TypedFunc};
+use wasmtime::{
+    Caller, Config, Engine, Extern, Instance, Linker, Memory, Module, Store, TypedFunc,
+};
 
 /// Sentinel returned by host functions when the lookup yields nothing
 /// (mirrors `nexus-wasm-host::host::RET_NOT_FOUND`).
@@ -152,6 +154,15 @@ impl InvocationState {
     }
 }
 
+fn new_engine() -> Result<Engine, MiniHostError> {
+    // Match the real host's admission set in both invocations and ABI probes.
+    let mut config = Config::new();
+    config.wasm_gc(false);
+    config.wasm_function_references(false);
+    config.wasm_exceptions(false);
+    Engine::new(&config).map_err(|e| MiniHostError::Instantiation(e.to_string()))
+}
+
 /// Run one stateless compute invocation against a module's compiled bytes.
 ///
 /// # Errors
@@ -163,7 +174,7 @@ pub fn run(
     manifest: &ModuleManifest,
     input: &ComputeInput,
 ) -> Result<ComputeOutput, MiniHostError> {
-    let engine = Engine::default();
+    let engine = new_engine()?;
     let module = Module::new(&engine, wasm_bytes)
         .map_err(|e| MiniHostError::Instantiation(e.to_string()))?;
 
@@ -465,7 +476,7 @@ mod tests {
         manifest: &ModuleManifest,
         input: &ComputeInput,
     ) -> Result<i64, MiniHostError> {
-        let engine = Engine::default();
+        let engine = new_engine()?;
         let module =
             Module::new(&engine, wasm).map_err(|e| MiniHostError::Instantiation(e.to_string()))?;
         let mut store = Store::new(&engine, InvocationState::from_input(input));
@@ -601,7 +612,7 @@ mod tests {
         input: &ComputeInput,
         addr: usize,
     ) -> (i64, Vec<u8>) {
-        let engine = Engine::default();
+        let engine = new_engine().expect("engine initializes");
         let module = Module::new(&engine, wasm).expect("module compiles");
         let mut store = Store::new(&engine, InvocationState::from_input(input));
         let mut linker = Linker::<InvocationState>::new(&engine);
@@ -713,6 +724,26 @@ mod tests {
   (func (export "compute") (param i32 i32 i32 i32) (result i64) (i64.const 0)))"#;
         let wasm = wat::parse_str(wat).expect("wat parses");
         let err = run(&wasm, &manifest(), &input(vec![])).expect_err("must fail");
+        assert!(matches!(err, MiniHostError::Instantiation(_)), "{err}");
+    }
+
+    #[test]
+    fn rejects_newly_default_enabled_proposals() {
+        // Wasmtime 47+ enables the GC / function-references / exceptions
+        // proposals by default; the mini-host pins them OFF to match the real
+        // host's module-admission set. A module requiring the exceptions
+        // proposal (`try_table`) must fail validation, not instantiate.
+        let wat = r#"(module
+  (tag $e)
+  (memory (export "memory") 1)
+  (func (export "alloc") (param $len i32) (result i32) (i32.const 0))
+  (func (export "compute") (param i32 i32 i32 i32) (result i64)
+    (block $b (result)
+      (try_table (catch $e $b) (nop)))
+    (i64.const 0)))"#;
+        let wasm = wat::parse_str(wat).expect("wat parses");
+        let err = run(&wasm, &manifest(), &input(vec![]))
+            .expect_err("exceptions-proposal module must be rejected");
         assert!(matches!(err, MiniHostError::Instantiation(_)), "{err}");
     }
 }

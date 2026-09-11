@@ -29,7 +29,8 @@ function ToastControls({
   onReady: (api: ReturnType<typeof useToast>) => void;
 }) {
   const api = useToast();
-  return <>{(onReady(api), null)}</>;
+  onReady(api);
+  return null;
 }
 
 function renderToaster(children?: ReactNode) {
@@ -253,7 +254,8 @@ describe('useErrorToast classified transport body (V1.129 P1)', () => {
     onReady: (fire: (error: unknown, key: string) => void) => void;
   }) {
     const fire = useErrorToast();
-    return <>{(onReady(fire), null)}</>;
+    onReady(fire);
+    return null;
   }
 
   function renderErrorToastBridge(onReady: (fire: (error: unknown, key: string) => void) => void) {

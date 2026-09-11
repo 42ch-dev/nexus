@@ -108,7 +108,7 @@ async fn publish_history_parses_success() {
         manuscript_id: Some("mss_y".parse().unwrap()),
         artifact_type: None,
         cursor: None,
-        limit: Some(10),
+        limit: std::num::NonZeroU64::new(10),
     };
 
     let r = client.publish_history(&req).await.expect("history");

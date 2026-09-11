@@ -47,37 +47,37 @@ async fn seed_novel_writing_preset_input(
         "preset.input.topic",
         "AI consciousness in a near-future city",
     )
-    .await;
-    ctx.set("preset.input.vibe", "literary").await;
-    ctx.set("preset.input.work_ref", "e2e-test-novel").await;
-    ctx.set("preset.input.work_id", "wrk_e2e_test").await;
+    .unwrap();
+    ctx.set("preset.input.vibe", "literary").unwrap();
+    ctx.set("preset.input.work_ref", "e2e-test-novel").unwrap();
+    ctx.set("preset.input.work_id", "wrk_e2e_test").unwrap();
     // V1.38 P0: chapter is now a preset.input template variable
-    ctx.set("preset.input.chapter", 1).await;
+    ctx.set("preset.input.chapter", 1).unwrap();
     // V1.38 P1: chapter context fields for parameterized paths
-    ctx.set("preset.input.chapter_label", "01").await;
+    ctx.set("preset.input.chapter_label", "01").unwrap();
     ctx.set(
         "preset.input.outline_path",
         "Works/e2e-test-novel/Outlines/chapters/ch01-outline.md",
     )
-    .await;
+    .unwrap();
     ctx.set(
         "preset.input.body_path",
         "Works/e2e-test-novel/Stories/ch01-ch01.md",
     )
-    .await;
-    ctx.set("preset.input.slug", "ch01").await;
+    .unwrap();
+    ctx.set("preset.input.slug", "ch01").unwrap();
     // V1.40 P2 (QC1-C001 fix): seed world_kb_block so strict-mode template
     // rendering does not fail. Worldless e2e tests use empty string.
-    ctx.set("preset.input.world_kb_block", "").await;
+    ctx.set("preset.input.world_kb_block", "").unwrap();
     // V1.48 P1: seed open_findings_block so strict-mode template rendering
     // does not fail. e2e tests do not exercise findings; empty string means
     // the `{{#if open_findings_block}}` guard omits the section.
-    ctx.set("preset.input.open_findings_block", "").await;
+    ctx.set("preset.input.open_findings_block", "").unwrap();
     // V1.49 P1: seed foreshadowing_summary so strict-mode template rendering
     // does not fail on `{{preset.input.foreshadowing_summary}}`. e2e tests do
     // not populate the foreshadowing index; empty string means the
     // `{{#if foreshadowing_summary}}` guard omits the section.
-    ctx.set("preset.input.foreshadowing_summary", "").await;
+    ctx.set("preset.input.foreshadowing_summary", "").unwrap();
 }
 
 async fn start_novel_writing_session(
@@ -109,7 +109,6 @@ async fn run_until_wait_or_terminal(
             outcome,
             nexus_orchestration::engine::StepOutcome::Completed { .. }
                 | nexus_orchestration::engine::StepOutcome::WaitingForInput { .. }
-                | nexus_orchestration::engine::StepOutcome::Error(_)
         );
         outcomes.push(outcome);
         if is_done {

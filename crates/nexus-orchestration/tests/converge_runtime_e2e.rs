@@ -60,7 +60,7 @@ fn make_converge_task(
 /// `source_id` identifies which predecessor is arriving (must match
 /// an entry in `converge_predecessors` for the gate to count it).
 fn converge_arrive(ctx: &Context, target_id: &str, source_id: &str) {
-    StateCompositeTask::record_converge_arrival(ctx, target_id, source_id);
+    StateCompositeTask::record_converge_arrival(ctx, target_id, source_id).unwrap();
 }
 
 // ── wait_for_all tests ────────────────────────────────────────────────
@@ -179,7 +179,7 @@ async fn converge_any_idempotent_second_run_resumes() {
 
     // Second pass (resumed via resume_key): advances immediately.
     // The resume path skips the gate entirely.
-    ctx.set_sync("_state_merge_idem_resumed", true);
+    ctx.set("_state_merge_idem_resumed", true).unwrap();
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
         matches!(result.next_action, NextAction::Continue),

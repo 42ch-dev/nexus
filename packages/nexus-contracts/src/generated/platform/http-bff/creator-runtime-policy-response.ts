@@ -27,5 +27,5 @@ export interface CreatorRuntimePolicyResponse {
   /**
    * Remaining embedding quota for local_first creators (null if not applicable or unlimited)
    */
-  local_first_embedding_remaining?: number;
+  local_first_embedding_remaining?: number | null;
 }

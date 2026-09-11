@@ -8,6 +8,9 @@
  * Read surface for a world's structured rules (V1.166 DR-64 / AR-3): GET /v1/daemon/worlds/{world_id}/rules. Items project the spoke Rule author metadata verbatim (canonical_name, kind, statement, severity_hint, status, target_entry_types — open spoke vocabulary, no nexus coercion at rest) plus the AR-2 constraint carrier surfaced first-class from extensions.nexus.constraint (absent/malformed → omitted; the extensions bag itself is NOT exposed). The projection converts the stored INTEGER Unix-epoch timestamps to RFC 3339. Store order is canonical_name ASC, rule_id ASC (author-metadata list, not newest-first); `truncated` is the honest flag for the 500-rule safety cap: true only when more rows exist than the cap. Owned world with zero rules → 200 + {"rules": [], "truncated": false}.
  */
 export interface WorldRulesListResponse {
+  /**
+   * Items: One spoke Rule projected for the read surface (AR-3 row_to_item mirror).
+   */
   rules: {
     /**
      * Stable rule id (rul_<uuid v4 simple>, AR-2).

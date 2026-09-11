@@ -1271,8 +1271,12 @@ mod tests {
         );
         engine.set_prompt_executor(executor.clone(), session_cancels.clone());
 
-        let graph = Arc::new(graph_flow::Graph::new("real-cancel"));
-        graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("reap-retry")
+                .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph build"),
+        );
         let session_id = engine
             .start_session("novel-writing", graph)
             .await
@@ -1307,6 +1311,7 @@ mod tests {
             .mark_step_in_flight(
                 &session_id,
                 record.state_revision,
+                Some(record.graph_version),
                 nexus_orchestration::run_state::RunCheckpoint {
                     root: &pre_step_root,
                     children: &[],
@@ -1379,8 +1384,12 @@ mod tests {
         );
         engine.set_prompt_executor(executor.clone(), session_cancels.clone());
 
-        let graph = Arc::new(graph_flow::Graph::new("active-cancel"));
-        graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("reap-retry")
+                .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph build"),
+        );
         let session_id = engine
             .start_session("novel-writing", graph)
             .await
@@ -1433,6 +1442,7 @@ mod tests {
             .mark_step_in_flight(
                 &session_id,
                 record.state_revision,
+                Some(record.graph_version),
                 nexus_orchestration::run_state::RunCheckpoint {
                     root: &pre_step_root,
                     children: &[],
@@ -1576,8 +1586,12 @@ mod tests {
         );
         engine.set_prompt_executor(executor.clone(), session_cancels.clone());
 
-        let graph = Arc::new(graph_flow::Graph::new("non-cooperative-cancel"));
-        graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("reap-retry")
+                .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph build"),
+        );
         let session_id = engine
             .start_session("novel-writing", graph)
             .await
@@ -1627,6 +1641,7 @@ mod tests {
             .mark_step_in_flight(
                 &session_id,
                 record.state_revision,
+                Some(record.graph_version),
                 nexus_orchestration::run_state::RunCheckpoint {
                     root: &pre_step_root,
                     children: &[],
@@ -1784,16 +1799,24 @@ mod tests {
         );
         engine.set_prompt_executor(executor.clone(), session_cancels.clone());
 
-        let graph = Arc::new(graph_flow::Graph::new("reap-nested"));
-        graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("reap-retry")
+                .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph build"),
+        );
         let session_id = engine
             .start_session("novel-writing", graph)
             .await
             .expect("start session");
 
         // Spawn child and grandchild.
-        let inner = Arc::new(graph_flow::Graph::new("inner-a"));
-        inner.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+        let inner = Arc::new(
+            graph_flow::GraphBuilder::new("inner-a")
+                .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph build"),
+        );
         let child_id = engine
             .spawn_child_session(nexus_orchestration::engine::ChildSessionParams {
                 parent_session_id: session_id.0.clone(),
@@ -1803,8 +1826,12 @@ mod tests {
             .await
             .expect("spawn child");
 
-        let inner2 = Arc::new(graph_flow::Graph::new("inner-b"));
-        inner2.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+        let inner2 = Arc::new(
+            graph_flow::GraphBuilder::new("inner-b")
+                .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph build"),
+        );
         let grandchild_id = engine
             .spawn_child_session(nexus_orchestration::engine::ChildSessionParams {
                 parent_session_id: child_id.0.clone(),
@@ -1877,15 +1904,23 @@ mod tests {
         );
         engine.set_prompt_executor(executor.clone(), session_cancels.clone());
 
-        let graph = Arc::new(graph_flow::Graph::new("reap-retry"));
-        graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("reap-retry")
+                .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph build"),
+        );
         let session_id = engine
             .start_session("novel-writing", graph)
             .await
             .expect("start session");
 
-        let inner = Arc::new(graph_flow::Graph::new("inner-a"));
-        inner.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+        let inner = Arc::new(
+            graph_flow::GraphBuilder::new("inner-a")
+                .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+                .build()
+                .expect("test graph build"),
+        );
         let child_id = engine
             .spawn_child_session(nexus_orchestration::engine::ChildSessionParams {
                 parent_session_id: session_id.0.clone(),

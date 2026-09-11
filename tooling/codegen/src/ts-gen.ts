@@ -44,7 +44,7 @@ import {
   readJSON,
   extractSchemaVersion,
 } from './utils';
-import { resolvePrepPaths, runPrep } from './schema-prep';
+import { resolvePrepPaths } from './schema-prep';
 
 /** Derive the compile() schema param type without depending on `@types/json-schema`. */
 type JsonSchema = Parameters<typeof compile>[0];
@@ -265,16 +265,3 @@ function writeRootIndex(
   writeFile(path.join(outDir, 'index.ts'), lines.join('\n') + '\n');
 }
 
-// Run if executed directly (tsx / node dist). Runs prep first so ts-gen is independently smoke-testable.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-if (require.main === module) {
-  runPrep()
-    .then(() => generateTSTypes())
-    .catch((err: Error) => {
-      logger.error(`TS generation failed: ${err.message}`);
-      if (process.env.DEBUG) {
-        console.error(err);
-      }
-      process.exit(1);
-    });
-}

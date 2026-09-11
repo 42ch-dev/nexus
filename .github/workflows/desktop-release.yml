@@ -26,7 +26,7 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Evaluate signing secrets
         id: sign-eval
@@ -98,9 +98,11 @@ jobs:
             echo "::error::Expected DMG not found in $base/dmg"
             exit 1
           fi
-          echo "app_path=$app_path" >> "$GITHUB_OUTPUT"
-          echo "dmg_path=$dmg_path" >> "$GITHUB_OUTPUT"
-          echo "bundle_dir=$base" >> "$GITHUB_OUTPUT"
+          {
+            echo "app_path=$app_path"
+            echo "dmg_path=$dmg_path"
+            echo "bundle_dir=$base"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Preserve unsigned DMG fallback
         if: ${{ steps.bundle.outcome == 'success' }}
@@ -128,11 +130,22 @@ jobs:
           echo "$APPLE_SIGN_CERT_P12_BASE64" | base64 --decode > "$p12_path"
           security import "$p12_path" -P "" -k "$keychain_path" -T /usr/bin/codesign -T /usr/bin/security
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_pass" "$keychain_path"
-          security list-keychains -d user -s "$keychain_path" $original
+          ORIGINAL_KEYCHAINS="$original" KEYCHAIN_PATH="$keychain_path" python3 - <<'PY'
+          import os
+          import shlex
+          import subprocess
+          subprocess.run(
+              ["security", "list-keychains", "-d", "user", "-s",
+               os.environ["KEYCHAIN_PATH"], *shlex.split(os.environ["ORIGINAL_KEYCHAINS"])],
+              check=True,
+          )
+          PY
 
-          echo "keychain_path=$keychain_path" >> "$GITHUB_OUTPUT"
-          echo "p12_path=$p12_path" >> "$GITHUB_OUTPUT"
-          echo "original_keychains=$original" >> "$GITHUB_OUTPUT"
+          {
+            echo "keychain_path=$keychain_path"
+            echo "p12_path=$p12_path"
+            echo "original_keychains=$original"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Sign app bundle with hardened runtime
         if: ${{ steps.sign-eval.outputs.should_sign == 'true' }}
@@ -226,13 +239,26 @@ jobs:
 
       - name: Clean up signing keychain
         if: ${{ always() && steps.sign-eval.outputs.should_sign == 'true' }}
+        env:
+          KEYCHAIN_PATH: ${{ steps.keychain.outputs.keychain_path }}
+          P12_PATH: ${{ steps.keychain.outputs.p12_path }}
+          ORIGINAL_KEYCHAINS: ${{ steps.keychain.outputs.original_keychains }}
         run: |
           set -euo pipefail
-          keychain_path="${{ steps.keychain.outputs.keychain_path }}"
-          p12_path="${{ steps.keychain.outputs.p12_path }}"
-          original="${{ steps.keychain.outputs.original_keychains }}"
+          keychain_path="$KEYCHAIN_PATH"
+          p12_path="$P12_PATH"
+          original="$ORIGINAL_KEYCHAINS"
           if [ -n "$original" ]; then
-            security list-keychains -d user -s $original || true
+            python3 - <<'PY' || true
+          import os
+          import shlex
+          import subprocess
+          subprocess.run(
+              ["security", "list-keychains", "-d", "user", "-s",
+               *shlex.split(os.environ["ORIGINAL_KEYCHAINS"])],
+              check=True,
+          )
+          PY
           fi
           if [ -n "$keychain_path" ] && security list-keychains | grep -q "$keychain_path"; then
             security delete-keychain "$keychain_path" || true

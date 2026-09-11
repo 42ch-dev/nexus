@@ -283,7 +283,7 @@ function main() {
   assertReject(deleteKnowledgeQuery, { expected_revision: -1 }, 'delete knowledge negative revision');
 
 
-  console.log('actor-contract-fixtures: all assertions passed');
+  process.stdout.write('actor-contract-fixtures: all assertions passed\n');
 }
 
 try {

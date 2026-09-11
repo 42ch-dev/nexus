@@ -167,6 +167,7 @@ async fn drive(d: &LiveDaemon, sid: &SessionId, resume_waiting: bool) -> PresetR
     drive_preset_run(
         d.engine.as_ref(),
         Some(&d.session_storage),
+        None,
         sid,
         &config,
         None,
@@ -259,16 +260,15 @@ async fn driver_steps_happy_path_preset_run_to_completion() {
     let ctx = d.engine.get_context(&sid).await.expect("context");
     assert!(
         ctx.get::<HashSet<String>>("_converge_arrivals_join")
-            .await
             .is_none(),
         "join leave clears the converge arrivals key"
     );
     assert!(
-        ctx.get::<u64>("_join_wait_start_join").await.is_none(),
+        ctx.get::<u64>("_join_wait_start_join").is_none(),
         "join leave clears the wait-start key (F-001 success-leave clear)"
     );
     assert!(
-        ctx.get::<String>("_join_timeout_note").await.is_none(),
+        ctx.get::<String>("_join_timeout_note").is_none(),
         "a passing join writes no timeout note"
     );
 }
@@ -318,7 +318,6 @@ async fn hanging_upstream_with_timeout_reroutes_via_on_timeout() {
     let ctx = d.engine.get_context(&sid).await.expect("context");
     let note = ctx
         .get::<String>("_join_timeout_note")
-        .await
         .expect("reroute must write _join_timeout_note");
     assert!(
         note.contains("join timeout at 'join'"),
@@ -339,12 +338,11 @@ async fn hanging_upstream_with_timeout_reroutes_via_on_timeout() {
     );
     assert!(
         ctx.get::<HashSet<String>>("_converge_arrivals_join")
-            .await
             .is_none(),
         "reroute clears the converge arrivals key"
     );
     assert!(
-        ctx.get::<u64>("_join_wait_start_join").await.is_none(),
+        ctx.get::<u64>("_join_wait_start_join").is_none(),
         "reroute clears the wait-start key"
     );
 
@@ -382,7 +380,11 @@ async fn hanging_upstream_without_on_timeout_fails_typed_not_waiting_forever() {
     let second = drive(&d, &sid, true).await;
 
     let error = match second {
-        PresetRunOutcome::Failed { steps, error } => {
+        PresetRunOutcome::Failed {
+            steps,
+            error,
+            settlement: _,
+        } => {
             assert_eq!(steps, 1, "the deadline-firing tick is one step");
             error
         }
@@ -435,7 +437,7 @@ async fn hanging_upstream_without_on_timeout_fails_typed_not_waiting_forever() {
     // surfaced above via `drive_preset_run` (§2b core assertion).
     let ctx = d.engine.get_context(&sid).await.expect("context");
     assert!(
-        ctx.get::<String>("_join_timeout_note").await.is_none(),
+        ctx.get::<String>("_join_timeout_note").is_none(),
         "typed-fail path writes no reroute note"
     );
 

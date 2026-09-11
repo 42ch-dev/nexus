@@ -13,6 +13,9 @@ export type CheckResponse = NexusDaemonCheckResponseSuccess | NexusDaemonCheckRe
  * Success: checker output findings.
  */
 export interface NexusDaemonCheckResponseSuccess {
+  /**
+   * Items: Spoke Finding wire shape (mirrored inline — monorepo codegen dereferences only in-repo $refs, so the spoke data/finding.schema.json shape is replicated field-for-field; no parallel runtime type, the handler round-trips nexus_spoke_adapter::Finding through JSON).
+   */
   findings: {
     /**
      * Stable finding id.

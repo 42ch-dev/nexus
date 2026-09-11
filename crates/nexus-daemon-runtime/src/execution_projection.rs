@@ -226,6 +226,7 @@ mod tests {
             execution_version,
             descriptor: None,
             state,
+            graph_version: 0,
         }
     }
 

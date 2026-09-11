@@ -201,6 +201,7 @@ async fn restart_mid_chain_resumes_without_re_executing_completed_edges() {
     let first = drive_preset_run(
         engine1.as_ref(),
         Some(&storage),
+        None,
         &sid,
         &PresetRunConfig::default(),
         None,
@@ -239,7 +240,8 @@ async fn restart_mid_chain_resumes_without_re_executing_completed_edges() {
         Some(dispatch.clone()),
         None,
         engine2.shared_state().session_cancels.clone(),
-    );
+    )
+    .expect("wired outer graph builds");
     let runner = Arc::new(graph_flow::FlowRunner::new(
         Arc::new(wired),
         storage2.clone(),
@@ -302,7 +304,6 @@ async fn restart_mid_chain_resumes_without_re_executing_completed_edges() {
     let ctx = engine2.get_context(&sid).await.expect("context");
     let note = ctx
         .get::<String>("_join_timeout_note")
-        .await
         .expect("reroute must write _join_timeout_note");
     let elapsed = elapsed_ms_from_note(&note);
     // The wait-start was persisted BEFORE the kill; the re-step compares it
@@ -375,6 +376,7 @@ async fn inspect_after_interrupt_is_side_effect_free_and_resume_matches_baseline
     let first = drive_preset_run(
         engine1.as_ref(),
         Some(&storage),
+        None,
         &sid,
         &PresetRunConfig::default(),
         None,
@@ -576,7 +578,8 @@ async fn inspect_after_interrupt_is_side_effect_free_and_resume_matches_baseline
         Some(dispatch.clone()),
         None,
         engine2.shared_state().session_cancels.clone(),
-    );
+    )
+    .expect("wired outer graph builds");
     let runner = Arc::new(graph_flow::FlowRunner::new(
         Arc::new(wired),
         storage2.clone(),
@@ -634,7 +637,6 @@ async fn inspect_after_interrupt_is_side_effect_free_and_resume_matches_baseline
     let ctx = engine2.get_context(&sid).await.expect("context");
     let note = ctx
         .get::<String>("_join_timeout_note")
-        .await
         .expect("reroute must write _join_timeout_note");
     let elapsed = elapsed_ms_from_note(&note);
     assert!(
@@ -674,19 +676,19 @@ async fn resume_skips_typed_failed_and_non_class_sessions() {
     typed_failed
         .context
         .set("_converge_arrivals_join", serde_json::json!(["branch_a"]))
-        .await;
+        .unwrap();
     typed_failed
         .context
         .set("_join_wait_start_join", serde_json::json!(1000u64))
-        .await;
+        .unwrap();
     typed_failed
         .context
         .set("_run_status", "failed".to_string())
-        .await;
+        .unwrap();
     typed_failed
         .context
         .set("_run_error", "converge_timeout: gate=converge".to_string())
-        .await;
+        .unwrap();
     storage.save(typed_failed).await.unwrap();
 
     // Session B: no join-tracking keys — not of the converge/merge chain

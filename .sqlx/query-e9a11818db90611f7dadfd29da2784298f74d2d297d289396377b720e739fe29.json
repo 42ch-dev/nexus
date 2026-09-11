@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT state_revision, execution_version, graph_version, status FROM orchestration_sessions WHERE session_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "state_revision",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "execution_version",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "graph_version",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "status",
+        "ordinal": 3,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e9a11818db90611f7dadfd29da2784298f74d2d297d289396377b720e739fe29"
+}

@@ -103,7 +103,6 @@ async fn inner_graph_runs_to_completion_and_exports_output() {
 
         match out {
             StepOutcome::Completed { .. } => break,
-            StepOutcome::Error(e) => panic!("engine error after {steps} steps: {e}"),
             StepOutcome::WaitingForInput { .. } => {
                 // Inner graphs shouldn't wait for input; resume.
                 engine
@@ -135,7 +134,7 @@ async fn inner_graph_runs_to_completion_and_exports_output() {
 
     // Verify output was exported from inner graph.
     let ctx = engine.get_context(&sid).await.expect("get_context");
-    let exported: String = ctx.get("state.A.output").await.unwrap_or_default();
+    let exported: String = ctx.get("state.A.output").unwrap_or_default();
     assert!(
         !exported.is_empty(),
         "state.A.output should be populated from inner graph output_binding"
@@ -162,14 +161,16 @@ async fn spawn_child_and_get_context() {
     ));
 
     // Create a simple inner graph.
-    let inner = graph_flow::Graph::new("test_child");
     // A1: the node resolves its cancellation token from this map.
     let session_cancels = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
-    inner.add_task(std::sync::Arc::new(
-        nexus_orchestration::tasks::InnerGraphNodeTask::new("x")
-            .with_prompt_executor(Some(Arc::new(EchoExecutor)))
-            .with_session_cancels(session_cancels.clone()),
-    ));
+    let inner = graph_flow::GraphBuilder::new("test_child")
+        .add_task(std::sync::Arc::new(
+            nexus_orchestration::tasks::InnerGraphNodeTask::new("x")
+                .with_prompt_executor(Some(Arc::new(EchoExecutor)))
+                .with_session_cancels(session_cancels.clone()),
+        ))
+        .build()
+        .expect("test graph build");
 
     let params = nexus_orchestration::engine::ChildSessionParams {
         parent_session_id: "parent-1".to_string(),
@@ -199,7 +200,7 @@ async fn spawn_child_and_get_context() {
 
     // Get child context.
     let child_ctx = engine.get_context(&child_sid).await.expect("get_context");
-    let output: String = child_ctx.get("nodes.x.output").await.unwrap_or_default();
+    let output: String = child_ctx.get("nodes.x.output").unwrap_or_default();
     assert!(
         !output.is_empty(),
         "child should have produced output: {output}"

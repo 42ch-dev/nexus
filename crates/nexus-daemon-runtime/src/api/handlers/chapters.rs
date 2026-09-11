@@ -359,11 +359,11 @@ pub async fn list_chapters(
     let _work = load_work(&state, &creator_id, &work_id).await?;
 
     let (cursor_volume, cursor_chapter) = decode_chapter_cursor(query.cursor.as_ref())?;
-    // Clamp to [1, 100]: the JSON schema declares `minimum: 1`, but Axum's Query
-    // extractor (serde) does not enforce schema constraints, so `?limit=0` would
-    // otherwise reach `chapter_page_meta` and underflow `limit_us - 1`, panicking
-    // with a 500. Default 50 when absent.
-    let limit = u32::try_from(query.limit.unwrap_or(50).clamp(1, 100)).unwrap_or(50);
+    // Clamp to [1, 100]: the generated `NonZeroU64` limit type enforces the
+    // schema `minimum: 1` at deserialization (`?limit=0` now rejects as 400
+    // instead of reaching `chapter_page_meta`), so only the upper bound is
+    // clamped here. Default 50 when absent.
+    let limit = u32::try_from(query.limit.map_or(50, |l| l.get().min(100))).unwrap_or(50);
     let fetch_limit = i64::from(limit.saturating_add(1));
 
     let status_filter = query
@@ -818,21 +818,26 @@ mod tests {
     }
 
     /// Regression: `?limit=0` used to reach `chapter_page_meta` and underflow
-    /// `limit_us - 1` (panic -> 500). The handler now clamps limit to [1, 100],
-    /// so limit=0 becomes 1 and returns a valid page instead of panicking.
+    /// `limit_us - 1` (panic -> 500). The generated `NonZeroU64` limit type now
+    /// rejects 0 at deserialization, so the underflow is impossible by
+    /// construction; this pins that rejection at the wire boundary.
     #[tokio::test]
-    async fn list_chapters_limit_zero_is_clamped_not_panicked() {
-        let (state, _tmp, work_id) = setup_chapter_work().await;
-        let query = ListChaptersQuery {
-            cursor: None,
-            limit: Some(0),
-            status: None,
-        };
-        let resp = list_chapters(AxumState(state), AxumPath(work_id), AxumQuery(query))
-            .await
-            .expect("limit=0 must be clamped, not panic");
-        assert_eq!(resp.pagination.limit, 1);
-        assert_eq!(resp.items.len(), 1);
+    async fn list_chapters_limit_zero_is_rejected_not_panicked() {
+        // Schema minimum: 1 — `limit=0` can no longer be constructed or
+        // deserialized, so the old `limit_us - 1` underflow is unreachable.
+        let rejected = serde_json::from_value::<ListChaptersQuery>(serde_json::json!({
+            "limit": 0
+        }));
+        assert!(
+            rejected.is_err(),
+            "limit=0 must fail NonZeroU64 deserialization"
+        );
+        // The lower boundary value still deserializes and reaches the handler.
+        let accepted = serde_json::from_value::<ListChaptersQuery>(serde_json::json!({
+            "limit": 1
+        }))
+        .expect("limit=1 is the schema minimum and must deserialize");
+        assert_eq!(accepted.limit, std::num::NonZeroU64::new(1));
     }
 
     #[tokio::test]
@@ -845,7 +850,7 @@ mod tests {
             AxumPath(work_id.clone()),
             AxumQuery(ListChaptersQuery {
                 cursor: None,
-                limit: Some(2),
+                limit: std::num::NonZeroU64::new(2),
                 status: None,
             }),
         )
@@ -869,7 +874,7 @@ mod tests {
             AxumPath(work_id),
             AxumQuery(ListChaptersQuery {
                 cursor: Some(cursor),
-                limit: Some(2),
+                limit: std::num::NonZeroU64::new(2),
                 status: None,
             }),
         )

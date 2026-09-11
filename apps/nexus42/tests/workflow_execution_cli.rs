@@ -2381,25 +2381,24 @@ async fn admission_work_linked_vs_general_insertion() {
     }
 }
 
-/// N-14: failed durable driver transition followed by refused re-entry —
-/// a drive loop whose durable `Failed` transition cannot be committed
-/// fences the owner; `ensure_driving` refuses to re-drive the session.
+/// N-14 (end-to-end): a failed drive over the REAL daemon settles its
+/// durable failure record and is never re-driven — the public admission path
+/// mints exactly one session and every later re-entry is refused.
 ///
-/// The deterministic production-storage fault seam
-/// (`WorkflowRunCoordinator::fail_next_drive_failure_write`) forces the
-/// durable `Failed` transition write to fail AFTER the drive outcome is
-/// `Failed`, so the failed-owner fence path is exercised through the REAL
-/// coordinator and REAL store — never a test-only coordinator or echo path.
+/// The storage-fault half of this contract (a commit/cleanup write that
+/// FAILS and fences the owner) is proven at the real store boundary in
+/// `nexus-daemon-runtime`'s `preset_run` fixtures with a delegating
+/// real-store wrapper; here the store is healthy, so the refusal comes from
+/// the durable terminal state instead.
 #[tokio::test]
 async fn admission_failed_driver_transition_refuses_reentry() {
     let daemon = LiveDaemon::start().await;
     let now = chrono::Utc::now().timestamp();
 
-    // Seed a driven_v1 row for `combat-engine` — a preset whose first
-    // capability (`narrative.compute`) fails at runtime when the world has
-    // no computable knowledge entries. The drive loop fails, and the
-    // durable `Failed` transition is committed (the store is healthy), so
-    // the run is terminal and re-entry is refused by the durable state.
+    // This fixture omits the required world_id task-template input, so
+    // `combat-engine` fails before invoking its first capability. The
+    // healthy store commits the witnessed failure and terminal settlement;
+    // durable state then refuses re-entry.
     sqlx::query(
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
@@ -2425,14 +2424,9 @@ async fn admission_failed_driver_transition_refuses_reentry() {
         .expect("production starter injected");
     let coordinator = daemon.state.run_coordinator().expect("coordinator wired");
 
-    // N-14: arm the deterministic production-storage fault seam — the
-    // durable `Failed` transition write will be forced to fail after the
-    // drive outcome is `Failed`.
-    coordinator.fail_next_drive_failure_write();
-
-    // First admission: the drive loop fails (narrative.compute has no
-    // computable entries in the seeded world). The durable `Failed`
-    // transition write FAILS (seam armed), so the failed owner is fenced.
+    // First admission succeeds; strict task-template rendering fails inside
+    // the drive. The healthy store records the authoritative `RunFailure`
+    // and settles the run as Failed.
     let first = starter.start("SCHDRVFAIL").await;
     assert!(
         first.is_ok(),
@@ -2440,27 +2434,9 @@ async fn admission_failed_driver_transition_refuses_reentry() {
     );
     let sid = first.expect("session id").0;
 
-    // The drive loop finishes and the failed owner is fenced (the seam
-    // made `persist_drive_failure` return false).
-    tokio::time::timeout(std::time::Duration::from_secs(15), async {
-        loop {
-            if coordinator
-                .is_fenced(&nexus_orchestration::SessionId(sid.clone()))
-                .await
-            {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-    })
-    .await
-    .expect("failed owner must be fenced after the failed durable write");
-
-    // The engine's failure surface (`mark_failed` → `EngineSignal::Cancel`)
-    // still persists the terminal `cancelled` record — the fence is
-    // independent of the durable terminal state.
-    let (status, state) = wait_for_run_status(&daemon, &sid, "cancelled", 15).await;
-    assert_eq!(status, "cancelled");
+    // Failed execution stays Failed after cleanup; it is not cancellation.
+    let (status, state) = wait_for_run_status(&daemon, &sid, "failed", 15).await;
+    assert_eq!(status, "failed");
     assert!(
         state
             .get("cancel_requested")
@@ -2468,10 +2444,23 @@ async fn admission_failed_driver_transition_refuses_reentry() {
             .unwrap_or(false),
         "durable cancel/failure record must be present: {state}"
     );
+    assert_eq!(
+        state
+            .get("failure")
+            .and_then(|f| f.get("code"))
+            .and_then(Value::as_str),
+        Some("driver_failed"),
+        "the authoritative RunFailure must be durable: {state}"
+    );
+    assert!(
+        !coordinator
+            .is_fenced(&nexus_orchestration::SessionId(sid.clone()))
+            .await,
+        "a healthy-store failure settles terminal; the owner fence is only for a FAILED write"
+    );
 
-    // Re-entry: the fenced owner refuses a fresh drive — `ensure_driving`
-    // returns `NotDriving` (the failed-owner fence, not the durable
-    // terminal gate).
+    // Re-entry: the durable terminal gate refuses a fresh drive —
+    // `ensure_driving` returns `NotDriving`.
     let disposition = coordinator
         .ensure_driving(&nexus_orchestration::SessionId(sid.clone()))
         .await
@@ -2479,20 +2468,15 @@ async fn admission_failed_driver_transition_refuses_reentry() {
     assert_eq!(
         disposition,
         nexus_daemon_runtime::preset_run::DriveDisposition::NotDriving,
-        "fenced owner must refuse re-entry"
+        "a terminal failed run must refuse re-entry"
     );
 
-    // The starter re-entry is refused (the owned `running` row's status
-    // gate — the equivalent refusal) — no second session is minted and no
-    // second driver starts.
-    let reentry = starter.start("SCHDRVFAIL").await;
-    let reentry_err =
-        reentry.expect_err("re-entry must be refused: the fenced owner is never re-driven");
-    let reentry_msg = reentry_err.to_string();
-    assert!(
-        reentry_msg.contains("not eligible"),
-        "re-entry refusal must be the eligibility gate: {reentry_msg}"
-    );
+    // Admission refuses the terminal failed run without minting another
+    // session. Assert the refusal and durable effects, not error wording.
+    starter
+        .start("SCHDRVFAIL")
+        .await
+        .expect_err("terminal failed run must refuse re-entry");
 
     let count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions WHERE session_id = ?")
@@ -2507,11 +2491,9 @@ async fn admission_failed_driver_transition_refuses_reentry() {
         Some(sid.as_str()),
         "schedule must keep its owned session identity"
     );
-    // T3: the durable run is terminal `cancelled` (asserted above), so the
-    // schedule settles to the same terminal outcome — the pre-settlement
-    // expectation that the row stays `running` is superseded.
+    // The matching schedule retains the same failed terminal cause.
     assert_eq!(
-        row.status, "cancelled",
+        row.status, "failed",
         "a terminal run settles its schedule to the matching terminal status"
     );
 }
@@ -3814,8 +3796,8 @@ async fn settlement_failed_inspect_agrees() {
     let daemon = LiveDaemon::start().await;
     let now = chrono::Utc::now().timestamp();
 
-    // combat-engine fails at runtime when the world has no computable
-    // knowledge entries (the T1 failed-driver fixture).
+    // Missing required world_id task-template input triggers a witnessed
+    // engine failure before capability execution (the T1 fixture).
     sqlx::query(
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
@@ -3845,11 +3827,10 @@ async fn settlement_failed_inspect_agrees() {
         .expect("admit failed run")
         .0;
 
-    // The drive fails; the durable record is terminal (cancelled via the
-    // engine's failure surface). The schedule settles to the SAME durable
-    // status — inspect agreement.
-    let (run_status, _) = wait_for_run_status(&daemon, &sid, "cancelled", 15).await;
-    assert_eq!(run_status, "cancelled");
+    // Resource cleanup must preserve Failed in both the durable run and
+    // schedule, so inspect cannot report a satisfied cancellation.
+    let (run_status, _) = wait_for_run_status(&daemon, &sid, "failed", 15).await;
+    assert_eq!(run_status, "failed");
 
     let row = load_drive_row(&daemon, "SCHSETTLEFAIL").await;
     assert_eq!(
@@ -3873,7 +3854,7 @@ async fn settlement_failed_inspect_agrees() {
         .expect("GET inspect");
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let inspect: Value = resp.json().await.expect("inspect json");
-    assert_eq!(inspect["schedule"]["status"].as_str(), Some("cancelled"));
+    assert_eq!(inspect["schedule"]["status"].as_str(), Some("failed"));
     assert_eq!(
         inspect["schedule"]["execution_policy"].as_str(),
         Some("driven_v1")

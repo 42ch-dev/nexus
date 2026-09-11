@@ -142,7 +142,7 @@ impl From<nexus_contracts::User> for User {
                 .expect("schema_version exceeds u32 range"),
             user_id: c.user_id.to_string(),
             username: c.username.to_string(),
-            email: c.email,
+            email: c.email.to_string(),
             display_name: c.display_name.to_string(),
             account_status: c.account_status.as_str().to_string(),
             subscription_tier: c.subscription_tier.as_str().to_string(),
@@ -175,7 +175,12 @@ impl TryFrom<User> for nexus_contracts::User {
                 .expect("schema_version must be non-zero"),
             user_id: d.user_id.parse().unwrap(),
             username: d.username.parse().unwrap(),
-            email: d.email,
+            email: d.email.parse().map_err(|e| {
+                CloudDomainError::ValidationError(format!(
+                    "email {:?} is not a valid wire UserEmail: {e}",
+                    d.email
+                ))
+            })?,
             display_name: d.display_name.parse().unwrap(),
             account_status,
             subscription_tier,

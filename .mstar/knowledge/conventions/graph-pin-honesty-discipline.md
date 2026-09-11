@@ -29,12 +29,24 @@ produced **two false claims in one iteration** (V1.174):
    false: `spoke-operations 0.11.1` is default-graph **prior art** via
    `nexus-spoke-adapter` (since V1.139).
 2. Round-1/compass phrased "rmcp behind `connect-client`" as if the crate
-   were gated — false: `rmcp 1.8.0` is **already in the default graph**
-   through `nexus-daemon-runtime → nexus-acp-host → agent-client-protocol
-   =0.11.1 → rmcp (features=["server"])`.
+   were gated — false at the time: `rmcp 1.8.0` was **already in the default
+   graph** through `nexus-daemon-runtime → nexus-acp-host →
+   agent-client-protocol =0.11.1 → rmcp (features=["server"])`.
 
 Both were corrected with machine-verified `cargo tree` evidence, and the
-18-probe script `tooling/check-graph-pins.sh` now pins the honest form.
+probe script `tooling/check-graph-pins.sh` pins the honest form.
+
+**Current state (2026-09 dependency sweep):** ACP 2.1.0 core dropped its
+rmcp dependency, so the default graph's rmcp obligation flipped from
+"exactly one 1.8.0" to **ABSENT** (verified by `cargo tree -i rmcp`);
+feature-on graphs (`connect-client`, `embedded-mcp`,
+`connect-client,connect-host`) pin exactly one `rmcp 3.2.0`. ACP itself is
+**not** absent from either shipped graph: it rides the unconditional
+`nexus-acp-host` normal edge, so both daemon and nexus42 pin exactly one
+`agent-client-protocol 2.1.0` in every probed combination. graph-flow is
+pinned exactly one `0.8.0` with an **empty resolved feature set**
+(`default-features = false` on every declaration; no `postgres`, no `rig`),
+proven by a `-f "{p} feats=[{f}]"` probe, not by lockfile inspection.
 
 ## Guidance
 
@@ -60,7 +72,7 @@ Both were corrected with machine-verified `cargo tree` evidence, and the
 | Obligation form | Example |
 |-----------------|---------|
 | **No new default-graph package** (delta) | "V1.174 adds no new default-graph package" — instead of "graph free of X" |
-| **Exactly-one-version lockstep** in every feature combination | `cargo tree -i rmcp` → exactly one `rmcp 1.8.0` under default, `-F connect-client`, and `-F connect-client,connect-host`; the `=1.8.0` direct pin prevents a second copy when a direct dep lands |
+| **Exactly-one-version lockstep** in every feature combination | `cargo tree -i rmcp` → ABSENT under default, exactly one `rmcp 3.2.0` under `-F connect-client`, `-F embedded-mcp`, and `-F connect-client,connect-host`; the `=3.2.0` direct pins prevent a second copy when another dep lands |
 | **Feature-combination matrix** with expected package sets per combination | default: no `spoke-connect`, no `libp2p`; `-F connect-client`: spoke-connect + spoke-operations appear, libp2p single 0.56.x |
 | **Both graphs `--all-targets`** when lockstep upgrades surface extra literal sites | V1.169 spoke-lockstep practice (feature-gated examples expose literal sites) |
 
@@ -105,10 +117,11 @@ into a real regression net for the next iteration that touches the graph.
 
 ## Examples
 
-- `tooling/check-graph-pins.sh` — 18 probes: default graphs free of
-  `spoke-connect`/`libp2p`; exactly one `spoke-operations 0.11.1` and one
-  `rmcp 1.8.0` in every combination; `-F connect-client` libp2p 0.56.x
-  single-version.
+- `tooling/check-graph-pins.sh` — default graphs free of
+  `spoke-connect`/`libp2p`/`rmcp`; exactly one `spoke-operations 0.11.1`,
+  one `agent-client-protocol 2.1.0`, and one featureless `graph-flow 0.8.0`
+  in the default graphs; exactly one `rmcp 3.2.0` in every feature-on
+  combination; `-F connect-client` libp2p 0.56.x single-version.
 - V1.174 corrections: `spoke-operations` prior art (§9.2 of
   `.mstar/iterations/v1.174/specs/v1.174-peer-tools-lock.md`), rmcp default-graph
   reality (same spec, corrections list #1).

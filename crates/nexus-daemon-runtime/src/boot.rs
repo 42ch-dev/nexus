@@ -993,7 +993,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             Some(tool_dispatch.clone()),
             prompt_executor.clone(),
             session_cancels.clone(),
-        );
+        )?;
         let graph = Arc::new(graph);
 
         match concrete_engine

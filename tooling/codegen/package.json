@@ -16,14 +16,14 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@apidevtools/json-schema-ref-parser": "^11.0.0",
+    "@apidevtools/json-schema-ref-parser": "^16.0.2",
     "glob": "^13.0.6",
-    "json-schema-to-typescript": "^15.0.0"
+    "json-schema-to-typescript": "^16.0.0"
   },
   "devDependencies": {
     "typescript": "7.0.2",
     "tsup": "^8.0.0",
-    "@types/node": "^20.10.0",
-    "vitest": "^4.1.11"
+    "@types/node": "^22.10.1",
+    "vitest": "^5.0.0"
   }
 }

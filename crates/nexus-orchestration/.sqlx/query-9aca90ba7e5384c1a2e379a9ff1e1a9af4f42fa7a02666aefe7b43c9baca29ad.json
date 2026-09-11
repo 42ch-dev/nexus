@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT creator_id FROM orchestration_sessions WHERE session_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "creator_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9aca90ba7e5384c1a2e379a9ff1e1a9af4f42fa7a02666aefe7b43c9baca29ad"
+}

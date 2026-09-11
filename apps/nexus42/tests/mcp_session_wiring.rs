@@ -27,10 +27,11 @@
 use std::path::PathBuf;
 use std::process::Stdio;
 
-use agent_client_protocol::schema::{
+use agent_client_protocol::schema::v1::{
     AgentCapabilities, InitializeRequest, InitializeResponse, McpServer, NewSessionRequest,
-    NewSessionResponse, ProtocolVersion, SessionId,
+    NewSessionResponse, SessionId,
 };
+use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Agent, Channel, Client};
 use rmcp::model::{CallToolRequestParams, ClientInfo};
 use rmcp::serve_client;

@@ -154,7 +154,7 @@ pub struct EmbeddedMcpServer {
 pub struct EmbeddedSession {
     /// Client-side transport: sink = client→server writes, stream =
     /// server→client reads. Named [`SinkStreamTransport`] explicitly (M-3)
-    /// — the rmcp 1.8 `IntoTransport` blanket covers it for `serve_client`.
+    /// — the rmcp 3.2 `IntoTransport` blanket covers it for `serve_client`.
     pub transport:
         SinkStreamTransport<mpsc::Sender<ClientToServer>, mpsc::Receiver<ServerToClient>>,
 }

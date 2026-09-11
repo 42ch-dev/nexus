@@ -84,7 +84,7 @@ tower-http = { version = "0.5", features = ["cors"] }
 url = "2"
 strum = { version = "0.26", features = ["derive"] }
 pulldown-cmark = "0.12"
-pulldown-cmark-frontmatter = "0.2"
+pulldown-cmark-frontmatter = "0.4"
 serde_yaml = "0.9"
 async-trait = "0.1"
 tempfile = "3"
@@ -100,7 +100,12 @@ tokio-stream = "0.1"
 blake3 = "1"
 # V1.58 P0 T1 (R-V156P0-M001): sha2 workspace-managed — referenced as
 # `sha2.workspace = true` by crates that compute OCC content hashes.
-sha2 = "0.10"
+# 2026-09-10 dependency sweep (#272): 0.10 → 0.11. `Digest`/`Sha256` API is
+# unchanged; the excluded standalone `modules/nexus-module-manifest` was
+# aligned to the same 0.11 pin by T3 (#249). The lock still carries sha2
+# 0.10.9 transitively via cranelift/sqlx — those are upstream constraints,
+# not a repo pin.
+sha2 = "0.11"
 handlebars = "6"
 which = "8"
 regex = "1"
@@ -199,7 +204,7 @@ tokio-tungstenite = "0.30"
 # crate versions (AR-1, AR-3); bump deliberately with the next iteration.
 # `default-features = false` drops `sync-client`; claude's `auth` feature is
 # not in default and must stay off (PD-2). Consumed by `nexus-agent-host`.
-claude-codes = { version = "=2.1.232", default-features = false, features = ["async-client"] }
+claude-codes = { version = "=2.1.261", default-features = false, features = ["async-client"] }
 codex-codes = { version = "=0.146.4", default-features = false, features = ["async-client"] }
 # V1.168 P2 (dsh-native provider): Rust SDK for the DeepSeek Harness runtime
 # (PD-4). crates.io exact pin, chosen at implement on 2026-08-17

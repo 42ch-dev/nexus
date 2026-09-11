@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT graph_version as \"graph_version!\", status as \"status!\"\n               FROM orchestration_sessions WHERE session_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "graph_version!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "status!",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "1b14af6bda4d96b709873112ea41021d86eb27d992aab693c333c6a5ac7d352e"
+}

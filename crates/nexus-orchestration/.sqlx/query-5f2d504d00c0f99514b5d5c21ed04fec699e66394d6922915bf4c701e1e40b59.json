@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE creator_schedules\n             SET status = 'running', current_session_id = ?,\n                 current_core_context_version = ?, updated_at = ?,\n                 execution_policy = 'driven_v1'\n             WHERE schedule_id = ? AND status IN ('pending', 'paused', 'running')\n               AND current_session_id IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "5f2d504d00c0f99514b5d5c21ed04fec699e66394d6922915bf4c701e1e40b59"
+}

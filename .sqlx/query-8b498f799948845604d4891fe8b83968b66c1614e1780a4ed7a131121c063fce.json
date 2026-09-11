@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT status FROM orchestration_sessions WHERE session_id = ?",
+  "query": "SELECT status FROM orchestration_sessions\n                 WHERE session_id = ? AND status = 'running'",
   "describe": {
     "columns": [
       {
@@ -16,5 +16,5 @@
       false
     ]
   },
-  "hash": "b12f1ded0d8f8addf394b1d2fb6684ce199b08556f4efb2a1ee664baf15e3b64"
+  "hash": "8b498f799948845604d4891fe8b83968b66c1614e1780a4ed7a131121c063fce"
 }

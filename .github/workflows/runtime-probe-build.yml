@@ -34,7 +34,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
         with:
@@ -90,7 +90,7 @@ jobs:
           }
           $hashLines | Set-Content -Encoding ascii -NoNewline:$false (Join-Path $out 'SHA256SUMS')
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: trpg-nexus-context-probe-windows-x64
           path: trpg-nexus-context-probe-windows-x64/

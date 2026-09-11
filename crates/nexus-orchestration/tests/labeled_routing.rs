@@ -262,8 +262,8 @@ async fn labeled_no_match_does_not_stall_session() {
         session
             .context
             .set("_judge_reason", "this is just testing".to_string())
-            .await;
-        session.context.set("_judge_result", true).await;
+            .unwrap();
+        session.context.set("_judge_result", true).unwrap();
         storage.save(session).await.expect("save session");
     }
 

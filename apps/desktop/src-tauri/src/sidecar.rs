@@ -1155,10 +1155,12 @@ fn process_alive(_pid: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        backoff, drain_stderr, format_error_detail, probe_port_state, resolve_port,
+        backoff, drain_stderr, format_error_detail, probe_health, probe_port_state, resolve_port,
         trim_stderr_tail, DaemonState, PortState, HEALTH_PROBE_TIMEOUT, HEALTH_START_TIMEOUT,
         MAX_RESTART_ATTEMPTS, PORT_FREE_POLL_TIMEOUT, STDERR_TAIL_MAX_BYTES,
     };
+    #[cfg(unix)]
+    use super::{process_alive, stop_external_daemon};
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
     use std::time::Duration;
@@ -1730,7 +1732,7 @@ mod tests {
     // desktop always-start path can reach Running without a fatal
     // "No active creator" boot failure.
 
-    static CLEAN_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static CLEAN_HOME_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     fn sidecar_target_triple() -> String {
         let arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_else(|_| "aarch64".to_string());
@@ -1833,7 +1835,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn clean_home_nexus42_daemon_reaches_healthy_without_profile() {
-        let _guard = CLEAN_HOME_LOCK.lock().expect("clean home lock");
+        let _guard = CLEAN_HOME_LOCK.lock().await;
         let port = reserve_ephemeral_port();
         let mut daemon = spawn_nexus42_on_clean_home(port);
 
@@ -1869,7 +1871,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn clean_home_creators_tier1_before_profile() {
-        let _guard = CLEAN_HOME_LOCK.lock().expect("clean home lock");
+        let _guard = CLEAN_HOME_LOCK.lock().await;
         let port = reserve_ephemeral_port();
         let _daemon = spawn_nexus42_on_clean_home(port);
 
@@ -1898,7 +1900,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn clean_home_sidecar_manager_attaches_to_running_daemon() {
-        let _guard = CLEAN_HOME_LOCK.lock().expect("clean home lock");
+        let _guard = CLEAN_HOME_LOCK.lock().await;
         let port = reserve_ephemeral_port();
         let _daemon = spawn_nexus42_on_clean_home(port);
 
@@ -2002,7 +2004,7 @@ mod tests {
 
         // handle_crash must detect restart_in_progress and return early
         // WITHOUT clobbering Starting → Stopped.
-        manager.handle_crash(&handle).await;
+        manager.handle_crash(handle).await;
 
         let inner = manager.0.lock().await;
         assert!(
@@ -2027,6 +2029,165 @@ mod tests {
         assert!(
             PORT_FREE_POLL_TIMEOUT >= Duration::from_secs(1),
             "PORT_FREE_POLL_TIMEOUT must allow time for socket cleanup (>=1s), got {PORT_FREE_POLL_TIMEOUT:?}"
+        );
+    }
+
+    // ── T3: probe_health boundary coverage against reqwest 0.13 ──────────
+    // The success path is exercised end-to-end by the clean-home lifecycle
+    // tests against a real daemon; these tests pin the failure boundaries
+    // against a raw loopback stub so a reqwest upgrade cannot silently change
+    // status/body/timeout semantics.
+
+    /// Serve exactly one canned HTTP response on `listener`, then return.
+    async fn serve_once(listener: tokio::net::TcpListener, response: String) {
+        if let Ok((mut socket, _)) = listener.accept().await {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let mut buf = [0u8; 1024];
+            // Read the request head; ignore content.
+            let _ = socket.read(&mut buf).await;
+            let _ = socket.write_all(response.as_bytes()).await;
+            let _ = socket.flush().await;
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn probe_health_returns_none_on_refused_connection() {
+        // Reserve an ephemeral port without listening for connections.
+        let socket = tokio::net::TcpSocket::new_v4().expect("test socket");
+        socket
+            .bind("127.0.0.1:0".parse().unwrap())
+            .expect("bind test socket");
+        let port = socket.local_addr().unwrap().port();
+        assert!(probe_health(port).await.is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn probe_health_returns_none_on_non_success_status() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(serve_once(
+            listener,
+            "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+                .to_owned(),
+        ));
+        assert!(probe_health(port).await.is_none());
+        server.await.expect("server task");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn probe_health_returns_none_on_malformed_json() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let port = listener.local_addr().unwrap().port();
+        let body = "this is not json";
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let server = tokio::spawn(serve_once(listener, response));
+        assert!(probe_health(port).await.is_none());
+        server.await.expect("server task");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn probe_health_stalled_body_is_cut_by_total_timeout() {
+        // Headers arrive (with a content-length that never completes) but the
+        // body stalls: the 2-second TOTAL request timeout must still fire and
+        // the probe must return None rather than hang.
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut buf = [0u8; 1024];
+                let _ = socket.read(&mut buf).await;
+                let _ = socket
+                    .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 1024\r\n\r\n")
+                    .await;
+                let _ = socket.flush().await;
+                // Hold the connection open without sending the body. The
+                // socket stays alive until the client (probe) gives up.
+                tokio::time::sleep(HEALTH_PROBE_TIMEOUT * 3).await;
+            }
+        });
+        let start = std::time::Instant::now();
+        assert!(probe_health(port).await.is_none());
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed >= HEALTH_PROBE_TIMEOUT,
+            "probe must have been cut by the total timeout, returned after {elapsed:?}"
+        );
+        assert!(
+            elapsed < HEALTH_PROBE_TIMEOUT * 2,
+            "probe must not outlive the total timeout materially, took {elapsed:?}"
+        );
+        server.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn probe_health_parses_success_json() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let port = listener.local_addr().unwrap().port();
+        let body = r#"{"status":"ok","version":"9.9.9"}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let server = tokio::spawn(serve_once(listener, response));
+        let health = probe_health(port).await.expect("valid health JSON parses");
+        assert_eq!(health.version, "9.9.9");
+        server.await.expect("server task");
+    }
+
+    // ── T3: Unix process-signal smoke against task-spawned PIDs only ─────
+    // Exercises the nix-based liveness check and graceful→forced termination
+    // against child processes this test spawns; never a discovered PID.
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "current_thread")]
+    async fn process_alive_tracks_task_spawned_child() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn sleep");
+        let pid = child.id();
+        assert!(process_alive(pid), "live child must be reported alive");
+        child.kill().expect("kill child");
+        child.wait().expect("reap child");
+        // After reaping, the PID is gone.
+        assert!(!process_alive(pid), "reaped child must be reported dead");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "current_thread")]
+    async fn stop_external_daemon_terminates_task_spawned_child() {
+        let child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn sleep");
+        let pid = child.id();
+        assert!(process_alive(pid));
+        // Reap concurrently: an unreaped zombie still answers kill(pid, 0),
+        // which would mask the SIGTERM effect from process_alive.
+        let reaper = std::thread::spawn(move || {
+            let mut child = child;
+            let _ = child.wait();
+        });
+        // Port is unused by the Unix stop path; pass a high unused port.
+        stop_external_daemon(63415, pid).await;
+        reaper.join().expect("reaper thread");
+        assert!(
+            !process_alive(pid),
+            "SIGTERM path must terminate the child (sleep exits on SIGTERM)"
         );
     }
 }

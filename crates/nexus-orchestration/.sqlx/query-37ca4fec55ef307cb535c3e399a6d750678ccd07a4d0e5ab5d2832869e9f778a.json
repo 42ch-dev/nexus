@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE creator_schedules\n             SET status = ?, terminated_at = ?, updated_at = ?\n             WHERE schedule_id = ? AND status = 'running'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "37ca4fec55ef307cb535c3e399a6d750678ccd07a4d0e5ab5d2832869e9f778a"
+}

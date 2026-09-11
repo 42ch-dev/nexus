@@ -557,9 +557,12 @@ mod tests {
     /// Build a minimal graph with a single manual-wait task (sessions stay
     /// non-terminal without executing any step).
     fn manual_wait_graph(name: &str) -> Arc<graph_flow::Graph> {
-        let graph = Arc::new(graph_flow::Graph::new(name));
-        graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
-        graph
+        Arc::new(
+            graph_flow::GraphBuilder::new(name)
+                .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
+                .build()
+                .expect("manual-wait test graph"),
+        )
     }
 
     /// AD-P0-2b (V1.120 P2 / F3): daemon auto-started `_system.*` boot sessions
@@ -910,10 +913,34 @@ mod tests {
                 .await
         }
 
+        async fn commit_transition_with_graph_fence(
+            &self,
+            session_id: &nexus_orchestration::engine::SessionId,
+            expected_revision: u64,
+            expected_graph_version: Option<u64>,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            next_status: nexus_orchestration::engine::SessionStatus,
+            next_state: &nexus_orchestration::run_state::RunStateV1,
+        ) -> Result<
+            nexus_orchestration::run_state::RunRecord,
+            nexus_orchestration::engine::EngineError,
+        > {
+            let _ = expected_graph_version;
+            self.commit_transition(
+                session_id,
+                expected_revision,
+                checkpoint,
+                next_status,
+                next_state,
+            )
+            .await
+        }
+
         async fn settle_cancelled(
             &self,
             session_id: &nexus_orchestration::engine::SessionId,
             expected_revision: u64,
+            expected_graph_version: Option<u64>,
             checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
             next_state: &nexus_orchestration::run_state::RunStateV1,
         ) -> Result<
@@ -921,7 +948,35 @@ mod tests {
             nexus_orchestration::engine::EngineError,
         > {
             self.inner
-                .settle_cancelled(session_id, expected_revision, checkpoint, next_state)
+                .settle_cancelled(
+                    session_id,
+                    expected_revision,
+                    expected_graph_version,
+                    checkpoint,
+                    next_state,
+                )
+                .await
+        }
+
+        async fn settle_failed(
+            &self,
+            session_id: &nexus_orchestration::engine::SessionId,
+            expected_revision: u64,
+            expected_graph_version: Option<u64>,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            next_state: &nexus_orchestration::run_state::RunStateV1,
+        ) -> Result<
+            nexus_orchestration::run_state::RunRecord,
+            nexus_orchestration::engine::EngineError,
+        > {
+            self.inner
+                .settle_failed(
+                    session_id,
+                    expected_revision,
+                    expected_graph_version,
+                    checkpoint,
+                    next_state,
+                )
                 .await
         }
 
@@ -930,7 +985,10 @@ mod tests {
             session_id: &nexus_orchestration::engine::SessionId,
             expected_revision: u64,
             pre_step: &graph_flow::Session,
-        ) -> Result<(), nexus_orchestration::engine::EngineError> {
+        ) -> Result<
+            nexus_orchestration::run_state::RunRecord,
+            nexus_orchestration::engine::EngineError,
+        > {
             self.inner
                 .restore_pre_step(session_id, expected_revision, pre_step)
                 .await
@@ -940,11 +998,21 @@ mod tests {
             &self,
             session_id: &nexus_orchestration::engine::SessionId,
             expected_revision: u64,
+            expected_graph_version: Option<u64>,
             checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
             step_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<(), nexus_orchestration::engine::EngineError> {
+        ) -> Result<
+            nexus_orchestration::run_state::RunRecord,
+            nexus_orchestration::engine::EngineError,
+        > {
             self.inner
-                .mark_step_in_flight(session_id, expected_revision, checkpoint, step_state)
+                .mark_step_in_flight(
+                    session_id,
+                    expected_revision,
+                    expected_graph_version,
+                    checkpoint,
+                    step_state,
+                )
                 .await
         }
 

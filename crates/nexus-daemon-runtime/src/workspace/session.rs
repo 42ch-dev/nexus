@@ -276,7 +276,7 @@ async fn compute_content_hashes_inner(
                 sha.update(&buffer[..n]);
             }
             let digest = sha.finalize();
-            hashes.insert(relative, format!("{digest:x}"));
+            hashes.insert(relative, hex::encode(digest));
         }
     }
 
@@ -705,7 +705,7 @@ async fn compute_single_file_hash(path: &Path) -> Result<String, SessionError> {
         }
         sha.update(&buffer[..n]);
     }
-    Ok(format!("{:x}", sha.finalize()))
+    Ok(hex::encode(sha.finalize()))
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

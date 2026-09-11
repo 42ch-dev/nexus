@@ -14,7 +14,7 @@
 
 use std::path::PathBuf;
 
-use agent_client_protocol::schema::{McpServer, McpServerStdio};
+use agent_client_protocol::schema::v1::{McpServer, McpServerStdio};
 
 /// Session-facing name of the nexus MCP server (`newSession.mcp_servers`).
 pub const NEXUS_MCP_SERVER_NAME: &str = "nexus";

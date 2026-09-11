@@ -16,10 +16,14 @@ nexus-contracts = { path = "../nexus-contracts" }
 # from this crate. Non-workspace path dep — legal because the root workspace
 # `exclude`s the crate (AR-1).
 nexus-module-manifest = { path = "../../modules/nexus-module-manifest" }
-# wasmtime: Bytecode Alliance runtime (compass Q1). Pinned to the v46 line.
+# wasmtime: Bytecode Alliance runtime (compass Q1). Pinned to the v48 line,
+# aligned with the standalone mini-host (modules/nexus-module-test) — both
+# hosts resolve the same version in lockstep (T3 aligned-48 cutover).
 # cranelift is the default compiler; fuel + epoch interruption provide the
-# compute-bound and wall-time sandbox guards (compass Q6).
-wasmtime = { version = "46", default-features = true }
+# compute-bound and wall-time sandbox guards (compass Q6). The GC /
+# function-references / exceptions proposals are explicitly disabled in
+# engine.rs because v47+ enables them by default.
+wasmtime = { version = "48", default-features = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 # Content-based manifest↔wasm pairing (Greptile P1): `ModuleManifest::verify_wasm_sha256`
