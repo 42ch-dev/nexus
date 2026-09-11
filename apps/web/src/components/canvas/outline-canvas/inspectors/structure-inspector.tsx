@@ -7,7 +7,7 @@
  */
 import { useMemo } from 'react';
 import { BookOpen, ChevronRight } from 'lucide-react';
-import { FixedSizeList, type ListChildComponentProps } from 'react-window';
+import { List, type RowComponentProps } from 'react-window';
 
 import { useTranslation } from 'react-i18next';
 
@@ -141,8 +141,18 @@ interface VolumeListData {
   t: (key: string, options?: Record<string, unknown>) => string;
 }
 
-function VolumeRow({ index, style, data }: ListChildComponentProps<VolumeListData>) {
-  const { volume, outline, chapters, selectedChapterId, onSelectChapter, onMoveChapter, t } = data;
+function VolumeRow({
+  index,
+  style,
+  ariaAttributes,
+  volume,
+  outline,
+  chapters,
+  selectedChapterId,
+  onSelectChapter,
+  onMoveChapter,
+  t,
+}: RowComponentProps<VolumeListData>) {
   const id = volume.chapter_ids[index];
   const chapter = chapters.find((c) => c.chapter === id);
   if (!chapter) return null;
@@ -153,7 +163,7 @@ function VolumeRow({ index, style, data }: ListChildComponentProps<VolumeListDat
       ? t('chapter.volume', { volume: nextVolume.volume_id })
       : '';
   return (
-    <li key={id} style={style} className="flex items-center gap-2">
+    <li style={style} className="flex items-center gap-2" {...ariaAttributes}>
       <ChapterRow
         chapter={chapter}
         outline={outline}
@@ -200,17 +210,15 @@ function VirtualVolumeList({
   );
 
   return (
-    <FixedSizeList
+    <List
       className="mt-2"
-      innerElementType="ul"
-      itemCount={volume.chapter_ids.length}
-      itemData={itemData}
-      itemSize={CHAPTER_ROW_HEIGHT}
-      height={height}
-      width="100%"
-    >
-      {VolumeRow}
-    </FixedSizeList>
+      tagName="ul"
+      rowComponent={VolumeRow}
+      rowCount={volume.chapter_ids.length}
+      rowProps={itemData}
+      rowHeight={CHAPTER_ROW_HEIGHT}
+      style={{ height, width: '100%' }}
+    />
   );
 }
 
@@ -222,11 +230,19 @@ interface UnassignedListData {
   t: (key: string, options?: Record<string, unknown>) => string;
 }
 
-function UnassignedRow({ index, style, data }: ListChildComponentProps<UnassignedListData>) {
-  const { unassigned, outline, selectedChapterId, onSelectChapter, t } = data;
+function UnassignedRow({
+  index,
+  style,
+  ariaAttributes,
+  unassigned,
+  outline,
+  selectedChapterId,
+  onSelectChapter,
+  t,
+}: RowComponentProps<UnassignedListData>) {
   const chapter = unassigned[index];
   return (
-    <li key={chapter.chapter} style={style}>
+    <li style={style} {...ariaAttributes}>
       <ChapterRow
         chapter={chapter}
         outline={outline}
@@ -252,17 +268,15 @@ function VirtualUnassignedList({
   );
 
   return (
-    <FixedSizeList
+    <List
       className="mt-2"
-      innerElementType="ul"
-      itemCount={unassigned.length}
-      itemData={itemData}
-      itemSize={CHAPTER_ROW_HEIGHT}
-      height={listHeight}
-      width="100%"
-    >
-      {UnassignedRow}
-    </FixedSizeList>
+      tagName="ul"
+      rowComponent={UnassignedRow}
+      rowCount={unassigned.length}
+      rowProps={itemData}
+      rowHeight={CHAPTER_ROW_HEIGHT}
+      style={{ height: listHeight, width: '100%' }}
+    />
   );
 }
 

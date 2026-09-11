@@ -131,7 +131,7 @@ tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
-toml = "0.8"
+toml = "0.9"
 toml_edit = "0.25"
 reqwest = { workspace = true }
 sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"] }
@@ -181,7 +181,7 @@ async-trait = "0.1"
 # `serial_test` serializes tests that mutate process-global state (env vars).
 # Without it, the summary_config_from_env_* tests race on NEXUS_CONTEXT_MAX_FILE_SIZE
 # under cargo's default parallel runner and intermittently fail on CI.
-serial_test = "3"
+serial_test = "4"
 # V1.153 P2 T1: spawned-binary smoke test (`tests/nexus_runtime_smoke.rs`).
 # The Connect dialing lives in the `runtime_smoke_probe` EXAMPLE (regular
 # connect-host deps — the default test graph stays libp2p-free); the test

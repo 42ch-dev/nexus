@@ -27,7 +27,7 @@ chrono = { workspace = true }
 tokio-util = { version = "0.7", features = ["compat"] }
 async-trait = "0.1"
 async-broadcast = "0.7"
-toml = "0.8"
+toml = "0.9"
 toml_edit = "0.25"
 nexus-contracts = { path = "../nexus-contracts" }
 which = "7"
@@ -53,4 +53,4 @@ tempfile = "3"
 # R-V1148P0-001 / R-V1151P2-004: the fork/PATH-dependent scan-probe tests are
 # marked `#[serial]` so they never fork concurrently within this test binary
 # (same pin as nexus-daemon-runtime / nexus-orchestration).
-serial_test = "3"
+serial_test = "4"
