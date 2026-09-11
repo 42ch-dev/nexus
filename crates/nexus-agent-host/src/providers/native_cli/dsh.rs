@@ -201,6 +201,8 @@ impl DeliveryBudget {
 /// Monotonic instants for actual-runtime streaming proof (L2).
 #[derive(Default, Clone, Debug)]
 pub struct DshStreamingRunTiming {
+    /// The turn that produced this snapshot (set only on publish).
+    pub op_id: Option<HostOperationId>,
     pub first_callback: Option<Instant>,
     pub run_completed: Option<Instant>,
 }
@@ -212,6 +214,32 @@ pub fn take_last_dsh_run_timing() -> Option<DshStreamingRunTiming> {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .take()
+}
+
+fn clear_last_dsh_run_timing() {
+    LAST_DSH_RUN_TIMING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take();
+}
+
+fn publish_completed_run_timing(
+    op_id: &HostOperationId,
+    run_timing: &StdMutex<DshStreamingRunTiming>,
+) {
+    let timing = run_timing.lock().unwrap_or_else(|e| e.into_inner());
+    if let (Some(first_callback), Some(run_completed)) =
+        (timing.first_callback, timing.run_completed)
+    {
+        let mut slot = LAST_DSH_RUN_TIMING
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *slot = Some(DshStreamingRunTiming {
+            op_id: Some(op_id.clone()),
+            first_callback: Some(first_callback),
+            run_completed: Some(run_completed),
+        });
+    }
 }
 
 struct QueuedPayload {
@@ -1494,10 +1522,7 @@ impl DshNativeProvider {
                 let delivery_failed = Arc::new(AtomicBool::new(false));
                 let failure_notify = Arc::new(Notify::new());
                 let run_timing = Arc::new(StdMutex::new(DshStreamingRunTiming::default()));
-                {
-                    let mut slot = LAST_DSH_RUN_TIMING.lock().unwrap_or_else(|e| e.into_inner());
-                    *slot = Some(run_timing.lock().unwrap_or_else(|e| e.into_inner()).clone());
-                }
+                clear_last_dsh_run_timing();
 
                 let run_harness = Arc::new(Mutex::new(None::<DeepSeekHarness>));
                 let run_harness_for_run = Arc::clone(&run_harness);
@@ -1627,6 +1652,7 @@ impl DshNativeProvider {
                                     run_timing.lock().unwrap_or_else(|e| e.into_inner());
                                 timing.run_completed = Some(Instant::now());
                             }
+                            publish_completed_run_timing(&op_id, &run_timing);
                             let snapshot = reconciliation.lock().unwrap().clone();
                             match finalize_successful_run(
                                 &result,

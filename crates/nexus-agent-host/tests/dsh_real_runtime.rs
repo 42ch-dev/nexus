@@ -1207,11 +1207,12 @@ async fn real_dsh_message_delta_precedes_terminal_with_timing_evidence() {
         let handle = handle.clone();
         let provider = &provider;
         async move {
+            let op_id = HostOperationId::new();
             let stream = provider
                 .execute(
                     &handle,
                     HostOperation::Prompt {
-                        op_id: HostOperationId::new(),
+                        op_id: op_id.clone(),
                         content: vec![HostContentBlock::Text {
                             text: "prove message-level streaming timing".to_string(),
                         }],
@@ -1258,6 +1259,11 @@ async fn real_dsh_message_delta_precedes_terminal_with_timing_evidence() {
             );
             let producer_timing = take_last_dsh_run_timing()
                 .expect("producer timing must be captured for actual-dsh proof");
+            assert_eq!(
+                producer_timing.op_id.as_ref(),
+                Some(&op_id),
+                "producer timing must belong to this turn"
+            );
             let (Some(callback_at), Some(run_completed_at)) = (
                 producer_timing.first_callback,
                 producer_timing.run_completed,
