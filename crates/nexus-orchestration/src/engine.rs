@@ -209,9 +209,10 @@ pub enum EngineSignal {
     Pause,
     Resume,
     Cancel,
-    /// Failed-step cleanup cancel: reuse the cancel path but refuse to
-    /// rebase onto a newer workflow/graph revision (no reload-and-retry).
-    CancelAnchored {
+    /// Failed-step cleanup: same bounded Host teardown as cancel, but the
+    /// confirmed terminal durable status is `Failed` (dependency admission
+    /// must not treat a prerequisite failure as a satisfied cancel).
+    FailAnchored {
         expected_revision: u64,
         expected_graph_version: u64,
     },
@@ -871,16 +872,22 @@ impl EngineSharedState {
         session_id: &SessionId,
         signal: &EngineSignal,
     ) -> Result<SessionStatus, EngineError> {
+        let cleanup_terminal = match signal {
+            EngineSignal::Cancel => Some(SessionStatus::Cancelled),
+            EngineSignal::FailAnchored { .. } => Some(SessionStatus::Failed),
+            _ => None,
+        };
         let cancel_allow_rebase = !matches!(
             signal,
-            EngineSignal::CancelAnchored {
+            EngineSignal::FailAnchored {
                 expected_revision: _,
                 expected_graph_version: _,
             }
         );
         let target_status = match signal {
             EngineSignal::Pause => SessionStatus::Paused,
-            EngineSignal::Cancel | EngineSignal::CancelAnchored { .. } => SessionStatus::Cancelled,
+            EngineSignal::Cancel => SessionStatus::Cancelled,
+            EngineSignal::FailAnchored { .. } => SessionStatus::Failed,
             EngineSignal::Resume | EngineSignal::Advance | EngineSignal::Continue { .. } => {
                 SessionStatus::Running
             }
@@ -900,7 +907,7 @@ impl EngineSharedState {
         // caller anchored to. Every write of this signal path fences the
         // graph clock too — a graph-only winner between any load and any
         // commit of this cleanup is an ownership loss, never an overwrite.
-        let cancel_anchor = if let EngineSignal::CancelAnchored {
+        let cancel_anchor = if let EngineSignal::FailAnchored {
             expected_revision: anchor_revision,
             expected_graph_version: anchor_graph,
         } = *signal
@@ -926,7 +933,7 @@ impl EngineSharedState {
             // refused.
             let interrupted_cancel_retry = matches!(
                 signal,
-                EngineSignal::Cancel | EngineSignal::CancelAnchored { .. }
+                EngineSignal::Cancel | EngineSignal::FailAnchored { .. }
             ) && record.status == SessionStatus::Interrupted
                 && record.state.as_ref().is_some_and(|s| s.cancel_requested);
             if !interrupted_cancel_retry {
@@ -942,7 +949,7 @@ impl EngineSharedState {
         if next_state.cancel_requested
             && !matches!(
                 signal,
-                EngineSignal::Cancel | EngineSignal::CancelAnchored { .. }
+                EngineSignal::Cancel | EngineSignal::FailAnchored { .. }
             )
         {
             return Err(EngineError::TerminalState(session_id.0.clone()));
@@ -954,7 +961,7 @@ impl EngineSharedState {
         if !matches!(
             signal,
             EngineSignal::Cancel
-                | EngineSignal::CancelAnchored { .. }
+                | EngineSignal::FailAnchored { .. }
                 | EngineSignal::Continue { .. }
         ) && (matches!(record.status, SessionStatus::WaitingForInput)
             || next_state.wait.is_some()
@@ -1059,7 +1066,7 @@ impl EngineSharedState {
             children: &[],
         };
 
-        if matches!(target_status, SessionStatus::Cancelled) {
+        if let Some(mut cleanup_terminal) = cleanup_terminal {
             // A5 cleanup retry (Finding 3): an `Interrupted` run with a
             // durable cancel intent re-enters the cancel path as the
             // bounded, owner-scoped cleanup retry. The cancel-intent fence
@@ -1290,8 +1297,14 @@ impl EngineSharedState {
                     // and re-committed against the new revision; the write
                     // result is never discarded, and the in-memory summary
                     // is updated only after the durable write succeeds.
-                    let reason =
-                        format!("cancel cleanup unconfirmed for run '{}': {e}", session_id.0);
+                    let reason = if cleanup_terminal == SessionStatus::Failed {
+                        format!(
+                            "failure cleanup unconfirmed for run '{}': {e}",
+                            session_id.0
+                        )
+                    } else {
+                        format!("cancel cleanup unconfirmed for run '{}': {e}", session_id.0)
+                    };
                     let mut interrupted_attempts: u32 = 0;
                     loop {
                         let Some(current) = store.load_run(session_id).await? else {
@@ -1306,12 +1319,22 @@ impl EngineSharedState {
                         let mut interrupted_state = current.state.unwrap_or_default();
                         interrupted_state.cancel_requested = true;
                         interrupted_state.in_flight = None;
-                        // Keep the original execution failure across cleanup
-                        // retries; only a user cancellation gets this cause.
-                        interrupted_state.failure.get_or_insert_with(|| RunFailure {
-                            code: "cancel_cleanup_unconfirmed".to_string(),
-                            message: reason.clone(),
-                        });
+                        // A manual cleanup retry must not replace the
+                        // original driver error with a teardown error.
+                        if !interrupted_state
+                            .failure
+                            .as_ref()
+                            .is_some_and(|f| f.code == "driver_failed")
+                        {
+                            interrupted_state.failure = Some(RunFailure {
+                                code: if cleanup_terminal == SessionStatus::Failed {
+                                    "failure_cleanup_unconfirmed".to_string()
+                                } else {
+                                    "cancel_cleanup_unconfirmed".to_string()
+                                },
+                                message: reason.clone(),
+                            });
+                        }
                         // Re-read the root snapshot so the Interrupted
                         // checkpoint never clobbers a position/context a
                         // concurrent transition advanced.
@@ -1389,12 +1412,18 @@ impl EngineSharedState {
                 }
             }
 
-            // C-001 phase 2: confirmed cleanup preserves its terminal cause.
-            // The A5 settlement fence admits Interrupted cleanup retries but
-            // never overwrites another terminal outcome. An execution failure
-            // must remain Failed: Cancelled dependencies are considered satisfied.
+            // C-001 phase 2: confirmed cleanup — persist terminal Cancelled.
+            // `settle_cancelled` is the A5 settlement fence: it admits the
+            // `Interrupted` cleanup-retry shape (and non-terminal rows) but
+            // refuses every other terminal status, so a retry can never
+            // overwrite a newer terminal outcome. The settlement is itself
+            // revision-fenced and retried on a CAS loss while the run is
+            // still cancellable — a concurrent cancel (e.g. the drive loop's
+            // best-effort failure flip) that wins the fence between our
+            // reload and commit must not turn this confirmed cleanup into a
+            // spurious conflict; both cancels settle to `cancelled`.
             let mut settle_attempts: u32 = 0;
-            let settled_status = loop {
+            loop {
                 let Some(current) = store.load_run(session_id).await? else {
                     return Err(EngineError::GraphFlow(
                         graph_flow::GraphError::StorageError(format!(
@@ -1403,14 +1432,24 @@ impl EngineSharedState {
                         )),
                     ));
                 };
-                if current.status == SessionStatus::Cancelled {
-                    // Anchored cleanup owns its clocks: an already-Cancelled
+                // A cleanup retry (or ordinary cancellation racing a failure
+                // commit) must preserve the durable execution failure.
+                if current
+                    .state
+                    .as_ref()
+                    .and_then(|state| state.failure.as_ref())
+                    .is_some_and(|failure| failure.code == "driver_failed")
+                {
+                    cleanup_terminal = SessionStatus::Failed;
+                }
+                if current.status == cleanup_terminal {
+                    // Anchored cleanup owns its clocks: an already-settled
                     // row is only OUR success when it still carries the
                     // previous operation's owned revision/graph. A newer
-                    // winner that settled Cancelled (or any other writer that
-                    // moved either clock) is an ownership loss — never adopted
-                    // as this failed owner's cleanup success. Ordinary Cancel
-                    // keeps the idempotent shortcut below.
+                    // winner that settled the same terminal (or any other
+                    // writer that moved either clock) is an ownership loss —
+                    // never adopted as this failed owner's cleanup success.
+                    // Ordinary Cancel keeps the idempotent shortcut below.
                     if let Some((owned_revision, owned_graph)) = anchored_clocks {
                         if current.state_revision != owned_revision
                             || current.graph_version != owned_graph
@@ -1422,13 +1461,13 @@ impl EngineSharedState {
                             });
                         }
                     }
-                    // A concurrent cancel already settled the run — the
+                    // A concurrent cleanup already settled the run — the
                     // confirmed cleanup outcome is identical.
-                    return Ok(SessionStatus::Cancelled);
+                    return Ok(cleanup_terminal);
                 }
                 // The `Interrupted` cleanup-retry shape (durable cancel
                 // intent) is the A5 settlement target — it must pass through
-                // to `settle_cleanup`. Every other terminal status is a
+                // to `settle_cancelled`. Every other terminal status is a
                 // deliberate conflict.
                 let interrupted_retry_shape = current.status == SessionStatus::Interrupted
                     && current.state.as_ref().is_some_and(|s| s.cancel_requested);
@@ -1439,15 +1478,6 @@ impl EngineSharedState {
                 let mut cancelled_state = current.state.unwrap_or_default();
                 cancelled_state.cancel_requested = true;
                 cancelled_state.in_flight = None;
-                let terminal_status = if cancelled_state
-                    .failure
-                    .as_ref()
-                    .is_some_and(|failure| failure.code != "cancel_cleanup_unconfirmed")
-                {
-                    SessionStatus::Failed
-                } else {
-                    SessionStatus::Cancelled
-                };
                 // Finding 1 (round 3): every settlement attempt reloads the
                 // authoritative root snapshot together with the current run
                 // record. The `root` loaded before the phase-1 fence may
@@ -1472,18 +1502,29 @@ impl EngineSharedState {
                 // winner is left untouched (no rebase in anchored mode).
                 let (settle_revision, settle_graph) =
                     anchored_clocks.unwrap_or((current_revision, settle_root.version));
-                match store
-                    .settle_cleanup(
-                        session_id,
-                        settle_revision,
-                        Some(settle_graph),
-                        settle_checkpoint,
-                        &cancelled_state,
-                        terminal_status,
-                    )
-                    .await
-                {
-                    Ok(record) => break record.status,
+                let settle_result = if cleanup_terminal == SessionStatus::Cancelled {
+                    store
+                        .settle_cancelled(
+                            session_id,
+                            settle_revision,
+                            Some(settle_graph),
+                            settle_checkpoint,
+                            &cancelled_state,
+                        )
+                        .await
+                } else {
+                    store
+                        .settle_failed(
+                            session_id,
+                            settle_revision,
+                            Some(settle_graph),
+                            settle_checkpoint,
+                            &cancelled_state,
+                        )
+                        .await
+                };
+                match settle_result {
+                    Ok(_) => break,
                     Err(EngineError::RevisionMismatch { .. }) => {
                         if !cancel_allow_rebase {
                             return Err(EngineError::RevisionMismatch {
@@ -1504,7 +1545,7 @@ impl EngineSharedState {
                     }
                     Err(e) => return Err(e),
                 }
-            };
+            }
             // M-004: reclaim the run's coordinator cancellation token at
             // the same confirmed run-terminal ownership boundary. Finding 2
             // (round 3): every owned descendant token is reclaimed at the
@@ -1521,7 +1562,7 @@ impl EngineSharedState {
                     cancels.remove(child_id);
                 }
             }
-            return Ok(settled_status);
+            return Ok(cleanup_terminal);
         }
 
         // Non-cancel signals refuse a graph-only winner rather than rebasing.
@@ -2458,7 +2499,7 @@ impl EngineSharedState {
                             children: &[],
                         };
                         match store
-                            .settle_cleanup(
+                            .settle_cancelled(
                                 &child_sid,
                                 current_revision,
                                 // Child-rollback settle keeps the
@@ -2467,7 +2508,6 @@ impl EngineSharedState {
                                 None,
                                 settle_checkpoint,
                                 &cancelled_state,
-                                SessionStatus::Cancelled,
                             )
                             .await
                         {
@@ -4604,23 +4644,40 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
         .await
     }
 
-    async fn settle_cleanup(
+    async fn settle_cancelled(
         &self,
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
         checkpoint: crate::run_state::RunCheckpoint<'_>,
         next_state: &crate::run_state::RunStateV1,
-        terminal_status: SessionStatus,
     ) -> Result<crate::run_state::RunRecord, EngineError> {
         self.inner
-            .settle_cleanup(
+            .settle_cancelled(
                 session_id,
                 expected_revision,
                 expected_graph_version,
                 checkpoint,
                 next_state,
-                terminal_status,
+            )
+            .await
+    }
+
+    async fn settle_failed(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_graph_version: Option<u64>,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .settle_failed(
+                session_id,
+                expected_revision,
+                expected_graph_version,
+                checkpoint,
+                next_state,
             )
             .await
     }
@@ -4856,23 +4913,40 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         .await
     }
 
-    async fn settle_cleanup(
+    async fn settle_cancelled(
         &self,
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
         checkpoint: crate::run_state::RunCheckpoint<'_>,
         next_state: &crate::run_state::RunStateV1,
-        terminal_status: SessionStatus,
     ) -> Result<crate::run_state::RunRecord, EngineError> {
         self.inner
-            .settle_cleanup(
+            .settle_cancelled(
                 session_id,
                 expected_revision,
                 expected_graph_version,
                 checkpoint,
                 next_state,
-                terminal_status,
+            )
+            .await
+    }
+
+    async fn settle_failed(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_graph_version: Option<u64>,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .settle_failed(
+                session_id,
+                expected_revision,
+                expected_graph_version,
+                checkpoint,
+                next_state,
             )
             .await
     }
@@ -4946,7 +5020,7 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
     }
 }
 
-/// Store wrapper that makes the FIRST child-rollback `settle_cleanup`
+/// Store wrapper that makes the FIRST child-rollback `settle_cancelled`
 /// lose its revision CAS to a competing transition (P1, fix round 6): the
 /// competing transition advances the child row at the SAME revision BEFORE
 /// the rollback settle commits, so the settle returns `RevisionMismatch`
@@ -5062,16 +5136,15 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
         .await
     }
 
-    async fn settle_cleanup(
+    async fn settle_cancelled(
         &self,
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
         checkpoint: crate::run_state::RunCheckpoint<'_>,
         next_state: &crate::run_state::RunStateV1,
-        terminal_status: SessionStatus,
     ) -> Result<crate::run_state::RunRecord, EngineError> {
-        // The child-rollback settle is the first `settle_cleanup` on the
+        // The child-rollback settle is the first `settle_cancelled` on the
         // freshly started child row. Inject a competing transition at the
         // SAME revision BEFORE the settle commits, so the settle loses the
         // CAS and the engine's rollback retry must reload and re-settle
@@ -5111,13 +5184,31 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
                 .expect("competing transition wins the CAS before the child settle");
         }
         self.inner
-            .settle_cleanup(
+            .settle_cancelled(
                 session_id,
                 expected_revision,
                 expected_graph_version,
                 checkpoint,
                 next_state,
-                terminal_status,
+            )
+            .await
+    }
+
+    async fn settle_failed(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_graph_version: Option<u64>,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .settle_failed(
+                session_id,
+                expected_revision,
+                expected_graph_version,
+                checkpoint,
+                next_state,
             )
             .await
     }
@@ -5811,8 +5902,11 @@ mod tests {
     // T2 fix round 1 — Finding 3: interrupted-cancel cleanup retry
     // ------------------------------------------------------------------
 
-    /// Cleanup retry preserves the original terminal cause: execution errors
-    /// remain Failed, while user cancellation settles Cancelled.
+    /// Deterministic faulted-shutdown proof (Finding 3): the first cancel
+    /// yields `Interrupted` (cleanup unconfirmed), a subsequent cancel
+    /// re-enters the cancel path as the owner-scoped cleanup retry, reaps
+    /// the owned Host session, and settles `Cancelled` — no step is
+    /// re-driven.
     #[tokio::test]
     async fn interrupted_cleanup_retry_preserves_terminal_cause() {
         for failed in [false, true] {

@@ -497,7 +497,7 @@ async fn cleanup_failed_run(
     match engine
         .signal(
             session_id,
-            EngineSignal::CancelAnchored {
+            EngineSignal::FailAnchored {
                 expected_revision: commit_revision,
                 expected_graph_version: commit_graph_version,
             },
@@ -3223,11 +3223,10 @@ mod tests {
             signal: EngineSignal,
         ) -> Result<(), EngineError> {
             self.signals.lock().push(signal.clone());
-            if matches!(
-                signal,
-                EngineSignal::Cancel | EngineSignal::CancelAnchored { .. }
-            ) {
+            if matches!(signal, EngineSignal::Cancel) {
                 *self.status.lock() = SessionStatus::Cancelled;
+            } else if matches!(signal, EngineSignal::FailAnchored { .. }) {
+                *self.status.lock() = SessionStatus::Failed;
             }
             Ok(())
         }
@@ -3526,8 +3525,12 @@ mod tests {
         );
     }
 
-    /// A task error survives cleanup as durable Failed, including schedule
-    /// reconciliation and downstream dependency admission.
+    /// graph-flow 0.8 OCC (Critical fix): a NON-conflict drive failure must
+    /// leave a durable failure record. The driver persists
+    /// `_run_status`/`_run_error` BEFORE the terminal cancellation fence —
+    /// after cancel settles, the protected-row save fence would refuse the
+    /// write. Real SQLite + real engine prove the record survives terminal
+    /// settlement while cleanup semantics (terminal cancel) are retained.
     #[tokio::test]
     async fn failed_drive_persists_failure_record_before_terminal_settlement() {
         struct FailingTask;
@@ -4729,23 +4732,40 @@ mod tests {
             .await
         }
 
-        async fn settle_cleanup(
+        async fn settle_cancelled(
             &self,
             session_id: &SessionId,
             expected_revision: u64,
             expected_graph_version: Option<u64>,
             checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
             next_state: &nexus_orchestration::run_state::RunStateV1,
-            terminal_status: SessionStatus,
         ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
             self.inner
-                .settle_cleanup(
+                .settle_cancelled(
                     session_id,
                     expected_revision,
                     expected_graph_version,
                     checkpoint,
                     next_state,
-                    terminal_status,
+                )
+                .await
+        }
+
+        async fn settle_failed(
+            &self,
+            session_id: &SessionId,
+            expected_revision: u64,
+            expected_graph_version: Option<u64>,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            next_state: &nexus_orchestration::run_state::RunStateV1,
+        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            self.inner
+                .settle_failed(
+                    session_id,
+                    expected_revision,
+                    expected_graph_version,
+                    checkpoint,
+                    next_state,
                 )
                 .await
         }
@@ -4842,7 +4862,7 @@ mod tests {
         /// A winner commits immediately AFTER the failure commit and before
         /// the anchored cleanup runs.
         WinnerBetweenCommitAndCleanup,
-        /// The anchored cleanup write (`settle_cleanup`) fails with a
+        /// The anchored cleanup write (`settle_cancelled`) fails with a
         /// storage error.
         FailCleanupSettle,
         /// A competing owner wins `mark_step_in_flight` first (pre-marker
@@ -4969,7 +4989,7 @@ mod tests {
             let mut winner_state = committed.state.clone().unwrap_or_default();
             winner_state.cancel_requested = true;
             self.inner
-                .settle_cleanup(
+                .settle_cancelled(
                     session_id,
                     committed.state_revision,
                     None,
@@ -4978,7 +4998,6 @@ mod tests {
                         children: &[],
                     },
                     &winner_state,
-                    SessionStatus::Cancelled,
                 )
                 .await
                 .expect("concurrent owner settles Cancelled after phase 1");
@@ -5138,26 +5157,46 @@ mod tests {
             Ok(committed)
         }
 
-        async fn settle_cleanup(
+        async fn settle_cancelled(
             &self,
             session_id: &SessionId,
             expected_revision: u64,
             expected_graph_version: Option<u64>,
             checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
             next_state: &nexus_orchestration::run_state::RunStateV1,
-            terminal_status: SessionStatus,
         ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
             if self.fault == BoundaryFault::FailCleanupSettle && self.file_once() {
                 return Err(Self::injected("injected cleanup-settle storage fault"));
             }
             self.inner
-                .settle_cleanup(
+                .settle_cancelled(
                     session_id,
                     expected_revision,
                     expected_graph_version,
                     checkpoint,
                     next_state,
-                    terminal_status,
+                )
+                .await
+        }
+
+        async fn settle_failed(
+            &self,
+            session_id: &SessionId,
+            expected_revision: u64,
+            expected_graph_version: Option<u64>,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            next_state: &nexus_orchestration::run_state::RunStateV1,
+        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            if self.fault == BoundaryFault::FailCleanupSettle && self.file_once() {
+                return Err(Self::injected("injected cleanup-settle storage fault"));
+            }
+            self.inner
+                .settle_failed(
+                    session_id,
+                    expected_revision,
+                    expected_graph_version,
+                    checkpoint,
+                    next_state,
                 )
                 .await
         }

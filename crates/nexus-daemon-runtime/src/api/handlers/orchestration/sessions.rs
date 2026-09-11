@@ -7,15 +7,15 @@ use crate::api::pagination::{decode_offset_cursor, encode_offset_cursor};
 use crate::api::sort::{compare_by_terms, parse_sort_terms};
 use crate::workspace::WorkspaceState;
 use axum::{
-    Json,
     extract::{Path, Query, State},
     http::StatusCode,
+    Json,
 };
-use nexus_contracts::PaginationInfo;
 use nexus_contracts::local::orchestration::http::{
     CreateSessionRequest, CreateSessionResponse, GetSessionResponse, ListSessionsQuery,
     ListSessionsResponse, SessionSummary, SignalSessionRequest,
 };
+use nexus_contracts::PaginationInfo;
 use nexus_orchestration::engine::{EngineSignal, SessionStatus};
 use nexus_orchestration::run_state::WorkflowStateStore;
 use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
@@ -936,26 +936,46 @@ mod tests {
             .await
         }
 
-        async fn settle_cleanup(
+        async fn settle_cancelled(
             &self,
             session_id: &nexus_orchestration::engine::SessionId,
             expected_revision: u64,
             expected_graph_version: Option<u64>,
             checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
             next_state: &nexus_orchestration::run_state::RunStateV1,
-            terminal_status: nexus_orchestration::engine::SessionStatus,
         ) -> Result<
             nexus_orchestration::run_state::RunRecord,
             nexus_orchestration::engine::EngineError,
         > {
             self.inner
-                .settle_cleanup(
+                .settle_cancelled(
                     session_id,
                     expected_revision,
                     expected_graph_version,
                     checkpoint,
                     next_state,
-                    terminal_status,
+                )
+                .await
+        }
+
+        async fn settle_failed(
+            &self,
+            session_id: &nexus_orchestration::engine::SessionId,
+            expected_revision: u64,
+            expected_graph_version: Option<u64>,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            next_state: &nexus_orchestration::run_state::RunStateV1,
+        ) -> Result<
+            nexus_orchestration::run_state::RunRecord,
+            nexus_orchestration::engine::EngineError,
+        > {
+            self.inner
+                .settle_failed(
+                    session_id,
+                    expected_revision,
+                    expected_graph_version,
+                    checkpoint,
+                    next_state,
                 )
                 .await
         }
