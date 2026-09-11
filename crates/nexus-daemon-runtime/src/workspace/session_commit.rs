@@ -42,6 +42,15 @@ pub async fn recover_unsettled(
     mgr: &WorkspaceSessionManager,
     workspace_root: &str,
 ) -> Result<(), SessionError> {
+    let _guard = mgr.lock_mutation().await;
+    recover_unsettled_locked(mgr, workspace_root).await
+}
+
+/// Recover unsettled intents when the caller already holds [`WorkspaceSessionManager::lock_mutation`].
+pub async fn recover_unsettled_locked(
+    mgr: &WorkspaceSessionManager,
+    workspace_root: &str,
+) -> Result<(), SessionError> {
     let intents = db::list_unsettled_intents(mgr.pool().as_ref(), workspace_root)
         .await
         .map_err(|e| SessionError::Database(e.to_string()))?;
@@ -51,7 +60,7 @@ pub async fn recover_unsettled(
                 return Err(SessionError::RecoveryConflict(workspace_root.to_string()));
             }
             db::IntentState::Applying | db::IntentState::RollingBack => {
-                rollback_intent(mgr, workspace_root, &intent).await?;
+                rollback_intent_locked(mgr, workspace_root, &intent).await?;
             }
             _ => {}
         }
@@ -59,7 +68,8 @@ pub async fn recover_unsettled(
     Ok(())
 }
 
-async fn rollback_intent(
+/// Roll back one intent when the caller already holds [`WorkspaceSessionManager::lock_mutation`].
+async fn rollback_intent_locked(
     mgr: &WorkspaceSessionManager,
     workspace_root: &str,
     intent: &db::CommitIntentRow,
@@ -72,8 +82,6 @@ async fn rollback_intent(
     let session_id = SessionId(intent.session_id.clone());
     let row = mgr.validate_session(&session_id).await?;
     let scope_dir = super::scope::scope_directory(&canonical_root, &row.relative_path)?;
-
-    let _guard = mgr.lock_mutation().await;
     db::update_intent_state(
         mgr.pool().as_ref(),
         &intent.revision,
@@ -432,7 +440,7 @@ pub async fn commit_recoverable(
                 .await
                 .map_err(|db_err| SessionError::Database(db_err.to_string()))?
             {
-                rollback_intent(mgr, &workspace_root, &intent).await?;
+                rollback_intent_locked(mgr, &workspace_root, &intent).await?;
             }
             cleanup_temp(&stage_paths);
             cleanup_temp(&backup_paths);
@@ -489,7 +497,7 @@ pub async fn startup_recovery_all(mgr: &WorkspaceSessionManager) -> Result<(), S
             return Err(SessionError::RecoveryConflict(intent.workspace_root.clone()));
         }
         if matches!(intent.state, db::IntentState::Applying | db::IntentState::RollingBack) {
-            recover_unsettled(mgr, &intent.workspace_root).await?;
+            recover_unsettled_locked(mgr, &intent.workspace_root).await?;
         }
     }
     Ok(())
