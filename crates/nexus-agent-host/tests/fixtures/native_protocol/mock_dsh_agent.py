@@ -182,6 +182,8 @@ def handle_request(req):
                 "type": "assistant/message",
                 "data": {"content": [{"type": "text", "text": "partial"}]},
             })
+        elif scenario == "malformed":
+            pass  # malformed turn/end below; no assistant prose
         else:
             session_event(session_id, {
                 "type": "assistant/message",
