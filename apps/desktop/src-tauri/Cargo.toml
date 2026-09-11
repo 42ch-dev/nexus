@@ -37,7 +37,7 @@ keyring = "4"
 # Mirrors the daemon's workspace_root source (`apps/nexus42/src/config.rs`):
 # `~/.nexus42/config.toml` → `workspace_path`.
 dirs = "5"
-toml = "0.8"
+toml = "1.1"
 toml_edit = "0.22"
 # The standalone opener engine (same crate tauri-plugin-opener wraps). Used by
 # the custom `open_with`/`reveal_in_finder` commands AFTER the runtime path
