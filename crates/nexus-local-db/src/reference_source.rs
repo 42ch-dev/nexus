@@ -290,7 +290,7 @@ pub async fn list(
         }
     );
 
-    let mut query = sqlx::query(&sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
     if let Some(cid) = creator_id {
         query = query.bind(cid);
     }
@@ -540,7 +540,7 @@ pub async fn find_stale_sources(
     let limit = limit.unwrap_or(50).clamp(1, 500);
     // SAFETY: dynamic SQL — compile-time macro not sufficient for
     // parameterized LIMIT and dynamic stale-threshold arithmetic.
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT
               reference_source_id,
               creator_id,
@@ -573,7 +573,7 @@ pub async fn find_stale_sources(
              )
            ORDER BY last_refreshed_at ASC NULLS FIRST
            LIMIT {limit}"
-    ))
+    )))
     .fetch_all(pool)
     .await?;
 

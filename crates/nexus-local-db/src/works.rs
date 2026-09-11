@@ -504,9 +504,9 @@ pub async fn get_work(
 ) -> Result<Option<WorkRecord>, LocalDbError> {
     // SAFETY: SELECT against works table — runtime query because the table
     // was added in the same migration cycle and sqlx prepare hasn't run yet.
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {WORKS_COLUMNS} FROM works WHERE work_id = ? AND creator_id = ?"
-    ))
+    )))
     .bind(work_id)
     .bind(creator_id)
     .fetch_optional(pool)
@@ -623,7 +623,7 @@ async fn list_works_inner<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
          LIMIT ? OFFSET ?"
     );
 
-    let mut query = sqlx::query(&sql).bind(creator_id).bind(workspace_slug);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(creator_id).bind(workspace_slug);
 
     if let Some(ref s) = filters.status {
         query = query.bind(s);
@@ -663,7 +663,7 @@ async fn count_works_inner<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
     // All user inputs are passed as bound parameters, not interpolated.
     let sql = format!("SELECT COUNT(*) AS cnt FROM works WHERE {where_sql}");
 
-    let mut query = sqlx::query(&sql).bind(creator_id).bind(workspace_slug);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(creator_id).bind(workspace_slug);
 
     if let Some(ref s) = filters.status {
         query = query.bind(s);
@@ -787,7 +787,7 @@ pub async fn patch_work(
     // All values are bound parameters, not interpolated.
     let sql = format!("UPDATE works SET {set_sql} WHERE work_id = ? AND creator_id = ?");
 
-    let mut query = sqlx::query(&sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
 
     if let Some(ref v) = patch.title {
         query = query.bind(v);
@@ -1019,7 +1019,7 @@ pub async fn patch_work_tx(
     // All values are bound parameters, not interpolated.
     let sql = format!("UPDATE works SET {set_sql} WHERE work_id = ? AND creator_id = ?");
 
-    let mut query = sqlx::query(&sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
 
     // Bind parameters in the same order as set_clauses
     if let Some(ref v) = patch.title {
@@ -1160,9 +1160,9 @@ pub async fn append_inspiration(
     // Read current inspiration_log inside tx
     // SAFETY: Dynamic SQL required for JSON manipulation via transaction.
     // All values are bound parameters.
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {WORKS_COLUMNS} FROM works WHERE work_id = ? AND creator_id = ?"
-    ))
+    )))
     .bind(work_id)
     .bind(creator_id)
     .fetch_optional(&mut *tx)
@@ -1319,9 +1319,9 @@ pub async fn advance_work_stage_atomic(
 
     // Step 1: SELECT current state inside transaction
     // SAFETY: SELECT against works table — runtime query.
-    let current: Option<WorkRecord> = sqlx::query(&format!(
+    let current: Option<WorkRecord> = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {WORKS_COLUMNS} FROM works WHERE work_id = ? AND creator_id = ?"
-    ))
+    )))
     .bind(work_id)
     .bind(creator_id)
     .fetch_optional(&mut *tx)

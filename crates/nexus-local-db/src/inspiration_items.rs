@@ -112,7 +112,7 @@ pub async fn list_inspiration(
         )
     };
 
-    let mut query = sqlx::query(&sql).bind(creator_id);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(creator_id);
     if let Some(s) = status_filter {
         query = query.bind(s);
     }
@@ -500,9 +500,9 @@ pub async fn get_inspiration(
     pool: &SqlitePool,
     item_id: &str,
 ) -> Result<Option<InspirationItem>, LocalDbError> {
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {INSPIRATION_COLUMNS} FROM inspiration_items WHERE item_id = ?"
-    ))
+    )))
     .bind(item_id)
     .fetch_optional(pool)
     .await?;

@@ -593,7 +593,7 @@ async fn list_findings_with_status_set(
          ORDER BY created_at DESC
          LIMIT ? OFFSET ?"
     );
-    let mut q = sqlx::query_as::<_, FindingRow>(&sql)
+    let mut q = sqlx::query_as::<_, FindingRow>(sqlx::AssertSqlSafe(sql))
         .bind(creator_id)
         .bind(filters.work_id.clone())
         .bind(filters.work_id.clone())
@@ -1010,7 +1010,7 @@ pub async fn update_finding(
         "UPDATE findings SET {} WHERE creator_id = ? AND finding_id = ?",
         set_clauses.join(", ")
     );
-    let mut q = sqlx::query(&sql);
+    let mut q = sqlx::query(sqlx::AssertSqlSafe(sql));
     if let Some(ref v) = patch.severity {
         q = q.bind(v);
     }

@@ -328,7 +328,7 @@ pub async fn list_by_creator(
         FROM kb_extract_jobs \
         WHERE creator_id = ? ORDER BY created_at DESC LIMIT {limit}"
     );
-    sqlx::query_as::<_, KbExtractJob>(&query)
+    sqlx::query_as::<_, KbExtractJob>(sqlx::AssertSqlSafe(query))
         .bind(creator_id)
         .fetch_all(pool)
         .await
@@ -910,7 +910,7 @@ pub async fn list_pending_for_world(
          WHERE world_id = ? AND promotion_status = 'pending' \
          ORDER BY created_at ASC LIMIT {limit}"
     );
-    sqlx::query_as::<_, KbExtractPromotion>(&query)
+    sqlx::query_as::<_, KbExtractPromotion>(sqlx::AssertSqlSafe(query))
         .bind(world_id)
         .fetch_all(pool)
         .await
@@ -962,7 +962,7 @@ pub async fn list_pending_for_world_after(
     }
     sql.push_str(" ORDER BY created_at ASC, job_id ASC LIMIT ?");
 
-    let mut query = sqlx::query_as::<_, KbExtractPromotion>(&sql).bind(world_id);
+    let mut query = sqlx::query_as::<_, KbExtractPromotion>(sqlx::AssertSqlSafe(sql)).bind(world_id);
     if has_cursor {
         query = query.bind(cursor_created_at).bind(cursor_job_id);
     }

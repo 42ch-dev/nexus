@@ -171,7 +171,7 @@ impl KnowledgeStore for SqliteKnowledgeStore {
         select_sql.push_str(" ORDER BY created_at DESC LIMIT ? OFFSET ?");
 
         // Build and execute count query
-        let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
+        let mut count_query = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(count_sql));
         count_query = count_query.bind(&query.user_id);
         if let Some(ref text) = query.text {
             count_query = count_query.bind(format!("%{text}%"));
@@ -190,18 +190,15 @@ impl KnowledgeStore for SqliteKnowledgeStore {
             .unwrap_or(0);
 
         // Build and execute select query
-        let mut select_query = sqlx::query_as::<
-            _,
-            (
-                String,
-                String,
-                String,
-                String,
-                Option<String>,
-                String,
-                String,
-            ),
-        >(&select_sql);
+        let mut select_query = sqlx::query_as::<_, (
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            String,
+            String,
+        )>(sqlx::AssertSqlSafe(select_sql));
         select_query = select_query.bind(&query.user_id);
         if let Some(ref text) = query.text {
             select_query = select_query.bind(format!("%{text}%"));
