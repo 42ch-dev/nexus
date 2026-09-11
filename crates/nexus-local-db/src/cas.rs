@@ -83,9 +83,9 @@ where
     // SAFETY: dynamic SQL — table, id_column, and version_column are
     // parameters, not static identifiers, so a compile-time checked macro
     // cannot be used.
-    let actual: Option<(i64,)> = sqlx::query_as(&format!(
+    let actual: Option<(i64,)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {version_column} FROM {table} WHERE {id_column} = ?"
-    ))
+    )))
     .bind(id_value)
     .fetch_optional(executor)
     .await?;

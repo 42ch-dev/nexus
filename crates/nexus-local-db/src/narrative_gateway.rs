@@ -200,7 +200,7 @@ pub async fn list_timeline_events_scoped(
         " ORDER BY branch_id ASC, sequence_no ASC"
     });
 
-    let mut q = sqlx::query_as::<_, TimelineEventRow>(&sql).bind(world_id);
+    let mut q = sqlx::query_as::<_, TimelineEventRow>(sqlx::AssertSqlSafe(sql)).bind(world_id);
     if let Some(bid) = branch_id {
         q = q.bind(bid);
     }
@@ -309,7 +309,7 @@ pub async fn list_timeline_events_page(
         " ORDER BY branch_id ASC, sequence_no ASC LIMIT ?"
     });
 
-    let mut q = sqlx::query_as::<_, TimelineEventPageRow>(&sql).bind(world_id);
+    let mut q = sqlx::query_as::<_, TimelineEventPageRow>(sqlx::AssertSqlSafe(sql)).bind(world_id);
     if let Some(bid) = branch_id {
         q = q.bind(bid);
     }
@@ -499,7 +499,7 @@ impl NarrativeGateway for SqliteNarrativeGateway {
             ("ASC", String::new())
         };
         let events = if let Some(bid) = branch_id {
-            sqlx::query_as::<_, TimelineEventRow>(&format!(
+            sqlx::query_as::<_, TimelineEventRow>(sqlx::AssertSqlSafe(format!(
                 r"SELECT
                     timeline_event_id,
                     world_id,
@@ -518,14 +518,14 @@ impl NarrativeGateway for SqliteNarrativeGateway {
                 WHERE world_id = ? AND branch_id = ?
                 ORDER BY sequence_no {order_dir}
                 {limit_clause}"
-            ))
+            )))
             .bind(world_id)
             .bind(bid)
             .fetch_all(&*self.pool)
             .await
             .map_err(|e| db_err(&e))?
         } else {
-            sqlx::query_as::<_, TimelineEventRow>(&format!(
+            sqlx::query_as::<_, TimelineEventRow>(sqlx::AssertSqlSafe(format!(
                 r"SELECT
                     timeline_event_id,
                     world_id,
@@ -544,7 +544,7 @@ impl NarrativeGateway for SqliteNarrativeGateway {
                 WHERE world_id = ?
                 ORDER BY branch_id {order_dir}, sequence_no {order_dir}
                 {limit_clause}"
-            ))
+            )))
             .bind(world_id)
             .fetch_all(&*self.pool)
             .await

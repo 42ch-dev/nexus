@@ -20,7 +20,6 @@ use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_store::SqliteKbStore;
 use sqlx::migrate::{Migration, Migrator};
 use sqlx::SqlitePool;
-use std::borrow::Cow;
 
 /// Version of the owner-scope migration under test. The 14-digit
 /// `20260905000002` keeps sqlx's numeric ordering after every shipped
@@ -83,20 +82,13 @@ fn pre_upgrade_migrator() -> Migrator {
         .filter(|m| m.version < OWNER_MIGRATION_VERSION)
         .cloned()
         .collect();
-    Migrator {
-        migrations: Cow::Owned(pre),
-        ignore_missing: false,
-        locking: true,
-        no_tx: false,
-    }
+    Migrator::with_migrations(pre)
 }
 
 /// Run a migrator on a single connection with foreign keys OFF.
 ///
-/// sqlx 0.8.6 wraps each migration in a transaction and ignores the
-/// `-- no-transaction` directive, so a migration file's own
-/// `PRAGMA foreign_keys=OFF` is a no-op; setting it on the connection before
-/// the migrate runner makes table rebuilds deterministic (no DROP cascade).
+/// Keep foreign keys disabled across the pre-upgrade migration batch so
+/// table rebuilds do not cascade while legacy fixtures are being installed.
 async fn run_migrator(pool: &SqlitePool, migrator: Migrator) {
     let mut conn = pool.acquire().await.unwrap();
     // SAFETY: PRAGMA statement — no table schema to validate against.
@@ -104,7 +96,7 @@ async fn run_migrator(pool: &SqlitePool, migrator: Migrator) {
         .execute(&mut *conn)
         .await
         .unwrap();
-    migrator.run_direct(&mut *conn).await.unwrap();
+    migrator.run_direct(None, &mut *conn, false).await.unwrap();
     // SAFETY: PRAGMA statement — no table schema to validate against.
     sqlx::query("PRAGMA foreign_keys = ON")
         .execute(&mut *conn)
@@ -268,7 +260,7 @@ async fn insert_owned_kb(
 
 /// Run a `json_array(...)` dump query, one canonical JSON string per row.
 async fn dump(pool: &SqlitePool, sql: &str) -> Vec<String> {
-    sqlx::query_scalar::<_, String>(sql)
+    sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(sql))
         .fetch_all(pool)
         .await
         .unwrap()
@@ -342,7 +334,7 @@ async fn kb_schema_objects(pool: &SqlitePool) -> Vec<(String, String, String)> {
 }
 
 async fn count_where(pool: &SqlitePool, sql: &str) -> i64 {
-    sqlx::query_scalar::<_, i64>(sql)
+    sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(sql))
         .fetch_one(pool)
         .await
         .unwrap()

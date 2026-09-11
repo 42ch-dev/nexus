@@ -61,8 +61,7 @@ async fn ctx() -> Ctx {
     let server = TestServer::new(api::create_router(
         state.clone(),
         DaemonApiConfig::keyless(),
-    ))
-    .expect("test server");
+    ));
     Ctx {
         _tmp: tmp,
         server,
@@ -180,7 +179,7 @@ async fn count_pending(server: &TestServer, character_id: &str, binding_id: Opti
 
 async fn sql_count(pool: &sqlx::SqlitePool, table: &str) -> i64 {
     // SAFETY: test-only count over a fixed set of table names.
-    sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {table}")))
         .fetch_one(pool)
         .await
         .unwrap()

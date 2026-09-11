@@ -1488,7 +1488,10 @@ async fn promote_adopt_rollbacks_entry_when_job_flip_races() {
            WHERE job_id = '{job_id}' AND promotion_status = 'pending'; \
          END"
     );
-    sqlx::query(&trigger_sql).execute(&pool).await.unwrap();
+    sqlx::query(sqlx::AssertSqlSafe(trigger_sql))
+        .execute(&pool)
+        .await
+        .unwrap();
 
     let req = WorldKbPromoteCandidateRequest {
         job_id: candidate.job_id.clone(),
@@ -1577,7 +1580,10 @@ async fn promote_adopt_rollbacks_entry_when_job_flip_cas_errors() {
            SELECT RAISE(ABORT, 'simulated flip CAS failure'); \
          END"
     );
-    sqlx::query(&trigger_sql).execute(&pool).await.unwrap();
+    sqlx::query(sqlx::AssertSqlSafe(trigger_sql))
+        .execute(&pool)
+        .await
+        .unwrap();
 
     let req = WorldKbPromoteCandidateRequest {
         job_id: candidate.job_id.clone(),
@@ -1795,7 +1801,10 @@ async fn promote_adopt_confirmed_job_does_not_recover_unattributed_collision() {
            WHERE job_id = '{job_id}' AND promotion_status = 'pending'; \
          END"
     );
-    sqlx::query(&trigger_sql).execute(&pool).await.unwrap();
+    sqlx::query(sqlx::AssertSqlSafe(trigger_sql))
+        .execute(&pool)
+        .await
+        .unwrap();
 
     let err = promote_candidate(
         State(state.clone()),

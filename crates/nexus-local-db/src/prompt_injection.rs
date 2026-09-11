@@ -167,7 +167,7 @@ pub async fn claim_prompt_injections(
          WHERE injection_id IN ({})",
         placeholders.join(", ")
     );
-    let mut query = sqlx::query(&sql).bind(now);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(now);
     for id in &ids {
         query = query.bind(id);
     }
@@ -230,7 +230,7 @@ pub async fn mark_prompt_injections_consumed(
             placeholders.join(", ")
         );
 
-        let mut query = sqlx::query(&sql).bind(now);
+        let mut query = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(now);
         for id in chunk {
             query = query.bind(id);
         }

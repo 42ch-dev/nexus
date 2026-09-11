@@ -5,24 +5,31 @@ on:
   push:
     branches: [main]
     paths:
-      - 'apps/web/**'
-      - 'apps/desktop/**'
+      - 'apps/desktop/src-tauri/**'
+      - 'apps/desktop/package.json'
       - 'apps/nexus42/**'
-      - 'packages/nexus-contracts/**'
       - 'crates/**'
-      - 'pnpm-lock.yaml'
-      - 'package.json'
-      - 'pnpm-workspace.yaml'
+      - 'modules/**'
+      - 'schemas/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
-      - '.github/workflows/**'
+      - 'scripts/served-ui-smoke.sh'
+      - '.github/workflows/desktop-build.yml'
+      - '.github/actions/**'
   pull_request:
     branches: [main]
     paths:
-      - 'apps/web/**'
-      - 'apps/desktop/**'
-      - 'packages/nexus-contracts/**'
-      - '.github/workflows/**'
+      - 'apps/desktop/src-tauri/**'
+      - 'apps/desktop/package.json'
+      - 'apps/nexus42/**'
+      - 'crates/**'
+      - 'modules/**'
+      - 'schemas/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'scripts/served-ui-smoke.sh'
+      - '.github/workflows/desktop-build.yml'
+      - '.github/actions/**'
 
 concurrency:
   group: desktop-build-${{ github.ref }}

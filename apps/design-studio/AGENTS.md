@@ -95,7 +95,7 @@ No daemon or Tauri required.
 
 ## Conventions
 
-- TypeScript strict; match `apps/web` toolchain (Vite 6, React 19, Tailwind 3, react-router v8 (declarative mode))
+- TypeScript strict; match `apps/web` toolchain (Vite 8, React 19, Tailwind 4, react-router v8 (declarative mode))
 - Theme toggle: `class` strategy on `<html>` — mirrors web `theme-provider` behavior
 - Read-only gallery — no YAML write-back, no localStorage token overrides
 - App chrome shows **Read-only · edit `DESIGN.md`** (repo-root SSOT helper)
@@ -115,7 +115,7 @@ See [design-studio.md spec §2](../../.mstar/specs/design-studio.md#2-audiences)
 
 ## Tests
 
-- Runner: Vitest 4 with jsdom + @testing-library/react — mirrors `apps/web` conventions
+- Runner: Vitest 5 with jsdom + @testing-library/react — mirrors `apps/web` conventions
 - Config: `vitest.config.ts` (resolve aliases match `vite.config.ts`; setup in `src/test/setup.ts`)
 - Scope: smoke tests for App shell render, theme toggle, and gallery section routing — see `src/App.test.tsx`
 - Run: `pnpm --filter design-studio test` (CI-compatible; no daemon required)

@@ -1051,7 +1051,7 @@ pub async fn list_schedules(
     })?;
 
     // SAFETY: dynamic query — see list_schedules SAFETY comment above.
-    let mut q = sqlx::query_as::<_, ListRow>(&sql);
+    let mut q = sqlx::query_as::<_, ListRow>(sqlx::AssertSqlSafe(sql));
     if let Some(ref cid) = query.creator_id {
         q = q.bind(cid);
     }
@@ -1069,7 +1069,7 @@ pub async fn list_schedules(
         })?;
 
     // SAFETY: dynamic COUNT query — same WHERE clause as the list query.
-    let mut count_q = sqlx::query(&count_sql);
+    let mut count_q = sqlx::query(sqlx::AssertSqlSafe(count_sql));
     if let Some(ref cid) = query.creator_id {
         count_q = count_q.bind(cid);
     }

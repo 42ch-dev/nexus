@@ -109,7 +109,7 @@ pub async fn list_pool_entries(
         )
     };
 
-    let mut query = sqlx::query(&sql).bind(creator_id);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(creator_id);
     if let Some(s) = status_filter {
         query = query.bind(s);
     }
@@ -334,9 +334,9 @@ pub async fn get_pool_entry(
     pool: &SqlitePool,
     entry_id: &str,
 ) -> Result<Option<PoolEntry>, LocalDbError> {
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {POOL_ENTRY_COLUMNS} FROM novel_pool_entries WHERE entry_id = ?"
-    ))
+    )))
     .bind(entry_id)
     .fetch_optional(pool)
     .await?;
@@ -354,9 +354,9 @@ pub async fn get_pool_entry_by_work(
     creator_id: &str,
     work_id: &str,
 ) -> Result<Option<PoolEntry>, LocalDbError> {
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {POOL_ENTRY_COLUMNS} FROM novel_pool_entries WHERE creator_id = ? AND work_id = ?"
-    ))
+    )))
     .bind(creator_id)
     .bind(work_id)
     .fetch_optional(pool)
@@ -374,9 +374,9 @@ pub async fn get_active_pool_entry(
     pool: &SqlitePool,
     creator_id: &str,
 ) -> Result<Option<PoolEntry>, LocalDbError> {
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {POOL_ENTRY_COLUMNS} FROM novel_pool_entries WHERE creator_id = ? AND status = 'active'"
-    ))
+    )))
     .bind(creator_id)
     .fetch_optional(pool)
     .await?;

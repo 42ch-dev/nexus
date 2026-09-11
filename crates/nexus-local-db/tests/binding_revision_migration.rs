@@ -8,7 +8,6 @@
 use nexus_local_db::{read_versions, seed_versions, DB_SCHEMA_VERSION};
 use sqlx::migrate::{Migration, Migrator};
 use sqlx::SqlitePool;
-use std::borrow::Cow;
 
 const BINDING_REVISION_MIGRATION_VERSION: i64 = 20_260_906_000_002;
 
@@ -42,17 +41,12 @@ fn pre_binding_revision_migrator() -> Migrator {
         .filter(|m| m.version < BINDING_REVISION_MIGRATION_VERSION)
         .cloned()
         .collect();
-    Migrator {
-        migrations: Cow::Owned(pre),
-        ignore_missing: false,
-        locking: true,
-        no_tx: false,
-    }
+    Migrator::with_migrations(pre)
 }
 
 async fn run_migrator(pool: &SqlitePool, migrator: Migrator) {
     let mut conn = pool.acquire().await.unwrap();
-    migrator.run_direct(&mut *conn).await.unwrap();
+    migrator.run_direct(None, &mut *conn, false).await.unwrap();
 }
 
 async fn seed_v21_fixture(pool: &SqlitePool) {

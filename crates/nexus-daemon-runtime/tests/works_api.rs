@@ -40,7 +40,7 @@ async fn test_ctx() -> TestCtx {
     test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
-    let server = TestServer::new(app).expect("failed to create test server");
+    let server = TestServer::new(app);
     TestCtx { tmp, server }
 }
 
@@ -57,7 +57,7 @@ async fn test_ctx_no_creator() -> TestCtx {
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
-    let server = TestServer::new(app).expect("failed to create test server");
+    let server = TestServer::new(app);
     std::mem::forget(tmp);
     TestCtx {
         tmp: test_utils::create_test_workspace().await.0,
@@ -100,7 +100,7 @@ async fn test_ctx_other_creator() -> (TestCtx, std::path::PathBuf) {
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
-    let server = TestServer::new(app).expect("failed to create test server");
+    let server = TestServer::new(app);
     std::mem::forget(tmp);
     (
         TestCtx {

@@ -43,7 +43,7 @@ async fn ctx() -> Ctx {
     let pool = state.pool().expect("pool").clone();
     test_utils::seed_test_creator_and_world(&pool).await;
     let app = api::create_router(state, DaemonApiConfig::keyless());
-    let server = TestServer::new(app).expect("test server");
+    let server = TestServer::new(app);
     Ctx {
         _tmp: tmp,
         server,

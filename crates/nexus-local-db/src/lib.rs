@@ -347,7 +347,7 @@ pub async fn begin_immediate(
     pool: &sqlx::SqlitePool,
 ) -> Result<sqlx::Transaction<'_, sqlx::Sqlite>, LocalDbError> {
     let conn = pool.acquire().await?;
-    sqlx::Transaction::begin(conn, Some(std::borrow::Cow::Borrowed("BEGIN IMMEDIATE")))
+    sqlx::Transaction::begin(conn, Some(sqlx::SqlStr::from_static("BEGIN IMMEDIATE")))
         .await
         .map_err(LocalDbError::from)
 }
@@ -481,11 +481,10 @@ pub async fn run_migrations(pool: &sqlx::SqlitePool) -> Result<(), LocalDbError>
 /// migration and gates its success row on an in-transaction
 /// `PRAGMA foreign_key_check`.
 ///
-/// The FK-off window is needed at all because sqlx 0.8.6 wraps every
-/// migration in a transaction and ignores the `-- no-transaction` directive,
-/// so the file's own pragma is a no-op and a DROP/recreate would cascade
-/// into child tables (`kb_source_anchors`, `kb_relationships`, `mind_states`,
-/// `actor_world_bindings.world_sheet_entry_id`).
+/// `SQLx` 0.9 honors `-- no-transaction`, but its generic no-transaction
+/// runner cannot restore connection-local FK enforcement when a rebuild
+/// fails after `PRAGMA foreign_keys=OFF`. This custom path also makes the
+/// integrity check part of the migration's success gate.
 async fn apply_pending_migrations(
     conn: &mut sqlx::SqliteConnection,
     migrator: &sqlx::migrate::Migrator,
@@ -500,15 +499,19 @@ async fn apply_pending_migrations(
         .execute(&mut *conn)
         .await
         .map_err(sqlx::migrate::MigrateError::Execute)?;
+    for schema_name in migrator.create_schemas.iter() {
+        conn.create_schema_if_not_exists(schema_name).await?;
+    }
+    let table_name = migrator.table_name.as_ref();
 
     // Bookkeeping identical to Migrator::run_direct (ignore_missing = false):
     // fail on a dirty (partially applied) migration, then validate applied
     // versions/checksums against the source before applying anything new.
-    conn.ensure_migrations_table().await?;
-    if let Some(version) = conn.dirty_version().await? {
+    conn.ensure_migrations_table(table_name).await?;
+    if let Some(version) = conn.dirty_version(table_name).await? {
         return Err(sqlx::migrate::MigrateError::Dirty(version).into());
     }
-    let applied = conn.list_applied_migrations().await?;
+    let applied = conn.list_applied_migrations(table_name).await?;
     for applied_migration in &applied {
         match migrator
             .iter()
@@ -540,7 +543,7 @@ async fn apply_pending_migrations(
         if requires_fk_suspension(migration) {
             apply_fk_suspension_migration(conn, migration).await?;
         } else {
-            conn.apply(migration).await?;
+            conn.apply(table_name, migration).await?;
         }
     }
     Ok(())
@@ -552,6 +555,7 @@ async fn apply_pending_migrations(
 fn requires_fk_suspension(migration: &sqlx::migrate::Migration) -> bool {
     let normalized: String = migration
         .sql
+        .as_str()
         .chars()
         .filter(|c| !c.is_whitespace())
         .flat_map(char::to_uppercase)
@@ -615,7 +619,7 @@ async fn apply_fk_suspension_tx(
     let start = std::time::Instant::now();
 
     let outcome: Result<(), LocalDbError> = async {
-        tx.execute(&*migration.sql)
+        tx.execute(migration.sql.clone())
             .await
             .map_err(|err| sqlx::migrate::MigrateError::ExecuteMigration(err, migration.version))?;
 
@@ -996,12 +1000,7 @@ mod tests {
             .filter(|m| m.version < OWNER_VERSION)
             .cloned()
             .collect();
-        sqlx::migrate::Migrator {
-            migrations: std::borrow::Cow::Owned(pre),
-            ignore_missing: false,
-            locking: true,
-            no_tx: false,
-        }
+        sqlx::migrate::Migrator::with_migrations(pre)
     }
 
     /// Count of successful `_sqlx_migrations` rows for the owner migration.
@@ -1080,7 +1079,7 @@ mod tests {
                 1,
                 Cow::Borrowed("create parent/child"),
                 MigrationType::Simple,
-                Cow::Borrowed(
+                sqlx::SqlStr::from_static(
                     "CREATE TABLE parent (id TEXT PRIMARY KEY);\n\
                      CREATE TABLE child (id TEXT PRIMARY KEY, p_id TEXT REFERENCES parent (id));",
                 ),
@@ -1090,7 +1089,7 @@ mod tests {
                 2,
                 Cow::Borrowed("rebuild child"),
                 MigrationType::Simple,
-                Cow::Borrowed(
+                sqlx::SqlStr::from_static(
                     "-- no-transaction\n\
                      PRAGMA foreign_keys=OFF;\n\
                      CREATE TABLE child_new (id TEXT PRIMARY KEY, p_id TEXT REFERENCES parent (id));\n\
@@ -1105,16 +1104,13 @@ mod tests {
                 3,
                 Cow::Borrowed("dangling insert"),
                 MigrationType::Simple,
-                Cow::Borrowed("INSERT INTO child (id, p_id) VALUES ('c1', 'missing_parent');"),
+                sqlx::SqlStr::from_static(
+                    "INSERT INTO child (id, p_id) VALUES ('c1', 'missing_parent');",
+                ),
                 false,
             ),
         ];
-        let migrator = Migrator {
-            migrations: Cow::Owned(migrations),
-            ignore_missing: false,
-            locking: true,
-            no_tx: false,
-        };
+        let migrator = Migrator::with_migrations(migrations);
 
         let dir = tempfile::tempdir().unwrap();
         let pool = single_conn_fk_pool(&dir.path().join("test.db")).await;
@@ -1229,7 +1225,7 @@ mod tests {
             1,
             Cow::Borrowed("rebuild with bookkeeping collision"),
             MigrationType::Simple,
-            Cow::Borrowed(
+            sqlx::SqlStr::from_static(
                 "-- no-transaction\n\
                  PRAGMA foreign_keys=OFF;\n\
                  CREATE TABLE rebuild_target (id TEXT PRIMARY KEY);\n\
@@ -1240,12 +1236,7 @@ mod tests {
             ),
             true,
         )];
-        let migrator = Migrator {
-            migrations: Cow::Owned(migrations),
-            ignore_missing: false,
-            locking: true,
-            no_tx: false,
-        };
+        let migrator = Migrator::with_migrations(migrations);
         let migrator_ref = &migrator;
 
         let dir = tempfile::tempdir().unwrap();

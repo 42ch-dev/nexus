@@ -303,7 +303,7 @@ pub async fn list_chapters_paginated(
     }
     sql.push_str(" ORDER BY volume, chapter LIMIT ?");
 
-    let mut query = sqlx::query(&sql)
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(work_id)
         .bind(cursor_volume)
         .bind(cursor_chapter);
@@ -389,7 +389,7 @@ pub async fn patch_chapter(
         "UPDATE work_chapters SET {set_sql} WHERE work_id = ? AND volume = ? AND chapter = ?"
     );
 
-    let mut query = sqlx::query(&sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
     if let Some(ref v) = patch.slug {
         query = query.bind(v);
     }

@@ -40,8 +40,7 @@ async fn ctx() -> Ctx {
     let server = TestServer::new(api::create_router(
         state.clone(),
         DaemonApiConfig::keyless(),
-    ))
-    .expect("test server");
+    ));
     Ctx {
         _tmp: tmp,
         server,
@@ -140,8 +139,7 @@ async fn actor_knowledge_view_requires_api_key() {
     let server = TestServer::new(api::create_router(
         state,
         DaemonApiConfig::keyed("test-secret"),
-    ))
-    .expect("test server");
+    ));
     let resp = server
         .post("/v1/daemon/actor-knowledge/view")
         .json(&json!({
@@ -650,7 +648,7 @@ async fn insert_owned_row(
          (key_block_id, owner_kind, {owner_column}, block_type, canonical_name, status, created_at) \
          VALUES (?, ?, ?, 'item', ?, 'confirmed', ?)"
     );
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(entry_id)
         .bind(owner_kind)
         .bind(owner_id)

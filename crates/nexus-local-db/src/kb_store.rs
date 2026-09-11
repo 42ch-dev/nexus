@@ -385,7 +385,7 @@ impl SqliteKbStore {
 
         // SAFETY: static column list; dynamic fragments are filter/limit clauses
         // with bind params only (no user-controlled SQL).
-        let mut q = sqlx::query_as::<_, KeyBlockRow>(&sql).bind(world_id);
+        let mut q = sqlx::query_as::<_, KeyBlockRow>(sqlx::AssertSqlSafe(sql)).bind(world_id);
         if has_id_filter {
             q = q.bind(serde_json::to_string(entry_ids).unwrap_or_else(|_| "[]".to_string()));
         }
@@ -990,7 +990,7 @@ impl KbStore for SqliteKbStore {
     ) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
         // SAFETY: LIMIT is a compile-time constant; dynamic SQL needed because
         // sqlx::query_as! does not support LIMIT as bind param in SQLite offline mode.
-        let rows = sqlx::query_as::<_, KeyBlockRow>(&format!(
+        let rows = sqlx::query_as::<_, KeyBlockRow>(sqlx::AssertSqlSafe(format!(
             r"SELECT
                 key_block_id,
                 owner_kind,
@@ -1016,7 +1016,7 @@ impl KbStore for SqliteKbStore {
               AND status NOT IN ('deleted', 'merged', 'deprecated')
             ORDER BY created_at ASC
             LIMIT {LIST_BY_WORLD_LIMIT}"
-        ))
+        )))
         .bind(world_id)
         .fetch_all(&*self.pool)
         .await
@@ -1215,7 +1215,7 @@ impl KbStore for SqliteKbStore {
                    AND key_block_id != ? \
                    AND status NOT IN ('deleted', 'merged', 'deprecated')"
             );
-            let count: i64 = sqlx::query_scalar(&q)
+            let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(q))
                 .bind(kb.owner.id())
                 .bind(&block_type_str)
                 .bind(&kb.canonical_name)
@@ -1382,7 +1382,7 @@ impl SqliteKbStore {
             ORDER BY created_at ASC
             LIMIT {LIST_BY_WORLD_LIMIT}"
         );
-        let rows = sqlx::query_as::<_, KeyBlockRow>(&sql)
+        let rows = sqlx::query_as::<_, KeyBlockRow>(sqlx::AssertSqlSafe(sql))
             .bind(world_id)
             .fetch_all(&*self.pool)
             .await
@@ -1440,7 +1440,7 @@ impl SqliteKbStore {
             ORDER BY created_at ASC
             LIMIT {LIST_BY_WORLD_LIMIT}"
         );
-        let rows = sqlx::query_as::<_, KeyBlockRow>(&sql)
+        let rows = sqlx::query_as::<_, KeyBlockRow>(sqlx::AssertSqlSafe(sql))
             .bind(owner.id())
             .fetch_all(&*self.pool)
             .await
@@ -1492,7 +1492,7 @@ impl SqliteKbStore {
               AND status NOT IN ('deleted', 'merged', 'deprecated')
             ORDER BY created_at ASC, key_block_id ASC"
         );
-        let rows = sqlx::query_as::<_, KeyBlockRow>(&sql)
+        let rows = sqlx::query_as::<_, KeyBlockRow>(sqlx::AssertSqlSafe(sql))
             .bind(owner.id())
             .fetch_all(&*self.pool)
             .await
@@ -1565,7 +1565,7 @@ impl SqliteKbStore {
             ORDER BY {created_key} ASC, key_block_id ASC
             LIMIT {limit}"
         );
-        let mut query = sqlx::query_as::<_, KeyBlockRow>(&sql).bind(owner.id());
+        let mut query = sqlx::query_as::<_, KeyBlockRow>(sqlx::AssertSqlSafe(sql)).bind(owner.id());
         if let Some((created_at, entry_id)) = after {
             query = query
                 .bind(created_at)
@@ -1666,7 +1666,7 @@ pub async fn cas_update_key_block_fields(
            AND owner_kind = 'world' AND world_id = ?"
     );
 
-    let mut q = sqlx::query(&sql);
+    let mut q = sqlx::query(sqlx::AssertSqlSafe(sql));
     q = q.bind(new_revision).bind(now);
     if let Some(v) = canonical_name {
         q = q.bind(v);

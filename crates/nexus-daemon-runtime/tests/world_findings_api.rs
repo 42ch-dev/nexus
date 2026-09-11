@@ -61,7 +61,7 @@ async fn ctx() -> Ctx {
     seed_world(&pool, EMPTY_WORLD, "Empty World", "test_creator").await;
     seed_world(&pool, FOREIGN_WORLD, "Foreign World", "other_creator").await;
     let app = api::create_router(state, DaemonApiConfig::keyless());
-    let server = TestServer::new(app).expect("test server");
+    let server = TestServer::new(app);
     Ctx {
         _tmp: tmp,
         server,

@@ -80,7 +80,7 @@ async fn ctx_with_engine(engine: WasmEngine, extra: &[(&str, ModuleManifest, Vec
     test_utils::seed_test_creator_and_world(&pool).await;
     seed_world(&pool, WORLD).await;
     let app = api::create_router(state, DaemonApiConfig::keyless());
-    let server = TestServer::new(app).expect("test server");
+    let server = TestServer::new(app);
     Ctx {
         _tmp: tmp,
         server,

@@ -1204,7 +1204,7 @@ async fn findings_batch_update_mid_batch_dao_error_preserves_prior_updates() {
          END",
         f2.finding_id
     );
-    sqlx::query(&trigger_sql)
+    sqlx::query(sqlx::AssertSqlSafe(trigger_sql))
         .execute(state.pool().unwrap())
         .await
         .expect("create trigger");

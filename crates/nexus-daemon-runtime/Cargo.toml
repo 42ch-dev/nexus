@@ -83,12 +83,12 @@ rust-embed = { version = "8.11.0", default-features = false, features = ["mime-g
 mime_guess = "2.0.5"
 # V1.92 P-1 T1 — TLS transport security (self-signed Ed25519 cert via rcgen,
 # axum-server bind_rustls drop-in for non-loopback listeners).
-axum-server = { version = "0.7", features = ["tls-rustls"] }
+axum-server = { version = "0.8", features = ["tls-rustls"] }
 rustls = { version = "0.23", features = ["aws-lc-rs"] }
 rcgen = "0.13"
 rustls-pemfile = "2"
 # V1.92 P0: parse persisted certificate SANs to detect bind-host mismatch.
-x509-parser = "0.17"
+x509-parser = "0.18"
 # V1.127 P1 greploop: probe native CLI presence at boot before register_provider.
 which = { workspace = true }
 # V1.174 P0 T1 (AR-57/AR-61): peer-tools WS transport + conformance suite.
@@ -128,10 +128,10 @@ rmcp = { version = "=3.2.0", default-features = false, features = ["server"], op
 spoke-operations = { workspace = true }
 
 [dev-dependencies]
-axum-test = "15"
+axum-test = "19.1"
 graph-flow = { version = "=0.8.0", default-features = false }
 nexus-orchestration = { path = "../nexus-orchestration" }
-serial_test = "3"
+serial_test = "4"
 criterion = { version = "0.8", features = ["html_reports"] }
 tokio-rustls = "0.26"
 # `wat` compiles WebAssembly text → binary for integration tests that exercise

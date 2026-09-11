@@ -86,10 +86,10 @@ pub async fn find_work_for_driver(
     schedule_id: &str,
 ) -> Result<Option<WorkRecord>, AutoChainError> {
     // SAFETY: dynamic SQL — driver_schedule_id lookup is a simple equality filter.
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {} FROM works WHERE driver_schedule_id = ? LIMIT 1",
         works::WORKS_COLUMNS
-    ))
+    )))
     .bind(schedule_id)
     .fetch_optional(pool)
     .await
@@ -2010,20 +2010,20 @@ pub async fn enqueue_cron_schedule(
 pub async fn find_resumable_works(pool: &SqlitePool) -> Result<Vec<WorkRecord>, AutoChainError> {
     // SAFETY: dynamic SQL — complex multi-table join for boot recovery.
     // V1.42 P0: skip Works with a foreign runtime_lock_holder.
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {0} FROM works w
-         WHERE w.auto_chain_enabled = 1
-           AND w.driver_schedule_id IS NOT NULL
-           AND w.auto_chain_interrupted = 0
-           AND w.status != 'completed'
-           AND w.runtime_lock_holder IS NULL
-           AND NOT EXISTS (
-               SELECT 1 FROM creator_schedules cs
-               WHERE cs.schedule_id = w.driver_schedule_id
-                 AND cs.status = 'running'
-           )",
+     WHERE w.auto_chain_enabled = 1
+       AND w.driver_schedule_id IS NOT NULL
+       AND w.auto_chain_interrupted = 0
+       AND w.status != 'completed'
+       AND w.runtime_lock_holder IS NULL
+       AND NOT EXISTS (
+           SELECT 1 FROM creator_schedules cs
+           WHERE cs.schedule_id = w.driver_schedule_id
+             AND cs.status = 'running'
+       )",
         works::WORKS_COLUMNS
-    ))
+    )))
     .fetch_all(pool)
     .await
     .map_err(nexus_local_db::LocalDbError::from)?;

@@ -525,7 +525,7 @@ impl Capability for WorldDeltaApply {
                 let sql = format!(
                     "SELECT key_block_id, body_json FROM kb_key_blocks WHERE key_block_id IN ({placeholders})"
                 );
-                let mut q = sqlx::query_as::<_, (String, Option<String>)>(&sql);
+                let mut q = sqlx::query_as::<_, (String, Option<String>)>(sqlx::AssertSqlSafe(sql));
                 for kid in chunk {
                     q = q.bind(*kid);
                 }

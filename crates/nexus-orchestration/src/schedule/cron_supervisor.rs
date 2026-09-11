@@ -711,10 +711,10 @@ async fn has_active_role_schedule(
 ) -> Result<bool, sqlx::Error> {
     // SAFETY: COUNT query against creator_schedules — runtime query with a
     // dynamic `IN (...)` status list (constant string, not user-controlled).
-    let count: i64 = sqlx::query_scalar(&format!(
+    let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT COUNT(*) FROM creator_schedules \
-         WHERE work_id = ? AND preset_id = ? AND status IN ({ACTIVE_STATUS_LIST})"
-    ))
+     WHERE work_id = ? AND preset_id = ? AND status IN ({ACTIVE_STATUS_LIST})"
+    )))
     .bind(work_id)
     .bind(preset_id)
     .fetch_one(pool)
