@@ -2984,11 +2984,6 @@ mod tests {
         ChildSessionParams, Context, EngineError, SessionFilter, SessionKey, SessionSummary,
     };
 
-    /// A5 idempotence: a fence-losing Cancel is a success only when the run
-    /// durably settled cancelled/interrupted; every other state (still
-    /// live, or settled completed/failed) keeps the conflict — the cancel
-    /// genuinely did not happen.
-    #[test]
     /// P4 T1: durable Failed+cancel_requested+driver_failed counts as cancel outcome
     /// (concurrent cancel vs drive-failure race — R-V1186P3-004).
     #[test]
@@ -3013,6 +3008,11 @@ mod tests {
         assert!(cancel_fence_loss_accomplished(&record));
     }
 
+    /// A5 idempotence: a fence-losing Cancel is a success only when the run
+    /// durably settled cancelled/interrupted; every other state (still
+    /// live, or settled completed/failed) keeps the conflict — the cancel
+    /// genuinely did not happen.
+    #[test]
     fn cancel_fence_loss_accomplished_only_for_cancel_outcomes() {
         use nexus_orchestration::run_state::{RunRecord, RunStateV1};
         let mk = |status, cancel_requested: bool| -> RunRecord {
@@ -5045,7 +5045,8 @@ mod tests {
                 .expect("winner context write");
             let mut winner_state = committed.state.clone().unwrap_or_default();
             winner_state.cancel_requested = true;
-            self.inner
+            let outcome = self
+                .inner
                 .settle_run(
                     session_id,
                     committed.state_revision,
@@ -5058,9 +5059,8 @@ mod tests {
                     nexus_orchestration::run_state::TerminalSettlementTarget::Cancelled,
                 )
                 .await
-                .expect("concurrent owner settles Cancelled after phase 1")
-                .record()
-                .clone();
+                .expect("concurrent owner settles Cancelled after phase 1");
+            assert_eq!(outcome.record().status, SessionStatus::Cancelled);
         }
     }
 
