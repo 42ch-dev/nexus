@@ -180,7 +180,7 @@ async fn consume_after_commit_is_stale() {
 /// Clone the `Arc<SqlitePool>` out of a manager so each spawned task gets
 /// its own manager handle pointing at the same DB.
 fn clone_mgr(mgr: &WorkspaceSessionManager) -> WorkspaceSessionManager {
-    WorkspaceSessionManager::new(mgr.pool())
+    mgr.clone()
 }
 
 // ── V1.58 P0 T2 (QC2 H-2 regression): symlink rejection in Modify path ────

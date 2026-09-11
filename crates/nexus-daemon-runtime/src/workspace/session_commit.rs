@@ -1,16 +1,18 @@
 //! Recoverable multi-file workspace commit (v1.188 P3 L2).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use nexus_contracts::local::orchestration::{WorkspaceChangeEntry, WorkspaceChangeOp};
 use nexus_local_db as db;
 use sha2::{Digest, Sha256};
 
+use super::bounds::{
+    validate_encoded_body, validate_entries_json_len, validate_hash_hex, validate_relative_path,
+};
 use super::commit_fs::{
-    atomic_create, atomic_delete_verified, atomic_replace_verified, backup_file, cleanup_temp,
-    decode_base64, hash_bytes, restore_preimage_verified, write_stage_file, MAX_CHANGES,
-    MAX_FILE_BYTES, MAX_TOTAL_BYTES,
+    decode_base64, hash_bytes, require_parent_exists, ScopeMutation, CREATE_FILE_MODE,
+    MAX_CHANGES, MAX_FILE_BYTES, MAX_TOTAL_BYTES,
 };
 use super::session::{
     canonicalize_workspace_root, enforce_path_boundary, SessionError, SessionId,
@@ -51,21 +53,140 @@ pub async fn recover_unsettled_locked(
     mgr: &WorkspaceSessionManager,
     workspace_root: &str,
 ) -> Result<(), SessionError> {
-    let intents = db::list_unsettled_intents(mgr.pool().as_ref(), workspace_root)
-        .await
-        .map_err(|e| SessionError::Database(e.to_string()))?;
+    let intents = list_unsettled_or_conflict(mgr, workspace_root).await?;
     for intent in intents {
         match intent.state {
             db::IntentState::RecoveryConflict => {
                 return Err(SessionError::RecoveryConflict(workspace_root.to_string()));
             }
-            db::IntentState::Applying | db::IntentState::RollingBack => {
+            db::IntentState::Applying => {
+                recover_applying_intent_locked(mgr, workspace_root, &intent).await?;
+            }
+            db::IntentState::RollingBack => {
                 rollback_intent_locked(mgr, workspace_root, &intent).await?;
             }
             _ => {}
         }
     }
     Ok(())
+}
+
+async fn list_unsettled_or_conflict(
+    mgr: &WorkspaceSessionManager,
+    workspace_root: &str,
+) -> Result<Vec<db::CommitIntentRow>, SessionError> {
+    match db::list_unsettled_intents(mgr.pool().as_ref(), workspace_root).await {
+        Ok(rows) => Ok(rows),
+        Err(db::LocalDbError::CorruptIntent { .. }) => {
+            Err(SessionError::RecoveryConflict(workspace_root.to_string()))
+        }
+        Err(e) => Err(SessionError::Database(e.to_string())),
+    }
+}
+
+async fn persist_recovery_conflict(
+    mgr: &WorkspaceSessionManager,
+    revision: &str,
+    workspace_root: &str,
+    category: &str,
+) -> Result<(), SessionError> {
+    db::update_intent_state(
+        mgr.pool().as_ref(),
+        revision,
+        db::IntentState::RecoveryConflict,
+        Some(category),
+    )
+    .await
+    .map_err(|e| SessionError::Database(e.to_string()))?;
+    Err(SessionError::RecoveryConflict(workspace_root.to_string()))
+}
+
+async fn load_recovery_session(
+    mgr: &WorkspaceSessionManager,
+    intent: &db::CommitIntentRow,
+) -> Result<db::WorkspaceSessionRow, SessionError> {
+    let row = db::get_session(mgr.pool().as_ref(), &intent.session_id)
+        .await
+        .map_err(|e| SessionError::Database(e.to_string()))?
+        .ok_or_else(|| SessionError::NotFound(SessionId(intent.session_id.clone())))?;
+    if row.claimed_by_revision.as_deref() != Some(intent.revision.as_str()) {
+        return Err(SessionError::RecoveryConflict(intent.workspace_root.clone()));
+    }
+    Ok(row)
+}
+
+async fn recover_applying_intent_locked(
+    mgr: &WorkspaceSessionManager,
+    workspace_root: &str,
+    intent: &db::CommitIntentRow,
+) -> Result<(), SessionError> {
+    if !intent.entries_metadata_valid() {
+        return persist_recovery_conflict(mgr, &intent.revision, workspace_root, "corrupt_entries").await;
+    }
+    let row = match load_recovery_session(mgr, intent).await {
+        Ok(r) => r,
+        Err(e) => {
+            if matches!(e, SessionError::RecoveryConflict(_)) {
+                let _ = persist_recovery_conflict(mgr, &intent.revision, workspace_root, "claim_mismatch").await;
+            }
+            return Err(e);
+        }
+    };
+    let canonical_root = canonicalize_workspace_root(Path::new(workspace_root)).await?;
+    let scope_dir = super::scope::scope_directory(&canonical_root, &row.relative_path)?;
+    let scope = match ScopeMutation::open(&scope_dir) {
+        Ok(s) => s,
+        Err(e) => {
+            return persist_recovery_conflict(
+                mgr,
+                &intent.revision,
+                workspace_root,
+                "scope_open_failed",
+            )
+            .await
+            .map_err(|_| SessionError::Io(e.to_string()));
+        }
+    };
+
+    let mut all_applied = true;
+    for entry in &intent.entries {
+        let applied = match entry.op.as_str() {
+            "create" | "modify" => scope
+                .hash_target(&entry.path)
+                .map(|h| Some(h) == entry.post_hash)
+                .unwrap_or(false),
+            "delete" => !scope.target_exists(&entry.path).unwrap_or(true),
+            _ => false,
+        };
+        if !applied {
+            all_applied = false;
+            break;
+        }
+    }
+
+    if all_applied {
+        let finalized = db::finalize_committed_intent(
+            mgr.pool().as_ref(),
+            &intent.revision,
+            &intent.session_id,
+        )
+        .await
+        .map_err(|e| SessionError::Database(e.to_string()))?;
+        if finalized {
+            return Ok(());
+        }
+        return persist_recovery_conflict(mgr, &intent.revision, workspace_root, "finalize_failed").await;
+    }
+
+    db::update_intent_state(
+        mgr.pool().as_ref(),
+        &intent.revision,
+        db::IntentState::RollingBack,
+        Some("applying_incomplete"),
+    )
+    .await
+    .map_err(|e| SessionError::Database(e.to_string()))?;
+    rollback_intent_locked(mgr, workspace_root, intent).await
 }
 
 /// Roll back one intent when the caller already holds [`WorkspaceSessionManager::lock_mutation`].
@@ -75,13 +196,35 @@ async fn rollback_intent_locked(
     intent: &db::CommitIntentRow,
 ) -> Result<(), SessionError> {
     if !intent.entries_metadata_valid() {
-        return Err(SessionError::RecoveryConflict(workspace_root.to_string()));
+        return persist_recovery_conflict(mgr, &intent.revision, workspace_root, "corrupt_entries").await;
     }
 
+    let row = match load_recovery_session(mgr, intent).await {
+        Ok(r) => r,
+        Err(e) => {
+            if matches!(e, SessionError::RecoveryConflict(_)) {
+                let _ = persist_recovery_conflict(mgr, &intent.revision, workspace_root, "claim_mismatch").await;
+            }
+            return Err(e);
+        }
+    };
+
     let canonical_root = canonicalize_workspace_root(Path::new(workspace_root)).await?;
-    let session_id = SessionId(intent.session_id.clone());
-    let row = mgr.validate_session(&session_id).await?;
     let scope_dir = super::scope::scope_directory(&canonical_root, &row.relative_path)?;
+    let scope = match ScopeMutation::open(&scope_dir) {
+        Ok(s) => s,
+        Err(e) => {
+            return persist_recovery_conflict(
+                mgr,
+                &intent.revision,
+                workspace_root,
+                "scope_open_failed",
+            )
+            .await
+            .map_err(|_| SessionError::Io(e.to_string()));
+        }
+    };
+
     db::update_intent_state(
         mgr.pool().as_ref(),
         &intent.revision,
@@ -93,27 +236,32 @@ async fn rollback_intent_locked(
 
     test_crash_if("during_rollback")?;
 
-    let mut temps = Vec::new();
-    for entry in &intent.entries {
-        let target = super::scope::resolve_in_scope(&scope_dir, &entry.path)?;
-        enforce_path_boundary(&target, &canonical_root)?;
-        let backup = entry
-            .backup_basename
-            .as_ref()
-            .map(|b| target.with_file_name(b));
-        if let Some(ref backup_path) = backup {
-            temps.push(backup_path.clone());
-        }
-        temps.push(target.with_file_name(&entry.stage_basename));
-        restore_preimage_verified(
-            &target,
-            backup.as_deref(),
+    for entry in intent.entries.iter().rev() {
+        enforce_path_boundary(&scope_dir.join(&entry.path), &canonical_root)?;
+        let restore = scope.restore_preimage(
+            &entry.path,
+            entry.backup_basename.as_deref(),
+            &entry.stage_basename,
             entry.pre_hash.as_deref(),
             entry.post_hash.as_deref(),
-        )
-        .map_err(|e| SessionError::Io(e.to_string()))?;
+            entry.mode,
+        );
+        if let Err(e) = restore {
+            let _ = persist_recovery_conflict(
+                mgr,
+                &intent.revision,
+                workspace_root,
+                "rollback_third_state",
+            )
+            .await;
+            return Err(SessionError::Io(e.to_string()));
+        }
+        if let Some(ref backup) = entry.backup_basename {
+            scope.cleanup_basename(&entry.path, backup);
+        }
+        scope.cleanup_basename(&entry.path, &entry.stage_basename);
     }
-    cleanup_temp(&temps);
+
     db::finalize_rolled_back_intent(
         mgr.pool().as_ref(),
         &intent.revision,
@@ -136,12 +284,7 @@ pub fn validate_manifest(changes: &[WorkspaceChangeEntry]) -> Result<(), Session
     let mut total = 0usize;
     let mut paths: Vec<String> = Vec::new();
     for change in changes {
-        if change.path.is_empty() || change.path.contains("..") {
-            return Err(SessionError::ManifestInvalid(format!(
-                "invalid path: {}",
-                change.path
-            )));
-        }
+        validate_relative_path(&change.path)?;
         for other in &paths {
             if other.starts_with(&format!("{}/", change.path))
                 || change.path.starts_with(&format!("{}/", other))
@@ -170,6 +313,7 @@ pub fn validate_manifest(changes: &[WorkspaceChangeEntry]) -> Result<(), Session
                 let content = change.content_base64.as_deref().ok_or_else(|| {
                     SessionError::ManifestInvalid("create requires contentBase64".into())
                 })?;
+                validate_encoded_body(content)?;
                 let bytes = decode_base64(content).map_err(SessionError::ManifestInvalid)?;
                 if bytes.len() > MAX_FILE_BYTES {
                     return Err(SessionError::ManifestInvalid(format!(
@@ -186,11 +330,8 @@ pub fn validate_manifest(changes: &[WorkspaceChangeEntry]) -> Result<(), Session
                 let expected = change.expected_hash.as_deref().ok_or_else(|| {
                     SessionError::ManifestInvalid("modify requires expectedHash".into())
                 })?;
-                if expected.is_empty() {
-                    return Err(SessionError::ManifestInvalid(
-                        "expectedHash must be non-empty".into(),
-                    ));
-                }
+                validate_hash_hex(expected)?;
+                validate_encoded_body(content)?;
                 let bytes = decode_base64(content).map_err(SessionError::ManifestInvalid)?;
                 if bytes.len() > MAX_FILE_BYTES {
                     return Err(SessionError::ManifestInvalid(format!(
@@ -206,11 +347,10 @@ pub fn validate_manifest(changes: &[WorkspaceChangeEntry]) -> Result<(), Session
                         "delete must not include contentBase64".into(),
                     ));
                 }
-                if change.expected_hash.as_deref().is_none_or(|h| h.is_empty()) {
-                    return Err(SessionError::ManifestInvalid(
-                        "delete requires expectedHash".into(),
-                    ));
-                }
+                let expected = change.expected_hash.as_deref().ok_or_else(|| {
+                    SessionError::ManifestInvalid("delete requires expectedHash".into())
+                })?;
+                validate_hash_hex(expected)?;
             }
         }
     }
@@ -334,74 +474,98 @@ pub async fn commit_recoverable(
 
     test_crash_if("after_intent")?;
 
+    let scope = ScopeMutation::open(&scope_dir).map_err(|e| SessionError::Io(e.to_string()))?;
     let mut entries_json: Vec<db::IntentEntryJson> = Vec::new();
-    let mut stage_paths: Vec<PathBuf> = Vec::new();
-    let mut backup_paths: Vec<PathBuf> = Vec::new();
-    let rev_tag = revision.replace("rev_", "");
+    let mut stage_basenames: Vec<(String, String)> = Vec::new();
+    let mut backup_basenames: Vec<(String, String)> = Vec::new();
 
-    for (idx, change) in changes.iter().enumerate() {
-        let target = super::scope::resolve_in_scope(&scope_dir, &change.path)?;
-        enforce_path_boundary(&target, &canonical_root)?;
-        super::commit_fs::require_parent_exists(&target)
-            .map_err(|e| SessionError::ManifestInvalid(e.to_string()))?;
-        let stage_basename = format!(".nexus-stage-{}-{}", rev_tag, idx);
-        let stage = target.with_file_name(&stage_basename);
-        let backup_basename = if target.exists() {
-            Some(format!(".nexus-backup-{}-{}", rev_tag, idx))
-        } else {
-            None
-        };
-        let backup = backup_basename
-            .as_ref()
-            .map(|b| target.with_file_name(b));
+    let staging = (|| {
+        let rev_tag = revision.replace("rev_", "");
+        for (idx, change) in changes.iter().enumerate() {
+            let target = super::scope::resolve_in_scope(&scope_dir, &change.path)?;
+            enforce_path_boundary(&target, &canonical_root)?;
+            require_parent_exists(&target).map_err(|e| SessionError::ManifestInvalid(e.to_string()))?;
+            let stage_basename = format!(".nexus-stage-{}-{}", rev_tag, idx);
+            let backup_basename = if scope.target_exists(&change.path).unwrap_or(false) {
+                Some(format!(".nexus-backup-{}-{}", rev_tag, idx))
+            } else {
+                None
+            };
 
-        let (pre_hash, post_hash) = match change.op {
-            WorkspaceChangeOp::Create => {
-                let bytes = decode_base64(change.content_base64.as_deref().unwrap_or(""))
-                    .map_err(SessionError::ManifestInvalid)?;
-                write_stage_file(&stage, &bytes).map_err(|e| SessionError::Io(e.to_string()))?;
-                stage_paths.push(stage.clone());
-                (None, Some(hash_bytes(&bytes)))
-            }
-            WorkspaceChangeOp::Modify => {
-                let bytes = decode_base64(change.content_base64.as_deref().unwrap_or(""))
-                    .map_err(SessionError::ManifestInvalid)?;
-                if let Some(ref backup_path) = backup {
-                    backup_file(&target, backup_path)
+            let (pre_hash, post_hash, mode) = match change.op {
+                WorkspaceChangeOp::Create => {
+                    let bytes = decode_base64(change.content_base64.as_deref().unwrap_or(""))
+                        .map_err(SessionError::ManifestInvalid)?;
+                    scope
+                        .write_stage(&change.path, &stage_basename, &bytes, Some(CREATE_FILE_MODE))
                         .map_err(|e| SessionError::Io(e.to_string()))?;
-                    backup_paths.push(backup_path.clone());
+                    stage_basenames.push((change.path.clone(), stage_basename.clone()));
+                    (None, Some(hash_bytes(&bytes)), Some(CREATE_FILE_MODE))
                 }
-                write_stage_file(&stage, &bytes).map_err(|e| SessionError::Io(e.to_string()))?;
-                stage_paths.push(stage.clone());
-                (change.expected_hash.clone(), Some(hash_bytes(&bytes)))
-            }
-            WorkspaceChangeOp::Delete => {
-                if let Some(ref backup_path) = backup {
-                    backup_file(&target, backup_path)
+                WorkspaceChangeOp::Modify => {
+                    let bytes = decode_base64(change.content_base64.as_deref().unwrap_or(""))
+                        .map_err(SessionError::ManifestInvalid)?;
+                    let captured_mode = if let Some(ref backup_name) = backup_basename {
+                        let mode = scope
+                            .backup_target(&change.path, backup_name)
+                            .map_err(|e| SessionError::Io(e.to_string()))?;
+                        backup_basenames.push((change.path.clone(), backup_name.clone()));
+                        mode
+                    } else {
+                        None
+                    };
+                    scope
+                        .write_stage(&change.path, &stage_basename, &bytes, captured_mode)
                         .map_err(|e| SessionError::Io(e.to_string()))?;
-                    backup_paths.push(backup_path.clone());
+                    stage_basenames.push((change.path.clone(), stage_basename.clone()));
+                    (change.expected_hash.clone(), Some(hash_bytes(&bytes)), captured_mode)
                 }
-                (change.expected_hash.clone(), None)
-            }
-        };
+                WorkspaceChangeOp::Delete => {
+                    if let Some(ref backup_name) = backup_basename {
+                        let mode = scope
+                            .backup_target(&change.path, backup_name)
+                            .map_err(|e| SessionError::Io(e.to_string()))?;
+                        backup_basenames.push((change.path.clone(), backup_name.clone()));
+                        (change.expected_hash.clone(), None, mode)
+                    } else {
+                        (change.expected_hash.clone(), None, None)
+                    }
+                }
+            };
 
-        entries_json.push(db::IntentEntryJson {
-            path: change.path.clone(),
-            op: match change.op {
-                WorkspaceChangeOp::Create => "create".to_string(),
-                WorkspaceChangeOp::Modify => "modify".to_string(),
-                WorkspaceChangeOp::Delete => "delete".to_string(),
-            },
-            pre_hash,
-            post_hash,
-            stage_basename,
-            backup_basename,
-            mode: None,
-        });
+            entries_json.push(db::IntentEntryJson {
+                path: change.path.clone(),
+                op: match change.op {
+                    WorkspaceChangeOp::Create => "create".to_string(),
+                    WorkspaceChangeOp::Modify => "modify".to_string(),
+                    WorkspaceChangeOp::Delete => "delete".to_string(),
+                },
+                pre_hash,
+                post_hash,
+                stage_basename,
+                backup_basename,
+                mode,
+            });
+        }
+        Ok(())
+    })();
+
+    if let Err(e) = staging {
+        cleanup_scoped_material(&scope, &stage_basenames, &backup_basenames);
+        let _ = db::release_session_claim(mgr.pool().as_ref(), &session_id.to_string(), &revision).await;
+        let _ = db::update_intent_state(
+            mgr.pool().as_ref(),
+            &revision,
+            db::IntentState::RollingBack,
+            Some("staging_failed"),
+        )
+        .await;
+        return Err(e);
     }
 
     let entries_serialized =
         serde_json::to_string(&entries_json).map_err(|e| SessionError::Database(e.to_string()))?;
+    validate_entries_json_len(&entries_serialized)?;
     sqlx::query("UPDATE workspace_commit_intents SET entries_json = ? WHERE revision = ?")
         .bind(&entries_serialized)
         .bind(&revision)
@@ -412,18 +576,16 @@ pub async fn commit_recoverable(
     test_crash_if("after_entries_persisted")?;
 
     for (idx, change) in changes.iter().enumerate() {
-        let target = super::scope::resolve_in_scope(&scope_dir, &change.path)?;
-        let stage = target.with_file_name(&entries_json[idx].stage_basename);
         let meta = &entries_json[idx];
         let result = match change.op {
-            WorkspaceChangeOp::Create => atomic_create(&target, &stage),
-            WorkspaceChangeOp::Modify => atomic_replace_verified(
-                &target,
-                &stage,
+            WorkspaceChangeOp::Create => scope.atomic_create(&change.path, &meta.stage_basename),
+            WorkspaceChangeOp::Modify => scope.atomic_replace_verified(
+                &change.path,
+                &meta.stage_basename,
                 meta.pre_hash.as_deref().unwrap_or(""),
             ),
-            WorkspaceChangeOp::Delete => atomic_delete_verified(
-                &target,
+            WorkspaceChangeOp::Delete => scope.atomic_delete_verified(
+                &change.path,
                 meta.pre_hash.as_deref().unwrap_or(""),
             ),
         };
@@ -440,10 +602,9 @@ pub async fn commit_recoverable(
                 .await
                 .map_err(|db_err| SessionError::Database(db_err.to_string()))?
             {
-                rollback_intent_locked(mgr, &workspace_root, &intent).await?;
+                let _ = rollback_intent_locked(mgr, &workspace_root, &intent).await;
             }
-            cleanup_temp(&stage_paths);
-            cleanup_temp(&backup_paths);
+            cleanup_scoped_material(&scope, &stage_basenames, &backup_basenames);
             return Err(SessionError::Io(e.to_string()));
         }
         test_crash_if("after_file_apply")?;
@@ -451,8 +612,7 @@ pub async fn commit_recoverable(
 
     test_crash_if("before_finalize")?;
 
-    cleanup_temp(&stage_paths);
-    cleanup_temp(&backup_paths);
+    cleanup_scoped_material(&scope, &stage_basenames, &backup_basenames);
 
     let finalized = db::finalize_committed_intent(
         mgr.pool().as_ref(),
@@ -478,20 +638,51 @@ pub async fn commit_recoverable(
     })
 }
 
+fn cleanup_scoped_material(
+    scope: &ScopeMutation,
+    stages: &[(String, String)],
+    backups: &[(String, String)],
+) {
+    for (path, basename) in backups {
+        scope.cleanup_basename(path, basename);
+    }
+    for (path, basename) in stages {
+        scope.cleanup_basename(path, basename);
+    }
+}
+
 /// Durable commit on an `Arc` manager; retains ownership through caller cancellation.
 pub async fn commit_recoverable_owned(
     mgr: Arc<WorkspaceSessionManager>,
     session_id: SessionId,
     changes: Vec<WorkspaceChangeEntry>,
 ) -> Result<CommitOutcome, SessionError> {
-    commit_recoverable(&mgr, &session_id, &changes).await
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let mgr2 = Arc::clone(&mgr);
+    let sid = session_id.clone();
+    let worker = tokio::spawn(async move {
+        let result = commit_recoverable(&mgr2, &sid, &changes).await;
+        let _ = tx.send(result);
+    });
+    let retained = tokio::spawn(async move {
+        let _ = worker.await;
+    });
+    mgr.register_commit_owner(retained);
+    match rx.await {
+        Ok(result) => result,
+        Err(_) => Err(SessionError::Internal("commit owner channel closed".into())),
+    }
 }
 
 pub async fn startup_recovery_all(mgr: &WorkspaceSessionManager) -> Result<(), SessionError> {
     let _guard = mgr.lock_mutation().await;
-    let intents = db::list_all_unsettled_intents(mgr.pool().as_ref())
-        .await
-        .map_err(|e| SessionError::Database(e.to_string()))?;
+    let intents = match db::list_all_unsettled_intents(mgr.pool().as_ref()).await {
+        Ok(rows) => rows,
+        Err(db::LocalDbError::CorruptIntent { workspace_root, .. }) => {
+            return Err(SessionError::RecoveryConflict(workspace_root));
+        }
+        Err(e) => return Err(SessionError::Database(e.to_string())),
+    };
     for intent in intents {
         if intent.state == db::IntentState::RecoveryConflict {
             return Err(SessionError::RecoveryConflict(intent.workspace_root.clone()));

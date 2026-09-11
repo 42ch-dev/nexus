@@ -35,7 +35,7 @@ impl Capability for WorkspaceOpen {
     }
 
     fn output_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"sessionId":{"type":"string"},"snapshot":{"type":"object","properties":{"workspaceRoot":{"type":"string"},"path":{"type":"string"},"existed":{"type":"boolean"},"fileHashes":{"type":"object"}},"required":["workspaceRoot","path","existed"]}},"required":["sessionId","snapshot"],"additionalProperties":false}"#
+        r#"{"type":"object","properties":{"sessionId":{"type":"string"},"snapshot":{"type":"object","properties":{"workspaceRoot":{"type":"string"},"path":{"type":"string"},"existed":{"type":"boolean"},"fileHashes":{"type":"object","additionalProperties":{"type":"string"}}},"required":["workspaceRoot","path","existed","fileHashes"],"additionalProperties":false}},"required":["sessionId","snapshot"],"additionalProperties":false}"#
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
@@ -76,7 +76,7 @@ impl Capability for WorkspaceCommit {
     }
 
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"sessionId":{"type":"string"},"changes":{"type":"array"}},"required":["sessionId","changes"],"additionalProperties":false}"#
+        r#"{"type":"object","properties":{"sessionId":{"type":"string"},"changes":{"type":"array","maxItems":128,"items":{"type":"object","properties":{"path":{"type":"string","maxLength":4096},"op":{"type":"string","enum":["create","modify","delete"]},"expectedHash":{"type":"string","maxLength":64},"contentBase64":{"type":"string","maxLength":1398104}},"required":["path","op"],"additionalProperties":false}}},"required":["sessionId","changes"],"additionalProperties":false}"#
     }
 
     fn output_schema(&self) -> &'static str {

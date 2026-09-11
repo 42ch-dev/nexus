@@ -264,19 +264,90 @@ pub async fn release_session_claim(
 }
 
 
+async fn mark_intent_recovery_conflict(
+    pool: &SqlitePool,
+    revision: &str,
+    category: &str,
+) -> Result<(), LocalDbError> {
+    sqlx::query(
+        "UPDATE workspace_commit_intents SET state = 'recovery_conflict', error_category = ?,          updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE revision = ?",
+    )
+    .bind(category)
+    .bind(revision)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+fn validate_intent_entry(entry: &IntentEntryJson) -> Result<(), LocalDbError> {
+    if entry.path.is_empty() || entry.path.len() > 4096 {
+        return Err(LocalDbError::ValidationError("invalid intent entry path".into()));
+    }
+    if entry.path.contains("..") || entry.path.starts_with('/') {
+        return Err(LocalDbError::ValidationError("intent entry path must be relative".into()));
+    }
+    match entry.op.as_str() {
+        "create" => {
+            if entry.pre_hash.is_some() {
+                return Err(LocalDbError::ValidationError("create entry must not have pre_hash".into()));
+            }
+            if entry.post_hash.as_deref().is_none_or(|h| h.len() != 64) {
+                return Err(LocalDbError::ValidationError("create entry requires post_hash".into()));
+            }
+        }
+        "modify" => {
+            if entry.pre_hash.as_deref().is_none_or(|h| h.len() != 64)
+                || entry.post_hash.as_deref().is_none_or(|h| h.len() != 64)
+            {
+                return Err(LocalDbError::ValidationError("modify entry requires pre/post hash".into()));
+            }
+        }
+        "delete" => {
+            if entry.pre_hash.as_deref().is_none_or(|h| h.len() != 64) || entry.post_hash.is_some() {
+                return Err(LocalDbError::ValidationError("delete entry requires pre_hash only".into()));
+            }
+        }
+        other => {
+            return Err(LocalDbError::ValidationError(format!("unknown intent op: {other}")));
+        }
+    }
+    for hash in entry.pre_hash.iter().chain(entry.post_hash.iter()) {
+        if !hash.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')) || hash.len() != 64 {
+            return Err(LocalDbError::ValidationError("intent hash must be lowercase hex".into()));
+        }
+    }
+    if entry.stage_basename.is_empty()
+        || entry.stage_basename.len() > 256
+        || !entry.stage_basename.starts_with(".nexus-")
+        || entry.stage_basename.contains('/')
+    {
+        return Err(LocalDbError::ValidationError("invalid stage basename".into()));
+    }
+    if let Some(ref backup) = entry.backup_basename {
+        if backup.is_empty()
+            || backup.len() > 256
+            || !backup.starts_with(".nexus-")
+            || backup.contains('/')
+        {
+            return Err(LocalDbError::ValidationError("invalid backup basename".into()));
+        }
+    }
+    Ok(())
+}
+
 async fn decode_intent_rows(pool: &SqlitePool, rows: Vec<IntentRowRaw>) -> Result<Vec<CommitIntentRow>, LocalDbError> {
     let mut out = Vec::new();
     for raw in rows {
         let revision = raw.revision.clone();
+        let workspace_root = raw.workspace_root.clone();
         match raw.try_into_row() {
             Ok(row) => out.push(row),
             Err(_) => {
-                let _ = sqlx::query(
-                    "UPDATE workspace_commit_intents SET state = 'recovery_conflict', error_category = 'corrupt_entries_json',                      updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE revision = ?",
-                )
-                .bind(&revision)
-                .execute(pool)
-                .await;
+                mark_intent_recovery_conflict(pool, &revision, "corrupt_entries_json").await?;
+                return Err(LocalDbError::CorruptIntent {
+                    revision,
+                    workspace_root,
+                });
             }
         }
     }
@@ -331,12 +402,18 @@ impl IntentRowRaw {
                 )))));
             }
         };
+        for entry in &entries {
+            validate_intent_entry(entry)?;
+        }
+        let state = IntentState::parse(&self.state).ok_or_else(|| {
+            LocalDbError::ValidationError(format!("unknown intent state: {}", self.state))
+        })?;
         Ok(CommitIntentRow {
             session_id: self.session_id,
             workspace_root: self.workspace_root,
             revision: self.revision,
             request_digest: self.request_digest,
-            state: IntentState::parse(&self.state).unwrap_or(IntentState::RecoveryConflict),
+            state,
             entries,
             error_category: self.error_category,
             entries_json_raw: self.entries_json,

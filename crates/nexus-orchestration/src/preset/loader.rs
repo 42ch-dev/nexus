@@ -2350,6 +2350,8 @@ states:
     enter:
       - kind: capability
         name: workspace.open
+        args:
+          path: .
     exit_when: { kind: manual }
     next: b
   - id: b

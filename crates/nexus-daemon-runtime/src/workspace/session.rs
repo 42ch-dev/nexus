@@ -320,11 +320,27 @@ pub struct RecoverableCommitConfig {
     pub db_path: PathBuf,
     pub mutation_guard: Arc<tokio::sync::Mutex<()>>,
     pub authority_lease: Arc<WorkspaceAuthorityLease>,
+    /// Retained commit operation owner (survives caller cancellation).
+    pub commit_owner: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 pub struct WorkspaceSessionManager {
     pool: Arc<SqlitePool>,
     recoverable: Option<RecoverableCommitConfig>,
+}
+
+impl Clone for WorkspaceSessionManager {
+    fn clone(&self) -> Self {
+        Self {
+            pool: Arc::clone(&self.pool),
+            recoverable: self.recoverable.as_ref().map(|cfg| RecoverableCommitConfig {
+                db_path: cfg.db_path.clone(),
+                mutation_guard: Arc::clone(&cfg.mutation_guard),
+                authority_lease: Arc::clone(&cfg.authority_lease),
+                commit_owner: Arc::clone(&cfg.commit_owner),
+            }),
+        }
+    }
 }
 
 impl WorkspaceSessionManager {
@@ -347,6 +363,7 @@ impl WorkspaceSessionManager {
                 db_path,
                 mutation_guard: Arc::new(tokio::sync::Mutex::new(())),
                 authority_lease,
+                commit_owner: Arc::new(tokio::sync::Mutex::new(None)),
             }),
         })
     }
@@ -362,6 +379,17 @@ impl WorkspaceSessionManager {
         } else {
             static FALLBACK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
             FALLBACK.lock().await
+        }
+    }
+
+    /// Register the retained commit operation owner spawned for caller cancellation safety.
+    pub fn register_commit_owner(&self, handle: tokio::task::JoinHandle<()>) {
+        if let Some(cfg) = &self.recoverable {
+            let slot = Arc::clone(&cfg.commit_owner);
+            tokio::spawn(async move {
+                let mut guard = slot.lock().await;
+                *guard = Some(handle);
+            });
         }
     }
 
