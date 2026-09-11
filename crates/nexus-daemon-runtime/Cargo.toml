@@ -88,7 +88,7 @@ rustls = { version = "0.23", features = ["aws-lc-rs"] }
 rcgen = "0.13"
 rustls-pemfile = "2"
 # V1.92 P0: parse persisted certificate SANs to detect bind-host mismatch.
-x509-parser = "0.17"
+x509-parser = "0.18"
 # V1.127 P1 greploop: probe native CLI presence at boot before register_provider.
 which = { workspace = true }
 # V1.174 P0 T1 (AR-57/AR-61): peer-tools WS transport + conformance suite.
