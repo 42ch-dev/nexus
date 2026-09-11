@@ -13,8 +13,8 @@ EOF so the SDK close ladder completes fast).
 
 Behavior knobs (env vars):
 - SCENARIO=happy|tool_call|malformed|cancel  (default: happy)
-  - happy:     assistant/message -> turn/end(stop) -> idle
-  - tool_call: assistant/message -> tool/call event -> turn/end(stop) ->
+  - happy:     assistant/message -> turn/end(completed) -> idle
+  - tool_call: assistant/message -> tool/call event -> turn/end(completed) ->
                idle (the SDK collects the tool event as raw noise; the
                normalized surface never surfaces tool calls — AR-6)
   - malformed: assistant/message -> turn/end WITHOUT data.reason.kind ->
@@ -116,7 +116,7 @@ def handle_request(req):
         else:
             session_event(session_id, {
                 "type": "turn/end",
-                "data": {"reason": {"kind": "stop"}},
+                "data": {"reason": {"kind": "completed"}},
             })
         session_status(session_id, "idle")
         return

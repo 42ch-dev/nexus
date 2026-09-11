@@ -262,7 +262,7 @@ async fn run_daemon_skips_native_providers_when_clis_absent() {
 }
 
 /// dsh env-route variant (PD-4): with `dsh-jsonrpc-agent` NOT on PATH but
-/// `DSH_RUNTIME_BIN` set, the daemon registers `dsh-native` (`runtime_bin`
+/// `DSH_RUNTIME_BIN` set, the daemon registers `dsh-native` (`dsh_bin`
 /// left unset — the SDK resolves the env var itself) while codex/claude
 /// stay unregistered.
 #[tokio::test]
