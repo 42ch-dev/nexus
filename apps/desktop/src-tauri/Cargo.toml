@@ -36,7 +36,7 @@ keyring = "4"
 # Home-directory + config resolution for the workspace-root path guard (§5 #8).
 # Mirrors the daemon's workspace_root source (`apps/nexus42/src/config.rs`):
 # `~/.nexus42/config.toml` → `workspace_path`.
-dirs = "5"
+dirs = "6"
 toml = "0.8"
 toml_edit = "0.22"
 # The standalone opener engine (same crate tauri-plugin-opener wraps). Used by
