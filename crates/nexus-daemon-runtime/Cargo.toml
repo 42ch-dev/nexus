@@ -131,7 +131,7 @@ spoke-operations = { workspace = true }
 axum-test = "15"
 graph-flow = { version = "=0.8.0", default-features = false }
 nexus-orchestration = { path = "../nexus-orchestration" }
-serial_test = "3"
+serial_test = "4"
 criterion = { version = "0.8", features = ["html_reports"] }
 tokio-rustls = "0.26"
 # `wat` compiles WebAssembly text → binary for integration tests that exercise
