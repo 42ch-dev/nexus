@@ -94,7 +94,7 @@ pub async fn get_timeline_overview(
     );
 
     // SAFETY: dynamic SQL — cursor condition is constructed at runtime.
-    let mut query = sqlx::query_as::<_, WorldOverviewRow>(&sql);
+    let mut query = sqlx::query_as::<_, WorldOverviewRow>(sqlx::AssertSqlSafe(&sql));
     if let Some(ref cursor_world_id) = bind_value {
         query = query.bind(cursor_world_id);
     }
