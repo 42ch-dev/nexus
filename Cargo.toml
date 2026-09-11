@@ -93,7 +93,7 @@ tokio-util = { version = "0.7", features = ["codec"] }
 hyper = "1"
 hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
-toml = "0.8"
+toml = "0.9"
 statig = { version = "0.3", features = ["async"] }
 futures-util = "0.3"
 tokio-stream = "0.1"

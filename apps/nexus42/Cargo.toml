@@ -131,7 +131,7 @@ tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
-toml = "0.8"
+toml = "0.9"
 toml_edit = "0.25"
 reqwest = { workspace = true }
 sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"] }
