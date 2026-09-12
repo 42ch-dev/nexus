@@ -144,23 +144,20 @@ impl DbPool {
         db_path: &Path,
         config: PoolConfig,
     ) -> Result<Self, nexus_local_db::LocalDbError> {
-        let url = format!("sqlite://{}?mode=rwc", db_path.display());
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(config.max_connections)
-            .acquire_timeout(config.timeout)
-            .connect(&url)
-            .await
-            .map_err(nexus_local_db::LocalDbError::from)?;
-        // SAFETY: PRAGMA statement — no table schema to validate against.
-        sqlx::query("PRAGMA journal_mode = WAL")
-            .execute(&pool)
-            .await?;
-        // SAFETY: PRAGMA statement — no table schema to validate against.
-        sqlx::query("PRAGMA foreign_keys = ON")
-            .execute(&pool)
-            .await?;
+        let guarded = nexus_local_db::writer_protocol::init_engine_pool(
+            db_path,
+            nexus_local_db::writer_protocol::BOOTSTRAP_CREATOR_ID,
+            nexus_local_db::writer_protocol::GuardedPoolOptions {
+                max_connections: config.max_connections,
+                acquire_timeout: Some(config.timeout),
+            },
+        )
+        .await?;
+        // The engine guard is retained for the process by the guarded factory,
+        // so the pool stays admitted while the owner lives; the daemon's
+        // lifetime is the owner's lifetime.
         Ok(Self {
-            pool,
+            pool: guarded.clone_pool(),
             max_connections: config.max_connections,
         })
     }
