@@ -1,17 +1,31 @@
 //! Recoverable workspace commit filesystem primitives (v1.188 P3 L2).
 //!
-//! Every workspace-relative mutation walks the scope directory component by
-//! component with `openat(..., O_DIRECTORY|O_NOFOLLOW)`, so no path component
-//! can be swapped for a symlink between resolution and use. The preimage
-//! check and the mutating syscall (`renameat` / `unlinkat` / `linkat`) run
-//! against the SAME directory descriptor, and the result is re-verified under
-//! that descriptor, so a raced path swap is detected rather than accepted.
+//! # Authority model
 //!
-//! External writers are not excluded — OCC detects third-state bytes at the
-//! mutation boundary and surfaces them as a typed error.
+//! Every workspace-relative path is walked component by component with
+//! `openat(..., O_DIRECTORY|O_NOFOLLOW)` from the canonical root, so no path
+//! component can be swapped for a symlink between resolution and use. Nothing
+//! is resolved by joining an untrusted path onto a trusted prefix.
+//!
+//! # Compare-and-swap at the mutation boundary
+//!
+//! A preimage hash read followed by a separate `rename`/`unlink` cannot detect
+//! an external writer landing in the gap. Instead every mutation CAPTURES the
+//! displaced bytes atomically and verifies them:
+//!
+//! * `replace` — `renameat(target -> displaced)` atomically moves whatever
+//!   occupies the target name aside, the displaced bytes are hashed, and the
+//!   staged bytes are installed with `linkat` (which fails `EEXIST` rather
+//!   than clobbering). A mismatch restores the captured file and reports a
+//!   third-state conflict; a capture by an external writer during install
+//!   leaves both artifacts in place as evidence.
+//! * `delete` — the same capture/verify/restore cycle, never hash-then-unlink.
+//! * `create` — `linkat` no-clobber install only.
+//!
+//! Non-Unix platforms REFUSE every mutation with `ErrorKind::Unsupported`:
+//! there is no joined-path mutating fallback anywhere in this module.
 
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use sha2::{Digest, Sha256};
@@ -26,6 +40,19 @@ pub const MAX_CHANGES: usize = 128;
 /// Owner-read/write for newly created workspace files.
 pub const CREATE_FILE_MODE: u32 = 0o600;
 
+/// Name holding the bytes displaced by a mutation, derived from the stage name.
+fn displaced_basename(stage_basename: &str) -> String {
+    format!("{stage_basename}-displaced")
+}
+
+/// Name used to stage a rollback restore, derived from the stage name.
+///
+/// Derived (never the commit stage name) so a still-present commit stage is
+/// never clobbered while evidence of the failed apply is preserved.
+fn restore_basename(stage_basename: &str) -> String {
+    format!("{stage_basename}-rb")
+}
+
 /// Scope-bound mutation handle over a verified directory descriptor.
 pub struct ScopeMutation {
     scope_path: PathBuf,
@@ -33,6 +60,107 @@ pub struct ScopeMutation {
     scope: unix_dir::DirFd,
 }
 
+#[cfg(not(unix))]
+mod unsupported {
+    use std::io;
+
+    /// Refuse a workspace mutation on a platform without descriptor-relative
+    /// atomic primitives. Failing closed is the only safe option: there is no
+    /// path-joining fallback that could preserve the CAS contract.
+    pub fn refuse<T>() -> io::Result<T> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "workspace commit requires a Unix platform for atomic \
+             descriptor-relative mutation",
+        ))
+    }
+}
+
+#[cfg(not(unix))]
+impl ScopeMutation {
+    /// Always refuses on non-Unix platforms.
+    pub fn open(_canonical_root: &Path, _scope_relative: &str) -> io::Result<Self> {
+        unsupported::refuse()
+    }
+
+    /// The resolved scope directory (diagnostics only).
+    #[must_use]
+    pub fn scope_path(&self) -> &Path {
+        &self.scope_path
+    }
+
+    pub fn target_exists(&self, _rel_path: &str) -> io::Result<bool> {
+        unsupported::refuse()
+    }
+
+    pub fn hash_target(&self, _rel_path: &str) -> io::Result<String> {
+        unsupported::refuse()
+    }
+
+    pub fn write_stage(
+        &self,
+        _rel_path: &str,
+        _stage_basename: &str,
+        _bytes: &[u8],
+        _mode: Option<u32>,
+    ) -> io::Result<()> {
+        unsupported::refuse()
+    }
+
+    pub fn backup_target(
+        &self,
+        _rel_path: &str,
+        _backup_basename: &str,
+    ) -> io::Result<Option<u32>> {
+        unsupported::refuse()
+    }
+
+    pub fn atomic_create(&self, _rel_path: &str, _stage_basename: &str) -> io::Result<()> {
+        unsupported::refuse()
+    }
+
+    pub fn atomic_replace_verified(
+        &self,
+        _rel_path: &str,
+        _stage_basename: &str,
+        _expected_hash: &str,
+    ) -> io::Result<()> {
+        unsupported::refuse()
+    }
+
+    pub fn atomic_delete_verified(
+        &self,
+        _rel_path: &str,
+        _expected_hash: &str,
+        _naming_basename: &str,
+    ) -> io::Result<()> {
+        unsupported::refuse()
+    }
+
+    pub fn restore_preimage(
+        &self,
+        _rel_path: &str,
+        _backup_basename: Option<&str>,
+        _stage_basename: &str,
+        _pre_hash: Option<&str>,
+        _post_hash: Option<&str>,
+        _mode: Option<u32>,
+    ) -> io::Result<()> {
+        unsupported::refuse()
+    }
+
+    pub fn cleanup_basename(&self, _rel_path: &str, _basename: &str) {}
+
+    pub fn cleanup_entry(
+        &self,
+        _rel_path: &str,
+        _stage_basename: &str,
+        _backup_basename: Option<&str>,
+    ) {
+    }
+}
+
+#[cfg(unix)]
 impl ScopeMutation {
     /// Open the workspace scope.
     ///
@@ -46,27 +174,14 @@ impl ScopeMutation {
         } else {
             canonical_root.join(scope_relative)
         };
-        #[cfg(unix)]
-        {
-            let root = unix_dir::DirFd::open(canonical_root)?;
-            let components = if scope_relative.is_empty() {
-                Vec::new()
-            } else {
-                split_relative(scope_relative)?
-            };
-            let scope = unix_dir::walk_scope(&root, &components)?;
-            Ok(Self { scope_path, scope })
-        }
-        #[cfg(not(unix))]
-        {
-            if !scope_path.is_dir() {
-                return Err(io::Error::new(
-                    io::ErrorKind::NotFound,
-                    "scope directory must exist",
-                ));
-            }
-            Ok(Self { scope_path })
-        }
+        let root = unix_dir::DirFd::open(canonical_root)?;
+        let components = if scope_relative.is_empty() {
+            Vec::new()
+        } else {
+            split_relative(scope_relative)?
+        };
+        let scope = unix_dir::walk_scope(&root, &components)?;
+        Ok(Self { scope_path, scope })
     }
 
     /// The resolved scope directory (diagnostics only).
@@ -114,7 +229,7 @@ impl ScopeMutation {
         self.with_parent(rel_path, |parent, name| parent.atomic_create(name, stage_basename))
     }
 
-    /// Replace only when the current hash matches `expected_hash`.
+    /// Replace via atomic capture + verify + no-clobber install.
     pub fn atomic_replace_verified(
         &self,
         rel_path: &str,
@@ -126,10 +241,18 @@ impl ScopeMutation {
         })
     }
 
-    /// Delete only when the current hash matches `expected_hash`.
-    pub fn atomic_delete_verified(&self, rel_path: &str, expected_hash: &str) -> io::Result<()> {
+    /// Delete via atomic capture + verify (never hash-then-unlink).
+    ///
+    /// `naming_basename` only names the private capture artifact; it is the
+    /// entry's stage basename, which the delete op never creates.
+    pub fn atomic_delete_verified(
+        &self,
+        rel_path: &str,
+        expected_hash: &str,
+        naming_basename: &str,
+    ) -> io::Result<()> {
         self.with_parent(rel_path, |parent, name| {
-            parent.atomic_delete_verified(name, expected_hash)
+            parent.atomic_delete_verified(name, expected_hash, naming_basename)
         })
     }
 
@@ -160,173 +283,32 @@ impl ScopeMutation {
         let _ = self.with_parent(rel_path, |parent, _| parent.unlink(basename));
     }
 
+    /// Remove every artifact derived from one entry (stage, backup, and the
+    /// capture/restore siblings).
+    ///
+    /// Called only once an intent has SETTLED: while an intent is unsettled
+    /// these files are the recovery evidence and must survive.
+    pub fn cleanup_entry(
+        &self,
+        rel_path: &str,
+        stage_basename: &str,
+        backup_basename: Option<&str>,
+    ) {
+        if let Some(backup) = backup_basename {
+            self.cleanup_basename(rel_path, backup);
+        }
+        self.cleanup_basename(rel_path, &displaced_basename(stage_basename));
+        self.cleanup_basename(rel_path, &restore_basename(stage_basename));
+        self.cleanup_basename(rel_path, stage_basename);
+    }
+
     fn with_parent<T, F>(&self, rel_path: &str, f: F) -> io::Result<T>
     where
-        F: FnOnce(&ParentDir, &str) -> io::Result<T>,
+        F: FnOnce(&unix_dir::DirFd, &str) -> io::Result<T>,
     {
-        let (parent, name) = self.resolve_parent(rel_path)?;
-        f(&parent, &name)
-    }
-
-    fn resolve_parent(&self, rel_path: &str) -> io::Result<(ParentDir, String)> {
         let components = split_relative(rel_path)?;
-        #[cfg(unix)]
-        {
-            let (dir, name) = unix_dir::walk_child(&self.scope, &components)?;
-            Ok((ParentDir::Unix(dir), name))
-        }
-        #[cfg(not(unix))]
-        {
-            let parent_path = if components.len() == 1 {
-                self.scope_path.clone()
-            } else {
-                self.scope_path.join(components[..components.len() - 1].join("/"))
-            };
-            let name = components.last().cloned().unwrap();
-            Ok((ParentDir::Path(parent_path), name))
-        }
-    }
-}
-
-/// Basename used for the rollback restore stage.
-///
-/// Derived (never the commit stage name) so a still-present commit stage is
-/// never clobbered while evidence of the failed apply is preserved.
-fn restore_basename(stage_basename: &str) -> String {
-    format!("{stage_basename}-rb")
-}
-
-enum ParentDir {
-    #[cfg(unix)]
-    Unix(unix_dir::DirFd),
-    #[cfg(not(unix))]
-    Path(PathBuf),
-}
-
-impl ParentDir {
-    fn exists(&self, name: &str) -> io::Result<bool> {
-        match self {
-            #[cfg(unix)]
-            Self::Unix(dir) => dir.exists(name),
-            #[cfg(not(unix))]
-            Self::Path(path) => Ok(path.join(name).exists()),
-        }
-    }
-
-    fn hash_file(&self, name: &str) -> io::Result<String> {
-        match self {
-            #[cfg(unix)]
-            Self::Unix(dir) => dir.hash_file(name),
-            #[cfg(not(unix))]
-            Self::Path(path) => hash_file(&path.join(name)),
-        }
-    }
-
-    fn write_stage_file(&self, name: &str, bytes: &[u8], mode: Option<u32>) -> io::Result<()> {
-        match self {
-            #[cfg(unix)]
-            Self::Unix(dir) => dir.write_stage_file(name, bytes, mode),
-            #[cfg(not(unix))]
-            Self::Path(path) => {
-                let stage = path.join(name);
-                write_stage_file_with_mode(&stage, bytes, mode)
-            }
-        }
-    }
-
-    fn backup_file(&self, name: &str, backup_basename: &str) -> io::Result<Option<u32>> {
-        match self {
-            #[cfg(unix)]
-            Self::Unix(dir) => dir.backup_file(name, backup_basename),
-            #[cfg(not(unix))]
-            Self::Path(path) => {
-                let src = path.join(name);
-                let backup = path.join(backup_basename);
-                let mode = read_file_mode(&src);
-                backup_file(&src, &backup)?;
-                Ok(mode)
-            }
-        }
-    }
-
-    fn atomic_create(&self, name: &str, stage_basename: &str) -> io::Result<()> {
-        match self {
-            #[cfg(unix)]
-            Self::Unix(dir) => dir.atomic_create(name, stage_basename),
-            #[cfg(not(unix))]
-            Self::Path(path) => {
-                atomic_create_noclobber(&path.join(stage_basename), &path.join(name))
-            }
-        }
-    }
-
-    fn atomic_replace_verified(
-        &self,
-        name: &str,
-        stage_basename: &str,
-        expected_hash: &str,
-    ) -> io::Result<()> {
-        match self {
-            #[cfg(unix)]
-            Self::Unix(dir) => dir.atomic_replace_verified(name, stage_basename, expected_hash),
-            #[cfg(not(unix))]
-            Self::Path(path) => atomic_replace_verified(
-                &path.join(name),
-                &path.join(stage_basename),
-                expected_hash,
-            ),
-        }
-    }
-
-    fn atomic_delete_verified(&self, name: &str, expected_hash: &str) -> io::Result<()> {
-        match self {
-            #[cfg(unix)]
-            Self::Unix(dir) => dir.atomic_delete_verified(name, expected_hash),
-            #[cfg(not(unix))]
-            Self::Path(path) => atomic_delete_verified(&path.join(name), expected_hash),
-        }
-    }
-
-    fn restore_preimage(
-        &self,
-        name: &str,
-        backup_basename: Option<&str>,
-        stage_basename: &str,
-        pre_hash: Option<&str>,
-        post_hash: Option<&str>,
-        mode: Option<u32>,
-    ) -> io::Result<()> {
-        match self {
-            #[cfg(unix)]
-            Self::Unix(dir) => {
-                dir.restore_preimage(name, backup_basename, stage_basename, pre_hash, post_hash, mode)
-            }
-            #[cfg(not(unix))]
-            Self::Path(path) => {
-                let target = path.join(name);
-                let backup = backup_basename.map(|b| path.join(b));
-                restore_preimage_verified(
-                    &target,
-                    backup.as_deref(),
-                    pre_hash,
-                    post_hash,
-                    mode,
-                    &restore_basename(stage_basename),
-                )
-            }
-        }
-    }
-
-    fn unlink(&self, name: &str) -> io::Result<()> {
-        match self {
-            #[cfg(unix)]
-            Self::Unix(dir) => dir.unlink(name),
-            #[cfg(not(unix))]
-            Self::Path(path) => {
-                let _ = fs::remove_file(path.join(name));
-                Ok(())
-            }
-        }
+        let (parent, name) = unix_dir::walk_child(&self.scope, &components)?;
+        f(&parent, &name)
     }
 }
 
@@ -367,7 +349,7 @@ fn split_relative(rel_path: &str) -> io::Result<Vec<String>> {
 
 #[cfg(unix)]
 mod unix_dir {
-    use super::CREATE_FILE_MODE;
+    use super::{displaced_basename, restore_basename, CREATE_FILE_MODE};
     use nix::fcntl::{openat, renameat, AtFlags, OFlag};
     use nix::sys::stat::Mode;
     use nix::unistd::{linkat, unlinkat};
@@ -471,67 +453,94 @@ mod unix_dir {
         /// Atomic no-clobber create: `linkat` fails with `EEXIST` when the
         /// target name is taken, so there is no check-then-rename window.
         pub fn atomic_create(&self, target: &str, stage_basename: &str) -> io::Result<()> {
-            linkat(
-                Some(self.raw_fd()),
-                stage_basename,
-                Some(self.raw_fd()),
-                target,
-                AtFlags::empty(),
-            )
-            .map_err(|err| match err {
-                nix::errno::Errno::EEXIST => {
-                    io::Error::new(io::ErrorKind::AlreadyExists, "target exists")
-                }
-                other => errno_io(other),
-            })?;
+            let staged = self.hash_file(stage_basename)?;
+            self.link_no_clobber(stage_basename, target, "create")?;
             self.unlink(stage_basename)?;
-            self.sync()?;
-            Ok(())
+            let installed = self.hash_file(target)?;
+            if installed != staged {
+                return Err(third_state("create", "installed bytes differ from staged"));
+            }
+            self.sync()
         }
 
-        /// Replace only when the target currently carries `expected_hash`.
+        /// Replace through an atomic capture + verify + no-clobber install.
         ///
-        /// The preimage check, the `renameat`, and the post-rename
-        /// re-verification all run against THIS directory descriptor, so a
-        /// raced path swap is detected instead of accepted.
+        /// The capture (`renameat`) and the install (`linkat`) both run
+        /// against THIS directory descriptor, and the displaced bytes are
+        /// verified, so an external writer landing between the preimage read
+        /// and the mutation is detected instead of silently overwritten.
         pub fn atomic_replace_verified(
             &self,
             target: &str,
             stage_basename: &str,
             expected_hash: &str,
         ) -> io::Result<()> {
-            let current = self.hash_file(target)?;
-            if current != expected_hash {
-                return Err(third_state("replace", "preimage mismatch"));
-            }
             let staged = self.hash_file(stage_basename)?;
-            renameat(
-                Some(self.raw_fd()),
-                stage_basename,
-                Some(self.raw_fd()),
-                target,
-            )
-            .map_err(errno_io)?;
-            let after = self.hash_file(target)?;
-            if after != staged {
-                return Err(third_state("replace", "post-rename bytes differ"));
+            let displaced = displaced_basename(stage_basename);
+
+            // 1. Atomically capture whatever currently occupies the target.
+            self.rename_within(target, &displaced)
+                .map_err(|err| match err {
+                    CaptureError::Absent => {
+                        third_state("replace", "target is absent at the mutation boundary")
+                    }
+                    CaptureError::Io(e) => e,
+                })?;
+
+            // 2. The captured bytes MUST be the preimage we validated.
+            let captured = self.hash_file(&displaced)?;
+            if captured != expected_hash {
+                self.restore_captured(&displaced, target)?;
+                return Err(third_state(
+                    "replace",
+                    "displaced bytes are not the expected preimage",
+                ));
             }
-            self.sync()?;
-            Ok(())
+
+            // 3. Install the staged bytes without clobbering.
+            self.link_no_clobber(stage_basename, target, "replace-displaced")?;
+            self.unlink(stage_basename)?;
+            let installed = self.hash_file(target)?;
+            if installed != staged {
+                return Err(third_state("replace", "installed bytes differ from staged"));
+            }
+            self.unlink(&displaced)?;
+            self.sync()
         }
 
-        /// Delete only when the target currently carries `expected_hash`.
-        pub fn atomic_delete_verified(&self, target: &str, expected_hash: &str) -> io::Result<()> {
-            let current = self.hash_file(target)?;
-            if current != expected_hash {
-                return Err(third_state("delete", "preimage mismatch"));
+        /// Delete through an atomic capture + verify.
+        ///
+        /// Equivalent real CAS: the original is renamed into a private capture
+        /// name and its bytes are verified there; a mismatch restores it. A
+        /// writer landing after the capture is untouched.
+        pub fn atomic_delete_verified(
+            &self,
+            target: &str,
+            expected_hash: &str,
+            naming_basename: &str,
+        ) -> io::Result<()> {
+            let displaced = displaced_basename(naming_basename);
+            self.rename_within(target, &displaced)
+                .map_err(|err| match err {
+                    CaptureError::Absent => {
+                        third_state("delete", "target is absent at the mutation boundary")
+                    }
+                    CaptureError::Io(e) => e,
+                })?;
+
+            let captured = self.hash_file(&displaced)?;
+            if captured != expected_hash {
+                self.restore_captured(&displaced, target)?;
+                return Err(third_state(
+                    "delete",
+                    "displaced bytes are not the expected preimage",
+                ));
             }
-            self.unlink(target)?;
-            self.sync()?;
-            Ok(())
+            self.unlink(&displaced)?;
+            self.sync()
         }
 
-        /// Restore the preimage from the backup (or remove a created target).
+        /// Restore the preimage (or remove a created target) during rollback.
         pub fn restore_preimage(
             &self,
             target: &str,
@@ -558,24 +567,20 @@ mod unix_dir {
                     let mut file = self.openat(backup, OFlag::O_RDONLY)?;
                     let mut bytes = Vec::new();
                     file.read_to_end(&mut bytes)?;
-                    let restore = super::restore_basename(stage_basename);
+                    let restore = restore_basename(stage_basename);
                     self.write_stage_file(&restore, &bytes, mode)?;
-                    let outcome = if self.exists(target)? {
+                    if self.exists(target)? {
                         let expected = post_hash.unwrap_or(pre_hash.unwrap_or(""));
-                        self.atomic_replace_verified(target, &restore, expected)
+                        self.atomic_replace_verified(target, &restore, expected)?;
                     } else {
-                        self.atomic_create(target, &restore)
-                    };
-                    if outcome.is_err() {
-                        // Preserve the restore material: it is evidence.
-                        return outcome;
+                        self.atomic_create(target, &restore)?;
                     }
                     Ok(())
                 }
                 _ => {
                     if self.exists(target)? {
                         let expected = post_hash.unwrap_or(pre_hash.unwrap_or(""));
-                        self.atomic_delete_verified(target, expected)?;
+                        self.atomic_delete_verified(target, expected, stage_basename)?;
                     }
                     Ok(())
                 }
@@ -584,8 +589,68 @@ mod unix_dir {
 
         /// `unlinkat` on this descriptor (never follows the final component).
         pub fn unlink(&self, name: &str) -> io::Result<()> {
-            unlinkat(Some(self.raw_fd()), name, nix::unistd::UnlinkatFlags::NoRemoveDir)
-                .map_err(errno_io)
+            unlinkat(
+                Some(self.raw_fd()),
+                name,
+                nix::unistd::UnlinkatFlags::NoRemoveDir,
+            )
+            .map_err(errno_io)
+        }
+
+        /// Atomically move `from` onto `to` within this directory.
+        fn rename_within(&self, from: &str, to: &str) -> Result<(), CaptureError> {
+            match renameat(Some(self.raw_fd()), from, Some(self.raw_fd()), to) {
+                Ok(()) => Ok(()),
+                Err(nix::errno::Errno::ENOENT) => Err(CaptureError::Absent),
+                Err(other) => Err(CaptureError::Io(errno_io(other))),
+            }
+        }
+
+        /// `linkat` install that fails `EEXIST` instead of clobbering; a taken
+        /// name means an external writer won the race, and BOTH the captured
+        /// original and the stage are left in place as evidence.
+        fn link_no_clobber(&self, from: &str, to: &str, op: &str) -> io::Result<()> {
+            match linkat(
+                Some(self.raw_fd()),
+                from,
+                Some(self.raw_fd()),
+                to,
+                AtFlags::empty(),
+            ) {
+                Ok(()) => Ok(()),
+                Err(nix::errno::Errno::EEXIST) => {
+                    self.sync()?;
+                    Err(third_state(
+                        op,
+                        "target name captured by an external writer during install; \
+                         evidence preserved",
+                    ))
+                }
+                Err(other) => Err(errno_io(other)),
+            }
+        }
+
+        /// Put the captured bytes back at the target name.
+        fn restore_captured(&self, displaced: &str, target: &str) -> io::Result<()> {
+            match linkat(
+                Some(self.raw_fd()),
+                displaced,
+                Some(self.raw_fd()),
+                target,
+                AtFlags::empty(),
+            ) {
+                Ok(()) => {}
+                Err(nix::errno::Errno::EEXIST) => {
+                    self.sync()?;
+                    return Err(third_state(
+                        "capture-restore",
+                        "target name occupied during capture restore; evidence preserved",
+                    ));
+                }
+                Err(other) => return Err(errno_io(other)),
+            }
+            self.unlink(displaced)?;
+            self.sync()
         }
 
         fn openat(&self, name: &str, flags: OFlag) -> io::Result<File> {
@@ -599,6 +664,12 @@ mod unix_dir {
             .map_err(errno_io)?;
             adopt_fd(fd, write)
         }
+    }
+
+    enum CaptureError {
+        /// The name to capture did not exist.
+        Absent,
+        Io(io::Error),
     }
 
     /// Walk every component of a scope path with `openat(O_DIRECTORY|O_NOFOLLOW)`.
@@ -670,198 +741,11 @@ mod unix_dir {
     }
 }
 
-/// Whether `path` is a symlink (never follows it).
-pub fn is_symlink(path: &Path) -> io::Result<bool> {
-    Ok(fs::symlink_metadata(path)?.file_type().is_symlink())
-}
-
-/// fsync a file and its parent directory.
-pub fn fsync_file_and_parent(path: &Path) -> io::Result<()> {
-    if path.exists() {
-        let file = OpenOptions::new().write(true).open(path)?;
-        file.sync_all()?;
-    }
-    if let Some(parent) = path.parent() {
-        if parent.exists() {
-            let dir = File::open(parent)?;
-            dir.sync_all()?;
-        }
-    }
-    Ok(())
-}
-
-/// Hash a path (path-based fallback; refuses symlinks).
-pub fn hash_file(path: &Path) -> io::Result<String> {
-    if is_symlink(path)? {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "symlink not allowed"));
-    }
-    let mut file = OpenOptions::new().read(true).open(path)?;
-    let mut sha = Sha256::new();
-    let mut buf = [0u8; 8192];
-    loop {
-        let n = file.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        sha.update(&buf[..n]);
-    }
-    Ok(hex::encode(sha.finalize()))
-}
-
 #[must_use]
 pub fn hash_bytes(bytes: &[u8]) -> String {
     let mut sha = Sha256::new();
     sha.update(bytes);
     hex::encode(sha.finalize())
-}
-
-/// Write a new exclusive stage file (create-new, no-clobber).
-pub fn write_stage_file_with_mode(path: &Path, bytes: &[u8], mode: Option<u32>) -> io::Result<()> {
-    if path.exists() {
-        return Err(io::Error::new(io::ErrorKind::AlreadyExists, "stage exists"));
-    }
-    {
-        let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
-        #[cfg(unix)]
-        if let Some(mode) = mode {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
-        }
-        file.write_all(bytes)?;
-        file.sync_all()?;
-    }
-    fsync_file_and_parent(path)?;
-    Ok(())
-}
-
-/// Copy `src` to a new exclusive `backup` (path-based fallback).
-pub fn backup_file(src: &Path, backup: &Path) -> io::Result<()> {
-    if is_symlink(src)? {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "cannot backup symlink"));
-    }
-    if backup.exists() {
-        return Err(io::Error::new(io::ErrorKind::AlreadyExists, "backup exists"));
-    }
-    let mut src_file = OpenOptions::new().read(true).open(src)?;
-    let mut bytes = Vec::new();
-    src_file.read_to_end(&mut bytes)?;
-    let mode = read_file_mode(src);
-    write_stage_file_with_mode(backup, &bytes, mode)?;
-    Ok(())
-}
-
-pub fn read_file_mode(path: &Path) -> Option<u32> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::metadata(path).ok().map(|m| m.permissions().mode())
-    }
-    #[cfg(not(unix))]
-    {
-        None
-    }
-}
-
-/// Atomic no-clobber create (`hard_link` fails with `EEXIST`).
-pub fn atomic_create_noclobber(stage: &Path, target: &Path) -> io::Result<()> {
-    fs::hard_link(stage, target)?;
-    fs::remove_file(stage)?;
-    fsync_file_and_parent(target)?;
-    Ok(())
-}
-
-/// Replace only when the current hash matches `expected_hash`.
-pub fn atomic_replace_verified(target: &Path, stage: &Path, expected_hash: &str) -> io::Result<()> {
-    let current = hash_file(target)?;
-    if current != expected_hash {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "third-state bytes at replace boundary: preimage mismatch",
-        ));
-    }
-    let staged = hash_file(stage)?;
-    fs::rename(stage, target)?;
-    if hash_file(target)? != staged {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "third-state bytes at replace boundary: post-rename bytes differ",
-        ));
-    }
-    fsync_file_and_parent(target)?;
-    Ok(())
-}
-
-/// Delete only when the current hash matches `expected_hash`.
-pub fn atomic_delete_verified(target: &Path, expected_hash: &str) -> io::Result<()> {
-    if is_symlink(target)? {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "cannot delete symlink"));
-    }
-    let current = hash_file(target)?;
-    if current != expected_hash {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "third-state bytes at delete boundary: preimage mismatch",
-        ));
-    }
-    fs::remove_file(target)?;
-    if let Some(parent) = target.parent() {
-        if parent.exists() {
-            let dir = File::open(parent)?;
-            dir.sync_all()?;
-        }
-    }
-    Ok(())
-}
-
-/// Restore the preimage from a backup (or remove a created target).
-pub fn restore_preimage_verified(
-    target: &Path,
-    backup: Option<&Path>,
-    pre_hash: Option<&str>,
-    post_hash: Option<&str>,
-    mode: Option<u32>,
-    restore_basename: &str,
-) -> io::Result<()> {
-    if target.exists() {
-        let current = hash_file(target)?;
-        match (post_hash, pre_hash) {
-            (Some(post), _) if current != post => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "third-state during rollback: target is not the applied postimage",
-                ));
-            }
-            (None, Some(pre)) if current != pre => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "unexpected bytes during rollback: target is not the preimage",
-                ));
-            }
-            _ => {}
-        }
-    }
-    match backup {
-        Some(backup_path) if backup_path.exists() => {
-            let mut file = OpenOptions::new().read(true).open(backup_path)?;
-            let mut bytes = Vec::new();
-            file.read_to_end(&mut bytes)?;
-            let stage = target.with_file_name(restore_basename);
-            write_stage_file_with_mode(&stage, &bytes, mode.or_else(|| read_file_mode(backup_path)))?;
-            if target.exists() {
-                let expected = post_hash.unwrap_or(pre_hash.unwrap_or(""));
-                atomic_replace_verified(target, &stage, expected)?;
-            } else {
-                atomic_create_noclobber(&stage, target)?;
-            }
-            Ok(())
-        }
-        _ => {
-            if target.exists() {
-                atomic_delete_verified(target, post_hash.unwrap_or(pre_hash.unwrap_or("")))?;
-            }
-            Ok(())
-        }
-    }
 }
 
 pub fn decode_base64(encoded: &str) -> Result<Vec<u8>, String> {

@@ -8,7 +8,7 @@ use nexus_contracts::local::orchestration::{
 };
 use nexus_daemon_runtime::workspace::executor::DaemonWorkspaceExecutor;
 use nexus_daemon_runtime::workspace::session::{
-    ChangeEntry, ChangeOp, SessionError, WorkspaceSessionManager,
+    ChangeEntry, ChangeOp, SessionError, SessionId, WorkspaceSessionManager,
 };
 use nexus_daemon_runtime::workspace::commit_fs::hash_bytes;
 use nexus_daemon_runtime::workspace::session_commit::{
@@ -789,4 +789,197 @@ async fn oversized_entries_json_blocks_startup_before_parsing() {
         err,
         nexus_local_db::LocalDbError::ValidationError(_)
     ));
+}
+
+#[tokio::test]
+#[serial]
+async fn unknown_session_rejected() {
+    let (pool, db_dir) = fresh_pool().await;
+    let mgr = recoverable_mgr(pool, &db_dir);
+    let ws = tempfile::tempdir().unwrap();
+    let root = ws.path().to_string_lossy().to_string();
+    mgr.startup_recovery().await.expect("startup");
+
+    let ghost = SessionId("ws_00000000-0000-0000-0000-000000000000".to_string());
+    let err = mgr
+        .commit_session_durable(&ghost, &[create_change("ghost.txt", b"x")], &root)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, SessionError::NotFound(_)),
+        "unknown session must be NotFound, got {err:?}"
+    );
+    assert!(!ws.path().join("ghost.txt").exists());
+    assert_eq!(intent_row_count(mgr.pool().as_ref(), &ghost.to_string()).await, 0);
+}
+
+#[tokio::test]
+#[serial]
+async fn recoverable_claim_race_has_single_winner() {
+    let (pool, db_dir) = fresh_pool().await;
+    let mgr = recoverable_mgr(pool, &db_dir);
+    let ws = tempfile::tempdir().unwrap();
+    let root = ws.path().to_string_lossy().to_string();
+    mgr.startup_recovery().await.expect("startup");
+    let session = mgr.open_session(&root, "", true).await.expect("open");
+
+    // Two concurrent durable commits on ONE session, identical manifest.
+    // Exactly one claim may be admitted; the loser either replays the winner's
+    // revision or is rejected as already-committed. Never two revisions.
+    let changes = vec![create_change("race.txt", b"contended")];
+    let mut handles = Vec::new();
+    for _ in 0..2 {
+        let mgr2 = Arc::clone(&mgr);
+        let session_id = session.clone();
+        let changes = changes.clone();
+        let owner_root = root.clone();
+        let _ = &owner_root;
+        handles.push(tokio::spawn(async move {
+            WorkspaceSessionManager::commit_session_durable_owned(mgr2, session_id, changes).await
+        }));
+    }
+
+    let mut revisions: Vec<String> = Vec::new();
+    let mut rejections = 0usize;
+    for handle in handles {
+        match handle.await.expect("join") {
+            Ok(outcome) => revisions.push(outcome.revision),
+            Err(SessionError::AlreadyCommitted(_)) => rejections += 1,
+            Err(other) => panic!("unexpected claim-race error: {other:?}"),
+        }
+    }
+
+    assert!(!revisions.is_empty(), "one contender must win");
+    assert_eq!(
+        revisions.iter().collect::<std::collections::HashSet<_>>().len(),
+        1,
+        "all winners must report the SAME revision, got {revisions:?}"
+    );
+    assert_eq!(revisions.len() + rejections, 2);
+
+    // The winner's bytes are intact and exactly one intent settled committed.
+    assert_eq!(
+        std::fs::read(ws.path().join("race.txt")).expect("committed file"),
+        b"contended"
+    );
+    let committed: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM workspace_commit_intents WHERE session_id = ? AND state = 'committed'",
+    )
+    .bind(session.to_string())
+    .fetch_one(mgr.pool().as_ref())
+    .await
+    .unwrap();
+    assert_eq!(committed, 1, "exactly one intent may settle committed");
+    let leftover: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM workspace_commit_intents WHERE session_id = ? AND state <> 'committed'",
+    )
+    .bind(session.to_string())
+    .fetch_one(mgr.pool().as_ref())
+    .await
+    .unwrap();
+    assert_eq!(leftover, 0, "no unsettled intent may survive a claim race");
+}
+
+#[tokio::test]
+#[serial]
+async fn external_writer_after_replace_is_detected_at_recovery() {
+    let (pool, db_dir) = fresh_pool().await;
+    let mgr = recoverable_mgr(pool, &db_dir);
+    let ws = tempfile::tempdir().unwrap();
+    let root = ws.path().to_string_lossy().to_string();
+    std::fs::write(ws.path().join("r.txt"), b"one").unwrap();
+    mgr.startup_recovery().await.expect("startup");
+    let session = mgr.open_session(&root, "", true).await.expect("open");
+
+    // Apply succeeds, then the commit dies before finalize.
+    set_test_crash_point(Some("after_file_apply"));
+    let err = mgr
+        .commit_session_durable(
+            &session,
+            &[modify_change("r.txt", &hash_bytes(b"one"), b"two")],
+            &root,
+        )
+        .await
+        .unwrap_err();
+    set_test_crash_point(None);
+    assert!(matches!(err, SessionError::Internal(_)));
+    assert_eq!(std::fs::read(ws.path().join("r.txt")).unwrap(), b"two");
+
+    // An external writer lands in the window after the mutation.
+    std::fs::write(ws.path().join("r.txt"), b"third-state").unwrap();
+
+    // Recovery must NOT settle committed, and must NOT overwrite the writer.
+    let err = mgr.startup_recovery().await.unwrap_err();
+    assert!(
+        matches!(err, SessionError::RecoveryConflict(_) | SessionError::Io(_)),
+        "post-mutation third state must block recovery, got {err:?}"
+    );
+    assert_eq!(
+        std::fs::read(ws.path().join("r.txt")).unwrap(),
+        b"third-state",
+        "recovery must never overwrite external bytes"
+    );
+    let state: String = sqlx::query_scalar(
+        "SELECT state FROM workspace_commit_intents WHERE session_id = ? ORDER BY revision DESC LIMIT 1",
+    )
+    .bind(session.to_string())
+    .fetch_one(mgr.pool().as_ref())
+    .await
+    .unwrap();
+    assert_eq!(state, "recovery_conflict");
+}
+
+#[tokio::test]
+#[serial]
+async fn external_writer_after_delete_is_detected_at_recovery() {
+    let (pool, db_dir) = fresh_pool().await;
+    let mgr = recoverable_mgr(pool, &db_dir);
+    let ws = tempfile::tempdir().unwrap();
+    let root = ws.path().to_string_lossy().to_string();
+    std::fs::write(ws.path().join("d.txt"), b"doomed").unwrap();
+    mgr.startup_recovery().await.expect("startup");
+    let session = mgr.open_session(&root, "", true).await.expect("open");
+
+    set_test_crash_point(Some("after_file_apply"));
+    let err = mgr
+        .commit_session_durable(
+            &session,
+            &[ChangeEntry {
+                path: "d.txt".to_string(),
+                op: ChangeOp::Delete,
+                expected_hash: Some(hash_bytes(b"doomed")),
+                content_base64: None,
+            }],
+            &root,
+        )
+        .await
+        .unwrap_err();
+    set_test_crash_point(None);
+    assert!(matches!(err, SessionError::Internal(_)));
+    assert!(
+        !ws.path().join("d.txt").exists(),
+        "the delete itself is atomic and effective"
+    );
+
+    // An external writer re-creates the name after our delete landed.
+    std::fs::write(ws.path().join("d.txt"), b"resurrected").unwrap();
+
+    let err = mgr.startup_recovery().await.unwrap_err();
+    assert!(
+        matches!(err, SessionError::RecoveryConflict(_) | SessionError::Io(_)),
+        "post-delete third state must block recovery, got {err:?}"
+    );
+    assert_eq!(
+        std::fs::read(ws.path().join("d.txt")).unwrap(),
+        b"resurrected",
+        "recovery must never delete bytes it did not write"
+    );
+    let state: String = sqlx::query_scalar(
+        "SELECT state FROM workspace_commit_intents WHERE session_id = ? ORDER BY revision DESC LIMIT 1",
+    )
+    .bind(session.to_string())
+    .fetch_one(mgr.pool().as_ref())
+    .await
+    .unwrap();
+    assert_eq!(state, "recovery_conflict");
 }

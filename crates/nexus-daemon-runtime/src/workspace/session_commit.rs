@@ -241,10 +241,11 @@ async fn recover_applying_intent_locked(
         // The commit is settled; the per-entry stage/backup material is now
         // dead weight and is removed only after the durable settle.
         for entry in &intent.entries {
-            if let Some(ref backup) = entry.backup_basename {
-                scope.cleanup_basename(&entry.path, backup);
-            }
-            scope.cleanup_basename(&entry.path, &entry.stage_basename);
+            scope.cleanup_entry(
+                &entry.path,
+                &entry.stage_basename,
+                entry.backup_basename.as_deref(),
+            );
         }
         return Ok(());
     }
@@ -327,10 +328,11 @@ async fn rollback_intent_locked(
             .await;
             return Err(SessionError::Io(e.to_string()));
         }
-        if let Some(ref backup) = entry.backup_basename {
-            scope.cleanup_basename(&entry.path, backup);
-        }
-        scope.cleanup_basename(&entry.path, &entry.stage_basename);
+        scope.cleanup_entry(
+            &entry.path,
+            &entry.stage_basename,
+            entry.backup_basename.as_deref(),
+        );
     }
 
     db::finalize_rolled_back_intent(
@@ -568,8 +570,9 @@ pub async fn commit_recoverable(
     let scope = ScopeMutation::open(&canonical_root, &row.relative_path)
         .map_err(|e| SessionError::Io(e.to_string()))?;
     let mut entries_json: Vec<db::IntentEntryJson> = Vec::new();
-    let mut stage_basenames: Vec<(String, String)> = Vec::new();
-    let mut backup_basenames: Vec<(String, String)> = Vec::new();
+    // Every artifact created for this commit, so any failure path can clean up
+    // exactly what it wrote (rel path, stage basename, backup basename).
+    let mut staged: Vec<(String, String, Option<String>)> = Vec::new();
 
     let staging = (|| {
         let rev_tag = revision.replace("rev_", "");
@@ -591,7 +594,6 @@ pub async fn commit_recoverable(
                     scope
                         .write_stage(&change.path, &stage_basename, &bytes, Some(CREATE_FILE_MODE))
                         .map_err(|e| SessionError::Io(e.to_string()))?;
-                    stage_basenames.push((change.path.clone(), stage_basename.clone()));
                     (None, Some(hash_bytes(&bytes)), Some(CREATE_FILE_MODE))
                 }
                 WorkspaceChangeOp::Modify => {
@@ -601,7 +603,6 @@ pub async fn commit_recoverable(
                         let mode = scope
                             .backup_target(&change.path, backup_name)
                             .map_err(|e| SessionError::Io(e.to_string()))?;
-                        backup_basenames.push((change.path.clone(), backup_name.clone()));
                         mode
                     } else {
                         None
@@ -609,7 +610,6 @@ pub async fn commit_recoverable(
                     scope
                         .write_stage(&change.path, &stage_basename, &bytes, captured_mode)
                         .map_err(|e| SessionError::Io(e.to_string()))?;
-                    stage_basenames.push((change.path.clone(), stage_basename.clone()));
                     (change.expected_hash.clone(), Some(hash_bytes(&bytes)), captured_mode)
                 }
                 WorkspaceChangeOp::Delete => {
@@ -617,7 +617,6 @@ pub async fn commit_recoverable(
                         let mode = scope
                             .backup_target(&change.path, backup_name)
                             .map_err(|e| SessionError::Io(e.to_string()))?;
-                        backup_basenames.push((change.path.clone(), backup_name.clone()));
                         (change.expected_hash.clone(), None, mode)
                     } else {
                         (change.expected_hash.clone(), None, None)
@@ -638,6 +637,12 @@ pub async fn commit_recoverable(
                 backup_basename,
                 mode,
             });
+            let entry = entries_json.last().expect("entry pushed above");
+            staged.push((
+                change.path.clone(),
+                entry.stage_basename.clone(),
+                entry.backup_basename.clone(),
+            ));
         }
         Ok(())
     })();
@@ -659,19 +664,43 @@ pub async fn commit_recoverable(
             )));
         }
         // Only now that the intent is settled do we drop the staged material.
-        cleanup_scoped_material(&scope, &stage_basenames, &backup_basenames);
+        cleanup_staged(&scope, &staged);
         return Err(e);
     }
 
-    let entries_serialized =
-        serde_json::to_string(&entries_json).map_err(|e| SessionError::Database(e.to_string()))?;
-    validate_entries_json_len(&entries_serialized)?;
-    sqlx::query("UPDATE workspace_commit_intents SET entries_json = ? WHERE revision = ?")
-        .bind(&entries_serialized)
-        .bind(&revision)
-        .execute(mgr.pool().as_ref())
+    // Persisting the durable entry metadata is a metadata write that happens
+    // AFTER staging. If it fails the commit must settle, not return early with
+    // `?`: settle the intent (delete row + release claim in one transaction)
+    // and only then drop the staged artifacts.
+    let persist = async {
+        let entries_serialized = serde_json::to_string(&entries_json)
+            .map_err(|e| SessionError::Database(e.to_string()))?;
+        validate_entries_json_len(&entries_serialized)?;
+        sqlx::query("UPDATE workspace_commit_intents SET entries_json = ? WHERE revision = ?")
+            .bind(&entries_serialized)
+            .bind(&revision)
+            .execute(mgr.pool().as_ref())
+            .await
+            .map_err(|e| SessionError::Database(e.to_string()))?;
+        Ok::<(), SessionError>(())
+    }
+    .await;
+
+    if let Err(e) = persist {
+        if let Err(db_err) = db::abort_intent_and_release_claim(
+            mgr.pool().as_ref(),
+            &revision,
+            &session_id.to_string(),
+        )
         .await
-        .map_err(|e| SessionError::Database(e.to_string()))?;
+        {
+            return Err(SessionError::Database(format!(
+                "metadata_persist_failed ({e}); abort_failed ({db_err})"
+            )));
+        }
+        cleanup_staged(&scope, &staged);
+        return Err(e);
+    }
 
     test_crash_if("after_entries_persisted")?;
 
@@ -687,6 +716,7 @@ pub async fn commit_recoverable(
             WorkspaceChangeOp::Delete => scope.atomic_delete_verified(
                 &change.path,
                 meta.pre_hash.as_deref().unwrap_or(""),
+                &meta.stage_basename,
             ),
         };
         if let Err(e) = result {
@@ -727,7 +757,7 @@ pub async fn commit_recoverable(
 
     test_crash_if("before_finalize")?;
 
-    cleanup_scoped_material(&scope, &stage_basenames, &backup_basenames);
+    cleanup_staged(&scope, &staged);
 
     let finalized = db::finalize_committed_intent(
         mgr.pool().as_ref(),
@@ -753,16 +783,10 @@ pub async fn commit_recoverable(
     })
 }
 
-fn cleanup_scoped_material(
-    scope: &ScopeMutation,
-    stages: &[(String, String)],
-    backups: &[(String, String)],
-) {
-    for (path, basename) in backups {
-        scope.cleanup_basename(path, basename);
-    }
-    for (path, basename) in stages {
-        scope.cleanup_basename(path, basename);
+/// Remove every artifact written by a settled commit attempt.
+fn cleanup_staged(scope: &ScopeMutation, staged: &[(String, String, Option<String>)]) {
+    for (path, stage, backup) in staged {
+        scope.cleanup_entry(path, stage, backup.as_deref());
     }
 }
 
