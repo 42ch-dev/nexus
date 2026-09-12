@@ -10,6 +10,7 @@ use crate::capability::model::{CapabilityDescriptor, ProtocolKind, ProviderHealt
 use crate::config::AgentHostConfig;
 use crate::error::HostResult;
 use crate::ids::ProviderId;
+use crate::providers::candidate_unavailable_health;
 use crate::{DiscoverySource, LaunchStrategy, ProviderCatalogEntry, TrustLevel};
 
 /// Builder that merges config, PATH, and ACP registry entries deterministically.
@@ -64,9 +65,10 @@ impl ProviderCatalog {
                         env: provider_config.env.clone(),
                     },
                 };
-                let caps = match protocol_kind {
-                    ProtocolKind::Acp => CapabilityDescriptor::acp_full(),
-                    ProtocolKind::NativeCli => CapabilityDescriptor::native_cli_limited(),
+                let caps = match (protocol_kind, provider_config.id.as_str()) {
+                    (ProtocolKind::Acp, _) => CapabilityDescriptor::acp_full(),
+                    (ProtocolKind::NativeCli, "dsh-native") => CapabilityDescriptor::dsh_limited(),
+                    (ProtocolKind::NativeCli, _) => CapabilityDescriptor::native_cli_limited(),
                 };
                 entries.push(ProviderCatalogEntry {
                     provider_id: pid.clone(),
@@ -80,15 +82,10 @@ impl ProviderCatalog {
                     // process has been spawned at catalog load. `available`
                     // means "configured and enabled", never "a launch
                     // succeeded" (agent-host.md §4 V1.186 lock).
-                    health: ProviderHealth {
-                        provider_id: pid.clone(),
-                        available: true,
-                        latency_ms: None,
-                        message: Some(
-                            "launch recipe registered; process spawns lazily per session"
-                                .to_string(),
-                        ),
-                    },
+                    health: candidate_unavailable_health(
+                        &pid,
+                        "configured candidate; bounded probe required",
+                    ),
                 });
                 seen_ids.insert(pid);
             } else {

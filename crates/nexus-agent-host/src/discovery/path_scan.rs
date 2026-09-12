@@ -25,6 +25,7 @@ use crate::capability::model::{CapabilityDescriptor, ProtocolKind, ProviderHealt
 use crate::config::AgentHostConfig;
 use crate::error::{HostError, HostResult};
 use crate::ids::ProviderId;
+use crate::providers::candidate_unavailable_health;
 use crate::{DiscoverySource, LaunchStrategy, ProviderCatalogEntry, TrustLevel};
 
 /// Known CLI commands and their provider ID mappings.
@@ -131,12 +132,7 @@ pub fn scan_path_in(
                 health,
             });
         };
-        let available = |message: Option<String>| ProviderHealth {
-            provider_id: pid.clone(),
-            available: true,
-            latency_ms: None,
-            message,
-        };
+        let candidate = |message: &str| candidate_unavailable_health(&pid, message);
         let unavailable = |message: String| ProviderHealth {
             provider_id: pid.clone(),
             available: false,
@@ -146,7 +142,7 @@ pub fn scan_path_in(
 
         // Search the provided dirs (and process PATH as a which fallback).
         if let Some(found_path) = find_command(path_dirs, cmd) {
-            push_row(found_path.to_string_lossy().into_owned(), available(None));
+            push_row(found_path.to_string_lossy().into_owned(), candidate("path candidate; bounded probe required"));
         } else if cmd == "dsh" {
             // Env route (PD-4): a non-empty `DSH_RUNTIME_BIN` counts as
             // present even when `dsh` is not on PATH — same catalog row,
@@ -161,7 +157,7 @@ pub fn scan_path_in(
                     match crate::providers::native_cli::dsh::resolve_dsh_executable(None) {
                         Ok(resolved) => push_row(
                             resolved.to_string_lossy().into_owned(),
-                            available(Some("DSH_RUNTIME_BIN is set".to_string())),
+                            candidate("path candidate via DSH_RUNTIME_BIN; bounded probe required"),
                         ),
                         Err(reason) => push_row(
                             env_bin.to_string_lossy().into_owned(),

@@ -1,6 +1,7 @@
 //! Config-based discovery — parse explicit provider config entries into catalog entries.
 
 use crate::capability::model::{CapabilityDescriptor, ProtocolKind, ProviderHealth};
+use crate::providers::{candidate_unavailable_health, validate_provider_config};
 use crate::config::AgentHostConfig;
 use crate::error::HostResult;
 use crate::ids::ProviderId;
@@ -20,6 +21,7 @@ pub fn entries_from_config(config: &AgentHostConfig) -> HostResult<Vec<ProviderC
         if !pc.enabled {
             continue;
         }
+        validate_provider_config(pc)?;
         let protocol_kind = pc.protocol_kind()?;
         let launch = match protocol_kind {
             ProtocolKind::Acp => LaunchStrategy::Acp {
@@ -33,9 +35,10 @@ pub fn entries_from_config(config: &AgentHostConfig) -> HostResult<Vec<ProviderC
                 env: pc.env.clone(),
             },
         };
-        let caps = match protocol_kind {
-            ProtocolKind::Acp => CapabilityDescriptor::acp_full(),
-            ProtocolKind::NativeCli => CapabilityDescriptor::native_cli_limited(),
+        let caps = match (protocol_kind, pc.id.as_str()) {
+            (ProtocolKind::Acp, _) => CapabilityDescriptor::acp_full(),
+            (ProtocolKind::NativeCli, "dsh-native") => CapabilityDescriptor::dsh_limited(),
+            (ProtocolKind::NativeCli, _) => CapabilityDescriptor::native_cli_limited(),
         };
         let pid = pc.provider_id();
         entries.push(ProviderCatalogEntry {
@@ -46,12 +49,10 @@ pub fn entries_from_config(config: &AgentHostConfig) -> HostResult<Vec<ProviderC
             source: DiscoverySource::Config,
             trust: TrustLevel::Explicit,
             capabilities: caps,
-            health: ProviderHealth {
-                provider_id: pid,
-                available: true,
-                latency_ms: None,
-                message: None,
-            },
+            health: candidate_unavailable_health(
+                &pid,
+                "configured candidate; bounded probe required",
+            ),
         });
     }
     Ok(entries)
