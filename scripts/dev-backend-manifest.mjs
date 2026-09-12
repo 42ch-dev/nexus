@@ -638,6 +638,40 @@ export async function validateDaemonHealth(
   }
 }
 
+export async function waitForDaemonHealth(
+  baseUrl,
+  {
+    timeoutMs = 5000,
+    deadlineMs = 60_000,
+    pollIntervalMs = 1000,
+    fetchImpl = globalThis.fetch,
+    expectedPackageVersion,
+    sleepImpl = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  } = {},
+) {
+  const deadline = Date.now() + deadlineMs;
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      return await validateDaemonHealth(baseUrl, {
+        timeoutMs,
+        fetchImpl,
+        expectedPackageVersion,
+      });
+    } catch (err) {
+      lastError = err;
+      if (Date.now() + pollIntervalMs >= deadline) {
+        break;
+      }
+      await sleepImpl(pollIntervalMs);
+    }
+  }
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+  throw new Error(`Daemon health not ready at ${baseUrl} within ${deadlineMs}ms`);
+}
+
 export async function assertCompatibleRunningDaemon({
   baseUrl,
   manifest,

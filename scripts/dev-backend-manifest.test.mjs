@@ -22,6 +22,7 @@ import {
   resolveDaemonEndpoint,
   sha256File,
   validateDaemonHealth,
+  waitForDaemonHealth,
   writeManifestAtomic,
 } from './dev-backend-manifest.mjs';
 
@@ -398,3 +399,24 @@ test('assertCompatibleRunningDaemon refuses same-version stale contract identity
     },
   );
 });
+test('waitForDaemonHealth retries until daemon responds', async () => {
+  let attempts = 0;
+  const result = await waitForDaemonHealth('http://127.0.0.1:8420', {
+    fetchImpl: async () => {
+      attempts += 1;
+      if (attempts < 3) {
+        throw new Error('connect ECONNREFUSED');
+      }
+      return {
+        ok: true,
+        text: async () => JSON.stringify({ status: 'ok', version: '0.1.0' }),
+      };
+    },
+    sleepImpl: async () => {},
+    pollIntervalMs: 1,
+    deadlineMs: 1000,
+  });
+  assert.equal(attempts, 3);
+  assert.equal(result.health.version, '0.1.0');
+});
+
