@@ -4962,6 +4962,7 @@ mod tests {
     impl BoundaryFaultStore {
         fn new(
             inner: Arc<dyn WorkflowStateStore>,
+            storage: Arc<dyn SessionStorage>,
             pool: Arc<sqlx::SqlitePool>,
             fault: BoundaryFault,
         ) -> Self {
@@ -8548,7 +8549,6 @@ mod tests {
         }
         struct SettlePairBarrierStore {
             inner: Arc<dyn WorkflowStateStore>,
-            storage: Arc<dyn SessionStorage>,
             arrived: Arc<AtomicUsize>,
             dispatches: Arc<AtomicUsize>,
         }
