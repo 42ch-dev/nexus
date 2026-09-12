@@ -2449,6 +2449,20 @@ mod tests {
     use deepseek_harness_sdk::Notification;
     use serde_json::{json, Map};
 
+
+    fn test_probe_request(timeout_ms: u64) -> crate::capability::model::ProbeRequest {
+        let cwd = std::path::PathBuf::from("/tmp");
+        crate::capability::model::ProbeRequest {
+            timeout_ms,
+            cwd,
+            owner: crate::capability::model::SessionOwner {
+                creator_id: "ctr_test".to_string(),
+                workspace_root: std::path::PathBuf::from("/tmp"),
+                orchestration_run_id: None,
+            },
+        }
+    }
+
     const MOCK_DSH_AGENT: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/native_protocol/mock_dsh_agent.py"
@@ -3524,7 +3538,7 @@ mod tests {
         .expect("empty native args");
 
         let health = provider
-            .probe(crate::capability::model::ProbeRequest { timeout_ms: 5000 })
+            .probe(test_probe_request(5000))
             .await
             .expect("probe should return a health value");
 
@@ -3552,7 +3566,7 @@ mod tests {
         let provider = stub_provider("test-dsh-probe", stub_env(&req_log, &dsh_home));
 
         let health = provider
-            .probe(crate::capability::model::ProbeRequest { timeout_ms: 30_000 })
+            .probe(test_probe_request(30_000))
             .await
             .expect("probe should succeed");
         assert!(
@@ -4232,7 +4246,7 @@ mod tests {
         let provider = stub_provider("test-dsh-probetimeout", env);
 
         let probe = provider
-            .probe(crate::capability::model::ProbeRequest { timeout_ms: 800 })
+            .probe(test_probe_request(800))
             .await;
         assert!(
             matches!(probe, Err(HostError::OperationTimeout { .. })),
@@ -4277,7 +4291,7 @@ mod tests {
         let provider = stub_provider("test-dsh-probeinit", env);
 
         let probe = provider
-            .probe(crate::capability::model::ProbeRequest { timeout_ms: 1000 })
+            .probe(test_probe_request(1000))
             .await;
         assert!(
             matches!(probe, Err(HostError::OperationTimeout { .. })),
@@ -4334,7 +4348,7 @@ mod tests {
         let provider = stub_provider("test-dsh-probeordinit", env);
 
         let probe = provider
-            .probe(crate::capability::model::ProbeRequest { timeout_ms: 100 })
+            .probe(test_probe_request(100))
             .await;
         assert!(
             matches!(probe, Err(HostError::OperationTimeout { .. })),

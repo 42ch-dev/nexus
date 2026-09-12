@@ -714,48 +714,52 @@ impl ProviderAdapter for AcpProvider {
 
     async fn probe(
         &self,
-        _request: crate::capability::model::ProbeRequest,
+        request: crate::capability::model::ProbeRequest,
     ) -> HostResult<ProviderHealth> {
-        // M-006: probe is a recipe-availability check only — resolve the
-        // launch command on PATH (bounded by the launch timeout), never a
-        // real spawn. A probe must not fabricate an owner/workspace and
-        // spawn an owned child just to tear it down: that would execute
-        // the agent binary outside any trusted Creator context.
-        let command = self.recipe.command.clone().unwrap_or_default();
         let provider_id = self.provider_id.clone();
-        let launch_dur = self.timeouts.launch_duration();
+        let launch_dur = std::time::Duration::from_millis(request.timeout_ms);
+        let cwd = crate::config::validate_workspace_path_under(
+            &request.cwd,
+            &request.owner.workspace_root,
+        )?;
 
-        let result = tokio::time::timeout(
-            launch_dur,
-            tokio::task::spawn_blocking(move || which::which(&command)),
-        )
+        let spec = crate::capability::model::LaunchSpec {
+            cwd,
+            model: None,
+            mode: None,
+            mcp_servers: vec![],
+            owner: request.owner.clone(),
+        };
+
+        let health = match tokio::time::timeout(launch_dur, async {
+            let connected = self.connect_session(&spec).await?;
+            let mut process = connected.process;
+            drop(connected.client);
+            process.shutdown(launch_dur).await.map_err(|e| {
+                HostError::cleanup_unconfirmed(format!("ACP probe cleanup unconfirmed: {e}"))
+                    .with_provider(self.provider_id.clone())
+            })?;
+            std::result::Result::<(), HostError>::Ok(())
+        })
         .await
-        .map_err(|_| {
-            HostError::timeout(
-                "probe",
-                format!(
-                    "command lookup timed out after {}ms",
-                    self.timeouts.launch_ms
-                ),
-            )
-            .with_provider(self.provider_id.clone())
-        })?;
-
-        let health = match result {
-            Ok(Ok(resolved_path)) => ProviderHealth {
+        {
+            Ok(Ok(())) => ProviderHealth {
                 provider_id,
                 available: true,
                 latency_ms: None,
-                message: Some(resolved_path.to_string_lossy().into_owned()),
+                message: Some("initialize handshake succeeded".to_string()),
             },
-            _ => ProviderHealth {
+            Ok(Err(error)) => ProviderHealth {
                 provider_id,
                 available: false,
                 latency_ms: None,
-                message: Some(format!(
-                    "command '{}' not found on PATH",
-                    self.recipe.command.as_deref().unwrap_or("")
-                )),
+                message: Some(format!("initialize handshake failed: {}", error.category())),
+            },
+            Err(_) => ProviderHealth {
+                provider_id,
+                available: false,
+                latency_ms: None,
+                message: Some("initialize handshake timed out".to_string()),
             },
         };
         Ok(health)

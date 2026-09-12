@@ -283,6 +283,12 @@ pub struct HostStartConfig {
     pub max_ops_per_session: usize,
     /// Timeout configuration.
     pub timeouts: crate::config::TimeoutConfig,
+    /// Pre-validated config retained from boot (avoids a second disk read).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_config: Option<crate::config::AgentHostConfig>,
+    /// Verified owner for bounded readiness probes at start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe_owner: Option<SessionOwner>,
 }
 
 /// Verified owner metadata bound to a Host session.
@@ -530,6 +536,10 @@ pub struct ProviderHealth {
 pub struct ProbeRequest {
     /// Timeout in milliseconds.
     pub timeout_ms: u64,
+    /// Canonical cwd for the bounded handshake probe.
+    pub cwd: PathBuf,
+    /// Verified session owner (Creator + workspace) for the probe child.
+    pub owner: SessionOwner,
 }
 
 /// Launch specification for starting a provider session.

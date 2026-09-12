@@ -742,44 +742,42 @@ impl ProviderAdapter for CodexNativeProvider {
 
     async fn probe(
         &self,
-        _request: crate::capability::model::ProbeRequest,
+        request: crate::capability::model::ProbeRequest,
     ) -> HostResult<ProviderHealth> {
-        // Cross-platform command lookup: `which` crate handles PATH scanning
-        // and Windows PATHEXT resolution automatically. Wrapped in
-        // spawn_blocking to keep the async runtime responsive, and enforced
-        // with launch_ms timeout.
-        let command = self.command.clone();
         let provider_id = self.provider_id.clone();
-        let launch_dur = self.timeouts.launch_duration();
+        let launch_dur = std::time::Duration::from_millis(request.timeout_ms);
+        let cwd = request.cwd.clone();
+        let command = self.command.clone();
+        let env = self.env.clone();
 
-        let result = tokio::time::timeout(
-            launch_dur,
-            tokio::task::spawn_blocking(move || which::which(&command)),
-        )
+        let health = match tokio::time::timeout(launch_dur, async {
+            let builder = codex_codes::AppServerBuilder::new()
+                .command(command)
+                .working_directory(cwd)
+                .envs(env);
+            let client = codex_codes::AsyncClient::start_with(builder).await?;
+            drop(client);
+            std::result::Result::<(), codex_codes::Error>::Ok(())
+        })
         .await
-        .map_err(|_| {
-            HostError::timeout(
-                "probe",
-                format!(
-                    "command lookup timed out after {}ms",
-                    self.timeouts.launch_ms
-                ),
-            )
-            .with_provider(self.provider_id.clone())
-        })?;
-
-        let health = match result {
-            Ok(Ok(resolved_path)) => ProviderHealth {
+        {
+            Ok(Ok(())) => ProviderHealth {
                 provider_id,
                 available: true,
                 latency_ms: None,
-                message: Some(resolved_path.to_string_lossy().into_owned()),
+                message: Some("app-server handshake succeeded".to_string()),
             },
-            _ => ProviderHealth {
+            Ok(Err(error)) => ProviderHealth {
                 provider_id,
                 available: false,
                 latency_ms: None,
-                message: Some(format!("command '{}' not found on PATH", self.command)),
+                message: Some(format!("app-server handshake failed: {error}")),
+            },
+            Err(_) => ProviderHealth {
+                provider_id,
+                available: false,
+                latency_ms: None,
+                message: Some("app-server handshake timed out".to_string()),
             },
         };
         Ok(health)
@@ -959,10 +957,25 @@ mod tests {
     use super::*;
     use crate::capability::model::{FinishReason, HostOperation, LaunchSpec};
 
+
+
     const MOCK_APP_SERVER: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/native_protocol/mock_codex_app_server.py"
     );
+
+    fn test_probe_request(timeout_ms: u64) -> crate::capability::model::ProbeRequest {
+        let cwd = std::path::PathBuf::from("/tmp");
+        crate::capability::model::ProbeRequest {
+            timeout_ms,
+            cwd,
+            owner: crate::capability::model::SessionOwner {
+                creator_id: "ctr_test".to_string(),
+                workspace_root: std::path::PathBuf::from("/tmp"),
+                orchestration_run_id: None,
+            },
+        }
+    }
 
     fn launch_spec() -> LaunchSpec {
         LaunchSpec {
@@ -1070,7 +1083,7 @@ mod tests {
         );
 
         let health = provider
-            .probe(crate::capability::model::ProbeRequest { timeout_ms: 5000 })
+            .probe(test_probe_request(5000))
             .await
             .expect("probe should succeed");
 
