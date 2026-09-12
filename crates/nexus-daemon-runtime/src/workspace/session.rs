@@ -155,6 +155,32 @@ impl fmt::Display for SessionError {
     }
 }
 
+impl SessionError {
+    /// Append `suffix` to this error's message, preserving its variant.
+    ///
+    /// A staging failure must keep its original typed surface — callers and
+    /// tests match the SHAPE ([`SessionError::Io`], [`SessionError::ManifestInvalid`])
+    /// to decide how to react — so recovery notes are folded into the message
+    /// instead of replacing the variant with a generic [`SessionError::Internal`].
+    #[must_use]
+    pub(super) fn with_message_suffix(self, suffix: &str) -> Self {
+        fn join(message: &str, suffix: &str) -> String {
+            format!("{message}; {suffix}")
+        }
+        match self {
+            Self::Io(message) => Self::Io(join(&message, suffix)),
+            Self::Internal(message) => Self::Internal(join(&message, suffix)),
+            Self::ManifestInvalid(message) => Self::ManifestInvalid(join(&message, suffix)),
+            Self::Database(message) => Self::Database(join(&message, suffix)),
+            Self::CorruptSnapshot(message) => Self::CorruptSnapshot(join(&message, suffix)),
+            // Staging cannot produce an identifier- or root-carrying variant,
+            // and none of those fields is a message: leave them untouched
+            // rather than rewriting a field that means something else.
+            other => other,
+        }
+    }
+}
+
 /// Contract-aligned change manifest types (v1.188 P3).
 pub use nexus_contracts::local::orchestration::{
     WorkspaceChangeEntry as ChangeEntry, WorkspaceChangeOp as ChangeOp,

@@ -1730,9 +1730,13 @@ async fn unconfirmed_staging_cleanup_retains_intent_for_recovery() {
     let err = handle.await.expect("join").unwrap_err();
     set_owner_gate(None);
 
+    // The staging failure keeps its ORIGINAL typed surface (the planted
+    // directory makes the stage write fail with `AlreadyExists` -> Io); the
+    // cleanup outcome is folded into the message, not into a new variant.
     assert!(
-        matches!(err, SessionError::Internal(ref m) if m.contains("cleanup_unconfirmed")),
-        "unconfirmed cleanup must keep the ledger, got {err:?}"
+        matches!(err, SessionError::Io(ref m)
+            if m.contains("cleanup_unconfirmed") && m.contains("intent retained for recovery")),
+        "unconfirmed cleanup must keep the ledger and the staging error type, got {err:?}"
     );
 
     // The ledger and its claim survive: recovery still has the identities.

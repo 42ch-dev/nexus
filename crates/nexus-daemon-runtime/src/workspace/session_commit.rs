@@ -844,9 +844,8 @@ pub async fn commit_recoverable(
         // copies on disk with no recovery identity. Unconfirmed cleanup
         // retains the intent and its claim for recovery instead.
         if let Err(cleanup_err) = cleanup_staged_confirmed(&scope, &staged) {
-            return Err(SessionError::Internal(format!(
-                "staging_failed ({e}); cleanup_unconfirmed ({cleanup_err}); \
-                 intent retained for recovery"
+            return Err(e.with_message_suffix(&format!(
+                "cleanup_unconfirmed ({cleanup_err}); intent retained for recovery"
             )));
         }
         if let Err(db_err) = db::abort_intent_and_release_claim(
@@ -856,9 +855,7 @@ pub async fn commit_recoverable(
         )
         .await
         {
-            return Err(SessionError::Database(format!(
-                "staging_failed ({e}); abort_failed ({db_err})"
-            )));
+            return Err(e.with_message_suffix(&format!("abort_failed ({db_err})")));
         }
         return Err(e);
     }
