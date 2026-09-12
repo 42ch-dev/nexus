@@ -201,6 +201,19 @@ impl DeliveryBudget {
             .unwrap_or_else(|e| e.into_inner());
         *pending_messages = pending_messages.saturating_sub(1);
     }
+
+    #[cfg(test)]
+    fn test_pending_message_slots(&self) -> usize {
+        *self
+            .pending_messages
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[cfg(test)]
+    fn test_pending_payload_bytes(&self) -> usize {
+        *self.pending.lock().unwrap_or_else(|e| e.into_inner())
+    }
 }
 
 /// Monotonic instants for actual-runtime streaming proof (L2).
@@ -212,38 +225,27 @@ pub struct DshStreamingRunTiming {
     pub run_completed: Option<Instant>,
 }
 
-pub static LAST_DSH_RUN_TIMING: StdMutex<Option<DshStreamingRunTiming>> = StdMutex::new(None);
-
-pub fn take_last_dsh_run_timing() -> Option<DshStreamingRunTiming> {
-    LAST_DSH_RUN_TIMING
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take()
-}
-
-fn clear_last_dsh_run_timing() {
-    LAST_DSH_RUN_TIMING
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take();
-}
+type RunTimingSnapshots =
+    Arc<StdMutex<HashMap<HostOperationId, DshStreamingRunTiming>>>;
 
 fn publish_completed_run_timing(
     op_id: &HostOperationId,
     run_timing: &StdMutex<DshStreamingRunTiming>,
+    snapshots: &RunTimingSnapshots,
 ) {
     let timing = run_timing.lock().unwrap_or_else(|e| e.into_inner());
     if let (Some(first_callback), Some(run_completed)) =
         (timing.first_callback, timing.run_completed)
     {
-        let mut slot = LAST_DSH_RUN_TIMING
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        *slot = Some(DshStreamingRunTiming {
-            op_id: Some(op_id.clone()),
-            first_callback: Some(first_callback),
-            run_completed: Some(run_completed),
-        });
+        let mut map = snapshots.lock().unwrap_or_else(|e| e.into_inner());
+        map.insert(
+            op_id.clone(),
+            DshStreamingRunTiming {
+                op_id: Some(op_id.clone()),
+                first_callback: Some(first_callback),
+                run_completed: Some(run_completed),
+            },
+        );
     }
 }
 
@@ -362,7 +364,7 @@ fn dispatch_successful_run_events(
                 })
                 .is_err()
             {
-                budget.release(bytes);
+                // QueuedPayload ownership returns on failure; Drop releases once.
                 return Err(operation_delivery_overflow_failure(session_id, op_id));
             }
         } else {
@@ -1187,6 +1189,8 @@ struct NativeSession {
     active_run: Arc<AtomicBool>,
     /// Wakes the retained final-close owner when reunify returns the harness.
     run_reunified: Arc<Notify>,
+    /// Per-operation streaming timing snapshots (keyed by `op_id`).
+    completed_run_timings: RunTimingSnapshots,
     /// Working directory for the runtime, retained from `LaunchSpec::cwd`
     /// (N-1).
     cwd: PathBuf,
@@ -1304,6 +1308,25 @@ impl DshNativeProvider {
             TimeoutConfig::default(),
         )
         .expect("empty native args are always accepted")
+    }
+
+
+    /// Take the completed streaming timing snapshot for one admitted turn.
+    pub async fn take_run_timing(
+        &self,
+        session_id: &HostSessionId,
+        op_id: &HostOperationId,
+    ) -> Option<DshStreamingRunTiming> {
+        let snapshots = {
+            let sessions = self.sessions.read().await;
+            sessions
+                .get(session_id)
+                .map(|native| Arc::clone(&native.completed_run_timings))
+        }?;
+        let mut guard = snapshots
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        guard.remove(op_id)
     }
 
     /// Register-time constructor used by daemon boot (P0 T2): `dsh_bin` is
@@ -1595,6 +1618,7 @@ impl DshNativeProvider {
         run_harness: Arc<Mutex<Option<DeepSeekHarness>>>,
         active_run: Arc<AtomicBool>,
         run_reunified: Arc<Notify>,
+        completed_run_timings: RunTimingSnapshots,
     ) -> HostEventStream {
         let retained = Arc::clone(&self.retained_leases);
         let run_timeout = self.timeouts.prompt_duration();
@@ -1621,8 +1645,6 @@ impl DshNativeProvider {
                 let delivery_failed = Arc::new(AtomicBool::new(false));
                 let failure_notify = Arc::new(Notify::new());
                 let run_timing = Arc::new(StdMutex::new(DshStreamingRunTiming::default()));
-                clear_last_dsh_run_timing();
-
                 let run_harness_for_run = Arc::clone(&run_harness);
 
                 let run = async {
@@ -1757,7 +1779,7 @@ impl DshNativeProvider {
                                     run_timing.lock().unwrap_or_else(|e| e.into_inner());
                                 timing.run_completed = Some(Instant::now());
                             }
-                            publish_completed_run_timing(&op_id, &run_timing);
+                            publish_completed_run_timing(&op_id, &run_timing, &completed_run_timings);
                             let snapshot = reconciliation.lock().unwrap().clone();
                             match finalize_successful_run(
                                 &result,
@@ -2057,6 +2079,7 @@ impl ProviderAdapter for DshNativeProvider {
                     run_harness: Arc::new(Mutex::new(None)),
                     active_run: Arc::new(AtomicBool::new(false)),
                     run_reunified: Arc::new(Notify::new()),
+                    completed_run_timings: Arc::new(StdMutex::new(HashMap::new())),
                     cwd: spec.cwd.clone(),
                     executable,
                 },
@@ -2125,7 +2148,7 @@ impl ProviderAdapter for DshNativeProvider {
 
         // Fetch the session state under a short registry read (B-2), then
         // admit under the per-session lock only.
-        let (state, closing, cwd, executable, run_harness, active_run, run_reunified) = {
+        let (state, closing, cwd, executable, run_harness, active_run, run_reunified, completed_run_timings) = {
             let sessions = self.sessions.read().await;
             let native_session = sessions.get(&session.session_id).ok_or_else(|| {
                 HostError::internal(format!(
@@ -2141,6 +2164,7 @@ impl ProviderAdapter for DshNativeProvider {
                 Arc::clone(&native_session.run_harness),
                 Arc::clone(&native_session.active_run),
                 Arc::clone(&native_session.run_reunified),
+                Arc::clone(&native_session.completed_run_timings),
             )
         };
 
@@ -2265,6 +2289,7 @@ impl ProviderAdapter for DshNativeProvider {
             run_harness,
             active_run,
             run_reunified,
+            completed_run_timings,
         ))
     }
 
@@ -4814,6 +4839,48 @@ mod tests {
         );
     }
 
+
+    #[tokio::test]
+    async fn dispatch_successful_run_try_send_failure_preserves_prior_pending() {
+        let budget = Arc::new(DeliveryBudget::default());
+        let (content_tx, mut content_rx) = mpsc::channel(1);
+        let session_id = HostSessionId::new();
+        let op_id = HostOperationId::new();
+        let first = "first".to_string();
+        let second = "second".to_string();
+        let events = vec![
+            HostEvent::MessageDelta(TextDeltaEvent {
+                session_id: session_id.clone(),
+                op_id: op_id.clone(),
+                text: first.clone(),
+            }),
+            HostEvent::MessageDelta(TextDeltaEvent {
+                session_id: session_id.clone(),
+                op_id: op_id.clone(),
+                text: second,
+            }),
+        ];
+        let failed = dispatch_successful_run_events(
+            events,
+            &content_tx,
+            &budget,
+            &session_id,
+            &op_id,
+        )
+        .expect_err("second delta must fail when the channel is full");
+        assert_eq!(failed.error_category, "provider_error");
+        assert_eq!(
+            budget.test_pending_message_slots(),
+            1,
+            "only the failed delta permit may be released; the first remains pending"
+        );
+        assert_eq!(budget.test_pending_payload_bytes(), first.len());
+        let payload = content_rx.recv().await.expect("first delta queued");
+        let _ = payload.into_event();
+        assert_eq!(budget.test_pending_message_slots(), 0);
+        assert_eq!(budget.test_pending_payload_bytes(), 0);
+    }
+
     #[tokio::test]
     async fn dsh_oversize_final_fallback_without_streamed_text_fails_delivery_bounds() {
         let budget = Arc::new(DeliveryBudget::default());
@@ -4870,6 +4937,30 @@ mod tests {
         assert_eq!(terminal_count(&events), 1);
     }
 
+
+
+    #[test]
+    fn publish_completed_run_timing_is_scoped_per_operation() {
+        let snapshots: RunTimingSnapshots = Arc::new(StdMutex::new(HashMap::new()));
+        let op_a = HostOperationId::new();
+        let op_b = HostOperationId::new();
+        let timing_a = StdMutex::new(DshStreamingRunTiming {
+            op_id: None,
+            first_callback: Some(Instant::now()),
+            run_completed: Some(Instant::now()),
+        });
+        let timing_b = StdMutex::new(DshStreamingRunTiming {
+            op_id: None,
+            first_callback: Some(Instant::now()),
+            run_completed: Some(Instant::now() + std::time::Duration::from_millis(5)),
+        });
+        publish_completed_run_timing(&op_a, &timing_a, &snapshots);
+        publish_completed_run_timing(&op_b, &timing_b, &snapshots);
+        let map = snapshots.lock().unwrap();
+        assert_eq!(map.len(), 2);
+        assert_eq!(map.get(&op_a).and_then(|t| t.op_id.as_ref()), Some(&op_a));
+        assert_eq!(map.get(&op_b).and_then(|t| t.op_id.as_ref()), Some(&op_b));
+    }
 
     #[test]
     fn delivery_budget_allows_sequential_drained_messages_beyond_64() {

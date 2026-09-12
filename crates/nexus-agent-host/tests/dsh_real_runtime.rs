@@ -52,7 +52,7 @@ use nexus_agent_host::capability::model::{
 };
 use nexus_agent_host::config::TimeoutConfig;
 use nexus_agent_host::error::HostError;
-use nexus_agent_host::providers::native_cli::dsh::{take_last_dsh_run_timing, DshNativeProvider, resolve_dsh_executable};
+use nexus_agent_host::providers::native_cli::dsh::{DshNativeProvider, resolve_dsh_executable};
 use nexus_agent_host::{HostOperationId, ProviderAdapter, ProviderId};
 use tempfile::TempDir;
 use tokio::io::AsyncReadExt;
@@ -1257,7 +1257,9 @@ async fn real_dsh_message_delta_precedes_terminal_with_timing_evidence() {
                 first_delta <= terminal_at,
                 "consumer: MessageDelta must not follow the terminal instant"
             );
-            let producer_timing = take_last_dsh_run_timing()
+            let producer_timing = provider
+                .take_run_timing(&handle.session_id, &op_id)
+                .await
                 .expect("producer timing must be captured for actual-dsh proof");
             assert_eq!(
                 producer_timing.op_id.as_ref(),
