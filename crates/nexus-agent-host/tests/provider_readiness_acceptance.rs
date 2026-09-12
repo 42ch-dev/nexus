@@ -191,21 +191,15 @@ fn spawn_records(log: &[serde_json::Value]) -> Vec<&serde_json::Value> {
     log.iter().filter(|e| e["method"] == "_spawn").collect()
 }
 
-/// Start events for SESSION launches only (the readiness probe runs in the
-/// host workspace boundary, so its cwd is excluded).
-fn session_start_events<'a>(
-    log: &'a [serde_json::Value],
-    workspace_root: &Path,
-) -> Vec<&'a serde_json::Value> {
-    let probe_cwd =
-        std::fs::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
+/// Every fixture PROCESS SPAWN receipt in a log, regardless of cwd.
+///
+/// The ACP fixture writes one `{"event": "start", "pid": ...}` record per
+/// process it creates, so this counts real spawns (probe AND session). A
+/// cwd-filtered session-only count would miss a child spawned in the boundary
+/// cwd, which is exactly what a denied admission must not do.
+fn spawn_events(log: &[serde_json::Value]) -> Vec<&serde_json::Value> {
     log.iter()
-        .filter(|e| e["event"] == "start")
-        .filter(|e| {
-            e["cwd"]
-                .as_str()
-                .is_none_or(|cwd| Path::new(cwd) != probe_cwd.as_path())
-        })
+        .filter(|e| e["event"] == "start" && e["pid"].is_u64())
         .collect()
 }
 
@@ -838,7 +832,7 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
     );
 
     // ...and the next admission must be DENIED, without spawning another child.
-    let sessions_before = session_start_events(&read_log(&launch_log), &workspace_root).len();
+    let spawns_before = spawn_events(&read_log(&launch_log)).len();
     let denied = manager
         .create_session(CreateSessionRequest {
             provider_id: ProviderId::new("mock-acp"),
@@ -850,14 +844,16 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
             owner: owner(&workspace_root),
         })
         .await;
-    assert!(
-        denied.is_err(),
-        "admission must agree with the now-unavailable catalog"
+    let denied_err = denied.expect_err("admission must agree with the now-unavailable catalog");
+    assert_eq!(
+        denied_err.category(),
+        "provider_unavailable",
+        "the denial must be the TYPED ProviderUnavailable category, got: {denied_err}"
     );
     assert_eq!(
-        session_start_events(&read_log(&launch_log), &workspace_root).len(),
-        sessions_before,
-        "the denied admission must not spawn another fixture child"
+        spawn_events(&read_log(&launch_log)).len(),
+        spawns_before,
+        "the denied admission must not spawn another fixture process"
     );
 
     // ── Case B: an ordinary prompt timeout must NOT invalidate.
@@ -883,8 +879,8 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
     });
     // The prompt deadline is REAL and configured through the authoritative
     // `TimeoutConfig` (it flows into the discovered provider). A short deadline
-    // makes a genuine streaming timeout observable; the outer wait below is
-    // generous so the assertion is about the event, not about timing.
+    // makes a genuine streaming timeout observable, and the drain bound below
+    // is chosen to be discriminating against the 180s unconfigured default.
     config2.timeouts.prompt_ms = 500;
     manager2.start(config2).await.expect("host start");
 
@@ -923,34 +919,30 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
     let observed_timeout = {
         use futures_util::StreamExt;
         let mut saw_timeout = None;
-        // Generous outer bound: the assertion below is about the EVENT, not a
-        // timing margin.
         let drain = async {
             while let Some(item) = stream.next().await {
                 if let Ok(HostEvent::OpFailed(failed)) = item {
-                    saw_timeout = Some((failed.error_category, failed.error_message));
+                    saw_timeout = Some(failed.error_category);
                     break;
                 }
             }
         };
-        tokio::time::timeout(std::time::Duration::from_secs(20), drain)
+        // Discriminating bound: 3s is far above the configured 500ms prompt
+        // deadline and far below the 180s crate default, so reaching the
+        // terminal event here is itself the evidence that the CONFIGURED
+        // deadline was the one enforced — an ignored `prompt_ms` would still be
+        // pending. (No assertion on the diagnostic's wording: that would pin
+        // source text rather than behavior.)
+        tokio::time::timeout(std::time::Duration::from_secs(3), drain)
             .await
-            .expect("the prompt must reach a terminal event");
+            .expect("the configured 500ms prompt deadline must elapse within 3s (default is 180s)");
         saw_timeout
     };
-    let (category, message) = observed_timeout.expect("the blocked prompt must emit OpFailed");
+    let category = observed_timeout.expect("the blocked prompt must emit OpFailed");
     assert!(
         category.contains("timeout"),
         "the terminal event must be a REAL timeout (got category '{category}'), \
 proving the configured prompt deadline elapsed"
-    );
-    // Non-timing proof that the AUTHORITATIVE config reached the provider: the
-    // provider reports the budget it actually enforced, so a `prompt_ms` that
-    // was ignored would not match.
-    assert!(
-        message.contains("500ms"),
-        "the terminal event must report the CONFIGURED prompt deadline of 500ms, \
-got: {message}"
     );
 
     // A prompt/content timeout is not a launch-class failure: the provider

@@ -1181,8 +1181,7 @@ impl WorkspaceState {
         let (creator_id, _workspace_slug) = self.verified_creator_context()?;
         let workspace_root = self
             .workspace_path()
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| self.nexus_home().clone());
+            .map_or_else(|| self.nexus_home().clone(), std::path::PathBuf::from);
         Some(nexus_agent_host::capability::model::SessionOwner {
             creator_id,
             workspace_root,
@@ -1267,10 +1266,12 @@ impl WorkspaceState {
         Arc::clone(&self.run_event_registry)
     }
 
+    #[must_use]
     pub fn run_event_sinks(&self) -> crate::run_events::RunEventSinkMap {
         Arc::clone(&self.run_event_sinks)
     }
 
+    #[must_use]
     pub fn session_cancels(
         &self,
     ) -> Arc<

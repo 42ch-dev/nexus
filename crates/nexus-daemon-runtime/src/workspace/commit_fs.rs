@@ -188,6 +188,12 @@ impl ScopeMutation {
     /// component of `scope_relative` is then walked with
     /// `openat(..., O_DIRECTORY|O_NOFOLLOW)`. A symlinked (or swapped)
     /// component anywhere on the way to the scope fails closed.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`io::Error`] from opening the canonical root, from any
+    /// `openat` on a component of `scope_relative`, or [`io::ErrorKind::Unsupported`]
+    /// on a non-Unix target.
     pub fn open(canonical_root: &Path, scope_relative: &str) -> io::Result<Self> {
         let scope_path = if scope_relative.is_empty() {
             canonical_root.to_path_buf()
@@ -211,16 +217,32 @@ impl ScopeMutation {
     }
 
     /// Whether a relative target exists (no symlink follow).
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`io::Error`] from splitting `rel_path` or walking its
+    /// parent components.
     pub fn target_exists(&self, rel_path: &str) -> io::Result<bool> {
-        self.with_parent(rel_path, |parent, name| parent.exists(name))
+        self.with_parent(rel_path, unix_dir::DirFd::exists)
     }
 
     /// Hash a relative target through a no-follow open.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`io::Error`] from splitting `rel_path`, walking its parent
+    /// components, or opening/reading the target.
     pub fn hash_target(&self, rel_path: &str) -> io::Result<String> {
-        self.with_parent(rel_path, |parent, name| parent.hash_file(name))
+        self.with_parent(rel_path, unix_dir::DirFd::hash_file)
     }
 
     /// Write an exclusive stage file beside the target (create-new, no-clobber).
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`io::Error`] from splitting `rel_path`, walking its parent
+    /// components, or creating/writing the stage file — including
+    /// [`io::ErrorKind::AlreadyExists`] when the stage name is taken.
     pub fn write_stage(
         &self,
         rel_path: &str,
@@ -234,6 +256,11 @@ impl ScopeMutation {
     }
 
     /// Backup an existing target into a sibling basename; returns captured mode.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`io::Error`] from splitting `rel_path`, walking its parent
+    /// components, or reading the existing target's metadata and bytes.
     pub fn backup_target(&self, rel_path: &str, backup_basename: &str) -> io::Result<Option<u32>> {
         self.with_parent(rel_path, |parent, name| {
             parent.backup_file(name, backup_basename)
@@ -241,6 +268,12 @@ impl ScopeMutation {
     }
 
     /// Atomic no-clobber create, coupled to the parent descriptor.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`io::Error`] from splitting `rel_path`, walking its parent
+    /// components, or the `linkat` install — including
+    /// [`io::ErrorKind::AlreadyExists`] rather than clobbering the target.
     pub fn atomic_create(&self, rel_path: &str, stage_basename: &str) -> io::Result<()> {
         self.with_parent(rel_path, |parent, name| {
             parent.atomic_create(name, stage_basename)
@@ -248,6 +281,13 @@ impl ScopeMutation {
     }
 
     /// Replace via atomic capture + verify + no-clobber install.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`io::Error`] from splitting `rel_path`, walking its parent
+    /// components, staging or naming the capture, or the verified install. A
+    /// captured hash that does not match `expected_hash` restores the captured
+    /// file and reports a conflict instead of mutating the target.
     pub fn atomic_replace_verified(
         &self,
         rel_path: &str,
@@ -263,6 +303,13 @@ impl ScopeMutation {
     ///
     /// `naming_basename` only names the private capture artifact; it is the
     /// entry's stage basename, which the delete op never creates.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`io::Error`] from splitting `rel_path`, walking its parent
+    /// components, naming or hashing the capture, or the unlink. A captured
+    /// hash that does not match `expected_hash` restores the captured file and
+    /// reports a conflict instead of deleting the target.
     pub fn atomic_delete_verified(
         &self,
         rel_path: &str,
@@ -275,6 +322,12 @@ impl ScopeMutation {
     }
 
     /// Restore the preimage during rollback.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`io::Error`] from splitting `rel_path`, walking its parent
+    /// components, or reinstating the backup/stage bytes (via
+    /// [`Self::atomic_replace_verified`] or [`Self::atomic_create`]).
     pub fn restore_preimage(
         &self,
         rel_path: &str,
@@ -447,6 +500,11 @@ mod unix_dir {
             if self.exists(name)? {
                 return Err(io::Error::new(io::ErrorKind::AlreadyExists, "stage exists"));
             }
+            // A file mode occupies the low 12 bits; `from_bits_truncate`
+            // immediately masks to the valid bits, so narrowing a restored
+            // mode wider than `mode_t` to its low half is the intended
+            // conversion, not a lossy accident.
+            #[allow(clippy::cast_possible_truncation)]
             let mode = Mode::from_bits_truncate(mode.unwrap_or(CREATE_FILE_MODE) as u16);
             let fd = openat(
                 Some(self.raw_fd()),
@@ -636,7 +694,7 @@ mod unix_dir {
                     let restore = restore_basename(stage_basename);
                     self.write_stage_file(&restore, &bytes, mode)?;
                     if self.exists(target)? {
-                        let expected = post_hash.unwrap_or(pre_hash.unwrap_or(""));
+                        let expected = post_hash.or(pre_hash).unwrap_or("");
                         self.atomic_replace_verified(target, &restore, expected)?;
                     } else {
                         self.atomic_create(target, &restore)?;
@@ -645,7 +703,7 @@ mod unix_dir {
                 }
                 _ => {
                     if self.exists(target)? {
-                        let expected = post_hash.unwrap_or(pre_hash.unwrap_or(""));
+                        let expected = post_hash.or(pre_hash).unwrap_or("");
                         self.atomic_delete_verified(target, expected, stage_basename)?;
                     }
                     Ok(())
@@ -814,6 +872,12 @@ pub fn hash_bytes(bytes: &[u8]) -> String {
     hex::encode(sha.finalize())
 }
 
+/// Decode one base64 manifest body.
+///
+/// # Errors
+///
+/// Returns a rendering of the base64 failure when `encoded` (trimmed) is not
+/// valid standard-alphabet base64.
 pub fn decode_base64(encoded: &str) -> Result<Vec<u8>, String> {
     use base64::Engine;
     base64::engine::general_purpose::STANDARD
@@ -822,6 +886,11 @@ pub fn decode_base64(encoded: &str) -> Result<Vec<u8>, String> {
 }
 
 /// Require that the target's parent directory already exists.
+///
+/// # Errors
+///
+/// Returns [`io::ErrorKind::NotFound`] when `target` has no parent, or when
+/// that parent is not an existing directory.
 pub fn require_parent_exists(target: &Path) -> io::Result<()> {
     match target.parent() {
         Some(parent) if parent.is_dir() => Ok(()),

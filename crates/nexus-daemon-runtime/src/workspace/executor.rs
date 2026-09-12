@@ -20,7 +20,7 @@ pub struct DaemonWorkspaceExecutor {
 
 impl DaemonWorkspaceExecutor {
     #[must_use]
-    pub fn new(
+    pub const fn new(
         session_manager: Arc<WorkspaceSessionManager>,
         canonical_workspace_root: String,
     ) -> Self {
@@ -62,7 +62,7 @@ impl WorkspaceExecutor for DaemonWorkspaceExecutor {
         input: WorkspaceOpenInput,
     ) -> Result<WorkspaceOpenOutput, CapabilityError> {
         nexus_home_layout::validate_workspace_path_safe(&input.path)
-            .map_err(|reason| CapabilityError::InputInvalid(reason))?;
+            .map_err(CapabilityError::InputInvalid)?;
         let target_path =
             std::path::PathBuf::from(&self.canonical_workspace_root).join(&input.path);
         let existed = target_path.exists();

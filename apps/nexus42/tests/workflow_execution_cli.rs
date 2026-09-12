@@ -4233,7 +4233,7 @@ fn parse_sse_frames(body: &str) -> Vec<SseFrameParsed> {
             let json = serde_json::from_str::<Value>(data).unwrap_or(Value::Null);
             let sequence = json
                 .get("sequence")
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .or_else(|| id.split(':').nth(1).and_then(|s| s.parse().ok()))
                 .unwrap_or(0);
             out.push(SseFrameParsed {
@@ -4265,7 +4265,7 @@ fn assert_monotonic_sse_frames(frames: &[SseFrameParsed]) {
 fn host_event_kind(data: &Value) -> Option<String> {
     data.get("host_event")
         .and_then(|v| v.as_object())
-        .and_then(|obj| obj.keys().next().map(|k| k.to_string()))
+        .and_then(|obj| obj.keys().next().map(std::string::ToString::to_string))
 }
 
 async fn fetch_session_events(
@@ -4454,7 +4454,7 @@ async fn p4_cancel_inspect_events_db_journey() {
     assert_monotonic_run_state_frames(&run_states, "cancelled");
 }
 
-/// P4 T4: late subscribe after a terminal run replays retained run_state.
+/// P4 T4: late subscribe after a terminal run replays retained `run_state`.
 #[tokio::test]
 async fn p4_late_subscribe_replays_terminal_run_state() {
     let host = BlockingHost::new();
@@ -4690,7 +4690,7 @@ async fn p4_public_sse_foreign_owner_denied() {
     );
 }
 
-/// Emits OpStarted + many MessageDelta frames + OpFinished in one operation.
+/// Emits `OpStarted` + many `MessageDelta` frames + `OpFinished` in one operation.
 struct EventFloodHost {
     deltas: usize,
     prompts: Mutex<Vec<String>>,
@@ -4751,7 +4751,7 @@ impl HostFacade for EventFloodHost {
             op_id: op_id.clone(),
             session_id: session_id.clone(),
         });
-        let mut events = vec![Ok(started.clone())];
+        let mut events = vec![Ok(started)];
         for i in 0..self.deltas {
             events.push(Ok(HostEvent::MessageDelta(TextDeltaEvent {
                 session_id: session_id.clone(),
@@ -4764,7 +4764,7 @@ impl HostFacade for EventFloodHost {
             op_id,
             reason: FinishReason::EndTurn,
         });
-        events.push(Ok(finished.clone()));
+        events.push(Ok(finished));
         Ok(Box::pin(futures_util::stream::iter(events)))
     }
 

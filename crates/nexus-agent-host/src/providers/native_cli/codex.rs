@@ -1086,10 +1086,19 @@ mod tests {
         // fixture fails `initialize` with it, so it genuinely travels the real
         // probe failure path.
         const SENTINEL: &str = "sentinel-secret-do-not-publish-4f2a";
-        let provider = mock_provider(HashMap::from([(
-            "INIT_ERROR_SENTINEL".to_string(),
-            SENTINEL.to_string(),
-        )]));
+        // The fixture's own request log is the evidence that this probe really
+        // reached it. Without a receipt a probe that never spawned (bad
+        // interpreter, missing fixture) would also report "unavailable" and the
+        // sentinel assertion below would pass vacuously.
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = temp_dir.path().join("probe-requests.jsonl");
+        let provider = mock_provider(HashMap::from([
+            (
+                "REQ_LOG".to_string(),
+                req_log.to_string_lossy().into_owned(),
+            ),
+            ("INIT_ERROR_SENTINEL".to_string(), SENTINEL.to_string()),
+        ]));
 
         let health = provider
             .probe(test_probe_request(10_000))
@@ -1100,14 +1109,26 @@ mod tests {
             !health.available,
             "a failing handshake must be unavailable, got {health:?}"
         );
+        // ACTUAL receipt from the fixture: `initialize` was issued and logged
+        // before the sentinel error was returned.
+        let log = std::fs::read_to_string(&req_log)
+            .expect("the probe must have spawned the fixture and logged a request");
+        let requests: Vec<serde_json::Value> = log
+            .lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect();
+        assert!(
+            requests.iter().any(|r| r["method"] == "initialize"),
+            "the probe must have issued initialize to the fixture; log: {log}"
+        );
+
+        // The observable contract: the hostile string never reaches the public
+        // diagnostic. The exact wording of the static category is deliberately
+        // NOT asserted — that would pin source text rather than behavior.
         let message = health.message.unwrap_or_default();
         assert!(
             !message.contains(SENTINEL),
             "the public diagnostic must never echo SDK/subprocess output: {message}"
-        );
-        assert!(
-            message.contains("app-server handshake failed"),
-            "the diagnostic stays the static category text, got: {message}"
         );
     }
 

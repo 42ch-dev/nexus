@@ -14,6 +14,10 @@ use std::sync::{Arc, Mutex};
 static CRASH_POINT: Mutex<Option<&'static str>> = Mutex::new(None);
 
 /// Set the next commit crash point (`None` disables simulation).
+///
+/// # Panics
+///
+/// Panics if the crash-point mutex was poisoned by a previous panic.
 pub fn set_crash_point(point: Option<&'static str>) {
     *CRASH_POINT.lock().expect("crash point lock") = point;
 }
@@ -32,6 +36,10 @@ pub(super) fn crash_point_is(point: &str) -> bool {
 static AFTER_DELETE_CAPTURE: Mutex<Option<Arc<dyn Fn() + Send + Sync>>> = Mutex::new(None);
 
 /// Install (or clear) the after-delete-capture hook.
+///
+/// # Panics
+///
+/// Panics if the hook mutex was poisoned by a previous panic.
 pub fn set_after_delete_capture_hook(hook: Option<Arc<dyn Fn() + Send + Sync>>) {
     *AFTER_DELETE_CAPTURE.lock().expect("hook lock") = hook;
 }
@@ -79,6 +87,10 @@ impl OwnerGate {
 static OWNER_GATE: Mutex<Option<Arc<OwnerGate>>> = Mutex::new(None);
 
 /// Install (or clear) the owner gate.
+///
+/// # Panics
+///
+/// Panics if the owner-gate mutex was poisoned by a previous panic.
 pub fn set_owner_gate(gate: Option<Arc<OwnerGate>>) {
     *OWNER_GATE.lock().expect("owner gate lock") = gate;
 }

@@ -14,6 +14,12 @@ pub struct WorkspaceAuthorityLease {
 
 impl WorkspaceAuthorityLease {
     /// Acquire an exclusive lock file adjacent to the canonical creator DB.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`io::Error`] from creating or opening the lock file, or
+    /// from the non-blocking `flock` when another manager already holds the
+    /// lease (the caller sees `WouldBlock`/`EAGAIN`).
     pub fn acquire(db_path: &Path) -> io::Result<Arc<Self>> {
         let path = db_path.with_extension("workspace_authority.lock");
         let file = OpenOptions::new()

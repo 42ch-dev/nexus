@@ -212,7 +212,7 @@ pub async fn get_session(
         .engine()
         .ok_or_else(|| NexusApiError::service_unavailable("engine not available"))?;
 
-    let sid = nexus_orchestration::engine::SessionId(session_id.to_string());
+    let sid = nexus_orchestration::engine::SessionId(session_id.clone());
     // Shared durable execution projection (A2/A7): present for terminal rows
     // with no live runner; a load error projects unreadable, never a
     // fabricated class.
@@ -419,7 +419,7 @@ pub async fn signal_session(
             Json(serde_json::json!({
                 "signal": "cancel",
                 "status": result.status,
-                "cancel_outcome": result.cancel_outcome.map(|o| o.as_str()),
+                "cancel_outcome": result.cancel_outcome.map(crate::preset_run::CancelOutcome::as_str),
             })),
         ));
     }
@@ -1258,15 +1258,14 @@ async fn authorize_orchestration_session_read(
         }
         None => None,
     };
-    let owner = match durable_owner {
-        Some(owner) => owner,
-        None => {
-            let active = sessions
-                .iter()
-                .find(|s| s.session_id == sid)
-                .ok_or_else(|| NexusApiError::NotFound(format!("session {session_id}")))?;
-            active.creator_id.clone()
-        }
+    let owner = if let Some(owner) = durable_owner {
+        owner
+    } else {
+        let active = sessions
+            .iter()
+            .find(|s| s.session_id == sid)
+            .ok_or_else(|| NexusApiError::NotFound(format!("session {session_id}")))?;
+        active.creator_id.clone()
     };
     if owner != active_creator {
         return Err(NexusApiError::NotFound(format!("session {session_id}")));
@@ -1286,8 +1285,10 @@ pub async fn session_events(
     let registry = state.run_event_registry();
     let sub = match registry.subscribe_live(&session_id, last_event_id, inspect_url) {
         Ok(rx) => rx,
-        Err(crate::run_events::SubscribeError::MalformedCursor)
-        | Err(crate::run_events::SubscribeError::FutureCursor) => {
+        Err(
+            crate::run_events::SubscribeError::MalformedCursor
+            | crate::run_events::SubscribeError::FutureCursor,
+        ) => {
             return Err(NexusApiError::BadRequest {
                 code: "invalid_cursor".into(),
                 message: "malformed or future Last-Event-ID".into(),

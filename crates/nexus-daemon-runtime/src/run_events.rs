@@ -78,6 +78,7 @@ impl RunEventSink {
         registry.publish_host_event(&self.run_id, step_id, attempt_id, host_event);
     }
 
+    #[must_use]
     pub fn run_id(&self) -> &str {
         &self.run_id
     }
@@ -230,6 +231,12 @@ impl Drop for LiveSubscription {
     }
 }
 
+impl Default for RunEventRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RunEventRegistry {
     #[must_use]
     pub fn new() -> Self {
@@ -245,6 +252,12 @@ impl RunEventRegistry {
         }
     }
 
+    // The `MAX_LIVE_RINGS` capacity check and the ring insertion MUST stay in
+    // one critical section: splitting them (as the lint's early `drop`
+    // suggests) would let two concurrent registrations both observe capacity
+    // and both insert, exceeding the cap. The guard is therefore held to the
+    // end of the atomic section on purpose.
+    #[allow(clippy::significant_drop_tightening)]
     pub fn try_register_live(&self, run_id: &str) -> Option<RunEventSink> {
         let mut state = self
             .inner
@@ -316,6 +329,11 @@ impl RunEventRegistry {
     /// ring stays live for the retry that may still settle it. Closing it
     /// would turn the actionable run into a replay-only history and drop
     /// every live subscriber.
+    // Lock/ring-move semantics preserved deliberately: the live-ring removal,
+    // terminal insertion and terminal-order eviction are one critical section
+    // (the lint's suggested early `drop` would sit after the last use and is a
+    // no-op, so an explicit allow beats a meaningless statement).
+    #[allow(clippy::significant_drop_tightening)]
     pub fn mark_terminal(&self, run_id: &str) {
         let mut state = self
             .inner
@@ -338,6 +356,20 @@ impl RunEventRegistry {
     }
 
     /// Live SSE: atomically replay from `Last-Event-ID`, then register for live tail.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SubscribeError::HistoryUnavailable`] when the run has no live
+    /// or terminal ring, or when the cursor's epoch does not match the ring's;
+    /// [`SubscribeError::MalformedCursor`] / [`SubscribeError::FutureCursor`]
+    /// for an unparsable or future cursor; and
+    /// [`SubscribeError::TooManySubscribers`] when the run's subscriber cap is
+    /// already reached.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: the ring lookup is `.expect`ed only after the same
+    /// map was checked to contain `run_id` under the same guard.
     pub fn subscribe_live(
         &self,
         run_id: &str,
@@ -510,9 +542,8 @@ impl RunEventRegistryInner {
         if self.ring_closed(run_id) {
             return;
         }
-        let data = match serde_json::to_string(value) {
-            Ok(s) => s,
-            Err(_) => return,
+        let Ok(data) = serde_json::to_string(value) else {
+            return;
         };
         let mut state = self
             .state
@@ -549,7 +580,7 @@ impl RunEventRegistryInner {
             self.append_gap_record_locked(ring, run_id, sequence);
             return;
         }
-        self.push_record_locked(ring, frame);
+        Self::push_record_locked(ring, frame);
     }
 
     fn append_gap_record_locked(&self, ring: &mut RunRing, run_id: &str, skipped_sequence: u64) {
@@ -567,10 +598,10 @@ impl RunEventRegistryInner {
             event: "gap".to_string(),
             data,
         };
-        self.push_record_locked(ring, frame);
+        Self::push_record_locked(ring, frame);
     }
 
-    fn push_record_locked(&self, ring: &mut RunRing, frame: SseFrame) {
+    fn push_record_locked(ring: &mut RunRing, frame: SseFrame) {
         let byte_len = encoded_sse_frame_bytes(&frame);
         ring.records.push_back(StoredRecord {
             sequence: ring.next_sequence.saturating_sub(1),
@@ -583,11 +614,11 @@ impl RunEventRegistryInner {
                 ring.total_bytes = ring.total_bytes.saturating_sub(front.byte_len);
             }
         }
-        fanout(ring, frame);
+        fanout(ring, &frame);
     }
 }
 
-fn encoded_sse_frame_bytes(frame: &SseFrame) -> usize {
+const fn encoded_sse_frame_bytes(frame: &SseFrame) -> usize {
     // Wire estimate: `id:` + id + `\n` + `event:` + event + `\n` + `data:` + data + `\n\n`
     frame.id.len() + frame.event.len() + frame.data.len() + 16
 }
@@ -599,8 +630,8 @@ fn encoded_sse_frame_bytes(frame: &SseFrame) -> usize {
 /// into the channel's reserved control slot, so it is deliverable even when
 /// the data queue is full; the subscriber entry is then removed, closing the
 /// channel after the gap.
-fn fanout(ring: &mut RunRing, frame: SseFrame) {
-    let byte_len = encoded_sse_frame_bytes(&frame);
+fn fanout(ring: &mut RunRing, frame: &SseFrame) {
+    let byte_len = encoded_sse_frame_bytes(frame);
     let lag_sequence = ring.next_sequence.saturating_sub(1);
     let mut remove = Vec::new();
     for (id, sub) in &mut ring.subscribers {
@@ -663,21 +694,22 @@ fn range_covered_by_explicit_gap(ring: &RunRing, from: u64, to: u64) -> bool {
 
 fn collect_from(ring: &RunRing, run_id: &str, after: Option<u64>) -> Vec<SseFrame> {
     let mut out = Vec::new();
-    let first_retained = ring.records.front().map(|r| r.sequence).unwrap_or(1);
+    let first_retained = ring.records.front().map_or(1, |r| r.sequence);
     let after_seq = after.unwrap_or(0);
     if after_seq == 0 && first_retained > 1 {
         if !range_covered_by_explicit_gap(ring, 1, first_retained - 1) {
             out.push(gap_frame(run_id, ring.epoch, 1, first_retained - 1));
         }
-    } else if after_seq > 0 && after_seq < first_retained {
-        if !range_covered_by_explicit_gap(ring, after_seq + 1, first_retained - 1) {
-            out.push(gap_frame(
-                run_id,
-                ring.epoch,
-                after_seq + 1,
-                first_retained - 1,
-            ));
-        }
+    } else if after_seq > 0
+        && after_seq < first_retained
+        && !range_covered_by_explicit_gap(ring, after_seq + 1, first_retained - 1)
+    {
+        out.push(gap_frame(
+            run_id,
+            ring.epoch,
+            after_seq + 1,
+            first_retained - 1,
+        ));
     }
     for rec in &ring.records {
         if rec.sequence > after_seq {
@@ -696,7 +728,7 @@ fn gap_frame(run_id: &str, epoch: u64, from: u64, to: u64) -> SseFrame {
     };
     let sequence = to.max(from);
     SseFrame {
-        id: format!("{}:{}", epoch, sequence),
+        id: format!("{epoch}:{sequence}"),
         event: "gap".to_string(),
         data: serde_json::to_string(&gap).unwrap_or_default(),
     }
@@ -718,8 +750,7 @@ fn parse_cursor(cursor: &str) -> Result<(u64, u64), SubscribeError> {
 fn current_epoch() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_secs())
 }
 
 #[cfg(test)]

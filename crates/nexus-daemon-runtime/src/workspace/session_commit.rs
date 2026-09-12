@@ -61,6 +61,13 @@ pub struct CommitOutcome {
     pub committed: bool,
 }
 
+/// Recover unsettled intents, taking the manager's mutation lock for the pass.
+///
+/// # Errors
+///
+/// Returns whatever [`recover_unsettled_locked`] reports: a
+/// [`SessionError::Database`] failure while listing or settling rows, or the
+/// recovery-conflict error for an intent another writer already claimed.
 pub async fn recover_unsettled(
     mgr: &WorkspaceSessionManager,
     workspace_root: &str,
@@ -70,6 +77,12 @@ pub async fn recover_unsettled(
 }
 
 /// Recover unsettled intents when the caller already holds [`WorkspaceSessionManager::lock_mutation`].
+///
+/// # Errors
+///
+/// Returns a [`SessionError::Database`] failure while listing or settling
+/// rows, or [`SessionError::RecoveryConflict`] when an intent is owned by
+/// another writer.
 pub async fn recover_unsettled_locked(
     mgr: &WorkspaceSessionManager,
     workspace_root: &str,
@@ -197,8 +210,7 @@ async fn recover_applying_intent_locked(
         let applied = match entry.op.as_str() {
             "create" | "modify" => scope
                 .hash_target(&entry.path)
-                .map(|h| Some(h) == entry.post_hash)
-                .unwrap_or(false),
+                .is_ok_and(|h| Some(h) == entry.post_hash),
             "delete" => !scope.target_exists(&entry.path).unwrap_or(true),
             _ => false,
         };
@@ -360,6 +372,13 @@ async fn rollback_intent_locked(
 ///
 /// Duplicates and prefix-overlaps are rejected AFTER normalization (`a.txt`
 /// and `./a.txt` are the same target).
+///
+/// # Errors
+///
+/// Returns [`SessionError::ManifestInvalid`] for a path that fails
+/// [`commit_fs::split_relative`](super::commit_fs::split_relative), for a
+/// duplicate normalized path, or for two paths where one is a prefix of the
+/// other.
 pub fn normalize_changes(
     changes: &[WorkspaceChangeEntry],
 ) -> Result<Vec<WorkspaceChangeEntry>, SessionError> {
@@ -393,6 +412,13 @@ pub fn normalize_changes(
     Ok(normalized)
 }
 
+/// Validate a change manifest's shape before any filesystem work.
+///
+/// # Errors
+///
+/// Returns [`SessionError::ManifestInvalid`] when the manifest is empty,
+/// exceeds [`commit_fs::MAX_CHANGES`](super::commit_fs::MAX_CHANGES), carries an
+/// invalid op or path, or exceeds the per-file/total byte bounds.
 pub fn validate_manifest(changes: &[WorkspaceChangeEntry]) -> Result<(), SessionError> {
     if changes.is_empty() {
         return Err(SessionError::ManifestInvalid(
@@ -410,7 +436,7 @@ pub fn validate_manifest(changes: &[WorkspaceChangeEntry]) -> Result<(), Session
         validate_relative_path(&change.path)?;
         for other in &paths {
             if other.starts_with(&format!("{}/", change.path))
-                || change.path.starts_with(&format!("{}/", other))
+                || change.path.starts_with(&format!("{other}/"))
             {
                 return Err(SessionError::ManifestInvalid(format!(
                     "overlapping paths: {} and {}",
@@ -512,6 +538,28 @@ async fn committed_replay_outcome(
     }))
 }
 
+/// Apply one recoverable commit: normalize, validate, CAS-verify each entry at
+/// the mutation boundary, persist the durable intent, then settle it.
+///
+/// # Errors
+///
+/// Returns [`SessionError::Internal`] when the manager has no recoverable
+/// authority, [`SessionError::ManifestInvalid`] for a malformed manifest,
+/// [`SessionError::HashConflict`] when a target no longer matches its expected
+/// hash at the mutation boundary, [`SessionError::NotFound`] for an unknown
+/// session, [`SessionError::Database`] on persistence failure, and
+/// [`SessionError::Io`] on filesystem failure.
+///
+/// # Panics
+///
+/// Never in practice: the settled-entries JSON is read back with
+/// `.expect("entry pushed above")` only after this function pushed that entry.
+//
+// The body is one ordered commit transaction: normalize -> validate -> capture
+// and verify each entry -> persist the intent -> settle. Splitting it into
+// helpers would scatter the CAS/settlement ordering that makes a partially
+// applied commit recoverable, so the length is deliberate.
+#[allow(clippy::too_many_lines)]
 pub async fn commit_recoverable(
     mgr: &WorkspaceSessionManager,
     session_id: &SessionId,
@@ -631,9 +679,9 @@ pub async fn commit_recoverable(
             enforce_path_boundary(&target, &canonical_root)?;
             require_parent_exists(&target)
                 .map_err(|e| SessionError::ManifestInvalid(e.to_string()))?;
-            let stage_basename = format!(".nexus-stage-{}-{}", rev_tag, idx);
+            let stage_basename = format!(".nexus-stage-{rev_tag}-{idx}");
             let backup_basename = if scope.target_exists(&change.path).unwrap_or(false) {
-                Some(format!(".nexus-backup-{}-{}", rev_tag, idx))
+                Some(format!(".nexus-backup-{rev_tag}-{idx}"))
             } else {
                 None
             };
@@ -656,10 +704,9 @@ pub async fn commit_recoverable(
                     let bytes = decode_base64(change.content_base64.as_deref().unwrap_or(""))
                         .map_err(SessionError::ManifestInvalid)?;
                     let captured_mode = if let Some(ref backup_name) = backup_basename {
-                        let mode = scope
+                        scope
                             .backup_target(&change.path, backup_name)
-                            .map_err(|e| SessionError::Io(e.to_string()))?;
-                        mode
+                            .map_err(|e| SessionError::Io(e.to_string()))?
                     } else {
                         None
                     };
@@ -856,6 +903,12 @@ fn cleanup_staged(scope: &ScopeMutation, staged: &[(String, String, Option<Strin
 }
 
 /// Durable commit on an `Arc` manager; retains ownership through caller cancellation.
+///
+/// # Errors
+///
+/// Returns whatever [`commit_recoverable`] reports for the manifest.
+/// Cancellation of the awaiting caller does not abandon the owned commit; the
+/// spawned owner is registered on the manager so a later pass can reap it.
 pub async fn commit_recoverable_owned(
     mgr: Arc<WorkspaceSessionManager>,
     session_id: SessionId,
@@ -871,10 +924,8 @@ pub async fn commit_recoverable_owned(
         let _ = tx.send(result);
     });
     mgr.register_commit_owner(owner).await;
-    match rx.await {
-        Ok(result) => result,
-        Err(_) => Err(SessionError::Internal("commit owner channel closed".into())),
-    }
+    rx.await
+        .unwrap_or_else(|_| Err(SessionError::Internal("commit owner channel closed".into())))
 }
 
 /// Reap stage/backup artifacts left behind by ALREADY-SETTLED intents.
@@ -938,6 +989,13 @@ async fn cleanup_settled_artifacts(mgr: &WorkspaceSessionManager) {
     }
 }
 
+/// Startup recovery for every unsettled intent, under the mutation lock.
+///
+/// # Errors
+///
+/// Returns [`SessionError::Database`] when listing unsettled intents fails
+/// (including a corrupt intent payload), or whatever the per-intent recovery
+/// reports.
 pub async fn startup_recovery_all(mgr: &WorkspaceSessionManager) -> Result<(), SessionError> {
     let _guard = mgr.lock_mutation().await;
     let intents = match db::list_all_unsettled_intents(mgr.pool().as_ref()).await {
