@@ -15,9 +15,13 @@ use crate::{WriterConnectionContext, WriterMode};
 
 struct UserData(WriterConnectionContext);
 
+/// SQLite calls this exactly once per successful registration that supplied it.
+/// Each scalar function owns its own [`UserData`] allocation so partial registration
+/// failure never leaves earlier callbacks pointing at freed memory, and a failed
+/// registration never double-frees a shared block.
 unsafe extern "C" fn destroy_userdata(ptr: *mut c_void) {
     if !ptr.is_null() {
-        // SAFETY: pointer came from Box::into_raw in install_writer_functions.
+        // SAFETY: pointer came from Box::into_raw in register_scalar.
         drop(unsafe { Box::from_raw(ptr.cast::<UserData>()) });
     }
 }
@@ -129,10 +133,10 @@ fn register_scalar(
     db: *mut sqlite3,
     name: &str,
     func: ScalarFn,
-    userdata: *mut UserData,
-    destroy: Option<unsafe extern "C" fn(*mut c_void)>,
+    context: WriterConnectionContext,
 ) -> Result<(), sqlx::Error> {
     let c_name = CString::new(name).map_err(|e| sqlx::Error::Configuration(e.to_string().into()))?;
+    let userdata = Box::into_raw(Box::new(UserData(context)));
     let status = unsafe {
         sqlite3_create_function_v2(
             db,
@@ -143,12 +147,14 @@ fn register_scalar(
             Some(func),
             None,
             None,
-            destroy,
+            Some(destroy_userdata),
         )
     };
     if status == SQLITE_OK {
         Ok(())
     } else {
+        // Registration failed: SQLite did not take ownership, so free locally.
+        unsafe { destroy_userdata(userdata.cast::<c_void>()) };
         Err(sqlx::Error::Configuration(
             format!("sqlite3_create_function_v2({name}) failed: {status}").into(),
         ))
@@ -156,13 +162,21 @@ fn register_scalar(
 }
 
 /// Install all five writer protocol scalar functions on `conn`.
+///
+/// # Ownership proof
+///
+/// Each function receives a **distinct** [`UserData`] allocation and its own
+/// `destroy_userdata` callback. Partial failure therefore cannot leave earlier
+/// registrations pointing at memory freed by a later error path, and a failed
+/// registration cannot invoke SQLite's destructor on memory SQLite never
+/// adopted. Successful paths leak exactly zero blocks: SQLite calls
+/// `destroy_userdata` once per registered function when the connection closes.
 pub async fn install_writer_functions(
     conn: &mut SqliteConnection,
     context: WriterConnectionContext,
 ) -> Result<(), sqlx::Error> {
     let mut handle = conn.lock_handle().await?;
     let db = handle.as_raw_handle().as_ptr();
-    let userdata = Box::into_raw(Box::new(UserData(context)));
     let functions: [(&str, ScalarFn); 5] = [
         ("nexus_writer_id", scalar_writer_id),
         ("nexus_writer_protocol", scalar_writer_protocol),
@@ -170,20 +184,8 @@ pub async fn install_writer_functions(
         ("nexus_migration_epoch", scalar_migration_epoch),
         ("nexus_engine_epoch", scalar_engine_epoch),
     ];
-    for (index, (name, func)) in functions.iter().enumerate() {
-        let destroy = if index + 1 == functions.len() {
-            Some(destroy_userdata as unsafe extern "C" fn(*mut c_void))
-        } else {
-            None
-        };
-        if let Err(err) = register_scalar(db, name, *func, userdata, destroy) {
-            if destroy.is_some() {
-                unsafe { destroy_userdata(userdata.cast::<c_void>()) };
-            } else {
-                unsafe { destroy_userdata(userdata.cast::<c_void>()) };
-            }
-            return Err(err);
-        }
+    for (name, func) in functions {
+        register_scalar(db, name, func, context.clone())?;
     }
     Ok(())
 }

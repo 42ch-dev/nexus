@@ -14,6 +14,7 @@ use uuid::Uuid;
 use crate::LocalDbError;
 
 const LOCK_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
+const SUPPORTED_PROTOCOL_VERSION: i64 = 1;
 pub const BOOTSTRAP_CREATOR_ID: &str = "bootstrap";
 
 /// Live admission guards held by THIS process, keyed by
@@ -23,7 +24,20 @@ pub const BOOTSTRAP_CREATOR_ID: &str = "bootstrap";
 /// connections carry fixed UDF epochs and cannot re-register) while the OS
 /// locks stay held for the process lifetime. Keyed per mode so retaining a
 /// direct guard never releases the engine owner's lock.
-static ACTIVE_GUARDS: LazyLock<Mutex<HashMap<(PathBuf, WriterMode), Arc<WorkspaceWriterGuard>>>> =
+struct RetainedGuardEntry {
+    guard: Arc<WorkspaceWriterGuard>,
+    pools: Mutex<Vec<SqlitePool>>,
+}
+
+impl RetainedGuardEntry {
+    fn pools_quiesced(&self) -> bool {
+        let mut pools = self.pools.lock().expect("pool registry poisoned");
+        pools.retain(|pool| !pool.is_closed());
+        pools.is_empty()
+    }
+}
+
+static ACTIVE_GUARDS: LazyLock<Mutex<HashMap<(PathBuf, WriterMode), RetainedGuardEntry>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -53,7 +67,6 @@ impl WriterMode {
 pub struct WorkspaceWriterGuard {
     pub(crate) db_path: PathBuf,
     writer_id: String,
-    creator_id: String,
     mode: WriterMode,
     migration_epoch: i64,
     engine_epoch: Option<i64>,
@@ -118,9 +131,14 @@ impl GuardedPool {
 }
 
 fn canonical_db_path(db_path: &Path) -> PathBuf {
-    db_path
-        .canonicalize()
-        .unwrap_or_else(|_| db_path.to_path_buf())
+    if db_path.exists() {
+        db_path.canonicalize().unwrap_or_else(|_| db_path.to_path_buf())
+    } else {
+        let parent = db_path.parent().unwrap_or_else(|| Path::new("."));
+        let file_name = db_path.file_name().map(PathBuf::from).unwrap_or_else(|| db_path.as_os_str().into());
+        let canonical_parent = parent.canonicalize().unwrap_or_else(|_| parent.to_path_buf());
+        canonical_parent.join(file_name)
+    }
 }
 
 pub fn retain_writer_guard(guard: Arc<WorkspaceWriterGuard>) {
@@ -128,7 +146,19 @@ pub fn retain_writer_guard(guard: Arc<WorkspaceWriterGuard>) {
     ACTIVE_GUARDS
         .lock()
         .expect("writer guard registry poisoned")
-        .insert(key, guard);
+        .entry(key)
+        .and_modify(|entry| entry.guard = Arc::clone(&guard))
+        .or_insert_with(|| RetainedGuardEntry { guard, pools: Mutex::new(Vec::new()) });
+}
+
+fn register_pool_handle(guard: &Arc<WorkspaceWriterGuard>, pool: &SqlitePool) {
+    let key = (canonical_db_path(&guard.db_path), guard.mode);
+    let mut guards = ACTIVE_GUARDS.lock().expect("writer guard registry poisoned");
+    let entry = guards.entry(key).or_insert_with(|| RetainedGuardEntry {
+        guard: Arc::clone(guard),
+        pools: Mutex::new(Vec::new()),
+    });
+    entry.pools.lock().expect("pool registry poisoned").push(pool.clone());
 }
 
 /// This process's live guard for `(db_path, mode)`, if any.
@@ -138,7 +168,7 @@ fn retained_guard(db_path: &Path, mode: WriterMode) -> Option<Arc<WorkspaceWrite
         .lock()
         .ok()?
         .get(&key)
-        .map(Arc::clone)
+        .map(|entry| Arc::clone(&entry.guard))
 }
 
 /// Drop one retained guard, releasing its OS admission locks.
@@ -150,26 +180,43 @@ fn release_guard(db_path: &Path, mode: WriterMode) {
         .remove(&key);
 }
 
-/// Drop this process's retained admission guards for `db_path`.
-///
-/// A migration needs the exclusive migration lock, which the same process's
-/// retained shared guards would otherwise deadlock against. Dropping a guard
-/// releases only the OS admission lock (`File`); writer registration rows stay
-/// durable and already-published pools keep their installed scalar functions,
-/// so they remain admitted while the epoch is unchanged and are fenced
-/// fail-closed if the migration advances it.
+/// Drop retained guards after every cooperative pool has closed.
 fn release_retained_guards(db_path: &Path) {
     let target = canonical_db_path(db_path);
     let mut guards = ACTIVE_GUARDS.lock().expect("writer guard registry poisoned");
     guards.retain(|(path, _), _| path != &target);
 }
 
+/// Release every retained writer guard for `db_path` in this process.
+///
+/// Cooperative pools on that path must be closed first; otherwise the OS
+/// locks remain held until those pools are dropped.
+pub fn release_retained_writer_guards(db_path: &Path) {
+    release_retained_guards(db_path);
+}
+
+
+async fn await_cooperative_quiescence(db_path: &Path) -> Result<(), LocalDbError> {
+    let target = canonical_db_path(db_path);
+    let start = Instant::now();
+    while start.elapsed() < LOCK_ACQUIRE_TIMEOUT {
+        let quiesced = ACTIVE_GUARDS.lock().expect("writer guard registry poisoned").iter()
+            .filter(|((path, _), _)| path == &target)
+            .all(|(_, entry)| entry.pools_quiesced());
+        if quiesced { return Ok(()); }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    Err(LocalDbError::OwnerBusy { resource: format!("{}: cooperative pools still active", target.display()) })
+}
+
 fn migration_lock_path(db_path: &Path) -> PathBuf {
-    PathBuf::from(format!("{}.migration.lock", db_path.display()))
+    let canonical = canonical_db_path(db_path);
+    PathBuf::from(format!("{}.migration.lock", canonical.display()))
 }
 
 fn engine_lock_path(db_path: &Path) -> PathBuf {
-    PathBuf::from(format!("{}.engine.lock", db_path.display()))
+    let canonical = canonical_db_path(db_path);
+    PathBuf::from(format!("{}.engine.lock", canonical.display()))
 }
 
 fn workspace_identity(db_path: &Path) -> Result<String, LocalDbError> {
@@ -288,34 +335,40 @@ async fn pool_with_context(
         .map_err(LocalDbError::from)
 }
 
-async fn read_gate_epochs(db_path: &Path) -> Result<(i64, i64), LocalDbError> {
-    // A not-yet-created database file cannot be opened `mode=ro` (SQLITE_CANTOPEN),
-    // and it has no protocol state: treat absence as the pre-activation (0, 0) gate.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GateState { protocol_version: i64, migration_epoch: i64, engine_epoch: i64 }
+
+fn validate_protocol_version(protocol_version: i64) -> Result<(), LocalDbError> {
+    if protocol_version > SUPPORTED_PROTOCOL_VERSION {
+        return Err(LocalDbError::SchemaMismatch {
+            reason: format!("workspace protocol_version={protocol_version} is newer than this binary supports ({SUPPORTED_PROTOCOL_VERSION})"),
+        });
+    }
+    Ok(())
+}
+
+async fn read_gate_state(db_path: &Path) -> Result<GateState, LocalDbError> {
     if !db_path.exists() {
-        return Ok((0, 0));
+        return Ok(GateState { protocol_version: 0, migration_epoch: 0, engine_epoch: 0 });
     }
     let url = sqlite_url(db_path, true);
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect(&url)
-        .await
-        .map_err(LocalDbError::from)?;
-    let present: Option<(i64,)> = sqlx::query_as(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='core_workspace_gate'",
-    )
-    .fetch_optional(&pool)
-    .await?;
-    if present.is_none() {
-        pool.close().await;
-        return Ok((0, 0));
-    }
-    let row: Option<(i64, i64)> = sqlx::query_as(
-        "SELECT migration_epoch, engine_epoch FROM core_workspace_gate WHERE pk = 1",
-    )
-    .fetch_optional(&pool)
-    .await?;
+    let pool = SqlitePoolOptions::new().max_connections(1).connect(&url).await.map_err(LocalDbError::from)?;
+    let present: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM sqlite_master WHERE type='table' AND name='core_workspace_gate'").fetch_optional(&pool).await?;
+    if present.is_none() { pool.close().await; return Ok(GateState { protocol_version: 0, migration_epoch: 0, engine_epoch: 0 }); }
+    let row: Option<(i64, i64, i64)> = sqlx::query_as("SELECT protocol_version, migration_epoch, engine_epoch FROM core_workspace_gate WHERE pk = 1").fetch_optional(&pool).await?;
     pool.close().await;
-    Ok(row.unwrap_or((0, 0)))
+    Ok(row.map(|(protocol_version, migration_epoch, engine_epoch)| GateState { protocol_version, migration_epoch, engine_epoch }).unwrap_or(GateState { protocol_version: 0, migration_epoch: 0, engine_epoch: 0 }))
+}
+
+async fn needs_activation_recovery(db_path: &Path) -> Result<bool, LocalDbError> {
+    if !protocol_tables_present(db_path).await { return Ok(false); }
+    Ok(read_gate_state(db_path).await?.migration_epoch == 0)
+}
+
+async fn read_gate_epochs(db_path: &Path) -> Result<(i64, i64), LocalDbError> {
+    let gate = read_gate_state(db_path).await?;
+    Ok((gate.migration_epoch, gate.engine_epoch))
 }
 
 async fn protocol_tables_present(db_path: &Path) -> bool {
@@ -421,6 +474,17 @@ async fn acquire_engine_epoch(
     Ok(next_engine)
 }
 
+
+async fn advance_migration_epoch(db_path: &Path, context: &WriterConnectionContext) -> Result<i64, LocalDbError> {
+    let pool = pool_with_context(db_path, context.clone(), single_connection()).await?;
+    let mut tx = crate::begin_immediate(&pool).await?;
+    let current: (i64,) = sqlx::query_as("SELECT migration_epoch FROM core_workspace_gate WHERE pk = 1").fetch_one(&mut *tx).await?;
+    let next = current.0 + 1;
+    let updated = sqlx::query("UPDATE core_workspace_gate SET migration_epoch = ? WHERE pk = 1 AND migration_epoch = ?").bind(next).bind(current.0).execute(&mut *tx).await?;
+    if updated.rows_affected() == 0 { return Err(LocalDbError::OwnerBusy { resource: "migration_epoch".to_string() }); }
+    tx.commit().await?; pool.close().await; Ok(next)
+}
+
 pub async fn acquire_writer_guard(
     db_path: &Path,
     creator_id: &str,
@@ -458,8 +522,9 @@ pub async fn acquire_writer_guard(
         ),
     };
 
-    let (migration_epoch, _) = read_gate_epochs(db_path).await?;
-    let migration_epoch = migration_epoch.max(1);
+    let gate = read_gate_state(db_path).await?;
+    validate_protocol_version(gate.protocol_version)?;
+    let migration_epoch = gate.migration_epoch.max(1);
 
     let engine_epoch = if mode == WriterMode::Engine {
         let ctx = writer_context(&writer_id, mode, migration_epoch, None);
@@ -474,7 +539,6 @@ pub async fn acquire_writer_guard(
     Ok(Arc::new(WorkspaceWriterGuard {
         db_path: db_path.to_path_buf(),
         writer_id,
-        creator_id: creator_id.to_string(),
         mode,
         migration_epoch,
         engine_epoch,
@@ -506,7 +570,9 @@ pub async fn open_guarded_pool_with(
         guard.migration_epoch,
         guard.engine_epoch,
     );
-    pool_with_context(&guard.db_path, context, options).await
+    let pool = pool_with_context(&guard.db_path, context, options).await?;
+    register_pool_handle(guard, &pool);
+    Ok(pool)
 }
 
 pub async fn open_guarded_pool_arc(guard: Arc<WorkspaceWriterGuard>) -> Result<GuardedPool, LocalDbError> {
@@ -529,30 +595,33 @@ pub async fn open_guarded_pool_arc_with(
 }
 
 pub async fn run_guarded_migrations(db_path: &Path) -> Result<(), LocalDbError> {
+    let gate_before = read_gate_state(db_path).await?;
+    validate_protocol_version(gate_before.protocol_version)?;
+    await_cooperative_quiescence(db_path).await?;
     release_retained_guards(db_path);
     let _migration_lock = acquire_exclusive_lock(&migration_lock_path(db_path))?;
-    let (current_epoch, _) = read_gate_epochs(db_path).await?;
     let writer_id = Uuid::new_v4().to_string();
     let workspace_identity = workspace_identity(db_path)?;
-    let ctx = writer_context(&writer_id, WriterMode::Migration, current_epoch, None);
+    let ctx = writer_context(&writer_id, WriterMode::Migration, gate_before.migration_epoch, None);
+    if protocol_tables_present(db_path).await {
+        register_writer(db_path, &ctx, BOOTSTRAP_CREATOR_ID, &workspace_identity).await?;
+    }
     let pool = pool_with_context(db_path, ctx.clone(), single_connection()).await?;
-    // The exclusive OS migration lock is the primary serialization (two
-    // co-booting processes cannot both migrate). The retry stays wired for the
-    // residual transient classes it already classifies (SQLITE_BUSY from an
-    // external writer, `_sqlx_migrations` bookkeeping collision).
+    let before_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations").fetch_one(&pool).await.unwrap_or(0);
     crate::run_migrations_with_retry(&pool, crate::run_migrations).await?;
+    let after_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations").fetch_one(&pool).await.unwrap_or(before_count);
     pool.close().await;
-    if current_epoch == 0 {
-        // Gate triggers require a migration writer registration before epoch bumps.
+    let gate_after = read_gate_state(db_path).await?;
+    validate_protocol_version(gate_after.protocol_version)?;
+    if gate_before.migration_epoch == 0 && gate_after.migration_epoch == 0 {
         register_writer(db_path, &ctx, BOOTSTRAP_CREATOR_ID, &workspace_identity).await?;
         let activated = activate_protocol_epoch(db_path, &ctx).await?;
-        register_writer(
-            db_path,
-            &writer_context(&writer_id, WriterMode::Migration, activated, None),
-            BOOTSTRAP_CREATOR_ID,
-            &workspace_identity,
-        )
-        .await?;
+        register_writer(db_path, &writer_context(&writer_id, WriterMode::Migration, activated, None), BOOTSTRAP_CREATOR_ID, &workspace_identity).await?;
+    } else if after_count > before_count {
+        let advanced = advance_migration_epoch(db_path, &writer_context(&writer_id, WriterMode::Migration, gate_after.migration_epoch, None)).await?;
+        register_writer(db_path, &writer_context(&writer_id, WriterMode::Migration, advanced, None), BOOTSTRAP_CREATOR_ID, &workspace_identity).await?;
+    } else if protocol_tables_present(db_path).await {
+        register_writer(db_path, &writer_context(&writer_id, WriterMode::Migration, gate_after.migration_epoch, None), BOOTSTRAP_CREATOR_ID, &workspace_identity).await?;
     }
     Ok(())
 }
@@ -576,7 +645,9 @@ pub async fn open_admitted_pool_with(
     mode: WriterMode,
     options: GuardedPoolOptions,
 ) -> Result<SqlitePool, LocalDbError> {
-    if !protocol_tables_present(db_path).await {
+    let gate = read_gate_state(db_path).await?;
+    validate_protocol_version(gate.protocol_version)?;
+    if !protocol_tables_present(db_path).await || needs_activation_recovery(db_path).await? {
         run_guarded_migrations(db_path).await?;
     }
     let guard = acquire_writer_guard(db_path, creator_id, mode).await?;

@@ -88,6 +88,8 @@ pub enum LocalDbError {
     OwnerBusy { resource: String },
     /// Writer registration or protocol epoch rejected the connection.
     WriterFenced { reason: String },
+    /// Durable workspace protocol or schema version is newer than this binary supports.
+    SchemaMismatch { reason: String },
     /// Malformed durable workspace commit intent row.
     CorruptIntent {
         revision: String,
@@ -362,6 +364,9 @@ impl fmt::Display for LocalDbError {
             }
             Self::WriterFenced { reason } => {
                 write!(f, "workspace writer fenced: {reason}")
+            }
+            Self::SchemaMismatch { reason } => {
+                write!(f, "workspace schema mismatch: {reason}")
             }
             Self::CorruptIntent {
                 revision,
