@@ -140,6 +140,8 @@ async fn build_host(
             max_sessions: 4,
             max_ops_per_session: 1,
             timeouts: timeouts(),
+            host_config: None,
+            probe_owner: None,
         })
         .await
         .expect("host start");

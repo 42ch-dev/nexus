@@ -30,28 +30,33 @@ enum AgentHostState {
 pub struct AgentHostSubsystem {
     /// The host facade (from `nexus-agent-host`).
     host: Arc<dyn HostFacade>,
+    /// Retained validated host configuration (single load at boot).
+    host_config: nexus_agent_host::config::AgentHostConfig,
     /// Path to the agent-host config file.
     config_path: std::path::PathBuf,
     /// Workspace root for the agent host.
     workspace_root: std::path::PathBuf,
+    /// Optional verified probe owner resolved from workspace state.
+    probe_owner: Option<nexus_agent_host::capability::model::SessionOwner>,
     /// Current state (behind Mutex for async access).
     state: Arc<Mutex<AgentHostState>>,
 }
 
 impl AgentHostSubsystem {
     /// Create a new Agent Host subsystem.
-    ///
-    /// The `host` should be a fully-constructed `HostManager` (or other `HostFacade` impl)
-    /// with providers already registered.
     pub fn new(
         host: Arc<dyn HostFacade>,
+        host_config: nexus_agent_host::config::AgentHostConfig,
         config_path: std::path::PathBuf,
         workspace_root: std::path::PathBuf,
+        probe_owner: Option<nexus_agent_host::capability::model::SessionOwner>,
     ) -> Self {
         Self {
             host,
+            host_config,
             config_path,
             workspace_root,
+            probe_owner,
             state: Arc::new(Mutex::new(AgentHostState::NotStarted)),
         }
     }
@@ -78,10 +83,11 @@ impl SubsystemBootstrap for AgentHostSubsystem {
         let start_config = nexus_agent_host::capability::HostStartConfig {
             config_path: self.config_path.clone(),
             workspace_root: self.workspace_root.clone(),
-            max_sessions: nexus_agent_host::config::AgentHostConfig::default().max_sessions,
-            max_ops_per_session: nexus_agent_host::config::AgentHostConfig::default()
-                .max_ops_per_session,
-            timeouts: nexus_agent_host::config::TimeoutConfig::default(),
+            max_sessions: self.host_config.max_sessions,
+            max_ops_per_session: self.host_config.max_ops_per_session,
+            timeouts: self.host_config.timeouts.clone(),
+            host_config: Some(self.host_config.clone()),
+            probe_owner: self.probe_owner.clone(),
         };
 
         self.host
@@ -113,7 +119,6 @@ impl SubsystemBootstrap for AgentHostSubsystem {
         let state = self.state.lock().await;
         match &*state {
             AgentHostState::Running => {
-                // Check host health
                 match self.host.health().await {
                     Ok(h) if h.running => SubsystemHealth::Up,
                     Ok(_) | Err(_) => SubsystemHealth::Degraded,
@@ -138,8 +143,10 @@ mod tests {
         let host = Arc::new(HostManager::new());
         let subsystem = AgentHostSubsystem::new(
             host,
+            nexus_agent_host::config::AgentHostConfig::default(),
             std::path::PathBuf::from("/tmp/test-config"),
             std::path::PathBuf::from("/tmp/workspace"),
+            None,
         );
         assert_eq!(subsystem.kind(), SubsystemKind::AgentHost);
     }
@@ -149,8 +156,10 @@ mod tests {
         let host = Arc::new(HostManager::new());
         let subsystem = AgentHostSubsystem::new(
             host,
+            nexus_agent_host::config::AgentHostConfig::default(),
             std::path::PathBuf::from("/tmp/test-config"),
             std::path::PathBuf::from("/tmp/workspace"),
+            None,
         );
         assert_eq!(subsystem.health().await, SubsystemHealth::Down);
     }

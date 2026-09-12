@@ -522,146 +522,9 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // --- Section 2.5: Agent Host subsystem (constructed BEFORE the
     // capability registry so the production HostPromptExecutor can be
     // injected into `CapabilityRuntimeDeps::prompt_executor` — A1) ---
-    let agent_host_facade: Arc<dyn nexus_agent_host::HostFacade> = {
-        use nexus_agent_host::providers::native_cli::{
-            claude::ClaudeCliProvider, codex::CodexNativeProvider, dsh::DshNativeProvider,
-        };
-
-        let manager = nexus_agent_host::core::manager::HostManager::new();
-        // Probe CLI presence before registering. Providers whose CLI is
-        // absent from PATH are NOT registered, so `/providers` and the
-        // AgentPicker UI do not surface them — avoiding a false promise
-        // where the UI offers a session path that only fails at
-        // process-spawn time (greptile P1; supersedes the qc1 W-001
-        // deferral R-V1127P1-QC-W-001, now closed).
-        //
-        // `default_config()` is a pure constructor that does not panic;
-        // `which::which()` is a fast PATH lookup (~1ms). Both are safe
-        // to call unconditionally at boot.
-        let mut providers_registered = 0u32;
-
-        if which::which("codex").is_ok() {
-            manager
-                .register_provider(
-                    Arc::new(CodexNativeProvider::default_config()),
-                    nexus_agent_host::LaunchStrategy::NativeCli {
-                        command: "codex".to_string(),
-                        args: vec![],
-                        env: std::collections::HashMap::new(),
-                    },
-                )
-                .await;
-            providers_registered += 1;
-            tracing::info!(
-                provider = "codex-native",
-                "registered native agent provider"
-            );
-        } else {
-            tracing::warn!(
-                provider = "codex-native",
-                "CLI not found on PATH; skipping registration"
-            );
-        }
-
-        if which::which("claude").is_ok() {
-            manager
-                .register_provider(
-                    Arc::new(ClaudeCliProvider::default_config()),
-                    nexus_agent_host::LaunchStrategy::NativeCli {
-                        command: "claude".to_string(),
-                        args: vec![],
-                        env: std::collections::HashMap::new(),
-                    },
-                )
-                .await;
-            providers_registered += 1;
-            tracing::info!(
-                provider = "claude-native",
-                "registered native agent provider"
-            );
-        } else {
-            tracing::warn!(
-                provider = "claude-native",
-                "CLI not found on PATH; skipping registration"
-            );
-        }
-
-        // dsh-native (PD-4): bring-your-own runtime, same skip-if-missing
-        // rule as claude/codex. One Nexus-owned resolution (v1.188 P0 T2,
-        // `resolve_dsh_executable`): explicit configured command/path →
-        // nonblank parent `DSH_RUNTIME_BIN` → PATH `dsh`; bare commands
-        // resolve through PATH, relative paths with separators are
-        // rejected, and an invalid explicit/env override fails closed
-        // (skip, never a fallback to another binary). The canonical
-        // absolute executable is handed to the provider and passed to the
-        // SDK as `Config::dsh_bin` (the SDK never default-searches `dsh`).
-        match nexus_agent_host::providers::native_cli::dsh::resolve_dsh_executable(None) {
-            Ok(dsh_executable) => {
-                manager
-                    .register_provider(
-                        Arc::new(DshNativeProvider::with_dsh_bin(Some(
-                            dsh_executable.to_string_lossy().into_owned(),
-                        ))),
-                        nexus_agent_host::LaunchStrategy::NativeCli {
-                            command: dsh_executable.to_string_lossy().into_owned(),
-                            args: vec![],
-                            env: std::collections::HashMap::new(),
-                        },
-                    )
-                    .await;
-                providers_registered += 1;
-                tracing::info!(provider = "dsh-native", "registered native agent provider");
-            }
-            Err(reason) => {
-                // Safe static category text only (no environment dumps).
-                tracing::warn!(
-                    provider = "dsh-native",
-                    "runtime resolution failed ({reason}); skipping registration"
-                );
-            }
-        }
-
-        // Configured generic ACP providers (V1.186): register launch recipes
-        // only — no client/process at boot. The first Host session for a
-        // provider lazily spawns its owned ACP child bound to the verified
-        // Creator workspace cwd. Disabled/missing providers are refused at
-        // construction and never registered.
-        let host_config = state.agent_host_config();
-        for provider_config in &host_config.providers {
-            if provider_config.protocol != "acp" {
-                continue;
-            }
-            match nexus_agent_host::providers::acp::AcpProvider::from_config(
-                provider_config.clone(),
-                host_config.timeouts.clone(),
-                nexus_agent_host::HostPermissionResolver::new_native_only(&host_config.policy),
-            ) {
-                Ok(provider) => {
-                    let launch = nexus_agent_host::LaunchStrategy::Acp {
-                        command: provider_config.command.clone().unwrap_or_default(),
-                        args: provider_config.args.clone(),
-                        env: provider_config.env.clone(),
-                    };
-                    manager.register_provider(Arc::new(provider), launch).await;
-                    providers_registered += 1;
-                    tracing::info!(
-                        provider = %provider_config.id,
-                        "registered configured ACP provider (lazy session-scoped spawn)"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        provider = %provider_config.id,
-                        error = %e,
-                        "skipping configured ACP provider"
-                    );
-                }
-            }
-        }
-
-        tracing::info!(providers_registered, "agent provider registration complete");
-        Arc::new(manager)
-    };
+    // v1.188 P2: discovery/factory/probe run inside HostManager::start().
+    let agent_host_facade: Arc<dyn nexus_agent_host::HostFacade> =
+        Arc::new(nexus_agent_host::core::manager::HostManager::new());
     state.set_agent_host(Arc::clone(&agent_host_facade));
     tracing::info!("Agent host facade wired");
 
@@ -1856,10 +1719,14 @@ fn create_subsystems(
     let mut subsystems = core_subsystems(state, port);
 
     // Agent Host is an optional subsystem — failure does not block daemon startup
+    let host_config = (*state.agent_host_config()).clone();
+    let probe_owner = state.verified_probe_owner();
     subsystems.push(Arc::new(AgentHostSubsystem::new(
         agent_host_facade,
+        host_config,
         agent_host_config_path,
         workspace_root,
+        probe_owner,
     )));
 
     subsystems

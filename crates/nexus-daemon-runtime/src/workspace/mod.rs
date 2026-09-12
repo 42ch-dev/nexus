@@ -1073,6 +1073,23 @@ impl WorkspaceState {
         self.agent_host_config = Arc::new(config);
     }
 
+    /// Resolve verified probe owner from active creator + workspace path.
+    #[must_use]
+    pub fn verified_probe_owner(
+        &self,
+    ) -> Option<nexus_agent_host::capability::model::SessionOwner> {
+        let creator_id = crate::config::try_active_creator_id(self.nexus_home())?;
+        let workspace_root = self
+            .workspace_path()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| self.nexus_home().clone());
+        Some(nexus_agent_host::capability::model::SessionOwner {
+            creator_id,
+            workspace_root,
+            orchestration_run_id: None,
+        })
+    }
+
     /// Get the agent host configuration.
     #[must_use]
     pub fn agent_host_config(&self) -> Arc<AgentHostConfig> {

@@ -114,6 +114,8 @@ fn host_start_config(ws: &TestWorkspace) -> HostStartConfig {
             prompt_ms: 10_000,
             shutdown_ms: 2_000,
         },
+        host_config: None,
+        probe_owner: None,
     }
 }
 
