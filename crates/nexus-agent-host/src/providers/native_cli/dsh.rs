@@ -65,51 +65,54 @@
 //! close; an unconfirmed close retains every byte of evidence. A session
 //! is never removed before confirmed close.
 //!
-//! # No streaming, no cancel (AR-6)
+//! # Message-level streaming, no cancel (P1 / AR-6)
 //!
-//! `Session::run` returns only after the root session reports idle and
-//! `final_response` is derived from the last `assistant/message` event —
-//! the SDK has no incremental delta API and no cancel / session-close RPC.
-//! `dsh-native` therefore ships the documented narrower descriptor
-//! [`CapabilityDescriptor::dsh_limited`] (`streaming: false`,
-//! `cancellation: false`) and `cancel()` is an honest no-op. The turn
-//! emits exactly one `OpStarted` before content (P0 conformance cutover),
-//! then the mapped result events.
+//! v1.188 P1 maps root `assistant/message` notifications into
+//! `MessageDelta` events through a bounded retained producer while
+//! `Session::run` is in flight. [`CapabilityDescriptor::dsh_limited`]
+//! advertises `streaming: true` only after the actual-dsh timing proof in
+//! `tests/dsh_real_runtime.rs`; `cancellation` stays `false` (no cancel
+//! RPC). Each turn emits exactly one `OpStarted` before content, then
+//! mapped deltas and exactly one terminal.
 //!
-//! # Timeout behavior (B-3)
+//! # Timeout / failure behavior (P1 T2)
 //!
 //! The per-turn `tokio::time::timeout` wraps the whole run coroutine. When
-//! it fires, the SDK coroutine is dropped but the runtime keeps executing
-//! the already-sent prompt — no cancel RPC exists — so the turn completes
-//! in the runtime with side effects the caller believes failed (a
-//! "zombie" turn). The stored `dsh_session_id` is therefore rotated on
-//! timeout ([`rotate_dsh_session_id`]): the next execute starts a fresh
-//! agent+session pair and can never be spliced into the abandoned turn.
+//! it fires, the SDK coroutine is dropped but the runtime may keep the
+//! abandoned prompt alive — no cancel RPC exists. The host emits one
+//! `OpFailed(timeout)` and transfers the session to retained close; there
+//! is no zombie-session reuse on the same handle.
 
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
-use deepseek_harness_sdk::{Config, DeepSeekHarness, Error as DshError, Input};
+use deepseek_harness_sdk::{Config, DeepSeekHarness, Error as DshError, Input, Notification};
 use futures_util::future::{BoxFuture, FutureExt, Shared};
 use futures_util::StreamExt;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{mpsc, Mutex, RwLock};
 #[cfg(unix)]
 use super::sealed_fs;
 
 use crate::capability::model::{
     CapabilityDescriptor, HostContentBlock, HostEvent, HostEventStream, ManagedSessionHandle,
     OperationFailedEvent, OperationStartedEvent, PromptPermissionScope, ProtocolKind,
-    ProviderDescriptor, ProviderHealth,
+    ProviderDescriptor, ProviderHealth, TextDeltaEvent,
 };
 use crate::config::TimeoutConfig;
 use crate::error::{HostError, HostResult};
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
 use crate::providers::native_cli::map_dsh::{
-    classify_error_parts, classify_run_error, map_run_result,
+    classify_error_parts, classify_notification, classify_run_error, finalize_successful_run,
+    operation_delivery_overflow_failure, operation_protocol_failure, ClassifyNotificationError,
+    DshNotificationClass, RunReconciliation,
 };
+use deepseek_harness_sdk::RunResult;
+use std::time::Instant;
+use tokio::sync::Notify;
 use crate::ProviderAdapter;
 
 /// The bare command resolved through PATH when no explicit configured
@@ -147,6 +150,356 @@ const DENY_ALL_PATCH: &str = include_str!("deny_all.cordis.patch.yml");
 
 /// File name of the copied no-tools patch inside the sealed child home.
 const DENY_ALL_PATCH_FILENAME: &str = "nexus-deny-all.cordis.patch.yml";
+
+/// Nexus-owned delivery bounds (architecture §4.3).
+const DSCH_MAX_QUEUED_MESSAGES: usize = 64;
+const DSCH_MAX_EVENT_TEXT_BYTES: usize = 256 * 1024;
+const DSCH_MAX_PENDING_PAYLOAD_BYTES: usize = 1024 * 1024;
+const DSCH_MAX_EMITTED_TEXT_BYTES: usize = 4 * 1024 * 1024;
+
+#[derive(Default)]
+struct DeliveryBudget {
+    pending: StdMutex<usize>,
+    emitted: StdMutex<usize>,
+    /// In-flight message deltas awaiting consumer dequeue; released when the
+    /// queued payload is consumed or dropped (architecture §4.3 pending cap).
+    pending_messages: StdMutex<usize>,
+}
+
+impl DeliveryBudget {
+    fn try_reserve(&self, bytes: usize) -> bool {
+        if bytes > DSCH_MAX_EVENT_TEXT_BYTES {
+            return false;
+        }
+        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        let mut emitted = self.emitted.lock().unwrap_or_else(|e| e.into_inner());
+        let mut pending_messages = self
+            .pending_messages
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if *pending_messages >= DSCH_MAX_QUEUED_MESSAGES {
+            return false;
+        }
+        if *pending + bytes > DSCH_MAX_PENDING_PAYLOAD_BYTES {
+            return false;
+        }
+        if *emitted + bytes > DSCH_MAX_EMITTED_TEXT_BYTES {
+            return false;
+        }
+        *pending_messages += 1;
+        *pending += bytes;
+        *emitted += bytes;
+        true
+    }
+
+    fn release(&self, bytes: usize) {
+        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        *pending = pending.saturating_sub(bytes);
+        let mut pending_messages = self
+            .pending_messages
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *pending_messages = pending_messages.saturating_sub(1);
+    }
+
+    #[cfg(test)]
+    fn test_pending_message_slots(&self) -> usize {
+        *self
+            .pending_messages
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[cfg(test)]
+    fn test_pending_payload_bytes(&self) -> usize {
+        *self.pending.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+/// Monotonic instants for actual-runtime streaming proof (L2).
+#[derive(Default, Clone, Debug)]
+pub struct DshStreamingRunTiming {
+    /// The turn that produced this snapshot (set only on publish).
+    pub op_id: Option<HostOperationId>,
+    pub first_callback: Option<Instant>,
+    pub run_completed: Option<Instant>,
+}
+
+type RunTimingSnapshots =
+    Arc<StdMutex<HashMap<HostOperationId, DshStreamingRunTiming>>>;
+
+fn publish_completed_run_timing(
+    op_id: &HostOperationId,
+    run_timing: &StdMutex<DshStreamingRunTiming>,
+    snapshots: &RunTimingSnapshots,
+) {
+    let timing = run_timing.lock().unwrap_or_else(|e| e.into_inner());
+    if let (Some(first_callback), Some(run_completed)) =
+        (timing.first_callback, timing.run_completed)
+    {
+        let mut map = snapshots.lock().unwrap_or_else(|e| e.into_inner());
+        map.insert(
+            op_id.clone(),
+            DshStreamingRunTiming {
+                op_id: Some(op_id.clone()),
+                first_callback: Some(first_callback),
+                run_completed: Some(run_completed),
+            },
+        );
+    }
+}
+
+struct QueuedPayload {
+    event: Option<HostEvent>,
+    reservation: Option<usize>,
+    budget: Arc<DeliveryBudget>,
+}
+
+impl QueuedPayload {
+    fn into_event(mut self) -> HostEvent {
+        if let Some(bytes) = self.reservation.take() {
+            self.budget.release(bytes);
+        }
+        self.event.take().expect("queued payload consumed once")
+    }
+}
+
+impl Drop for QueuedPayload {
+    fn drop(&mut self) {
+        if let Some(bytes) = self.reservation.take() {
+            self.budget.release(bytes);
+        }
+    }
+}
+
+struct StreamObserver {
+    root_session_id: String,
+    session_id: HostSessionId,
+    op_id: HostOperationId,
+    content_tx: mpsc::Sender<QueuedPayload>,
+    reconciliation: Arc<StdMutex<RunReconciliation>>,
+    classifier_failed: Arc<AtomicBool>,
+    delivery_failed: Arc<AtomicBool>,
+    budget: Arc<DeliveryBudget>,
+    failure_notify: Arc<Notify>,
+    run_timing: Arc<StdMutex<DshStreamingRunTiming>>,
+}
+
+impl StreamObserver {
+    fn signal_failure(&self, classifier: bool, delivery: bool) {
+        if classifier {
+            self.classifier_failed.store(true, Ordering::Release);
+        }
+        if delivery {
+            self.delivery_failed.store(true, Ordering::Release);
+        }
+        self.failure_notify.notify_waiters();
+    }
+
+    fn observe(&self, notification: &Notification) {
+        if self.classifier_failed.load(Ordering::Acquire)
+            || self.delivery_failed.load(Ordering::Acquire)
+        {
+            return;
+        }
+        match classify_notification(notification, &self.root_session_id) {
+            Ok(DshNotificationClass::Ignore) => {}
+            Ok(DshNotificationClass::RootText(text)) => {
+                let bytes = text.len();
+                if !self.budget.try_reserve(bytes) {
+                    self.signal_failure(false, true);
+                    return;
+                }
+                {
+                    let mut timing = self.run_timing.lock().unwrap_or_else(|e| e.into_inner());
+                    if timing.first_callback.is_none() {
+                        timing.first_callback = Some(Instant::now());
+                    }
+                }
+                let event = HostEvent::MessageDelta(TextDeltaEvent {
+                    session_id: self.session_id.clone(),
+                    op_id: self.op_id.clone(),
+                    text,
+                });
+                match self.content_tx.try_send(QueuedPayload {
+                    event: Some(event),
+                    reservation: Some(bytes),
+                    budget: Arc::clone(&self.budget),
+                }) {
+                    Ok(()) => {
+                        self.reconciliation
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .note_root_text_emitted();
+                    }
+                    Err(_) => self.signal_failure(false, true),
+                }
+            }
+            Err(ClassifyNotificationError::Protocol(_)) => self.signal_failure(true, false),
+            Err(ClassifyNotificationError::EventTooLarge(_)) => self.signal_failure(false, true),
+        }
+    }
+}
+/// Enqueue fallback `MessageDelta` events through the same delivery budget as
+/// callback text; terminal events are returned for the one-slot channel.
+fn dispatch_successful_run_events(
+    events: Vec<HostEvent>,
+    content_tx: &mpsc::Sender<QueuedPayload>,
+    budget: &Arc<DeliveryBudget>,
+    session_id: &HostSessionId,
+    op_id: &HostOperationId,
+) -> Result<Vec<HostEvent>, OperationFailedEvent> {
+    let mut terminals = Vec::new();
+    for event in events {
+        if let HostEvent::MessageDelta(delta) = event {
+            let bytes = delta.text.len();
+            if bytes > DSCH_MAX_EVENT_TEXT_BYTES || !budget.try_reserve(bytes) {
+                return Err(operation_delivery_overflow_failure(session_id, op_id));
+            }
+            if content_tx
+                .try_send(QueuedPayload {
+                    event: Some(HostEvent::MessageDelta(delta)),
+                    reservation: Some(bytes),
+                    budget: Arc::clone(budget),
+                })
+                .is_err()
+            {
+                // QueuedPayload ownership returns on failure; Drop releases once.
+                return Err(operation_delivery_overflow_failure(session_id, op_id));
+            }
+        } else {
+            terminals.push(event);
+        }
+    }
+    Ok(terminals)
+}
+
+
+
+fn delivery_failure_signaled(
+    classifier_failed: &AtomicBool,
+    delivery_failed: &AtomicBool,
+) -> bool {
+    classifier_failed.load(Ordering::Acquire) || delivery_failed.load(Ordering::Acquire)
+}
+
+async fn wait_delivery_failure(
+    failure_notify: &Notify,
+    classifier_failed: &AtomicBool,
+    delivery_failed: &AtomicBool,
+) {
+    loop {
+        if delivery_failure_signaled(classifier_failed, delivery_failed) {
+            return;
+        }
+        failure_notify.notified().await;
+    }
+}
+
+/// Signals the producer when the consumer drops the stream before normal
+/// completion (`content_tx` stays open while the observer still holds a
+/// sender clone during `Session::run`).
+struct StreamConsumerDropGuard {
+    stream_finished: Arc<AtomicBool>,
+    consumer_dropped: Arc<AtomicBool>,
+    consumer_drop_notify: Arc<Notify>,
+}
+
+impl StreamConsumerDropGuard {
+    fn mark_stream_finished(&self) {
+        self.stream_finished.store(true, Ordering::Release);
+    }
+}
+
+impl Drop for StreamConsumerDropGuard {
+    fn drop(&mut self) {
+        if !self.stream_finished.load(Ordering::Acquire) {
+            // Latch synchronously so a real owner drop before the producer
+            // enters `select!` is never lost (Notify alone is not enough).
+            self.consumer_dropped.store(true, Ordering::Release);
+            self.consumer_drop_notify.notify_waiters();
+        }
+    }
+}
+
+fn consumer_drop_signaled(consumer_dropped: &AtomicBool) -> bool {
+    consumer_dropped.load(Ordering::Acquire)
+}
+
+async fn wait_consumer_drop(consumer_dropped: &AtomicBool, consumer_drop_notify: &Notify) {
+    loop {
+        if consumer_drop_signaled(consumer_dropped) {
+            return;
+        }
+        consumer_drop_notify.notified().await;
+    }
+}
+
+
+async fn wait_run_harness_reunify(
+    state: &Mutex<ClientState>,
+    active_run: &AtomicBool,
+    run_reunified: &Notify,
+) -> Option<DeepSeekHarness> {
+    loop {
+        {
+            let mut guard = state.lock().await;
+            if let Some(harness) = guard.harness.take() {
+                return Some(harness);
+            }
+        }
+        // reunify latches `active_run` false after returning the harness;
+        // check the latch before registering a Notify waiter.
+        if !active_run.load(Ordering::Acquire) {
+            let mut guard = state.lock().await;
+            return guard.harness.take();
+        }
+        let notified = run_reunified.notified();
+        tokio::pin!(notified);
+        if !active_run.load(Ordering::Acquire) {
+            let mut guard = state.lock().await;
+            if let Some(harness) = guard.harness.take() {
+                return Some(harness);
+            }
+            return guard.harness.take();
+        }
+        notified.as_mut().await;
+    }
+}
+
+async fn reunify_run_harness(
+    run_harness: &Mutex<Option<DeepSeekHarness>>,
+    state: &Mutex<ClientState>,
+    active_run: &AtomicBool,
+    run_reunified: &Notify,
+) {
+    let harness = run_harness.lock().await.take();
+    if let Some(harness) = harness {
+        let mut guard = state.lock().await;
+        if guard.harness.is_none() {
+            guard.harness = Some(harness);
+        }
+    }
+    active_run.store(false, Ordering::Release);
+    run_reunified.notify_waiters();
+}
+
+async fn invalidate_session_after_failed_operation(
+    state: Arc<Mutex<ClientState>>,
+    retained: RetainedLeases,
+) {
+    let mut guard = state.lock().await;
+    if guard.closed {
+        return;
+    }
+    guard.closed = true;
+    let cleanup = start_close(
+        guard.harness.take(),
+        guard.sealed_home.take(),
+        Arc::clone(&retained),
+    );
+    guard.cleanup = Some(cleanup);
+}
 
 /// Resolve the dsh runtime executable to a canonical absolute path.
 ///
@@ -399,14 +752,18 @@ fn start_close(
 /// failure retains its exact anchored lease in `ClientState`) — the
 /// session record may only be removed after that specific lease's
 /// confirmed deletion.
-fn start_final_close(state: Arc<Mutex<ClientState>>, retained: RetainedLeases) -> CleanupWait {
+fn start_final_close(
+    state: Arc<Mutex<ClientState>>,
+    active_run: Arc<AtomicBool>,
+    run_reunified: Arc<Notify>,
+    retained: RetainedLeases,
+) -> CleanupWait {
     let cleanup = async move {
-        let (pending, harness, sealed_home, session_failed_lease) = {
+        let (pending, sealed_home, session_failed_lease) = {
             let mut guard = state.lock().await;
             guard.closed = true;
             (
                 guard.cleanup.take(),
-                guard.harness.take(),
                 guard.sealed_home.take(),
                 guard.failed_lease.take(),
             )
@@ -415,6 +772,13 @@ fn start_final_close(state: Arc<Mutex<ClientState>>, retained: RetainedLeases) -
             // A pending (switch) close must resolve before the final
             // close completes; its failure IS the unconfirmed result.
             pending.await?;
+        }
+        let mut harness = {
+            let mut guard = state.lock().await;
+            guard.harness.take()
+        };
+        if harness.is_none() {
+            harness = wait_run_harness_reunify(&state, &active_run, &run_reunified).await;
         }
         close_and_reap(harness, sealed_home, &retained).await?;
         if let Some(path) = session_failed_lease {
@@ -819,6 +1183,14 @@ struct NativeSession {
     /// await, never behind the run mutex): concurrent/retried shutdowns
     /// observe the same shared completion.
     cleanup_slot: Arc<std::sync::Mutex<Option<CleanupWait>>>,
+    /// Harness slot while a turn holds `Session::run` outside `ClientState`.
+    run_harness: Arc<Mutex<Option<DeepSeekHarness>>>,
+    /// True while the producer owns the harness in [`run_harness`].
+    active_run: Arc<AtomicBool>,
+    /// Wakes the retained final-close owner when reunify returns the harness.
+    run_reunified: Arc<Notify>,
+    /// Per-operation streaming timing snapshots (keyed by `op_id`).
+    completed_run_timings: RunTimingSnapshots,
     /// Working directory for the runtime, retained from `LaunchSpec::cwd`
     /// (N-1).
     cwd: PathBuf,
@@ -833,6 +1205,7 @@ impl std::fmt::Debug for NativeSession {
         debug.field("cwd", &self.cwd.display());
         debug.field("executable", &self.executable.display());
         debug.field("closing", &self.closing.load(Ordering::Acquire));
+        debug.field("active_run", &self.active_run.load(Ordering::Acquire));
         match self.state.try_lock() {
             Ok(state) => {
                 debug
@@ -935,6 +1308,25 @@ impl DshNativeProvider {
             TimeoutConfig::default(),
         )
         .expect("empty native args are always accepted")
+    }
+
+
+    /// Take the completed streaming timing snapshot for one admitted turn.
+    pub async fn take_run_timing(
+        &self,
+        session_id: &HostSessionId,
+        op_id: &HostOperationId,
+    ) -> Option<DshStreamingRunTiming> {
+        let snapshots = {
+            let sessions = self.sessions.read().await;
+            sessions
+                .get(session_id)
+                .map(|native| Arc::clone(&native.completed_run_timings))
+        }?;
+        let mut guard = snapshots
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        guard.remove(op_id)
     }
 
     /// Register-time constructor used by daemon boot (P0 T2): `dsh_bin` is
@@ -1206,8 +1598,11 @@ impl DshNativeProvider {
     /// SDK's inbox-receipt / root-idle waits are unbounded by design.
     /// Emits at most one terminal event:
     ///
-    /// - `Ok(RunResult)` → exactly one `MessageDelta(final_response)` + one
-    ///   `OpFinished` (AR-1 dsh table / AR-6).
+    /// - `Ok(RunResult)` with streamed root text → callback `MessageDelta`(s)
+    ///   during the run, then exactly one `OpFinished` (AR-1 dsh table / AR-6).
+    /// - `Ok(RunResult)` without streamed root text → one budget-checked
+    ///   fallback `MessageDelta(final_response)` on the content channel, then
+    ///   `OpFinished`.
     /// - `tokio::time::error::Elapsed` → one `OpFailed(timeout)`.
     /// - `Err(DshError)` → one `OpFailed` from `classify_run_error` (AR-7).
     /// - Session closed by `shutdown()` before the run starts → one
@@ -1220,64 +1615,275 @@ impl DshNativeProvider {
         prompt_text: String,
         state: Arc<Mutex<ClientState>>,
         closing: Arc<AtomicBool>,
+        run_harness: Arc<Mutex<Option<DeepSeekHarness>>>,
+        active_run: Arc<AtomicBool>,
+        run_reunified: Arc<Notify>,
+        completed_run_timings: RunTimingSnapshots,
     ) -> HostEventStream {
-        let sessions = Arc::clone(&self.sessions);
+        let retained = Arc::clone(&self.retained_leases);
         let run_timeout = self.timeouts.prompt_duration();
         let prompt_ms = self.timeouts.prompt_ms;
+        let budget = Arc::new(DeliveryBudget::default());
+        let op_id_for_stream = op_id.clone();
+        let session_id_for_stream = session_id.clone();
 
+        let (content_tx, content_rx) = mpsc::channel(DSCH_MAX_QUEUED_MESSAGES);
+        let (terminal_tx, terminal_rx) = mpsc::channel(1);
+
+        let budget_for_observer = Arc::clone(&budget);
+        let consumer_dropped = Arc::new(AtomicBool::new(false));
+        let consumer_drop_notify = Arc::new(Notify::new());
+        let stream_finished = Arc::new(AtomicBool::new(false));
+        let consumer_dropped_for_task = Arc::clone(&consumer_dropped);
+        let consumer_drop_notify_for_task = Arc::clone(&consumer_drop_notify);
+        tokio::spawn(async move {
+            let consumer_dropped = consumer_dropped_for_task;
+            let consumer_drop_notify = consumer_drop_notify_for_task;
+            let (tail_events, invalidate) = {
+                let reconciliation = Arc::new(StdMutex::new(RunReconciliation::new()));
+                let classifier_failed = Arc::new(AtomicBool::new(false));
+                let delivery_failed = Arc::new(AtomicBool::new(false));
+                let failure_notify = Arc::new(Notify::new());
+                let run_timing = Arc::new(StdMutex::new(DshStreamingRunTiming::default()));
+                let run_harness_for_run = Arc::clone(&run_harness);
+
+                let run = async {
+                    let root_session_id = {
+                        let mut guard = state.lock().await;
+                        if guard.closed || closing.load(Ordering::Acquire) {
+                            return Err(RunError::SessionGone);
+                        }
+                        let root_session_id = guard.dsh_session_id.clone();
+                        let Some(harness) = guard.harness.take() else {
+                            return Err(RunError::SessionGone);
+                        };
+                        active_run.store(true, Ordering::Release);
+                        *run_harness_for_run.lock().await = Some(harness);
+                        root_session_id
+                    };
+
+                    let observer = Arc::new(StreamObserver {
+                        root_session_id: root_session_id.clone(),
+                        session_id: session_id.clone(),
+                        op_id: op_id.clone(),
+                        content_tx: content_tx.clone(),
+                        reconciliation: Arc::clone(&reconciliation),
+                        classifier_failed: Arc::clone(&classifier_failed),
+                        delivery_failed: Arc::clone(&delivery_failed),
+                        budget: Arc::clone(&budget_for_observer),
+                        failure_notify: Arc::clone(&failure_notify),
+                        run_timing: Arc::clone(&run_timing),
+                    });
+                    let obs = Arc::clone(&observer);
+                    let mut slot = run_harness_for_run.lock().await;
+                    let harness = slot.as_mut().ok_or(RunError::SessionGone)?;
+                    let session = harness.start_session(Some(root_session_id));
+                    session
+                        .run(Input::Text(prompt_text), Some(&|n| obs.observe(n)))
+                        .await
+                        .map_err(RunError::Sdk)
+                };
+
+                let run_outcome = if delivery_failure_signaled(
+                    &classifier_failed,
+                    &delivery_failed,
+                ) {
+                    RunSelectOutcome::FailureSignal
+                } else if consumer_drop_signaled(&consumer_dropped) {
+                    RunSelectOutcome::ReceiverClosed
+                } else {
+                    tokio::select! {
+                        biased;
+                        _ = wait_delivery_failure(
+                            &failure_notify,
+                            &classifier_failed,
+                            &delivery_failed,
+                        ) => RunSelectOutcome::FailureSignal,
+                        _ = wait_consumer_drop(&consumer_dropped, &consumer_drop_notify) => {
+                            RunSelectOutcome::ReceiverClosed
+                        }
+                        result = tokio::time::timeout(run_timeout, run) => match result {
+                            Ok(inner) => RunSelectOutcome::Run(inner),
+                            Err(_elapsed) => RunSelectOutcome::TimedOut,
+                        },
+                    }
+                };
+
+                reunify_run_harness(
+                    &run_harness,
+                    &state,
+                    &active_run,
+                    &run_reunified,
+                )
+                .await;
+
+                match run_outcome {
+                    RunSelectOutcome::FailureSignal => {
+                        if classifier_failed.load(Ordering::Acquire) {
+                            (
+                                vec![HostEvent::OpFailed(operation_protocol_failure(
+                                    &session_id,
+                                    &op_id,
+                                ))],
+                                true,
+                            )
+                        } else {
+                            (
+                                vec![HostEvent::OpFailed(operation_delivery_overflow_failure(
+                                    &session_id,
+                                    &op_id,
+                                ))],
+                                true,
+                            )
+                        }
+                    }
+                    RunSelectOutcome::ReceiverClosed => (
+                        vec![HostEvent::OpFailed(OperationFailedEvent {
+                            session_id: session_id.clone(),
+                            op_id: op_id.clone(),
+                            error_category: "stream_closed".to_string(),
+                            error_message: "dsh event stream closed before the turn completed"
+                                .to_string(),
+                        })],
+                        true,
+                    ),
+                    RunSelectOutcome::TimedOut => (
+                        vec![HostEvent::OpFailed(OperationFailedEvent {
+                            session_id: session_id.clone(),
+                            op_id: op_id.clone(),
+                            error_category: "timeout".to_string(),
+                            error_message: format!("dsh turn timed out after {prompt_ms}ms"),
+                        })],
+                        true,
+                    ),
+                    RunSelectOutcome::Run(Ok(result)) => {
+                        if classifier_failed.load(Ordering::Acquire) {
+                            (
+                                vec![HostEvent::OpFailed(operation_protocol_failure(
+                                    &session_id,
+                                    &op_id,
+                                ))],
+                                true,
+                            )
+                        } else if delivery_failed.load(Ordering::Acquire) {
+                            (
+                                vec![HostEvent::OpFailed(operation_delivery_overflow_failure(
+                                    &session_id,
+                                    &op_id,
+                                ))],
+                                true,
+                            )
+                        } else {
+                            {
+                                let mut timing =
+                                    run_timing.lock().unwrap_or_else(|e| e.into_inner());
+                                timing.run_completed = Some(Instant::now());
+                            }
+                            publish_completed_run_timing(&op_id, &run_timing, &completed_run_timings);
+                            let snapshot = reconciliation.lock().unwrap().clone();
+                            match finalize_successful_run(
+                                &result,
+                                &snapshot,
+                                &session_id,
+                                &op_id,
+                            ) {
+                                Ok(events) => match dispatch_successful_run_events(
+                                    events,
+                                    &content_tx,
+                                    &budget_for_observer,
+                                    &session_id,
+                                    &op_id,
+                                ) {
+                                    Ok(terminals) => (terminals, false),
+                                    Err(failed) => {
+                                        (vec![HostEvent::OpFailed(failed)], true)
+                                    }
+                                },
+                                Err(failed) => (vec![HostEvent::OpFailed(failed)], true),
+                            }
+                        }
+                    }
+                    RunSelectOutcome::Run(Err(RunError::SessionGone)) => (
+                        vec![HostEvent::OpFailed(OperationFailedEvent {
+                            session_id: session_id.clone(),
+                            op_id: op_id.clone(),
+                            error_category: "stream_closed".to_string(),
+                            error_message: "dsh session closed before the turn completed"
+                                .to_string(),
+                        })],
+                        true,
+                    ),
+                    RunSelectOutcome::Run(Err(RunError::Sdk(error))) => (
+                        vec![HostEvent::OpFailed(classify_run_error(
+                            &error,
+                            &session_id,
+                            &op_id,
+                        ))],
+                        true,
+                    ),
+                }
+            };
+
+            if invalidate {
+                invalidate_session_after_failed_operation(state, retained).await;
+            }
+
+            drop(content_tx);
+            for event in tail_events {
+                let _ = terminal_tx.send(event).await;
+            }
+        });
+
+        let stream_finished_for_guard = Arc::clone(&stream_finished);
+        let consumer_dropped_for_guard = Arc::clone(&consumer_dropped);
+        let consumer_drop_notify_for_guard = Arc::clone(&consumer_drop_notify);
         futures_util::stream::unfold(
             (
-                state,
-                closing,
-                sessions,
-                op_id,
-                session_id,
-                prompt_text,
-                run_timeout,
-                prompt_ms,
-                VecDeque::new(),
                 false,
                 false,
+                content_rx,
+                terminal_rx,
+                budget,
+                VecDeque::<HostEvent>::new(),
+                op_id_for_stream.clone(),
+                session_id_for_stream.clone(),
+                StreamConsumerDropGuard {
+                    stream_finished: stream_finished_for_guard,
+                    consumer_dropped: consumer_dropped_for_guard,
+                    consumer_drop_notify: consumer_drop_notify_for_guard,
+                },
             ),
             |(
-                state,
-                closing,
-                sessions,
+                started,
+                mut finished,
+                mut content_rx,
+                mut terminal_rx,
+                budget,
+                mut pending,
                 op_id,
                 session_id,
-                prompt_text,
-                run_timeout,
-                prompt_ms,
-                mut pending,
-                started,
-                done,
+                drop_guard,
             )| async move {
-                // Drain mapped events from the turn first: one successful
-                // run maps to a MessageDelta + a terminal.
                 if let Some(event) = pending.pop_front() {
                     return Some((
                         Ok(event),
                         (
-                            state,
-                            closing,
-                            sessions,
+                            started,
+                            finished,
+                            content_rx,
+                            terminal_rx,
+                            budget,
+                            pending,
                             op_id,
                             session_id,
-                            prompt_text,
-                            run_timeout,
-                            prompt_ms,
-                            pending,
-                            started,
-                            done,
+                            drop_guard,
                         ),
                     ));
                 }
-                if done {
+                if finished {
+                    drop_guard.mark_stream_finished();
                     return None;
                 }
-                // Exactly one OpStarted precedes any op-scoped event
-                // (conformance LifecycleOrdering); it is emitted even when
-                // the turn then fails, because admission already happened.
                 if !started {
                     return Some((
                         Ok(HostEvent::OpStarted(OperationStartedEvent {
@@ -1285,142 +1891,96 @@ impl DshNativeProvider {
                             session_id: session_id.clone(),
                         })),
                         (
-                            state,
-                            closing,
-                            sessions,
+                            true,
+                            finished,
+                            content_rx,
+                            terminal_rx,
+                            budget,
+                            pending,
                             op_id,
                             session_id,
-                            prompt_text,
-                            run_timeout,
-                            prompt_ms,
-                            pending,
-                            true,
-                            done,
+                            drop_guard,
                         ),
                     ));
                 }
 
-                // One turn = one Session::run under the per-session lock
-                // (B-2): other sessions' cancel/shutdown never wait on this
-                // run. The `Session` borrows the harness, which borrows the
-                // guard, so the guard must live across the whole run await;
-                // the significant_drop_tightening suggestion to drop it
-                // early is a false positive here (the borrow checker
-                // rejects it).
-                #[allow(clippy::significant_drop_tightening)]
-                let run = {
-                    let state = Arc::clone(&state);
-                    let closing = Arc::clone(&closing);
-                    let prompt_text = prompt_text.clone();
-                    async move {
-                        let mut guard = state.lock().await;
-                        if guard.closed || closing.load(Ordering::Acquire) {
-                            // Shutdown intent landed before the run: never
-                            // run on a torn-down session (the final close
-                            // owns the harness now).
-                            return Err(RunError::SessionGone);
-                        }
-                        let dsh_session_id = guard.dsh_session_id.clone();
-                        let harness = match guard.harness.as_mut() {
-                            Some(harness) => harness,
-                            None => return Err(RunError::SessionGone),
-                        };
-                        let session = harness.start_session(Some(dsh_session_id));
-                        session.run(Input::Text(prompt_text), None)
-                            .await
-                            .map_err(RunError::Sdk)
-                    }
-                };
+                if let Ok(payload) = content_rx.try_recv() {
+                    let event = payload.into_event();
+                    return Some((
+                        Ok(event),
+                        (
+                            started,
+                            finished,
+                            content_rx,
+                            terminal_rx,
+                            budget,
+                            pending,
+                            op_id,
+                            session_id,
+                            drop_guard,
+                        ),
+                    ));
+                }
 
-                let events =
-                    match tokio::time::timeout(run_timeout, run).await {
-                        Ok(Ok(result)) => map_run_result(&result, &session_id, &op_id),
-                        Ok(Err(RunError::SessionGone)) => {
-                            vec![HostEvent::OpFailed(OperationFailedEvent {
-                                session_id: session_id.clone(),
-                                op_id: op_id.clone(),
-                                error_category: "stream_closed".to_string(),
-                                error_message: "dsh session closed before the turn completed"
-                                    .to_string(),
-                            })]
+                match content_rx.recv().await {
+                    Some(payload) => {
+                        let event = payload.into_event();
+                        Some((
+                            Ok(event),
+                            (
+                                started,
+                                finished,
+                                content_rx,
+                                terminal_rx,
+                                budget,
+                                pending,
+                                op_id,
+                                session_id,
+                                drop_guard,
+                            ),
+                        ))
+                    }
+                    None => {
+                        if let Some(event) = terminal_rx.recv().await {
+                            pending.push_back(event);
+                            while let Ok(more) = terminal_rx.try_recv() {
+                                pending.push_back(more);
+                            }
+                            finished = true;
+                            let next = pending.pop_front().expect("terminal batch");
+                            Some((
+                                Ok(next),
+                                (
+                                    started,
+                                    finished,
+                                    content_rx,
+                                    terminal_rx,
+                                    budget,
+                                    pending,
+                                    op_id,
+                                    session_id,
+                                drop_guard,
+                                ),
+                            ))
+                        } else {
+                            drop_guard.mark_stream_finished();
+                            None
                         }
-                        Ok(Err(RunError::Sdk(error))) => vec![HostEvent::OpFailed(
-                            classify_run_error(&error, &session_id, &op_id),
-                        )],
-                        Err(_elapsed) => {
-                            // B-3: the timeout dropped the run coroutine
-                            // (and its per-session lock guard) but the
-                            // runtime keeps executing the prompt under
-                            // the OLD session id — a zombie turn. Rotate
-                            // the stored id so a retry starts a fresh
-                            // agent+session pair; the abandoned turn can
-                            // then never receive a spliced retry prompt.
-                            rotate_dsh_session_id(&sessions, &session_id).await;
-                            vec![HostEvent::OpFailed(OperationFailedEvent {
-                                session_id: session_id.clone(),
-                                op_id: op_id.clone(),
-                                error_category: "timeout".to_string(),
-                                error_message: format!("dsh turn timed out after {prompt_ms}ms"),
-                            })]
-                        }
-                    };
-                let mut iter = events.into_iter();
-                let first = iter.next().expect("the turn maps to at least one event");
-                pending.extend(iter);
-                Some((
-                    Ok(first),
-                    (
-                        state,
-                        closing,
-                        sessions,
-                        op_id,
-                        session_id,
-                        prompt_text,
-                        run_timeout,
-                        prompt_ms,
-                        pending,
-                        true,
-                        true,
-                    ),
-                ))
+                    }
+                }
             },
         )
         .boxed()
     }
+
 }
 
-/// Rotate the stored DSH session id after a turn timeout (B-3).
-///
-/// The timeout drops the `Session::run` coroutine, but the runtime keeps
-/// running the already-sent prompt under the old id (no cancel RPC —
-/// AR-6). Replacing the stored id makes the next `execute` start a fresh
-/// agent+session pair (the runtime lazily creates unknown ids), so a
-/// retry can never be spliced into the abandoned "zombie" turn. Runs
-/// under the per-session lock, which the timed-out coroutine released
-/// when it was dropped, so this never waits on the zombie turn. A session
-/// already removed by `shutdown()` makes this a no-op.
-// The guard must be held across the mutation (the rotation is the point
-// of the function); dropping it "earlier" would drop it before the
-// write. The significant_drop_tightening suggestion is a false positive
-// for this tail-of-function drop.
-#[allow(clippy::significant_drop_tightening)]
-async fn rotate_dsh_session_id(
-    sessions: &Arc<RwLock<HashMap<HostSessionId, NativeSession>>>,
-    session_id: &HostSessionId,
-) {
-    let state = {
-        let guard = sessions.read().await;
-        guard.get(session_id).map(|ns| Arc::clone(&ns.state))
-    };
-    let Some(state) = state else {
-        return;
-    };
-    let mut guard = state.lock().await;
-    guard.dsh_session_id = uuid::Uuid::new_v4().to_string();
-    tracing::info!(
-        session_id = %session_id,
-        "dsh turn timed out; rotated dsh session id so a retry starts a fresh session",
-    );
+
+enum RunSelectOutcome {
+    FailureSignal,
+    ReceiverClosed,
+    TimedOut,
+    Run(Result<RunResult, RunError>),
 }
 
 /// Failure of the turn's `Session::run` attempt.
@@ -1516,6 +2076,10 @@ impl ProviderAdapter for DshNativeProvider {
                     })),
                     closing: Arc::new(AtomicBool::new(false)),
                     cleanup_slot: Arc::new(std::sync::Mutex::new(None)),
+                    run_harness: Arc::new(Mutex::new(None)),
+                    active_run: Arc::new(AtomicBool::new(false)),
+                    run_reunified: Arc::new(Notify::new()),
+                    completed_run_timings: Arc::new(StdMutex::new(HashMap::new())),
                     cwd: spec.cwd.clone(),
                     executable,
                 },
@@ -1584,7 +2148,7 @@ impl ProviderAdapter for DshNativeProvider {
 
         // Fetch the session state under a short registry read (B-2), then
         // admit under the per-session lock only.
-        let (state, closing, cwd, executable) = {
+        let (state, closing, cwd, executable, run_harness, active_run, run_reunified, completed_run_timings) = {
             let sessions = self.sessions.read().await;
             let native_session = sessions.get(&session.session_id).ok_or_else(|| {
                 HostError::internal(format!(
@@ -1597,6 +2161,10 @@ impl ProviderAdapter for DshNativeProvider {
                 Arc::clone(&native_session.closing),
                 native_session.cwd.clone(),
                 native_session.executable.clone(),
+                Arc::clone(&native_session.run_harness),
+                Arc::clone(&native_session.active_run),
+                Arc::clone(&native_session.run_reunified),
+                Arc::clone(&native_session.completed_run_timings),
             )
         };
 
@@ -1718,6 +2286,10 @@ impl ProviderAdapter for DshNativeProvider {
             prompt_text,
             state,
             closing,
+            run_harness,
+            active_run,
+            run_reunified,
+            completed_run_timings,
         ))
     }
 
@@ -1761,10 +2333,12 @@ impl ProviderAdapter for DshNativeProvider {
                         Arc::clone(&native_session.state),
                         Arc::clone(&native_session.closing),
                         Arc::clone(&native_session.cleanup_slot),
+                        Arc::clone(&native_session.active_run),
+                        Arc::clone(&native_session.run_reunified),
                     )
                 })
         };
-        let Some((state, closing, cleanup_slot)) = session_parts else {
+        let Some((state, closing, cleanup_slot, active_run, run_reunified)) = session_parts else {
             // A previous shutdown already observed the confirmed close and
             // removed the record: this is the retained completed result,
             // never a new reap of an already-closed client.
@@ -1785,7 +2359,12 @@ impl ProviderAdapter for DshNativeProvider {
             match &*slot {
                 Some(cleanup) => cleanup.clone(),
                 None => {
-                    let cleanup = start_final_close(state, Arc::clone(&self.retained_leases));
+                    let cleanup = start_final_close(
+                        state,
+                        active_run,
+                        run_reunified,
+                        Arc::clone(&self.retained_leases),
+                    );
                     *slot = Some(cleanup.clone());
                     cleanup
                 }
@@ -1864,7 +2443,11 @@ mod tests {
     #![allow(clippy::await_holding_lock)]
 
     use super::*;
-    use crate::capability::model::{FinishReason, HostOperation, LaunchSpec, McpServerConfig};
+    use crate::capability::model::{
+        FinishReason, HostOperation, LaunchSpec, McpServerConfig, OperationFinishedEvent,
+    };
+    use deepseek_harness_sdk::Notification;
+    use serde_json::{json, Map};
 
     const MOCK_DSH_AGENT: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -1931,15 +2514,19 @@ mod tests {
         .expect("empty native args are accepted")
     }
 
+    fn lock_test_env() -> std::sync::MutexGuard<'static, ()> {
+        crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
     /// Launch under the env lock: launch() now initializes the runtime
     /// eagerly, spawning the python fixture whose `#!/usr/bin/env python3`
     /// shebang resolves python3 through PATH at execve time (see lib.rs
     /// test_support).
     #[allow(clippy::future_not_send)]
     async fn launch_hermetic(provider: &DshNativeProvider) -> ManagedSessionHandle {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         provider.launch(launch_spec()).await.expect("launch")
     }
 
@@ -2002,9 +2589,7 @@ mod tests {
         handle: &ManagedSessionHandle,
         text: &str,
     ) -> Vec<HostEvent> {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let stream = provider
             .execute(
                 handle,
@@ -2038,9 +2623,7 @@ mod tests {
         text: &str,
         scope: Option<PromptPermissionScope>,
     ) -> HostResult<Vec<HostEvent>> {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let stream = provider.execute(
             handle,
             HostOperation::Prompt {
@@ -2149,8 +2732,8 @@ mod tests {
         assert_eq!(desc.protocol_kind, ProtocolKind::NativeCli);
         assert!(desc.capabilities.text_prompt);
         assert!(
-            !desc.capabilities.streaming,
-            "dsh-native must not claim streaming (AR-6)"
+            desc.capabilities.streaming,
+            "dsh-native streams committed messages (v1.188 P1, AR-6)"
         );
         assert!(
             !desc.capabilities.cancellation,
@@ -2221,9 +2804,7 @@ mod tests {
 
     #[test]
     fn resolve_explicit_bare_command_uses_path() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let bin = temp_dir.path().join("dsh-custom");
         write_executable(&bin);
@@ -2241,9 +2822,7 @@ mod tests {
 
     #[test]
     fn resolve_invalid_explicit_override_never_falls_back() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let env_bin = temp_dir.path().join("env-dsh");
         write_executable(&env_bin);
@@ -2266,9 +2845,7 @@ mod tests {
 
     #[test]
     fn resolve_env_route_then_path_fallback() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let env_bin = temp_dir.path().join("env-dsh");
         write_executable(&env_bin);
@@ -2315,9 +2892,7 @@ mod tests {
 
     #[test]
     fn resolve_blank_values_count_as_absent() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let env_bin = temp_dir.path().join("env-dsh");
         write_executable(&env_bin);
@@ -2479,9 +3054,7 @@ mod tests {
 
     #[test]
     fn selected_dsh_home_follows_sdk_precedence() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         // Caller env DSH_HOME wins over the parent value.
         let previous = std::env::var("DSH_HOME").ok();
         std::env::set_var("DSH_HOME", "/parent/dsh-home");
@@ -2644,9 +3217,7 @@ mod tests {
         let handle = launch_hermetic(&provider).await;
 
         {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider
                 .shutdown(handle.clone())
                 .await
@@ -2705,9 +3276,7 @@ mod tests {
         let handle = launch_hermetic(&provider).await;
 
         let first = {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider.shutdown(handle.clone()).await
         };
         assert!(
@@ -2727,9 +3296,7 @@ mod tests {
         // completes, then retry: the SAME completion is observed.
         tokio::time::sleep(std::time::Duration::from_millis(800)).await;
         {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider
                 .shutdown(handle.clone())
                 .await
@@ -2824,13 +3391,12 @@ mod tests {
         );
     }
 
-    /// Timeout arm over the fixture stub (B-3): with the stub holding the
-    /// turn open, the provider timeout emits exactly one
-    /// `OpFailed(timeout)` AND rotates the stored `dsh_session_id`, so a
-    /// retry starts a fresh agent+session pair instead of being spliced
-    /// into the abandoned (zombie) turn.
+    /// Timeout arm over the fixture stub (P1 T2): with the stub holding the
+    /// turn open, the provider timeout emits exactly one `OpFailed(timeout)`
+    /// and transfers the host session to retained close — no retry on the
+    /// same handle (no zombie-session reuse).
     #[tokio::test]
-    async fn dsh_timeout_arm_fails_turn_and_rotates_session() {
+    async fn dsh_timeout_arm_fails_turn_and_closes_session() {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
         let req_log = req_log_dir.path().join("reqs.jsonl");
         let timeouts = TimeoutConfig {
@@ -2841,7 +3407,6 @@ mod tests {
         env.insert("HOLD_TURN".to_string(), "1".to_string());
         let provider = stub_provider_with_timeouts("test-dsh-timeout", env, timeouts);
         let handle = launch_hermetic(&provider).await;
-        let first_id = stored_dsh_session_id(&provider, &handle.session_id).await;
 
         let events = run_turn(&provider, &handle, "slow turn 1").await;
         assert_eq!(terminal_count(&events), 1);
@@ -2852,29 +3417,27 @@ mod tests {
             "timeout arm must emit OpFailed(timeout): {events:?}"
         );
 
-        let second_id = stored_dsh_session_id(&provider, &handle.session_id).await;
-        assert_ne!(
-            second_id, first_id,
-            "a timed-out turn must rotate the dsh session id"
-        );
-
-        // A retry on the same host session must also be bounded (fresh
-        // session, same zombie-avoidance) and rotate again.
-        let events = run_turn(&provider, &handle, "slow turn 2").await;
-        assert_eq!(terminal_count(&events), 1);
+        let retry = provider
+            .execute(
+                &handle,
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "slow turn 2".to_string(),
+                    }],
+                    permission_scope: None,
+                },
+            )
+            .await;
         assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, HostEvent::OpFailed(f) if f.error_category == "timeout")),
-            "second timeout arm must emit OpFailed(timeout): {events:?}"
+            retry.is_err(),
+            "a timed-out turn must close the session before another execute"
         );
-        let third_id = stored_dsh_session_id(&provider, &handle.session_id).await;
-        assert_ne!(third_id, second_id, "each timeout rotates again");
-        assert_ne!(third_id, first_id);
+        assert!(
+            matches!(retry, Err(HostError::InternalHostError { .. })),
+            "closed session must reject execute with InternalHostError"
+        );
 
-        // At least one prompt must have reached the stub over the wire
-        // (the exact count depends on whether a timeout caught the cold
-        // harness start, which this test does not need to pin).
         let methods = method_sequence(&req_log_entries(&req_log));
         assert!(
             methods.iter().any(|m| m == "session/prompt"),
@@ -2882,9 +3445,7 @@ mod tests {
         );
 
         {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider
                 .shutdown(handle)
                 .await
@@ -2925,9 +3486,7 @@ mod tests {
             .expect("execute");
 
         {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider.shutdown(handle).await.expect("shutdown");
         }
 
@@ -2952,9 +3511,7 @@ mod tests {
     /// never fall back.
     #[tokio::test]
     async fn probe_unavailable_for_invalid_explicit_override() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let _bin_guard = DshRuntimeBinGuard::set(Path::new(MOCK_DSH_AGENT));
         let provider = DshNativeProvider::new(
             ProviderId::new("nonexistent-dsh-xyz"),
@@ -2988,9 +3545,7 @@ mod tests {
     /// provider-catalog response (`GET /v1/daemon/agent-host/providers`).
     #[tokio::test]
     async fn probe_initializes_and_closes_both_recipes() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let dsh_home = temp_dir.path().join("dsh-home");
@@ -3157,9 +3712,7 @@ mod tests {
         // shutdown deletes it.
         assert!(sealed_home.exists(), "the sealed lease is retained while live");
         {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider.shutdown(handle).await.expect("confirmed close");
         }
         assert!(
@@ -3293,9 +3846,7 @@ mod tests {
         // Start a turn and drive the stream on a task so the run holds
         // the per-session mutex.
         let stream = {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider
                 .execute(
                     &handle,
@@ -3368,6 +3919,112 @@ mod tests {
         );
     }
 
+
+    /// Regression for fe78386b7: reunify can clear `active_run` and notify
+    /// between the old `while` latch check and `notified()` registration,
+    /// leaving the retained final close hung or skipping the reunified
+    /// harness. The latch-safe waiter must observe reunify and close the
+    /// harness.
+    #[tokio::test]
+    async fn start_final_close_race_with_reunify_observes_harness() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = temp_dir.path().join("reqs.jsonl");
+        let provider = stub_provider(
+            "test-dsh-reunify-race",
+            stub_env(&req_log, &temp_dir.path().join("dsh-home")),
+        );
+        let handle = launch_hermetic(&provider).await;
+
+        let (state, run_harness, active_run, run_reunified, retained) = {
+            let sessions = provider.sessions.read().await;
+            let native = sessions.get(&handle.session_id).expect("session");
+            (
+                Arc::clone(&native.state),
+                Arc::clone(&native.run_harness),
+                Arc::clone(&native.active_run),
+                Arc::clone(&native.run_reunified),
+                Arc::clone(&provider.retained_leases),
+            )
+        };
+
+        {
+            let mut guard = state.lock().await;
+            let harness = guard.harness.take().expect("launch initializes harness");
+            *run_harness.lock().await = Some(harness);
+        }
+        active_run.store(true, Ordering::Release);
+
+        let close = start_final_close(
+            state.clone(),
+            active_run.clone(),
+            run_reunified.clone(),
+            retained,
+        );
+        let reunify = tokio::spawn({
+            let run_harness = Arc::clone(&run_harness);
+            let state = Arc::clone(&state);
+            let active_run = Arc::clone(&active_run);
+            let run_reunified = Arc::clone(&run_reunified);
+            async move {
+                reunify_run_harness(&run_harness, &state, &active_run, &run_reunified).await;
+            }
+        });
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            reunify.await.expect("reunify task");
+            match close.await {
+                Ok(()) => {}
+                Err(_) => panic!("confirmed close"),
+            }
+        })
+        .await
+        .expect("final close must not hang on reunify notify race");
+
+        let methods = method_sequence(&req_log_entries(&req_log));
+        assert!(
+            methods.contains(&"shutdown".to_string()),
+            "the reunified harness must be closed: {methods:?}"
+        );
+        let guard = state.lock().await;
+        assert!(
+            guard.harness.is_none(),
+            "fe78386b7 could skip reunify and leave harness in ClientState"
+        );
+    }
+
+    #[tokio::test]
+    async fn wait_run_harness_reunify_observes_latched_reunify_without_notify() {
+        let state = Arc::new(Mutex::new(ClientState {
+            dsh_session_id: "test".to_string(),
+            harness: None,
+            closed: false,
+            recipe: Recipe::Ordinary,
+            policy_locked: false,
+            sealed_home: None,
+            failed_lease: None,
+            cleanup: None,
+        }));
+        let active_run = Arc::new(AtomicBool::new(true));
+        let run_reunified = Arc::new(Notify::new());
+
+        let waiter = tokio::spawn({
+            let state = Arc::clone(&state);
+            let active_run = Arc::clone(&active_run);
+            let run_reunified = Arc::clone(&run_reunified);
+            async move {
+                wait_run_harness_reunify(&state, &active_run, &run_reunified).await
+            }
+        });
+
+        active_run.store(false, Ordering::Release);
+
+        match tokio::time::timeout(std::time::Duration::from_millis(200), waiter).await {
+            Ok(Ok(_)) => {}
+            Ok(Err(join_error)) => panic!("waiter join failed: {join_error}"),
+            Err(_) => panic!("latched reunify must complete without Notify"),
+        }
+    }
+
     /// Finding 2: a sealed-home provisioning failure on the first
     /// deny-all prompt permanently closes the session — no retryable
     /// half-switched state, no ordinary fallback; later `None` and
@@ -3420,9 +4077,7 @@ mod tests {
         // A later shutdown still completes (nothing left to close) and
         // removes the record.
         {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider.shutdown(handle).await.expect("final close completes");
         }
     }
@@ -3564,9 +4219,7 @@ mod tests {
     /// close still finishes and deletes the sealed lease afterwards.
     #[tokio::test]
     async fn probe_deadline_drop_keeps_sealed_cleanup_owner() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let dsh_home = temp_dir.path().join("dsh-home");
@@ -3611,9 +4264,7 @@ mod tests {
     /// the provisioned lease behind and this test fails.)
     #[tokio::test]
     async fn probe_init_timeout_retains_sealed_owner_and_completes_cleanup() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let dsh_home = temp_dir.path().join("dsh-home");
@@ -3671,9 +4322,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn probe_init_timeout_retains_ordinary_owner_and_reaps_child() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let dsh_home = temp_dir.path().join("dsh-home");
@@ -3756,9 +4405,7 @@ mod tests {
             .expect("chmod 0500");
 
         let first = {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider.shutdown(handle.clone()).await
         };
         assert!(
@@ -3788,9 +4435,7 @@ mod tests {
         std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o755))
             .expect("restore perms");
         {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider
                 .shutdown(handle.clone())
                 .await
@@ -3940,9 +4585,7 @@ mod tests {
         assert_eq!(leaf_mode, 0o555, "the mock made the leaf unwritable for removal");
 
         let first = {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider.shutdown(handle.clone()).await
         };
         assert!(
@@ -3959,9 +4602,7 @@ mod tests {
         std::fs::set_permissions(&blocker, std::fs::Permissions::from_mode(0o755))
             .expect("restore blocker perms");
         {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider
                 .shutdown(handle.clone())
                 .await
@@ -4039,14 +4680,537 @@ mod tests {
     /// OpFinished(EndTurn); and the confirmed shutdown reaps the sealed
     /// child pid and deletes the lease.
     #[cfg(unix)]
+    fn stub_env_scenario(req_log: &Path, home: &Path, scenario: &str) -> HashMap<String, String> {
+        let mut env = stub_env(req_log, home);
+        env.insert("SCENARIO".to_string(), scenario.to_string());
+        env
+    }
+
+    fn message_texts(events: &[HostEvent]) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                HostEvent::MessageDelta(delta) => Some(delta.text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn terminal_of(events: &[HostEvent]) -> Option<&HostEvent> {
+        events.iter().rev().find(|event| {
+            matches!(event, HostEvent::OpFinished(_) | HostEvent::OpFailed(_))
+        })
+    }
+
+
+
+
+    fn test_root_message_notification(root_session_id: &str, text: &str) -> Notification {
+        let mut payload = Map::new();
+        payload.insert("sessionId".to_string(), json!(root_session_id));
+        payload.insert(
+            "event".to_string(),
+            json!({
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": text}]},
+            }),
+        );
+        Notification {
+            method: "session.event".to_string(),
+            payload,
+        }
+    }
+
+    fn test_stream_observer(
+        root_session_id: &str,
+    ) -> (
+        Arc<StreamObserver>,
+        HostSessionId,
+        HostOperationId,
+        Arc<AtomicBool>,
+        Arc<AtomicBool>,
+        Arc<Notify>,
+        mpsc::Receiver<QueuedPayload>,
+        Arc<DeliveryBudget>,
+    ) {
+        let session_id = HostSessionId::new();
+        let op_id = HostOperationId::new();
+        let budget = Arc::new(DeliveryBudget::default());
+        let (content_tx, content_rx) = mpsc::channel(DSCH_MAX_QUEUED_MESSAGES);
+        let classifier_failed = Arc::new(AtomicBool::new(false));
+        let delivery_failed = Arc::new(AtomicBool::new(false));
+        let failure_notify = Arc::new(Notify::new());
+        let observer = Arc::new(StreamObserver {
+            root_session_id: root_session_id.to_string(),
+            session_id: session_id.clone(),
+            op_id: op_id.clone(),
+            content_tx,
+            reconciliation: Arc::new(StdMutex::new(RunReconciliation::new())),
+            classifier_failed: Arc::clone(&classifier_failed),
+            delivery_failed: Arc::clone(&delivery_failed),
+            budget: Arc::clone(&budget),
+            failure_notify: Arc::clone(&failure_notify),
+            run_timing: Arc::new(StdMutex::new(DshStreamingRunTiming::default())),
+        });
+        (
+            observer,
+            session_id,
+            op_id,
+            classifier_failed,
+            delivery_failed,
+            failure_notify,
+            content_rx,
+            budget,
+        )
+    }
+
+    /// Mirrors the producer `RunSelectOutcome::FailureSignal` delivery arm.
+    fn failure_signal_delivery_overflow_events(
+        session_id: &HostSessionId,
+        op_id: &HostOperationId,
+        classifier_failed: &AtomicBool,
+    ) -> Vec<HostEvent> {
+        if classifier_failed.load(Ordering::Acquire) {
+            vec![HostEvent::OpFailed(operation_protocol_failure(session_id, op_id))]
+        } else {
+            vec![HostEvent::OpFailed(operation_delivery_overflow_failure(session_id, op_id))]
+        }
+    }
+
+    /// Overflow terminal must be delivery-bounds `OpFailed`, not success or
+    /// timeout/protocol arms.
+    fn assert_delivery_overflow_terminal(events: &[HostEvent]) {
+        assert_eq!(terminal_count(events), 1);
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, HostEvent::OpFinished(_))),
+            "delivery overflow must not finalize the turn: {events:?}"
+        );
+        match terminal_of(events) {
+            Some(HostEvent::OpFailed(failed)) => {
+                assert_eq!(failed.error_category, "provider_error");
+                assert_eq!(
+                    failed.error_message,
+                    "dsh operation exceeded Nexus delivery bounds"
+                );
+            }
+            other => panic!("expected delivery overflow OpFailed, got {other:?}"),
+        }
+    }
+
     #[tokio::test]
+    async fn dsh_two_messages_emit_a_then_b_without_duplicate_final() {
+        let req_log_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = req_log_dir.path().join("reqs.jsonl");
+        let dsh_home = req_log_dir.path().join("dsh-home");
+        let provider = stub_provider(
+            "test-dsh-two-msgs",
+            stub_env_scenario(&req_log, &dsh_home, "two_messages"),
+        );
+        let handle = launch_hermetic(&provider).await;
+        let events = run_turn(&provider, &handle, "two").await;
+        assert_eq!(message_texts(&events), vec!["A", "B"], "{events:?}");
+        assert!(matches!(
+            terminal_of(&events),
+            Some(HostEvent::OpFinished(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn dsh_nested_assistant_message_is_ignored() {
+        let req_log_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = req_log_dir.path().join("reqs.jsonl");
+        let dsh_home = req_log_dir.path().join("dsh-home");
+        let provider = stub_provider(
+            "test-dsh-nested",
+            stub_env_scenario(&req_log, &dsh_home, "nested"),
+        );
+        let handle = launch_hermetic(&provider).await;
+        let events = run_turn(&provider, &handle, "nested").await;
+        assert_eq!(message_texts(&events), vec!["mock dsh reply"], "{events:?}");
+    }
+
+
+    #[tokio::test]
+    async fn dsh_absent_root_event_type_fails_protocol_not_final_fallback() {
+        let req_log_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = req_log_dir.path().join("reqs.jsonl");
+        let dsh_home = req_log_dir.path().join("dsh-home");
+        let provider = stub_provider(
+            "test-dsh-absent-type",
+            stub_env_scenario(&req_log, &dsh_home, "malformed_root_event_type"),
+        );
+        let handle = launch_hermetic(&provider).await;
+        let events = run_turn(&provider, &handle, "bad-type").await;
+        assert!(
+            matches!(
+                terminal_of(&events),
+                Some(HostEvent::OpFailed(f)) if f.error_category == "decode_error"
+            ),
+            "absent root event type must fail closed, not final_response fallback: {events:?}"
+        );
+        assert_eq!(terminal_count(&events), 1);
+    }
+
+    #[tokio::test]
+    async fn dsh_malformed_text_block_fails_after_partial_delivery() {
+        let req_log_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = req_log_dir.path().join("reqs.jsonl");
+        let dsh_home = req_log_dir.path().join("dsh-home");
+        let provider = stub_provider(
+            "test-dsh-malformed-text",
+            stub_env_scenario(&req_log, &dsh_home, "malformed_text"),
+        );
+        let handle = launch_hermetic(&provider).await;
+        let events = run_turn(&provider, &handle, "bad").await;
+        assert!(
+            matches!(
+                terminal_of(&events),
+                Some(HostEvent::OpFailed(f)) if f.error_category == "decode_error"
+            ),
+            "{events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn dsh_non_success_after_streamed_text_still_fails() {
+        let req_log_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = req_log_dir.path().join("reqs.jsonl");
+        let dsh_home = req_log_dir.path().join("dsh-home");
+        let provider = stub_provider(
+            "test-dsh-partial-fail",
+            stub_env_scenario(&req_log, &dsh_home, "partial_then_fail"),
+        );
+        let handle = launch_hermetic(&provider).await;
+        let events = run_turn(&provider, &handle, "partial").await;
+        assert_eq!(message_texts(&events), vec!["partial"], "{events:?}");
+        assert!(
+            matches!(
+                terminal_of(&events),
+                Some(HostEvent::OpFailed(f)) if f.error_category == "max_tokens"
+            ),
+            "{events:?}"
+        );
+    }
+
+
+    #[tokio::test]
+    async fn dispatch_successful_run_try_send_failure_preserves_prior_pending() {
+        let budget = Arc::new(DeliveryBudget::default());
+        let (content_tx, mut content_rx) = mpsc::channel(1);
+        let session_id = HostSessionId::new();
+        let op_id = HostOperationId::new();
+        let first = "first".to_string();
+        let second = "second".to_string();
+        let events = vec![
+            HostEvent::MessageDelta(TextDeltaEvent {
+                session_id: session_id.clone(),
+                op_id: op_id.clone(),
+                text: first.clone(),
+            }),
+            HostEvent::MessageDelta(TextDeltaEvent {
+                session_id: session_id.clone(),
+                op_id: op_id.clone(),
+                text: second,
+            }),
+        ];
+        let failed = dispatch_successful_run_events(
+            events,
+            &content_tx,
+            &budget,
+            &session_id,
+            &op_id,
+        )
+        .expect_err("second delta must fail when the channel is full");
+        assert_eq!(failed.error_category, "provider_error");
+        assert_eq!(
+            budget.test_pending_message_slots(),
+            1,
+            "only the failed delta permit may be released; the first remains pending"
+        );
+        assert_eq!(budget.test_pending_payload_bytes(), first.len());
+        let payload = content_rx.recv().await.expect("first delta queued");
+        let _ = payload.into_event();
+        assert_eq!(budget.test_pending_message_slots(), 0);
+        assert_eq!(budget.test_pending_payload_bytes(), 0);
+    }
+
+    #[tokio::test]
+    async fn dsh_oversize_final_fallback_without_streamed_text_fails_delivery_bounds() {
+        let budget = Arc::new(DeliveryBudget::default());
+        let (content_tx, _content_rx) = mpsc::channel(DSCH_MAX_QUEUED_MESSAGES);
+        let session_id = HostSessionId::new();
+        let op_id = HostOperationId::new();
+        let huge = "x".repeat(DSCH_MAX_EVENT_TEXT_BYTES + 1);
+        let events = vec![
+            HostEvent::MessageDelta(TextDeltaEvent {
+                session_id: session_id.clone(),
+                op_id: op_id.clone(),
+                text: huge,
+            }),
+            HostEvent::OpFinished(OperationFinishedEvent {
+                session_id: session_id.clone(),
+                op_id: op_id.clone(),
+                reason: FinishReason::EndTurn,
+            }),
+        ];
+        let dispatched = dispatch_successful_run_events(
+            events,
+            &content_tx,
+            &budget,
+            &session_id,
+            &op_id,
+        )
+        .expect_err("oversized no-callback fallback must fail delivery bounds");
+        assert_eq!(dispatched.error_category, "provider_error");
+        assert_eq!(
+            dispatched.error_message,
+            "dsh operation exceeded Nexus delivery bounds"
+        );
+    }
+
+
+    #[tokio::test]
+    async fn dsh_oversize_fixture_fails_delivery_bounds() {
+        let req_log_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = req_log_dir.path().join("reqs.jsonl");
+        let dsh_home = req_log_dir.path().join("dsh-home");
+        let provider = stub_provider(
+            "test-dsh-oversize",
+            stub_env_scenario(&req_log, &dsh_home, "oversize"),
+        );
+        let handle = launch_hermetic(&provider).await;
+        let events = run_turn(&provider, &handle, "big").await;
+        assert!(
+            matches!(
+                terminal_of(&events),
+                Some(HostEvent::OpFailed(f)) if f.error_category == "provider_error"
+            ),
+            "{events:?}"
+        );
+        assert_eq!(terminal_count(&events), 1);
+    }
+
+
+
+    #[test]
+    fn publish_completed_run_timing_is_scoped_per_operation() {
+        let snapshots: RunTimingSnapshots = Arc::new(StdMutex::new(HashMap::new()));
+        let op_a = HostOperationId::new();
+        let op_b = HostOperationId::new();
+        let timing_a = StdMutex::new(DshStreamingRunTiming {
+            op_id: None,
+            first_callback: Some(Instant::now()),
+            run_completed: Some(Instant::now()),
+        });
+        let timing_b = StdMutex::new(DshStreamingRunTiming {
+            op_id: None,
+            first_callback: Some(Instant::now()),
+            run_completed: Some(Instant::now() + std::time::Duration::from_millis(5)),
+        });
+        publish_completed_run_timing(&op_a, &timing_a, &snapshots);
+        publish_completed_run_timing(&op_b, &timing_b, &snapshots);
+        let map = snapshots.lock().unwrap();
+        assert_eq!(map.len(), 2);
+        assert_eq!(map.get(&op_a).and_then(|t| t.op_id.as_ref()), Some(&op_a));
+        assert_eq!(map.get(&op_b).and_then(|t| t.op_id.as_ref()), Some(&op_b));
+    }
+
+    #[test]
+    fn delivery_budget_allows_sequential_drained_messages_beyond_64() {
+        let budget = DeliveryBudget::default();
+        for i in 0..70 {
+            assert!(budget.try_reserve(10), "reserve at {i}");
+            budget.release(10);
+        }
+    }
+
+    #[test]
+    fn delivery_budget_rejects_65th_concurrent_pending_message() {
+        let budget = DeliveryBudget::default();
+        for i in 0..64 {
+            assert!(budget.try_reserve(1), "pending slot {i}");
+        }
+        assert!(
+            !budget.try_reserve(1),
+            "the 65th concurrent pending message must overflow"
+        );
+        budget.release(1);
+        assert!(budget.try_reserve(1), "a released permit may be reused");
+    }
+
+    #[tokio::test]
+    async fn delivery_budget_queued_payload_recycles_pending_message_permit() {
+        let budget = Arc::new(DeliveryBudget::default());
+        let (tx, mut rx) = mpsc::channel(DSCH_MAX_QUEUED_MESSAGES);
+        let session_id = HostSessionId::new();
+        let op_id = HostOperationId::new();
+        for i in 0..70 {
+            let text = format!("m{i}");
+            let bytes = text.len();
+            assert!(budget.try_reserve(bytes), "reserve at {i}");
+            tx.try_send(QueuedPayload {
+                event: Some(HostEvent::MessageDelta(TextDeltaEvent {
+                    session_id: session_id.clone(),
+                    op_id: op_id.clone(),
+                    text,
+                })),
+                reservation: Some(bytes),
+                budget: Arc::clone(&budget),
+            })
+            .expect("channel accepts drained turn");
+            let payload = rx.recv().await.expect("consumer drains");
+            let _ = payload.into_event();
+        }
+    }
+
+    #[tokio::test]
+    async fn stream_observer_callback_path_overflows_on_65th_pending_message() {
+        const ROOT: &str = "root-sess";
+        let (
+            observer,
+            session_id,
+            op_id,
+            classifier_failed,
+            delivery_failed,
+            failure_notify,
+            mut content_rx,
+            budget,
+        ) = test_stream_observer(ROOT);
+
+        for i in 0..65 {
+            observer.observe(&test_root_message_notification(ROOT, &format!("m{i}")));
+        }
+
+        assert!(!classifier_failed.load(Ordering::Acquire));
+        assert!(delivery_failed.load(Ordering::Acquire));
+        assert_eq!(budget.test_pending_message_slots(), 64);
+
+        let mut queued = Vec::new();
+        while let Ok(payload) = content_rx.try_recv() {
+            let event = payload.into_event();
+            if let HostEvent::MessageDelta(delta) = event {
+                queued.push(delta.text);
+            }
+        }
+        assert_eq!(
+            queued,
+            (0..64).map(|i| format!("m{i}")).collect::<Vec<_>>(),
+            "first 64 notifications must queue in order while the consumer is idle"
+        );
+
+        observer.observe(&test_root_message_notification(ROOT, "m65"));
+        assert!(
+            matches!(content_rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)),
+            "post-overflow notifications must not enqueue more deltas"
+        );
+
+        let notified = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            wait_delivery_failure(
+                &failure_notify,
+                &classifier_failed,
+                &delivery_failed,
+            ),
+        )
+        .await;
+        assert!(notified.is_ok(), "delivery_failed must wake failure waiters");
+
+        let terminal = failure_signal_delivery_overflow_events(
+            &session_id,
+            &op_id,
+            &classifier_failed,
+        );
+        assert_delivery_overflow_terminal(&terminal);
+    }
+
+    #[tokio::test]
+    async fn dsh_receiver_drop_while_hold_turn_invalidates_session() {
+        let req_log_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = req_log_dir.path().join("reqs.jsonl");
+        let dsh_home = req_log_dir.path().join("dsh-home");
+        let provider = stub_provider(
+            "test-dsh-drop",
+            stub_env_scenario(&req_log, &dsh_home, "hold_turn"),
+        );
+        let handle = launch_hermetic(&provider).await;
+        let mut stream = Box::pin(
+            provider
+                .execute(
+                    &handle,
+                    HostOperation::Prompt {
+                        op_id: HostOperationId::new(),
+                        content: vec![HostContentBlock::Text {
+                            text: "hold".to_string(),
+                        }],
+                        permission_scope: None,
+                    },
+                )
+                .await
+                .expect("execute"),
+        );
+        let first = stream.next().await.expect("op started").expect("ok");
+        assert!(matches!(first, HostEvent::OpStarted(_)));
+        drop(stream);
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        assert!(
+            provider
+                .execute(
+                    &handle,
+                    HostOperation::Prompt {
+                        op_id: HostOperationId::new(),
+                        content: vec![HostContentBlock::Text {
+                            text: "after drop".to_string(),
+                        }],
+                        permission_scope: None,
+                    },
+                )
+                .await
+                .is_err(),
+            "session must be unusable after receiver drop"
+        );
+    }
+
+    #[tokio::test]
+    async fn dsh_lag_fixture_still_delivers_message_before_terminal() {
+        let req_log_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = req_log_dir.path().join("reqs.jsonl");
+        let dsh_home = req_log_dir.path().join("dsh-home");
+        let mut env = stub_env_scenario(&req_log, &dsh_home, "lag");
+        env.insert("LAG_MS".to_string(), "100".to_string());
+        let provider = stub_provider("test-dsh-lag", env);
+        let handle = launch_hermetic(&provider).await;
+        let stream = provider
+            .execute(
+                &handle,
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "lag".to_string(),
+                    }],
+                    permission_scope: None,
+                },
+            )
+            .await
+            .expect("execute");
+        let mut stream = std::pin::pin!(stream);
+        let started = stream.next().await.expect("started").expect("ok");
+        assert!(matches!(started, HostEvent::OpStarted(_)));
+        let delta = stream.next().await.expect("delta").expect("ok");
+        assert!(matches!(delta, HostEvent::MessageDelta(_)));
+        let terminal = stream.next().await.expect("terminal").expect("ok");
+        assert!(matches!(terminal, HostEvent::OpFinished(_)));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+
     async fn wire_child_named_dsh_full_handshake_and_confirmed_exit() {
         // This test holds the env lock itself (PATH isolation must cover
         // resolution AND spawn), so it cannot call the locking helpers —
         // execute/collect inline instead.
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let bin_dir = temp_dir.path().join("bin");
         install_fixture_as_dsh(&bin_dir);
@@ -4235,9 +5399,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn wrong_server_identity_fails_closed_and_reaps_child() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let mut env = stub_env(&req_log, &temp_dir.path().join("dsh-home"));
@@ -4270,9 +5432,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn initialize_timeout_fails_launch_and_reaps_child() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let mut env = stub_env(&req_log, &temp_dir.path().join("dsh-home"));
@@ -4309,9 +5469,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn shutdown_rpc_error_is_diagnostic_and_close_is_confirmed() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let mut env = stub_env(&req_log, &temp_dir.path().join("dsh-home"));

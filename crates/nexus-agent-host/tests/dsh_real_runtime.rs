@@ -25,6 +25,9 @@
 //! - a missing required plugin package fails launch closed (typed error,
 //!   zero model calls) — every incompatible/failed denial is a STOP, never
 //!   an ordinary fallback;
+//! - v1.188 P1: message-level streaming timing on the installed runtime
+//!   (first `MessageDelta` observed before the terminal on a loopback LLM
+//!   proxy turn; non-secret monotonic Instant evidence is logged);
 //! - safe runtime identity (CLI version, npm package identity, wire
 //!   protocol server identity) is recorded without touching credentials.
 //!
@@ -1141,6 +1144,149 @@ async fn real_dsh_missing_plugin_package_fails_closed() {
         "no Nexus sealed lease remains after the failed launch"
     );
     markers.assert_all_absent();
+}
+
+
+/// Wall-clock capture for the P1 actual-dsh streaming timing proof.
+#[cfg(unix)]
+struct TurnTiming {
+    first_message_delta: Option<Instant>,
+    terminal: Option<Instant>,
+    events: Vec<HostEvent>,
+}
+
+#[cfg(unix)]
+async fn collect_turn_timed(
+    stream: nexus_agent_host::capability::model::HostEventStream,
+) -> TurnTiming {
+    let mut first_message_delta = None;
+    let mut terminal = None;
+    let mut events = Vec::new();
+    let mut stream = std::pin::pin!(stream);
+    while let Some(item) = stream.next().await {
+        let event = item.expect("stream item should be Ok");
+        let now = Instant::now();
+        if matches!(event, HostEvent::MessageDelta(_)) && first_message_delta.is_none() {
+            first_message_delta = Some(now);
+        }
+        if matches!(event, HostEvent::OpFinished(_) | HostEvent::OpFailed(_)) && terminal.is_none()
+        {
+            terminal = Some(now);
+        }
+        events.push(event);
+    }
+    TurnTiming {
+        first_message_delta,
+        terminal,
+        events,
+    }
+}
+
+/// Actual installed `dsh` on a loopback LLM proxy: at least one committed
+/// `MessageDelta` is observed before the terminal, with monotonic Instant
+/// evidence logged for parent verification (P1 T3 / AC2).
+#[cfg(unix)]
+#[tokio::test]
+async fn real_dsh_message_delta_precedes_terminal_with_timing_evidence() {
+    let Some(dsh_bin) = real_dsh() else {
+        return;
+    };
+    let _serial = serial_real_runtime();
+    let baseline = ChildBaseline::capture();
+    let root = tempfile::tempdir().expect("temp root");
+    std::fs::create_dir_all(root.path().join("home")).expect("isolated HOME");
+    let markers = Arc::new(HostileMarkers::under(&root));
+    let proxy = Proxy::start(0, Arc::clone(&markers)).await;
+    let provider = real_provider(&root, proxy.port, &dsh_bin);
+
+    let handle = provider
+        .launch(launch_spec(root.path()))
+        .await
+        .expect("ordinary launch against isolated home");
+    let body = {
+        let handle = handle.clone();
+        let provider = &provider;
+        async move {
+            let op_id = HostOperationId::new();
+            let stream = provider
+                .execute(
+                    &handle,
+                    HostOperation::Prompt {
+                        op_id: op_id.clone(),
+                        content: vec![HostContentBlock::Text {
+                            text: "prove message-level streaming timing".to_string(),
+                        }],
+                        permission_scope: None,
+                    },
+                )
+                .await
+                .expect("prompt admission succeeds");
+            let timing = collect_turn_timed(stream).await;
+            assert!(
+                matches!(timing.events.first(), Some(HostEvent::OpStarted(_))),
+                "events: {:?}",
+                timing.events
+            );
+            let deltas: Vec<&str> = timing
+                .events
+                .iter()
+                .filter_map(|e| match e {
+                    HostEvent::MessageDelta(delta) => Some(delta.text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                !deltas.is_empty(),
+                "the runtime must emit at least one MessageDelta: {:?}",
+                timing.events
+            );
+            assert!(
+                matches!(
+                    timing.events.last(),
+                    Some(HostEvent::OpFinished(f)) if f.reason == FinishReason::EndTurn
+                ),
+                "bounded completion: {:?}",
+                timing.events
+            );
+            let (Some(first_delta), Some(terminal_at)) =
+                (timing.first_message_delta, timing.terminal)
+            else {
+                panic!("timing arms must be populated: {:?}", timing.events);
+            };
+            assert!(
+                first_delta <= terminal_at,
+                "consumer: MessageDelta must not follow the terminal instant"
+            );
+            let producer_timing = provider
+                .take_run_timing(&handle.session_id, &op_id)
+                .await
+                .expect("producer timing must be captured for actual-dsh proof");
+            assert_eq!(
+                producer_timing.op_id.as_ref(),
+                Some(&op_id),
+                "producer timing must belong to this turn"
+            );
+            let (Some(callback_at), Some(run_completed_at)) = (
+                producer_timing.first_callback,
+                producer_timing.run_completed,
+            ) else {
+                panic!("producer timing arms must be populated");
+            };
+            assert!(
+                callback_at < run_completed_at,
+                "committed callback must strictly precede Session::run completion                  (callback={callback_at:?}, run_completed={run_completed_at:?})"
+            );
+            let lead_ms = run_completed_at
+                .saturating_duration_since(callback_at)
+                .as_millis();
+            eprintln!(
+                "P1 actual-dsh timing evidence: first callback observed {lead_ms}ms                  (monotonic Instant) before Session::run completion on this host;                  consumer delta lead {}ms before terminal",
+                terminal_at.saturating_duration_since(first_delta).as_millis()
+            );
+            assert_eq!(proxy.records().len(), 1, "one scripted model call");
+        }
+    };
+    with_confirmed_teardown(&provider, handle, &baseline, body).await;
 }
 
 /// Record the actual runtime identity without reading credentials: CLI

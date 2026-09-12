@@ -105,8 +105,9 @@ pub fn scan_path_in(
         }
 
         // The dsh row advertises the AR-6 documented narrower descriptor
-        // (`streaming`/`cancellation` false — the SDK surface has neither),
-        // never the broader native CLI claim; claude/codex keep
+        // (`cancellation` false — the SDK surface has no cancel RPC;
+        // `streaming` true since v1.188 P1 message-level proof), never
+        // the broader native CLI claim; claude/codex keep
         // `native_cli_limited()`.
         let capabilities = if provider_id_str == "dsh-native" {
             CapabilityDescriptor::dsh_limited()
@@ -500,15 +501,16 @@ mod tests {
             assert!(entry.health.available, "entry should be marked available");
         }
 
-        // B-2: the dsh row advertises the AR-6 narrower descriptor, never
-        // the broader native CLI claim; claude/codex keep the native CLI
+        // B-2: the dsh row advertises the AR-6 narrower descriptor —
+        // message-level streaming (proven on actual dsh in v1.188 P1 T3)
+        // but no cancellation; claude/codex keep the broader native CLI
         // descriptor.
         for entry in &entries {
             match entry.provider_id.0.as_str() {
                 "dsh-native" => {
                     assert!(
-                        !entry.capabilities.streaming,
-                        "dsh-native must not claim streaming (AR-6)"
+                        entry.capabilities.streaming,
+                        "dsh-native streams committed messages (v1.188 P1, AR-6)"
                     );
                     assert!(
                         !entry.capabilities.cancellation,
@@ -575,8 +577,8 @@ mod tests {
         assert!(args.is_empty());
         assert!(env.is_empty());
         assert!(
-            !dsh.capabilities.streaming,
-            "dsh row must not claim streaming (AR-6)"
+            dsh.capabilities.streaming,
+            "dsh row streams committed messages (v1.188 P1, AR-6)"
         );
         assert!(
             !dsh.capabilities.cancellation,

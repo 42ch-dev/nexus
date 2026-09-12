@@ -148,19 +148,79 @@ def handle_request(req):
             "type": "agent/inbox/spliced",
             "data": {"inserted": [{"id": message_id}]},
         })
-        if os.environ.get("HOLD_TURN"):
-            # The turn stays open: never emit the root idle, so the SDK
-            # run hangs and the provider's turn timeout fires.
+        scenario = os.environ.get("SCENARIO", "happy")
+        if scenario == "hold_turn" or os.environ.get("HOLD_TURN") == "1":
             return
-        session_event(session_id, {
-            "type": "assistant/message",
-            "data": {"message": {"content": [{"type": "text", "text": "mock dsh reply"}]}},
-        })
-        session_event(session_id, {
-            "type": "turn/end",
-            "data": {"reason": {"kind": "completed"}},
-        })
-        session_status(session_id, "idle")
+        if scenario == "lag":
+            time.sleep(int(os.environ.get("LAG_MS", "150")) / 1000.0)
+        if scenario == "nested":
+            session_event("child-session", {
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": "nested-only"}]},
+            })
+        if scenario == "two_messages":
+            session_event(session_id, {
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": "A"}]},
+            })
+            session_event(session_id, {
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": "B"}]},
+            })
+        elif scenario == "empty_only":
+            session_event(session_id, {
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": ""}]},
+            })
+        elif scenario == "malformed_text":
+            session_event(session_id, {
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": 1}]},
+            })
+        elif scenario == "malformed_root_event_type":
+            session_event(session_id, {
+                "data": {"content": [{"type": "text", "text": "would-be-streamed"}]},
+            })
+        elif scenario == "oversize":
+            big = "x" * (int(os.environ.get("OVERSIZE_BYTES", str(256 * 1024 + 1))))
+            session_event(session_id, {
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": big}]},
+            })
+        elif scenario == "partial_then_fail":
+            session_event(session_id, {
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": "partial"}]},
+            })
+        elif scenario == "malformed":
+            pass  # malformed turn/end below; no assistant prose
+        else:
+            session_event(session_id, {
+                "type": "assistant/message",
+                "data": {"message": {"content": [{"type": "text", "text": "mock dsh reply"}]}},
+            })
+        if scenario == "tool_call":
+            session_event(session_id, {
+                "type": "tool/call",
+                "data": {"tool": "bash", "input": {"command": "echo hi"}},
+            })
+        finish_kind = "completed"
+        if scenario == "partial_then_fail":
+            finish_kind = "max-tokens"
+        if scenario == "malformed":
+            session_event(session_id, {
+                "type": "turn/end",
+                "data": {"reason": {}},
+            })
+            # Root idle ends the SDK activity interval even when turn/end is
+            # malformed; without idle Session::run waits forever.
+            session_status(session_id, "idle")
+        else:
+            session_event(session_id, {
+                "type": "turn/end",
+                "data": {"reason": {"kind": finish_kind}},
+            })
+            session_status(session_id, "idle")
         return
 
     if method == "shutdown":
