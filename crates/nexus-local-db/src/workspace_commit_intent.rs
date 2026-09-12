@@ -4,6 +4,13 @@ use crate::LocalDbError;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
+/// Maximum accepted size of a persisted `entries_json` document, in bytes.
+///
+/// Enforced on the RAW column value BEFORE `serde_json` deserializes it, so a
+/// hostile or corrupt row cannot force unbounded parse work; and enforced
+/// again on the serialized document before it is written.
+pub const MAX_ENTRIES_JSON_BYTES: usize = 512_000;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IntentState {
@@ -89,6 +96,12 @@ pub async fn claim_session_and_insert_intent(
     entries_json: &str,
 ) -> Result<ClaimSessionResult, LocalDbError> {
     let mut tx = pool.begin().await?;
+
+    if entries_json.len() > MAX_ENTRIES_JSON_BYTES {
+        return Err(LocalDbError::ValidationError(format!(
+            "intent entries_json exceeds {MAX_ENTRIES_JSON_BYTES} bytes"
+        )));
+    }
 
     let existing = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM workspace_commit_intents \
@@ -263,6 +276,55 @@ pub async fn release_session_claim(
     Ok(())
 }
 
+
+/// Remove an intent that never applied and release its claim, atomically.
+///
+/// Staging failures happen before any target mutation, so there is no durable
+/// material to recover: the row is DELETED and the claim CLEARED in one
+/// transaction. Neither an orphaned `rolling_back` row nor a claimed-but-
+/// abandoned session can survive this call.
+pub async fn abort_intent_and_release_claim(
+    pool: &SqlitePool,
+    revision: &str,
+    session_id: &str,
+) -> Result<(), LocalDbError> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM workspace_commit_intents WHERE revision = ? AND state = 'applying'")
+        .bind(revision)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "UPDATE workspace_sessions SET claimed_by_revision = NULL \
+         WHERE session_id = ? AND claimed_by_revision = ? AND consumed = 0",
+    )
+    .bind(session_id)
+    .bind(revision)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Most recent committed intent for a canonical workspace root.
+///
+/// Root comparison canonicalizes both sides (the stored value may be a
+/// non-canonical alias, e.g. `/var` vs `/private/var`); `rowid DESC` makes
+/// the pick deterministic.
+pub async fn latest_committed_intent_for_root(
+    pool: &SqlitePool,
+    workspace_root: &str,
+) -> Result<Option<CommitIntentRow>, LocalDbError> {
+    let rows = sqlx::query_as::<_, IntentRowRaw>(
+        "SELECT session_id, workspace_root, revision, request_digest, state, entries_json, error_category \
+         FROM workspace_commit_intents WHERE state = 'committed' ORDER BY rowid DESC",
+    )
+    .fetch_all(pool)
+    .await?;
+    let row = rows
+        .into_iter()
+        .find(|row| workspace_roots_match(&row.workspace_root, workspace_root));
+    row.map(IntentRowRaw::try_into_row).transpose()
+}
 
 async fn mark_intent_recovery_conflict(
     pool: &SqlitePool,
@@ -439,6 +501,13 @@ struct IntentRowRaw {
 
 impl IntentRowRaw {
     fn try_into_row(self) -> Result<CommitIntentRow, LocalDbError> {
+        // T1: bound the RAW column bytes first — never hand an unbounded
+        // document to the JSON parser.
+        if self.entries_json.len() > MAX_ENTRIES_JSON_BYTES {
+            return Err(LocalDbError::ValidationError(format!(
+                "intent entries_json exceeds {MAX_ENTRIES_JSON_BYTES} bytes"
+            )));
+        }
         let entries: Vec<IntentEntryJson> = match serde_json::from_str(&self.entries_json) {
             Ok(v) => v,
             Err(e) => {

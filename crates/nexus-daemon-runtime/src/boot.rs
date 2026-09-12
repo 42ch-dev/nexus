@@ -909,6 +909,14 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // A2/A7: the engine resolves directory presets for source identity from
     // the nexus home.
     concrete_engine.set_nexus_home(state.nexus_home().clone());
+    // v1.188 P3: resolve `_context.workspace.*` from the SAME shared
+    // workspace authority the commit executor writes through, so preset
+    // conditional edges observe real durable state.
+    if let (Some(mgr), Some(root)) = (state.session_manager(), state.workspace_path()) {
+        concrete_engine.set_workspace_state_provider(std::sync::Arc::new(
+            crate::workspace::state_provider::DaemonWorkspaceStateProvider::new(mgr, root),
+        ));
+    }
 
     let concrete_engine = Arc::new(concrete_engine);
     let engine: Arc<dyn OrchestrationEngine> = concrete_engine.clone();

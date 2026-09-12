@@ -255,6 +255,20 @@ pub trait WorkspaceExecutor: Send + Sync {
     ) -> Result<nexus_contracts::local::orchestration::WorkspaceCommitOutput, CapabilityError>;
 }
 
+/// Provider for live workspace session state (v1.188 P3).
+///
+/// Preset conditional edges may reference `_context.workspace.<field>`. The
+/// graph task resolves that object from this provider at
+/// expression-evaluation time, so the branch sees the REAL durable workspace
+/// state owned by the daemon's workspace authority — never a synthetic
+/// placeholder. `None` (no provider) leaves `_context.workspace` absent.
+#[async_trait]
+pub trait WorkspaceStateProvider: Send + Sync {
+    /// Latest durable workspace state, or `None` when the workspace has no
+    /// committed session yet.
+    async fn workspace_state(&self) -> Option<serde_json::Value>;
+}
+
 /// Runtime dependencies injected through `CapabilityRegistry::with_runtime_deps`.
 ///
 /// Groups pool and prompt executor so daemon boot can construct a single

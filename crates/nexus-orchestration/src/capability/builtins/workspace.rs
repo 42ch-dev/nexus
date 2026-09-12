@@ -31,7 +31,7 @@ impl Capability for WorkspaceOpen {
     }
 
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}"#
+        r#"{"type":"object","properties":{"path":{"type":"string","minLength":1,"maxLength":4096,"pattern":"^(?!/)(?!.*\.\.)[^/]+(?:/[^/]+)*$"}},"required":["path"],"additionalProperties":false}"#
     }
 
     fn output_schema(&self) -> &'static str {
@@ -76,7 +76,12 @@ impl Capability for WorkspaceCommit {
     }
 
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"sessionId":{"type":"string"},"changes":{"type":"array","maxItems":128,"items":{"type":"object","properties":{"path":{"type":"string","maxLength":4096},"op":{"type":"string","enum":["create","modify","delete"]},"expectedHash":{"type":"string","maxLength":64},"contentBase64":{"type":"string","maxLength":1398104}},"required":["path","op"],"additionalProperties":false}}},"required":["sessionId","changes"],"additionalProperties":false}"#
+        // v1.188 P3 T3: op-conditional required fields, sha256 pattern, and
+        // the manifest-wide bounds expressible in JSON Schema (item count and
+        // per-field lengths). Aggregate byte totals (MAX_FILE_BYTES per file,
+        // MAX_TOTAL_BYTES per manifest) are enforced by the executor, which is
+        // the only place they can be summed.
+        r#"{"type":"object","properties":{"sessionId":{"type":"string","minLength":1},"changes":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"object","properties":{"path":{"type":"string","minLength":1,"maxLength":4096,"pattern":"^(?!/)(?!.*\.\.)[^/]+(?:/[^/]+)*$"},"op":{"type":"string","enum":["create","modify","delete"]},"expectedHash":{"type":"string","pattern":"^[0-9a-f]{64}$"},"contentBase64":{"type":"string","minLength":1,"maxLength":1398104}},"required":["path","op"],"additionalProperties":false,"allOf":[{"if":{"properties":{"op":{"const":"create"}},"required":["op"]},"then":{"required":["contentBase64"]},"else":{"required":["expectedHash"]}},{"if":{"properties":{"op":{"const":"delete"}},"required":["op"]},"then":{"not":{"required":["contentBase64"]}},"else":{"required":["contentBase64"]}}]}},"required":["sessionId","changes"],"additionalProperties":false}"#
     }
 
     fn output_schema(&self) -> &'static str {

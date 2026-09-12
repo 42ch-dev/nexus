@@ -17,6 +17,7 @@ pub mod manager;
 pub mod scope;
 pub mod session;
 pub mod session_commit;
+pub mod state_provider;
 
 use crate::api::errors::NexusApiError;
 use crate::db::pool::{DbPool, PoolConfig};
@@ -823,6 +824,14 @@ impl WorkspaceState {
             engine.set_prompt_executor(executor.clone(), self.session_cancels());
         }
         engine.set_nexus_home(self.nexus_home().clone());
+        // v1.188 P3: resolve `_context.workspace.*` from the SAME shared
+        // workspace authority the commit executor writes through, so preset
+        // conditional edges observe real durable state.
+        if let (Some(mgr), Some(root)) = (self.session_manager(), self.workspace_path()) {
+            engine.set_workspace_state_provider(Arc::new(
+                crate::workspace::state_provider::DaemonWorkspaceStateProvider::new(mgr, root),
+            ));
+        }
 
         let engine_arc = Arc::new(engine);
 

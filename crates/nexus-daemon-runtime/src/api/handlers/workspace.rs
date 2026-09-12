@@ -387,6 +387,38 @@ mod tests {
         (tmp, state)
     }
 
+    /// A `create` change carrying `content` (base64 as the DTO requires).
+    fn create_entry(
+        path: &str,
+        content: &[u8],
+    ) -> nexus_contracts::local::orchestration::WorkspaceChangeEntry {
+        use base64::Engine;
+        nexus_contracts::local::orchestration::WorkspaceChangeEntry {
+            path: path.to_string(),
+            op: nexus_contracts::local::orchestration::WorkspaceChangeOp::Create,
+            expected_hash: None,
+            content_base64: Some(
+                base64::engine::general_purpose::STANDARD.encode(content),
+            ),
+        }
+    }
+
+    /// The commit path requires the scope directory to exist (missing parents
+    /// are rejected), so materialize a dedicated scope before opening. A
+    /// dedicated scope keeps this fixture from perturbing sibling tests that
+    /// assert on `Works/my-novel` not existing.
+    const COMMIT_SCOPE: &str = "Works/commit-scope";
+
+    fn ensure_scope_dir() {
+        std::fs::create_dir_all(format!("/tmp/test-workspace/{COMMIT_SCOPE}")).expect("scope dir");
+    }
+
+    fn committed_file(name: &str) -> std::path::PathBuf {
+        std::path::Path::new("/tmp/test-workspace")
+            .join(COMMIT_SCOPE)
+            .join(name)
+    }
+
     // ── Path bounds tests ─────────────────────────────────────────────
 
     #[tokio::test]
@@ -472,29 +504,36 @@ mod tests {
     #[tokio::test]
     async fn open_and_commit_full_session_lifecycle() {
         let (_tmp, state) = make_state().await;
+        ensure_scope_dir();
         // Open
         let open_result = open_workspace(
             AxumState(state.clone()),
             Json(WorkspaceOpenRequest {
-                path: "Works/my-novel".to_string(),
+                path: COMMIT_SCOPE.to_string(),
             }),
         )
         .await
         .expect("open_workspace should succeed");
         let session_id = open_result.session_id.clone();
 
-        // Commit
-        let commit_result = commit_workspace(
+        // Commit a real change: an empty manifest is invalid input (v1.188 P3
+        // requires at least one change — a no-op commit must not consume a
+        // session).
+        let file = "lifecycle.txt";
+        let result = commit_workspace(
             AxumState(state),
             Json(WorkspaceCommitRequest {
                 session_id: session_id.clone(),
-                changes: vec![],
+                changes: vec![create_entry(file, b"lifecycle")],
             }),
         )
         .await
         .expect("commit_workspace should succeed");
-        assert!(commit_result.committed);
-        assert!(commit_result.revision.starts_with("rev_"));
+        assert!(result.committed);
+        assert!(result.revision.starts_with("rev_"));
+        let written = committed_file(file);
+        assert_eq!(std::fs::read(&written).expect("committed file"), b"lifecycle");
+        let _ = std::fs::remove_file(&written);
     }
 
     // ── Commit conflict rejection tests ───────────────────────────────
@@ -502,10 +541,11 @@ mod tests {
     #[tokio::test]
     async fn commit_rejects_stale_session() {
         let (_tmp, state) = make_state().await;
+        ensure_scope_dir();
         let open_result = open_workspace(
             AxumState(state.clone()),
             Json(WorkspaceOpenRequest {
-                path: "Works/my-novel".to_string(),
+                path: COMMIT_SCOPE.to_string(),
             }),
         )
         .await
@@ -517,7 +557,7 @@ mod tests {
             AxumState(state.clone()),
             Json(WorkspaceCommitRequest {
                 session_id: session_id.clone(),
-                changes: vec![],
+                changes: vec![create_entry("stale.txt", b"first")],
             }),
         )
         .await
@@ -528,10 +568,11 @@ mod tests {
             AxumState(state),
             Json(WorkspaceCommitRequest {
                 session_id: session_id.clone(),
-                changes: vec![],
+                changes: vec![create_entry("stale.txt", b"second")],
             }),
         )
         .await;
+        let _ = std::fs::remove_file(committed_file("stale.txt"));
         match result {
             Err(NexusApiError::Conflict(msg)) => {
                 assert!(

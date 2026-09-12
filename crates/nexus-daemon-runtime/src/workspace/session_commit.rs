@@ -34,6 +34,49 @@ fn test_crash_if(point: &str) -> Result<(), SessionError> {
     Ok(())
 }
 
+/// Test-only rendezvous at the commit owner's admission boundary (v1.188 P3).
+///
+/// Lets a test prove caller-cancellation safety DETERMINISTICALLY: the owner
+/// signals `admitted` once it holds the claim, the test cancels the awaiting
+/// caller, then releases `proceed` and awaits `settled`. No sleeps, no races.
+#[derive(Debug, Default)]
+pub struct OwnerGate {
+    /// Signalled when the owner has been admitted (claim held).
+    pub admitted: Arc<tokio::sync::Notify>,
+    /// The owner waits for this before continuing past admission.
+    pub proceed: Arc<tokio::sync::Notify>,
+    /// Signalled after the owner task settles.
+    pub settled: Arc<tokio::sync::Notify>,
+}
+
+static TEST_OWNER_GATE: Mutex<Option<Arc<OwnerGate>>> = Mutex::new(None);
+
+/// Install (or clear) the test owner gate.
+pub fn set_test_owner_gate(gate: Option<Arc<OwnerGate>>) {
+    *TEST_OWNER_GATE.lock().expect("owner gate lock") = gate;
+}
+
+fn current_owner_gate() -> Option<Arc<OwnerGate>> {
+    TEST_OWNER_GATE
+        .lock()
+        .expect("owner gate lock")
+        .as_ref()
+        .map(Arc::clone)
+}
+
+async fn test_owner_gate_admitted() {
+    if let Some(gate) = current_owner_gate() {
+        gate.admitted.notify_one();
+        gate.proceed.notified().await;
+    }
+}
+
+fn test_owner_gate_settled() {
+    if let Some(gate) = current_owner_gate() {
+        gate.settled.notify_one();
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitOutcome {
     pub revision: String,
@@ -133,8 +176,7 @@ async fn recover_applying_intent_locked(
         }
     };
     let canonical_root = canonicalize_workspace_root(Path::new(workspace_root)).await?;
-    let scope_dir = super::scope::scope_directory(&canonical_root, &row.relative_path)?;
-    let scope = match ScopeMutation::open(&scope_dir) {
+    let scope = match ScopeMutation::open(&canonical_root, &row.relative_path) {
         Ok(s) => s,
         Err(e) => {
             return persist_recovery_conflict(
@@ -147,6 +189,21 @@ async fn recover_applying_intent_locked(
             .map_err(|_| SessionError::Io(e.to_string()));
         }
     };
+
+    if intent.entries.is_empty() {
+        // Staging never persisted its entry metadata (crash between claim and
+        // `entries_json` write), so nothing was applied: this intent can only
+        // roll back. Reached via `test_crash_if("after_intent")`.
+        db::update_intent_state(
+            mgr.pool().as_ref(),
+            &intent.revision,
+            db::IntentState::RollingBack,
+            Some("staging_incomplete"),
+        )
+        .await
+        .map_err(|e| SessionError::Database(e.to_string()))?;
+        return rollback_intent_locked(mgr, workspace_root, intent).await;
+    }
 
     let mut all_applied = true;
     for entry in &intent.entries {
@@ -172,10 +229,24 @@ async fn recover_applying_intent_locked(
         )
         .await
         .map_err(|e| SessionError::Database(e.to_string()))?;
-        if finalized {
-            return Ok(());
+        if !finalized {
+            return persist_recovery_conflict(
+                mgr,
+                &intent.revision,
+                workspace_root,
+                "finalize_failed",
+            )
+            .await;
         }
-        return persist_recovery_conflict(mgr, &intent.revision, workspace_root, "finalize_failed").await;
+        // The commit is settled; the per-entry stage/backup material is now
+        // dead weight and is removed only after the durable settle.
+        for entry in &intent.entries {
+            if let Some(ref backup) = entry.backup_basename {
+                scope.cleanup_basename(&entry.path, backup);
+            }
+            scope.cleanup_basename(&entry.path, &entry.stage_basename);
+        }
+        return Ok(());
     }
 
     db::update_intent_state(
@@ -211,7 +282,7 @@ async fn rollback_intent_locked(
 
     let canonical_root = canonicalize_workspace_root(Path::new(workspace_root)).await?;
     let scope_dir = super::scope::scope_directory(&canonical_root, &row.relative_path)?;
-    let scope = match ScopeMutation::open(&scope_dir) {
+    let scope = match ScopeMutation::open(&canonical_root, &row.relative_path) {
         Ok(s) => s,
         Err(e) => {
             return persist_recovery_conflict(
@@ -490,9 +561,12 @@ pub async fn commit_recoverable(
         db::ClaimSessionResult::Expired => return Err(SessionError::Expired(session_id.clone())),
     }
 
+    test_owner_gate_admitted().await;
+
     test_crash_if("after_intent")?;
 
-    let scope = ScopeMutation::open(&scope_dir).map_err(|e| SessionError::Io(e.to_string()))?;
+    let scope = ScopeMutation::open(&canonical_root, &row.relative_path)
+        .map_err(|e| SessionError::Io(e.to_string()))?;
     let mut entries_json: Vec<db::IntentEntryJson> = Vec::new();
     let mut stage_basenames: Vec<(String, String)> = Vec::new();
     let mut backup_basenames: Vec<(String, String)> = Vec::new();
@@ -569,15 +643,23 @@ pub async fn commit_recoverable(
     })();
 
     if let Err(e) = staging {
-        cleanup_scoped_material(&scope, &stage_basenames, &backup_basenames);
-        let _ = db::release_session_claim(mgr.pool().as_ref(), &session_id.to_string(), &revision).await;
-        let _ = db::update_intent_state(
+        // Staging happens before any target mutation, so no durable material
+        // can need recovery. The intent row is REMOVED and the claim RELEASED
+        // in one transaction: neither an orphaned `rolling_back` row nor a
+        // claimed-but-abandoned session may outlive this failure.
+        if let Err(db_err) = db::abort_intent_and_release_claim(
             mgr.pool().as_ref(),
             &revision,
-            db::IntentState::RollingBack,
-            Some("staging_failed"),
+            &session_id.to_string(),
         )
-        .await;
+        .await
+        {
+            return Err(SessionError::Database(format!(
+                "staging_failed ({e}); abort_failed ({db_err})"
+            )));
+        }
+        // Only now that the intent is settled do we drop the staged material.
+        cleanup_scoped_material(&scope, &stage_basenames, &backup_basenames);
         return Err(e);
     }
 
@@ -616,14 +698,29 @@ pub async fn commit_recoverable(
             )
             .await
             .map_err(|db_err| SessionError::Database(db_err.to_string()))?;
-            if let Some(intent) = db::get_intent_by_revision(mgr.pool().as_ref(), &revision)
+
+            let intent = db::get_intent_by_revision(mgr.pool().as_ref(), &revision)
                 .await
-                .map_err(|db_err| SessionError::Database(db_err.to_string()))?
-            {
-                let _ = rollback_intent_locked(mgr, &workspace_root, &intent).await;
-            }
-            cleanup_scoped_material(&scope, &stage_basenames, &backup_basenames);
-            return Err(SessionError::Io(e.to_string()));
+                .map_err(|db_err| SessionError::Database(db_err.to_string()))?;
+            let rollback = match intent {
+                Some(intent) => rollback_intent_locked(mgr, &workspace_root, &intent).await,
+                None => Err(SessionError::Internal(
+                    "apply_failed: intent row vanished before rollback".into(),
+                )),
+            };
+
+            return match rollback {
+                // Rollback settled the intent; it removed its own per-entry
+                // stage/backup material, so there is nothing left to clean.
+                Ok(()) => Err(SessionError::Io(e.to_string())),
+                // Rollback could not settle. The conflict evidence (stage and
+                // backup files plus the persisted `recovery_conflict` row)
+                // MUST survive for operator recovery — never clean it up, and
+                // never report success.
+                Err(rollback_err) => Err(SessionError::Internal(format!(
+                    "apply_failed ({e}); rollback_failed ({rollback_err});                      recovery evidence preserved"
+                ))),
+            };
         }
         test_crash_if("after_file_apply")?;
     }
@@ -681,6 +778,7 @@ pub async fn commit_recoverable_owned(
     let owner = tokio::spawn(async move {
         set_test_crash_point(None);
         let result = commit_recoverable(&mgr2, &sid, &changes).await;
+        test_owner_gate_settled();
         let _ = tx.send(result);
     });
     mgr.register_commit_owner(owner).await;
