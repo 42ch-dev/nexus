@@ -234,6 +234,8 @@ pub struct WorkspaceState {
     /// makes each invocation's watchdog observe only its own budget; it also
     /// caps W-1's worst case (one CPU-bound compute at a time).
     compute_serializer: Arc<tokio::sync::Semaphore>,
+    /// v1.189 P1-T2: transport-neutral World KB core bound to the engine pool.
+    core_service: Arc<std::sync::OnceLock<Arc<nexus_core::CoreService>>>,
     /// V1.179 P0 T1 (DF-88): boot-scoped embedded MCP server (Model B).
     /// Stored at daemon boot (`boot.rs` §8.5) so in-daemon consumers can
     /// `establish()` on the ONE boot instance (GC #9 enablement gate: the
@@ -317,6 +319,7 @@ impl WorkspaceState {
             wasm_engine: Arc::new(None),
             module_cache: Arc::new(None),
             compute_serializer: Arc::new(tokio::sync::Semaphore::new(1)),
+            core_service: Arc::new(std::sync::OnceLock::new()),
             #[cfg(feature = "embedded-mcp")]
             embedded_mcp_server: Arc::new(None),
         }
@@ -437,6 +440,7 @@ impl WorkspaceState {
             wasm_engine: Arc::new(None),
             module_cache: Arc::new(None),
             compute_serializer: Arc::new(tokio::sync::Semaphore::new(1)),
+            core_service: Arc::new(std::sync::OnceLock::new()),
             #[cfg(feature = "embedded-mcp")]
             embedded_mcp_server: Arc::new(None),
         })
@@ -1196,6 +1200,46 @@ impl WorkspaceState {
     /// This is the single authority — the HTTP guard delegates here and the
     /// probe owner calls it, so the two can never drift.
     #[must_use]
+
+    /// Resolve the attached [`nexus_core::CoreService`] or initialize it lazily.
+    pub async fn core_or_uninit(&self) -> Result<Arc<nexus_core::CoreService>, crate::api::errors::NexusApiError> {
+        if let Some(core) = self.core_service.get() {
+            return Ok(Arc::clone(core));
+        }
+        let pool = self.pool_or_uninit()?;
+        let user_home = self
+            .nexus_home()
+            .parent()
+            .ok_or_else(|| crate::api::errors::NexusApiError::Internal {
+                code: "NEXUS_HOME_INVALID".to_string(),
+                message: "Workspace nexus home has no parent directory".to_string(),
+            })?
+            .to_path_buf();
+        let (creator_id, workspace_slug) = self
+            .verified_creator_context()
+            .ok_or(crate::api::errors::NexusApiError::AuthRequired)?;
+        let db_path = self
+            .creator_db_read()
+            .db_path
+            .clone()
+            .ok_or(crate::api::errors::NexusApiError::Uninitialized)?;
+        let core = nexus_core::CoreService::attach_pool(
+            nexus_core::CoreOpenOptions {
+                user_home,
+                access: nexus_core::CoreAccess::EngineOwner,
+            },
+            creator_id,
+            workspace_slug,
+            db_path,
+            pool.clone(),
+        )
+        .await
+        .map_err(crate::api::errors::NexusApiError::from)?;
+        let arc = Arc::new(core);
+        let _ = self.core_service.set(Arc::clone(&arc));
+        Ok(arc)
+    }
+
     pub fn verified_creator_context(&self) -> Option<(String, String)> {
         let creator_id = crate::config::try_active_creator_id(self.nexus_home())?;
         let workspace_slug =

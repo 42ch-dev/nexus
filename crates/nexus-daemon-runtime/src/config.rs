@@ -3,11 +3,16 @@
 //! Read `~/.nexus42/config.toml` for active creator / workspace slug (same shape as CLI `CliConfig` subset).
 
 use nexus_contracts::local::domain::RuntimeMode;
+use nexus_home_layout::active_context::{
+    read_active_creator_id as layout_read_active_creator_id,
+    read_active_workspace_slug as layout_read_active_workspace_slug,
+    resolve_state_db_path as layout_resolve_state_db_path,
+    try_active_creator_id as layout_try_active_creator_id,
+    try_resolve_state_db_path as layout_try_resolve_state_db_path,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-
-const DEFAULT_WORKSPACE_SLUG: &str = "default";
 
 /// Resolve the default workspace root when `workspace_path` is unset.
 ///
@@ -27,6 +32,7 @@ pub fn resolve_default_workspace_path() -> PathBuf {
         .join("default")
 }
 
+/// Daemon-extended CLI config snapshot (reuses home-layout active-context readers).
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct CliConfigSnapshot {
     #[serde(default)]
@@ -40,70 +46,48 @@ pub struct CliConfigSnapshot {
 }
 
 impl CliConfigSnapshot {
-    /// Load from `config.toml` with automatic migration from legacy `config.json`.
+    /// Load via the shared home-layout reader, then overlay daemon-only fields.
     pub fn load(nexus_root: &Path) -> anyhow::Result<Self> {
+        let base = nexus_home_layout::active_context::CliConfigSnapshot::load(nexus_root)?;
         let toml_path = nexus_root.join("config.toml");
-        let json_path = nexus_root.join("config.json");
-
-        // 1. Try loading config.toml
-        if toml_path.exists() {
-            let text = std::fs::read_to_string(&toml_path)?;
-            if text.trim().is_empty() {
-                return Ok(Self::default());
-            }
-            return Ok(toml::from_str(&text)?);
+        if !toml_path.exists() {
+            return Ok(Self {
+                active_creator_id: base.active_creator_id,
+                active_workspace_slug_by_creator: base.active_workspace_slug_by_creator,
+                ..Self::default()
+            });
         }
-
-        // 2. Migration: try loading legacy config.json
-        if json_path.exists() {
-            let text = std::fs::read_to_string(&json_path)?;
-            if text.trim().is_empty() {
-                std::fs::rename(&json_path, nexus_root.join("config.json.migrated"))?;
-                return Ok(Self::default());
-            }
-            match serde_json::from_str::<Self>(&text) {
-                Ok(cfg) => {
-                    // Write config.toml and rename legacy file
-                    let toml_str = toml::to_string_pretty(&cfg)?;
-                    std::fs::write(&toml_path, toml_str)?;
-                    std::fs::rename(&json_path, nexus_root.join("config.json.migrated"))?;
-                    tracing::info!("Migrated config.json → config.toml (daemon)");
-                    return Ok(cfg);
-                }
-                Err(e) => {
-                    tracing::warn!("Legacy config.json corrupted: {}", e);
-                    return Ok(Self::default());
-                }
-            };
+        let text = std::fs::read_to_string(&toml_path)?;
+        if text.trim().is_empty() {
+            return Ok(Self {
+                active_creator_id: base.active_creator_id,
+                active_workspace_slug_by_creator: base.active_workspace_slug_by_creator,
+                ..Self::default()
+            });
         }
-
-        // 3. No config file — return defaults
-        Ok(Self::default())
+        let mut cfg: Self = toml::from_str(&text)?;
+        if cfg.active_creator_id.is_none() {
+            cfg.active_creator_id = base.active_creator_id;
+        }
+        if cfg.active_workspace_slug_by_creator.is_empty() {
+            cfg.active_workspace_slug_by_creator = base.active_workspace_slug_by_creator;
+        }
+        Ok(cfg)
     }
 
     #[must_use]
     pub fn workspace_slug_for_creator(&self, creator_id: &str) -> String {
-        self.active_workspace_slug_by_creator
-            .get(creator_id)
-            .map(std::string::String::as_str)
-            .filter(|s| !s.is_empty())
-            .unwrap_or(DEFAULT_WORKSPACE_SLUG)
-            .to_string()
+        nexus_home_layout::active_context::CliConfigSnapshot {
+            active_creator_id: self.active_creator_id.clone(),
+            active_workspace_slug_by_creator: self.active_workspace_slug_by_creator.clone(),
+        }
+        .workspace_slug_for_creator(creator_id)
     }
 }
 
 /// Resolve workspace `state.db` under ADR-014 (same rules as CLI `config::resolve_state_db_path`).
 pub fn resolve_state_db_path(user_home: &Path, nexus_root: &Path) -> anyhow::Result<PathBuf> {
-    let cfg = CliConfigSnapshot::load(nexus_root)?;
-    let cid = cfg.active_creator_id.as_deref().ok_or_else(|| {
-        anyhow::anyhow!(
-            "No active creator in ~/.nexus42/config.toml. Run `nexus42 init workspace` or `nexus42 creator use <id>`."
-        )
-    })?;
-    let slug = cfg.workspace_slug_for_creator(cid);
-    Ok(nexus_home_layout::workspace_state_db_path(
-        user_home, cid, &slug,
-    ))
+    layout_resolve_state_db_path(user_home, nexus_root)
 }
 
 /// Read the active `creator_id` from the CLI config (`config.toml`).
@@ -113,26 +97,7 @@ pub fn resolve_state_db_path(user_home: &Path, nexus_root: &Path) -> anyhow::Res
 /// agent-host probe owner) share one read/validation path with the handlers.
 #[must_use]
 pub fn read_active_creator_id(nexus_home: &Path) -> Option<String> {
-    // `nexus_home` is caller/config-derived, so normalize before it is used to
-    // build a path: an absolute, `..`-free home is the only shape whose join
-    // cannot escape the intended home directory. Every real caller passes the
-    // resolved home from the layout helpers, so valid inputs are unaffected;
-    // a malformed home now reads as "no active creator" instead of producing a
-    // path outside the home.
-    if !nexus_home.is_absolute()
-        || nexus_home
-            .components()
-            .any(|component| component == std::path::Component::ParentDir)
-    {
-        return None;
-    }
-    let config_path = nexus_home.join("config.toml");
-    let content = std::fs::read_to_string(&config_path).ok()?;
-    let config: toml::Value = toml::from_str(&content).ok()?;
-    config
-        .get("active_creator_id")
-        .and_then(|v| v.as_str())
-        .map(std::string::ToString::to_string)
+    layout_read_active_creator_id(nexus_home)
 }
 
 /// Read the active workspace slug for `creator_id` from the CLI config.
@@ -144,11 +109,7 @@ pub fn read_active_creator_id(nexus_home: &Path) -> Option<String> {
 /// `None` here surfaces a misleading `Authentication required`.
 #[must_use]
 pub fn read_active_workspace_slug(nexus_home: &Path, creator_id: &str) -> Option<String> {
-    Some(
-        CliConfigSnapshot::load(nexus_home)
-            .unwrap_or_default()
-            .workspace_slug_for_creator(creator_id),
-    )
+    layout_read_active_workspace_slug(nexus_home, creator_id)
 }
 
 /// Read `active_creator_id` from `~/.nexus42/config.toml` without failing.
@@ -158,9 +119,7 @@ pub fn read_active_workspace_slug(nexus_home: &Path, creator_id: &str) -> Option
 /// absent or the config file cannot be read.
 #[must_use]
 pub fn try_active_creator_id(nexus_root: &Path) -> Option<String> {
-    CliConfigSnapshot::load(nexus_root)
-        .ok()
-        .and_then(|cfg| cfg.active_creator_id)
+    layout_try_active_creator_id(nexus_root)
 }
 
 /// Returns `None` when `active_creator_id` is absent, instead of failing
@@ -170,10 +129,5 @@ pub fn try_active_creator_id(nexus_root: &Path) -> Option<String> {
 /// ADR-014 path rules as the CLI.
 #[must_use]
 pub fn try_resolve_state_db_path(user_home: &Path, nexus_root: &Path) -> Option<PathBuf> {
-    let cfg = CliConfigSnapshot::load(nexus_root).ok()?;
-    let cid = cfg.active_creator_id.as_deref()?;
-    let slug = cfg.workspace_slug_for_creator(cid);
-    Some(nexus_home_layout::workspace_state_db_path(
-        user_home, cid, &slug,
-    ))
+    layout_try_resolve_state_db_path(user_home, nexus_root)
 }

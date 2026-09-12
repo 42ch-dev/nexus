@@ -84,6 +84,8 @@ pub async fn create_test_workspace() -> (TestTempRoot, PathBuf, PathBuf) {
     nexus_local_db::seed_versions(&pool)
         .await
         .expect("failed to seed versions");
+    pool.close().await;
+    nexus_local_db::writer_protocol::release_retained_writer_guards(&db_path);
 
     (tmp, nexus_home, db_path)
 }
@@ -111,6 +113,8 @@ pub async fn create_initialized_test_workspace() -> (TestTempRoot, PathBuf, Path
     .execute(&pool)
     .await
     .expect("failed to seed active_manifest_id");
+    pool.close().await;
+    nexus_local_db::writer_protocol::release_retained_writer_guards(&db_path);
 
     (tmp, nexus_home, db_path, workspace_dir)
 }

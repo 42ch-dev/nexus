@@ -25,7 +25,7 @@
 
 use super::wire_cast;
 use crate::api::errors::NexusApiError;
-use crate::api::handlers::world_kb_guards::{require_creator, require_world_owner};
+use crate::api::handlers::world_kb_guards::{self, require_creator, require_world_owner};
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
@@ -288,172 +288,14 @@ pub async fn patch_entity(
     Path(world_id): Path<String>,
     Json(req): Json<WorldKbPatchEntityRequest>,
 ) -> Result<Json<WorldKbPatchEntityResponse>, NexusApiError> {
-    let creator_id = require_creator(&state)?;
-    let pool = state.pool_or_uninit()?;
-
-    // Authorization FIRST: verify the active creator owns the world BEFORE any
-    // entity read. `world_id` comes from the PATH (not the entity), so this is
-    // safe to check first. Doing the entity read + cross-world scope check
-    // before this point leaked entity existence across world boundaries — an
-    // unauthenticated-but-locally-active creator could distinguish `NotFound`
-    // ("entity not in this world") from `Forbidden` ("not your world"). This
-    // matches the order already used by `promote_candidate` and the read
-    // endpoints (V1.73 greploop issue 3).
-    require_world_owner(pool, &world_id, &creator_id).await?;
-
-    // ID existence + scope: the entity must live in this world.
-    //
-    // This is the FIRST of two `get_knowledge_entry` reads in this handler:
-    // here for validation + pre-orchestrator guards; the second (post-write)
-    // re-reads the row for the response projection because the server-side
-    // `updated_at` is not carried by the orchestrator's returned entry.
-    let store = nexus_local_db::kb_store::SqliteKbStore::with_validation_mode(
-        pool.clone(),
-        ValidationMode::Novel,
-    );
-    // V1.160 P1 create-on-absent (entity-scope-model §5.1.2): the handler is
-    // now a true create-or-update surface, branching on the store read result.
-    // `Ok(kb)` → the existing update flow below (UNCHANGED — terminal guard +
-    // OCC + cross-world scope fire here, including for soft-deleted / merged
-    // rows, which `get_knowledge_entry` returns as Found, never NotFound).
-    // `Err(NotFound)` + `expected_version == 0` → create convention
-    // (client-minted `entity_id` + absent row + version 0) → create branch.
-    // `Err(NotFound)` + `expected_version > 0` → update-on-absent is client
-    // staleness, never a silent create → 409.
-    // `Err(other)` → genuine storage error → 500 (unchanged).
-    let kb = match store.get_knowledge_entry(&req.entity_id).await {
-        Ok(kb) => kb,
-        Err(KbStoreError::NotFound(_)) if req.expected_version == 0 => {
-            return patch_entity_create(pool, &world_id, &req).await;
-        }
-        Err(KbStoreError::NotFound(_)) => {
-            return Err(NexusApiError::world_kb_conflict(
-                0,
-                &req.entity_id,
-                "version",
-                "the entity does not exist; refetch the World KB graph and reapply",
-            ));
-        }
-        Err(e) => {
-            return Err(NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            });
-        }
-    };
-    if kb.world_id() != Some(world_id.as_str()) {
-        return Err(NexusApiError::NotFound(format!(
-            "entity {} in world {world_id}",
-            req.entity_id
-        )));
-    }
-
-    // Editability invariant: deleted entities are terminal and cannot be
-    // patched. (Pending candidates live on kb_extract_jobs, not
-    // kb_key_blocks — they are promoted via promote-candidate, not edited
-    // here.) Note (V1.143): 'merged' is now also terminal — this guard
-    // still pre-rejects only 'deleted', but the orchestrator's
-    // `validate_update_path` rejects 'merged' downstream (spoke's
-    // KnowledgeEntry transition table treats it as terminal), so the
-    // pre-cutover 'merged remains editable' allowance no longer applies.
-    if kb.status == "deleted" {
-        return Err(NexusApiError::world_kb_validation_failed(
-            &["deleted entities are terminal and cannot be patched".to_string()],
-            &[],
-        ));
-    }
-
-    let current_version = kb.revision.unwrap_or(0);
-    // OCC precondition.
-    if req.expected_version != current_version {
-        return Err(NexusApiError::world_kb_conflict(
-            current_version,
-            req.entity_id,
-            "version",
-            "refetch the World KB graph and reapply",
-        ));
-    }
-
-    // Validate the patch carries at least one field.
-    if patch_is_empty(&req.patch) {
-        return Err(NexusApiError::InvalidInput {
-            field: "patch".to_string(),
-            reason: "at least one of title/body/aliases/block_type/modules must be provided"
-                .to_string(),
-        });
-    }
-
-    // Compute new field values + validate. Only the typed `KnowledgeEntryBody` is
-    // needed: V1.143 routes the write through `orchestrate_upsert`, and the
-    // production adapter serializes the spoke `KnowledgeEntry` body itself.
-    let new_name = req.patch.title.as_ref().map(|t| t.to_string());
-    let new_block_type = req.patch.block_type;
-    let body_for_validation = compute_body(&kb, &req.patch)?;
-
-    if let Some(ref name) = new_name {
-        validate_canonical_name(name)
-            .map_err(|e| NexusApiError::world_kb_validation_failed(&[e.to_string()], &[]))?;
-    }
-    let validation_block_type =
-        new_block_type.map_or(kb.block_type, wire_cast::<nexus_contracts::BlockType, _>);
-    if let Some(ref body) = body_for_validation {
-        validate_body(validation_block_type, Some(body), ValidationMode::Novel)
-            .map_err(|e| NexusApiError::world_kb_validation_failed(&[e.to_string()], &[]))?;
-    }
-
-    // V1.143 P1: route the canonical entity edit through `orchestrate_upsert`
-    // (Surface B). The handler owns validation + pre-orchestrator guards; the
-    // orchestrator owns the spoke lifecycle invariants + the CAS persist (the
-    // production adapter's `put_update` reuses the same `cas_update_key_block_
-    // fields` CAS + revision bump as the previous direct write, preserving
-    // per-row OCC behavior).
-    //
-    // Build the POST-PATCH entity and convert it to the spoke `KnowledgeEntry`
-    // boundary type (sole conversion seam, spec §7.1). The candidate's revision
-    // is the current (pre-bump) revision: the orchestrator's
-    // `assert_revision_match` requires candidate.revision == stored.revision,
-    // and the adapter's `put_update` bumps the revision on the CAS write.
-    let post_patch = build_post_patch(&kb, &req.patch, body_for_validation.as_ref());
-    let spoke_req = build_spoke_upsert_request(&post_patch);
-    let adapter = NexusAdapter::new(pool.clone());
-    // `with_bound_tx` is a no-op when the adapter has no shared tx cell
-    // (`put_update` opens + commits its own transaction) — patch_entity has no
-    // sibling write, so the unbound path is behavior-equivalent to the previous
-    // `pool.begin()` → CAS → `commit()` block.
-    //
-    // TX lifecycle (unbound path — guides the P2 relate-cutover author):
-    // Ok → adapter commits the CAS write inside `put_update_unbound`;
-    // Reject (orchestrator `validate_update_path`, stale/conflict CAS) → no
-    // commit (tx never opened, or dropped → rolled back); error path on
-    // begin/commit → tx dropped → rolled back, surfaced as Reject. The
-    // handler never holds the tx here, unlike `promote_adopt`'s bound
-    // `tx.commit()`/`rollback()`.
-    let result = adapter
-        .with_bound_tx(|| orchestrate_upsert(&adapter, spoke_req))
-        .await;
-    // Confirm success + extract the bumped revision from the persisted entry.
-    let persisted = map_upsert_response(result, pool, &req.entity_id).await?;
-    let new_version = persisted.revision.unwrap_or(0);
-
-    info!(entity_id = %req.entity_id, new_version, "world_kb.patch_entity committed");
-
-    // Re-read canonical post-write state for the response projection (mirrors
-    // the pre-cutover re-read; `cas_update_key_block_fields` sets `updated_at`
-    // server-side, which the orchestrator's returned entry does not carry).
-    let updated = store
-        .get_knowledge_entry(&req.entity_id)
+    let (core, principal) = world_kb_guards::resolve_core_principal(&state).await?;
+    let response = core
+        .patch_world_kb_entity(&principal, world_id, req)
         .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
-
-    Ok(Json(WorldKbPatchEntityResponse {
-        entity: wire_cast(project_entity(&updated)),
-        version: new_version,
-        validation_summary: wire_cast(validation_summary(&[], &[])),
-    }))
+        .map_err(NexusApiError::from)?;
+    Ok(Json(wire_cast(response)))
 }
+
 
 /// V1.160 P1 create-on-absent branch of [`patch_entity`] (entity-scope-model
 /// §5.1.2). Fires only when the store reports `NotFound` AND the client sent
@@ -1878,71 +1720,16 @@ pub async fn get_graph(
     Path(world_id): Path<String>,
     Query(query): Query<GraphQuery>,
 ) -> Result<Json<WorldKbGraphResponse>, NexusApiError> {
-    let creator_id = require_creator(&state)?;
-    require_world_owner(state.pool_or_uninit()?, &world_id, &creator_id).await?;
-
-    let store = kb_store::SqliteKbStore::new(state.pool_or_uninit()?.clone());
-    let blocks = store
-        .list_by_world(&world_id)
+    let (core, principal) = world_kb_guards::resolve_core_principal(&state).await?;
+    let response = core
+        .world_kb_graph(
+            &principal,
+            world_id,
+            query.include_suggested.unwrap_or(false),
+        )
         .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
-
-    // simplify: V1.73 derives source-anchor provenance edges from the
-    // KnowledgeEntryRecord's own source_work_id/source_provenance_kind rather than a
-    // separate kb_source_anchors join. One edge per entity with provenance.
-    let mut entities = Vec::with_capacity(blocks.len().min(GRAPH_ENTITY_CAP));
-    let mut source_anchors = Vec::new();
-    for kb in blocks.into_iter().take(GRAPH_ENTITY_CAP) {
-        if kb.status == "deleted" {
-            continue;
-        }
-        if kb.source_work_id.is_some() {
-            let reference = match kb.source_chapter {
-                Some(ch) => format!(
-                    "work:{},chapter:{ch}",
-                    kb.source_work_id.clone().unwrap_or_default()
-                ),
-                None => format!("work:{}", kb.source_work_id.clone().unwrap_or_default()),
-            };
-            source_anchors.push(WorldKbSourceAnchorProjection {
-                source_anchor_id: format!("sa_{}", kb.entry_id),
-                key_block_id: kb.entry_id.clone(),
-                source_type: kb
-                    .source_provenance_kind
-                    .clone()
-                    .unwrap_or_else(|| "manual".to_string()),
-                reference,
-                created_at: Some(kb.created_at.clone()),
-            });
-        }
-        entities.push(project_entity(&kb));
-    }
-
-    // V1.76 TODO: relationship graph pagination. The response currently ships
-    // the entire graph for the world (entities capped by `GRAPH_ENTITY_CAP`,
-    // relationships capped by `GRAPH_RELATIONSHIP_CAP` as of V1.77). When the
-    // relationship count exceeds the client viewport budget, introduce
-    // `limit`/`cursor` query params and a `truncated` flag plus `next_cursor`
-    // in `WorldKbGraphResponse` so callers can paginate without losing the
-    // symmetric-reverse derived edges. That requires a wire-contract change
-    // (new response fields + schema/codegen), so it is deferred past the V1.77
-    // `wire_contracts_changed: FALSE` polish pass; the cap is the interim
-    // safety bound (qc1 F-003 / `R-V176QC1-S002`).
-    Ok(Json(WorldKbGraphResponse {
-        entities: wire_cast(entities),
-        source_anchors: wire_cast(source_anchors),
-        relationships: wire_cast(
-            project_relationships_for_world(
-                state.pool_or_uninit()?,
-                &world_id,
-                query.include_suggested.unwrap_or(false),
-            )
-            .await?,
-        ),
-    }))
+        .map_err(NexusApiError::from)?;
+    Ok(Json(wire_cast(response)))
 }
 
 /// `GET /v1/daemon/worlds/{world_id}/kb/key-blocks/{key_block_id}/state` —
@@ -2139,52 +1926,17 @@ pub async fn get_candidates(
     Path(world_id): Path<String>,
     Query(query): Query<CandidatesQuery>,
 ) -> Result<Json<WorldKbCandidatesResponse>, NexusApiError> {
-    let creator_id = require_creator(&state)?;
-    require_world_owner(state.pool_or_uninit()?, &world_id, &creator_id).await?;
-
-    let limit = query
-        .limit
-        .unwrap_or(DEFAULT_CANDIDATE_LIMIT)
-        .clamp(1, MAX_CANDIDATE_LIMIT);
-    let limit_us = usize::try_from(limit).unwrap_or(usize::MAX);
-    let (cursor_created_at, cursor_job_id) = decode_candidate_cursor(query.cursor.as_ref())?;
-
-    // Fetch `limit + 1` rows starting strictly after the cursor tuple so the
-    // extra row detects `has_more` without truncating later pages.
-    let pending = list_pending_for_world_after(
-        state.pool_or_uninit()?,
-        &world_id,
-        cursor_created_at.as_deref(),
-        cursor_job_id.as_deref(),
-        limit + 1,
-    )
-    .await
-    .map_err(NexusApiError::from)?;
-
-    // Cursor = keyset of the last row ON the current page (index limit-1), so
-    // the next page starts strictly after it. Mirrors `chapter_page_meta`.
-    let next_cursor = if pending.len() > limit_us {
-        let last = &pending[limit_us - 1];
-        Some(encode_candidate_cursor(&last.created_at, &last.job_id))
-    } else {
-        None
-    };
-    let has_more = next_cursor.is_some();
-
-    let items: Vec<WorldKbCandidateProjection> = pending
-        .iter()
-        .take(limit_us)
-        .map(project_candidate)
-        .collect();
-
-    Ok(Json(WorldKbCandidatesResponse {
-        items: wire_cast(items),
-        pagination: wire_cast(PaginationInfo {
-            limit,
-            has_more,
-            next_cursor,
-        }),
-    }))
+    let (core, principal) = world_kb_guards::resolve_core_principal(&state).await?;
+    let response = core
+        .world_kb_candidates(
+            &principal,
+            world_id,
+            query.limit,
+            query.cursor.clone(),
+        )
+        .await
+        .map_err(NexusApiError::from)?;
+    Ok(Json(wire_cast(response)))
 }
 
 // ─── patch-relationship orchestration helpers (V1.144 P2) ───────────────────
