@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-close-report.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreCloseReport",
+  "type": "object",
+  "required": ["state", "cleanup_confirmed", "pending_operations"],
+  "additionalProperties": false,
+  "properties": {
+    "state": { "type": "string", "enum": ["closed", "interrupted"] },
+    "cleanup_confirmed": { "type": "boolean" },
+    "pending_operations": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "reason": {
+      "type": ["string", "null"],
+      "enum": ["user_requested", "engine_replaced", "schema_mismatch", "writer_fenced", null]
+    }
+  }
+}

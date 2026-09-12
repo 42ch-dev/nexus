@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-change-row.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreChangeRow",
+  "type": "object",
+  "required": ["sequence", "world_id", "resource_kind", "resource_id", "change_kind", "writer_id"],
+  "additionalProperties": false,
+  "properties": {
+    "sequence": { "type": "string", "pattern": "^[0-9]+$" },
+    "world_id": { "type": "string" },
+    "resource_kind": { "type": "string" },
+    "resource_id": { "type": "string" },
+    "resource_revision": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9]+$",
+      "description": "Nullable decimal-string revision."
+    },
+    "change_kind": { "type": "string" },
+    "writer_id": { "type": "string" }
+  }
+}
