@@ -15,7 +15,7 @@
 14:```text
 15:Identity & scope          →  who owns data (Creator, User, World, …)
 16:Architecture & contracts  →  which crate owns which concern; wire vs local types
-17:Runtime topology          →  CLI → daemon → Daemon API → ACP workers
+17:Runtime topology          →  CLI → daemon → Daemon API → ACP workers  (shipped; target boundary → rust-core-service-boundary.md, not yet activated)
 18:Persistence               →  state.db, reference store, workspace layout
 19:Orchestration             →  presets, capabilities, schedules, sessions
 20:Product surface (CLI)     →  command IA, entry paths, per-flag behavior
@@ -65,6 +65,7 @@
 64:| [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) | Master | Active — V1.64 amendment: local Web UI workspace member + embedded asset edge |
 65:| [entity-scope-model.md](entity-scope-model.md) | Master | Normative — V1.40 Shipped §5.1.1; V1.51 Shipped §5.5.6; **V1.62 Shipped** §5.5.9 (computable-flag + structured validation). **V1.158**: §1.4 V1.123 three-layer overlay + V1.156 3×2 matrix completion amendment promoted to Normative (World×Moment + Work×Brief closed; frontend-only, `wire_contracts_changed: false`). **V1.159**: §5.1.1 era taxonomy amendment (`era_type` + §5.6 `custom`/`custom_label: "parent_era"` nesting carrier — additive, `wire_contracts_changed: false`). **V1.162**: §6.6 fork-creation write boundary + lineage projection contract amendment (PD-01 local-vs-platform reconciliation; carrier approach B locked — branch-level `is_fork`/`parent_branch_id`/`forked_from_event_id`/`label?` fro…
 66:| [local-runtime-boundary.md](local-runtime-boundary.md) | Master | Normative |
+| [rust-core-service-boundary.md](rust-core-service-boundary.md) | Master | Accepted target — V1.189, locked 2026-09-13 (not shipped). Transport-neutral Rust authority, independent CLI/runtime, TS service composition, proof-gated Electron on an accepted macOS 13+ target floor. Activation gated by exercised family migration; shipped Masters remain current-behavior SSOT until then |
 67:| [schemas-directory-layout.md](schemas-directory-layout.md) | Master | Normative — current Daemon API contracts live under `schemas/daemon-api/`; generated authorities: Rust `generated::daemon_api` + TypeScript `generated/daemon-api` (reconciled through V1.183). V1.139 architect §5.2: `domain/key-block.schema.json` deleted (spoke `knowledge-entry.schema.json` is the KB type source) |
 68:| [local-api-surface-conventions.md](local-api-surface-conventions.md) | Redirect stub | **V1.90 redirect stub** — renamed to [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md); retained for historical links from iteration compasses/plans |
 69:| [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) | Master | Normative — V1.77 amendment (§11 findings PATCH as non-OCC resource PATCH); cross-resource Daemon API response/query conventions for `schemas/daemon-api/` + `nexus-daemon-runtime` handlers |
@@ -187,6 +188,7 @@
 181:| Compute module ABI (V1 envelope) | [compute-module-abi.md](compute-module-abi.md) | wasm-host, schemas-directory-layout §3.5, orchestration-engine §8.4, entity-scope-model §5.5.9, `schemas/daemon-api/compute/` |
 182:| WASM compute host runtime | [wasm-host.md](wasm-host.md) | compute-module-abi, orchestration-engine §8.4, `crates/nexus-wasm-host/AGENTS.md` |
 | Orchestration checkpoint resume / `ops inspect` | [daemon-runtime.md](daemon-runtime.md) §19 | cli-spec §6.3B (`nexus42 ops inspect`), preset-conditional-routing §3.3.3 |
+| Rust core vs TS service vs CLI/runtime/desktop hosts | [rust-core-service-boundary.md](rust-core-service-boundary.md) (Accepted target) | local-runtime-boundary, daemon-runtime, cli-spec, desktop-shell, agent-host — shipped current policy until a family migration is exercised |
 183:
 184:---
 185:
