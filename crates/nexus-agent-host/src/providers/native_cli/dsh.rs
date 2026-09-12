@@ -4744,6 +4744,47 @@ mod tests {
         })
     }
 
+
+    /// Wait until the flood fixture logs `_flood_complete` (all wire
+    /// notifications emitted) while the consumer holds backpressure.
+    async fn wait_for_flood_burst_complete(req_log: &Path) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if req_log_entries(req_log)
+                .iter()
+                .any(|entry| entry["method"] == "_flood_complete")
+            {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+        panic!("flood fixture burst did not complete within 5s");
+    }
+
+    /// Collect a turn while pausing consumer dequeue after `OpStarted` so
+    /// the producer can accumulate 64 pending message slots before the 65th
+    /// reserve fails (pending cap, not lifetime accepts).
+    #[allow(clippy::future_not_send)]
+    async fn collect_events_with_post_started_backpressure(
+        req_log: &Path,
+        stream: HostEventStream,
+    ) -> Vec<HostEvent> {
+        let mut stream = std::pin::pin!(stream);
+        let mut events = Vec::new();
+        let started = stream
+            .next()
+            .await
+            .expect("stream must yield OpStarted")
+            .expect("OpStarted must be Ok");
+        assert!(matches!(started, HostEvent::OpStarted(_)));
+        events.push(started);
+        wait_for_flood_burst_complete(req_log).await;
+        while let Some(item) = stream.next().await {
+            events.push(item.expect("stream item should be Ok"));
+        }
+        events
+    }
+
     #[tokio::test]
     async fn dsh_two_messages_emit_a_then_b_without_duplicate_final() {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
@@ -5017,9 +5058,31 @@ mod tests {
         let dsh_home = req_log_dir.path().join("dsh-home");
         let mut env = stub_env_scenario(&req_log, &dsh_home, "flood_messages");
         env.insert("FLOOD_COUNT".to_string(), "65".to_string());
+        env.insert("FLOOD_HOLD".to_string(), "1".to_string());
         let provider = stub_provider("test-dsh-flood", env);
         let handle = launch_hermetic(&provider).await;
-        let events = run_turn(&provider, &handle, "flood").await;
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
+        let stream = provider
+            .execute(
+                &handle,
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: "flood".to_string(),
+                    }],
+                    permission_scope: None,
+                },
+            )
+            .await
+            .expect("execute");
+        let events = collect_events_with_post_started_backpressure(&req_log, stream).await;
+        assert_eq!(
+            message_texts(&events),
+            (0..64).map(|i| format!("m{i}")).collect::<Vec<_>>(),
+            "only the first 64 messages may be delivered before pending overflow"
+        );
         assert!(
             matches!(
                 terminal_of(&events),
@@ -5027,6 +5090,7 @@ mod tests {
             ),
             "{events:?}"
         );
+        assert_eq!(terminal_count(&events), 1);
     }
 
     #[tokio::test]

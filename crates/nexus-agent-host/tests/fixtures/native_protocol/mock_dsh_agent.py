@@ -194,6 +194,19 @@ def handle_request(req):
                     "type": "assistant/message",
                     "data": {"content": [{"type": "text", "text": f"m{i}"}]},
                 })
+            if os.environ.get("FLOOD_HOLD") == "1":
+                # Log after the burst so the host test can hold consumer
+                # backpressure until all notifications are on the wire,
+                # then keep the turn open (no turn/end) while overflow is
+                # signaled.
+                path = os.environ.get("REQ_LOG")
+                if path:
+                    with open(path, "a") as f:
+                        f.write(json.dumps({
+                            "method": "_flood_complete",
+                            "count": count,
+                        }) + "\n")
+                return
         elif scenario == "partial_then_fail":
             session_event(session_id, {
                 "type": "assistant/message",
