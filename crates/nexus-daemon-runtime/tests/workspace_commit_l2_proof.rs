@@ -1561,6 +1561,10 @@ async fn commit_rejects_session_opened_in_foreign_workspace_root() {
 #[tokio::test]
 #[serial]
 async fn executor_rejects_foreign_session_on_idempotent_replay() {
+    // A non-empty relative scope: `workspace.open` rejects an empty path, and
+    // the commit requires the scope directory to already exist.
+    const SCOPE: &str = "foreign";
+
     let (pool, db_dir) = fresh_pool().await;
     let mgr = recoverable_mgr(pool, &db_dir);
     let root_a = tempfile::tempdir().unwrap();
@@ -1569,9 +1573,6 @@ async fn executor_rejects_foreign_session_on_idempotent_replay() {
     let root_b_str = root_b.path().to_string_lossy().to_string();
     let exec_a = DaemonWorkspaceExecutor::new(Arc::clone(&mgr), root_a_str.clone());
     let exec_b = DaemonWorkspaceExecutor::new(Arc::clone(&mgr), root_b_str.clone());
-    // A non-empty relative scope: `workspace.open` rejects an empty path, and
-    // the commit requires the scope directory to already exist.
-    const SCOPE: &str = "foreign";
     std::fs::create_dir(root_a.path().join(SCOPE)).expect("scope dir");
     let opened = exec_a
         .open(WorkspaceOpenInput {
@@ -1644,7 +1645,7 @@ async fn crash_during_staging_then_startup_recovery_cleans_partial_artifacts() {
 
     let stage_files: Vec<String> = std::fs::read_dir(ws.path())
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .filter(|n| n.contains(".nexus-stage-") || n.contains(".nexus-backup-"))
         .collect();
@@ -1656,7 +1657,7 @@ async fn crash_during_staging_then_startup_recovery_cleans_partial_artifacts() {
     mgr.startup_recovery().await.expect("startup recovery");
     let stage_after: Vec<String> = std::fs::read_dir(ws.path())
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .filter(|n| n.contains(".nexus-stage-") || n.contains(".nexus-backup-"))
         .collect();

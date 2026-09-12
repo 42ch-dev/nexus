@@ -802,15 +802,16 @@ mod tests {
         let before = RunEventRegistry::new();
         let _sink = before.try_register_live("run-1").expect("register");
         before.publish_run_state("run-1", &mk_record("run-1", SessionStatus::Running, 1));
-        let pre_restart_cursor = {
-            let state = before
-                .inner
-                .state
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let ring = state.live.get("run-1").expect("ring");
-            format!("{}:1", ring.epoch)
-        };
+        let epoch = before
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .live
+            .get("run-1")
+            .expect("ring")
+            .epoch;
+        let pre_restart_cursor = format!("{epoch}:1");
 
         let after = RunEventRegistry::new();
         let _sink = after

@@ -71,9 +71,19 @@ async fn new_events_test_ctx() -> EventsTestCtx {
     }
 }
 
-async fn restart_workspace_state(ctx: &EventsTestCtx) -> WorkspaceState {
+/// Build a SECOND workspace authority over the same root.
+///
+/// The workspace-authority lease is exclusive per root (v1.188 P3), and
+/// acquisition is one-shot non-blocking, so the previous authority MUST already
+/// be dropped when this runs. The caller destructures its context and drops the
+/// first `state` explicitly rather than relying on scope-end timing.
+async fn restart_workspace_state(
+    nexus_home: &std::path::Path,
+    db_path: &std::path::Path,
+) -> WorkspaceState {
     let mut state =
-        WorkspaceState::new_for_testing(ctx.nexus_home.clone(), ctx.db_path.clone(), None).await;
+        WorkspaceState::new_for_testing(nexus_home.to_path_buf(), db_path.to_path_buf(), None)
+            .await;
     state.set_agent_host_config(production_agent_host_config());
     publish_production_bundle(&state).await;
     state
@@ -84,16 +94,16 @@ fn test_server(state: WorkspaceState) -> TestServer {
 }
 
 async fn seed_terminal_session(pool: &sqlx::SqlitePool, session_id: &str, state_revision: i64) {
-    sqlx::query(
-        "INSERT INTO orchestration_sessions
-            (session_id, creator_id, preset_id, preset_version, status,
-             current_task_id, context_json, created_at, updated_at,
-             execution_version, state_revision, graph_version)
-         VALUES (?, 'test_creator', 'novel-writing', 1, 'completed',
+    sqlx::query!(
+        "INSERT INTO orchestration_sessions \
+            (session_id, creator_id, preset_id, preset_version, status, \
+             current_task_id, context_json, created_at, updated_at, \
+             execution_version, state_revision, graph_version) \
+         VALUES (?, 'test_creator', 'novel-writing', 1, 'completed', \
                  NULL, '{}', 1, 2, 1, ?, 1)",
+        session_id,
+        state_revision
     )
-    .bind(session_id)
-    .bind(state_revision)
     .execute(pool)
     .await
     .expect("seed durable session row");
@@ -155,12 +165,22 @@ async fn session_events_live_replay_and_terminal_close() {
 
 #[tokio::test]
 async fn session_events_restart_yields_history_unavailable_after_ring_eviction() {
-    let ctx = new_events_test_ctx().await;
+    let EventsTestCtx {
+        _tmp,
+        nexus_home,
+        db_path,
+        state,
+        pool,
+    } = new_events_test_ctx().await;
     let run_id = "p4-restart-gap";
-    publish_terminal_run_state(&ctx.state.run_event_registry(), run_id, 1);
-    seed_terminal_session(&ctx.pool, run_id, 1).await;
+    publish_terminal_run_state(&state.run_event_registry(), run_id, 1);
+    seed_terminal_session(&pool, run_id, 1).await;
 
-    let restarted = restart_workspace_state(&ctx).await;
+    // Release the first authority BEFORE the restart acquires the lease for the
+    // same root; `pool` is an independent clone and is not the lease holder.
+    drop(state);
+
+    let restarted = restart_workspace_state(&nexus_home, &db_path).await;
     let server = test_server(restarted);
     let resp = server
         .get(&format!(
@@ -183,22 +203,22 @@ async fn session_events_restart_yields_history_unavailable_after_ring_eviction()
 }
 
 async fn seed_foreign_terminal_session(pool: &sqlx::SqlitePool, session_id: &str) {
-    sqlx::query(
-        "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data)
+    sqlx::query!(
+        "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
          VALUES ('other_creator', 'Other', 'active', datetime('now'), '{}')",
     )
     .execute(pool)
     .await
     .expect("seed foreign creator");
-    sqlx::query(
-        "INSERT INTO orchestration_sessions
-            (session_id, creator_id, preset_id, preset_version, status,
-             current_task_id, context_json, created_at, updated_at,
-             execution_version, state_revision, graph_version)
-         VALUES (?, 'other_creator', 'novel-writing', 1, 'completed',
+    sqlx::query!(
+        "INSERT INTO orchestration_sessions \
+            (session_id, creator_id, preset_id, preset_version, status, \
+             current_task_id, context_json, created_at, updated_at, \
+             execution_version, state_revision, graph_version) \
+         VALUES (?, 'other_creator', 'novel-writing', 1, 'completed', \
                  NULL, '{}', 1, 2, 1, 1, 1)",
+        session_id
     )
-    .bind(session_id)
     .execute(pool)
     .await
     .expect("seed foreign session");
