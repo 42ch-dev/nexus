@@ -535,14 +535,17 @@ mod unix_dir {
     }
 
 
+    /// Reopen an owned raw fd via `/dev/fd` without widening access mode.
+    ///
+    /// Stage files are created `O_WRONLY`; reopening them read+write returns
+    /// `EACCES` on Darwin/Linux and breaks create commits.
     fn adopt_fd(fd: i32, write: bool) -> io::Result<File> {
         let path = format!("/dev/fd/{}", fd);
-        let mut opts = OpenOptions::new();
-        opts.read(true);
-        if write {
-            opts.write(true);
-        }
-        let file = opts.open(&path)?;
+        let file = if write {
+            OpenOptions::new().write(true).open(&path)?
+        } else {
+            OpenOptions::new().read(true).open(&path)?
+        };
         nix::unistd::close(fd).map_err(errno_io)?;
         Ok(file)
     }
