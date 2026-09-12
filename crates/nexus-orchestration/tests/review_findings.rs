@@ -431,3 +431,72 @@ async fn ac5_idempotent_review_repeat_no_duplicate_finding() {
         "second terminal for the same schedule must NOT create a duplicate; got {n2}"
     );
 }
+
+// ── QC1 F-001: duplicate driven terminal callback hooks exactly once ────────
+
+/// P4 QC1 F-001: `settle_and_chain_atomic` must gate post-settlement hooks on
+/// the source UPDATE `rows_affected()`. A duplicate terminal callback for an
+/// already-settled driven schedule returns the durable winner without re-running
+/// review-findings (or auto-chain child rerun).
+#[tokio::test]
+async fn qc1_duplicate_driven_terminal_callback_hooks_exactly_once() {
+    let pool = test_pool().await;
+    let sup = Arc::new(ScheduleSupervisor::new(Arc::new(pool.clone())));
+
+    let work = novel_work("wrk_qc1", 3, 5);
+    works::create_work(&pool, &work).await.unwrap();
+
+    let now = chrono::Utc::now().timestamp();
+    sqlx::query(
+        r"INSERT INTO orchestration_sessions
+           (session_id, creator_id, preset_id, preset_version, status,
+            context_json, created_at, updated_at)
+           VALUES (?, ?, 'novel-chapter-review', 1, 'completed', '{}', ?, ?)",
+    )
+    .bind("run_qc1_session")
+    .bind(CREATOR)
+    .bind(now)
+    .bind(now)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r"INSERT INTO creator_schedules
+           (schedule_id, creator_id, preset_id, preset_version, status,
+            concurrency_kind, current_core_context_version,
+            label, created_at, updated_at, work_id, execution_policy,
+            current_session_id)
+           VALUES (?, ?, 'novel-chapter-review', 1, 'running', 'serial', 0,
+                   'review-wrk_qc1', ?, ?, 'wrk_qc1', 'driven_v1', ?)",
+    )
+    .bind("sch_qc1_review")
+    .bind(CREATOR)
+    .bind(now)
+    .bind(now)
+    .bind("run_qc1_session")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    auto_chain::set_driver(&pool, CREATOR, "wrk_qc1", "sch_qc1_review", "review")
+        .await
+        .unwrap();
+
+    assert_eq!(count_findings(&pool, "wrk_qc1").await, 0);
+
+    sup.on_schedule_terminal("sch_qc1_review", ScheduleStatus::Completed)
+        .await
+        .unwrap();
+    assert_eq!(count_findings(&pool, "wrk_qc1").await, 1);
+
+    // Duplicate callback: schedule already completed; must not re-run hooks.
+    sup.on_schedule_terminal("sch_qc1_review", ScheduleStatus::Completed)
+        .await
+        .unwrap();
+    assert_eq!(
+        count_findings(&pool, "wrk_qc1").await,
+        1,
+        "duplicate driven terminal callback must not create a second finding"
+    );
+}
+

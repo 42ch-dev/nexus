@@ -89,6 +89,14 @@ pub struct SseFrame {
     pub data: String,
 }
 
+/// Live subscriber queue entry: carries the exact wire-byte reservation used
+/// for backpressure accounting so dequeue/drop releases the same count.
+#[derive(Debug, Clone)]
+struct QueuedFrame {
+    frame: SseFrame,
+    wire_bytes: usize,
+}
+
 #[derive(Debug)]
 pub enum SubscribeError {
     MalformedCursor,
@@ -129,7 +137,7 @@ struct StoredRecord {
 }
 
 struct Subscriber {
-    tx: mpsc::Sender<SseFrame>,
+    tx: mpsc::Sender<QueuedFrame>,
     pending_frames: usize,
     pending_bytes: usize,
 }
@@ -137,7 +145,7 @@ struct Subscriber {
 struct SubscriberRelease {
     inner: Weak<RunEventRegistryInner>,
     run_id: String,
-    subscriber_id: u64,
+    pub(crate) subscriber_id: u64,
 }
 
 impl Drop for SubscriberRelease {
@@ -152,7 +160,7 @@ impl Drop for SubscriberRelease {
 /// on [`recv`](Self::recv). Dropping releases the subscriber permit.
 pub struct LiveSubscription {
     replay: VecDeque<SseFrame>,
-    rx: mpsc::Receiver<SseFrame>,
+    rx: mpsc::Receiver<QueuedFrame>,
     inner: Weak<RunEventRegistryInner>,
     run_id: String,
     subscriber_id: u64,
@@ -164,11 +172,29 @@ impl LiveSubscription {
         if let Some(frame) = self.replay.pop_front() {
             return Some(frame);
         }
-        let frame = self.rx.recv().await?;
+        let queued = self.rx.recv().await?;
         if let Some(inner) = self.inner.upgrade() {
-            inner.decrement_subscriber_pending(&self.run_id, self.subscriber_id, frame.data.len());
+            inner.decrement_subscriber_pending(
+                &self.run_id,
+                self.subscriber_id,
+                queued.wire_bytes,
+            );
         }
-        Some(frame)
+        Some(queued.frame)
+    }
+}
+
+impl Drop for LiveSubscription {
+    fn drop(&mut self) {
+        if let Some(inner) = self.inner.upgrade() {
+            while let Ok(queued) = self.rx.try_recv() {
+                inner.decrement_subscriber_pending(
+                    &self.run_id,
+                    self.subscriber_id,
+                    queued.wire_bytes,
+                );
+            }
+        }
     }
 }
 
@@ -367,6 +393,20 @@ impl RunEventRegistry {
             .map(|r| r.subscribers.len())
             .unwrap_or(0)
     }
+
+    /// Pending backpressure counters for a live subscriber (test/diagnostic).
+    #[cfg(test)]
+    pub fn subscriber_pending(&self, run_id: &str, subscriber_id: u64) -> (usize, usize) {
+        self.inner
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .live
+            .get(run_id)
+            .and_then(|r| r.subscribers.get(&subscriber_id))
+            .map(|s| (s.pending_frames, s.pending_bytes))
+            .unwrap_or((0, 0))
+    }
 }
 
 impl RunEventRegistryInner {
@@ -528,18 +568,30 @@ fn fanout(ring: &mut RunRing, frame: SseFrame) {
             || sub.pending_bytes.saturating_add(byte_len) > MAX_PENDING_BYTES_PER_SUB
         {
             let lag = lag_gap_frame(&ring.run_id, ring.epoch, lag_sequence);
-            let _ = sub.tx.try_send(lag);
+            let lag_bytes = encoded_sse_frame_bytes(&lag);
+            let _ = sub.tx.try_send(QueuedFrame {
+                frame: lag,
+                wire_bytes: lag_bytes,
+            });
             remove.push(*id);
             continue;
         }
-        match sub.tx.try_send(frame.clone()) {
+        let queued = QueuedFrame {
+            frame: frame.clone(),
+            wire_bytes: byte_len,
+        };
+        match sub.tx.try_send(queued) {
             Ok(()) => {
                 sub.pending_frames += 1;
                 sub.pending_bytes += byte_len;
             }
             Err(mpsc::error::TrySendError::Full(_)) => {
                 let lag = lag_gap_frame(&ring.run_id, ring.epoch, lag_sequence);
-                let _ = sub.tx.try_send(lag);
+                let lag_bytes = encoded_sse_frame_bytes(&lag);
+                let _ = sub.tx.try_send(QueuedFrame {
+                    frame: lag,
+                    wire_bytes: lag_bytes,
+                });
                 remove.push(*id);
             }
             Err(mpsc::error::TrySendError::Closed(_)) => {
@@ -947,4 +999,76 @@ mod tests {
         assert!(ring.total_bytes <= MAX_BYTES_PER_RUN);
         assert!(ring.records.iter().any(|r| r.frame.event == "gap"));
     }
+    #[tokio::test]
+    async fn dequeue_releases_wire_byte_reservation_not_payload_only() {
+        let registry = RunEventRegistry::new();
+        let _sink = registry.try_register_live("run-1").expect("register");
+        let mut sub = registry
+            .subscribe_live("run-1", None, "/inspect".into())
+            .expect("subscribe");
+        let subscriber_id = sub.subscriber_id;
+        registry.publish_run_state("run-1", &mk_record("run-1", SessionStatus::Running, 1));
+        let (frames_before, bytes_before) = registry.subscriber_pending("run-1", subscriber_id);
+        assert!(frames_before > 0, "publish must reserve pending frames");
+        assert!(bytes_before > 0, "publish must reserve pending bytes");
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(1), sub.recv())
+            .await
+            .expect("frame timeout")
+            .expect("frame");
+        assert_eq!(frame.event, "run_state");
+        let (frames_after, bytes_after) = registry.subscriber_pending("run-1", subscriber_id);
+        assert_eq!(frames_after, 0, "dequeue must release frame reservation");
+        assert_eq!(bytes_after, 0, "dequeue must release full wire-byte reservation");
+    }
+
+    #[tokio::test]
+    async fn draining_subscriber_never_false_gaps_under_wire_overhead() {
+        let registry = RunEventRegistry::new();
+        let _sink = registry.try_register_live("run-1").expect("register");
+        let mut sub = registry
+            .subscribe_live("run-1", None, "/inspect".into())
+            .expect("subscribe");
+        let subscriber_id = sub.subscriber_id;
+        for i in 0..512 {
+            registry.publish_run_state(
+                "run-1",
+                &mk_record("run-1", SessionStatus::Running, i as u64 + 1),
+            );
+            let frame = tokio::time::timeout(std::time::Duration::from_secs(1), sub.recv())
+                .await
+                .expect("timed out while draining")
+                .expect("subscriber closed while draining");
+            assert_ne!(frame.event, "gap", "draining subscriber must not false-gap at frame {i}");
+            let (_, bytes_after) = registry.subscriber_pending("run-1", subscriber_id);
+            assert_eq!(bytes_after, 0, "pending bytes must not leak wire overhead at frame {i}");
+        }
+        assert_eq!(registry.live_subscriber_count("run-1"), 1);
+    }
+
+    #[tokio::test]
+    async fn lagging_subscriber_is_removed_when_pending_cap_exceeded() {
+        let registry = RunEventRegistry::new();
+        let _sink = registry.try_register_live("run-1").expect("register");
+        let _sub = registry
+            .subscribe_live("run-1", None, "/inspect".into())
+            .expect("subscribe");
+        for i in 0..(MAX_PENDING_FRAMES_PER_SUB + 1) {
+            registry.publish_run_state(
+                "run-1",
+                &mk_record("run-1", SessionStatus::Running, i as u64 + 1),
+            );
+        }
+        assert_eq!(
+            registry.live_subscriber_count("run-1"),
+            0,
+            "lagging subscriber must be removed once pending cap is exceeded"
+        );
+        assert!(
+            registry
+                .subscribe_live("run-1", None, "/inspect".into())
+                .is_ok(),
+            "a fresh subscriber must still be admitted after lag eviction"
+        );
+    }
+
 }
