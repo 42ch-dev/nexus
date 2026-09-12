@@ -3891,6 +3891,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "nexus-contracts",
+ "nexus-home-layout",
+ "nexus-knowledge",
+ "nexus-local-db",
+ "nexus-spoke-adapter",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "nexus-creator"
 version = "0.1.0"
 dependencies = [
@@ -3952,6 +3972,7 @@ dependencies = [
  "nexus-acp-host",
  "nexus-agent-host",
  "nexus-contracts",
+ "nexus-core",
  "nexus-creator",
  "nexus-creator-memory",
  "nexus-daemon-runtime",
@@ -4013,8 +4034,12 @@ dependencies = [
 name = "nexus-home-layout"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror 1.0.69",
+ "toml",
  "uuid",
 ]
 
