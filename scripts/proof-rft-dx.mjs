@@ -19,6 +19,7 @@ import {
   computeDbSchemaRange,
   defaultArtifactPath,
   getRepoRoot,
+  getHostTriple,
   isDaemonCliStatusRunning,
   manifestPathForArtifact,
   readBackendManifest,
@@ -376,9 +377,7 @@ export async function ensureDaemonTracked({ artifactPath, port, env }) {
     await startDaemonNonBlocking(artifactPath, port, env);
   }
   await waitForDaemonHealth(baseUrl, { expectedPackageVersion: manifest.packageVersion, deadlineMs: 120_000 });
-  if (ownership.wasRunning) {
-    await assertCompatibleRunningDaemon({ baseUrl, manifest, port, daemonStatusOutput: statusOutput });
-  }
+  await assertCompatibleRunningDaemon({ baseUrl, manifest, port, daemonStatusOutput: statusOutput });
   return { baseUrl, manifest, startedByRunner: ownership.startedByRunner };
 }
 
@@ -389,8 +388,8 @@ async function validateEndpointGraph(baseUrl) {
   return { health, graph: { url: String(graphUrl), status: graph.status, body: JSON.parse(graph.body) } };
 }
 
-async function assertEndpointOwnedByForest(port, rootPids, { psOutput } = {}) {
-  const listenerPid = await resolveListenerPid(port);
+export async function assertEndpointOwnedByForest(port, rootPids, { psOutput, listenerPid: listenerPidOverride } = {}) {
+  const listenerPid = listenerPidOverride ?? await resolveListenerPid(port);
   if (listenerPid === null) return { listenerPid: null, owned: true };
   const output = psOutput ?? (await exec('ps', ['-eo', 'pid=,ppid=,command='])).stdout;
   const owned = isPidInForest(listenerPid, rootPids, output);
@@ -417,9 +416,10 @@ export async function resolveViteOrigin({ child, config, rootPids, fallbackOrigi
     const captured = child.getCapturedOrigin?.();
     if (captured) {
       const url = new URL(captured);
-      const listenerPid = await resolveListenerPid(url.port);
       const psOutput = (await exec('ps', ['-eo', 'pid=,ppid=,command='])).stdout;
-      if (listenerPid !== null && !isPidInForest(listenerPid, rootPids, psOutput)) {
+      try {
+        await assertEndpointOwnedByForest(url.port, rootPids, { psOutput });
+      } catch {
         await sleep(250);
         continue;
       }
@@ -428,7 +428,9 @@ export async function resolveViteOrigin({ child, config, rootPids, fallbackOrigi
     const listenerPid = await resolveListenerPid(config.vitePort);
     if (listenerPid !== null) {
       const psOutput = (await exec('ps', ['-eo', 'pid=,ppid=,command='])).stdout;
-      if (!isPidInForest(listenerPid, rootPids, psOutput)) {
+      try {
+        await assertEndpointOwnedByForest(config.vitePort, rootPids, { psOutput });
+      } catch {
         await sleep(250);
         continue;
       }
@@ -442,7 +444,7 @@ export async function resolveViteOrigin({ child, config, rootPids, fallbackOrigi
 async function runSidecarBaseline(repoRoot) {
   const startedAt = new Date().toISOString(); const t0 = performance.now();
   await new Promise((resolvePromise, reject) => {
-    const child = spawn('bash', ['scripts/fetch-sidecar.sh'], { cwd: repoRoot, env: { ...process.env, SIDECAR_PROFILE: 'debug' }, stdio: 'inherit' });
+    const child = spawn('bash', ['scripts/fetch-sidecar.sh'], { cwd: repoRoot, env: { ...process.env, SIDECAR_ENSURE_ONLY: '1' }, stdio: 'inherit' });
     child.on('error', reject); child.on('close', code => (code === 0 ? resolvePromise() : reject(new Error(`sidecar exit ${code}`))));
   });
   return { kind: 'desktop-web-sidecar-baseline', durationMs: performance.now() - t0, startedAt, endedAt: new Date().toISOString() };
@@ -482,12 +484,23 @@ async function recordRunFailure(outDir, payload) {
     return null;
   }
 }
+export async function recordFailureAfterCleanup({ outDir, buildPayload, cleanup }) {
+  const cleanupOutcome = {};
+  try {
+    Object.assign(cleanupOutcome, await cleanup());
+  } catch (cleanupErr) {
+    cleanupOutcome.cleanupError = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
+  }
+  return recordRunFailure(outDir, buildPayload(cleanupOutcome));
+}
+
 
 export async function runSurfaceLoop(options) {
   const { surface, samples, coldSamples, port, outDir, repoRoot, env: baseEnv, injectFail = false } = options;
   const config = SURFACE_CONFIG[surface];
   const startedAt = new Date().toISOString();
   const command = process.argv.join(' ');
+  let runError = null;
   let environment = null;
   let cleanupOutcome = { restoredMarker: false, childrenStopped: false, daemonStopped: false };
   let partial = { surface };
@@ -598,21 +611,7 @@ export async function runSurfaceLoop(options) {
     };
     return { payload, evidencePath: await writeEvidence(outDir, payload) };
   } catch (err) {
-    const evidencePath = await recordRunFailure(outDir, buildFailurePayload({
-      runKind: `${surface}-stable-loop`,
-      startedAt,
-      command,
-      environment: environment ?? { sourceSha: await runGitSha(repoRoot).catch(() => 'unknown') },
-      error: err,
-      cleanupOutcome,
-      partial: {
-        ...partial,
-        artifact: manifest && artifactPath ? await buildArtifactRecord(artifactPath, manifest).catch(() => null) : null,
-      },
-    }));
-    const wrapped = err instanceof Error ? err : new Error(String(err));
-    wrapped.evidencePath = evidencePath;
-    throw wrapped;
+    runError = err instanceof Error ? err : new Error(String(err));
   } finally {
     for (const child of [...children].reverse()) await killProcessTree(child);
     cleanupOutcome.childrenStopped = true;
@@ -633,7 +632,23 @@ export async function runSurfaceLoop(options) {
         cleanupOutcome.daemonStopError = stopErr instanceof Error ? stopErr.message : String(stopErr);
       }
     }
+    if (runError) {
+      const evidencePath = await recordRunFailure(outDir, buildFailurePayload({
+        runKind: `${surface}-stable-loop`,
+        startedAt,
+        command,
+        environment: environment ?? { sourceSha: await runGitSha(repoRoot).catch(() => 'unknown') },
+        error: runError,
+        cleanupOutcome,
+        partial: {
+          ...partial,
+          artifact: manifest && artifactPath ? await buildArtifactRecord(artifactPath, manifest).catch(() => null) : null,
+        },
+      }));
+      runError.evidencePath = evidencePath;
+    }
   }
+  if (runError) throw runError;
 }
 
 export async function runNegativeCase(name, { port, outDir, repoRoot, env }) {
@@ -645,6 +660,8 @@ export async function runNegativeCase(name, { port, outDir, repoRoot, env }) {
   let observedError = null;
   let sampleMeta = { negativeCase: name, sampleCount: 1, outcome: null };
   let artifactMeta = { path: 'N/A', manifestPath: 'N/A', sha256: 'N/A', manifestSha256: 'N/A', contractHash: 'N/A' };
+  let runError = null;
+  let expectedNegativeFailure = null;
 
   try {
     environment = await captureEnvironment(repoRoot);
@@ -666,15 +683,17 @@ export async function runNegativeCase(name, { port, outDir, repoRoot, env }) {
       try { await assertCompatibleBackend({ artifactPath: missingPath, contractHash, protocolVersion: CURRENT_WRITER_PROTOCOL }); }
       catch (err) { observedError = err.message; pass = err instanceof BackendCompatibilityError && observedError.includes(REMEDIATION_COMMAND); }
     } else if (name === 'mismatched-contract') {
+      const hostTriple = await getHostTriple();
       const fakeArtifact = join(tempDir, 'nexus42'); await writeFile(fakeArtifact, 'fake', 'utf8');
-      const manifest = { artifactPath: fakeArtifact, sha256: await sha256File(fakeArtifact), targetTriple: 'test', packageVersion: '0.0.0-test', contractHash: 'b'.repeat(64), nativeApiVersion: null, writerProtocol: CURRENT_WRITER_PROTOCOL, dbSchemaRange: await computeDbSchemaRange(repoRoot) };
+      const manifest = { artifactPath: fakeArtifact, sha256: await sha256File(fakeArtifact), targetTriple: hostTriple, packageVersion: '0.0.0-test', contractHash: 'b'.repeat(64), nativeApiVersion: null, writerProtocol: CURRENT_WRITER_PROTOCOL, dbSchemaRange: await computeDbSchemaRange(repoRoot) };
       await writeManifestAtomic(manifestPathForArtifact(fakeArtifact), manifest);
       artifactMeta = { path: fakeArtifact, manifestPath: manifestPathForArtifact(fakeArtifact), sha256: manifest.sha256, manifestSha256: await sha256File(manifestPathForArtifact(fakeArtifact)), contractHash: manifest.contractHash };
       try { await assertCompatibleBackend({ artifactPath: fakeArtifact, contractHash, protocolVersion: CURRENT_WRITER_PROTOCOL }); }
       catch (err) { observedError = err.message; pass = err instanceof BackendCompatibilityError && observedError.includes('contractHash'); }
     } else if (name === 'wrong-digest') {
+      const hostTriple = await getHostTriple();
       const fakeArtifact = join(tempDir, 'nexus42'); await writeFile(fakeArtifact, 'fake', 'utf8');
-      const manifest = { artifactPath: fakeArtifact, sha256: 'c'.repeat(64), targetTriple: 'test', packageVersion: '0.0.0-test', contractHash, nativeApiVersion: null, writerProtocol: CURRENT_WRITER_PROTOCOL, dbSchemaRange: await computeDbSchemaRange(repoRoot) };
+      const manifest = { artifactPath: fakeArtifact, sha256: 'c'.repeat(64), targetTriple: hostTriple, packageVersion: '0.0.0-test', contractHash, nativeApiVersion: null, writerProtocol: CURRENT_WRITER_PROTOCOL, dbSchemaRange: await computeDbSchemaRange(repoRoot) };
       await writeManifestAtomic(manifestPathForArtifact(fakeArtifact), manifest);
       artifactMeta = { path: fakeArtifact, manifestPath: manifestPathForArtifact(fakeArtifact), sha256: await sha256File(fakeArtifact), manifestSha256: await sha256File(manifestPathForArtifact(fakeArtifact)), contractHash: manifest.contractHash };
       try { await assertCompatibleBackend({ artifactPath: fakeArtifact, contractHash, protocolVersion: CURRENT_WRITER_PROTOCOL }); }
@@ -711,21 +730,33 @@ export async function runNegativeCase(name, { port, outDir, repoRoot, env }) {
     if (!pass) throw new Error(`Negative case ${name} did not fail as expected`);
     return { payload, evidencePath };
   } catch (err) {
-    if (!(err instanceof Error && err.message.startsWith('Negative case'))) {
+    if (err instanceof Error && err.message.startsWith('Negative case')) {
+      expectedNegativeFailure = err;
+    } else {
+      runError = err instanceof Error ? err : new Error(String(err));
+    }
+  } finally {
+    const cleanupOutcome = { tempDirRemoved: false };
+    try {
+      await rm(tempDir, { recursive: true, force: true });
+      cleanupOutcome.tempDirRemoved = true;
+    } catch (rmErr) {
+      cleanupOutcome.tempDirRemoveError = rmErr instanceof Error ? rmErr.message : String(rmErr);
+    }
+    if (runError) {
       await recordRunFailure(outDir, buildFailurePayload({
         runKind: `negative-${name}`,
         startedAt,
         command,
         environment: environment ?? { sourceSha: await runGitSha(repoRoot).catch(() => 'unknown') },
-        error: err,
-        cleanupOutcome: { tempDirRemoved: false },
+        error: runError,
+        cleanupOutcome,
         partial: { negativeCase: name, observedError, artifact: artifactMeta, sample: sampleMeta },
       }));
     }
-    throw err;
-  } finally {
-    await rm(tempDir, { recursive: true, force: true });
   }
+  if (expectedNegativeFailure) throw expectedNegativeFailure;
+  if (runError) throw runError;
 }
 
 export async function runBoundaryDemo({ port, outDir, repoRoot }) {
@@ -735,8 +766,9 @@ export async function runBoundaryDemo({ port, outDir, repoRoot }) {
   const schemaProbe = join(repoRoot, 'schemas', '.proof-rft-dx-contract-touch.json');
   const touch = new TrackedEdit(schemaProbe);
   let refusalError = null;
-  let artifactPath = null;
   let manifest = null;
+  let artifactPath = null;
+  let runError = null;
 
   try {
     environment = await captureEnvironment(repoRoot);
@@ -769,20 +801,32 @@ export async function runBoundaryDemo({ port, outDir, repoRoot }) {
     };
     return { payload, evidencePath: await writeEvidence(outDir, payload) };
   } catch (err) {
-    await recordRunFailure(outDir, buildFailurePayload({
-      runKind: 'stable-vs-backend-boundary',
-      startedAt,
-      command,
-      environment: environment ?? { sourceSha: await runGitSha(repoRoot).catch(() => 'unknown') },
-      error: err,
-      cleanupOutcome: { fixtureRestored: false },
-      partial: { boundary: { contractInputTouch: relative(repoRoot, schemaProbe), stableLoopRefusal: refusalError }, artifact: manifest && artifactPath ? await buildArtifactRecord(artifactPath, manifest).catch(() => null) : null },
-    }));
-    throw err;
+    runError = err instanceof Error ? err : new Error(String(err));
   } finally {
-    await touch.restore();
-    await assertByteIdenticalRestore([touch]);
+    const cleanupOutcome = { fixtureRestored: false };
+    try {
+      await touch.restore();
+      await assertByteIdenticalRestore([touch]);
+      cleanupOutcome.fixtureRestored = true;
+    } catch (restoreErr) {
+      cleanupOutcome.restoreError = restoreErr instanceof Error ? restoreErr.message : String(restoreErr);
+    }
+    if (runError) {
+      await recordRunFailure(outDir, buildFailurePayload({
+        runKind: 'stable-vs-backend-boundary',
+        startedAt,
+        command,
+        environment: environment ?? { sourceSha: await runGitSha(repoRoot).catch(() => 'unknown') },
+        error: runError,
+        cleanupOutcome,
+        partial: {
+          boundary: { contractInputTouch: relative(repoRoot, schemaProbe), stableLoopRefusal: refusalError },
+          artifact: manifest && artifactPath ? await buildArtifactRecord(artifactPath, manifest).catch(() => null) : null,
+        },
+      }));
+    }
   }
+  if (runError) throw runError;
 }
 
 export async function runRefreshReproof({ outDir, repoRoot }) {

@@ -15,12 +15,15 @@ import {
   computeContractHash,
   computeDbSchemaRange,
   computeDbSchemaRangeFromNames,
+  ensureSidecarFromArtifact,
+  getHostTriple,
   isDaemonCliStatusRunning,
   manifestPathForArtifact,
   readBackendManifest,
   refreshBackend,
   resolveDaemonEndpoint,
   sha256File,
+  sidecarDestPath,
   validateDaemonHealth,
   waitForDaemonHealth,
   writeManifestAtomic,
@@ -418,5 +421,105 @@ test('waitForDaemonHealth retries until daemon responds', async () => {
   });
   assert.equal(attempts, 3);
   assert.equal(result.health.version, '0.1.0');
+});
+
+test('resolveDaemonEndpoint rejects non-loopback VITE_DAEMON_URL hosts', () => {
+  assert.throws(
+    () => resolveDaemonEndpoint({ urlEnv: 'http://192.168.1.10:8420' }),
+    /host must be loopback/,
+  );
+});
+
+test('isDaemonCliStatusRunning accepts explicit [running] token', () => {
+  const output = `Daemon Status:\n  URL: http://127.0.0.1:8420\n  Status: [running]\n  PID: 42`;
+  assert.equal(isDaemonCliStatusRunning(output), true);
+});
+
+test('assertCompatibleBackend refuses targetTriple mismatch with remediation text', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'manifest-triple-'));
+  try {
+    const artifactPath = join(dir, 'nexus42');
+    await writeFile(artifactPath, 'artifact');
+    const digest = await sha256File(artifactPath);
+    const contractHash = await computeContractHash();
+    const range = await computeDbSchemaRange();
+    const manifest = {
+      artifactPath,
+      sha256: digest,
+      targetTriple: 'x86_64-unknown-linux-gnu',
+      packageVersion: '0.1.0',
+      contractHash,
+      nativeApiVersion: null,
+      writerProtocol: CURRENT_WRITER_PROTOCOL,
+      dbSchemaRange: range,
+    };
+    await writeFile(manifestPathForArtifact(artifactPath), `${JSON.stringify(manifest, null, 2)}\n`);
+    await assert.rejects(
+      () => assertCompatibleBackend({ artifactPath, contractHash, protocolVersion: CURRENT_WRITER_PROTOCOL }),
+      err => {
+        assert.ok(err instanceof BackendCompatibilityError);
+        expectRemediation(err);
+        assert.match(err.message, /targetTriple/);
+        return true;
+      },
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('writeManifestAtomic uses pid and uuid temp filenames', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'manifest-atomic-'));
+  try {
+    const manifestPath = join(dir, 'nexus42.manifest.json');
+    await writeManifestAtomic(manifestPath, { ok: true });
+    const entries = await import('node:fs/promises').then(m => m.readdir(dir));
+    assert.equal(entries.length, 1);
+    assert.match(entries[0], /^nexus42\.manifest\.json$/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('ensureSidecarFromArtifact copies compatible backend artifact without building', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sidecar-ensure-'));
+  const repoRoot = (await import('./dev-backend-manifest.mjs')).getRepoRoot();
+  const hostTriple = await getHostTriple();
+  const dest = sidecarDestPath(repoRoot, hostTriple);
+  const hadDest = await import('node:fs/promises').then(m => m.access(dest).then(() => true).catch(() => false));
+  let priorDest = null;
+  if (hadDest) priorDest = await readFile(dest);
+  try {
+    const targetDir = join(dir, 'target');
+    const artifactPath = join(targetDir, 'debug', 'nexus42');
+    await mkdir(dirname(artifactPath), { recursive: true });
+    await writeFile(artifactPath, 'sidecar-binary');
+    const digest = await sha256File(artifactPath);
+    const contractHash = await computeContractHash(repoRoot);
+    const range = await computeDbSchemaRange(repoRoot);
+    const manifest = {
+      artifactPath,
+      sha256: digest,
+      targetTriple: hostTriple,
+      packageVersion: '0.1.0',
+      contractHash,
+      nativeApiVersion: null,
+      writerProtocol: CURRENT_WRITER_PROTOCOL,
+      dbSchemaRange: range,
+    };
+    await writeManifestAtomic(manifestPathForArtifact(artifactPath), manifest);
+    const result = await ensureSidecarFromArtifact({
+      repoRoot,
+      env: { ...process.env, CARGO_TARGET_DIR: targetDir },
+      profile: 'debug',
+    });
+    assert.equal(result.copied, true);
+    assert.equal(result.dest, dest);
+    assert.equal(await sha256File(result.dest), digest);
+  } finally {
+    if (priorDest !== null) await writeFile(dest, priorDest);
+    else await rm(dest, { force: true });
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 

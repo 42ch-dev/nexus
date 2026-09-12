@@ -14,6 +14,10 @@
 
 set -euo pipefail
 
+if [ "${SIDECAR_ENSURE_ONLY:-}" = "1" ]; then
+  exec node "$(dirname "$0")/dev-backend-manifest.mjs" --ensure-sidecar
+fi
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="${REPO_ROOT}/apps/desktop/src-tauri/binaries"
 

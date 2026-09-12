@@ -26,6 +26,8 @@ import {
   writeEvidence,
   collectProcessTreePids,
   measureColdLaunchSample,
+  recordFailureAfterCleanup,
+  assertEndpointOwnedByForest,
 } from './proof-rft-dx.mjs';
 
 test('nearestRankP95 uses nearest-rank p95', () => {
@@ -183,4 +185,32 @@ test('measureColdLaunchSample starts clock at spawn and includes origin resolve 
   assert.ok(result.originResolveMs >= 55, 'origin resolve is recorded separately');
   assert.ok(result.elapsedMs >= result.originResolveMs, 'elapsed is not post-listen only');
   assert.ok(result.elapsedMs >= 65, 'elapsed includes spawn through served-page, not listener-to-page only');
+});
+
+test('recordFailureAfterCleanup records cleanup outcome after cleanup runs', async () => {
+  const outDir = await mkdtemp(join(tmpdir(), 'proof-rft-dx-cleanup-'));
+  const evidencePath = await recordFailureAfterCleanup({
+    outDir,
+    cleanup: async () => ({ tempDirRemoved: true }),
+    buildPayload: cleanupOutcome =>
+      buildFailurePayload({
+        runKind: 'cleanup-order-demo',
+        startedAt: '2026-09-13T12:00:00.000Z',
+        command: 'node scripts/proof-rft-dx.mjs --inject-fail',
+        environment: { sourceSha: 'deadbeef' },
+        error: new Error('boom'),
+        cleanupOutcome,
+      }),
+  });
+  assert.ok(evidencePath);
+  const saved = JSON.parse(await readFile(evidencePath, 'utf8'));
+  assert.equal(saved.cleanupOutcome.tempDirRemoved, true);
+  await rm(outDir, { recursive: true, force: true });
+});
+
+test('assertEndpointOwnedByForest refuses foreign listeners', async () => {
+  await assert.rejects(
+    () => assertEndpointOwnedByForest(5173, [100], { listenerPid: 200, psOutput: '200 1 foreign\n' }),
+    /foreign PID/,
+  );
 });

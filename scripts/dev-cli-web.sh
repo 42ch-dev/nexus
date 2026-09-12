@@ -32,8 +32,6 @@ DAEMON_STATUS_OUTPUT="$("${BIN}" daemon status --port "${PORT}" 2>&1 || true)"
 export DAEMON_STATUS_OUTPUT
 if node --input-type=module -e "import { isDaemonCliStatusRunning } from './scripts/dev-backend-manifest.mjs'; process.exit(isDaemonCliStatusRunning(process.env.DAEMON_STATUS_OUTPUT ?? '') ? 0 : 1)"; then
   echo "    daemon already running"
-  echo "==> validating running daemon compatibility"
-  node --input-type=module -e "import { readBackendManifest, assertCompatibleRunningDaemon } from './scripts/dev-backend-manifest.mjs'; const manifest = await readBackendManifest(process.env.NEXUS42_ARTIFACT); await assertCompatibleRunningDaemon({ baseUrl: process.env.VITE_DAEMON_URL, manifest, port: Number(process.env.NEXUS42_DAEMON_PORT), daemonStatusOutput: process.env.DAEMON_STATUS_OUTPUT ?? '' }); console.log('    running daemon compatible (version ' + manifest.packageVersion + ')');"
 else
   if "${BIN}" daemon start --port "${PORT}"; then
     echo "    daemon started (detached)"
@@ -42,8 +40,8 @@ else
   fi
 fi
 
-echo "==> validating daemon health"
-node --input-type=module -e "import { readBackendManifest, waitForDaemonHealth } from './scripts/dev-backend-manifest.mjs'; const manifest = await readBackendManifest(process.env.NEXUS42_ARTIFACT); const result = await waitForDaemonHealth(process.env.VITE_DAEMON_URL, { expectedPackageVersion: manifest.packageVersion, deadlineMs: 120000 }); console.log('    health OK (' + result.url + ', version ' + result.health.version + ')');"
+echo "==> validating running daemon compatibility"
+node --input-type=module -e "import { readBackendManifest, assertCompatibleRunningDaemon } from './scripts/dev-backend-manifest.mjs'; const manifest = await readBackendManifest(process.env.NEXUS42_ARTIFACT); await assertCompatibleRunningDaemon({ baseUrl: process.env.VITE_DAEMON_URL, manifest, port: Number(process.env.NEXUS42_DAEMON_PORT), daemonStatusOutput: process.env.DAEMON_STATUS_OUTPUT ?? '' }); console.log('    running daemon compatible (version ' + manifest.packageVersion + ')');"
 
 echo "==> starting web dev server (http://localhost:5173)"
 export VITE_DAEMON_URL

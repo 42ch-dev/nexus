@@ -39,11 +39,12 @@
     "build:cli:release": "cargo build -p nexus42 --release",
     "sidecar": "bash scripts/fetch-sidecar.sh",
     "sidecar:dev": "SIDECAR_PROFILE=debug bash scripts/fetch-sidecar.sh",
+    "sidecar:ensure": "SIDECAR_ENSURE_ONLY=1 bash scripts/fetch-sidecar.sh",
     "dev:design-studio": "pnpm -F design-studio dev",
     "dev:web": "pnpm -F web dev",
     "dev:desktop": "pnpm run sidecar:dev && pnpm --filter web build && pnpm --filter desktop run icons:generate && pnpm --filter desktop exec tauri dev --config src-tauri/tauri.dev.dist.conf.json",
     "dev:backend:refresh": "node scripts/refresh-dev-backend.mjs",
-    "dev:desktop:web": "pnpm run sidecar:dev && pnpm --filter web dev",
+    "dev:desktop:web": "pnpm run sidecar:ensure && pnpm --filter web dev",
     "dev": "bash scripts/dev-cli-web.sh"
   },
   "devDependencies": {

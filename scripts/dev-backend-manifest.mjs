@@ -1,8 +1,8 @@
 /** Stable backend artifact manifest, compatibility checks, and dev endpoint derivation. */
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
-import { access, readFile, rename, writeFile } from 'node:fs/promises';
+import { access, chmod, copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
@@ -37,9 +37,50 @@ export function defaultArtifactPath({ profile = 'debug', targetDir } = {}) {
   const resolvedTargetDir = targetDir ?? resolve(getRepoRoot(), 'target');
   return join(resolvedTargetDir, profile, 'nexus42');
 }
-
 export function manifestPathForArtifact(artifactPath) {
   return `${artifactPath}.manifest.json`;
+}
+
+export function resolveSidecarTarget(env = process.env) {
+  if (env.SIDECAR_TARGETS) {
+    return env.SIDECAR_TARGETS.split(/\s+/).filter(Boolean)[0];
+  }
+  switch (`${process.platform}:${process.arch}`) {
+    case 'darwin:arm64':
+      return 'aarch64-apple-darwin';
+    case 'darwin:x64':
+      return 'x86_64-apple-darwin';
+    default:
+      return 'aarch64-apple-darwin';
+  }
+}
+
+export function sidecarDestPath(repoRoot, targetTriple) {
+  return join(repoRoot, 'apps', 'desktop', 'src-tauri', 'binaries', `nexus42-${targetTriple}`);
+}
+
+export async function ensureSidecarFromArtifact({
+  repoRoot = getRepoRoot(),
+  env = process.env,
+  profile = 'debug',
+} = {}) {
+  const targetDir = await resolveTargetDir(env);
+  const artifactPath = defaultArtifactPath({ profile, targetDir });
+  const contractHash = await computeContractHash(repoRoot);
+  const manifest = await assertCompatibleBackend({
+    artifactPath,
+    contractHash,
+    protocolVersion: CURRENT_WRITER_PROTOCOL,
+  });
+  const targetTriple = manifest.targetTriple;
+  const dest = sidecarDestPath(repoRoot, targetTriple);
+  await mkdir(dirname(dest), { recursive: true });
+  const needsCopy = !(await pathExists(dest)) || (await sha256File(dest)) !== manifest.sha256;
+  if (needsCopy) {
+    await copyFile(artifactPath, dest);
+    await chmod(dest, 0o755);
+  }
+  return { artifactPath, dest, manifest, targetTriple, copied: needsCopy };
 }
 
 async function pathExists(path) {
@@ -254,6 +295,12 @@ export async function assertCompatibleBackend({ artifactPath, contractHash, prot
       `Backend manifest writerProtocol ${manifest.writerProtocol} does not match required protocol ${protocolVersion}.`,
     );
   }
+  const hostTriple = await getHostTriple();
+  if (manifest.targetTriple !== hostTriple) {
+    throw new BackendCompatibilityError(
+      `Backend manifest targetTriple (${manifest.targetTriple}) does not match host (${hostTriple}).`,
+    );
+  }
 
   const currentRange = await computeDbSchemaRange();
   if (
@@ -268,7 +315,7 @@ export async function assertCompatibleBackend({ artifactPath, contractHash, prot
 
 export async function writeManifestAtomic(manifestPath, manifest) {
   const dir = dirname(manifestPath);
-  const tmp = join(dir, `.${basename(manifestPath)}.${process.pid}.tmp`);
+  const tmp = join(dir, `.${basename(manifestPath)}.${process.pid}.${randomUUID()}.tmp`);
   await writeFile(tmp, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
   await rename(tmp, manifestPath);
 }
@@ -308,6 +355,8 @@ export async function refreshBackend({
       previousContractHash = null;
     }
   }
+  const targetTriple = await getHostTriple();
+  const packageVersion = await getPackageVersion(repoRoot);
 
   await maybeRunCodegen(repoRoot, previousContractHash, contractHash);
 
@@ -327,8 +376,8 @@ export async function refreshBackend({
   const manifest = {
     artifactPath,
     sha256: await sha256File(artifactPath),
-    targetTriple: await getHostTriple(),
-    packageVersion: await getPackageVersion(repoRoot),
+    targetTriple,
+    packageVersion,
     contractHash,
     nativeApiVersion: null,
     writerProtocol: CURRENT_WRITER_PROTOCOL,
@@ -337,6 +386,19 @@ export async function refreshBackend({
 
   await writeManifestAtomic(manifestPath, manifest);
   return manifest;
+}
+
+function isLoopbackHostname(hostname) {
+  const normalized = String(hostname).toLowerCase();
+  return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1';
+}
+
+function assertLoopbackHostname(hostname, label = 'VITE_DAEMON_URL') {
+  if (!isLoopbackHostname(hostname)) {
+    throw new Error(
+      `${label} host must be loopback (127.0.0.1, localhost, or ::1); got ${hostname}.`,
+    );
+  }
 }
 
 export function resolveDaemonEndpoint({ portEnv, urlEnv } = {}) {
@@ -353,6 +415,7 @@ export function resolveDaemonEndpoint({ portEnv, urlEnv } = {}) {
     } catch {
       throw new Error(`Invalid VITE_DAEMON_URL: ${urlRaw}`);
     }
+    assertLoopbackHostname(parsed.hostname, 'VITE_DAEMON_URL');
     if (parsed.port && parsePortValue(parsed.port, 'VITE_DAEMON_URL port') !== port) {
       throw new Error(
         `NEXUS42_DAEMON_PORT (${port}) conflicts with VITE_DAEMON_URL port (${parsed.port || 'default'}).`,
@@ -366,6 +429,7 @@ export function resolveDaemonEndpoint({ portEnv, urlEnv } = {}) {
 
   if (hasUrl) {
     const parsed = new URL(urlRaw);
+    assertLoopbackHostname(parsed.hostname, 'VITE_DAEMON_URL');
     const port = parsed.port
       ? parsePortValue(parsed.port, 'VITE_DAEMON_URL port')
       : DEFAULT_DAEMON_PORT;
@@ -380,7 +444,7 @@ export function resolveDaemonEndpoint({ portEnv, urlEnv } = {}) {
   return { baseUrl, port };
 }
 export function isDaemonCliStatusRunning(statusOutput) {
-  return /Status:\s*✓\s*Running/.test(statusOutput);
+  return /Status:\s*(?:✓\s*Running|\[running\])/i.test(statusOutput);
 }
 
 export function parseDaemonStatusPid(statusOutput) {
@@ -745,6 +809,17 @@ export async function runDevCliWebPreflight(env = process.env) {
 }
 
 const isMain = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;
+if (isMain && process.argv[2] === '--ensure-sidecar') {
+  ensureSidecarFromArtifact()
+    .then(({ dest, copied }) => {
+      console.log(`==> sidecar artifact ready${copied ? ' (copied)' : ' (already compatible)'}`);
+      console.log(`    dest: ${dest}`);
+    })
+    .catch(err => {
+      console.error(err.message ?? err);
+      process.exit(1);
+    });
+}
 if (isMain && process.argv[2] === '--preflight') {
   runDevCliWebPreflight().catch(err => {
     console.error(err.message ?? err);
