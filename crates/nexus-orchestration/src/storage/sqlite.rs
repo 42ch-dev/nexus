@@ -39,7 +39,7 @@ use super::inspect::{CheckpointRow, CheckpointSummary};
 use crate::engine::{EngineError, SessionId, SessionStatus, SessionSummary};
 use crate::run_state::{
     ChildCheckpoint, PromptAttempt, RunCheckpoint, RunDescriptorV1, RunRecord, RunStateV1,
-    WorkflowStateStore,
+    SettlementResult, TerminalSettlementTarget, WorkflowStateStore,
 };
 
 /// SQLite-backed session storage sharing `nexus-local-db`'s pool.
@@ -1395,6 +1395,8 @@ async fn run_settle_failed_cas(
 /// Classify a zero-row restore fence: distinguish a revision mismatch from a
 /// non-steppable row, with corrupt clock/status shapes surfaced as hard
 /// storage errors before either (Important 6).
+
+
 async fn classify_restore_fence_miss(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     session_id: &SessionId,
@@ -2333,115 +2335,91 @@ impl WorkflowStateStore for SqliteSessionStorage {
         Ok(record)
     }
 
-    async fn settle_cancelled(
+    async fn settle_run(
         &self,
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
         checkpoint: RunCheckpoint<'_>,
         next_state: &RunStateV1,
-    ) -> Result<RunRecord, EngineError> {
+        terminal_target: TerminalSettlementTarget,
+    ) -> Result<SettlementResult, EngineError> {
+        let next_status = match terminal_target {
+            TerminalSettlementTarget::Completed => SessionStatus::Completed,
+            TerminalSettlementTarget::Cancelled => SessionStatus::Cancelled,
+            TerminalSettlementTarget::Failed => SessionStatus::Failed,
+        };
         let payload = prepare_v1_transition_payload(session_id, checkpoint.root, next_state)?;
-
         let mut tx = nexus_local_db::begin_immediate(&self.pool)
             .await
             .map_err(|e| {
                 EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                    "settle_cancelled begin tx: {e}"
+                    "settle_run begin tx: {e}"
                 )))
             })?;
-
-        // A5 settlement fence (see `run_settle_cancelled_cas`).
-        run_settle_cancelled_cas(
-            &mut tx,
-            session_id,
-            &payload,
-            expected_revision,
-            expected_graph_version,
-        )
-        .await?;
-
+        let cas_result = match terminal_target {
+            TerminalSettlementTarget::Cancelled => run_settle_cancelled_cas(
+                &mut tx,
+                session_id,
+                &payload,
+                expected_revision,
+                expected_graph_version,
+            )
+            .await,
+            TerminalSettlementTarget::Failed => run_settle_failed_cas(
+                &mut tx,
+                session_id,
+                &payload,
+                expected_revision,
+                expected_graph_version,
+            )
+            .await,
+            TerminalSettlementTarget::Completed => run_commit_transition_cas(
+                &mut tx,
+                session_id,
+                &payload,
+                "completed",
+                expected_revision,
+                expected_graph_version,
+            )
+            .await,
+        };
+        if let Err(EngineError::TerminalState(_)) = &cas_result {
+            tx.rollback().await.ok();
+            if let Some(winner) = self.load_run(session_id).await? {
+                if matches!(
+                    winner.status,
+                    SessionStatus::Completed | SessionStatus::Failed | SessionStatus::Cancelled
+                ) {
+                    return Ok(SettlementResult::Observed(winner));
+                }
+            }
+            return Err(EngineError::TerminalState(session_id.0.clone()));
+        }
+        cas_result?;
         let (descriptor, execution_version, graph_version) = finalize_v1_transition_writes(
             &mut tx,
             session_id,
             checkpoint,
             payload.now,
-            "settle_cancelled",
+            "settle_run",
         )
         .await?;
-
         let record = RunRecord {
             session_id: SessionId(session_id.0.clone()),
-            status: SessionStatus::Cancelled,
+            status: next_status,
             state_revision: expected_revision + 1,
             execution_version,
             descriptor,
             state: Some(next_state.clone()),
             graph_version,
         };
-
         tx.commit().await.map_err(|e| {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                "settle_cancelled commit: {e}"
+                "settle_run commit: {e}"
             )))
         })?;
-
-        Ok(record)
-    }
-
-    async fn settle_failed(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        expected_graph_version: Option<u64>,
-        checkpoint: RunCheckpoint<'_>,
-        next_state: &RunStateV1,
-    ) -> Result<RunRecord, EngineError> {
-        let payload = prepare_v1_transition_payload(session_id, checkpoint.root, next_state)?;
-
-        let mut tx = nexus_local_db::begin_immediate(&self.pool)
-            .await
-            .map_err(|e| {
-                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                    "settle_failed begin tx: {e}"
-                )))
-            })?;
-
-        run_settle_failed_cas(
-            &mut tx,
-            session_id,
-            &payload,
-            expected_revision,
-            expected_graph_version,
-        )
-        .await?;
-
-        let (descriptor, execution_version, graph_version) = finalize_v1_transition_writes(
-            &mut tx,
-            session_id,
-            checkpoint,
-            payload.now,
-            "settle_failed",
-        )
-        .await?;
-
-        let record = RunRecord {
-            session_id: SessionId(session_id.0.clone()),
-            status: SessionStatus::Failed,
-            state_revision: expected_revision + 1,
-            execution_version,
-            descriptor,
-            state: Some(next_state.clone()),
-            graph_version,
-        };
-
-        tx.commit().await.map_err(|e| {
-            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                "settle_failed commit: {e}"
-            )))
-        })?;
-
-        Ok(record)
+        Ok(SettlementResult::Applied(record))
     }
 
     async fn load_children(

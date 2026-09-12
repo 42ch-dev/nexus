@@ -36,6 +36,7 @@ pub mod path_enrichment;
 // V1.180 P2 T1 (DR-06 ops E2E): daemon-local preset-run driver — the missing
 // production seam that steps an outer orchestration session to terminal.
 pub mod preset_run;
+pub mod run_events;
 pub mod prompt_executor;
 pub mod refresh_scheduler;
 pub mod stale_findings_watcher;

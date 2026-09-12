@@ -937,6 +937,9 @@ async fn admit_new_schedule(
     {
         Ok(_sid) => Ok("running".to_string()),
         Err(e) => {
+            if matches!(e, crate::preset_run::RunControlError::RunEventCapacity(_)) {
+                return Err(NexusApiError::from(e));
+            }
             let msg = e.to_string();
             if msg.contains("not eligible") {
                 sqlx::query!(
@@ -1418,6 +1421,10 @@ pub async fn signal_schedule(
                 )
                 .await
                 .map_err(|e| {
+                    // QC2 F-004: typed capacity refusal (retryable), not 500.
+                    if matches!(e, crate::preset_run::RunControlError::RunEventCapacity(_)) {
+                        return NexusApiError::from(e);
+                    }
                     let msg = e.to_string();
                     if msg.contains("not eligible")
                         || msg.contains("execution_policy")
@@ -1543,74 +1550,25 @@ pub async fn signal_schedule(
                     NexusApiError::NotFound(format!("schedule {schedule_id} not found"))
                 })?;
 
-                let terminal_status = if let Some(sid) = &snapshot_session {
+                // QC2 F-002: ONE cancel projection owner. The coordinator
+                // re-reads the durable record and returns a TYPED outcome —
+                // confirmed `cancelled`, unconfirmed `interrupted`, or the
+                // converged `driver_failed` — plus the shared conflict
+                // envelopes. No error-string matching, no divergent 500.
+                let (terminal_status, cancel_outcome) = if let Some(sid) = &snapshot_session {
                     let coordinator = state.run_coordinator().ok_or_else(|| {
                         NexusApiError::service_unavailable("run coordinator not configured")
                     })?;
-                    match coordinator
-                        .signal_run(
-                            &nexus_orchestration::engine::SessionId(sid.clone()),
-                            crate::preset_run::RunSignal::Cancel,
-                        )
+                    let result = coordinator
+                        .cancel_run(&nexus_orchestration::engine::SessionId(sid.clone()))
                         .await
-                    {
-                        Ok(result) => result.status,
-                        Err(crate::preset_run::RunControlError::StateConflict(sid, msg)) => {
-                            return Err(NexusApiError::ConflictCoded {
-                                code: "workflow_state_conflict".into(),
-                                message: format!("state conflict for {sid}: {msg}"),
-                            });
-                        }
-                        Err(crate::preset_run::RunControlError::WaitConflict {
-                            session_id,
-                            status,
-                            current_wait_id,
-                        }) => {
-                            return Err(NexusApiError::ConflictCoded {
-                                code: "workflow_wait_conflict".into(),
-                                message: format!(
-                                    "wait conflict for {session_id}: current status {status}, current_wait_id {current_wait_id:?}"
-                                ),
-                            });
-                        }
-                        Err(crate::preset_run::RunControlError::ScheduleNotFound(sid)) => {
-                            return Err(NexusApiError::NotFound(format!(
-                                "session {sid} not found"
-                            )));
-                        }
-                        Err(other) => {
-                            let msg = other.to_string();
-                            // A5 (qc2 F-002): the engine commits durable
-                            // `interrupted` BEFORE surfacing the unconfirmed
-                            // cleanup as an error. That is not a server
-                            // failure — report the persisted outcome so the
-                            // operator sees an unconfirmed stop, never a
-                            // fabricated success and never a 500 that hides
-                            // the durable truth.
-                            if msg.contains("cancel cleanup unconfirmed") {
-                                tracing::warn!(
-                                    schedule_id = %schedule_id,
-                                    session_id = %sid,
-                                    "schedule cancel: owned run cleanup unconfirmed; \
-                                     durable run is interrupted"
-                                );
-                                return Ok((
-                                    StatusCode::OK,
-                                    Json(SignalScheduleResponse {
-                                        schedule_id,
-                                        status: "interrupted".to_string(),
-                                        current_wait_id: None,
-                                    }),
-                                ));
-                            }
-                            return Err(NexusApiError::Internal {
-                                code: "RUN_CONTROL_ERROR".into(),
-                                message: msg,
-                            });
-                        }
-                    }
+                        .map_err(NexusApiError::from)?;
+                    (result.status, result.cancel_outcome)
                 } else {
-                    "cancelled".to_string()
+                    (
+                        "cancelled".to_string(),
+                        Some(crate::preset_run::CancelOutcome::Confirmed),
+                    )
                 };
 
                 // qc2 F-002: an unconfirmed cancel/cleanup (`interrupted`) is
@@ -1622,7 +1580,7 @@ pub async fn signal_schedule(
                 // response reports the durable run status and public inspect
                 // projects `execution.recovery_class: "interrupted"` from the
                 // session record.
-                if terminal_status == "interrupted" {
+                if cancel_outcome == Some(crate::preset_run::CancelOutcome::Unconfirmed) {
                     tracing::warn!(
                         schedule_id = %schedule_id,
                         session_id = ?snapshot_session,
@@ -1734,21 +1692,7 @@ pub async fn signal_schedule(
                                 crate::preset_run::RunSignal::Resume,
                             )
                             .await
-                            .map_err(|e| match e {
-                                crate::preset_run::RunControlError::StateConflict(sid, msg) => {
-                                    NexusApiError::ConflictCoded {
-                                        code: "workflow_state_conflict".into(),
-                                        message: format!("state conflict for {sid}: {msg}"),
-                                    }
-                                }
-                                crate::preset_run::RunControlError::ScheduleNotFound(sid) => {
-                                    NexusApiError::NotFound(format!("session {sid} not found"))
-                                }
-                                other => NexusApiError::Internal {
-                                    code: "RUN_CONTROL_ERROR".into(),
-                                    message: other.to_string(),
-                                },
-                            })?;
+                            .map_err(NexusApiError::from)?;
                         return Ok((
                             StatusCode::OK,
                             Json(SignalScheduleResponse {
@@ -1816,57 +1760,7 @@ pub async fn signal_schedule(
                     },
                 )
                 .await
-                .map_err(|e| match e {
-                    crate::preset_run::RunControlError::WaitConflict {
-                        session_id,
-                        status,
-                        current_wait_id,
-                    } => {
-                        // A4 exact envelope: `{session_id, status,
-                        // current_wait_id}` in details.
-                        NexusApiError::ConflictCodedDetails {
-                            code: "workflow_wait_conflict".into(),
-                            message: format!(
-                                "wait conflict for {session_id}: current status {status}, current_wait_id {current_wait_id:?}"
-                            ),
-                            details: serde_json::json!({
-                                "session_id": session_id,
-                                "status": status,
-                                "current_wait_id": current_wait_id,
-                            }),
-                        }
-                    }
-                    crate::preset_run::RunControlError::StateConflict(sid, msg) => {
-                        NexusApiError::ConflictCoded {
-                            code: "workflow_state_conflict".into(),
-                            message: format!("state conflict for {sid}: {msg}"),
-                        }
-                    }
-                    crate::preset_run::RunControlError::ReconstructionUnavailable {
-                        session_id,
-                        reason,
-                    } => {
-                        NexusApiError::ConflictCodedDetails {
-                            code: "reconstruction_unavailable".into(),
-                            message: format!(
-                                "cannot continue schedule {schedule_id} (session {session_id}): \
-                                 {reason} — human wait preserved, cancel-only"
-                            ),
-                            details: serde_json::json!({
-                                "session_id": session_id,
-                                "reason": reason,
-                                "allowed_actions": ["cancel", "new_run"],
-                            }),
-                        }
-                    }
-                    crate::preset_run::RunControlError::ScheduleNotFound(sid) => {
-                        NexusApiError::NotFound(format!("session {sid} not found"))
-                    }
-                    other => NexusApiError::Internal {
-                        code: "RUN_CONTROL_ERROR".into(),
-                        message: other.to_string(),
-                    },
-                })?;
+                .map_err(NexusApiError::from)?;
             Ok((
                 StatusCode::OK,
                 Json(SignalScheduleResponse {

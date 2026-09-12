@@ -26,7 +26,7 @@ use crate::capability::CapabilityError;
 use crate::capability::CapabilityRegistry;
 use crate::run_state::{
     ChildCheckpoint, PresetSourceIdentity, RunCheckpoint, RunDescriptorV1, RunFailure, RunRecord,
-    RunStateV1, WorkflowStateStore,
+    RunStateV1, SettlementResult, TerminalSettlementTarget, WorkflowStateStore,
 };
 
 /// Context key that effectful tasks set when they perform an external effect
@@ -1507,29 +1507,31 @@ impl EngineSharedState {
                 // winner is left untouched (no rebase in anchored mode).
                 let (settle_revision, settle_graph) =
                     anchored_clocks.unwrap_or((current_revision, settle_root.version));
-                let settle_result = if cleanup_terminal == SessionStatus::Cancelled {
-                    store
-                        .settle_cancelled(
-                            session_id,
-                            settle_revision,
-                            Some(settle_graph),
-                            settle_checkpoint,
-                            &cancelled_state,
-                        )
-                        .await
+                let terminal_target = if cleanup_terminal == SessionStatus::Cancelled {
+                    TerminalSettlementTarget::Cancelled
                 } else {
-                    store
-                        .settle_failed(
-                            session_id,
-                            settle_revision,
-                            Some(settle_graph),
-                            settle_checkpoint,
-                            &cancelled_state,
-                        )
-                        .await
+                    TerminalSettlementTarget::Failed
                 };
+                let settle_result = store
+                    .settle_run(
+                        session_id,
+                        settle_revision,
+                        Some(settle_graph),
+                        settle_checkpoint,
+                        &cancelled_state,
+                        terminal_target,
+                    )
+                    .await;
                 match settle_result {
-                    Ok(_) => break,
+                    Ok(SettlementResult::Applied(record)) => {
+                        cleanup_terminal = record.status;
+                        break;
+                    }
+                    Ok(SettlementResult::Observed(record)) => {
+                        // Durable winner is another owner — do not reclaim
+                        // tokens or infer cleanup from Observed (P4 §6.2).
+                        return Ok(record.status);
+                    }
                     Err(EngineError::RevisionMismatch { .. }) => {
                         if !cancel_allow_rebase {
                             return Err(EngineError::RevisionMismatch {
@@ -2029,18 +2031,47 @@ impl EngineSharedState {
                 // A graph-only writer landing after that snapshot loses the
                 // CAS instead of having its context clobbered by the stale
                 // step result.
-                let commit_result = store
-                    .commit_transition_with_graph_fence(
-                        session_id,
-                        transition_revision,
-                        Some(root.version),
-                        checkpoint,
-                        status.clone(),
-                        &next_state,
-                    )
-                    .await;
+                let commit_result: Result<(bool, SessionStatus), EngineError> =
+                    if status == SessionStatus::Completed {
+                        match store
+                            .settle_run(
+                                session_id,
+                                transition_revision,
+                                Some(root.version),
+                                checkpoint,
+                                &next_state,
+                                TerminalSettlementTarget::Completed,
+                            )
+                            .await
+                        {
+                            Ok(SettlementResult::Applied(record)) => {
+                                Ok((true, record.status))
+                            }
+                            Ok(SettlementResult::Observed(record)) => {
+                                Ok((false, record.status))
+                            }
+                            Err(e) => Err(e),
+                        }
+                    } else {
+                        store
+                            .commit_transition_with_graph_fence(
+                                session_id,
+                                transition_revision,
+                                Some(root.version),
+                                checkpoint,
+                                status.clone(),
+                                &next_state,
+                            )
+                            .await
+                            .map(|_| (true, status.clone()))
+                    };
                 match commit_result {
-                    Ok(_) => {
+                    Ok((owned_commit, durable_status)) => {
+                        status = durable_status;
+                        if !owned_commit {
+                            // Observed terminal winner — leave coordinator
+                            // cleanup to the owner that won the CAS.
+                        } else {
                         // The parent's `commit_transition` persisted each
                         // child checkpoint with `state_revision + 1` (the
                         // store's ON CONFLICT bump). Synchronize the
@@ -2120,6 +2151,7 @@ impl EngineSharedState {
                             }
                         }
                     }
+                        }
                     Err(commit_err) => {
                         if had_effect {
                             // A failed post-effect commit must NOT blindly rewind
@@ -2504,19 +2536,19 @@ impl EngineSharedState {
                             children: &[],
                         };
                         match store
-                            .settle_cancelled(
+                            .settle_run(
                                 &child_sid,
                                 current_revision,
-                                // Child-rollback settle keeps the
-                                // revision-only CAS (not the anchored
-                                // failure-cleanup path).
                                 None,
                                 settle_checkpoint,
                                 &cancelled_state,
+                                TerminalSettlementTarget::Cancelled,
                             )
                             .await
                         {
-                            Ok(_) => break,
+                            Ok(SettlementResult::Applied(_) | SettlementResult::Observed(_)) => {
+                                break;
+                            }
                             Err(EngineError::RevisionMismatch { .. }) => {
                                 settle_attempts += 1;
                                 if settle_attempts >= CANCEL_FENCE_RETRY_BOUND {
@@ -4643,40 +4675,23 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
         .await
     }
 
-    async fn settle_cancelled(
+    async fn settle_run(
         &self,
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
         checkpoint: crate::run_state::RunCheckpoint<'_>,
         next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        terminal_target: TerminalSettlementTarget,
+    ) -> Result<SettlementResult, EngineError> {
         self.inner
-            .settle_cancelled(
+            .settle_run(
                 session_id,
                 expected_revision,
                 expected_graph_version,
                 checkpoint,
                 next_state,
-            )
-            .await
-    }
-
-    async fn settle_failed(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        expected_graph_version: Option<u64>,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
-        self.inner
-            .settle_failed(
-                session_id,
-                expected_revision,
-                expected_graph_version,
-                checkpoint,
-                next_state,
+                terminal_target,
             )
             .await
     }
@@ -4912,40 +4927,23 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         .await
     }
 
-    async fn settle_cancelled(
+    async fn settle_run(
         &self,
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
         checkpoint: crate::run_state::RunCheckpoint<'_>,
         next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        terminal_target: TerminalSettlementTarget,
+    ) -> Result<SettlementResult, EngineError> {
         self.inner
-            .settle_cancelled(
+            .settle_run(
                 session_id,
                 expected_revision,
                 expected_graph_version,
                 checkpoint,
                 next_state,
-            )
-            .await
-    }
-
-    async fn settle_failed(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        expected_graph_version: Option<u64>,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
-        self.inner
-            .settle_failed(
-                session_id,
-                expected_revision,
-                expected_graph_version,
-                checkpoint,
-                next_state,
+                terminal_target,
             )
             .await
     }
@@ -5135,22 +5133,19 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
         .await
     }
 
-    async fn settle_cancelled(
+    async fn settle_run(
         &self,
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
         checkpoint: crate::run_state::RunCheckpoint<'_>,
         next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
-        // The child-rollback settle is the first `settle_cancelled` on the
-        // freshly started child row. Inject a competing transition at the
-        // SAME revision BEFORE the settle commits, so the settle loses the
-        // CAS and the engine's rollback retry must reload and re-settle
-        // against the new revision.
-        if !self
-            .injected
-            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        terminal_target: TerminalSettlementTarget,
+    ) -> Result<SettlementResult, EngineError> {
+        if terminal_target == TerminalSettlementTarget::Cancelled
+            && !self
+                .injected
+                .swap(true, std::sync::atomic::Ordering::SeqCst)
         {
             let record = self
                 .inner
@@ -5183,31 +5178,13 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
                 .expect("competing transition wins the CAS before the child settle");
         }
         self.inner
-            .settle_cancelled(
+            .settle_run(
                 session_id,
                 expected_revision,
                 expected_graph_version,
                 checkpoint,
                 next_state,
-            )
-            .await
-    }
-
-    async fn settle_failed(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        expected_graph_version: Option<u64>,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
-        self.inner
-            .settle_failed(
-                session_id,
-                expected_revision,
-                expected_graph_version,
-                checkpoint,
-                next_state,
+                terminal_target,
             )
             .await
     }
