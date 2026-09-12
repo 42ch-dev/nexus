@@ -2446,6 +2446,8 @@ mod tests {
     use crate::capability::model::{
         FinishReason, HostOperation, LaunchSpec, McpServerConfig, OperationFinishedEvent,
     };
+    use deepseek_harness_sdk::Notification;
+    use serde_json::{json, Map};
 
     const MOCK_DSH_AGENT: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -4702,6 +4704,79 @@ mod tests {
 
 
 
+
+    fn test_root_message_notification(root_session_id: &str, text: &str) -> Notification {
+        let mut payload = Map::new();
+        payload.insert("sessionId".to_string(), json!(root_session_id));
+        payload.insert(
+            "event".to_string(),
+            json!({
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": text}]},
+            }),
+        );
+        Notification {
+            method: "session.event".to_string(),
+            payload,
+        }
+    }
+
+    fn test_stream_observer(
+        root_session_id: &str,
+    ) -> (
+        Arc<StreamObserver>,
+        HostSessionId,
+        HostOperationId,
+        Arc<AtomicBool>,
+        Arc<AtomicBool>,
+        Arc<Notify>,
+        mpsc::Receiver<QueuedPayload>,
+        Arc<DeliveryBudget>,
+    ) {
+        let session_id = HostSessionId::new();
+        let op_id = HostOperationId::new();
+        let budget = Arc::new(DeliveryBudget::default());
+        let (content_tx, content_rx) = mpsc::channel(DSCH_MAX_QUEUED_MESSAGES);
+        let classifier_failed = Arc::new(AtomicBool::new(false));
+        let delivery_failed = Arc::new(AtomicBool::new(false));
+        let failure_notify = Arc::new(Notify::new());
+        let observer = Arc::new(StreamObserver {
+            root_session_id: root_session_id.to_string(),
+            session_id: session_id.clone(),
+            op_id: op_id.clone(),
+            content_tx,
+            reconciliation: Arc::new(StdMutex::new(RunReconciliation::new())),
+            classifier_failed: Arc::clone(&classifier_failed),
+            delivery_failed: Arc::clone(&delivery_failed),
+            budget: Arc::clone(&budget),
+            failure_notify: Arc::clone(&failure_notify),
+            run_timing: Arc::new(StdMutex::new(DshStreamingRunTiming::default())),
+        });
+        (
+            observer,
+            session_id,
+            op_id,
+            classifier_failed,
+            delivery_failed,
+            failure_notify,
+            content_rx,
+            budget,
+        )
+    }
+
+    /// Mirrors the producer `RunSelectOutcome::FailureSignal` delivery arm.
+    fn failure_signal_delivery_overflow_events(
+        session_id: &HostSessionId,
+        op_id: &HostOperationId,
+        classifier_failed: &AtomicBool,
+    ) -> Vec<HostEvent> {
+        if classifier_failed.load(Ordering::Acquire) {
+            vec![HostEvent::OpFailed(operation_protocol_failure(session_id, op_id))]
+        } else {
+            vec![HostEvent::OpFailed(operation_delivery_overflow_failure(session_id, op_id))]
+        }
+    }
+
     /// Overflow terminal must be delivery-bounds `OpFailed`, not success or
     /// timeout/protocol arms.
     fn assert_delivery_overflow_terminal(events: &[HostEvent]) {
@@ -4722,22 +4797,6 @@ mod tests {
             }
             other => panic!("expected delivery overflow OpFailed, got {other:?}"),
         }
-    }
-
-    /// Wait until the flood fixture logs `_flood_complete` after its
-    /// burst while the returned event stream stays unpolluted (no dequeue).
-    async fn wait_for_flood_burst_complete(req_log: &Path) {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while std::time::Instant::now() < deadline {
-            if req_log_entries(req_log)
-                .iter()
-                .any(|entry| entry["method"] == "_flood_complete")
-            {
-                return;
-            }
-            tokio::task::yield_now().await;
-        }
-        panic!("flood fixture burst did not complete within 5s");
     }
 
     #[tokio::test]
@@ -5007,43 +5066,66 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dsh_flood_fixture_hits_delivery_overflow() {
-        let req_log_dir = tempfile::tempdir().expect("temp dir");
-        let req_log = req_log_dir.path().join("reqs.jsonl");
-        let dsh_home = req_log_dir.path().join("dsh-home");
-        let mut env = stub_env_scenario(&req_log, &dsh_home, "flood_messages");
-        env.insert("FLOOD_HOLD".to_string(), "1".to_string());
-        env.insert("FLOOD_COUNT".to_string(), "66".to_string());
-        let provider = stub_provider("test-dsh-flood", env);
-        let handle = launch_hermetic(&provider).await;
-        let _env_lock = lock_test_env();
-        let stream = provider
-            .execute(
-                &handle,
-                HostOperation::Prompt {
-                    op_id: HostOperationId::new(),
-                    content: vec![HostContentBlock::Text {
-                        text: "flood".to_string(),
-                    }],
-                    permission_scope: None,
-                },
-            )
-            .await
-            .expect("execute");
-        // Rendezvous: hold the returned stream idle until the fixture burst
-        // marker; overflow is latched before the first poll, then turn/end
-        // completes and the producer must surface delivery overflow.
-        // Observable prefix is m0..m64: one staged/deliverable item outside
-        // the 64-slot MPSC plus 64 still pending; the 66th notification
-        // overflows (65 notifications would finish without overflow).
-        wait_for_flood_burst_complete(&req_log).await;
-        let events = collect_events(stream).await;
+    async fn stream_observer_callback_path_overflows_on_65th_pending_message() {
+        const ROOT: &str = "root-sess";
+        let (
+            observer,
+            session_id,
+            op_id,
+            classifier_failed,
+            delivery_failed,
+            failure_notify,
+            mut content_rx,
+            budget,
+        ) = test_stream_observer(ROOT);
+
+        for i in 0..65 {
+            observer.observe(&test_root_message_notification(ROOT, &format!("m{i}")));
+        }
+
+        assert!(!classifier_failed.load(Ordering::Acquire));
+        assert!(delivery_failed.load(Ordering::Acquire));
+        assert_eq!(budget.test_pending_message_slots(), 64);
+
+        let mut queued = Vec::new();
+        while let Ok(payload) = content_rx.try_recv() {
+            let event = payload
+                .into_event()
+                .expect("queued callback payload must be a message delta");
+            if let HostEvent::MessageDelta(delta) = event {
+                queued.push(delta.text);
+            }
+        }
         assert_eq!(
-            message_texts(&events),
-            (0..65).map(|i| format!("m{i}")).collect::<Vec<_>>(),
-            "one staged delivered item plus 64 pending, then overflow on the next notification"
+            queued,
+            (0..64).map(|i| format!("m{i}")).collect::<Vec<_>>(),
+            "first 64 notifications must queue in order while the consumer is idle"
         );
-        assert_delivery_overflow_terminal(&events);
+
+        observer.observe(&test_root_message_notification(ROOT, "m65"));
+        assert_eq!(
+            content_rx.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty),
+            "post-overflow notifications must not enqueue more deltas"
+        );
+
+        let notified = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            wait_delivery_failure(
+                &failure_notify,
+                &classifier_failed,
+                &delivery_failed,
+            ),
+        )
+        .await;
+        assert!(notified.is_ok(), "delivery_failed must wake failure waiters");
+
+        let terminal = failure_signal_delivery_overflow_events(
+            &session_id,
+            &op_id,
+            &classifier_failed,
+        );
+        assert_delivery_overflow_terminal(&terminal);
     }
 
     #[tokio::test]

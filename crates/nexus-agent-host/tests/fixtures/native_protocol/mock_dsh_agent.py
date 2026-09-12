@@ -187,24 +187,6 @@ def handle_request(req):
                 "type": "assistant/message",
                 "data": {"content": [{"type": "text", "text": big}]},
             })
-        elif scenario == "flood_messages":
-            count = int(os.environ.get("FLOOD_COUNT", "65"))
-            for i in range(count):
-                session_event(session_id, {
-                    "type": "assistant/message",
-                    "data": {"content": [{"type": "text", "text": f"m{i}"}]},
-                })
-            if os.environ.get("FLOOD_HOLD") == "1":
-                # Log after the burst so the host test can hold consumer
-                # backpressure until all notifications are on the wire; then
-                # fall through to normal turn/end so Session::run completes.
-                path = os.environ.get("REQ_LOG")
-                if path:
-                    with open(path, "a") as f:
-                        f.write(json.dumps({
-                            "method": "_flood_complete",
-                            "count": count,
-                        }) + "\n")
         elif scenario == "partial_then_fail":
             session_event(session_id, {
                 "type": "assistant/message",
