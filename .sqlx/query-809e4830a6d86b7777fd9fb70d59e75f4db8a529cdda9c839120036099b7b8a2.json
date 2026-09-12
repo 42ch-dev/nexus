@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE workspace_sessions SET claimed_by_revision = ? WHERE session_id = ? AND consumed = 0 AND expires_at > strftime('%Y-%m-%dT%H:%M:%SZ', 'now') AND (claimed_by_revision IS NULL OR claimed_by_revision = '')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "809e4830a6d86b7777fd9fb70d59e75f4db8a529cdda9c839120036099b7b8a2"
+}

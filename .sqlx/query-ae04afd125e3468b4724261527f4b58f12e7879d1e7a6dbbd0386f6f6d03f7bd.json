@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE workspace_commit_intents SET state = ?, error_category = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE revision = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "ae04afd125e3468b4724261527f4b58f12e7879d1e7a6dbbd0386f6f6d03f7bd"
+}

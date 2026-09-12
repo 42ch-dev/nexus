@@ -21,39 +21,61 @@ use super::session::{
 
 /// Fail the commit when a test has armed this crash point.
 ///
-/// Compiled to a no-op in production: the crash points live in the gated
-/// `workspace::test_hooks` seam.
-fn test_crash_if(point: &str) -> Result<(), SessionError> {
-    #[cfg(any(test, feature = "test-hooks"))]
-    if super::test_hooks::crash_point_is(point) {
-        return Err(SessionError::Internal(format!("test_crash:{point}")));
-    }
-    let _ = point;
-    Ok(())
+/// Expands to a real check in test/`test-hooks` builds and to nothing at all in
+/// production, so the production path carries neither an always-`Ok` wrapper
+/// nor a dead branch. The gated crash seams live in `workspace::test_hooks`.
+macro_rules! test_crash_if {
+    ($point:expr) => {
+        #[cfg(any(test, feature = "test-hooks"))]
+        {
+            if $crate::workspace::test_hooks::crash_point_is($point) {
+                return Err($crate::workspace::session::SessionError::Internal(format!(
+                    "test_crash:{}",
+                    $point
+                )));
+            }
+        }
+    };
+}
+
+fn is_simulated_test_crash(err: &SessionError) -> bool {
+    matches!(
+        err,
+        SessionError::Internal(msg) if msg.starts_with("test_crash:")
+    )
 }
 
 /// Rendezvous at the owner's admission boundary when a test gate is armed.
+///
+/// Gated builds only: the production callsite is compiled out, so no
+/// never-awaiting async wrapper exists there.
+#[cfg(any(test, feature = "test-hooks"))]
 async fn test_owner_gate_admitted(session_id: &str) {
-    #[cfg(any(test, feature = "test-hooks"))]
     super::test_hooks::owner_gate_admitted(session_id).await;
-    let _ = session_id;
 }
 
 /// Signal that the retained owner task has settled, when a gate is armed.
+#[cfg(any(test, feature = "test-hooks"))]
 fn test_owner_gate_settled(session_id: &str) {
-    #[cfg(any(test, feature = "test-hooks"))]
     super::test_hooks::owner_gate_settled(session_id);
-    let _ = session_id;
 }
+
+/// Production no-op for the gated settle signal.
+#[cfg(not(any(test, feature = "test-hooks")))]
+const fn test_owner_gate_settled(_session_id: &str) {}
 
 #[cfg(any(test, feature = "test-hooks"))]
 use super::test_hooks::clear_crash_point;
 
 /// Clear an inherited crash point at owner spawn.
+#[cfg(any(test, feature = "test-hooks"))]
 fn clear_inherited_crash_point() {
-    #[cfg(any(test, feature = "test-hooks"))]
     clear_crash_point();
 }
+
+/// Production no-op: the spawned owner inherits no crash point.
+#[cfg(not(any(test, feature = "test-hooks")))]
+const fn clear_inherited_crash_point() {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitOutcome {
@@ -191,9 +213,8 @@ async fn recover_applying_intent_locked(
     };
 
     if intent.entries.is_empty() {
-        // Staging never persisted its entry metadata (crash between claim and
-        // `entries_json` write), so nothing was applied: this intent can only
-        // roll back. Reached via `test_crash_if("after_intent")`.
+        // Legacy or corrupt intents with no recovery identity: nothing was
+        // applied, so this intent can only roll back.
         db::update_intent_state(
             mgr.pool().as_ref(),
             &intent.revision,
@@ -312,7 +333,7 @@ async fn rollback_intent_locked(
     .await
     .map_err(|e| SessionError::Database(e.to_string()))?;
 
-    test_crash_if("during_rollback")?;
+    test_crash_if!("during_rollback");
 
     // Restore every preimage FIRST, and clean nothing up yet: while the intent
     // is still `rolling_back` the stage/backup artifacts are the evidence a
@@ -340,7 +361,7 @@ async fn rollback_intent_locked(
         }
     }
 
-    test_crash_if("after_rollback_restore_before_finalize")?;
+    test_crash_if!("after_rollback_restore_before_finalize");
 
     // Durable rolled-back transition BEFORE any artifact removal.
     db::finalize_rolled_back_intent(mgr.pool().as_ref(), &intent.revision, &intent.session_id)
@@ -523,6 +544,130 @@ fn new_revision() -> String {
     format!("rev_{}", uuid::Uuid::new_v4())
 }
 
+fn staged_triplet(entry: &db::IntentEntryJson) -> (String, String, Option<String>) {
+    (
+        entry.path.clone(),
+        entry.stage_basename.clone(),
+        entry.backup_basename.clone(),
+    )
+}
+
+/// Plan durable recovery identities before any stage/backup bytes are written.
+fn plan_commit_entries(
+    scope: &ScopeMutation,
+    scope_dir: &Path,
+    canonical_root: &Path,
+    changes: &[WorkspaceChangeEntry],
+    revision: &str,
+) -> Result<Vec<db::IntentEntryJson>, SessionError> {
+    let rev_tag = revision.replace("rev_", "");
+    let mut entries_json = Vec::with_capacity(changes.len());
+    for (idx, change) in changes.iter().enumerate() {
+        let target = super::scope::resolve_in_scope(scope_dir, &change.path)?;
+        enforce_path_boundary(&target, canonical_root)?;
+        require_parent_exists(&target).map_err(|e| SessionError::ManifestInvalid(e.to_string()))?;
+        let stage_basename = format!(".nexus-stage-{rev_tag}-{idx}");
+        let backup_basename = if scope.target_exists(&change.path).unwrap_or(false) {
+            Some(format!(".nexus-backup-{rev_tag}-{idx}"))
+        } else {
+            None
+        };
+
+        // Plan the restore mode from the live target BEFORE any bytes are
+        // written: rolling back a modify/delete must restore the original
+        // permission bits, and the write-ahead intent row is the only place
+        // that mode can survive a crash mid-staging.
+        let captured_mode = match backup_basename {
+            Some(_) => scope
+                .target_mode(&change.path)
+                .map_err(|e| SessionError::Io(e.to_string()))?,
+            None => None,
+        };
+
+        let (pre_hash, post_hash, mode) = match change.op {
+            WorkspaceChangeOp::Create => {
+                let bytes = decode_base64(change.content_base64.as_deref().unwrap_or(""))
+                    .map_err(SessionError::ManifestInvalid)?;
+                (None, Some(hash_bytes(&bytes)), Some(CREATE_FILE_MODE))
+            }
+            WorkspaceChangeOp::Modify => {
+                let bytes = decode_base64(change.content_base64.as_deref().unwrap_or(""))
+                    .map_err(SessionError::ManifestInvalid)?;
+                (
+                    change.expected_hash.clone(),
+                    Some(hash_bytes(&bytes)),
+                    captured_mode,
+                )
+            }
+            WorkspaceChangeOp::Delete => (change.expected_hash.clone(), None, captured_mode),
+        };
+
+        entries_json.push(db::IntentEntryJson {
+            path: change.path.clone(),
+            op: match change.op {
+                WorkspaceChangeOp::Create => "create".to_string(),
+                WorkspaceChangeOp::Modify => "modify".to_string(),
+                WorkspaceChangeOp::Delete => "delete".to_string(),
+            },
+            pre_hash,
+            post_hash,
+            stage_basename,
+            backup_basename,
+            mode,
+        });
+    }
+    Ok(entries_json)
+}
+
+/// Write the stage/backup artifacts named by a previously persisted intent.
+fn write_staged_artifacts(
+    scope: &ScopeMutation,
+    changes: &[WorkspaceChangeEntry],
+    entries_json: &[db::IntentEntryJson],
+) -> Result<(), SessionError> {
+    for (idx, (change, meta)) in changes.iter().zip(entries_json.iter()).enumerate() {
+        match change.op {
+            WorkspaceChangeOp::Create => {
+                let bytes = decode_base64(change.content_base64.as_deref().unwrap_or(""))
+                    .map_err(SessionError::ManifestInvalid)?;
+                scope
+                    .write_stage(&change.path, &meta.stage_basename, &bytes, meta.mode)
+                    .map_err(|e| SessionError::Io(e.to_string()))?;
+            }
+            WorkspaceChangeOp::Modify => {
+                let bytes = decode_base64(change.content_base64.as_deref().unwrap_or(""))
+                    .map_err(SessionError::ManifestInvalid)?;
+                let captured_mode = if let Some(ref backup_name) = meta.backup_basename {
+                    scope
+                        .backup_target(&change.path, backup_name)
+                        .map_err(|e| SessionError::Io(e.to_string()))?
+                } else {
+                    None
+                };
+                scope
+                    .write_stage(
+                        &change.path,
+                        &meta.stage_basename,
+                        &bytes,
+                        captured_mode.or(meta.mode),
+                    )
+                    .map_err(|e| SessionError::Io(e.to_string()))?;
+            }
+            WorkspaceChangeOp::Delete => {
+                if let Some(ref backup_name) = meta.backup_basename {
+                    scope
+                        .backup_target(&change.path, backup_name)
+                        .map_err(|e| SessionError::Io(e.to_string()))?;
+                }
+            }
+        }
+        if idx == 0 {
+            test_crash_if!("after_first_staged_file");
+        }
+    }
+    Ok(())
+}
+
 async fn committed_replay_outcome(
     mgr: &WorkspaceSessionManager,
     session_id: &SessionId,
@@ -564,6 +709,7 @@ pub async fn commit_recoverable(
     mgr: &WorkspaceSessionManager,
     session_id: &SessionId,
     changes: &[WorkspaceChangeEntry],
+    active_workspace_root: &str,
 ) -> Result<CommitOutcome, SessionError> {
     if mgr.recoverable_config().is_none() {
         return Err(SessionError::Internal(
@@ -575,6 +721,8 @@ pub async fn commit_recoverable(
         .await
         .map_err(|e| SessionError::Database(e.to_string()))?
         .ok_or_else(|| SessionError::NotFound(session_id.clone()))?;
+
+    super::scope::enforce_active_workspace_root(&row.workspace_root, active_workspace_root).await?;
 
     // Canonical form first: the digest and the mutation order below are both
     // derived from it, so a reordered-equivalent retry is identical.
@@ -623,8 +771,20 @@ pub async fn commit_recoverable(
 
     mgr.validate_contract_manifest(session_id, changes).await?;
 
-    let revision = new_revision();
+    // Held across scope open, mode planning, claim, staging, and apply: the
+    // planned restore mode is read from the LIVE target, so a preceding
+    // in-process commit must not be able to change that target while this
+    // commit is still planning.
     let _guard = mgr.lock_mutation().await;
+
+    let scope = ScopeMutation::open(&canonical_root, &row.relative_path)
+        .map_err(|e| SessionError::Io(e.to_string()))?;
+    let revision = new_revision();
+    let entries_json =
+        plan_commit_entries(&scope, &scope_dir, &canonical_root, changes, &revision)?;
+    let entries_serialized =
+        serde_json::to_string(&entries_json).map_err(|e| SessionError::Database(e.to_string()))?;
+    validate_entries_json_len(&entries_serialized)?;
 
     let claim = db::claim_session_and_insert_intent(
         mgr.pool().as_ref(),
@@ -632,7 +792,7 @@ pub async fn commit_recoverable(
         &revision,
         &workspace_root,
         &digest,
-        "[]",
+        &entries_serialized,
     )
     .await
     .map_err(|e| SessionError::Database(e.to_string()))?;
@@ -661,104 +821,34 @@ pub async fn commit_recoverable(
         db::ClaimSessionResult::Expired => return Err(SessionError::Expired(session_id.clone())),
     }
 
+    #[cfg(any(test, feature = "test-hooks"))]
     test_owner_gate_admitted(&session_id.to_string()).await;
 
-    test_crash_if("after_intent")?;
+    test_crash_if!("after_intent");
 
-    let scope = ScopeMutation::open(&canonical_root, &row.relative_path)
-        .map_err(|e| SessionError::Io(e.to_string()))?;
-    let mut entries_json: Vec<db::IntentEntryJson> = Vec::new();
-    // Every artifact created for this commit, so any failure path can clean up
-    // exactly what it wrote (rel path, stage basename, backup basename).
-    let mut staged: Vec<(String, String, Option<String>)> = Vec::new();
+    let staged: Vec<(String, String, Option<String>)> =
+        entries_json.iter().map(staged_triplet).collect();
 
-    let staging = (|| {
-        let rev_tag = revision.replace("rev_", "");
-        for (idx, change) in changes.iter().enumerate() {
-            let target = super::scope::resolve_in_scope(&scope_dir, &change.path)?;
-            enforce_path_boundary(&target, &canonical_root)?;
-            require_parent_exists(&target)
-                .map_err(|e| SessionError::ManifestInvalid(e.to_string()))?;
-            let stage_basename = format!(".nexus-stage-{rev_tag}-{idx}");
-            let backup_basename = if scope.target_exists(&change.path).unwrap_or(false) {
-                Some(format!(".nexus-backup-{rev_tag}-{idx}"))
-            } else {
-                None
-            };
-
-            let (pre_hash, post_hash, mode) = match change.op {
-                WorkspaceChangeOp::Create => {
-                    let bytes = decode_base64(change.content_base64.as_deref().unwrap_or(""))
-                        .map_err(SessionError::ManifestInvalid)?;
-                    scope
-                        .write_stage(
-                            &change.path,
-                            &stage_basename,
-                            &bytes,
-                            Some(CREATE_FILE_MODE),
-                        )
-                        .map_err(|e| SessionError::Io(e.to_string()))?;
-                    (None, Some(hash_bytes(&bytes)), Some(CREATE_FILE_MODE))
-                }
-                WorkspaceChangeOp::Modify => {
-                    let bytes = decode_base64(change.content_base64.as_deref().unwrap_or(""))
-                        .map_err(SessionError::ManifestInvalid)?;
-                    let captured_mode = if let Some(ref backup_name) = backup_basename {
-                        scope
-                            .backup_target(&change.path, backup_name)
-                            .map_err(|e| SessionError::Io(e.to_string()))?
-                    } else {
-                        None
-                    };
-                    scope
-                        .write_stage(&change.path, &stage_basename, &bytes, captured_mode)
-                        .map_err(|e| SessionError::Io(e.to_string()))?;
-                    (
-                        change.expected_hash.clone(),
-                        Some(hash_bytes(&bytes)),
-                        captured_mode,
-                    )
-                }
-                WorkspaceChangeOp::Delete => {
-                    if let Some(ref backup_name) = backup_basename {
-                        let mode = scope
-                            .backup_target(&change.path, backup_name)
-                            .map_err(|e| SessionError::Io(e.to_string()))?;
-                        (change.expected_hash.clone(), None, mode)
-                    } else {
-                        (change.expected_hash.clone(), None, None)
-                    }
-                }
-            };
-
-            entries_json.push(db::IntentEntryJson {
-                path: change.path.clone(),
-                op: match change.op {
-                    WorkspaceChangeOp::Create => "create".to_string(),
-                    WorkspaceChangeOp::Modify => "modify".to_string(),
-                    WorkspaceChangeOp::Delete => "delete".to_string(),
-                },
-                pre_hash,
-                post_hash,
-                stage_basename,
-                backup_basename,
-                mode,
-            });
-            let entry = entries_json.last().expect("entry pushed above");
-            staged.push((
-                change.path.clone(),
-                entry.stage_basename.clone(),
-                entry.backup_basename.clone(),
-            ));
-        }
-        Ok(())
-    })();
+    let staging = write_staged_artifacts(&scope, changes, &entries_json);
 
     if let Err(e) = staging {
-        // Staging happens before any target mutation, so no durable material
-        // can need recovery. The intent row is REMOVED and the claim RELEASED
-        // in one transaction: neither an orphaned `rolling_back` row nor a
-        // claimed-but-abandoned session may outlive this failure.
+        if is_simulated_test_crash(&e) {
+            // Simulated crash: keep BOTH the durable intent and the partial
+            // artifact set, so startup recovery still has the identities it
+            // needs to roll the set back.
+            return Err(e);
+        }
+        // Confirm the full planned artifact set is gone BEFORE the durable
+        // ledger is deleted: the intent row is the only record of which
+        // artifacts belong to this commit, so deleting it first could strand
+        // copies on disk with no recovery identity. Unconfirmed cleanup
+        // retains the intent and its claim for recovery instead.
+        if let Err(cleanup_err) = cleanup_staged_confirmed(&scope, &staged) {
+            return Err(SessionError::Internal(format!(
+                "staging_failed ({e}); cleanup_unconfirmed ({cleanup_err}); \
+                 intent retained for recovery"
+            )));
+        }
         if let Err(db_err) = db::abort_intent_and_release_claim(
             mgr.pool().as_ref(),
             &revision,
@@ -770,46 +860,10 @@ pub async fn commit_recoverable(
                 "staging_failed ({e}); abort_failed ({db_err})"
             )));
         }
-        // Only now that the intent is settled do we drop the staged material.
-        cleanup_staged(&scope, &staged);
         return Err(e);
     }
 
-    // Persisting the durable entry metadata is a metadata write that happens
-    // AFTER staging. If it fails the commit must settle, not return early with
-    // `?`: settle the intent (delete row + release claim in one transaction)
-    // and only then drop the staged artifacts.
-    let persist = async {
-        let entries_serialized = serde_json::to_string(&entries_json)
-            .map_err(|e| SessionError::Database(e.to_string()))?;
-        validate_entries_json_len(&entries_serialized)?;
-        sqlx::query("UPDATE workspace_commit_intents SET entries_json = ? WHERE revision = ?")
-            .bind(&entries_serialized)
-            .bind(&revision)
-            .execute(mgr.pool().as_ref())
-            .await
-            .map_err(|e| SessionError::Database(e.to_string()))?;
-        Ok::<(), SessionError>(())
-    }
-    .await;
-
-    if let Err(e) = persist {
-        if let Err(db_err) = db::abort_intent_and_release_claim(
-            mgr.pool().as_ref(),
-            &revision,
-            &session_id.to_string(),
-        )
-        .await
-        {
-            return Err(SessionError::Database(format!(
-                "metadata_persist_failed ({e}); abort_failed ({db_err})"
-            )));
-        }
-        cleanup_staged(&scope, &staged);
-        return Err(e);
-    }
-
-    test_crash_if("after_entries_persisted")?;
+    test_crash_if!("after_entries_persisted");
 
     for (idx, change) in changes.iter().enumerate() {
         let meta = &entries_json[idx];
@@ -859,10 +913,10 @@ pub async fn commit_recoverable(
                 ))),
             };
         }
-        test_crash_if("after_file_apply")?;
+        test_crash_if!("after_file_apply");
     }
 
-    test_crash_if("before_finalize")?;
+    test_crash_if!("before_finalize");
 
     // Durable committed transition FIRST. Stage/backup artifacts are the
     // recovery evidence for an unsettled intent, so none of them may be
@@ -875,7 +929,7 @@ pub async fn commit_recoverable(
         return Err(SessionError::AlreadyCommitted(session_id.clone()));
     }
 
-    test_crash_if("after_finalize_before_cleanup")?;
+    test_crash_if!("after_finalize_before_cleanup");
 
     // The commit is durable; artifact removal is now best-effort. A crash here
     // leaves dead material behind, which the startup sweep reaps without
@@ -902,6 +956,27 @@ fn cleanup_staged(scope: &ScopeMutation, staged: &[(String, String, Option<Strin
     }
 }
 
+/// Remove the full planned artifact set and confirm every name is gone.
+///
+/// Removal is attempted for every entry even after the first failure, so a
+/// partially cleanable set is still reduced as far as it can be; the first
+/// failure is what the caller reports. Any surviving artifact keeps the
+/// durable intent (and its claim) alive for recovery.
+fn cleanup_staged_confirmed(
+    scope: &ScopeMutation,
+    staged: &[(String, String, Option<String>)],
+) -> Result<(), SessionError> {
+    let mut failure: Option<String> = None;
+    for (path, stage, backup) in staged {
+        if let Err(e) = scope.cleanup_entry_confirmed(path, stage, backup.as_deref()) {
+            if failure.is_none() {
+                failure = Some(e.to_string());
+            }
+        }
+    }
+    failure.map_or(Ok(()), |msg| Err(SessionError::Io(msg)))
+}
+
 /// Durable commit on an `Arc` manager; retains ownership through caller cancellation.
 ///
 /// # Errors
@@ -913,13 +988,15 @@ pub async fn commit_recoverable_owned(
     mgr: Arc<WorkspaceSessionManager>,
     session_id: SessionId,
     changes: Vec<WorkspaceChangeEntry>,
+    active_workspace_root: String,
 ) -> Result<CommitOutcome, SessionError> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     let mgr2 = Arc::clone(&mgr);
     let sid = session_id.clone();
+    let active_root = active_workspace_root.clone();
     let owner = tokio::spawn(async move {
         clear_inherited_crash_point();
-        let result = commit_recoverable(&mgr2, &sid, &changes).await;
+        let result = commit_recoverable(&mgr2, &sid, &changes, &active_root).await;
         test_owner_gate_settled(&sid.to_string());
         let _ = tx.send(result);
     });

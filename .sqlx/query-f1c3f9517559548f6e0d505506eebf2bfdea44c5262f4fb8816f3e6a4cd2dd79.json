@@ -6,47 +6,56 @@
       {
         "name": "session_id",
         "ordinal": 0,
-        "type_info": "Text"
+        "type_info": "Text",
+        "nullable": false
       },
       {
         "name": "workspace_root",
         "ordinal": 1,
-        "type_info": "Text"
+        "type_info": "Text",
+        "nullable": false
       },
       {
         "name": "relative_path",
         "ordinal": 2,
-        "type_info": "Text"
+        "type_info": "Text",
+        "nullable": false
       },
       {
         "name": "existed",
         "ordinal": 3,
-        "type_info": "Integer"
+        "type_info": "Integer",
+        "nullable": false
       },
       {
         "name": "file_hashes_json",
         "ordinal": 4,
-        "type_info": "Text"
+        "type_info": "Text",
+        "nullable": false
       },
       {
         "name": "created_at",
         "ordinal": 5,
-        "type_info": "Text"
+        "type_info": "Text",
+        "nullable": false
       },
       {
         "name": "expires_at",
         "ordinal": 6,
-        "type_info": "Text"
+        "type_info": "Text",
+        "nullable": false
       },
       {
         "name": "consumed",
         "ordinal": 7,
-        "type_info": "Integer"
+        "type_info": "Integer",
+        "nullable": false
       },
       {
         "name": "claimed_by_revision",
         "ordinal": 8,
-        "type_info": "Text"
+        "type_info": "Text",
+        "nullable": null
       }
     ],
     "parameters": {

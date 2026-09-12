@@ -266,12 +266,6 @@ pub async fn commit_workspace(
         .ok_or(NexusApiError::Uninitialized)?;
     let session_id = crate::workspace::session::SessionId(req.session_id.clone());
 
-    // The workspace must be initialized; the owner resolves the root itself
-    // from the session row, so only presence is asserted here.
-    if state.workspace_path().is_none() {
-        return Err(NexusApiError::Uninitialized);
-    }
-
     // V1.58 P0 T5 (R-V156P0-M005): validate + consume in one atomic step.
     // The previous two-call sequence (validate_changes_manifest then
     // consume_session) left a TOCTOU window; the durable commit closes it by
@@ -283,7 +277,15 @@ pub async fn commit_workspace(
     // shutdown), the already-admitted commit still runs to a durable
     // conclusion instead of being abandoned mid-apply. The response is still
     // the owner's real outcome.
-    match commit_workspace_owned(session_mgr, session_id.clone(), req.changes.clone()).await {
+    let active_workspace_root = state.workspace_path().ok_or(NexusApiError::Uninitialized)?;
+    match WorkspaceSessionManager::commit_session_durable_owned(
+        session_mgr,
+        session_id.clone(),
+        req.changes.clone(),
+        active_workspace_root,
+    )
+    .await
+    {
         Ok(outcome) => {
             info!(
                 session_id = %session_id,
@@ -315,18 +317,6 @@ pub async fn commit_workspace(
         }
         Err(e) => Err(map_session_error(&session_id, e)),
     }
-}
-
-/// Run a durable commit on the retained owner and await its outcome.
-///
-/// The owner outlives this future, so request cancellation cannot abandon an
-/// admitted commit.
-async fn commit_workspace_owned(
-    session_mgr: std::sync::Arc<WorkspaceSessionManager>,
-    session_id: crate::workspace::session::SessionId,
-    changes: Vec<nexus_contracts::local::orchestration::WorkspaceChangeEntry>,
-) -> Result<crate::workspace::session_commit::CommitOutcome, SessionError> {
-    WorkspaceSessionManager::commit_session_durable_owned(session_mgr, session_id, changes).await
 }
 
 /// Map a [`SessionError`] to the appropriate [`NexusApiError`] variant.
@@ -379,6 +369,15 @@ fn map_session_error(
         } => NexusApiError::InvalidInput {
             field: "path".into(),
             reason: format!("path '{path}' escapes canonical workspace root '{workspace_root}'"),
+        },
+        SessionError::ActiveWorkspaceMismatch {
+            session_root,
+            active_root,
+        } => NexusApiError::InvalidInput {
+            field: "session_id".into(),
+            reason: format!(
+                "session workspace root '{session_root}' does not match active workspace root '{active_root}'"
+            ),
         },
     }
 }

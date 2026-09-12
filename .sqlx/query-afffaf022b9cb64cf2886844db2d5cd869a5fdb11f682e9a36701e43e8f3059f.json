@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM workspace_commit_intents WHERE revision = ? AND state = 'applying'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "afffaf022b9cb64cf2886844db2d5cd869a5fdb11f682e9a36701e43e8f3059f"
+}

@@ -99,6 +99,12 @@ pub enum SessionError {
         path: String,
         workspace_root: String,
     },
+    /// Session belongs to a different canonical workspace root than the active
+    /// executor or HTTP authority (v1.188 P5 hotfix).
+    ActiveWorkspaceMismatch {
+        session_root: String,
+        active_root: String,
+    },
 }
 
 impl fmt::Display for SessionError {
@@ -138,6 +144,13 @@ impl fmt::Display for SessionError {
                     "path '{path}' escapes canonical workspace root '{workspace_root}'"
                 )
             }
+            Self::ActiveWorkspaceMismatch {
+                session_root,
+                active_root,
+            } => write!(
+                f,
+                "session workspace root '{session_root}' does not match active workspace root '{active_root}'"
+            ),
         }
     }
 }
@@ -846,11 +859,16 @@ impl WorkspaceSessionManager {
         &self,
         session_id: &SessionId,
         changes: &[ChangeEntry],
-        _workspace_root: &str,
+        active_workspace_root: &str,
     ) -> Result<db::WorkspaceSessionRow, SessionError> {
         if self.recoverable.is_some() {
-            let _outcome =
-                super::session_commit::commit_recoverable(self, session_id, changes).await?;
+            let _outcome = super::session_commit::commit_recoverable(
+                self,
+                session_id,
+                changes,
+                active_workspace_root,
+            )
+            .await?;
             return db::get_session(&self.pool, &session_id.to_string())
                 .await
                 .map_err(|e| SessionError::Database(e.to_string()))?
@@ -886,17 +904,23 @@ impl WorkspaceSessionManager {
         &self,
         session_id: &SessionId,
         changes: &[ChangeEntry],
-        _workspace_root: &str,
+        active_workspace_root: &str,
     ) -> Result<super::session_commit::CommitOutcome, SessionError> {
         if self.recoverable.is_none() {
             return Err(SessionError::Internal(
                 "recoverable workspace authority required".into(),
             ));
         }
-        super::session_commit::commit_recoverable(self, session_id, changes).await
+        super::session_commit::commit_recoverable(self, session_id, changes, active_workspace_root)
+            .await
     }
 
     /// Durable commit on an `Arc` manager; retains ownership through caller cancellation.
+    ///
+    /// The caller must pass the verified active workspace root from its own
+    /// authority context (for example HTTP [`WorkspaceState::workspace_path`]
+    /// or the executor's canonical root). Foreign-root rejection runs before
+    /// replay, claim, and normal commit work.
     ///
     /// # Errors
     ///
@@ -907,8 +931,15 @@ impl WorkspaceSessionManager {
         self_arc: Arc<Self>,
         session_id: SessionId,
         changes: Vec<ChangeEntry>,
+        active_workspace_root: String,
     ) -> Result<super::session_commit::CommitOutcome, SessionError> {
-        super::session_commit::commit_recoverable_owned(self_arc, session_id, changes).await
+        super::session_commit::commit_recoverable_owned(
+            self_arc,
+            session_id,
+            changes,
+            active_workspace_root,
+        )
+        .await
     }
 
     /// Run startup recovery for all unsettled intents (call before publishing executor).

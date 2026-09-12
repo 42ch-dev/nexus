@@ -91,7 +91,7 @@ pub async fn get_session(
     session_id: &str,
 ) -> Result<Option<WorkspaceSessionRow>, LocalDbError> {
     let row = sqlx::query!(
-        "SELECT session_id, workspace_root, relative_path, existed, file_hashes_json, \
+        "SELECT session_id as \"session_id!\", workspace_root, relative_path, existed, file_hashes_json, \
          created_at, expires_at, consumed, claimed_by_revision \
          FROM workspace_sessions WHERE session_id = ?",
         session_id

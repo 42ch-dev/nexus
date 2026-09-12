@@ -38,7 +38,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use rustix::fd::OwnedFd;
-use rustix::fs::{AtFlags, Mode, OFlags};
+use rustix::fs::{AtFlags, Mode, OFlags, RawMode};
 
 const DIR_OPEN: OFlags = OFlags::RDONLY
     .union(OFlags::DIRECTORY)
@@ -180,7 +180,7 @@ fn walk_absolute(path: &Path, create_missing: bool) -> Result<OwnedFd, String> {
 /// Open directory `name` under `dirfd` no-follow, creating it with
 /// `mode` (umask-independent via `fchmod`) when absent. A symlinked or
 /// non-directory entry fails closed.
-pub fn ensure_dir_at(dirfd: &OwnedFd, name: &str, mode: u16) -> Result<OwnedFd, String> {
+pub fn ensure_dir_at(dirfd: &OwnedFd, name: &str, mode: RawMode) -> Result<OwnedFd, String> {
     debug_assert!(!name.contains('/'));
     let name = OsStr::new(name);
     match open_dir_at(dirfd, name) {
@@ -219,7 +219,7 @@ pub fn ensure_dir_at(dirfd: &OwnedFd, name: &str, mode: u16) -> Result<OwnedFd, 
 /// already exists — no check-then-create window), apply `mode` via
 /// `fchmod` (umask-proof), and return its descriptor. A symlink raced in
 /// after the create is rejected by the no-follow reopen.
-pub fn mkdir_exclusive_at(dirfd: &OwnedFd, name: &str, mode: u16) -> Result<OwnedFd, String> {
+pub fn mkdir_exclusive_at(dirfd: &OwnedFd, name: &str, mode: RawMode) -> Result<OwnedFd, String> {
     debug_assert!(!name.contains('/'));
     rustix::fs::mkdirat(dirfd, name, Mode::from_bits_truncate(mode)).map_err(|error| {
         format!(

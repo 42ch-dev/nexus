@@ -39,3 +39,31 @@ pub fn resolve_in_scope(scope_dir: &Path, change_path: &str) -> Result<PathBuf, 
     let target = scope_dir.join(change_path);
     Ok(target)
 }
+
+/// Require a session's persisted workspace root to match the active executor root.
+///
+/// Both paths are canonicalized before comparison so symlink-equivalent roots
+/// match and foreign sessions cannot commit through a different authority.
+///
+/// # Errors
+///
+/// Returns [`SessionError::ActiveWorkspaceMismatch`] when the canonical roots
+/// differ, or whichever error [`canonicalize_workspace_root`] reports.
+pub async fn enforce_active_workspace_root(
+    session_workspace_root: &str,
+    active_workspace_root: &str,
+) -> Result<(), SessionError> {
+    let session_canonical =
+        super::session::canonicalize_workspace_root(std::path::Path::new(session_workspace_root))
+            .await?;
+    let active_canonical =
+        super::session::canonicalize_workspace_root(std::path::Path::new(active_workspace_root))
+            .await?;
+    if session_canonical != active_canonical {
+        return Err(SessionError::ActiveWorkspaceMismatch {
+            session_root: session_canonical.to_string_lossy().into_owned(),
+            active_root: active_canonical.to_string_lossy().into_owned(),
+        });
+    }
+    Ok(())
+}

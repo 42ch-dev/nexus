@@ -298,8 +298,10 @@ async fn retained_owner_survives_caller_drop() {
     let mgr2 = Arc::clone(&mgr);
     let session_id = session.clone();
     let changes = vec![create_change("owner.txt", b"owned")];
+    let owner_root = root.clone();
     let caller = tokio::spawn(async move {
-        WorkspaceSessionManager::commit_session_durable_owned(mgr2, session_id, changes).await
+        WorkspaceSessionManager::commit_session_durable_owned(mgr2, session_id, changes, owner_root)
+            .await
     });
 
     // The owner task has been admitted (claim held) and is parked.
@@ -851,9 +853,11 @@ async fn recoverable_claim_race_has_single_winner() {
         let session_id = session.clone();
         let changes = changes.clone();
         let owner_root = root.clone();
-        let _ = &owner_root;
         handles.push(tokio::spawn(async move {
-            WorkspaceSessionManager::commit_session_durable_owned(mgr2, session_id, changes).await
+            WorkspaceSessionManager::commit_session_durable_owned(
+                mgr2, session_id, changes, owner_root,
+            )
+            .await
         }));
     }
 
@@ -1518,5 +1522,256 @@ async fn crash_before_modify_apply_reverse_rollback_treats_unapplied_modify_as_n
     assert!(
         !ws.path().join("a.txt").exists(),
         "the applied create is undone"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn commit_rejects_session_opened_in_foreign_workspace_root() {
+    let (pool, db_dir) = fresh_pool().await;
+    let mgr = recoverable_mgr(pool, &db_dir);
+    let root_a = tempfile::tempdir().unwrap();
+    let root_b = tempfile::tempdir().unwrap();
+    let root_a_str = root_a.path().to_string_lossy().to_string();
+    let root_b_str = root_b.path().to_string_lossy().to_string();
+    let session = mgr
+        .open_session(&root_a_str, "", true)
+        .await
+        .expect("open in root A");
+
+    let err = mgr
+        .commit_session_durable(
+            &session,
+            &[create_change("foreign.txt", b"never")],
+            &root_b_str,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, SessionError::ActiveWorkspaceMismatch { .. }));
+    assert!(!root_a.path().join("foreign.txt").exists());
+    assert!(!root_b.path().join("foreign.txt").exists());
+
+    let row = db::get_session(mgr.pool().as_ref(), &session.to_string())
+        .await
+        .expect("db")
+        .expect("session row");
+    assert!(!row.consumed);
+}
+
+#[tokio::test]
+#[serial]
+async fn executor_rejects_foreign_session_on_idempotent_replay() {
+    let (pool, db_dir) = fresh_pool().await;
+    let mgr = recoverable_mgr(pool, &db_dir);
+    let root_a = tempfile::tempdir().unwrap();
+    let root_b = tempfile::tempdir().unwrap();
+    let root_a_str = root_a.path().to_string_lossy().to_string();
+    let root_b_str = root_b.path().to_string_lossy().to_string();
+    let exec_a = DaemonWorkspaceExecutor::new(Arc::clone(&mgr), root_a_str.clone());
+    let exec_b = DaemonWorkspaceExecutor::new(Arc::clone(&mgr), root_b_str.clone());
+    // A non-empty relative scope: `workspace.open` rejects an empty path, and
+    // the commit requires the scope directory to already exist.
+    const SCOPE: &str = "foreign";
+    std::fs::create_dir(root_a.path().join(SCOPE)).expect("scope dir");
+    let opened = exec_a
+        .open(WorkspaceOpenInput {
+            path: SCOPE.to_string(),
+        })
+        .await
+        .expect("open");
+    let changes = vec![WorkspaceChangeEntry {
+        path: "replay.txt".to_string(),
+        op: WorkspaceChangeOp::Create,
+        expected_hash: None,
+        content_base64: Some(b64(b"once")),
+    }];
+    exec_a
+        .commit(WorkspaceCommitInput {
+            session_id: opened.session_id.clone(),
+            changes: changes.clone(),
+        })
+        .await
+        .expect("commit in root A");
+    let err = exec_b
+        .commit(WorkspaceCommitInput {
+            session_id: opened.session_id,
+            changes,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        nexus_orchestration::capability::CapabilityError::InputInvalid(_)
+    ));
+    assert_eq!(
+        std::fs::read(root_a.path().join(SCOPE).join("replay.txt")).unwrap(),
+        b"once"
+    );
+    assert!(!root_b.path().join(SCOPE).join("replay.txt").exists());
+}
+
+#[tokio::test]
+#[serial]
+async fn crash_during_staging_then_startup_recovery_cleans_partial_artifacts() {
+    let (pool, db_dir) = fresh_pool().await;
+    let mgr = recoverable_mgr(pool, &db_dir);
+    let ws = tempfile::tempdir().unwrap();
+    let root = ws.path().to_string_lossy().to_string();
+    let session = mgr.open_session(&root, "", true).await.expect("open");
+    set_crash_point(Some("after_first_staged_file"));
+    let err = mgr
+        .commit_session_durable(
+            &session,
+            &[
+                create_change("first.txt", b"one"),
+                create_change("second.txt", b"two"),
+            ],
+            &root,
+        )
+        .await
+        .unwrap_err();
+    set_crash_point(None);
+    assert!(matches!(err, SessionError::Internal(_)));
+
+    let intent: String = sqlx::query_scalar(
+        "SELECT state FROM workspace_commit_intents WHERE session_id = ? ORDER BY revision DESC LIMIT 1",
+    )
+    .bind(session.to_string())
+    .fetch_one(mgr.pool().as_ref())
+    .await
+    .unwrap();
+    assert_eq!(intent, "applying");
+
+    let stage_files: Vec<String> = std::fs::read_dir(ws.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.contains(".nexus-stage-") || n.contains(".nexus-backup-"))
+        .collect();
+    assert!(
+        !stage_files.is_empty(),
+        "partial staging artifacts must survive the simulated crash"
+    );
+
+    mgr.startup_recovery().await.expect("startup recovery");
+    let stage_after: Vec<String> = std::fs::read_dir(ws.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.contains(".nexus-stage-") || n.contains(".nexus-backup-"))
+        .collect();
+    assert!(
+        stage_after.is_empty(),
+        "startup recovery must clean partial artifacts, got {stage_after:?}"
+    );
+}
+
+// ── failure boundary: ledger release is gated on confirmed cleanup ─────────
+
+/// A real staging failure must not delete the durable ledger until the full
+/// planned artifact set is confirmed gone.
+///
+/// Forces the boundary deterministically: the owner parks at admission (the
+/// intent row is already durable and names every planned artifact), the test
+/// then occupies the SECOND entry's planned stage name with a directory. That
+/// makes staging fail (`AlreadyExists`) AND makes removal of that name
+/// impossible (`unlink` on a directory), so cleanup cannot be confirmed. The
+/// intent row and its claim must survive, and startup recovery must still be
+/// able to identify and settle the set.
+#[tokio::test]
+#[serial]
+async fn unconfirmed_staging_cleanup_retains_intent_for_recovery() {
+    let (pool, db_dir) = fresh_pool().await;
+    let mgr = recoverable_mgr(pool, &db_dir);
+    let ws = tempfile::tempdir().unwrap();
+    let root = ws.path().to_string_lossy().to_string();
+    let session = mgr.open_session(&root, "", true).await.expect("open");
+
+    let gate = Arc::new(OwnerGate::for_session(session.to_string()));
+    set_owner_gate(Some(Arc::clone(&gate)));
+    let mgr2 = Arc::clone(&mgr);
+    let session_id = session.clone();
+    let owner_root = root.clone();
+    let handle = tokio::spawn(async move {
+        mgr2.commit_session_durable(
+            &session_id,
+            &[
+                create_change("a.txt", b"one"),
+                create_change("b.txt", b"two"),
+            ],
+            &owner_root,
+        )
+        .await
+    });
+
+    // Admission: the intent row exists and carries the planned identities.
+    gate.admitted.notified().await;
+    let entries_json: String = sqlx::query_scalar(
+        "SELECT entries_json FROM workspace_commit_intents WHERE session_id = ? ORDER BY revision DESC LIMIT 1",
+    )
+    .bind(session.to_string())
+    .fetch_one(mgr.pool().as_ref())
+    .await
+    .unwrap();
+    let planned: Vec<db::IntentEntryJson> = serde_json::from_str(&entries_json).unwrap();
+    assert_eq!(planned.len(), 2, "both entries are planned up front");
+    let doomed = planned
+        .iter()
+        .find(|e| e.path == "b.txt")
+        .expect("b.txt planned")
+        .stage_basename
+        .clone();
+
+    // Occupy that exact planned stage name with a directory.
+    std::fs::create_dir(ws.path().join(&doomed)).expect("plant directory");
+
+    gate.proceed.notify_one();
+    let err = handle.await.expect("join").unwrap_err();
+    set_owner_gate(None);
+
+    assert!(
+        matches!(err, SessionError::Internal(ref m) if m.contains("cleanup_unconfirmed")),
+        "unconfirmed cleanup must keep the ledger, got {err:?}"
+    );
+
+    // The ledger and its claim survive: recovery still has the identities.
+    let (state, claimed): (String, Option<String>) = sqlx::query_as(
+        "SELECT i.state, s.claimed_by_revision FROM workspace_commit_intents i \
+         JOIN workspace_sessions s ON s.session_id = i.session_id WHERE i.session_id = ?",
+    )
+    .bind(session.to_string())
+    .fetch_one(mgr.pool().as_ref())
+    .await
+    .unwrap();
+    assert_eq!(state, "applying", "the intent must not be dropped");
+    assert!(
+        claimed.is_some(),
+        "the claim must not be released while an artifact remains"
+    );
+    assert!(!ws.path().join("a.txt").exists());
+    assert!(!ws.path().join("b.txt").exists());
+
+    // With the ledger intact, recovery identifies and settles the whole set.
+    std::fs::remove_dir(ws.path().join(&doomed)).expect("clear planted directory");
+    mgr.startup_recovery().await.expect("recovery");
+    let settled: String = sqlx::query_scalar(
+        "SELECT state FROM workspace_commit_intents WHERE session_id = ? ORDER BY revision DESC LIMIT 1",
+    )
+    .bind(session.to_string())
+    .fetch_one(mgr.pool().as_ref())
+    .await
+    .unwrap();
+    assert_eq!(settled, "rolled_back");
+    assert!(!ws.path().join("a.txt").exists());
+    assert!(!ws.path().join("b.txt").exists());
+    let leaked: Vec<String> = std::fs::read_dir(ws.path())
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.contains(".nexus-stage-") || n.contains(".nexus-backup-"))
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "recovery must not leak artifacts, found {leaked:?}"
     );
 }

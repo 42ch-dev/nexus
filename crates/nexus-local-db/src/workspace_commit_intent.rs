@@ -110,12 +110,12 @@ pub async fn claim_session_and_insert_intent(
         )));
     }
 
-    let existing = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM workspace_commit_intents \
-         WHERE session_id = ? AND request_digest = ? AND state = 'committed'",
+    let existing = sqlx::query_scalar!(
+        r#"SELECT COUNT(*) as "count!: i64" FROM workspace_commit_intents
+         WHERE session_id = ? AND request_digest = ? AND state = 'committed'"#,
+        session_id,
+        request_digest
     )
-    .bind(session_id)
-    .bind(request_digest)
     .fetch_one(&mut *tx)
     .await?;
     if existing > 0 {
@@ -123,14 +123,14 @@ pub async fn claim_session_and_insert_intent(
         return Ok(ClaimSessionResult::DigestConflict);
     }
 
-    let claim = sqlx::query(
+    let claim = sqlx::query!(
         "UPDATE workspace_sessions SET claimed_by_revision = ? \
          WHERE session_id = ? AND consumed = 0 \
          AND expires_at > strftime('%Y-%m-%dT%H:%M:%SZ', 'now') \
          AND (claimed_by_revision IS NULL OR claimed_by_revision = '')",
+        revision,
+        session_id
     )
-    .bind(revision)
-    .bind(session_id)
     .execute(&mut *tx)
     .await?;
     if claim.rows_affected() == 0 {
@@ -152,16 +152,16 @@ pub async fn claim_session_and_insert_intent(
         });
     }
 
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO workspace_commit_intents \
          (session_id, workspace_root, revision, request_digest, state, entries_json) \
          VALUES (?, ?, ?, ?, 'applying', ?)",
+        session_id,
+        workspace_root,
+        revision,
+        request_digest,
+        entries_json
     )
-    .bind(session_id)
-    .bind(workspace_root)
-    .bind(revision)
-    .bind(request_digest)
-    .bind(entries_json)
     .execute(&mut *tx)
     .await?;
 
@@ -178,13 +178,15 @@ pub async fn get_committed_intent_by_digest(
     session_id: &str,
     request_digest: &str,
 ) -> Result<Option<CommitIntentRow>, LocalDbError> {
-    let row = sqlx::query_as::<_, IntentRowRaw>(
-        "SELECT session_id, workspace_root, revision, request_digest, state, entries_json, error_category \
-         FROM workspace_commit_intents \
-         WHERE session_id = ? AND request_digest = ? AND state = 'committed' LIMIT 1",
+    let row = sqlx::query_as!(
+        IntentRowRaw,
+        r#"SELECT session_id as "session_id!", workspace_root as "workspace_root!", revision as "revision!",
+                  request_digest as "request_digest!", state as "state!", entries_json as "entries_json!", error_category
+         FROM workspace_commit_intents
+         WHERE session_id = ? AND request_digest = ? AND state = 'committed' LIMIT 1"#,
+        session_id,
+        request_digest
     )
-    .bind(session_id)
-    .bind(request_digest)
     .fetch_optional(pool)
     .await?;
     row.map(IntentRowRaw::try_into_row).transpose()
@@ -198,11 +200,13 @@ pub async fn get_intent_by_revision(
     pool: &SqlitePool,
     revision: &str,
 ) -> Result<Option<CommitIntentRow>, LocalDbError> {
-    let row = sqlx::query_as::<_, IntentRowRaw>(
-        "SELECT session_id, workspace_root, revision, request_digest, state, entries_json, error_category \
-         FROM workspace_commit_intents WHERE revision = ?",
+    let row = sqlx::query_as!(
+        IntentRowRaw,
+        r#"SELECT session_id as "session_id!", workspace_root as "workspace_root!", revision as "revision!",
+                  request_digest as "request_digest!", state as "state!", entries_json as "entries_json!", error_category
+         FROM workspace_commit_intents WHERE revision = ?"#,
+        revision
     )
-    .bind(revision)
     .fetch_optional(pool)
     .await?;
     row.map(IntentRowRaw::try_into_row).transpose()
@@ -217,13 +221,14 @@ pub async fn update_intent_state(
     state: IntentState,
     error_category: Option<&str>,
 ) -> Result<(), LocalDbError> {
-    sqlx::query(
+    let state_str = state.as_str();
+    sqlx::query!(
         "UPDATE workspace_commit_intents SET state = ?, error_category = ?, \
          updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE revision = ?",
+        state_str,
+        error_category,
+        revision
     )
-    .bind(state.as_str())
-    .bind(error_category)
-    .bind(revision)
     .execute(pool)
     .await?;
     Ok(())
@@ -238,24 +243,24 @@ pub async fn finalize_committed_intent(
     session_id: &str,
 ) -> Result<bool, LocalDbError> {
     let mut tx = pool.begin().await?;
-    let updated = sqlx::query(
+    let updated = sqlx::query!(
         "UPDATE workspace_commit_intents SET state = 'committed', \
          updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') \
          WHERE revision = ? AND state = 'applying'",
+        revision
     )
-    .bind(revision)
     .execute(&mut *tx)
     .await?;
     if updated.rows_affected() == 0 {
         tx.rollback().await?;
         return Ok(false);
     }
-    sqlx::query(
+    sqlx::query!(
         "UPDATE workspace_sessions SET consumed = 1, claimed_by_revision = NULL \
          WHERE session_id = ? AND claimed_by_revision = ?",
+        session_id,
+        revision
     )
-    .bind(session_id)
-    .bind(revision)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
@@ -271,17 +276,17 @@ pub async fn finalize_rolled_back_intent(
     session_id: &str,
 ) -> Result<(), LocalDbError> {
     let mut tx = pool.begin().await?;
-    sqlx::query(
+    sqlx::query!(
         "UPDATE workspace_commit_intents SET state = 'rolled_back', \
          updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE revision = ?",
+        revision
     )
-    .bind(revision)
     .execute(&mut *tx)
     .await?;
-    sqlx::query(
+    sqlx::query!(
         "UPDATE workspace_sessions SET consumed = 1, claimed_by_revision = NULL WHERE session_id = ?",
+        session_id
     )
-    .bind(session_id)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
@@ -296,12 +301,12 @@ pub async fn release_session_claim(
     session_id: &str,
     revision: &str,
 ) -> Result<(), LocalDbError> {
-    sqlx::query(
+    sqlx::query!(
         "UPDATE workspace_sessions SET claimed_by_revision = NULL \
          WHERE session_id = ? AND claimed_by_revision = ? AND consumed = 0",
+        session_id,
+        revision
     )
-    .bind(session_id)
-    .bind(revision)
     .execute(pool)
     .await?;
     Ok(())
@@ -323,16 +328,18 @@ pub async fn abort_intent_and_release_claim(
     session_id: &str,
 ) -> Result<(), LocalDbError> {
     let mut tx = pool.begin().await?;
-    sqlx::query("DELETE FROM workspace_commit_intents WHERE revision = ? AND state = 'applying'")
-        .bind(revision)
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query(
+    sqlx::query!(
+        "DELETE FROM workspace_commit_intents WHERE revision = ? AND state = 'applying'",
+        revision
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query!(
         "UPDATE workspace_sessions SET claimed_by_revision = NULL \
          WHERE session_id = ? AND claimed_by_revision = ? AND consumed = 0",
+        session_id,
+        revision
     )
-    .bind(session_id)
-    .bind(revision)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
@@ -352,9 +359,11 @@ pub async fn latest_committed_intent_for_root(
     pool: &SqlitePool,
     workspace_root: &str,
 ) -> Result<Option<CommitIntentRow>, LocalDbError> {
-    let rows = sqlx::query_as::<_, IntentRowRaw>(
-        "SELECT session_id, workspace_root, revision, request_digest, state, entries_json, error_category \
-         FROM workspace_commit_intents WHERE state = 'committed' ORDER BY rowid DESC",
+    let rows = sqlx::query_as!(
+        IntentRowRaw,
+        r#"SELECT session_id as "session_id!", workspace_root as "workspace_root!", revision as "revision!",
+                  request_digest as "request_digest!", state as "state!", entries_json as "entries_json!", error_category
+         FROM workspace_commit_intents WHERE state = 'committed' ORDER BY rowid DESC"#
     )
     .fetch_all(pool)
     .await?;
@@ -402,13 +411,16 @@ pub fn validate_cleanup_entries(entries_json: &str) -> Result<Vec<IntentEntryJso
 pub async fn list_settled_intents_for_cleanup(
     pool: &SqlitePool,
 ) -> Result<Vec<(String, String, String)>, LocalDbError> {
-    let rows: Vec<(String, String, String)> = sqlx::query_as(
-        "SELECT session_id, workspace_root, entries_json FROM workspace_commit_intents \
-         WHERE state IN ('committed', 'rolled_back')",
+    let rows = sqlx::query!(
+        r#"SELECT session_id as "session_id!", workspace_root as "workspace_root!", entries_json as "entries_json!"
+           FROM workspace_commit_intents WHERE state IN ('committed', 'rolled_back')"#
     )
     .fetch_all(pool)
     .await?;
-    Ok(rows)
+    Ok(rows
+        .into_iter()
+        .map(|row| (row.session_id, row.workspace_root, row.entries_json))
+        .collect())
 }
 
 async fn mark_intent_recovery_conflict(
@@ -416,11 +428,11 @@ async fn mark_intent_recovery_conflict(
     revision: &str,
     category: &str,
 ) -> Result<(), LocalDbError> {
-    sqlx::query(
+    sqlx::query!(
         "UPDATE workspace_commit_intents SET state = 'recovery_conflict', error_category = ?,          updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE revision = ?",
+        category,
+        revision
     )
-    .bind(category)
-    .bind(revision)
     .execute(pool)
     .await?;
     Ok(())
@@ -546,10 +558,11 @@ pub async fn get_committed_request_digest(
     pool: &SqlitePool,
     session_id: &str,
 ) -> Result<Option<String>, LocalDbError> {
-    sqlx::query_scalar::<_, String>(
-        "SELECT request_digest FROM workspace_commit_intents          WHERE session_id = ? AND state = 'committed' LIMIT 1",
+    sqlx::query_scalar!(
+        r#"SELECT request_digest as "request_digest!" FROM workspace_commit_intents
+           WHERE session_id = ? AND state = 'committed' LIMIT 1"#,
+        session_id
     )
-    .bind(session_id)
     .fetch_optional(pool)
     .await
     .map_err(LocalDbError::from)
@@ -563,8 +576,9 @@ pub async fn workspace_has_recovery_conflict(
     pool: &SqlitePool,
     workspace_root: &str,
 ) -> Result<bool, LocalDbError> {
-    let roots: Vec<String> = sqlx::query_scalar(
-        "SELECT DISTINCT workspace_root FROM workspace_commit_intents          WHERE state = 'recovery_conflict'",
+    let roots = sqlx::query_scalar!(
+        r#"SELECT DISTINCT workspace_root as "workspace_root!" FROM workspace_commit_intents
+           WHERE state = 'recovery_conflict'"#
     )
     .fetch_all(pool)
     .await?;
@@ -581,10 +595,12 @@ pub async fn list_unsettled_intents(
     pool: &SqlitePool,
     workspace_root: &str,
 ) -> Result<Vec<CommitIntentRow>, LocalDbError> {
-    let rows = sqlx::query_as::<_, IntentRowRaw>(
-        "SELECT session_id, workspace_root, revision, request_digest, state, entries_json, error_category \
-         FROM workspace_commit_intents \
-         WHERE state IN ('applying', 'rolling_back', 'recovery_conflict')",
+    let rows = sqlx::query_as!(
+        IntentRowRaw,
+        r#"SELECT session_id as "session_id!", workspace_root as "workspace_root!", revision as "revision!",
+                  request_digest as "request_digest!", state as "state!", entries_json as "entries_json!", error_category
+         FROM workspace_commit_intents
+         WHERE state IN ('applying', 'rolling_back', 'recovery_conflict')"#,
     )
     .fetch_all(pool)
     .await?;
@@ -602,10 +618,12 @@ pub async fn list_unsettled_intents(
 pub async fn list_all_unsettled_intents(
     pool: &SqlitePool,
 ) -> Result<Vec<CommitIntentRow>, LocalDbError> {
-    let rows = sqlx::query_as::<_, IntentRowRaw>(
-        "SELECT session_id, workspace_root, revision, request_digest, state, entries_json, error_category \
-         FROM workspace_commit_intents \
-         WHERE state IN ('applying', 'rolling_back', 'recovery_conflict')",
+    let rows = sqlx::query_as!(
+        IntentRowRaw,
+        r#"SELECT session_id as "session_id!", workspace_root as "workspace_root!", revision as "revision!",
+                  request_digest as "request_digest!", state as "state!", entries_json as "entries_json!", error_category
+         FROM workspace_commit_intents
+         WHERE state IN ('applying', 'rolling_back', 'recovery_conflict')"#,
     )
     .fetch_all(pool)
     .await?;

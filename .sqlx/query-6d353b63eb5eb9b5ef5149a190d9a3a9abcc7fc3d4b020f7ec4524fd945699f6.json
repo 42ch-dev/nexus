@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT DISTINCT workspace_root as \"workspace_root!\" FROM workspace_commit_intents\n           WHERE state = 'recovery_conflict'",
+  "describe": {
+    "columns": [
+      {
+        "name": "workspace_root!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_commit_intents",
+            "name": "workspace_root"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6d353b63eb5eb9b5ef5149a190d9a3a9abcc7fc3d4b020f7ec4524fd945699f6"
+}

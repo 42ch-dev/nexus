@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE workspace_sessions SET consumed = 1, claimed_by_revision = NULL WHERE session_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "eb73296193efb7f70780fc27dcb6d2853fd883f636dceaec115694505969d092"
+}

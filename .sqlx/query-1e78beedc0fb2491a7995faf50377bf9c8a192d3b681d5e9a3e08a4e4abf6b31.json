@@ -1,0 +1,98 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT session_id as \"session_id!\", workspace_root as \"workspace_root!\", revision as \"revision!\",\n                  request_digest as \"request_digest!\", state as \"state!\", entries_json as \"entries_json!\", error_category\n         FROM workspace_commit_intents WHERE state = 'committed' ORDER BY rowid DESC",
+  "describe": {
+    "columns": [
+      {
+        "name": "session_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_commit_intents",
+            "name": "session_id"
+          }
+        }
+      },
+      {
+        "name": "workspace_root!",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_commit_intents",
+            "name": "workspace_root"
+          }
+        }
+      },
+      {
+        "name": "revision!",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_commit_intents",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "name": "request_digest!",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_commit_intents",
+            "name": "request_digest"
+          }
+        }
+      },
+      {
+        "name": "state!",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_commit_intents",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "name": "entries_json!",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_commit_intents",
+            "name": "entries_json"
+          }
+        }
+      },
+      {
+        "name": "error_category",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_commit_intents",
+            "name": "error_category"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "1e78beedc0fb2491a7995faf50377bf9c8a192d3b681d5e9a3e08a4e4abf6b31"
+}

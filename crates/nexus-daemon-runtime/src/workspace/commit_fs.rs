@@ -54,11 +54,15 @@ fn is_safe_basename(name: &str) -> bool {
         && !name.contains('\0')
 }
 
-/// Fire the gated after-delete-capture seam (no-op in production).
+/// Fire the gated after-delete-capture seam.
+#[cfg(any(test, feature = "test-hooks"))]
 fn run_after_delete_capture_hook() {
-    #[cfg(any(test, feature = "test-hooks"))]
     super::test_hooks::run_after_delete_capture_hook();
 }
+
+/// Production no-op: the capture/finalize injection point is test-only.
+#[cfg(not(any(test, feature = "test-hooks")))]
+const fn run_after_delete_capture_hook() {}
 
 /// Name holding the bytes displaced by a mutation, derived from the stage name.
 fn displaced_basename(stage_basename: &str) -> String {
@@ -71,6 +75,22 @@ fn displaced_basename(stage_basename: &str) -> String {
 /// never clobbered while evidence of the failed apply is preserved.
 fn restore_basename(stage_basename: &str) -> String {
     format!("{stage_basename}-rb")
+}
+
+/// Every artifact name derivable from one entry: the backup copy, the
+/// capture/restore siblings, and the stage file itself.
+///
+/// Single source of truth for both best-effort cleanup and its confirmed
+/// variant, so the removed set and the verified set cannot diverge.
+fn artifact_names(stage_basename: &str, backup_basename: Option<&str>) -> Vec<String> {
+    let mut names = Vec::with_capacity(4);
+    if let Some(backup) = backup_basename {
+        names.push(backup.to_string());
+    }
+    names.push(displaced_basename(stage_basename));
+    names.push(restore_basename(stage_basename));
+    names.push(stage_basename.to_string());
+    names
 }
 
 /// Scope-bound mutation handle over a verified directory descriptor.
@@ -114,6 +134,10 @@ impl ScopeMutation {
     }
 
     pub fn hash_target(&self, _rel_path: &str) -> io::Result<String> {
+        unsupported::refuse()
+    }
+
+    pub fn target_mode(&self, _rel_path: &str) -> io::Result<Option<u32>> {
         unsupported::refuse()
     }
 
@@ -178,6 +202,15 @@ impl ScopeMutation {
         _backup_basename: Option<&str>,
     ) {
     }
+
+    pub fn cleanup_entry_confirmed(
+        &self,
+        _rel_path: &str,
+        _stage_basename: &str,
+        _backup_basename: Option<&str>,
+    ) -> io::Result<()> {
+        unsupported::refuse()
+    }
 }
 
 #[cfg(unix)]
@@ -234,6 +267,20 @@ impl ScopeMutation {
     /// components, or opening/reading the target.
     pub fn hash_target(&self, rel_path: &str) -> io::Result<String> {
         self.with_parent(rel_path, unix_dir::DirFd::hash_file)
+    }
+
+    /// Read the current mode of an existing target (no-follow, read-only).
+    ///
+    /// Commit planning records a modify/delete entry's restore mode before any
+    /// stage or backup bytes are written, so the durable write-ahead intent row
+    /// carries the same permission bits a later rollback must restore.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`io::Error`] from splitting `rel_path`, walking its parent
+    /// components, or opening the target.
+    pub fn target_mode(&self, rel_path: &str) -> io::Result<Option<u32>> {
+        self.with_parent(rel_path, unix_dir::DirFd::read_mode)
     }
 
     /// Write an exclusive stage file beside the target (create-new, no-clobber).
@@ -373,12 +420,43 @@ impl ScopeMutation {
         stage_basename: &str,
         backup_basename: Option<&str>,
     ) {
-        if let Some(backup) = backup_basename {
-            self.cleanup_basename(rel_path, backup);
+        for name in artifact_names(stage_basename, backup_basename) {
+            self.cleanup_basename(rel_path, &name);
         }
-        self.cleanup_basename(rel_path, &displaced_basename(stage_basename));
-        self.cleanup_basename(rel_path, &restore_basename(stage_basename));
-        self.cleanup_basename(rel_path, stage_basename);
+    }
+
+    /// Remove every artifact derived from one entry and CONFIRM the removal.
+    ///
+    /// [`Self::cleanup_entry`] is best-effort cleanup for an intent that has
+    /// already settled durably, so it cannot authorize deleting an UNSETTLED
+    /// intent row -- that row is the only record of which artifacts belong to
+    /// the commit. This variant reports failure instead, and is the gate a
+    /// staging failure must pass before the durable ledger may be released.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`io::Error`] from walking the target's parent, or an error
+    /// naming the surviving artifact when any planned name is still present
+    /// (for example when a directory occupies the stage name).
+    pub fn cleanup_entry_confirmed(
+        &self,
+        rel_path: &str,
+        stage_basename: &str,
+        backup_basename: Option<&str>,
+    ) -> io::Result<()> {
+        self.cleanup_entry(rel_path, stage_basename, backup_basename);
+        // Confirm on a fresh walk rather than trusting the unlink results:
+        // `cleanup_basename` swallows them by design.
+        self.with_parent(rel_path, |parent, _| {
+            for name in artifact_names(stage_basename, backup_basename) {
+                if parent.exists(&name)? {
+                    return Err(io::Error::other(format!(
+                        "artifact survived cleanup: {name}"
+                    )));
+                }
+            }
+            Ok(())
+        })
     }
 
     fn with_parent<T, F>(&self, rel_path: &str, f: F) -> io::Result<T>
@@ -488,6 +566,12 @@ mod unix_dir {
                 sha.update(&buf[..n]);
             }
             Ok(hex::encode(sha.finalize()))
+        }
+
+        /// Read a target's mode through a no-follow open (metadata only).
+        pub fn read_mode(&self, name: &str) -> io::Result<Option<u32>> {
+            let src = self.openat(name, OFlag::O_RDONLY)?;
+            Ok(file_mode_fd(&src))
         }
 
         /// Create a new exclusive stage file (`O_CREAT|O_EXCL`, no-clobber).

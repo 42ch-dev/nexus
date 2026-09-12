@@ -6,8 +6,8 @@ use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
+use uuid::Uuid;
 
 pub const MAX_RECORDS_PER_RUN: usize = 256;
 pub const MAX_BYTES_PER_RUN: usize = 1024 * 1024;
@@ -87,7 +87,7 @@ impl RunEventSink {
 #[derive(Debug, Clone, Serialize)]
 pub struct HostEventWire<'a> {
     pub run_id: &'a str,
-    pub epoch: u64,
+    pub epoch: Uuid,
     pub sequence: u64,
     pub step_id: &'a str,
     pub attempt_id: &'a str,
@@ -97,7 +97,7 @@ pub struct HostEventWire<'a> {
 #[derive(Debug, Clone, Serialize)]
 pub struct RunStateWire<'a> {
     pub run_id: &'a str,
-    pub epoch: u64,
+    pub epoch: Uuid,
     pub sequence: u64,
     pub state_revision: u64,
     pub status: &'a str,
@@ -108,7 +108,7 @@ pub struct RunStateWire<'a> {
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
 pub struct GapWire {
     pub run_id: String,
-    pub epoch: u64,
+    pub epoch: Uuid,
     pub from_sequence: u64,
     pub to_sequence: u64,
 }
@@ -159,7 +159,7 @@ struct RegistryState {
 
 struct RunRing {
     run_id: String,
-    epoch: u64,
+    epoch: Uuid,
     records: VecDeque<StoredRecord>,
     total_bytes: usize,
     next_sequence: u64,
@@ -312,7 +312,7 @@ impl RunEventRegistry {
             });
         let wire = RunStateWire {
             run_id,
-            epoch: 0,
+            epoch: Uuid::nil(),
             sequence: 0,
             state_revision: record.state_revision,
             status: record.status.as_db_str(),
@@ -527,7 +527,7 @@ impl RunEventRegistryInner {
         }
         let wire = HostEventWire {
             run_id,
-            epoch: 0,
+            epoch: Uuid::nil(),
             sequence: 0,
             step_id,
             attempt_id,
@@ -717,7 +717,7 @@ fn collect_from(ring: &RunRing, run_id: &str, after: Option<u64>) -> Vec<SseFram
     out
 }
 
-fn gap_frame(run_id: &str, epoch: u64, from: u64, to: u64) -> SseFrame {
+fn gap_frame(run_id: &str, epoch: Uuid, from: u64, to: u64) -> SseFrame {
     let gap = GapWire {
         run_id: run_id.to_string(),
         epoch,
@@ -732,23 +732,21 @@ fn gap_frame(run_id: &str, epoch: u64, from: u64, to: u64) -> SseFrame {
     }
 }
 
-fn lag_gap_frame(run_id: &str, epoch: u64, sequence: u64) -> SseFrame {
+fn lag_gap_frame(run_id: &str, epoch: Uuid, sequence: u64) -> SseFrame {
     gap_frame(run_id, epoch, sequence, sequence)
 }
 
-fn parse_cursor(cursor: &str) -> Result<(u64, u64), SubscribeError> {
-    let Some((epoch, seq)) = cursor.split_once(':') else {
+fn parse_cursor(cursor: &str) -> Result<(Uuid, u64), SubscribeError> {
+    let Some((epoch, seq)) = cursor.rsplit_once(':') else {
         return Err(SubscribeError::MalformedCursor);
     };
-    let epoch = epoch.parse().map_err(|_| SubscribeError::MalformedCursor)?;
+    let epoch = Uuid::parse_str(epoch).map_err(|_| SubscribeError::MalformedCursor)?;
     let seq = seq.parse().map_err(|_| SubscribeError::MalformedCursor)?;
     Ok((epoch, seq))
 }
 
-fn current_epoch() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
+fn current_epoch() -> Uuid {
+    Uuid::new_v4()
 }
 
 #[cfg(test)]
@@ -771,8 +769,8 @@ mod tests {
     fn frame_sequence(frame: &SseFrame) -> u64 {
         frame
             .id
-            .split(':')
-            .nth(1)
+            .rsplit(':')
+            .next()
             .expect("cursor id")
             .parse()
             .expect("numeric sequence")
@@ -791,11 +789,44 @@ mod tests {
 
     #[test]
     fn gap_cursor_is_numeric_sequence() {
-        let frame = gap_frame("run-1", 42, 3, 7);
-        assert!(frame.id.starts_with("42:"));
-        let seq = frame.id.split(':').nth(1).unwrap();
+        let epoch = Uuid::parse_str("00000000-0000-0000-0000-00000000002a").expect("epoch");
+        let frame = gap_frame("run-1", epoch, 3, 7);
+        assert!(frame.id.starts_with(&format!("{epoch}:")));
+        let seq = frame.id.rsplit(':').next().unwrap();
         assert!(seq.parse::<u64>().is_ok());
         assert_ne!(seq, "gap");
+    }
+
+    #[test]
+    fn pre_restart_cursor_yields_history_unavailable_after_registry_restart() {
+        let before = RunEventRegistry::new();
+        let _sink = before.try_register_live("run-1").expect("register");
+        before.publish_run_state("run-1", &mk_record("run-1", SessionStatus::Running, 1));
+        let pre_restart_cursor = {
+            let state = before
+                .inner
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let ring = state.live.get("run-1").expect("ring");
+            format!("{}:1", ring.epoch)
+        };
+
+        let after = RunEventRegistry::new();
+        let _sink = after
+            .try_register_live("run-1")
+            .expect("re-register after restart");
+        after.publish_run_state("run-1", &mk_record("run-1", SessionStatus::Running, 2));
+
+        let result = after.subscribe_live("run-1", Some(&pre_restart_cursor), "/inspect".into());
+        let Err(err) = result else {
+            panic!("pre-restart cursor must not subscribe live");
+        };
+        let SubscribeError::HistoryUnavailable(wire) = err else {
+            panic!("pre-restart cursor must map to history_unavailable, not invalid_cursor or silent skip");
+        };
+        assert_eq!(wire.run_id, "run-1");
+        assert_eq!(wire.inspect_url, "/inspect");
     }
 
     /// Nested prompt steps run under child session ids; the root must be
@@ -835,7 +866,7 @@ mod tests {
     #[test]
     fn encoded_frame_cap_counts_wire_overhead() {
         let frame = SseFrame {
-            id: "1:1".into(),
+            id: "00000000-0000-0000-0000-000000000001:1".into(),
             event: "host_event".into(),
             data: "x".repeat(MAX_FRAME_BYTES),
         };

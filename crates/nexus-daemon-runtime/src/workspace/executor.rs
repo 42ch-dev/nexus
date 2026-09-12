@@ -49,6 +49,9 @@ fn map_session_error(err: SessionError) -> CapabilityError {
             CapabilityError::PermanentExternal("workspace recovery conflict".into())
         }
         SessionError::PathEscape { .. } => CapabilityError::InputInvalid("path not allowed".into()),
+        SessionError::ActiveWorkspaceMismatch { .. } => {
+            CapabilityError::InputInvalid("session workspace root mismatch".into())
+        }
         SessionError::Database(_) | SessionError::Io(_) | SessionError::Internal(_) => {
             CapabilityError::Internal("workspace storage error".into())
         }
@@ -103,6 +106,7 @@ impl WorkspaceExecutor for DaemonWorkspaceExecutor {
             Arc::clone(&self.session_manager),
             session_id,
             input.changes,
+            self.canonical_workspace_root.clone(),
         )
         .await
         .map_err(map_session_error)?;
