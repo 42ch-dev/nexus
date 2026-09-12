@@ -879,9 +879,21 @@ async fn cleanup_settled_artifacts(mgr: &WorkspaceSessionManager) {
     };
 
     for (session_id, workspace_root, entries_json) in rows {
-        let entries: Vec<db::IntentEntryJson> = match serde_json::from_str(&entries_json) {
+        // FAIL CLOSED: this document names the files we are about to unlink, so
+        // it goes through the full raw-size/entry/path/artifact-basename
+        // validation before any filesystem work. A malformed row is skipped
+        // whole — nothing is deleted and the evidence survives.
+        let entries = match db::validate_cleanup_entries(&entries_json) {
             Ok(entries) => entries,
-            Err(_) => continue,
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    session_id = %session_id,
+                    "settled-artifact sweep: refusing cleanup for unvalidated metadata; \
+                     evidence preserved"
+                );
+                continue;
+            }
         };
         if entries.is_empty() {
             continue;

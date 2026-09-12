@@ -40,6 +40,20 @@ pub const MAX_CHANGES: usize = 128;
 /// Owner-read/write for newly created workspace files.
 pub const CREATE_FILE_MODE: u32 = 0o600;
 
+/// Whether `name` is a usable single-segment basename.
+///
+/// Rejects empty names, any path separator, the `.`/`..` pseudo-segments, and
+/// embedded NULs — every shape that could make a directory-relative operation
+/// leave its parent.
+fn is_safe_basename(name: &str) -> bool {
+    !name.is_empty()
+        && name != "."
+        && name != ".."
+        && !name.contains('/')
+        && !name.contains('\\')
+        && !name.contains('\0')
+}
+
 /// Fire the gated after-delete-capture seam (no-op in production).
 fn run_after_delete_capture_hook() {
     #[cfg(any(test, feature = "test-hooks"))]
@@ -285,7 +299,15 @@ impl ScopeMutation {
     }
 
     /// Remove a sibling basename (stage/backup) relative to a target path.
+    ///
+    /// Only a plain single-segment basename is accepted: a separator or a `..`
+    /// would let the directory-relative unlink escape the parent, so such a
+    /// name is refused outright (defence in depth behind the metadata
+    /// validation, which should already have rejected it).
     pub fn cleanup_basename(&self, rel_path: &str, basename: &str) {
+        if !is_safe_basename(basename) {
+            return;
+        }
         let _ = self.with_parent(rel_path, |parent, _| parent.unlink(basename));
     }
 

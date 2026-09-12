@@ -57,7 +57,7 @@ pub use workspace_commit_intent::{
     abort_intent_and_release_claim, claim_session_and_insert_intent, finalize_committed_intent,
     finalize_rolled_back_intent, get_committed_intent_by_digest, get_committed_request_digest,
     get_intent_by_revision, latest_committed_intent_for_root, list_all_unsettled_intents,
-    list_settled_intents_for_cleanup,
+    list_settled_intents_for_cleanup, validate_cleanup_entries,
     list_unsettled_intents, release_session_claim, update_intent_state,
     workspace_has_recovery_conflict, ClaimSessionResult, CommitIntentRow, IntentEntryJson,
     IntentState, MAX_ENTRIES_JSON_BYTES,

@@ -1327,3 +1327,52 @@ async fn alias_equivalent_paths_rejected_after_normalization() {
         0
     );
 }
+
+#[tokio::test]
+#[serial]
+async fn corrupt_settled_basename_cannot_traverse_outside_scope() {
+    let (pool, db_dir) = fresh_pool().await;
+    let mgr = recoverable_mgr(pool, &db_dir);
+
+    // Layout: <parent>/ws/<scope> and a sentinel OUTSIDE the scope.
+    let parent = tempfile::tempdir().unwrap();
+    let ws = parent.path().join("ws");
+    std::fs::create_dir_all(&ws).unwrap();
+    let sentinel = parent.path().join("escape-sentinel.txt");
+    std::fs::write(&sentinel, b"must-survive").unwrap();
+    let root = ws.to_string_lossy().to_string();
+    mgr.startup_recovery().await.expect("startup");
+    let session = mgr.open_session(&root, "", true).await.expect("open");
+
+    // A settled row whose artifact basename is a traversal. Every field is
+    // otherwise well-formed, so only basename validation can stop it.
+    let hostile = serde_json::json!([{
+        "path": "x.txt",
+        "op": "create",
+        "preHash": null,
+        "postHash": "0".repeat(64),
+        "stageBasename": "../escape-sentinel.txt",
+        "backupBasename": null,
+        "mode": null
+    }])
+    .to_string();
+    sqlx::query(
+        "INSERT INTO workspace_commit_intents (session_id, workspace_root, revision, request_digest, state, entries_json) \
+         VALUES (?, ?, 'rev_traversal', 'dig', 'committed', ?)",
+    )
+    .bind(session.to_string())
+    .bind(&root)
+    .bind(&hostile)
+    .execute(mgr.pool().as_ref())
+    .await
+    .unwrap();
+
+    // The sweep must refuse this row entirely, not unlink through the name.
+    mgr.startup_recovery().await.expect("recovery");
+
+    assert_eq!(
+        std::fs::read(&sentinel).expect("sentinel must still exist"),
+        b"must-survive",
+        "an unvalidated settled basename must never reach unlink"
+    );
+}

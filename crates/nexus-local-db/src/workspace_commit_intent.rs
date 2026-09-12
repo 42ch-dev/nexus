@@ -326,6 +326,30 @@ pub async fn latest_committed_intent_for_root(
     row.map(IntentRowRaw::try_into_row).transpose()
 }
 
+/// Validate a settled intent's persisted metadata before ANY filesystem cleanup.
+///
+/// The sweep deletes files named by this document, so it is untrusted input
+/// even though we wrote it: the raw column bytes are bounded first, then every
+/// entry is put through the same op/path/hash/artifact-basename validation the
+/// commit path uses. A malformed row must fail closed — the caller skips it and
+/// preserves the evidence — rather than forward an unvalidated basename to a
+/// directory-relative unlink.
+pub fn validate_cleanup_entries(
+    entries_json: &str,
+) -> Result<Vec<IntentEntryJson>, LocalDbError> {
+    if entries_json.len() > MAX_ENTRIES_JSON_BYTES {
+        return Err(LocalDbError::ValidationError(format!(
+            "settled intent entries_json exceeds {MAX_ENTRIES_JSON_BYTES} bytes"
+        )));
+    }
+    let entries: Vec<IntentEntryJson> = serde_json::from_str(entries_json)
+        .map_err(|e| LocalDbError::ValidationError(format!("corrupt settled entries_json: {e}")))?;
+    for entry in &entries {
+        validate_intent_entry(entry)?;
+    }
+    Ok(entries)
+}
+
 /// Rows for post-settle artifact cleanup, parsed leniently by the caller.
 ///
 /// Committed and rolled-back intents are already durable, so a row whose
