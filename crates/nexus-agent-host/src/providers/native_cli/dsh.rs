@@ -5057,7 +5057,7 @@ mod tests {
         let req_log = req_log_dir.path().join("reqs.jsonl");
         let dsh_home = req_log_dir.path().join("dsh-home");
         let mut env = stub_env_scenario(&req_log, &dsh_home, "flood_messages");
-        env.insert("FLOOD_COUNT".to_string(), "65".to_string());
+        env.insert("FLOOD_COUNT".to_string(), "66".to_string());
         env.insert("FLOOD_HOLD".to_string(), "1".to_string());
         let provider = stub_provider("test-dsh-flood", env);
         let handle = launch_hermetic(&provider).await;
@@ -5080,8 +5080,8 @@ mod tests {
         let events = collect_events_with_post_started_backpressure(&req_log, stream).await;
         assert_eq!(
             message_texts(&events),
-            (0..64).map(|i| format!("m{i}")).collect::<Vec<_>>(),
-            "only the first 64 messages may be delivered before pending overflow"
+            (0..65).map(|i| format!("m{i}")).collect::<Vec<_>>(),
+            "one message may be dequeued before hold; then 64 pending slots fill before the 66th notification overflows"
         );
         assert!(
             matches!(
