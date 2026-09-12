@@ -3,7 +3,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { freemem, totalmem, arch, platform, release, version as nodeVersion } from 'node:os';
+import { cpus, freemem, totalmem, arch, platform, release } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
@@ -24,6 +24,7 @@ import {
   readBackendManifest,
   refreshBackend,
   resolveDaemonEndpoint,
+  resolveListenerPid,
   resolveTargetDir,
   sha256File,
   validateDaemonHealth,
@@ -34,10 +35,12 @@ import {
 const exec = promisify(execFile);
 const GRAPH_PATH = '/v1/daemon/worlds/wld_proof_rft_dx/kb/graph';
 const DEFAULT_DAEMON_PORT = 8420;
+const DX1_SAMPLE_INTERVAL_MS = 50;
 
 const CARGO_FAMILY = /(?:^|\/)(cargo|rustc|rustup|cc1|clang\+\+?|ld\.lld)(?:\s|$)/i;
 const TAURI_FAMILY = /(?:^|\/)(tauri|cargo-tauri)(?:\s|$)/i;
 const NATIVE_BUILD = /(?:^|\/)(cmake|ninja|make|meson)(?:\s|$)/i;
+const VITE_ORIGIN_RE = /Local:\s+(https?:\/\/[^\s]+)/;
 
 export const SURFACE_CONFIG = {
   web: {
@@ -59,18 +62,23 @@ export const SURFACE_CONFIG = {
   'desktop-web': {
     label: 'desktop-web', vitePort: 5173, needsDaemon: true, needsSidecar: true, needsUiWatcher: false,
     markerRelative: 'apps/web/src/proof-rft-dx-marker.ts', markerUrlPath: '/src/proof-rft-dx-marker.ts',
-    servedProbePath: '/', devCommand: ['pnpm', '--filter', 'web', 'dev'],
+    servedProbePath: '/', devCommand: ['pnpm', 'run', 'dev:desktop:web'],
+    loopAlias: 'pnpm run dev:desktop:web',
   },
 };
 
 export function parseArgs(argv) {
-  const result = { surface: null, negative: null, boundaryDemo: false, refreshReproof: false, samples: 30, coldSamples: 10, port: DEFAULT_DAEMON_PORT, out: null, help: false };
+  const result = {
+    surface: null, negative: null, boundaryDemo: false, refreshReproof: false, injectFail: false,
+    samples: 30, coldSamples: 10, port: DEFAULT_DAEMON_PORT, out: null, help: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--surface') result.surface = argv[++i];
     else if (arg === '--negative') result.negative = argv[++i];
     else if (arg === '--boundary-demo') result.boundaryDemo = true;
     else if (arg === '--refresh-reproof') result.refreshReproof = true;
+    else if (arg === '--inject-fail') result.injectFail = true;
     else if (arg === '--samples') result.samples = Number.parseInt(argv[++i], 10);
     else if (arg === '--cold-samples') result.coldSamples = Number.parseInt(argv[++i], 10);
     else if (arg === '--port') result.port = Number.parseInt(argv[++i], 10);
@@ -79,6 +87,11 @@ export function parseArgs(argv) {
     else throw new Error(`Unknown argument: ${arg}`);
   }
   return result;
+}
+
+export function requireOutDir(args) {
+  if (!args.out) throw new Error('--out <dir> is required');
+  return resolve(args.out);
 }
 
 export function nearestRankP95(samples) {
@@ -123,7 +136,55 @@ export function countCargoTraces(rootPid, psOutput) {
   const traced = rows.filter(r => descendants.has(r.pid));
   const cargoHits = traced.filter(r => isCargoFamilyCommand(r.command));
   const tauriHits = traced.filter(r => isTauriFamilyCommand(r.command));
-  return { processCount: traced.length, cargoCount: cargoHits.length, tauriCount: tauriHits.length, cargoCommands: cargoHits.map(r => r.command), tauriCommands: tauriHits.map(r => r.command), tracedPids: [...descendants].sort((a,b)=>a-b) };
+  return { processCount: traced.length, cargoCount: cargoHits.length, tauriCount: tauriHits.length, cargoCommands: cargoHits.map(r => r.command), tauriCommands: tauriHits.map(r => r.command), tracedPids: [...descendants].sort((a, b) => a - b) };
+}
+
+export function isPidInForest(pid, rootPids, psOutput) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  for (const rootPid of rootPids) {
+    const { tracedPids } = countCargoTraces(rootPid, psOutput);
+    if (tracedPids.includes(pid)) return true;
+  }
+  return false;
+}
+
+export function summarizeIntervalSamples(samples) {
+  const cargoCommands = new Set();
+  const tauriCommands = new Set();
+  const tracedPids = new Set();
+  let maxProcessCount = 0;
+  let cargoPositiveSamples = 0;
+  for (const sample of samples) {
+    if (sample.cargoCount > 0) cargoPositiveSamples += 1;
+    maxProcessCount = Math.max(maxProcessCount, sample.processCount ?? 0);
+    for (const cmd of sample.cargoCommands ?? []) cargoCommands.add(cmd);
+    for (const cmd of sample.tauriCommands ?? []) tauriCommands.add(cmd);
+    for (const pid of sample.tracedPids ?? []) tracedPids.add(pid);
+  }
+  return {
+    observationCount: samples.length,
+    cargoPositiveSamples,
+    processCount: maxProcessCount,
+    cargoCount: cargoCommands.size,
+    tauriCount: tauriCommands.size,
+    cargoCommands: [...cargoCommands],
+    tauriCommands: [...tauriCommands],
+    tracedPids: [...tracedPids].sort((a, b) => a - b),
+    anyCargo: cargoPositiveSamples > 0,
+    anyTauri: tauriCommands.size > 0,
+  };
+}
+
+export function getDx1RootPids({ viteChild, watcherChild, config }) {
+  const roots = [];
+  if (viteChild?.pid) roots.push(viteChild.pid);
+  if (config.needsUiWatcher && watcherChild?.pid) roots.push(watcherChild.pid);
+  return roots;
+}
+
+export function parseViteOriginFromChunk(text) {
+  const match = text.match(VITE_ORIGIN_RE);
+  return match ? match[1].trim().replace(/\/$/, '') : null;
 }
 
 export function evidenceFilename({ runKind, pass, startedAt }) { return `${startedAt.replace(/[:.]/g, '-')}-${runKind}-${pass ? 'pass' : 'fail'}.json`; }
@@ -134,21 +195,77 @@ export function markerProbeUrl(viteOrigin, config, repoRoot) {
   return `${viteOrigin}/@fs${abs}`;
 }
 
+async function runVersion(command, args) {
+  try { return (await exec(command, args)).stdout.trim().split('\n')[0]; } catch { return 'N/A'; }
+}
+
+export async function captureCompilerVersions() {
+  const rustc = await runVersion('rustc', ['--version']);
+  const cargo = await runVersion('cargo', ['--version']);
+  const linker = process.platform === 'darwin'
+    ? await runVersion('clang', ['--version'])
+    : await runVersion('ld', ['--version']);
+  return { rustc, cargo, linker };
+}
+
+export async function captureEnvironment(repoRoot, { includeCompiler = false } = {}) {
+  const cpuList = cpus();
+  const compiler = includeCompiler ? await captureCompilerVersions() : { rustc: 'N/A', cargo: 'N/A', linker: 'N/A' };
+  return {
+    os: {
+      platform: platform(),
+      arch: arch(),
+      release: release(),
+      version: `${platform()} ${release()}`,
+      node: process.version,
+    },
+    cpu: { model: cpuList[0]?.model ?? 'N/A', logicalCores: cpuList.length },
+    compiler,
+    memory: { totalBytes: totalmem(), freeBytes: freemem() },
+    repoRoot,
+    sourceSha: await runGitSha(repoRoot),
+  };
+}
+
+export async function sampleProcessForest(rootPids) {
+  const psOutput = (await exec('ps', ['-eo', 'pid=,ppid=,command='])).stdout;
+  const perRoot = [];
+  for (const rootPid of rootPids) perRoot.push({ rootPid, ...countCargoTraces(rootPid, psOutput) });
+  const merged = summarizeIntervalSamples(perRoot);
+  return { perRoot, merged, psOutput };
+}
+
+export async function traceDuringEdit(rootPids, fn, { intervalMs = DX1_SAMPLE_INTERVAL_MS } = {}) {
+  const intervalSamples = [];
+  let running = true;
+  const sampler = (async () => {
+    while (running) {
+      const { perRoot } = await sampleProcessForest(rootPids);
+      for (const sample of perRoot) intervalSamples.push(sample);
+      await sleep(intervalMs);
+    }
+  })();
+  try {
+    const result = await fn();
+    return { result, intervalSamples };
+  } finally {
+    running = false;
+    await Promise.race([sampler, sleep(intervalMs * 3)]);
+  }
+}
 
 async function startDaemonNonBlocking(artifactPath, port, env) {
-  await new Promise((resolve, reject) => {
+  await new Promise((resolvePromise, reject) => {
     const child = spawn(artifactPath, ['daemon', 'start', '--port', String(port)], { env, stdio: 'ignore' });
     child.on('error', reject);
-    child.on('close', () => resolve());
-    setTimeout(resolve, 1000);
+    child.on('close', () => resolvePromise());
+    setTimeout(resolvePromise, 1000);
   });
 }
 
 async function sleep(ms) { await new Promise(r => setTimeout(r, ms)); }
 async function pathExists(path) { try { await access(path); return true; } catch { return false; } }
 async function runGitSha(repoRoot) { return (await exec('git', ['rev-parse', 'HEAD'], { cwd: repoRoot })).stdout.trim(); }
-async function captureEnvironment(repoRoot) { return { os: { platform: platform(), arch: arch(), release: release(), node: nodeVersion() }, memory: { totalBytes: totalmem(), freeBytes: freemem() }, repoRoot, sourceSha: await runGitSha(repoRoot) }; }
-async function sampleProcessTree(rootPid) { return countCargoTraces(rootPid, (await exec('ps', ['-eo', 'pid=,ppid=,command='])).stdout); }
 
 async function fetchText(url, { timeoutMs = 5000 } = {}) {
   const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -191,18 +308,49 @@ async function assertByteIdenticalRestore(edits) {
   }
 }
 
+export function collectProcessTreePids(rootPid, psOutput) {
+  if (!Number.isInteger(rootPid) || rootPid <= 0) return [];
+  return [...collectDescendants(rootPid, parsePsLines(psOutput))];
+}
+
+async function waitForPortFree(port, { timeoutMs = 15_000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const listenerPid = await resolveListenerPid(port);
+    if (listenerPid === null) return;
+    await sleep(100);
+  }
+  throw new Error(`Timed out waiting for port ${port} to be released`);
+}
 async function killProcessTree(child) {
-  if (!child || child.exitCode !== null) return;
-  try { process.kill(child.pid, 'SIGTERM'); } catch { return; }
+  if (!child?.pid) return;
+  let psOutput = (await exec('ps', ['-eo', 'pid=,ppid=,command='])).stdout;
+  const pids = collectProcessTreePids(child.pid, psOutput);
+  for (const pid of [...pids].sort((a, b) => b - a)) {
+    try { process.kill(pid, 'SIGTERM'); } catch {}
+  }
   await sleep(500);
-  if (child.exitCode === null) { try { process.kill(child.pid, 'SIGKILL'); } catch {} }
-  await new Promise(resolve => { child.on('close', resolve); setTimeout(resolve, 2000); });
+  psOutput = (await exec('ps', ['-eo', 'pid=,ppid=,command='])).stdout;
+  const survivors = collectProcessTreePids(child.pid, psOutput).filter(pid => {
+    try { process.kill(pid, 0); return true; } catch { return false; }
+  });
+  for (const pid of survivors.sort((a, b) => b - a)) {
+    try { process.kill(pid, 'SIGKILL'); } catch {}
+  }
+  await new Promise(resolve => { child.on('close', resolve); setTimeout(resolve, 1000); });
 }
 
 function spawnLogged(command, args, { cwd, env, label }) {
   const child = spawn(command, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
-  child.stdout?.on('data', c => process.stderr.write(`[${label}] ${c}`));
-  child.stderr?.on('data', c => process.stderr.write(`[${label}] ${c}`));
+  let capturedOrigin = null;
+  const onData = chunk => {
+    process.stderr.write(`[${label}] ${chunk}`);
+    const origin = parseViteOriginFromChunk(chunk.toString());
+    if (origin) capturedOrigin = origin;
+  };
+  child.stdout?.on('data', onData);
+  child.stderr?.on('data', onData);
+  child.getCapturedOrigin = () => capturedOrigin;
   return child;
 }
 
@@ -215,14 +363,23 @@ export async function writeEvidence(outDir, payload) {
   return target;
 }
 
-async function ensureDaemon({ artifactPath, port, env }) {
+export function recordDaemonOwnership(wasRunning) {
+  return { startedByRunner: !wasRunning, wasRunning };
+}
+export async function ensureDaemonTracked({ artifactPath, port, env }) {
   const manifest = await readBackendManifest(artifactPath);
   const { baseUrl } = resolveDaemonEndpoint({ portEnv: String(port), urlEnv: env.VITE_DAEMON_URL });
   const statusOutput = (await exec(artifactPath, ['daemon', 'status', '--port', String(port)], { env })).stdout;
-  if (!isDaemonCliStatusRunning(statusOutput)) { await startDaemonNonBlocking(artifactPath, port, env); }
+  const wasRunning = isDaemonCliStatusRunning(statusOutput);
+  const ownership = recordDaemonOwnership(wasRunning);
+  if (ownership.startedByRunner) {
+    await startDaemonNonBlocking(artifactPath, port, env);
+  }
   await waitForDaemonHealth(baseUrl, { expectedPackageVersion: manifest.packageVersion, deadlineMs: 120_000 });
-  if (isDaemonCliStatusRunning(statusOutput)) await assertCompatibleRunningDaemon({ baseUrl, manifest, port, daemonStatusOutput: statusOutput });
-  return { baseUrl, manifest };
+  if (ownership.wasRunning) {
+    await assertCompatibleRunningDaemon({ baseUrl, manifest, port, daemonStatusOutput: statusOutput });
+  }
+  return { baseUrl, manifest, startedByRunner: ownership.startedByRunner };
 }
 
 async function validateEndpointGraph(baseUrl) {
@@ -232,87 +389,276 @@ async function validateEndpointGraph(baseUrl) {
   return { health, graph: { url: String(graphUrl), status: graph.status, body: JSON.parse(graph.body) } };
 }
 
+async function assertEndpointOwnedByForest(port, rootPids, { psOutput } = {}) {
+  const listenerPid = await resolveListenerPid(port);
+  if (listenerPid === null) return { listenerPid: null, owned: true };
+  const output = psOutput ?? (await exec('ps', ['-eo', 'pid=,ppid=,command='])).stdout;
+  const owned = isPidInForest(listenerPid, rootPids, output);
+  if (!owned) {
+    throw new Error(`Port ${port} is occupied by foreign PID ${listenerPid}; refusing to collect timing evidence from a non-child listener`);
+  }
+  return { listenerPid, owned: true };
+}
+
+export async function resolveViteOrigin({ child, config, rootPids, fallbackOrigin, timeoutMs = 120_000 }) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const captured = child.getCapturedOrigin?.();
+    if (captured) {
+      const url = new URL(captured);
+      const listenerPid = await resolveListenerPid(url.port);
+      const psOutput = (await exec('ps', ['-eo', 'pid=,ppid=,command='])).stdout;
+      if (listenerPid !== null && !isPidInForest(listenerPid, rootPids, psOutput)) {
+        await sleep(250);
+        continue;
+      }
+      return captured.replace(/\/$/, '');
+    }
+    const listenerPid = await resolveListenerPid(config.vitePort);
+    if (listenerPid !== null) {
+      const psOutput = (await exec('ps', ['-eo', 'pid=,ppid=,command='])).stdout;
+      if (!isPidInForest(listenerPid, rootPids, psOutput)) {
+        await sleep(250);
+        continue;
+      }
+      return fallbackOrigin;
+    }
+    await sleep(250);
+  }
+  throw new Error(`Timed out resolving Vite origin for ${config.label}; last fallback=${fallbackOrigin}`);
+}
+
 async function runSidecarBaseline(repoRoot) {
   const startedAt = new Date().toISOString(); const t0 = performance.now();
-  await new Promise((resolve, reject) => {
+  await new Promise((resolvePromise, reject) => {
     const child = spawn('bash', ['scripts/fetch-sidecar.sh'], { cwd: repoRoot, env: { ...process.env, SIDECAR_PROFILE: 'debug' }, stdio: 'inherit' });
-    child.on('error', reject); child.on('close', code => (code === 0 ? resolve() : reject(new Error(`sidecar exit ${code}`))));
+    child.on('error', reject); child.on('close', code => (code === 0 ? resolvePromise() : reject(new Error(`sidecar exit ${code}`))));
   });
   return { kind: 'desktop-web-sidecar-baseline', durationMs: performance.now() - t0, startedAt, endedAt: new Date().toISOString() };
 }
 
+async function buildArtifactRecord(artifactPath, manifest) {
+  const manifestPath = manifestPathForArtifact(artifactPath);
+  return {
+    path: artifactPath,
+    manifestPath,
+    sha256: manifest.sha256,
+    manifestSha256: await sha256File(manifestPath),
+    contractHash: manifest.contractHash,
+  };
+}
+
+export function buildFailurePayload({
+  runKind, startedAt, command, environment, error, cleanupOutcome, partial = {},
+}) {
+  return {
+    runKind,
+    pass: false,
+    command,
+    error: error instanceof Error ? error.message : String(error),
+    cleanupOutcome,
+    timestamps: { utcStart: startedAt, utcEnd: new Date().toISOString() },
+    environment,
+    ...partial,
+  };
+}
+
+async function recordRunFailure(outDir, payload) {
+  try {
+    return await writeEvidence(outDir, payload);
+  } catch (writeErr) {
+    console.error(`Failed to write failure evidence: ${writeErr instanceof Error ? writeErr.message : writeErr}`);
+    return null;
+  }
+}
+
 export async function runSurfaceLoop(options) {
-  const { surface, samples, coldSamples, port, outDir, repoRoot, env: baseEnv } = options;
+  const { surface, samples, coldSamples, port, outDir, repoRoot, env: baseEnv, injectFail = false } = options;
   const config = SURFACE_CONFIG[surface];
   const startedAt = new Date().toISOString();
-  const environment = await captureEnvironment(repoRoot);
-  const targetDir = await resolveTargetDir(baseEnv);
-  const artifactPath = defaultArtifactPath({ targetDir });
-  const contractHash = await computeContractHash(repoRoot);
-  const manifest = await assertCompatibleBackend({ artifactPath, contractHash, protocolVersion: CURRENT_WRITER_PROTOCOL });
-  const env = { ...baseEnv, NEXUS42_DAEMON_PORT: String(port), VITE_DAEMON_URL: `http://127.0.0.1:${port}`, NEXUS42_ARTIFACT: artifactPath };
-  const { baseUrl } = resolveDaemonEndpoint({ portEnv: env.NEXUS42_DAEMON_PORT, urlEnv: env.VITE_DAEMON_URL });
-  const endpointCheck = config.needsDaemon ? await (async () => { await ensureDaemon({ artifactPath, port, env }); return await validateEndpointGraph(baseUrl); })() : null;
-  const sidecarBaseline = config.needsSidecar ? await runSidecarBaseline(repoRoot) : null;
-  const markerPath = join(repoRoot, config.markerRelative);
-  const markerEdit = new TrackedEdit(markerPath); await markerEdit.capture();
-  const children = []; const viteOrigin = `http://127.0.0.1:${config.vitePort}`; let daemonStartedByRunner = false;
+  const command = process.argv.join(' ');
+  let environment = null;
+  let cleanupOutcome = { restoredMarker: false, childrenStopped: false, daemonStopped: false };
+  let partial = { surface };
+  let markerEdit = null;
+  const children = [];
+  let watcherChild = null;
+  let daemonStartedByRunner = false;
+  let artifactPath = null;
+  let manifest = null;
+  let runEnv = baseEnv;
+
   try {
+    environment = await captureEnvironment(repoRoot);
+    const targetDir = await resolveTargetDir(baseEnv);
+    artifactPath = defaultArtifactPath({ targetDir });
+    const contractHash = await computeContractHash(repoRoot);
+    runEnv = { ...baseEnv, NEXUS42_DAEMON_PORT: String(port), VITE_DAEMON_URL: `http://127.0.0.1:${port}`, NEXUS42_ARTIFACT: artifactPath };
+    manifest = await assertCompatibleBackend({ artifactPath, contractHash, protocolVersion: CURRENT_WRITER_PROTOCOL });
+    let endpointCheck = null;
     if (config.needsDaemon) {
-      const statusOutput = (await exec(artifactPath, ['daemon', 'status', '--port', String(port)], { env })).stdout;
-      if (!isDaemonCliStatusRunning(statusOutput)) { daemonStartedByRunner = true; await ensureDaemon({ artifactPath, port, env }); }
+      const ensured = await ensureDaemonTracked({ artifactPath, port, env: runEnv });
+      daemonStartedByRunner = ensured.startedByRunner;
+      endpointCheck = await validateEndpointGraph(ensured.baseUrl);
     }
-    if (config.needsUiWatcher) { children.push(spawnLogged(config.uiWatcherCommand[0], config.uiWatcherCommand.slice(1), { cwd: repoRoot, env, label: 'nexus-ui-dev' })); await sleep(3000); }
+    const sidecarBaseline = config.needsSidecar ? await runSidecarBaseline(repoRoot) : null;
+    const markerPath = join(repoRoot, config.markerRelative);
+    markerEdit = new TrackedEdit(markerPath); await markerEdit.capture();
+    const fallbackOrigin = `http://127.0.0.1:${config.vitePort}`;
+    if (config.needsUiWatcher) {
+      watcherChild = spawnLogged(config.uiWatcherCommand[0], config.uiWatcherCommand.slice(1), { cwd: repoRoot, env: runEnv, label: 'nexus-ui-dev' });
+      children.push(watcherChild);
+      await sleep(3000);
+    }
     const warmSamples = []; const coldSampleValues = []; const dx1Traces = [];
-    const runViteChild = () => spawnLogged(config.devCommand[0], config.devCommand.slice(1), { cwd: repoRoot, env, label: surface });
+    const runViteChild = () => spawnLogged(config.devCommand[0], config.devCommand.slice(1), { cwd: repoRoot, env: runEnv, label: surface });
     let viteChild = runViteChild(); children.push(viteChild);
-    for (let i = 0; i < coldSamples; i++) { if (viteChild) await killProcessTree(viteChild); viteChild = runViteChild(); children.push(viteChild); const t0 = performance.now(); await waitForHttpOk(`${viteOrigin}${config.servedProbePath}`); coldSampleValues.push(performance.now() - t0); }
-    if (viteChild) await killProcessTree(viteChild); viteChild = runViteChild(); children.push(viteChild); await waitForHttpOk(`${viteOrigin}${config.servedProbePath}`);
-    for (let i = 0; i < 3 + samples; i++) { await markerEdit.write(markerSource(i)); const t0 = performance.now(); await waitForMarker(viteOrigin, config, repoRoot, i); const elapsed = performance.now() - t0; dx1Traces.push(await sampleProcessTree(viteChild.pid)); if (i >= 3) warmSamples.push(elapsed); }
-    const dx1CargoTotal = dx1Traces.reduce((s, t) => s + t.cargoCount, 0);
-    const dx1TauriTotal = dx1Traces.reduce((s, t) => s + t.tauriCount, 0);
+    let rootPids = getDx1RootPids({ viteChild, watcherChild, config });
+    let viteOrigin = await resolveViteOrigin({ child: viteChild, config, rootPids, fallbackOrigin });
+    for (let i = 0; i < coldSamples; i++) {
+      if (viteChild) await killProcessTree(viteChild);
+      await waitForPortFree(config.vitePort);
+      viteChild = runViteChild(); children.push(viteChild);
+      rootPids = getDx1RootPids({ viteChild, watcherChild, config });
+      viteOrigin = await resolveViteOrigin({ child: viteChild, config, rootPids, fallbackOrigin });
+      const t0 = performance.now();
+      await waitForHttpOk(`${viteOrigin}${config.servedProbePath}`);
+      coldSampleValues.push(performance.now() - t0);
+    }
+    if (viteChild) await killProcessTree(viteChild);
+    await waitForPortFree(config.vitePort);
+    viteChild = runViteChild(); children.push(viteChild);
+    rootPids = getDx1RootPids({ viteChild, watcherChild, config });
+    viteOrigin = await resolveViteOrigin({ child: viteChild, config, rootPids, fallbackOrigin });
+    await waitForHttpOk(`${viteOrigin}${config.servedProbePath}`);
+    if (injectFail) throw new Error('Injected failure for evidence path verification');
+    for (let i = 0; i < 3 + samples; i++) {
+      const { result: markerResult, intervalSamples } = await traceDuringEdit(rootPids, async () => {
+        await markerEdit.write(markerSource(i));
+        const t0 = performance.now();
+        const marker = await waitForMarker(viteOrigin, config, repoRoot, i);
+        return { elapsedMs: performance.now() - t0, marker };
+      });
+      const summary = summarizeIntervalSamples(intervalSamples);
+      dx1Traces.push({ sampleIndex: i, intervalSamples: intervalSamples.length, ...summary, marker: markerResult.marker });
+      if (i >= 3) warmSamples.push(markerResult.elapsedMs);
+    }
+    const dx1CargoTotal = dx1Traces.reduce((sum, trace) => sum + (trace.anyCargo ? 1 : 0), 0);
+    const dx1TauriTotal = dx1Traces.reduce((sum, trace) => sum + (trace.anyTauri ? 1 : 0), 0);
     const dx2 = evaluateDx2(warmSamples); const dx3 = evaluateDx3(coldSampleValues);
-    const dx1Pass = dx1CargoTotal === 0 && (surface !== 'desktop-web' || dx1TauriTotal === 0);
+    const dx1Pass = dx1Traces.every(trace => !trace.anyCargo) && (surface !== 'desktop-web' || dx1Traces.every(trace => !trace.anyTauri));
     const payload = {
-      runKind: `${surface}-stable-loop`, pass: dx1Pass && dx2.pass && dx3.pass, command: process.argv.join(' '), surface,
-      criteria: { 'DX-1': { pass: dx1Pass, cargoTraceCount: dx1CargoTotal, tauriTraceCount: dx1TauriTotal, samples: dx1Traces }, 'DX-2': { ...dx2, samplesMs: warmSamples }, 'DX-3': { ...dx3, samplesMs: coldSampleValues } },
-      endpoint: config.needsDaemon ? { port, baseUrl, health: endpointCheck.health, graph: endpointCheck.graph } : null,
-      sidecarBaseline, artifact: { path: artifactPath, manifestPath: manifestPathForArtifact(artifactPath), sha256: manifest.sha256, contractHash: manifest.contractHash },
-      timestamps: { utcStart: startedAt, utcEnd: new Date().toISOString() }, environment,
+      runKind: `${surface}-stable-loop`, pass: dx1Pass && dx2.pass && dx3.pass, command, surface,
+      loopCommand: config.loopAlias ?? config.devCommand.join(' '),
+      criteria: {
+        'DX-1': {
+          pass: dx1Pass,
+          cargoTraceCount: dx1CargoTotal,
+          tauriTraceCount: dx1TauriTotal,
+          sampling: { mode: 'interval', intervalMs: DX1_SAMPLE_INTERVAL_MS, rootPidsTracked: rootPids },
+          samples: dx1Traces,
+        },
+        'DX-2': { ...dx2, samplesMs: warmSamples },
+        'DX-3': { ...dx3, samplesMs: coldSampleValues },
+      },
+      endpoint: config.needsDaemon ? { port, baseUrl: `http://127.0.0.1:${port}`, health: endpointCheck.health, graph: endpointCheck.graph, viteOrigin } : { viteOrigin },
+      sidecarBaseline,
+      artifact: await buildArtifactRecord(artifactPath, manifest),
+      timestamps: { utcStart: startedAt, utcEnd: new Date().toISOString() },
+      environment,
       observedOutcomes: { warmSampleCount: warmSamples.length, coldSampleCount: coldSampleValues.length },
-      notes: ['HTTP fetch of Vite-served marker module; no browser automation.'],
+      notes: [
+        'HTTP fetch of Vite-served marker module; no browser automation.',
+        'DX-1 uses interval ps sampling across all loop root PIDs for the full edit→visible window.',
+        config.needsSidecar ? 'Desktop-web sidecar baseline executed before timed DX-2/DX-3 windows.' : null,
+      ].filter(Boolean),
     };
     return { payload, evidencePath: await writeEvidence(outDir, payload) };
+  } catch (err) {
+    const evidencePath = await recordRunFailure(outDir, buildFailurePayload({
+      runKind: `${surface}-stable-loop`,
+      startedAt,
+      command,
+      environment: environment ?? { sourceSha: await runGitSha(repoRoot).catch(() => 'unknown') },
+      error: err,
+      cleanupOutcome,
+      partial: {
+        ...partial,
+        artifact: manifest && artifactPath ? await buildArtifactRecord(artifactPath, manifest).catch(() => null) : null,
+      },
+    }));
+    const wrapped = err instanceof Error ? err : new Error(String(err));
+    wrapped.evidencePath = evidencePath;
+    throw wrapped;
   } finally {
     for (const child of [...children].reverse()) await killProcessTree(child);
-    await markerEdit.restore(); await assertByteIdenticalRestore([markerEdit]);
-    if (daemonStartedByRunner) { try { await exec(artifactPath, ['daemon', 'stop', '--port', String(port)]); } catch {} }
+    cleanupOutcome.childrenStopped = true;
+    if (markerEdit) {
+      try {
+        await markerEdit.restore();
+        await assertByteIdenticalRestore([markerEdit]);
+        cleanupOutcome.restoredMarker = true;
+      } catch (restoreErr) {
+        cleanupOutcome.restoreError = restoreErr instanceof Error ? restoreErr.message : String(restoreErr);
+      }
+    }
+    if (daemonStartedByRunner && artifactPath) {
+      try {
+        await exec(artifactPath, ['daemon', 'stop', '--port', String(port)], { env: runEnv });
+        cleanupOutcome.daemonStopped = true;
+      } catch (stopErr) {
+        cleanupOutcome.daemonStopError = stopErr instanceof Error ? stopErr.message : String(stopErr);
+      }
+    }
   }
 }
 
 export async function runNegativeCase(name, { port, outDir, repoRoot, env }) {
-  const startedAt = new Date().toISOString(); const environment = await captureEnvironment(repoRoot);
-  const targetDir = await resolveTargetDir(env); const artifactPath = defaultArtifactPath({ targetDir });
-  const contractHash = await computeContractHash(repoRoot); let pass = false; let observedError = null;
-  const tempDir = join(repoRoot, 'scripts', `.proof-rft-dx-tmp-${process.pid}`); await mkdir(tempDir, { recursive: true });
+  const startedAt = new Date().toISOString();
+  const command = process.argv.join(' ');
+  let environment = null;
+  const tempDir = join(repoRoot, 'scripts', `.proof-rft-dx-tmp-${process.pid}`);
+  let pass = false;
+  let observedError = null;
+  let sampleMeta = { negativeCase: name, sampleCount: 1, outcome: null };
+  let artifactMeta = { path: 'N/A', manifestPath: 'N/A', sha256: 'N/A', manifestSha256: 'N/A', contractHash: 'N/A' };
+
   try {
+    environment = await captureEnvironment(repoRoot);
+    await mkdir(tempDir, { recursive: true });
+    const targetDir = await resolveTargetDir(env);
+    const artifactPath = defaultArtifactPath({ targetDir });
+    const contractHash = await computeContractHash(repoRoot);
+    artifactMeta = {
+      path: artifactPath,
+      manifestPath: manifestPathForArtifact(artifactPath),
+      sha256: (await pathExists(artifactPath)) ? await sha256File(artifactPath) : 'N/A',
+      manifestSha256: (await pathExists(manifestPathForArtifact(artifactPath))) ? await sha256File(manifestPathForArtifact(artifactPath)) : 'N/A',
+      contractHash,
+    };
+
     if (name === 'missing-artifact') {
-      try { await assertCompatibleBackend({ artifactPath: join(tempDir, 'missing-nexus42'), contractHash, protocolVersion: CURRENT_WRITER_PROTOCOL }); }
+      const missingPath = join(tempDir, 'missing-nexus42');
+      artifactMeta = { path: missingPath, manifestPath: manifestPathForArtifact(missingPath), sha256: 'N/A', manifestSha256: 'N/A', contractHash };
+      try { await assertCompatibleBackend({ artifactPath: missingPath, contractHash, protocolVersion: CURRENT_WRITER_PROTOCOL }); }
       catch (err) { observedError = err.message; pass = err instanceof BackendCompatibilityError && observedError.includes(REMEDIATION_COMMAND); }
     } else if (name === 'mismatched-contract') {
       const fakeArtifact = join(tempDir, 'nexus42'); await writeFile(fakeArtifact, 'fake', 'utf8');
       const manifest = { artifactPath: fakeArtifact, sha256: await sha256File(fakeArtifact), targetTriple: 'test', packageVersion: '0.0.0-test', contractHash: 'b'.repeat(64), nativeApiVersion: null, writerProtocol: CURRENT_WRITER_PROTOCOL, dbSchemaRange: await computeDbSchemaRange(repoRoot) };
       await writeManifestAtomic(manifestPathForArtifact(fakeArtifact), manifest);
+      artifactMeta = { path: fakeArtifact, manifestPath: manifestPathForArtifact(fakeArtifact), sha256: manifest.sha256, manifestSha256: await sha256File(manifestPathForArtifact(fakeArtifact)), contractHash: manifest.contractHash };
       try { await assertCompatibleBackend({ artifactPath: fakeArtifact, contractHash, protocolVersion: CURRENT_WRITER_PROTOCOL }); }
       catch (err) { observedError = err.message; pass = err instanceof BackendCompatibilityError && observedError.includes('contractHash'); }
     } else if (name === 'wrong-digest') {
       const fakeArtifact = join(tempDir, 'nexus42'); await writeFile(fakeArtifact, 'fake', 'utf8');
       const manifest = { artifactPath: fakeArtifact, sha256: 'c'.repeat(64), targetTriple: 'test', packageVersion: '0.0.0-test', contractHash, nativeApiVersion: null, writerProtocol: CURRENT_WRITER_PROTOCOL, dbSchemaRange: await computeDbSchemaRange(repoRoot) };
       await writeManifestAtomic(manifestPathForArtifact(fakeArtifact), manifest);
+      artifactMeta = { path: fakeArtifact, manifestPath: manifestPathForArtifact(fakeArtifact), sha256: await sha256File(fakeArtifact), manifestSha256: await sha256File(manifestPathForArtifact(fakeArtifact)), contractHash: manifest.contractHash };
       try { await assertCompatibleBackend({ artifactPath: fakeArtifact, contractHash, protocolVersion: CURRENT_WRITER_PROTOCOL }); }
       catch (err) { observedError = err.message; pass = err instanceof BackendCompatibilityError && observedError.includes('digest'); }
     } else if (name === 'incompatible-daemon') {
       const manifest = await assertCompatibleBackend({ artifactPath, contractHash, protocolVersion: CURRENT_WRITER_PROTOCOL });
+      artifactMeta = await buildArtifactRecord(artifactPath, manifest);
       const stalePort = port + 7; const staleUrl = `http://127.0.0.1:${stalePort}`; let started = false;
       try {
         await startDaemonNonBlocking(artifactPath, stalePort, env); started = true;
@@ -331,55 +677,165 @@ export async function runNegativeCase(name, { port, outDir, repoRoot, env }) {
         }
       } finally { if (started) await exec(artifactPath, ['daemon', 'stop', '--port', String(stalePort)]); }
     } else throw new Error(`Unknown negative case: ${name}`);
-    const payload = { runKind: `negative-${name}`, pass, command: process.argv.join(' '), negativeCase: name, observedError, remediation: REMEDIATION_COMMAND, timestamps: { utcStart: startedAt, utcEnd: new Date().toISOString() }, environment };
+
+    sampleMeta.outcome = pass ? 'refused-as-expected' : 'unexpected-pass';
+    const payload = {
+      runKind: `negative-${name}`, pass, command, negativeCase: name, observedError, remediation: REMEDIATION_COMMAND,
+      artifact: artifactMeta, sample: sampleMeta,
+      timestamps: { utcStart: startedAt, utcEnd: new Date().toISOString() }, environment,
+    };
     const evidencePath = await writeEvidence(outDir, payload);
     if (!pass) throw new Error(`Negative case ${name} did not fail as expected`);
     return { payload, evidencePath };
-  } finally { await rm(tempDir, { recursive: true, force: true }); }
+  } catch (err) {
+    if (!(err instanceof Error && err.message.startsWith('Negative case'))) {
+      await recordRunFailure(outDir, buildFailurePayload({
+        runKind: `negative-${name}`,
+        startedAt,
+        command,
+        environment: environment ?? { sourceSha: await runGitSha(repoRoot).catch(() => 'unknown') },
+        error: err,
+        cleanupOutcome: { tempDirRemoved: false },
+        partial: { negativeCase: name, observedError, artifact: artifactMeta, sample: sampleMeta },
+      }));
+    }
+    throw err;
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 }
 
 export async function runBoundaryDemo({ port, outDir, repoRoot }) {
-  const startedAt = new Date().toISOString(); const environment = await captureEnvironment(repoRoot);
-  const targetDir = await resolveTargetDir(process.env); const artifactPath = defaultArtifactPath({ targetDir });
-  const contractHash = await computeContractHash(repoRoot);
-  await assertCompatibleBackend({ artifactPath, contractHash, protocolVersion: CURRENT_WRITER_PROTOCOL });
+  const startedAt = new Date().toISOString();
+  const command = process.argv.join(' ');
+  let environment = null;
   const schemaProbe = join(repoRoot, 'schemas', '.proof-rft-dx-contract-touch.json');
-  const touch = new TrackedEdit(schemaProbe); await touch.capture(); let refusalError = null;
+  const touch = new TrackedEdit(schemaProbe);
+  let refusalError = null;
+  let artifactPath = null;
+  let manifest = null;
+
   try {
+    environment = await captureEnvironment(repoRoot);
+    const targetDir = await resolveTargetDir(process.env);
+    artifactPath = defaultArtifactPath({ targetDir });
+    const contractHash = await computeContractHash(repoRoot);
+    manifest = await assertCompatibleBackend({ artifactPath, contractHash, protocolVersion: CURRENT_WRITER_PROTOCOL });
+    await touch.capture();
     await touch.write(`${JSON.stringify({ proof: 'touch' })}\n`);
     try { await assertCompatibleBackend({ artifactPath, contractHash: await computeContractHash(repoRoot), protocolVersion: CURRENT_WRITER_PROTOCOL }); }
     catch (err) { refusalError = err.message; }
-  } finally { await touch.restore(); await assertByteIdenticalRestore([touch]); }
-  const refreshStarted = new Date().toISOString();
-  const refreshedManifest = await refreshBackend({ profile: 'debug', targetDir, repoRoot });
-  const reproof = await assertCompatibleBackend({ artifactPath, contractHash: await computeContractHash(repoRoot), protocolVersion: CURRENT_WRITER_PROTOCOL });
-  const payload = { runKind: 'stable-vs-backend-boundary', pass: Boolean(refusalError?.includes(REMEDIATION_COMMAND)) && reproof.sha256 === refreshedManifest.sha256, command: process.argv.join(' '), boundary: { contractInputTouch: relative(repoRoot, schemaProbe), stableLoopRefusal: refusalError, refreshCommand: REMEDIATION_COMMAND, refresh: { utcStart: refreshStarted, utcEnd: new Date().toISOString(), manifestSha256: refreshedManifest.sha256 }, reproofManifestSha256: reproof.sha256 }, endpoint: { port }, timestamps: { utcStart: startedAt, utcEnd: new Date().toISOString() }, environment };
-  return { payload, evidencePath: await writeEvidence(outDir, payload) };
+    const refreshStarted = new Date().toISOString();
+    const refreshedManifest = await refreshBackend({ profile: 'debug', targetDir, repoRoot });
+    environment = await captureEnvironment(repoRoot, { includeCompiler: true });
+    const reproof = await assertCompatibleBackend({ artifactPath, contractHash: await computeContractHash(repoRoot), protocolVersion: CURRENT_WRITER_PROTOCOL });
+    const payload = {
+      runKind: 'stable-vs-backend-boundary', pass: Boolean(refusalError?.includes(REMEDIATION_COMMAND)) && reproof.sha256 === refreshedManifest.sha256,
+      command,
+      boundary: {
+        contractInputTouch: relative(repoRoot, schemaProbe),
+        stableLoopRefusal: refusalError,
+        refreshCommand: REMEDIATION_COMMAND,
+        refresh: { utcStart: refreshStarted, utcEnd: new Date().toISOString(), manifestSha256: refreshedManifest.sha256 },
+        reproofManifestSha256: reproof.sha256,
+      },
+      endpoint: { port },
+      artifact: await buildArtifactRecord(artifactPath, reproof),
+      timestamps: { utcStart: startedAt, utcEnd: new Date().toISOString() },
+      environment,
+    };
+    return { payload, evidencePath: await writeEvidence(outDir, payload) };
+  } catch (err) {
+    await recordRunFailure(outDir, buildFailurePayload({
+      runKind: 'stable-vs-backend-boundary',
+      startedAt,
+      command,
+      environment: environment ?? { sourceSha: await runGitSha(repoRoot).catch(() => 'unknown') },
+      error: err,
+      cleanupOutcome: { fixtureRestored: false },
+      partial: { boundary: { contractInputTouch: relative(repoRoot, schemaProbe), stableLoopRefusal: refusalError }, artifact: manifest && artifactPath ? await buildArtifactRecord(artifactPath, manifest).catch(() => null) : null },
+    }));
+    throw err;
+  } finally {
+    await touch.restore();
+    await assertByteIdenticalRestore([touch]);
+  }
 }
 
 export async function runRefreshReproof({ outDir, repoRoot }) {
-  const startedAt = new Date().toISOString(); const environment = await captureEnvironment(repoRoot);
-  const targetDir = await resolveTargetDir(process.env); const artifactPath = defaultArtifactPath({ targetDir });
-  const before = await readBackendManifest(artifactPath);
-  const refreshed = await refreshBackend({ profile: 'debug', targetDir, repoRoot });
-  const after = await assertCompatibleBackend({ artifactPath, contractHash: await computeContractHash(repoRoot), protocolVersion: CURRENT_WRITER_PROTOCOL });
-  const payload = { runKind: 'refresh-reproof', pass: after.sha256 === refreshed.sha256, command: process.argv.join(' '), beforeSha256: before.sha256, afterSha256: after.sha256, timestamps: { utcStart: startedAt, utcEnd: new Date().toISOString() }, environment };
-  return { payload, evidencePath: await writeEvidence(outDir, payload) };
+  const startedAt = new Date().toISOString();
+  const command = process.argv.join(' ');
+  let environment = null;
+  let artifactPath = null;
+
+  try {
+    environment = await captureEnvironment(repoRoot);
+    const targetDir = await resolveTargetDir(process.env);
+    artifactPath = defaultArtifactPath({ targetDir });
+    const before = await readBackendManifest(artifactPath);
+    const refreshed = await refreshBackend({ profile: 'debug', targetDir, repoRoot });
+    environment = await captureEnvironment(repoRoot, { includeCompiler: true });
+    const after = await assertCompatibleBackend({ artifactPath, contractHash: await computeContractHash(repoRoot), protocolVersion: CURRENT_WRITER_PROTOCOL });
+    const payload = {
+      runKind: 'refresh-reproof', pass: after.sha256 === refreshed.sha256, command,
+      beforeSha256: before.sha256, afterSha256: after.sha256,
+      artifact: await buildArtifactRecord(artifactPath, after),
+      timestamps: { utcStart: startedAt, utcEnd: new Date().toISOString() },
+      environment,
+    };
+    return { payload, evidencePath: await writeEvidence(outDir, payload) };
+  } catch (err) {
+    await recordRunFailure(outDir, buildFailurePayload({
+      runKind: 'refresh-reproof',
+      startedAt,
+      command,
+      environment: environment ?? { sourceSha: await runGitSha(repoRoot).catch(() => 'unknown') },
+      error: err,
+      cleanupOutcome: {},
+      partial: { artifactPath },
+    }));
+    throw err;
+  }
 }
 
 function printHelp() {
-  console.log(`Usage:\n  node scripts/proof-rft-dx.mjs --surface <web|studio|shared-ui|desktop-web> --samples 30 --cold-samples 10 --port 18420 --out <dir>\n  node scripts/proof-rft-dx.mjs --negative <missing-artifact|mismatched-contract|wrong-digest|incompatible-daemon> --port 18420 --out <dir>\n  node scripts/proof-rft-dx.mjs --boundary-demo --port 18420 --out <dir>\n  node scripts/proof-rft-dx.mjs --refresh-reproof --out <dir>`);
+  console.log(`Usage:\n  node scripts/proof-rft-dx.mjs --surface <web|studio|shared-ui|desktop-web> --samples 30 --cold-samples 10 --port 18420 --out <dir>\n  node scripts/proof-rft-dx.mjs --negative <missing-artifact|mismatched-contract|wrong-digest|incompatible-daemon> --port 18420 --out <dir>\n  node scripts/proof-rft-dx.mjs --boundary-demo --port 18420 --out <dir>\n  node scripts/proof-rft-dx.mjs --refresh-reproof --out <dir>\n  node scripts/proof-rft-dx.mjs --surface web --inject-fail --samples 0 --cold-samples 0 --port 18420 --out <dir>`);
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) { printHelp(); return; }
   const repoRoot = getRepoRoot(); const env = { ...process.env };
-  if (args.negative) { const result = await runNegativeCase(args.negative, { port: args.port, outDir: resolve(args.out), repoRoot, env }); console.log(`negative ${args.negative}: PASS → ${result.evidencePath}`); return; }
-  if (args.boundaryDemo) { const result = await runBoundaryDemo({ port: args.port, outDir: resolve(args.out), repoRoot }); console.log(`boundary-demo: ${result.payload.pass ? 'PASS' : 'FAIL'} → ${result.evidencePath}`); return; }
-  if (args.refreshReproof) { const result = await runRefreshReproof({ outDir: resolve(args.out), repoRoot }); console.log(`refresh-reproof: ${result.payload.pass ? 'PASS' : 'FAIL'} → ${result.evidencePath}`); return; }
-  if (!args.surface || !args.out) throw new Error('--surface and --out are required');
-  const result = await runSurfaceLoop({ surface: args.surface, samples: args.samples, coldSamples: args.coldSamples, port: args.port, outDir: resolve(args.out), repoRoot, env });
+  if (args.negative) {
+    const outDir = requireOutDir(args);
+    const result = await runNegativeCase(args.negative, { port: args.port, outDir, repoRoot, env });
+    console.log(`negative ${args.negative}: PASS → ${result.evidencePath}`);
+    return;
+  }
+  if (args.boundaryDemo) {
+    const outDir = requireOutDir(args);
+    const result = await runBoundaryDemo({ port: args.port, outDir, repoRoot });
+    console.log(`boundary-demo: ${result.payload.pass ? 'PASS' : 'FAIL'} → ${result.evidencePath}`);
+    return;
+  }
+  if (args.refreshReproof) {
+    const outDir = requireOutDir(args);
+    const result = await runRefreshReproof({ outDir, repoRoot });
+    console.log(`refresh-reproof: ${result.payload.pass ? 'PASS' : 'FAIL'} → ${result.evidencePath}`);
+    return;
+  }
+  if (!args.surface) throw new Error('--surface is required');
+  const outDir = requireOutDir(args);
+  const result = await runSurfaceLoop({
+    surface: args.surface,
+    samples: args.samples,
+    coldSamples: args.coldSamples,
+    port: args.port,
+    outDir,
+    repoRoot,
+    env,
+    injectFail: args.injectFail,
+  });
   console.log(`${args.surface}: ${result.payload.pass ? 'PASS' : 'FAIL'} cargo=${result.payload.criteria['DX-1'].cargoTraceCount} → ${result.evidencePath}`);
   if (!result.payload.pass) process.exitCode = 1;
 }

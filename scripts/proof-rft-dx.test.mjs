@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   nearestRankP95,
   maxSample,
@@ -13,7 +16,15 @@ import {
   markerSource,
   markerProbeUrl,
   parseArgs,
+  requireOutDir,
   SURFACE_CONFIG,
+  summarizeIntervalSamples,
+  getDx1RootPids,
+  parseViteOriginFromChunk,
+  isPidInForest,
+  buildFailurePayload,
+  writeEvidence,
+  collectProcessTreePids,
 } from './proof-rft-dx.mjs';
 
 test('nearestRankP95 uses nearest-rank p95', () => {
@@ -59,4 +70,91 @@ test('parseArgs reads surface and sample flags', () => {
 test('evidenceFilename encodes pass/fail without overwriting semantics', () => {
   const name = evidenceFilename({ runKind: 'web-stable-loop', pass: false, startedAt: '2026-09-13T10:00:00.000Z' });
   assert.match(name, /fail\.json$/);
+});
+
+test('requireOutDir rejects missing --out for all modes', () => {
+  assert.throws(() => requireOutDir({ out: null }), /--out <dir> is required/);
+  assert.equal(requireOutDir({ out: '/tmp/evidence' }), '/tmp/evidence');
+});
+
+test('desktop-web uses the real dev:desktop:web alias', () => {
+  assert.deepEqual(SURFACE_CONFIG['desktop-web'].devCommand, ['pnpm', 'run', 'dev:desktop:web']);
+  assert.equal(SURFACE_CONFIG['desktop-web'].loopAlias, 'pnpm run dev:desktop:web');
+});
+
+test('shared-ui DX-1 roots include watcher and vite child', () => {
+  const roots = getDx1RootPids({
+    viteChild: { pid: 200 },
+    watcherChild: { pid: 150 },
+    config: SURFACE_CONFIG['shared-ui'],
+  });
+  assert.deepEqual(roots, [200, 150]);
+});
+
+test('summarizeIntervalSamples detects cargo across interval observations', () => {
+  const summary = summarizeIntervalSamples([
+    { processCount: 2, cargoCount: 0, tauriCount: 0, cargoCommands: [], tauriCommands: [], tracedPids: [1, 2] },
+    { processCount: 3, cargoCount: 1, tauriCount: 0, cargoCommands: ['/usr/bin/cargo build'], tauriCommands: [], tracedPids: [1, 2, 3] },
+  ]);
+  assert.equal(summary.anyCargo, true);
+  assert.equal(summary.cargoPositiveSamples, 1);
+  assert.equal(summary.cargoCount, 1);
+});
+
+test('isPidInForest accepts descendants only', () => {
+  const ps = `10 1 pnpm dev\n11 10 node vite\n99 1 foreign-server`;
+  assert.equal(isPidInForest(11, [10], ps), true);
+  assert.equal(isPidInForest(99, [10], ps), false);
+});
+
+test('parseViteOriginFromChunk captures Local origin', () => {
+  const origin = parseViteOriginFromChunk('\n  ➜  Local:   http://127.0.0.1:5173/\n');
+  assert.equal(origin, 'http://127.0.0.1:5173');
+});
+
+test('buildFailurePayload preserves error and cleanup outcome', () => {
+  const payload = buildFailurePayload({
+    runKind: 'web-stable-loop',
+    startedAt: '2026-09-13T10:00:00.000Z',
+    command: 'node scripts/proof-rft-dx.mjs',
+    environment: { sourceSha: 'abc' },
+    error: new Error('boom'),
+    cleanupOutcome: { restoredMarker: true },
+    partial: { surface: 'web' },
+  });
+  assert.equal(payload.pass, false);
+  assert.equal(payload.error, 'boom');
+  assert.equal(payload.cleanupOutcome.restoredMarker, true);
+  assert.equal(payload.surface, 'web');
+});
+
+test('writeEvidence records failure JSON without overwriting', async () => {
+  const outDir = await mkdtemp(join(tmpdir(), 'proof-rft-dx-'));
+  const payload = buildFailurePayload({
+    runKind: 'inject-fail-demo',
+    startedAt: '2026-09-13T12:00:00.000Z',
+    command: 'node scripts/proof-rft-dx.mjs --inject-fail',
+    environment: { sourceSha: 'deadbeef' },
+    error: new Error('Injected failure for evidence path verification'),
+    cleanupOutcome: { childrenStopped: true },
+  });
+  const first = await writeEvidence(outDir, payload);
+  const saved = JSON.parse(await readFile(first, 'utf8'));
+  assert.equal(saved.pass, false);
+  assert.match(saved.error, /Injected failure/);
+  await assert.rejects(() => writeEvidence(outDir, payload), /Evidence file already exists/);
+  await rm(outDir, { recursive: true, force: true });
+});
+
+test('recordDaemonOwnership marks first ensure start as runner-owned', async () => {
+  const { recordDaemonOwnership } = await import('./proof-rft-dx.mjs');
+  assert.deepEqual(recordDaemonOwnership(false), { startedByRunner: true, wasRunning: false });
+  assert.deepEqual(recordDaemonOwnership(true), { startedByRunner: false, wasRunning: true });
+});
+
+
+test('collectProcessTreePids includes descendants', () => {
+  const ps = `100 1 pnpm dev\n101 100 node vite\n102 101 esbuild\n103 50 foreign`;
+  const pids = collectProcessTreePids(100, ps);
+  assert.deepEqual(pids.sort((a, b) => a - b), [100, 101, 102]);
 });
