@@ -4046,6 +4046,7 @@ dependencies = [
  "nexus-home-layout",
  "nexus-knowledge",
  "nexus-narrative",
+ "nexus-storage-guard",
  "nix 0.28.0",
  "serde",
  "serde_json",
@@ -4173,6 +4174,14 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+]
+
+[[package]]
+name = "nexus-storage-guard"
+version = "0.1.0"
+dependencies = [
+ "libsqlite3-sys",
+ "sqlx",
 ]
 
 [[package]]
