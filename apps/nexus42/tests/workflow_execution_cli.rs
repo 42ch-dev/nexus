@@ -562,6 +562,43 @@ async fn admission_concurrent_pending_row_one_session() {
 /// no OVERLAP, and a settled run no longer overlaps). The blocking host
 /// holds the winner's first prompt open so the race is between the two
 /// claims, never between a claim and a settle.
+/// Diagnosis for the serial-admission race: for each schedule id, report the
+/// schedule row (status, session) and that session's durable run record
+/// (status + raw `run_state_json`, which carries the failure field and any
+/// wait marker). Diagnostic only — it runs on the failing path, never on the
+/// happy path.
+async fn serial_race_diag(daemon: &LiveDaemon, ids: &[&str]) -> String {
+    let mut diag = String::new();
+    for id in ids {
+        let row = load_drive_row(daemon, id).await;
+        let record = match row.current_session_id.as_deref() {
+            Some(sid) => {
+                let loaded: (String, Option<Vec<u8>>) = sqlx::query_as(
+                    "SELECT status, run_state_json \
+                     FROM orchestration_sessions WHERE session_id = ?",
+                )
+                .bind(sid)
+                .fetch_one(&daemon.pool)
+                .await
+                .expect("load run record for diagnosis");
+                Some(loaded)
+            }
+            None => None,
+        };
+        let state = record
+            .as_ref()
+            .and_then(|(_, state)| state.as_deref())
+            .map(|bytes| String::from_utf8_lossy(bytes).to_string());
+        diag.push_str(&format!(
+            "\n  {id}: schedule_status={} session={:?} run_status={:?} run_state={state:?}",
+            row.status,
+            row.current_session_id,
+            record.as_ref().map(|(status, _)| status.as_str())
+        ));
+    }
+    diag
+}
+
 #[tokio::test]
 async fn admission_distinct_serial_rows_race_one_owned() {
     let daemon = LiveDaemon::start_with_agent_host(BlockingHost::non_cooperative()).await;
@@ -604,13 +641,19 @@ async fn admission_distinct_serial_rows_race_one_owned() {
     // its row stays pending and unowned (the store's in-transaction matrix
     // recheck linearizes the distinct-row serial race).
     let successes = [a.0.is_success(), b.0.is_success()];
-    assert_eq!(
-        successes.iter().filter(|s| **s).count(),
-        1,
-        "exactly one of the two racing admissions must succeed: {} / {}",
-        a.1,
-        b.1
-    );
+    let success_count = successes.iter().filter(|s| **s).count();
+    if success_count != 1 {
+        // Two successes under `BEGIN IMMEDIATE` mean the first admission's
+        // schedule row had already LEFT `running` (a settled run) before the
+        // second gate read it, so both responses report `running` yet both
+        // rows were admitted. The dump carries the first run's durable
+        // failure field, which names the cause directly.
+        let diag = serial_race_diag(&daemon, &["SCHRACE1", "SCHRACE2"]).await;
+        panic!(
+            "exactly one of the two racing admissions must succeed: {} / {}{diag}",
+            a.1, b.1
+        );
+    }
     let loser_body = if a.0.is_success() { &b.1 } else { &a.1 };
     assert_eq!(
         loser_body["error"]["code"].as_str(),
@@ -629,40 +672,7 @@ async fn admission_distinct_serial_rows_race_one_owned() {
         .as_deref()
         .is_some_and(|s| !s.is_empty());
     if !(owned1 ^ owned2) {
-        // Diagnosis, not a guess: dump each row's schedule status AND its
-        // durable run record (status + state + failure + wait). If the row
-        // that was expected to lose actually settled, its run record names
-        // the product cause; if BOTH are still running/parked, then `owned`
-        // merely means "has a session id" (it includes settled rows) and the
-        // real exclusive-admission proof is the serial-gate refusal already
-        // captured in the admission responses above.
-        let mut diag = String::new();
-        for (label, row) in [("SCHRACE1", &row1), ("SCHRACE2", &row2)] {
-            let record = match row.current_session_id.as_deref() {
-                Some(sid) => {
-                    let loaded: (String, Option<Vec<u8>>) = sqlx::query_as(
-                        "SELECT status, run_state_json \
-                         FROM orchestration_sessions WHERE session_id = ?",
-                    )
-                    .bind(sid)
-                    .fetch_one(&daemon.pool)
-                    .await
-                    .expect("load run record for diagnosis");
-                    Some(loaded)
-                }
-                None => None,
-            };
-            let state = record
-                .as_ref()
-                .and_then(|(_, state)| state.as_deref())
-                .map(|bytes| String::from_utf8_lossy(bytes).to_string());
-            diag.push_str(&format!(
-                "\n  {label}: schedule_status={} session={:?} run_status={:?} run_state={state:?}",
-                row.status,
-                row.current_session_id,
-                record.as_ref().map(|(status, _)| status.as_str())
-            ));
-        }
+        let diag = serial_race_diag(&daemon, &["SCHRACE1", "SCHRACE2"]).await;
         panic!(
             "exactly one of the two distinct serial rows must own a run: \
              SCHRACE1 owned={owned1} SCHRACE2 owned={owned2}{diag}"
