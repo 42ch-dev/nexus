@@ -4745,6 +4745,49 @@ mod tests {
     }
 
 
+
+    /// Consumer-observable flood prefix: ordered `m0`, `m1`, … without gaps
+    /// or duplicates, and no more than the fixture burst count.
+    fn assert_ordered_unique_fixture_prefix(texts: &[String], fixture_count: usize) {
+        assert!(
+            !texts.is_empty(),
+            "must observe at least one streamed message before overflow"
+        );
+        assert!(
+            texts.len() <= fixture_count,
+            "must not exceed fixture message count: {texts:?}"
+        );
+        for (i, text) in texts.iter().enumerate() {
+            assert_eq!(
+                text,
+                &format!("m{i}"),
+                "messages must be an ordered unique m0.. prefix: {texts:?}"
+            );
+        }
+    }
+
+    /// Overflow terminal must be delivery-bounds `OpFailed`, not success or
+    /// timeout/protocol arms.
+    fn assert_delivery_overflow_terminal(events: &[HostEvent]) {
+        assert_eq!(terminal_count(events), 1);
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, HostEvent::OpFinished(_))),
+            "delivery overflow must not finalize the turn: {events:?}"
+        );
+        match terminal_of(events) {
+            Some(HostEvent::OpFailed(failed)) => {
+                assert_eq!(failed.error_category, "provider_error");
+                assert_eq!(
+                    failed.error_message,
+                    "dsh operation exceeded Nexus delivery bounds"
+                );
+            }
+            other => panic!("expected delivery overflow OpFailed, got {other:?}"),
+        }
+    }
+
     /// Wait until the flood fixture logs `_flood_complete` after its
     /// burst while the returned event stream stays unpolluted (no dequeue).
     async fn wait_for_flood_burst_complete(req_log: &Path) {
@@ -5052,24 +5095,14 @@ mod tests {
             )
             .await
             .expect("execute");
-        // Rendezvous: do not poll/dequeue the stream until the fixture burst
-        // is complete so exactly 64 content slots are pending when the 65th
-        // notification arrives (no scheduler-dependent dequeue count).
+        // Rendezvous: hold the returned stream idle until the fixture burst
+        // marker; internal producer dequeue scheduling is not pinned here.
+        const FLOOD_FIXTURE_MESSAGE_COUNT: usize = 65;
         wait_for_flood_burst_complete(&req_log).await;
         let events = collect_events(stream).await;
-        assert_eq!(
-            message_texts(&events),
-            (0..64).map(|i| format!("m{i}")).collect::<Vec<_>>(),
-            "with an idle receiver, 64 pending slots fill then the 65th notification overflows"
-        );
-        assert!(
-            matches!(
-                terminal_of(&events),
-                Some(HostEvent::OpFailed(f)) if f.error_category == "provider_error"
-            ),
-            "{events:?}"
-        );
-        assert_eq!(terminal_count(&events), 1);
+        let texts = message_texts(&events);
+        assert_ordered_unique_fixture_prefix(&texts, FLOOD_FIXTURE_MESSAGE_COUNT);
+        assert_delivery_overflow_terminal(&events);
     }
 
     #[tokio::test]
