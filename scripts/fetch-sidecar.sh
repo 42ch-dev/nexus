@@ -53,8 +53,8 @@ for target in "${TARGETS[@]}"; do
   rustup target add "${target}" 2>/dev/null || true
   SIDECAR_SRC="${CARGO_TARGET}/${target}/${PROFILE}/nexus42"
   SIDECAR_DEST="${DEST}/nexus42-${target}"
-  echo "    artifact source: ${SIDEcar_SRC}"
-  echo "    artifact dest:   ${SIDEcar_DEST}"
+  echo "    artifact source: ${SIDECAR_SRC}"
+  echo "    artifact dest:   ${SIDECAR_DEST}"
   if [ "${PROFILE}" = "release" ]; then
     cargo build --release -p nexus42 --target "${target}"
   else

@@ -1,21 +1,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import {
   REMEDIATION_COMMAND,
   BackendCompatibilityError,
   CURRENT_WRITER_PROTOCOL,
+  RunningDaemonCompatibilityError,
   assertCompatibleBackend,
+  assertCompatibleRunningDaemon,
   computeContractHash,
   computeDbSchemaRange,
   computeDbSchemaRangeFromNames,
   manifestPathForArtifact,
   readBackendManifest,
+  refreshBackend,
   resolveDaemonEndpoint,
   sha256File,
+  validateDaemonHealth,
   writeManifestAtomic,
 } from './dev-backend-manifest.mjs';
 
@@ -153,34 +157,105 @@ test('assertCompatibleBackend refuses stale writer_protocol with remediation tex
   }
 });
 
-test('failed refresh leaves previous manifest when rewrite never commits', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'manifest-atomic-'));
+test('assertCompatibleBackend wraps malformed manifest with remediation text', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'manifest-malformed-'));
   try {
-    const manifestPath = join(dir, 'nexus42.manifest.json');
-    const first = {
-      artifactPath: join(dir, 'nexus42'),
-      sha256: 'a'.repeat(64),
-      targetTriple: 'aarch64-apple-darwin',
-      packageVersion: '0.1.0',
-      contractHash: 'b'.repeat(64),
-      nativeApiVersion: null,
-      writerProtocol: CURRENT_WRITER_PROTOCOL,
-      dbSchemaRange: { min: '20260417_000001_initial', max: '20260417_000001_initial' },
-    };
-    await writeManifestAtomic(manifestPath, first);
-    const before = JSON.parse(await readFile(manifestPath, 'utf8'));
-
-    await assert.rejects(async () => {
-      throw new Error('simulated cargo build failure');
-      await writeManifestAtomic(manifestPath, { ...first, sha256: 'c'.repeat(64) });
-    });
-
-    const after = JSON.parse(await readFile(manifestPath, 'utf8'));
-    assert.deepEqual(after, before);
+    const artifactPath = join(dir, 'nexus42');
+    await writeFile(artifactPath, 'artifact');
+    await writeFile(manifestPathForArtifact(artifactPath), '{not-json');
+    const contractHash = await computeContractHash();
+    await assert.rejects(
+      () => assertCompatibleBackend({ artifactPath, contractHash, protocolVersion: CURRENT_WRITER_PROTOCOL }),
+      err => {
+        assert.ok(err instanceof BackendCompatibilityError);
+        expectRemediation(err);
+        assert.match(err.message, /invalid/i);
+        return true;
+      },
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('assertCompatibleBackend refuses manifest artifactPath identity mismatch', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'manifest-identity-'));
+  try {
+    const artifactPath = join(dir, 'nexus42');
+    const otherPath = join(dir, 'other-nexus42');
+    await writeFile(artifactPath, 'artifact');
+    const digest = await sha256File(artifactPath);
+    const contractHash = await computeContractHash();
+    const range = await computeDbSchemaRange();
+    const manifest = {
+      artifactPath: otherPath,
+      sha256: digest,
+      targetTriple: 'aarch64-apple-darwin',
+      packageVersion: '0.1.0',
+      contractHash,
+      nativeApiVersion: null,
+      writerProtocol: CURRENT_WRITER_PROTOCOL,
+      dbSchemaRange: range,
+    };
+    await writeFile(manifestPathForArtifact(artifactPath), `${JSON.stringify(manifest, null, 2)}\n`);
+    await assert.rejects(
+      () => assertCompatibleBackend({ artifactPath, contractHash, protocolVersion: CURRENT_WRITER_PROTOCOL }),
+      err => {
+        assert.ok(err instanceof BackendCompatibilityError);
+        expectRemediation(err);
+        assert.match(err.message, /does not identify the requested artifact/);
+        return true;
+      },
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('refreshBackend preserves prior manifest when cargo build fails', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'refresh-failure-'));
+  try {
+    const targetDir = join(dir, 'target');
+    const artifactPath = join(targetDir, 'debug', 'nexus42');
+    const manifestPath = manifestPathForArtifact(artifactPath);
+    await mkdir(dirname(artifactPath), { recursive: true });
+    await writeFile(artifactPath, 'prior-artifact');
+    const digest = await sha256File(artifactPath);
+    const contractHash = await computeContractHash();
+    const range = await computeDbSchemaRange();
+    const manifest = {
+      artifactPath,
+      sha256: digest,
+      targetTriple: 'aarch64-apple-darwin',
+      packageVersion: '0.1.0',
+      contractHash,
+      nativeApiVersion: null,
+      writerProtocol: CURRENT_WRITER_PROTOCOL,
+      dbSchemaRange: range,
+    };
+    await writeManifestAtomic(manifestPath, manifest);
+    const before = JSON.parse(await readFile(manifestPath, 'utf8'));
+
+    await assert.rejects(
+      () =>
+        refreshBackend({
+          profile: 'debug',
+          targetDir,
+          commandRunner: async () => {
+            throw new Error('simulated cargo build failure');
+          },
+        }),
+      /simulated cargo build failure/,
+    );
+
+    const after = JSON.parse(await readFile(manifestPath, 'utf8'));
+    assert.deepEqual(after, before);
+    assert.equal(await sha256File(artifactPath), digest);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('resolveDaemonEndpoint rejects port and explicit URL conflicts', () => {
   assert.throws(
     () =>
@@ -196,4 +271,51 @@ test('resolveDaemonEndpoint derives loopback URL from nondefault port', () => {
   const endpoint = resolveDaemonEndpoint({ portEnv: '18420' });
   assert.equal(endpoint.baseUrl, 'http://127.0.0.1:18420');
   assert.equal(endpoint.port, 18420);
+});
+
+test('resolveDaemonEndpoint materializes default port for URL-only host', () => {
+  const endpoint = resolveDaemonEndpoint({ urlEnv: 'http://127.0.0.1' });
+  assert.equal(endpoint.baseUrl, 'http://127.0.0.1:8420');
+  assert.equal(endpoint.port, 8420);
+});
+
+test('resolveDaemonEndpoint rejects malformed port values', () => {
+  assert.throws(() => resolveDaemonEndpoint({ portEnv: '18420junk' }), /Invalid NEXUS42_DAEMON_PORT/);
+});
+
+test('validateDaemonHealth rejects non-ok status responses', async () => {
+  await assert.rejects(
+    () =>
+      validateDaemonHealth('http://127.0.0.1:1', {
+        fetchImpl: async () => ({
+          ok: true,
+          text: async () => JSON.stringify({ status: 'bad', version: '0.1.0' }),
+        }),
+      }),
+    /expected "ok"/,
+  );
+});
+
+test('assertCompatibleRunningDaemon refuses incompatible running daemon with actionable guidance', async () => {
+  const manifest = {
+    packageVersion: '0.1.0',
+  };
+  await assert.rejects(
+    () =>
+      assertCompatibleRunningDaemon({
+        baseUrl: 'http://127.0.0.1:19999',
+        manifest,
+        port: 19999,
+        fetchImpl: async () => ({
+          ok: true,
+          text: async () => JSON.stringify({ status: 'bad', version: '9.9.9' }),
+        }),
+      }),
+    err => {
+      assert.ok(err instanceof RunningDaemonCompatibilityError);
+      assert.match(err.message, /Stop it with: nexus42 daemon stop --port 19999/);
+      assert.match(err.message, new RegExp(REMEDIATION_COMMAND.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      return true;
+    },
+  );
 });

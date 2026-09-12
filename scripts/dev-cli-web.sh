@@ -33,10 +33,12 @@ if ! "${BIN}" daemon status --port "${PORT}" >/dev/null 2>&1; then
   echo "    daemon started (detached)"
 else
   echo "    daemon already running"
+  echo "==> validating running daemon compatibility"
+  node --input-type=module -e "import { readBackendManifest, assertCompatibleRunningDaemon } from './scripts/dev-backend-manifest.mjs'; const manifest = await readBackendManifest(process.env.NEXUS42_ARTIFACT); await assertCompatibleRunningDaemon({ baseUrl: process.env.VITE_DAEMON_URL, manifest, port: Number(process.env.NEXUS42_DAEMON_PORT) }); console.log('    running daemon compatible (version ' + manifest.packageVersion + ')');"
 fi
 
 echo "==> validating daemon health"
-node --input-type=module -e "import { validateDaemonHealth } from './scripts/dev-backend-manifest.mjs'; const result = await validateDaemonHealth(process.env.VITE_DAEMON_URL); console.log('    health OK (' + result.url + ')');"
+node --input-type=module -e "import { readBackendManifest, validateDaemonHealth } from './scripts/dev-backend-manifest.mjs'; const manifest = await readBackendManifest(process.env.NEXUS42_ARTIFACT); const result = await validateDaemonHealth(process.env.VITE_DAEMON_URL, { expectedPackageVersion: manifest.packageVersion }); console.log('    health OK (' + result.url + ', version ' + result.health.version + ')');"
 
 echo "==> starting web dev server (http://localhost:5173)"
 export VITE_DAEMON_URL

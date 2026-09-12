@@ -38,7 +38,6 @@ export function defaultArtifactPath({ profile = 'debug', targetDir } = {}) {
   return join(resolvedTargetDir, profile, 'nexus42');
 }
 
-
 export function manifestPathForArtifact(artifactPath) {
   return `${artifactPath}.manifest.json`;
 }
@@ -176,6 +175,28 @@ export class BackendCompatibilityError extends Error {
   }
 }
 
+export function parsePortValue(raw, label = 'port') {
+  if (typeof raw !== 'string' || raw === '') {
+    throw new Error(`Invalid ${label}: ${raw}`);
+  }
+  if (!/^\d+$/.test(raw)) {
+    throw new Error(`Invalid ${label}: ${raw}`);
+  }
+  const port = Number.parseInt(raw, 10);
+  if (port <= 0 || port > 65535) {
+    throw new Error(`Invalid ${label}: ${raw}`);
+  }
+  return port;
+}
+
+export class RunningDaemonCompatibilityError extends Error {
+  constructor(message, { port } = {}) {
+    super(message);
+    this.name = 'RunningDaemonCompatibilityError';
+    this.port = port;
+  }
+}
+
 export async function readBackendManifest(artifactPath) {
   const manifestPath = manifestPathForArtifact(artifactPath);
   const raw = JSON.parse(await readFile(manifestPath, 'utf8'));
@@ -205,7 +226,22 @@ export async function assertCompatibleBackend({ artifactPath, contractHash, prot
     throw new BackendCompatibilityError(`Backend manifest is missing at ${manifestPath}.`);
   }
 
-  const manifest = await readBackendManifest(artifactPath);
+  let manifest;
+  try {
+    manifest = await readBackendManifest(artifactPath);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new BackendCompatibilityError(`Backend manifest at ${manifestPath} is invalid (${detail}).`);
+  }
+
+  const requestedArtifactPath = resolve(artifactPath);
+  const recordedArtifactPath = resolve(manifest.artifactPath);
+  if (requestedArtifactPath !== recordedArtifactPath) {
+    throw new BackendCompatibilityError(
+      `Backend manifest artifactPath (${manifest.artifactPath}) does not identify the requested artifact (${artifactPath}).`,
+    );
+  }
+
   const digest = await sha256File(artifactPath);
   if (digest !== manifest.sha256) {
     throw new BackendCompatibilityError('Backend artifact digest does not match manifest sha256.');
@@ -253,7 +289,12 @@ async function maybeRunCodegen(repoRoot, previousContractHash, nextContractHash)
   await runCommand('pnpm', ['run', 'codegen'], { cwd: repoRoot, env: { ...process.env, SQLX_OFFLINE: 'true' } });
 }
 
-export async function refreshBackend({ profile = 'debug', targetDir, repoRoot = getRepoRoot() } = {}) {
+export async function refreshBackend({
+  profile = 'debug',
+  targetDir,
+  repoRoot = getRepoRoot(),
+  commandRunner = runCommand,
+} = {}) {
   const resolvedTargetDir = targetDir ?? (await resolveTargetDir());
   const artifactPath = defaultArtifactPath({ profile, targetDir: resolvedTargetDir });
   const manifestPath = manifestPathForArtifact(artifactPath);
@@ -270,7 +311,11 @@ export async function refreshBackend({ profile = 'debug', targetDir, repoRoot = 
 
   await maybeRunCodegen(repoRoot, previousContractHash, contractHash);
 
-  await runCommand('cargo', ['build', '-p', 'nexus42'], {
+  const cargoArgs = ['build', '-p', 'nexus42'];
+  if (profile === 'release') {
+    cargoArgs.push('--release');
+  }
+  await commandRunner('cargo', cargoArgs, {
     cwd: repoRoot,
     env: { ...process.env, CARGO_TARGET_DIR: resolvedTargetDir },
   });
@@ -301,17 +346,14 @@ export function resolveDaemonEndpoint({ portEnv, urlEnv } = {}) {
   const hasUrl = urlRaw !== '';
 
   if (hasPort && hasUrl) {
-    const port = Number.parseInt(portRaw, 10);
-    if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-      throw new Error(`Invalid NEXUS42_DAEMON_PORT: ${portRaw}`);
-    }
+    const port = parsePortValue(portRaw, 'NEXUS42_DAEMON_PORT');
     let parsed;
     try {
       parsed = new URL(urlRaw);
     } catch {
       throw new Error(`Invalid VITE_DAEMON_URL: ${urlRaw}`);
     }
-    if (parsed.port && Number.parseInt(parsed.port, 10) !== port) {
+    if (parsed.port && parsePortValue(parsed.port, 'VITE_DAEMON_URL port') !== port) {
       throw new Error(
         `NEXUS42_DAEMON_PORT (${port}) conflicts with VITE_DAEMON_URL port (${parsed.port || 'default'}).`,
       );
@@ -324,19 +366,32 @@ export function resolveDaemonEndpoint({ portEnv, urlEnv } = {}) {
 
   if (hasUrl) {
     const parsed = new URL(urlRaw);
-    const port = parsed.port ? Number.parseInt(parsed.port, 10) : DEFAULT_DAEMON_PORT;
+    const port = parsed.port
+      ? parsePortValue(parsed.port, 'VITE_DAEMON_URL port')
+      : DEFAULT_DAEMON_PORT;
+    if (!parsed.port) {
+      parsed.port = String(port);
+    }
     return { baseUrl: parsed.origin, port };
   }
 
-  const port = hasPort ? Number.parseInt(portRaw, 10) : DEFAULT_DAEMON_PORT;
-  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-    throw new Error(`Invalid NEXUS42_DAEMON_PORT: ${portRaw}`);
-  }
+  const port = hasPort ? parsePortValue(portRaw, 'NEXUS42_DAEMON_PORT') : DEFAULT_DAEMON_PORT;
   const baseUrl = `http://${DEFAULT_DAEMON_HOST}:${port}`;
   return { baseUrl, port };
 }
 
-export async function validateDaemonHealth(baseUrl, { timeoutMs = 5000, fetchImpl = globalThis.fetch } = {}) {
+export function formatRunningDaemonRefusal({ baseUrl, port, reason }) {
+  return (
+    `Incompatible daemon already running at ${baseUrl}: ${reason} ` +
+    `Stop it with: nexus42 daemon stop --port ${port}. ` +
+    `Then refresh the backend if needed (${REMEDIATION_COMMAND}) and restart dev.`
+  );
+}
+
+export async function validateDaemonHealth(
+  baseUrl,
+  { timeoutMs = 5000, fetchImpl = globalThis.fetch, expectedPackageVersion } = {},
+) {
   if (typeof fetchImpl !== 'function') {
     throw new Error('fetch is unavailable for daemon health validation');
   }
@@ -349,10 +404,23 @@ export async function validateDaemonHealth(baseUrl, { timeoutMs = 5000, fetchImp
       throw new Error(`Daemon health request failed with HTTP ${response.status} at ${url}`);
     }
     const body = await response.text();
-    if (!/"status"/.test(body)) {
-      throw new Error(`Daemon health response at ${url} did not include status`);
+    let health;
+    try {
+      health = JSON.parse(body);
+    } catch {
+      throw new Error(`Daemon health response at ${url} was not valid JSON`);
     }
-    return { url: String(url), status: response.status, body };
+    if (health?.status !== 'ok') {
+      throw new Error(
+        `Daemon health response at ${url} reported status ${JSON.stringify(health?.status)} (expected "ok")`,
+      );
+    }
+    if (expectedPackageVersion !== undefined && health.version !== expectedPackageVersion) {
+      throw new Error(
+        `Daemon health version ${JSON.stringify(health.version)} does not match expected package version ${expectedPackageVersion}`,
+      );
+    }
+    return { url: String(url), status: response.status, body, health };
   } catch (err) {
     if (err.name === 'AbortError') {
       throw new Error(`Daemon health request timed out after ${timeoutMs}ms at ${url}`);
@@ -363,13 +431,32 @@ export async function validateDaemonHealth(baseUrl, { timeoutMs = 5000, fetchImp
   }
 }
 
+export async function assertCompatibleRunningDaemon({
+  baseUrl,
+  manifest,
+  port,
+  fetchImpl = globalThis.fetch,
+}) {
+  try {
+    await validateDaemonHealth(baseUrl, {
+      fetchImpl,
+      expectedPackageVersion: manifest.packageVersion,
+    });
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new RunningDaemonCompatibilityError(formatRunningDaemonRefusal({ baseUrl, port, reason }), {
+      port,
+    });
+  }
+}
+
 export async function prepareDevCliWebEnvironment(env = process.env) {
   const repoRoot = getRepoRoot();
   const targetDir = await resolveTargetDir(env);
   const artifactPath = defaultArtifactPath({ targetDir });
   const contractHash = await computeContractHash(repoRoot);
 
-  await assertCompatibleBackend({
+  const manifest = await assertCompatibleBackend({
     artifactPath,
     contractHash,
     protocolVersion: CURRENT_WRITER_PROTOCOL,
@@ -384,6 +471,7 @@ export async function prepareDevCliWebEnvironment(env = process.env) {
     repoRoot,
     targetDir,
     artifactPath,
+    manifest,
     baseUrl,
     port,
     contractHash,
