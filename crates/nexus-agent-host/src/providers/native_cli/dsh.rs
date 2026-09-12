@@ -4745,8 +4745,8 @@ mod tests {
     }
 
 
-    /// Wait until the flood fixture logs `_flood_complete` (all wire
-    /// notifications emitted) while the consumer holds backpressure.
+    /// Wait until the flood fixture logs `_flood_complete` after its
+    /// burst while the returned event stream stays unpolluted (no dequeue).
     async fn wait_for_flood_burst_complete(req_log: &Path) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while std::time::Instant::now() < deadline {
@@ -4759,30 +4759,6 @@ mod tests {
             tokio::task::yield_now().await;
         }
         panic!("flood fixture burst did not complete within 5s");
-    }
-
-    /// Collect a turn while pausing consumer dequeue after `OpStarted` so
-    /// the producer can accumulate 64 pending message slots before the 65th
-    /// reserve fails (pending cap, not lifetime accepts).
-    #[allow(clippy::future_not_send)]
-    async fn collect_events_with_post_started_backpressure(
-        req_log: &Path,
-        stream: HostEventStream,
-    ) -> Vec<HostEvent> {
-        let mut stream = std::pin::pin!(stream);
-        let mut events = Vec::new();
-        let started = stream
-            .next()
-            .await
-            .expect("stream must yield OpStarted")
-            .expect("OpStarted must be Ok");
-        assert!(matches!(started, HostEvent::OpStarted(_)));
-        events.push(started);
-        wait_for_flood_burst_complete(req_log).await;
-        while let Some(item) = stream.next().await {
-            events.push(item.expect("stream item should be Ok"));
-        }
-        events
     }
 
     #[tokio::test]
@@ -5057,13 +5033,12 @@ mod tests {
         let req_log = req_log_dir.path().join("reqs.jsonl");
         let dsh_home = req_log_dir.path().join("dsh-home");
         let mut env = stub_env_scenario(&req_log, &dsh_home, "flood_messages");
-        env.insert("FLOOD_COUNT".to_string(), "66".to_string());
         env.insert("FLOOD_HOLD".to_string(), "1".to_string());
         let provider = stub_provider("test-dsh-flood", env);
         let handle = launch_hermetic(&provider).await;
         let _env_lock = crate::test_support::PROCESS_ENV_LOCK
             .lock()
-            .expect("lock env tests");
+            .unwrap_or_else(|e| e.into_inner());
         let stream = provider
             .execute(
                 &handle,
@@ -5077,11 +5052,15 @@ mod tests {
             )
             .await
             .expect("execute");
-        let events = collect_events_with_post_started_backpressure(&req_log, stream).await;
+        // Rendezvous: do not poll/dequeue the stream until the fixture burst
+        // is complete so exactly 64 content slots are pending when the 65th
+        // notification arrives (no scheduler-dependent dequeue count).
+        wait_for_flood_burst_complete(&req_log).await;
+        let events = collect_events(stream).await;
         assert_eq!(
             message_texts(&events),
-            (0..65).map(|i| format!("m{i}")).collect::<Vec<_>>(),
-            "one message may be dequeued before hold; then 64 pending slots fill before the 66th notification overflows"
+            (0..64).map(|i| format!("m{i}")).collect::<Vec<_>>(),
+            "with an idle receiver, 64 pending slots fill then the 65th notification overflows"
         );
         assert!(
             matches!(
