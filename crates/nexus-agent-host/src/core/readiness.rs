@@ -193,7 +193,7 @@ pub fn probe_request_for_owner(
 #[must_use]
 pub fn safe_provider_message(error: &HostError) -> String {
     match error.category() {
-        "timeout" => "probe or launch timed out".to_string(),
+        "operation_timeout" => "operation timed out".to_string(),
         "cleanup_unconfirmed" => "cleanup unconfirmed".to_string(),
         "launch_failed" => "launch failed".to_string(),
         "provider_unavailable" => "provider unavailable".to_string(),
@@ -204,8 +204,18 @@ pub fn safe_provider_message(error: &HostError) -> String {
 /// Whether a session launch failure should invalidate provider readiness.
 #[must_use]
 pub fn is_launch_class_failure(error: &HostError) -> bool {
-    matches!(
-        error.category(),
-        "launch_failed" | "timeout" | "cleanup_unconfirmed" | "provider_unavailable"
-    )
+    match error {
+        HostError::LaunchFailed { .. }
+        | HostError::CleanupUnconfirmed { .. }
+        | HostError::ProviderUnavailable { .. } => true,
+        // A timeout only invalidates readiness when it happened at a real
+        // launch/initialize boundary. The typed `stage` distinguishes those
+        // from an ordinary prompt/content/run timeout, which leaves an
+        // already-initialized recipe healthy — blanket-classifying every
+        // `operation_timeout` would tear down a provider that still works.
+        HostError::OperationTimeout { stage, .. } => {
+            matches!(stage.as_str(), "launch" | "initialize" | "session")
+        }
+        _ => false,
+    }
 }

@@ -93,11 +93,26 @@ mod tests {
 
     #[test]
     fn enabled_provider_produces_entry() {
+        // A native_cli provider takes its argv from the provider itself, so a
+        // configured `args` list is rejected before it can become a candidate.
         let config = make_config(vec![crate::config::ProviderConfig {
             id: "claude-native".to_string(),
             protocol: "native_cli".to_string(),
             command: Some("claude".to_string()),
             args: vec!["-p".to_string()],
+            env: HashMap::new(),
+            enabled: true,
+        }]);
+        let err = entries_from_config(&config).expect_err("native args must be rejected");
+        assert_eq!(err.category(), "internal_host_error");
+
+        // Without unsupported argv the same provider yields the explicit
+        // config candidate, still unavailable until a bounded probe.
+        let config = make_config(vec![crate::config::ProviderConfig {
+            id: "claude-native".to_string(),
+            protocol: "native_cli".to_string(),
+            command: Some("claude".to_string()),
+            args: vec![],
             env: HashMap::new(),
             enabled: true,
         }]);
@@ -107,6 +122,10 @@ mod tests {
         assert_eq!(entries[0].source, DiscoverySource::Config);
         assert_eq!(entries[0].trust, TrustLevel::Explicit);
         assert_eq!(entries[0].protocol_kind, ProtocolKind::NativeCli);
+        assert!(
+            !entries[0].health.available,
+            "a configured candidate is not available until probed"
+        );
     }
 
     #[test]

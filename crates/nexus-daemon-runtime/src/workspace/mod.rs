@@ -93,6 +93,24 @@ pub struct RuntimeBundle {
     supervisor: Arc<ScheduleSupervisor>,
 }
 
+/// Static, sanitized category for an unusable structural agent-host config.
+///
+/// The agent-host loader returns `HostError::InternalHostError` whose `Display`
+/// embeds the TOML parser's own message — which can quote the offending source
+/// line, and that line may contain env/API credentials. Only a fixed category
+/// may leave this boundary.
+///
+/// `NotFound`-class failures never reach here: the loader follows the existing
+/// missing-file policy (defaults) and returns `Ok`.
+fn agent_host_config_error_category(error: &nexus_agent_host::HostError) -> String {
+    match error {
+        nexus_agent_host::HostError::InternalHostError { .. } => {
+            "structural_config_unusable".to_string()
+        }
+        other => format!("structural_config_{}", other.category()),
+    }
+}
+
 /// Shared workspace state
 #[derive(Clone)]
 pub struct WorkspaceState {
@@ -161,6 +179,14 @@ pub struct WorkspaceState {
     actor_sessions: ActorSessionRegistry,
     /// Agent host configuration loaded at boot from `agent-host/config.toml`.
     agent_host_config: Arc<AgentHostConfig>,
+    /// Static reason the structural agent-host config could not be used, when
+    /// the file EXISTS but is unreadable/unparseable. `Some` means the loaded
+    /// `agent_host_config` is a placeholder that MUST NOT be presented as the
+    /// operator's intent — the agent-host subsystem fails start instead.
+    ///
+    /// Deliberately a fixed, sanitized category: the raw TOML parser error can
+    /// echo the offending source line, which may contain env/API credentials.
+    agent_host_config_error: Arc<Option<String>>,
     /// Shutdown notification — fired when the daemon enters Stopping state.
     /// Consumers (HTTP server, engine drainer) await this to initiate graceful shutdown.
     shutdown_notify: Arc<Notify>,
@@ -281,6 +307,8 @@ impl WorkspaceState {
             agent_host: Arc::new(None),
             actor_sessions: ActorSessionRegistry::new(),
             agent_host_config: Arc::new(AgentHostConfig::default()),
+            // Test constructor: no boot-time structural config load occurs.
+            agent_host_config_error: Arc::new(None),
             shutdown_notify: Arc::new(Notify::new()),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             daemon_tool_dispatch: Arc::new(RwLock::new(None)),
@@ -349,11 +377,23 @@ impl WorkspaceState {
         // `$HOME/.nexus42/agent-host/config.toml` itself; passing the already
         // resolved `nexus_home` double-nested the path and left the canonical
         // file unread (tri-QC P1-A).
-        let agent_host_config =
-            nexus_agent_host::config::load_config(&user_home).unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "failed to load agent host config; using defaults");
-                AgentHostConfig::default()
-            });
+        // Missing optional file follows the existing policy (defaults). A file
+        // that EXISTS but cannot be read/parsed is a REAL structural error: it
+        // must propagate through retained-config startup rather than silently
+        // selecting PATH/default providers the operator never configured.
+        let (agent_host_config, agent_host_config_error) =
+            match nexus_agent_host::config::load_config(&user_home) {
+                Ok(config) => (config, None),
+                Err(error) => {
+                    // Static category only — never the parser's source excerpt.
+                    let category = agent_host_config_error_category(&error);
+                    tracing::error!(
+                        category = %category,
+                        "agent host structural config is unusable;                          agent host will refuse to start with defaults"
+                    );
+                    (AgentHostConfig::default(), Some(category))
+                }
+            };
 
         if db.is_some() {
             tracing::info!("Workspace state.db at {:?}", db_path);
@@ -388,6 +428,7 @@ impl WorkspaceState {
             agent_host: Arc::new(None),
             actor_sessions: ActorSessionRegistry::new(),
             agent_host_config: Arc::new(agent_host_config),
+            agent_host_config_error: Arc::new(agent_host_config_error),
             shutdown_notify: Arc::new(Notify::new()),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             daemon_tool_dispatch: Arc::new(RwLock::new(None)),
@@ -1122,6 +1163,9 @@ impl WorkspaceState {
     /// Called from boot.rs after loading the config from disk.
     pub fn set_agent_host_config(&mut self, config: AgentHostConfig) {
         self.agent_host_config = Arc::new(config);
+        // An explicit programmatic config supersedes the boot-time load, so any
+        // recorded structural failure no longer applies.
+        self.agent_host_config_error = Arc::new(None);
     }
 
     /// Resolve verified probe owner from active creator + workspace path.
@@ -1129,7 +1173,12 @@ impl WorkspaceState {
     pub fn verified_probe_owner(
         &self,
     ) -> Option<nexus_agent_host::capability::model::SessionOwner> {
-        let creator_id = crate::config::try_active_creator_id(self.nexus_home())?;
+        // SAME provenance boundary as public admission: the probe owner must
+        // satisfy exactly what `require_creator` requires (active creator AND a
+        // valid active workspace selection), otherwise this process could run
+        // bounded subprocess probes for a context the public Host session path
+        // rejects.
+        let (creator_id, _workspace_slug) = self.verified_creator_context()?;
         let workspace_root = self
             .workspace_path()
             .map(std::path::PathBuf::from)
@@ -1141,10 +1190,36 @@ impl WorkspaceState {
         })
     }
 
+    /// The state-level provenance resolver shared by public admission and the
+    /// probe owner: an active creator ID together with a valid active
+    /// workspace selection for that creator.
+    ///
+    /// This is the single authority — the HTTP guard delegates here and the
+    /// probe owner calls it, so the two can never drift.
+    #[must_use]
+    pub fn verified_creator_context(&self) -> Option<(String, String)> {
+        let creator_id = crate::config::try_active_creator_id(self.nexus_home())?;
+        let workspace_slug =
+            crate::api::handlers::works::read_active_workspace_slug(self.nexus_home(), &creator_id)
+                .filter(|slug| !slug.trim().is_empty())?;
+        Some((creator_id, workspace_slug))
+    }
+
     /// Get the agent host configuration.
     #[must_use]
     pub fn agent_host_config(&self) -> Arc<AgentHostConfig> {
         Arc::clone(&self.agent_host_config)
+    }
+
+    /// Static, sanitized reason the structural agent-host config is unusable.
+    ///
+    /// `Some` means the file exists but could not be read/parsed; the retained
+    /// [`Self::agent_host_config`] is a placeholder, so the agent-host
+    /// subsystem must refuse to start rather than serve defaults as if they
+    /// were configured.
+    #[must_use]
+    pub fn agent_host_config_error(&self) -> Option<String> {
+        self.agent_host_config_error.as_ref().clone()
     }
 
     /// Set the daemon-side tool dispatch adapter (DF-47, V1.42 P3).

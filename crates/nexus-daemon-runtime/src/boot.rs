@@ -1752,10 +1752,14 @@ fn create_subsystems(
 
     // Agent Host is an optional subsystem — failure does not block daemon startup
     let host_config = (*state.agent_host_config()).clone();
+    // A structural config failure rides along so the subsystem refuses to start
+    // rather than serving defaults as if they were configured.
+    let host_config_error = state.agent_host_config_error();
     let probe_owner = state.verified_probe_owner();
     subsystems.push(Arc::new(AgentHostSubsystem::new(
         agent_host_facade,
         host_config,
+        host_config_error,
         agent_host_config_path,
         workspace_root,
         probe_owner,

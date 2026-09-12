@@ -164,9 +164,14 @@ impl HostManager {
     async fn mark_probe_context_unavailable(&self) {
         let mut providers = self.providers.write().await;
         for entry in providers.values_mut() {
-            if !entry.health.available {
-                entry.health.message = Some("probe_context_unavailable".to_string());
-            }
+            // EVERY entry becomes unavailable without a verified probe owner.
+            // A prior owner-bound start may have published `available = true`;
+            // that success must not survive a re-start that has no owner, or
+            // the catalog/admission would expose a provider this process can no
+            // longer prove ready. Stale latency/success state is cleared too.
+            entry.health.available = false;
+            entry.health.latency_ms = None;
+            entry.health.message = Some("probe_context_unavailable".to_string());
         }
     }
 
@@ -515,7 +520,7 @@ impl crate::HostFacade for HostManager {
         session_id: HostSessionId,
         op: crate::capability::model::HostOperation,
     ) -> HostResult<HostEventStream> {
-        let (adapter, _) = self.get_provider_for_session(&session_id).await?;
+        let (adapter, provider_id) = self.get_provider_for_session(&session_id).await?;
 
         // Admission check: ops-per-session limit.
         {
@@ -565,6 +570,17 @@ impl crate::HostFacade for HostManager {
                     .write()
                     .await
                     .transition_busy_to_ready(&session_id, &op_id);
+                // An early execution failure (sealed/ordinary initialization or
+                // a confirmed-close failure on the first denied prompt, or a
+                // lazy child setup failure) is the same launch-class failure
+                // `create_session` already handles: the candidate is no longer
+                // ready, so invalidate it. Ordinary prompt/content timeouts are
+                // excluded by the category+stage gate inside
+                // `is_launch_class_failure`.
+                if is_launch_class_failure(&e) {
+                    self.invalidate_provider(&provider_id, safe_provider_message(&e))
+                        .await;
+                }
                 return Err(e);
             }
         };
@@ -2153,6 +2169,240 @@ mod tests {
         assert!(
             denied.is_err(),
             "admission must match catalog unavailable health"
+        );
+    }
+
+    /// A provider whose probe succeeds and whose first `execute` fails with a
+    /// chosen error — the post-ready launch-failure shape.
+    struct ExecFailingMockProvider {
+        provider_id: ProviderId,
+        error: fn() -> HostError,
+    }
+
+    #[async_trait]
+    impl ProviderAdapter for ExecFailingMockProvider {
+        fn descriptor(&self) -> crate::capability::model::ProviderDescriptor {
+            crate::capability::model::ProviderDescriptor {
+                provider_id: self.provider_id.clone(),
+                display_name: "ExecFail".to_string(),
+                protocol_kind: crate::capability::model::ProtocolKind::Acp,
+                capabilities: crate::capability::model::CapabilityDescriptor::acp_full(),
+            }
+        }
+
+        async fn probe(
+            &self,
+            _request: ProbeRequest,
+        ) -> HostResult<crate::capability::model::ProviderHealth> {
+            Ok(crate::capability::model::ProviderHealth {
+                provider_id: self.provider_id.clone(),
+                available: true,
+                latency_ms: Some(1),
+                message: Some("probe ok".to_string()),
+            })
+        }
+
+        async fn launch(&self, _spec: LaunchSpec) -> HostResult<ManagedSessionHandle> {
+            Ok(ManagedSessionHandle {
+                provider_id: self.provider_id.clone(),
+                session_id: HostSessionId::new(),
+                capabilities: crate::capability::model::CapabilityDescriptor::acp_full(),
+                process_identity: None,
+            })
+        }
+
+        async fn execute(
+            &self,
+            _handle: &ManagedSessionHandle,
+            _op: crate::capability::model::HostOperation,
+        ) -> HostResult<HostEventStream> {
+            Err((self.error)())
+        }
+
+        async fn cancel(
+            &self,
+            _session: &ManagedSessionHandle,
+            _op_id: HostOperationId,
+        ) -> HostResult<()> {
+            Ok(())
+        }
+
+        async fn shutdown(&self, _session: ManagedSessionHandle) -> HostResult<()> {
+            Ok(())
+        }
+
+        fn capabilities(&self) -> crate::capability::model::CapabilityDescriptor {
+            crate::capability::model::CapabilityDescriptor::acp_full()
+        }
+    }
+
+    async fn exec_probe_then_fail(
+        manager: &HostManager,
+        provider: Arc<dyn ProviderAdapter>,
+    ) -> String {
+        manager.register_provider(provider, mock_launch()).await;
+        manager.start(start_config()).await.expect("start");
+        let session = manager
+            .create_session(CreateSessionRequest {
+                provider_id: ProviderId::new("exec-fail"),
+                cwd: std::path::PathBuf::from("/tmp"),
+                model: None,
+                mode: None,
+                mcp_servers: vec![],
+                metadata: serde_json::Value::Null,
+                owner: test_owner(),
+            })
+            .await
+            .expect("session created from a probed-available provider");
+        match manager
+            .exec(
+                session.id.clone(),
+                crate::capability::model::HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![crate::capability::model::HostContentBlock::Text {
+                        text: "hi".to_string(),
+                    }],
+                    permission_scope: None,
+                },
+            )
+            .await
+        {
+            Err(error) => error.category().to_string(),
+            Ok(_) => panic!("execute must fail"),
+        }
+    }
+
+    async fn catalog_availability(manager: &HostManager) -> bool {
+        manager
+            .provider_catalog()
+            .await
+            .expect("catalog")
+            .entries
+            .iter()
+            .find(|e| e.provider_id == ProviderId::new("exec-fail"))
+            .expect("provider in catalog")
+            .health
+            .available
+    }
+
+    #[tokio::test]
+    async fn exec_launch_class_failure_invalidates_provider() {
+        // A launch-class failure from `exec` (the dsh sealed/ordinary init or a
+        // lazy child-setup failure) must invalidate the SAME candidate health
+        // `create_session` does, so a later admission cannot keep using a
+        // provider that is no longer ready.
+        let manager = HostManager::new();
+        let category = exec_probe_then_fail(
+            &manager,
+            Arc::new(ExecFailingMockProvider {
+                provider_id: ProviderId::new("exec-fail"),
+                error: || {
+                    HostError::cleanup_unconfirmed("probe cleanup unconfirmed").with_provider(
+                        ProviderId::new("exec-fail"),
+                    )
+                },
+            }),
+        )
+        .await;
+        assert_eq!(category, "cleanup_unconfirmed");
+        assert!(
+            !catalog_availability(&manager).await,
+            "a launch-class exec failure must invalidate the candidate"
+        );
+    }
+
+    #[tokio::test]
+    async fn exec_content_timeout_keeps_provider_ready() {
+        // The counterpart: an ordinary PROMPT timeout is not a launch-class
+        // failure. A provider that initialized successfully must stay ready —
+        // blanket-classifying every `operation_timeout` would tear down a
+        // working recipe.
+        let manager = HostManager::new();
+        let category = exec_probe_then_fail(
+            &manager,
+            Arc::new(ExecFailingMockProvider {
+                provider_id: ProviderId::new("exec-fail"),
+                error: || {
+                    HostError::timeout("prompt", "prompt exceeded its budget").with_provider(
+                        ProviderId::new("exec-fail"),
+                    )
+                },
+            }),
+        )
+        .await;
+        assert_eq!(category, "operation_timeout");
+        assert!(
+            catalog_availability(&manager).await,
+            "a content/prompt timeout must NOT invalidate a probed-ready provider"
+        );
+    }
+
+    #[tokio::test]
+    async fn launch_stage_timeout_is_launch_class() {
+        // The stage-specific half of the same rule: a timeout AT a launch
+        // boundary is launch-class.
+        let launch_stage = HostError::timeout("launch", "initialize handshake timed out");
+        assert!(is_launch_class_failure(&launch_stage));
+        let init_stage = HostError::timeout("initialize", "init timed out");
+        assert!(is_launch_class_failure(&init_stage));
+        let prompt_stage = HostError::timeout("prompt", "content timed out");
+        assert!(!is_launch_class_failure(&prompt_stage));
+        // The safe diagnostic must use the REAL category.
+        assert_eq!(safe_provider_message(&prompt_stage), "operation timed out");
+    }
+
+    #[tokio::test]
+    async fn restart_without_probe_owner_invalidates_previously_healthy_entries() {
+        // F6: a manager that completed an owner-bound start publishes
+        // `available = true`. Re-starting it with NO verified owner must clear
+        // EVERY row (not only rows already unavailable), including latency.
+        let manager = HostManager::new();
+        manager
+            .register_provider(
+                Arc::new(MockProvider {
+                    provider_id: ProviderId::new("mock"),
+                }),
+                mock_launch(),
+            )
+            .await;
+        manager.start(start_config()).await.expect("owner-bound start");
+        assert!(
+            manager
+                .provider_catalog()
+                .await
+                .expect("catalog")
+                .entries
+                .iter()
+                .find(|e| e.provider_id == ProviderId::new("mock"))
+                .expect("mock in catalog")
+                .health
+                .available,
+            "the probed provider must be available after an owner-bound start"
+        );
+
+        let mut cfg = start_config();
+        cfg.probe_owner = None;
+        manager.start(cfg).await.expect("owner-less re-start");
+
+        let entry = manager
+            .provider_catalog()
+            .await
+            .expect("catalog")
+            .entries
+            .into_iter()
+            .find(|e| e.provider_id == ProviderId::new("mock"))
+            .expect("mock in catalog");
+        assert!(
+            !entry.health.available,
+            "a re-start without a verified owner must invalidate every entry"
+        );
+        assert_eq!(
+            entry.health.message.as_deref(),
+            Some("probe_context_unavailable")
+        );
+        assert!(
+            entry.health.latency_ms.is_none(),
+            "stale latency/success state must be cleared"
         );
     }
 

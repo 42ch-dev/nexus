@@ -10,7 +10,7 @@ use crate::capability::model::{CapabilityDescriptor, ProtocolKind};
 use crate::config::AgentHostConfig;
 use crate::error::HostResult;
 use crate::ids::ProviderId;
-use crate::providers::candidate_unavailable_health;
+use crate::providers::{candidate_unavailable_health, validate_provider_config};
 use crate::{DiscoverySource, LaunchStrategy, ProviderCatalogEntry, TrustLevel};
 
 /// Builder that merges config, PATH, and ACP registry entries deterministically.
@@ -52,6 +52,11 @@ impl ProviderCatalog {
         for provider_config in &config.providers {
             let pid = ProviderId::new(&provider_config.id);
             if provider_config.enabled {
+                // ONE validation authority: the catalog path runs the same
+                // `validate_provider_config` gate as `entries_from_config`, so
+                // an unsupported native id, a missing/blank command, or
+                // non-empty native args can never become a catalog candidate.
+                validate_provider_config(provider_config)?;
                 let protocol_kind = provider_config.protocol_kind()?;
                 let launch = match protocol_kind {
                     ProtocolKind::Acp => LaunchStrategy::Acp {
@@ -142,6 +147,9 @@ impl ProviderCatalog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Test-only: `ProviderHealth` is referenced by the fixture builders below
+    // but not by the non-test catalog path, so it is imported here.
+    use crate::capability::model::ProviderHealth;
     use std::collections::HashMap;
 
     fn default_config() -> AgentHostConfig {

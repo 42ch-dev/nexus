@@ -56,7 +56,13 @@ pub fn validate_provider_config(pc: &ProviderConfig) -> HostResult<()> {
             pc.protocol, pc.id
         )));
     }
-    if pc.command.as_deref().is_none_or(str::is_empty) {
+    // A command is an executable name, not a shell line: whitespace-only input
+    // is empty input.
+    if pc
+        .command
+        .as_deref()
+        .is_none_or(|command| command.trim().is_empty())
+    {
         return Err(HostError::internal(format!(
             "enabled provider '{}' requires a non-empty command",
             pc.id
@@ -92,14 +98,21 @@ pub fn validate_agent_host_config_providers(
     Ok(())
 }
 
+/// The protocol a launch strategy implies — the ONE derivation used to build
+/// a [`ProviderConfig`] from a catalog entry.
+const fn protocol_of(launch: &LaunchStrategy) -> &'static str {
+    match launch {
+        LaunchStrategy::Acp { .. } => "acp",
+        LaunchStrategy::NativeCli { .. } => "native_cli",
+    }
+}
+
 /// Build a [`ProviderConfig`] from a selected catalog entry for factory dispatch.
 fn provider_config_from_entry(entry: &ProviderCatalogEntry) -> HostResult<ProviderConfig> {
-    let (protocol, command, args, env) = match &entry.launch {
-        LaunchStrategy::Acp { command, args, env } => {
-            ("acp", command.clone(), args.clone(), env.clone())
-        }
-        LaunchStrategy::NativeCli { command, args, env } => {
-            ("native_cli", command.clone(), args.clone(), env.clone())
+    let (command, args, env) = match &entry.launch {
+        LaunchStrategy::Acp { command, args, env }
+        | LaunchStrategy::NativeCli { command, args, env } => {
+            (command.clone(), args.clone(), env.clone())
         }
     };
     if command.trim().is_empty() {
@@ -110,7 +123,7 @@ fn provider_config_from_entry(entry: &ProviderCatalogEntry) -> HostResult<Provid
     }
     Ok(ProviderConfig {
         id: entry.provider_id.0.clone(),
-        protocol: protocol.to_string(),
+        protocol: protocol_of(&entry.launch).to_string(),
         command: Some(command),
         args,
         env,
@@ -134,6 +147,25 @@ pub fn adapter_from_catalog_entry(
 ) -> HostResult<Arc<dyn ProviderAdapter>> {
     let provider_config = provider_config_from_entry(entry)?;
     validate_provider_config(&provider_config)?;
+
+    // The entry's DECLARED protocol must match the protocol its launch
+    // strategy implies. Dispatch below selects the adapter from
+    // `entry.protocol_kind`, while `provider_config_from_entry` derives
+    // validation from the launch strategy — so an inconsistent pair (for
+    // example a `NativeCli` entry carrying an ACP launch with the dsh-native
+    // id) would validate as one protocol and construct the other. Require
+    // agreement instead of silently constructing the wrong adapter.
+    let declared = match entry.protocol_kind {
+        ProtocolKind::Acp => "acp",
+        ProtocolKind::NativeCli => "native_cli",
+    };
+    let implied = protocol_of(&entry.launch);
+    if declared != implied {
+        return Err(HostError::internal(format!(
+            "provider '{}' declares protocol '{declared}' but carries a '{implied}' launch strategy",
+            entry.provider_id
+        )));
+    }
 
     match entry.protocol_kind {
         ProtocolKind::Acp => {

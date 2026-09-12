@@ -32,6 +32,11 @@ pub struct AgentHostSubsystem {
     host: Arc<dyn HostFacade>,
     /// Retained validated host configuration (single load at boot).
     host_config: nexus_agent_host::config::AgentHostConfig,
+    /// Static, sanitized reason the structural config is unusable (file exists
+    /// but could not be read/parsed). `Some` means `host_config` is a
+    /// placeholder: start refuses instead of serving defaults as if the
+    /// operator had configured them.
+    host_config_error: Option<String>,
     /// Path to the agent-host config file.
     config_path: std::path::PathBuf,
     /// Workspace root for the agent host.
@@ -47,6 +52,7 @@ impl AgentHostSubsystem {
     pub fn new(
         host: Arc<dyn HostFacade>,
         host_config: nexus_agent_host::config::AgentHostConfig,
+        host_config_error: Option<String>,
         config_path: std::path::PathBuf,
         workspace_root: std::path::PathBuf,
         probe_owner: Option<nexus_agent_host::capability::model::SessionOwner>,
@@ -54,6 +60,7 @@ impl AgentHostSubsystem {
         Self {
             host,
             host_config,
+            host_config_error,
             config_path,
             workspace_root,
             probe_owner,
@@ -80,6 +87,15 @@ impl std::fmt::Debug for AgentHostSubsystem {
 #[async_trait::async_trait]
 impl SubsystemBootstrap for AgentHostSubsystem {
     async fn start(&self) -> anyhow::Result<()> {
+        // A structural config failure is NOT recoverable by falling back to
+        // defaults: PATH/default providers the operator never configured would
+        // otherwise become admissible. Refuse to start and surface only the
+        // static category (the raw parser error may quote credential-bearing
+        // source lines).
+        if let Some(reason) = &self.host_config_error {
+            anyhow::bail!("agent host structural config unusable: {reason}");
+        }
+
         let start_config = nexus_agent_host::capability::HostStartConfig {
             config_path: self.config_path.clone(),
             workspace_root: self.workspace_root.clone(),
@@ -142,6 +158,7 @@ mod tests {
         let subsystem = AgentHostSubsystem::new(
             host,
             nexus_agent_host::config::AgentHostConfig::default(),
+            None,
             std::path::PathBuf::from("/tmp/test-config"),
             std::path::PathBuf::from("/tmp/workspace"),
             None,
@@ -150,11 +167,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn structural_config_error_refuses_start_without_leaking_source() {
+        // A file that EXISTS but cannot be parsed must never be replaced by
+        // defaults (PATH providers the operator did not configure). Start
+        // refuses, and the surfaced reason is the static category — never the
+        // raw parser excerpt, which can quote credential-bearing source lines.
+        let host = Arc::new(HostManager::new());
+        let subsystem = AgentHostSubsystem::new(
+            host,
+            nexus_agent_host::config::AgentHostConfig::default(),
+            Some("structural_config_unusable".to_string()),
+            std::path::PathBuf::from("/tmp/test-config"),
+            std::path::PathBuf::from("/tmp/workspace"),
+            None,
+        );
+
+        let err = subsystem
+            .start()
+            .await
+            .expect_err("structural config failure must refuse start");
+        let message = err.to_string();
+        assert!(
+            message.contains("structural_config_unusable"),
+            "must surface the static category, got: {message}"
+        );
+        assert!(
+            !message.contains("providers"),
+            "must not dump config content: {message}"
+        );
+    }
+
+    #[tokio::test]
     async fn health_is_down_before_start() {
         let host = Arc::new(HostManager::new());
         let subsystem = AgentHostSubsystem::new(
             host,
             nexus_agent_host::config::AgentHostConfig::default(),
+            None,
             std::path::PathBuf::from("/tmp/test-config"),
             std::path::PathBuf::from("/tmp/workspace"),
             None,

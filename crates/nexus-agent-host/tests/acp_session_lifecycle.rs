@@ -93,6 +93,9 @@ fn acp_provider_config(
     }
 }
 
+/// A probe owner bound to `workspace_root` (must be the host boundary or a
+/// descendant of it) — the same shape `WorkspaceState::verified_probe_owner`
+/// produces in production.
 fn owner(creator_id: &str, workspace_root: PathBuf) -> SessionOwner {
     SessionOwner {
         creator_id: creator_id.to_string(),
@@ -102,6 +105,9 @@ fn owner(creator_id: &str, workspace_root: PathBuf) -> SessionOwner {
 }
 
 fn host_start_config(ws: &TestWorkspace) -> HostStartConfig {
+    // The probe owner's workspace root must be the host boundary; the
+    // per-session Creator workspaces live underneath it.
+
     HostStartConfig {
         config_path: ws.config_path.clone(),
         workspace_root: ws.workspace_root.clone(),
@@ -115,13 +121,25 @@ fn host_start_config(ws: &TestWorkspace) -> HostStartConfig {
             shutdown_ms: 2_000,
         },
         host_config: None,
-        probe_owner: None,
+        // Verified probe owner bound to this fixture's workspace root. The
+        // ready-path tests below create real sessions; without an owner every
+        // registered entry stays unavailable and admission would refuse.
+        probe_owner: Some(owner("ctr_probe", ws.workspace_root.clone())),
     }
 }
 
 async fn build_host(
     ws: &TestWorkspace,
     provider_cfg: ProviderConfig,
+) -> (Arc<HostManager>, Arc<dyn HostFacade>) {
+    build_host_with_owner(ws, provider_cfg, Some(owner("ctr_probe", ws.workspace_root.clone()))).await
+}
+
+/// Build the host with an explicit probe owner (`None` = no verified context).
+async fn build_host_with_owner(
+    ws: &TestWorkspace,
+    provider_cfg: ProviderConfig,
+    probe_owner: Option<SessionOwner>,
 ) -> (Arc<HostManager>, Arc<dyn HostFacade>) {
     let manager = Arc::new(HostManager::new());
     let provider = AcpProvider::from_config(
@@ -144,10 +162,9 @@ async fn build_host(
         env: provider_cfg.env.clone(),
     };
     manager.register_provider(Arc::new(provider), launch).await;
-    manager
-        .start(host_start_config(ws))
-        .await
-        .expect("host start");
+    let mut start_config = host_start_config(ws);
+    start_config.probe_owner = probe_owner;
+    manager.start(start_config).await.expect("host start");
     let host: Arc<dyn HostFacade> = manager.clone();
     (manager, host)
 }
@@ -165,6 +182,30 @@ fn read_fixture_log(path: &Path) -> Vec<serde_json::Value> {
 
 fn start_events(log: &[serde_json::Value]) -> Vec<&serde_json::Value> {
     log.iter().filter(|e| e["event"] == "start").collect()
+}
+
+/// Start events for SESSION launches only (probe spawns excluded).
+///
+/// A probe owner is wired so the ready-path fixtures admit sessions, which
+/// means `HostManager::start` runs one bounded ACP probe in the boundary root
+/// before any session exists. Per-session spawn-count assertions must not
+/// count that probe child, so its boundary-root cwd is filtered out.
+fn session_start_events<'a>(
+    log: &'a [serde_json::Value],
+    ws: &TestWorkspace,
+) -> Vec<&'a serde_json::Value> {
+    let probe_cwd = ws
+        .workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| ws.workspace_root.clone());
+    start_events(log)
+        .into_iter()
+        .filter(|e| {
+            e["cwd"]
+                .as_str()
+                .is_none_or(|cwd| Path::new(cwd) != probe_cwd.as_path())
+        })
+        .collect()
 }
 async fn wait_for_event(path: &Path, event: &str) -> Vec<serde_json::Value> {
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -186,7 +227,10 @@ async fn no_boot_spawn_and_truthful_catalog_recipe() {
     let _lock = env_lock();
     let ws = setup_workspace();
     let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log, &[], true);
-    let (manager, _host) = build_host(&ws, provider_cfg.clone()).await;
+    // No verified probe owner: this is the no-context case. The catalog must
+    // still report the true recipe AND stay unavailable — readiness is never
+    // claimed without a bounded probe.
+    let (manager, _host) = build_host_with_owner(&ws, provider_cfg.clone(), None).await;
 
     // No process may have been spawned at boot/catalog load.
     assert!(
@@ -217,7 +261,10 @@ async fn no_boot_spawn_and_truthful_catalog_recipe() {
             panic!("expected Acp launch strategy, got {other:?}")
         }
     }
-    assert!(entry.health.available, "configured+enabled is available");
+    assert!(
+        !entry.health.available,
+        "without a verified probe owner the entry stays unavailable"
+    );
     // The manager's runtime catalog reports the registered recipe; the
     // discovery catalog (config path) states the lazy-spawn message.
     assert!(
@@ -264,7 +311,7 @@ async fn lazy_per_session_pid_and_creator_cwd_isolation() {
     // The fixture must have been spawned with the Creator workspace cwd,
     // never the daemon cwd (the test process cwd).
     let log = read_fixture_log(&ws.fixture_log);
-    let starts = start_events(&log);
+    let starts = session_start_events(&log, &ws);
     assert_eq!(starts.len(), 1, "exactly one spawn for session A: {log:?}");
     let cwd_a = starts[0]["cwd"].as_str().expect("cwd recorded");
     let expected_cwd = ws
@@ -294,7 +341,7 @@ async fn lazy_per_session_pid_and_creator_cwd_isolation() {
         .expect("session B created");
 
     let log = read_fixture_log(&ws.fixture_log);
-    let starts = start_events(&log);
+    let starts = session_start_events(&log, &ws);
     assert_eq!(starts.len(), 2, "two distinct spawns: {log:?}");
     let pid_b = starts[1]["pid"].as_u64().expect("pid recorded");
     assert_ne!(
@@ -442,7 +489,9 @@ async fn cancel_reaches_owned_operation_and_shutdown_reaps_exact_process() {
 
     let pid = {
         let log = read_fixture_log(&ws.fixture_log);
-        start_events(&log)[0]["pid"].as_u64().expect("pid") as u32
+        session_start_events(&log, &ws)[0]["pid"]
+            .as_u64()
+            .expect("pid") as u32
     };
 
     // Start a blocked prompt in the background (the fixture never responds).
@@ -524,7 +573,9 @@ async fn shutdown_reaps_owned_process_tree_descendants() {
     // The fixture spawned an outliving descendant; the owned process-tree
     // teardown must kill the whole group (leader + descendant).
     let log = read_fixture_log(&ws.fixture_log);
-    let child_pid = start_events(&log)[0]["pid"].as_u64().expect("pid") as u32;
+    let child_pid = session_start_events(&log, &ws)[0]["pid"]
+        .as_u64()
+        .expect("pid") as u32;
     let descendant_pid = log
         .iter()
         .find(|e| e["event"] == "descendant_spawned")
@@ -554,7 +605,9 @@ async fn eof_after_initialize_is_typed_failure() {
     let provider_cfg = acp_provider_config(
         "mock-acp",
         &ws.fixture_log,
-        &[("EOF_AFTER_INIT", "1")],
+        // Run 1 is the bounded readiness probe (passes); run 2 is the
+        // session launch that must fail — post-ready launch failure.
+        &[("EOF_AFTER_INIT_FROM_RUN", "2")],
         true,
     );
     let (_manager, host) = build_host(&ws, provider_cfg).await;

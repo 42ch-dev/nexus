@@ -1460,7 +1460,11 @@ impl DshNativeProvider {
     /// exact path retained for reconciliation, never healthy with a
     /// leaked lease. Previously retained lease paths get one exact-path
     /// removal retry at the start (reconciliation, no scans).
-    async fn probe_recipes(&self) -> HostResult<ProviderHealth> {
+    async fn probe_recipes(
+        &self,
+        cwd: &std::path::Path,
+        owner: &crate::capability::model::SessionOwner,
+    ) -> HostResult<ProviderHealth> {
         let unavailable = |message: String| ProviderHealth {
             provider_id: self.provider_id.clone(),
             available: false,
@@ -1476,8 +1480,15 @@ impl DshNativeProvider {
             Ok(executable) => executable,
             Err(message) => return Ok(unavailable(message)),
         };
-        let cwd = std::env::current_dir()
-            .map_err(|_io| HostError::internal("probe could not resolve the current directory"))?;
+        // The bounded probe MUST run in the verified Creator/workspace
+        // boundary the caller admitted — never the daemon's ambient cwd, which
+        // could be a different workspace entirely. The owner binding is
+        // retained through both recipe startups below.
+        tracing::debug!(
+            creator_id = %owner.creator_id,
+            cwd = %cwd.display(),
+            "dsh probe bound to verified owner workspace"
+        );
 
         // The ordinary recipe's start + confirmed close run as ONE
         // retained spawned owner (tri-QC F-001, seat 2), installed before
@@ -1486,7 +1497,7 @@ impl DshNativeProvider {
         // never the only owner of the spawned ordinary child; the owner
         // still drives the start to completion and confirms the close,
         // reaping the direct child.
-        let ordinary_config = self.sdk_config(&cwd, &executable, None);
+        let ordinary_config = self.sdk_config(cwd, &executable, None);
         let ordinary_retained = Arc::clone(&self.retained_leases);
         let ordinary_cleanup = async move {
             match DeepSeekHarness::start(ordinary_config).await {
@@ -1531,7 +1542,7 @@ impl DshNativeProvider {
                 )));
             }
         };
-        let config = self.sdk_config(&cwd, &executable, Some(&lease.path));
+        let config = self.sdk_config(cwd, &executable, Some(&lease.path));
         let retained = Arc::clone(&self.retained_leases);
         let sealed_cleanup = async move {
             // The anchor guard lives through the SDK start handoff:
@@ -1996,7 +2007,7 @@ impl ProviderAdapter for DshNativeProvider {
         // all leave the provider unavailable with safe static text.
         match tokio::time::timeout(
             std::time::Duration::from_millis(request.timeout_ms),
-            self.probe_recipes(),
+            self.probe_recipes(&request.cwd, &request.owner),
         )
         .await
         {

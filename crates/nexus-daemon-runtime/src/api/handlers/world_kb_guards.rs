@@ -7,16 +7,18 @@
 //! pack-adjacent handler must reuse these instead of copying them again.
 
 use crate::api::errors::NexusApiError;
-use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_slug};
 use crate::workspace::WorkspaceState;
 
 /// Read the active creator id or return `AuthRequired`.
 pub(crate) fn require_creator(state: &WorkspaceState) -> Result<String, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let _workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
-        .ok_or(NexusApiError::AuthRequired)?;
-    Ok(creator_id)
+    // ONE provenance authority: `WorkspaceState::verified_creator_context`
+    // requires an active creator AND a valid active workspace selection — the
+    // same predicate the agent-host probe owner reuses, so admission and probe
+    // context can never disagree.
+    state
+        .verified_creator_context()
+        .map(|(creator_id, _workspace_slug)| creator_id)
+        .ok_or(NexusApiError::AuthRequired)
 }
 
 /// Verify the active creator owns the World (`narrative_worlds.owner_creator_id`).

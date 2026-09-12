@@ -249,6 +249,7 @@ pub fn scan_custom_path(
         if suppressed.contains(&pid) {
             continue;
         }
+        let candidate = |message: &str| candidate_unavailable_health(&pid, message);
 
         // Same capability honesty as the production scan: the dsh row
         // carries the AR-6 narrower descriptor. The `DSH_RUNTIME_BIN`
@@ -274,12 +275,9 @@ pub fn scan_custom_path(
                 source: DiscoverySource::PathScan,
                 trust: TrustLevel::LocalPath,
                 capabilities,
-                health: ProviderHealth {
-                    provider_id: pid,
-                    available: true,
-                    latency_ms: None,
-                    message: None,
-                },
+                // Same truthful-candidate contract as the production scan: an
+                // executable on a scanned dir is a candidate, not readiness.
+                health: candidate("path candidate; bounded probe required"),
             });
         }
     }
@@ -496,7 +494,21 @@ mod tests {
             assert_eq!(entry.protocol_kind, ProtocolKind::NativeCli);
             assert_eq!(entry.source, DiscoverySource::PathScan);
             assert_eq!(entry.trust, TrustLevel::LocalPath);
-            assert!(entry.health.available, "entry should be marked available");
+            // Truthful catalog: an executable on PATH is a CANDIDATE. It is not
+            // available until a bounded probe proves it, so discovery must not
+            // claim readiness.
+            assert!(
+                !entry.health.available,
+                "a PATH candidate is unavailable until probed: {entry:?}"
+            );
+            assert!(
+                entry
+                    .health
+                    .message
+                    .as_deref()
+                    .is_some_and(|m| m.contains("bounded probe required")),
+                "candidate health must state why it is unavailable"
+            );
         }
 
         // B-2: the dsh row advertises the AR-6 narrower descriptor —
@@ -560,7 +572,17 @@ mod tests {
         assert_eq!(dsh.protocol_kind, ProtocolKind::NativeCli);
         assert_eq!(dsh.source, DiscoverySource::PathScan);
         assert_eq!(dsh.trust, TrustLevel::LocalPath);
-        assert!(dsh.health.available, "a valid override is available");
+        assert!(
+            !dsh.health.available,
+            "a valid override is still only a candidate until probed"
+        );
+        assert!(
+            dsh.health
+                .message
+                .as_deref()
+                .is_some_and(|m| m.contains("bounded probe required")),
+            "the env-route row must state the bounded-probe requirement"
+        );
         let LaunchStrategy::NativeCli { command, args, env } = &dsh.launch else {
             panic!("dsh row must be a NativeCli launch");
         };

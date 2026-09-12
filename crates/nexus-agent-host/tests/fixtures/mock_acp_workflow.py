@@ -13,6 +13,12 @@ Modes (env vars, all optional):
   - EOF_AFTER_INIT=1 respond to initialize, then exit 0 immediately —
                      the host must surface EOF as a typed failure, not
                      success.
+  - EOF_AFTER_INIT_FROM_RUN=n (n >= 1) as EOF_AFTER_INIT, but only from the
+                     n-th fixture start recorded in ACP_FIXTURE_LOG. Lets a
+                     test separate a PASSING bounded readiness probe (run 1)
+                     from a FAILING later session launch (run n), so
+                     post-ready launch failure is distinguished from a broken
+                     recipe.
   - DESCENDANT=1     spawn a child process that outlives the fixture; the
                      host's owned process-tree shutdown must reap the exact
                      child (never a reused/unowned PID).
@@ -28,8 +34,39 @@ import sys
 
 LOG_PATH = os.environ.get("ACP_FIXTURE_LOG")
 BLOCK_PROMPT = os.environ.get("BLOCK_PROMPT") == "1"
-EOF_AFTER_INIT = os.environ.get("EOF_AFTER_INIT") == "1"
 DESCENDANT = os.environ.get("DESCENDANT") == "1"
+
+
+def _prior_run_count():
+    """Fixture starts already recorded in the shared log (0 for the first)."""
+    if not LOG_PATH or not os.path.exists(LOG_PATH):
+        return 0
+    count = 0
+    with open(LOG_PATH, encoding="utf-8") as fh:
+        for line in fh:
+            try:
+                if json.loads(line).get("event") == "start":
+                    count += 1
+            except json.JSONDecodeError:
+                continue
+    return count
+
+
+def _eof_after_init_enabled():
+    if os.environ.get("EOF_AFTER_INIT") == "1":
+        return True
+    from_run = os.environ.get("EOF_AFTER_INIT_FROM_RUN")
+    if not from_run:
+        return False
+    try:
+        threshold = int(from_run)
+    except ValueError:
+        return False
+    # Runs are 1-indexed: this start is run number (_prior_run_count() + 1).
+    return (_prior_run_count() + 1) >= threshold
+
+
+EOF_AFTER_INIT = _eof_after_init_enabled()
 
 _descendant = None
 
