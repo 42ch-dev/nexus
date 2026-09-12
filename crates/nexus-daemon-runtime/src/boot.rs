@@ -632,10 +632,11 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         let workflow_store: Arc<dyn WorkflowStateStore> = sqlite_storage.clone();
         let host_config = state.agent_host_config();
         let executor: std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor> =
-            std::sync::Arc::new(crate::prompt_executor::HostPromptExecutor::new(
+            std::sync::Arc::new(crate::prompt_executor::HostPromptExecutor::new_with_run_event_sinks(
                 agent_host_facade.clone(),
                 workflow_store,
                 host_config.timeouts.clone(),
+                Some(state.run_event_sinks()),
             ));
         executor
     });
@@ -647,12 +648,31 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // normal boot aggregate, never a pool-less placeholder. Tier-0 boot
     // (no creator DB) keeps `pool: None` and defers the pool-backed
     // registry to Profile attach (`publish_lazy_attach_bundle`).
+
+    if let Some(mgr) = state.session_manager() {
+        mgr.startup_recovery()
+            .await
+            .map_err(|e| anyhow::anyhow!("workspace startup recovery failed: {e}"))?;
+    }
+
+    let workspace_executor: Option<
+        std::sync::Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>,
+    > = state.session_manager().and_then(|mgr| {
+        state.workspace_path().map(|root| {
+            std::sync::Arc::new(crate::workspace::executor::DaemonWorkspaceExecutor::new(
+                mgr,
+                root,
+            )) as std::sync::Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>
+        })
+    });
+
     let runtime_deps = CapabilityRuntimeDeps {
         pool: state.pool().cloned(),
         prompt_executor: prompt_executor.clone(),
         session_cancels: session_cancels.clone(),
         daemon_tool_dispatch: None,
         cdn_config,
+        workspace_executor,
     };
     // V1.172 P0 T3 (AR-35): user capabilities live under
     // `~/.nexus42/capabilities/`. nexus-home-layout helpers take the RAW user
@@ -753,6 +773,14 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // A2/A7: the engine resolves directory presets for source identity from
     // the nexus home.
     concrete_engine.set_nexus_home(state.nexus_home().clone());
+    // v1.188 P3: resolve `_context.workspace.*` from the SAME shared
+    // workspace authority the commit executor writes through, so preset
+    // conditional edges observe real durable state.
+    if let (Some(mgr), Some(root)) = (state.session_manager(), state.workspace_path()) {
+        concrete_engine.set_workspace_state_provider(std::sync::Arc::new(
+            crate::workspace::state_provider::DaemonWorkspaceStateProvider::new(mgr, root),
+        ));
+    }
 
     let concrete_engine = Arc::new(concrete_engine);
     let engine: Arc<dyn OrchestrationEngine> = concrete_engine.clone();
@@ -798,7 +826,10 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             {
                 coordinator_builder = coordinator_builder.with_binding_provider(provider_id);
             }
-            let coordinator = Arc::new(coordinator_builder);
+            coordinator_builder = coordinator_builder
+                .with_run_events(state.run_event_registry())
+                .with_run_event_sinks(state.run_event_sinks());
+        let coordinator = Arc::new(coordinator_builder);
             state.set_run_coordinator(coordinator.clone());
             if let Some(executor) = &prompt_executor {
                 state.set_prompt_executor(executor.clone());
@@ -2054,6 +2085,7 @@ mod tests {
             )),
             daemon_tool_dispatch: None,
             cdn_config: None,
+        workspace_executor: None,
         }
     }
 

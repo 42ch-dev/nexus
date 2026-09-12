@@ -818,6 +818,11 @@ pub struct StateCompositeTask {
     /// object. Tests set this directly; in production the engine populates it
     /// from the active workspace session.
     workspace_state: Option<serde_json::Value>,
+    /// Live workspace state provider (v1.188 P3): resolves the
+    /// `_context.workspace` object from the daemon's shared workspace
+    /// authority at expression-evaluation time. Wired by the production
+    /// loader; `None` for engines/tests without a provider.
+    workspace_state_provider: Option<Arc<dyn crate::capability::WorkspaceStateProvider>>,
     /// Bounded-join deadline in milliseconds for this state's join gate
     /// (DR-06, v1.179). `None` = unbounded wait (legacy behaviour).
     timeout_ms: Option<u64>,
@@ -880,6 +885,7 @@ impl StateCompositeTask {
             converge_predecessors: std::collections::HashSet::new(),
             cached_expr,
             workspace_state: None,
+            workspace_state_provider: None,
         }
     }
 
@@ -952,29 +958,32 @@ impl StateCompositeTask {
         self
     }
 
-    /// Set the workspace session state for expression evaluation (V1.56 P3).
+    /// Set a fixed workspace session state for expression evaluation (V1.56 P3).
     ///
     /// When set, `build_context_json()` exposes this value as a nested
     /// `workspace` object, accessible in expressions as
-    /// `_context.workspace.<field>`.
-    ///
-    /// # Activation status (V1.58 P2 — R-V156P3-S004)
-    ///
-    /// This builder is currently **test-only**: the production loader
-    /// (`build_outer_graph` / `build_wired_outer_graph`) does not call it,
-    /// so `self.workspace_state` is `None` at runtime. When `None`,
-    /// `inject_workspace_context` falls back to a minimal synthetic default
-    /// (`session_id: ""`, `conflict_detected: false`, `changes_applied: 0`).
-    ///
-    /// Production activation requires wiring the engine to inject real
-    /// workspace session state per schedule tick (e.g. via a context key
-    /// that `inject_workspace_context` reads, or a capability invocation
-    /// mirroring the `registry.refresh` pattern). This is deferred to a
-    /// future plan because it requires changes to the engine → task context
-    /// injection boundary.
+    /// `_context.workspace.<field>`. This is the explicit-override path used
+    /// by tests and by callers that already hold a snapshot; production
+    /// resolves the object live through
+    /// [`Self::with_workspace_state_provider`] instead.
     #[must_use]
     pub fn with_workspace_state(mut self, state: serde_json::Value) -> Self {
         self.workspace_state = Some(state);
+        self
+    }
+
+    /// Set the live workspace state provider (v1.188 P3).
+    ///
+    /// Wired by `build_wired_outer_graph` from the engine, so every preset
+    /// state resolves `_context.workspace.*` against the shared workspace
+    /// authority at evaluation time. The provider wins over a fixed
+    /// [`Self::with_workspace_state`] snapshot.
+    #[must_use]
+    pub fn with_workspace_state_provider(
+        mut self,
+        provider: Arc<dyn crate::capability::WorkspaceStateProvider>,
+    ) -> Self {
+        self.workspace_state_provider = Some(provider);
         self
     }
 
@@ -1400,7 +1409,7 @@ impl StateCompositeTask {
                 self.inject_registry_refresh_context(context).await?;
             }
             if cache.needs_workspace {
-                self.inject_workspace_context(context)?;
+                self.inject_workspace_context(context).await?;
             }
         }
         Ok(())
@@ -1487,9 +1496,10 @@ impl StateCompositeTask {
     /// V1.58 P2 (R-V156P3-W001): emits a `tracing::debug!` span so operators
     /// can trace what workspace context was injected into which schedule tick
     /// (previously this path had zero tracing).
-    fn inject_workspace_context(&self, context: &graph_flow::Context) -> graph_flow::Result<()> {
-        // Synchronous by design: the workspace snapshot is already in memory
-        // (`self.workspace_state`), so no `.await` point exists here.
+    async fn inject_workspace_context(
+        &self,
+        context: &graph_flow::Context,
+    ) -> graph_flow::Result<()> {
         // Check if already injected (avoid clobbering).
         if context
             .get::<serde_json::Value>("__workspace_state")
@@ -1501,29 +1511,37 @@ impl StateCompositeTask {
             return Ok(());
         }
 
-        let ws_state = self.workspace_state.clone().unwrap_or_else(|| {
-            serde_json::json!({
-                "session_id": "",
-                "conflict_detected": false,
-                "changes_applied": 0,
-                "workspace_root": ""
-            })
-        });
+        // Production path: resolve live state from the workspace authority.
+        if let Some(provider) = &self.workspace_state_provider {
+            if let Some(ws_state) = provider.workspace_state().await {
+                tracing::debug!(
+                    state_id = %self.id,
+                    source = "provider",
+                    "injecting live workspace context for expression evaluation"
+                );
+                context.set("__workspace_state", ws_state)?;
+                return Ok(());
+            }
+            tracing::debug!(
+                state_id = %self.id,
+                source = "provider",
+                "workspace provider returned no committed state"
+            );
+        }
 
+        // Explicit-override path (tests, pre-snapshotted callers).
+        let Some(ws_state) = self.workspace_state.clone() else {
+            tracing::debug!(
+                state_id = %self.id,
+                "workspace context unavailable: no provider and no fixed state"
+            );
+            return Ok(());
+        };
         tracing::debug!(
             state_id = %self.id,
-            source = if self.workspace_state.is_some() { "hook" } else { "default" },
-            conflict_detected = %ws_state
-                .get("conflict_detected")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false),
-            changes_applied = %ws_state
-                .get("changes_applied")
-                .and_then(serde_json::Value::as_i64)
-                .unwrap_or(0),
-            "injecting workspace context for expression evaluation"
+            source = "fixed",
+            "injecting configured workspace context for expression evaluation"
         );
-
         context.set("__workspace_state", ws_state)?;
         Ok(())
     }
@@ -3120,6 +3138,7 @@ mod tests {
             session_cancels: session_cancels_with_default(),
             daemon_tool_dispatch: None,
             cdn_config: None,
+        workspace_executor: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -3164,6 +3183,7 @@ mod tests {
             session_cancels: session_cancels_with_default(),
             daemon_tool_dispatch: None,
             cdn_config: None,
+        workspace_executor: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -3258,6 +3278,7 @@ mod tests {
             session_cancels: map,
             daemon_tool_dispatch: None,
             cdn_config: None,
+        workspace_executor: None,
         };
         Arc::new(CapabilityRegistry::with_runtime_deps(&deps))
     }
@@ -3494,6 +3515,7 @@ mod tests {
             session_cancels: session_cancels_with_default(),
             daemon_tool_dispatch: None,
             cdn_config: None,
+        workspace_executor: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -3547,6 +3569,7 @@ mod tests {
             session_cancels: session_cancels_with_default(),
             daemon_tool_dispatch: None,
             cdn_config: None,
+        workspace_executor: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -4153,6 +4176,7 @@ mod tests {
             session_cancels,
             daemon_tool_dispatch: None,
             cdn_config: None,
+        workspace_executor: None,
         };
         Arc::new(CapabilityRegistry::with_runtime_deps(&deps))
     }
@@ -4468,6 +4492,7 @@ mod tests {
             converge_predecessors: std::collections::HashSet::new(),
             cached_expr: None,
             workspace_state: None,
+            workspace_state_provider: None,
             timeout_ms: None,
             on_timeout: None,
             clock: Arc::new(SystemJoinClock),
@@ -4697,6 +4722,7 @@ mod tests {
             converge_predecessors: std::collections::HashSet::new(),
             cached_expr: None,
             workspace_state: None,
+            workspace_state_provider: None,
             timeout_ms: None,
             on_timeout: None,
             clock: Arc::new(SystemJoinClock),
@@ -4766,6 +4792,7 @@ mod tests {
             converge_predecessors: std::collections::HashSet::new(),
             cached_expr,
             workspace_state: None,
+            workspace_state_provider: None,
             timeout_ms: None,
             on_timeout: None,
             clock: Arc::new(SystemJoinClock),
@@ -4952,12 +4979,12 @@ mod tests {
 
     #[tokio::test]
     async fn workspace_no_conflict_continues() {
-        // When no conflict, `_context.workspace.conflict_detected` is false,
-        // so `!_context.workspace.conflict_detected` should be true → continue.
+        // When no conflict, `_context.workspace.committed` is false,
+        // so `!_context.workspace.committed` should be true → continue.
         let task = make_branches_task(
             "check_workspace",
             vec![ConditionalRule {
-                when: "!_context.workspace.conflict_detected".to_string(),
+                when: "!_context.workspace.committed".to_string(),
                 target: "continue_state".to_string(),
             }],
             "resolve_conflict_state",
@@ -4968,8 +4995,8 @@ mod tests {
             "__workspace_state",
             serde_json::json!({
                 "session_id": "ws_test1",
-                "conflict_detected": false,
-                "changes_applied": 0,
+                "committed": false,
+                "change_count": 0,
                 "workspace_root": "/tmp/ws"
             }),
         )
@@ -4986,11 +5013,11 @@ mod tests {
 
     #[tokio::test]
     async fn workspace_conflict_resolves() {
-        // When conflict_detected is true, route to resolve_conflict.
+        // When committed is true, route to resolve_conflict.
         let task = make_branches_task(
             "check_workspace",
             vec![ConditionalRule {
-                when: "_context.workspace.conflict_detected".to_string(),
+                when: "_context.workspace.committed".to_string(),
                 target: "resolve_conflict_state".to_string(),
             }],
             "continue_state",
@@ -5001,8 +5028,8 @@ mod tests {
             "__workspace_state",
             serde_json::json!({
                 "session_id": "ws_test2",
-                "conflict_detected": true,
-                "changes_applied": 0,
+                "committed": true,
+                "change_count": 0,
                 "workspace_root": "/tmp/ws"
             }),
         )
@@ -5017,13 +5044,92 @@ mod tests {
         );
     }
 
+    /// Live workspace state provider used by the production-wiring proof.
+    struct FixedWorkspaceStateProvider(serde_json::Value);
+
+    #[async_trait]
+    impl crate::capability::WorkspaceStateProvider for FixedWorkspaceStateProvider {
+        async fn workspace_state(&self) -> Option<serde_json::Value> {
+            Some(self.0.clone())
+        }
+    }
+
     #[tokio::test]
-    async fn workspace_changes_count_threshold() {
-        // changes_applied > 3 → route to review_state.
+    async fn preset_workflow_resolves_workspace_branch_from_provider() {
+        // The SAME conditional-edge shape a preset declares, wired the way
+        // `build_wired_outer_graph` wires it: the context carries NO
+        // `__workspace_state`, so the branch can only resolve if the live
+        // provider is consulted at evaluation time.
         let task = make_branches_task(
             "check_workspace",
             vec![ConditionalRule {
-                when: "_context.workspace.changes_applied > 3".to_string(),
+                when: "_context.workspace.committed".to_string(),
+                target: "resolve_conflict_state".to_string(),
+            }],
+            "continue_state",
+        )
+        .with_workspace_state_provider(Arc::new(FixedWorkspaceStateProvider(
+            serde_json::json!({
+                "session_id": "ws_provider",
+                "committed": true,
+                "change_count": 7,
+                "workspace_root": "/tmp/ws"
+            }),
+        )));
+
+        let ctx = graph_flow::Context::new();
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "resolve_conflict_state"),
+            "provider-backed workspace state must drive the branch, got {:?}",
+            result.next_action
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_workspace_state_wins_over_fixed_snapshot() {
+        // A stale fixed snapshot must never mask the live authority.
+        let task = make_branches_task(
+            "check_workspace",
+            vec![ConditionalRule {
+                when: "_context.workspace.committed".to_string(),
+                target: "resolve_conflict_state".to_string(),
+            }],
+            "continue_state",
+        )
+        .with_workspace_state(serde_json::json!({
+            "session_id": "ws_stale",
+            "committed": true,
+            "change_count": 0,
+            "workspace_root": "/tmp/ws"
+        }))
+        .with_workspace_state_provider(Arc::new(FixedWorkspaceStateProvider(
+            serde_json::json!({
+                "session_id": "ws_live",
+                "committed": false,
+                "change_count": 0,
+                "workspace_root": "/tmp/ws"
+            }),
+        )));
+
+        let ctx = graph_flow::Context::new();
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "continue_state"),
+            "live provider state must win over the fixed snapshot, got {:?}",
+            result.next_action
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_changes_count_threshold() {
+        // change_count > 3 → route to review_state.
+        let task = make_branches_task(
+            "check_workspace",
+            vec![ConditionalRule {
+                when: "_context.workspace.change_count > 3".to_string(),
                 target: "review_state".to_string(),
             }],
             "continue_state",
@@ -5034,8 +5140,8 @@ mod tests {
             "__workspace_state",
             serde_json::json!({
                 "session_id": "ws_test3",
-                "conflict_detected": false,
-                "changes_applied": 5,
+                "committed": false,
+                "change_count": 5,
                 "workspace_root": "/tmp/ws"
             }),
         )
@@ -5045,18 +5151,18 @@ mod tests {
 
         assert!(
             matches!(result.next_action, NextAction::GoTo(ref t) if t == "review_state"),
-            "changes_applied > 3 should route to review_state, got {:?}",
+            "change_count > 3 should route to review_state, got {:?}",
             result.next_action
         );
     }
 
     #[tokio::test]
     async fn workspace_changes_count_below_threshold_goes_default() {
-        // changes_applied > 3 should NOT match when changes_applied is 2.
+        // change_count > 3 should NOT match when change_count is 2.
         let task = make_branches_task(
             "check_workspace",
             vec![ConditionalRule {
-                when: "_context.workspace.changes_applied > 3".to_string(),
+                when: "_context.workspace.change_count > 3".to_string(),
                 target: "review_state".to_string(),
             }],
             "continue_state",
@@ -5067,8 +5173,8 @@ mod tests {
             "__workspace_state",
             serde_json::json!({
                 "session_id": "ws_test4",
-                "conflict_detected": false,
-                "changes_applied": 2,
+                "committed": false,
+                "change_count": 2,
                 "workspace_root": "/tmp/ws"
             }),
         )
@@ -5078,7 +5184,7 @@ mod tests {
 
         assert!(
             matches!(result.next_action, NextAction::GoTo(ref t) if t == "continue_state"),
-            "changes_applied <= 3 should route to default, got {:?}",
+            "change_count <= 3 should route to default, got {:?}",
             result.next_action
         );
     }
@@ -5086,11 +5192,11 @@ mod tests {
     #[tokio::test]
     async fn workspace_default_state_when_no_state_injected() {
         // When no workspace state is set, the default values should be used:
-        // conflict_detected = false, so `_context.workspace.conflict_detected` is false.
+        // committed = false, so `_context.workspace.committed` is false.
         let task = make_branches_task(
             "check_workspace",
             vec![ConditionalRule {
-                when: "_context.workspace.conflict_detected".to_string(),
+                when: "_context.workspace.committed".to_string(),
                 target: "resolve_conflict_state".to_string(),
             }],
             "continue_state",

@@ -177,6 +177,7 @@ async fn start_server(
             )),
             daemon_tool_dispatch: None,
             cdn_config: None,
+        workspace_executor: None,
         };
         let (registry, outcome) = CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, dir);
         assert!(

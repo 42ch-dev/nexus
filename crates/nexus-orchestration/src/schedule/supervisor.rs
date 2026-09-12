@@ -763,7 +763,7 @@ impl ScheduleSupervisor {
         //    terminal callback races nothing here because the row's owned
         //    session is already terminal. Terminal rows are excluded so a
         //    duplicate callback never rewrites a settled row.
-        sqlx::query(
+        let source_result = sqlx::query(
             "UPDATE creator_schedules SET status = ?, terminated_at = ?, updated_at = ?
              WHERE schedule_id = ? AND status NOT IN ('completed', 'failed', 'cancelled')
                AND current_session_id = ?",
@@ -775,6 +775,7 @@ impl ScheduleSupervisor {
         .bind(source_run_id)
         .execute(&mut *tx)
         .await?;
+        let source_transitioned = source_result.rows_affected() > 0;
 
         // 2. Child enqueue in the SAME transaction (auto-chain only).
         let mut child_id: Option<String> = None;
@@ -835,7 +836,9 @@ impl ScheduleSupervisor {
         // Whether THIS call performed the terminal transition. A duplicate
         // callback (source_run_id conflict) must not re-run completion hooks,
         // mark Work complete, or re-hand the child to the starter (Greptile P2).
-        let mut transitioned = !conflict;
+        // Ownership is keyed on the source UPDATE row count — not merely
+        // whether the child INSERT conflicted.
+        let mut transitioned = source_transitioned;
         if conflict {
             // Duplicate terminal callback: the child INSERT failed on the
             // source_run_id unique index. Roll back (the source settlement

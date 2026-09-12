@@ -8,9 +8,12 @@ use crate::api::sort::{compare_by_terms, parse_sort_terms};
 use crate::workspace::WorkspaceState;
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
+    response::sse::{Event, KeepAlive, Sse},
     Json,
 };
+use std::convert::Infallible;
+use tokio_stream::Stream;
 use nexus_contracts::local::orchestration::http::{
     CreateSessionRequest, CreateSessionResponse, GetSessionResponse, ListSessionsQuery,
     ListSessionsResponse, SessionSummary, SignalSessionRequest,
@@ -83,6 +86,11 @@ pub async fn create_session(
         )
         .await
         .map_err(|e| {
+            // QC2 F-004: the live-ring capacity refusal keeps its typed,
+            // retryable envelope instead of collapsing into a generic 500.
+            if matches!(e, crate::preset_run::RunControlError::RunEventCapacity(_)) {
+                return NexusApiError::from(e);
+            }
             let msg = e.to_string();
             if msg.contains("not eligible")
                 || msg.contains("system preset")
@@ -204,7 +212,7 @@ pub async fn get_session(
         .engine()
         .ok_or_else(|| NexusApiError::service_unavailable("engine not available"))?;
 
-    let sid = nexus_orchestration::engine::SessionId(session_id.clone());
+    let sid = nexus_orchestration::engine::SessionId(session_id.to_string());
     // Shared durable execution projection (A2/A7): present for terminal rows
     // with no live runner; a load error projects unreadable, never a
     // fabricated class.
@@ -382,57 +390,36 @@ pub async fn signal_session(
                 },
             )
             .await
-            .map_err(|e| match e {
-                crate::preset_run::RunControlError::WaitConflict {
-                    session_id,
-                    status,
-                    current_wait_id,
-                } => NexusApiError::ConflictCodedDetails {
-                    code: "workflow_wait_conflict".into(),
-                    message: format!(
-                        "wait conflict for {session_id}: current status {status}, current_wait_id {current_wait_id:?}"
-                    ),
-                    details: serde_json::json!({
-                        "session_id": session_id,
-                        "status": status,
-                        "current_wait_id": current_wait_id,
-                    }),
-                },
-                crate::preset_run::RunControlError::StateConflict(sid, msg) => {
-                    NexusApiError::ConflictCoded {
-                        code: "workflow_state_conflict".into(),
-                        message: format!("state conflict for {sid}: {msg}"),
-                    }
-                }
-                crate::preset_run::RunControlError::ReconstructionUnavailable {
-                    session_id,
-                    reason,
-                } => NexusApiError::ConflictCodedDetails {
-                    code: "reconstruction_unavailable".into(),
-                    message: format!(
-                        "cannot continue session {session_id}: {reason} — \
-                         human wait preserved, cancel-only"
-                    ),
-                    details: serde_json::json!({
-                        "session_id": session_id,
-                        "reason": reason,
-                        "allowed_actions": ["cancel", "new_run"],
-                    }),
-                },
-                crate::preset_run::RunControlError::ScheduleNotFound(sid) => {
-                    NexusApiError::NotFound(format!("session {sid} not found"))
-                }
-                other => NexusApiError::Internal {
-                    code: "RUN_CONTROL_ERROR".into(),
-                    message: other.to_string(),
-                },
-            })?;
+            .map_err(NexusApiError::from)?;
         return Ok((
             StatusCode::OK,
             Json(serde_json::json!({
                 "signal": "continue",
                 "status": result.status,
                 "current_wait_id": result.current_wait_id,
+            })),
+        ));
+    }
+
+    // QC2 F-002: Cancel has exactly ONE projection owner (the coordinator's
+    // `cancel_run`). The durable outcome — confirmed `cancelled`, unconfirmed
+    // `interrupted`, or the converged `driver_failed` — is a typed success;
+    // the handler never string-matches an engine error and never turns an
+    // actionable interrupted run into a 500.
+    if body.signal == "cancel" {
+        let coordinator = state
+            .run_coordinator()
+            .ok_or_else(|| NexusApiError::service_unavailable("run coordinator not configured"))?;
+        let result = coordinator
+            .cancel_run(&sid)
+            .await
+            .map_err(NexusApiError::from)?;
+        return Ok((
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "signal": "cancel",
+                "status": result.status,
+                "cancel_outcome": result.cancel_outcome.map(|o| o.as_str()),
             })),
         ));
     }
@@ -936,46 +923,23 @@ mod tests {
             .await
         }
 
-        async fn settle_cancelled(
+        async fn settle_run(
             &self,
             session_id: &nexus_orchestration::engine::SessionId,
             expected_revision: u64,
             expected_graph_version: Option<u64>,
             checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
             next_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<
-            nexus_orchestration::run_state::RunRecord,
-            nexus_orchestration::engine::EngineError,
-        > {
+            terminal_target: nexus_orchestration::run_state::TerminalSettlementTarget,
+        ) -> Result<nexus_orchestration::run_state::SettlementResult, nexus_orchestration::engine::EngineError> {
             self.inner
-                .settle_cancelled(
+                .settle_run(
                     session_id,
                     expected_revision,
                     expected_graph_version,
                     checkpoint,
                     next_state,
-                )
-                .await
-        }
-
-        async fn settle_failed(
-            &self,
-            session_id: &nexus_orchestration::engine::SessionId,
-            expected_revision: u64,
-            expected_graph_version: Option<u64>,
-            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-            next_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<
-            nexus_orchestration::run_state::RunRecord,
-            nexus_orchestration::engine::EngineError,
-        > {
-            self.inner
-                .settle_failed(
-                    session_id,
-                    expected_revision,
-                    expected_graph_version,
-                    checkpoint,
-                    next_state,
+                    terminal_target,
                 )
                 .await
         }
@@ -1058,13 +1022,15 @@ mod tests {
         }
     }
 
-    /// Production handler-level regression (Finding 4, round 3): a real v1
-    /// session, one injected cleanup failure, the first Cancel through the
-    /// production `signal_session` handler, then an immediate `get_session`
-    /// — the public projection must be `interrupted` with the actionable
-    /// failure reason, never a stale in-memory `running`.
+    /// Production handler-level regression (QC2 F-002): a real v1 session,
+    /// one injected cleanup failure, the first Cancel through the production
+    /// `signal_session` handler — the coordinator projects the durable
+    /// `interrupted` winner as a typed success — then an immediate
+    /// `get_session`: the public projection must be `interrupted` with the
+    /// actionable failure reason, never a stale in-memory `running` and
+    /// never a 500.
     #[tokio::test]
-    async fn get_session_projects_interrupted_after_first_failed_cancel() {
+    async fn get_session_projects_interrupted_after_unconfirmed_cancel() {
         let (_tmp, nexus_home, db_path) = create_test_workspace().await;
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
@@ -1089,7 +1055,16 @@ mod tests {
             >,
         > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
         engine.set_prompt_executor(executor.clone(), session_cancels.clone());
-        state.set_engine(Arc::new(engine));
+        // QC2 F-002: Cancel routes through the coordinator, so the test wires
+        // the production coordinator over the SAME engine/store.
+        let engine = Arc::new(engine);
+        state.set_engine(engine.clone());
+        state.set_run_coordinator(Arc::new(crate::preset_run::WorkflowRunCoordinator::new(
+            engine,
+            storage.clone(),
+            Arc::new(pool.clone()),
+            session_cancels,
+        )));
 
         // Start a real v1 session.
         let engine = state.engine().expect("engine set");
@@ -1099,10 +1074,11 @@ mod tests {
             .await
             .expect("start session");
 
-        // First Cancel through the production handler: the cleanup fails →
-        // the handler surfaces the engine error (the durable row is
-        // `interrupted` with the actionable reason).
-        let err = signal_session(
+        // First Cancel through the production handler: the cleanup cannot be
+        // confirmed, so the coordinator persists the durable `interrupted`
+        // winner and projects it as a TYPED success — never a 500 derived
+        // from an engine error string.
+        let (code, body) = signal_session(
             State(state.clone()),
             Path(session_id.0.clone()),
             Json(SignalSessionRequest {
@@ -1111,10 +1087,17 @@ mod tests {
             }),
         )
         .await
-        .expect_err("first cancel must surface the unconfirmed cleanup");
-        assert!(
-            matches!(err, NexusApiError::Internal { .. }),
-            "the failed cancel surfaces the engine error, got {err:?}"
+        .expect("an unconfirmed cancel must project a typed success");
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(
+            body.0["status"].as_str(),
+            Some("interrupted"),
+            "the unconfirmed cancel status is the durable interrupted winner"
+        );
+        assert_eq!(
+            body.0["cancel_outcome"].as_str(),
+            Some("unconfirmed"),
+            "the typed projection must label the unconfirmed outcome"
         );
 
         // Immediately perform the public GET: the projection must be
@@ -1138,8 +1121,10 @@ mod tests {
 
     /// Bounded interruption-write exhaustion proof (Finding 4, round 3):
     /// when the `Interrupted` write can never win its revision CAS, the
-    /// engine's bounded retry exhausts and the public result is a conflict
-    /// (409) — never an apparent successful cancellation.
+    /// engine's bounded retry exhausts and the coordinator's typed cancel
+    /// projection finds NO durable cancel outcome — the public result is the
+    /// shared conflict envelope (409), never an apparent successful
+    /// cancellation and never a cancel-specific 500.
     #[tokio::test]
     async fn interrupted_write_exhaustion_is_conflict_never_successful_cancel() {
         let (_tmp, nexus_home, db_path) = create_test_workspace().await;
@@ -1171,7 +1156,19 @@ mod tests {
             >,
         > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
         engine.set_prompt_executor(executor.clone(), session_cancels.clone());
-        state.set_engine(Arc::new(engine));
+        // QC2 F-002: wire the production coordinator over the SAME faulting
+        // store so the cancel projection reads exactly the durable truth.
+        let engine = Arc::new(engine);
+        state.set_engine(engine.clone());
+        state.set_run_coordinator(Arc::new(
+            crate::preset_run::WorkflowRunCoordinator::new(
+                engine,
+                storage.clone(),
+                Arc::new(pool.clone()),
+                session_cancels,
+            )
+            .with_workflow_store(store.clone()),
+        ));
 
         // Start a real v1 session.
         let engine = state.engine().expect("engine set");
@@ -1217,3 +1214,114 @@ mod tests {
         );
     }
 }
+
+
+/// Resolve a session through the same durable owner lookup as inspect, then
+/// verify the active Creator owns it. Foreign/missing sessions are 404.
+async fn authorize_orchestration_session_read(
+    state: &WorkspaceState,
+    session_id: &str,
+) -> Result<(), NexusApiError> {
+    use crate::api::handlers::works::read_active_creator_id;
+    let active_creator =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+    let engine = state
+        .engine()
+        .ok_or_else(|| NexusApiError::service_unavailable("engine not available"))?;
+    let sid = nexus_orchestration::engine::SessionId(session_id.to_string());
+    let sessions = engine
+        .list_active(nexus_orchestration::engine::SessionFilter::default())
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "ENGINE_ERROR".into(),
+            message: e.to_string(),
+        })?;
+    // The DURABLE row is the ownership SSOT, exactly as `get_session` treats
+    // it for status. The in-memory active summary is only a fast path for a
+    // row the durable store does not know about: after an ownership change
+    // (or any writer that moved `orchestration_sessions.creator_id`), a stale
+    // in-memory summary would otherwise authorize a FOREIGN creator to read
+    // another creator's live event stream.
+    let durable_owner = match state.pool() {
+        Some(pool) => {
+            let storage = SqliteSessionStorage::new(Arc::new(pool.clone()));
+            storage
+                .get_checkpoint_row(session_id)
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    code: "STORAGE_ERROR".into(),
+                    message: e.to_string(),
+                })?
+                .map(|row| row.creator_id)
+        }
+        None => None,
+    };
+    let owner = match durable_owner {
+        Some(owner) => owner,
+        None => {
+            let active = sessions
+                .iter()
+                .find(|s| s.session_id == sid)
+                .ok_or_else(|| NexusApiError::NotFound(format!("session {session_id}")))?;
+            active.creator_id.clone()
+        }
+    };
+    if owner != active_creator {
+        return Err(NexusApiError::NotFound(format!("session {session_id}")));
+    }
+    Ok(())
+}
+
+/// `GET /v1/daemon/orchestration/sessions/{session_id}/events` — live SSE replay.
+pub async fn session_events(
+    State(state): State<WorkspaceState>,
+    Path(session_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, NexusApiError> {
+    authorize_orchestration_session_read(&state, &session_id).await?;
+    let inspect_url = format!("/v1/daemon/orchestration/sessions/{session_id}");
+    let last_event_id = headers
+        .get("last-event-id")
+        .and_then(|v| v.to_str().ok());
+    let registry = state.run_event_registry();
+    let sub = match registry.subscribe_live(&session_id, last_event_id, inspect_url) {
+        Ok(rx) => rx,
+        Err(crate::run_events::SubscribeError::MalformedCursor)
+        | Err(crate::run_events::SubscribeError::FutureCursor) => {
+            return Err(NexusApiError::BadRequest {
+                code: "invalid_cursor".into(),
+                message: "malformed or future Last-Event-ID".into(),
+            });
+        }
+        Err(crate::run_events::SubscribeError::TooManySubscribers) => {
+            return Err(NexusApiError::ConflictCoded {
+                code: "sse_subscriber_limit".into(),
+                message: "too many concurrent SSE subscribers for this run".into(),
+            });
+        }
+        Err(crate::run_events::SubscribeError::HistoryUnavailable(body)) => {
+            return Err(NexusApiError::BadRequestCodedDetails {
+                code: "history_unavailable".into(),
+                message: "run event history is not available for replay".into(),
+                details: serde_json::json!({
+                    "run_id": body.run_id,
+                    "inspect_url": body.inspect_url,
+                }),
+            });
+        }
+    };
+    let stream = futures_util::stream::unfold(sub, |mut sub| async move {
+        match sub.recv().await {
+            Some(frame) => {
+                let event = Event::default()
+                    .id(frame.id)
+                    .event(frame.event)
+                    .data(frame.data);
+                Some((Ok(event), sub))
+            }
+            None => None,
+        }
+    });
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+

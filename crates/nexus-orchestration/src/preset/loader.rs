@@ -1371,6 +1371,13 @@ pub fn build_wired_outer_graph(
             .with_output_bindings(loaded.output_bindings.clone())
             .with_registry(caps.clone());
 
+        // v1.188 P3: resolve `_context.workspace.*` from the engine's live
+        // workspace state provider, so preset conditional edges see real
+        // durable workspace state instead of a synthetic default.
+        if let Some(provider) = engine.workspace_state_provider() {
+            task = task.with_workspace_state_provider(provider);
+        }
+
         // Wire daemon tool dispatch for HostTool enter actions (DF-47, V1.42 P3).
         if let Some(ref dispatch) = daemon_tool_dispatch {
             task = task.with_daemon_tool_dispatch(dispatch.clone());
@@ -2350,6 +2357,8 @@ states:
     enter:
       - kind: capability
         name: workspace.open
+        args:
+          path: .
     exit_when: { kind: manual }
     next: b
   - id: b

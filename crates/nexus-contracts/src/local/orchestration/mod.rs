@@ -96,41 +96,80 @@ pub struct OutboxCompactOutput {
 }
 
 // ---------------------------------------------------------------------------
-// Workspace capabilities
+// Workspace capabilities (v1.188 P3 — recoverable content commit)
 // ---------------------------------------------------------------------------
 
-/// Input for `workspace.open` — ensure workspace directory is present and valid.
+/// Input for `workspace.open` — open a scope-relative path within the bound workspace.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceOpenInput {
+    /// Safe workspace-relative scope path (required).
+    pub path: String,
+}
+
+/// Snapshot captured at `workspace.open` for OCC and commit validation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct WorkspaceOpenInput {
-    /// Workspace path (if None, uses default).
-    pub path: Option<String>,
+pub struct WorkspaceOpenSnapshot {
+    /// Canonical workspace creative root (absolute).
+    pub workspace_root: String,
+    /// Scope path opened (relative to `workspace_root`).
+    pub path: String,
+    /// Whether the scope path existed at open time.
+    pub existed: bool,
+    /// Relative path → lowercase SHA-256 hex for tracked regular files in scope.
+    #[serde(default)]
+    pub file_hashes: std::collections::HashMap<String, String>,
 }
 
 /// Output for `workspace.open`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceOpenOutput {
-    /// Resolved workspace path.
-    pub workspace_path: String,
-    /// Whether the workspace was created (vs already existed).
-    pub created: bool,
+    pub session_id: String,
+    pub snapshot: WorkspaceOpenSnapshot,
 }
 
-/// Input for `workspace.commit` — commit manuscript diff into working copy.
+/// Operation type for a workspace commit manifest entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkspaceChangeOp {
+    Create,
+    Modify,
+    Delete,
+}
+
+/// One change in a `workspace.commit` manifest.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceCommitInput {
-    /// Commit message.
-    pub message: String,
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceChangeEntry {
+    /// Scope-relative path for this change.
+    pub path: String,
+    pub op: WorkspaceChangeOp,
+    /// Lowercase SHA-256 of pre-image; null/absent for create.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_hash: Option<String>,
+    /// Canonical base64 content for create/modify; forbidden for delete.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_base64: Option<String>,
 }
 
-/// Output for `workspace.commit`.
+/// Input for `workspace.commit`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceCommitInput {
+    pub session_id: String,
+    pub changes: Vec<WorkspaceChangeEntry>,
+}
+
+/// Output for `workspace.commit` after durable completion.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceCommitOutput {
-    /// Commit hash or identifier.
+    /// Stable durable revision (`rev_<uuid>`).
     pub revision: String,
+    /// True only after filesystem apply and durable intent/session consume.
+    pub committed: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -295,6 +334,9 @@ pub struct JudgeRuleOutput {
 }
 
 // ---------------------------------------------------------------------------
+// FL-E stages (V1.34 creator-workflow §3.1)
+// ---------------------------------------------------------------------------
+
 // FL-E stages (V1.34 creator-workflow §3.1)
 // ---------------------------------------------------------------------------
 

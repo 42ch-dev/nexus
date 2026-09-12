@@ -96,9 +96,7 @@ states:
       - kind: capability
         name: workspace.open
         args:
-          prompt_file: prompts/start.md
-          vars:
-            input: "{{preset.input}}"
+          path: prompts/start.md
     exit_when:
       kind: manual
     next: done

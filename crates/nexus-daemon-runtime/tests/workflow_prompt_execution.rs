@@ -198,6 +198,7 @@ async fn build_stack(
         session_cancels: session_cancels.clone(),
         daemon_tool_dispatch: None,
         cdn_config: None,
+    workspace_executor: None,
     };
     let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
     (

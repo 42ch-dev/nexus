@@ -9,8 +9,18 @@
 //! preferable to a hard crash.
 
 pub mod actor_sessions;
+pub mod authority;
+pub mod bounds;
+pub mod commit_fs;
+pub mod executor;
 pub mod manager;
+pub mod scope;
 pub mod session;
+pub mod session_commit;
+pub mod state_provider;
+/// Test-only seams — absent from production builds.
+#[cfg(any(test, feature = "test-hooks"))]
+pub mod test_hooks;
 
 use crate::api::errors::NexusApiError;
 use crate::db::pool::{DbPool, PoolConfig};
@@ -130,6 +140,9 @@ pub struct WorkspaceState {
     session_cancels: Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
+    /// Bounded workflow-run SSE registry (P4 §6.3).
+    run_event_registry: Arc<crate::run_events::RunEventRegistry>,
+    run_event_sinks: crate::run_events::RunEventSinkMap,
     /// One async initialization gate for the lazy-attach runtime bundle
     /// (N-2): concurrent `ensure_creator_pool` callers serialize here and
     /// re-check; only the winner opens the pool and publishes the bundle.
@@ -225,7 +238,13 @@ impl WorkspaceState {
             .await
             .expect("Failed to create test database pool");
         let narrative_gateway = Arc::new(SqliteNarrativeGateway::new(db.pool().clone()));
-        let session_manager = Arc::new(WorkspaceSessionManager::new(Arc::new(db.pool().clone())));
+        let session_manager = Arc::new(
+            WorkspaceSessionManager::new_recoverable(
+                Arc::new(db.pool().clone()),
+                db_path.clone(),
+            )
+            .expect("workspace authority lease"),
+        );
         let creator_db = Arc::new(RwLock::new(CreatorDbSlot {
             db: Some(db),
             db_path: Some(db_path.clone()),
@@ -258,6 +277,8 @@ impl WorkspaceState {
             run_coordinator: Arc::new(RwLock::new(None)),
             prompt_executor: Arc::new(RwLock::new(None)),
             session_cancels: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            run_event_registry: Arc::new(crate::run_events::RunEventRegistry::new()),
+            run_event_sinks: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             bundle_gate: Arc::new(tokio::sync::Mutex::new(())),
             runtime_bundle: Arc::new(RwLock::new(None)),
             agent_host: Arc::new(None),
@@ -363,6 +384,8 @@ impl WorkspaceState {
             run_coordinator: Arc::new(RwLock::new(None)),
             prompt_executor: Arc::new(RwLock::new(None)),
             session_cancels: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            run_event_registry: Arc::new(crate::run_events::RunEventRegistry::new()),
+            run_event_sinks: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             bundle_gate: Arc::new(tokio::sync::Mutex::new(())),
             runtime_bundle: Arc::new(RwLock::new(None)),
             agent_host: Arc::new(None),
@@ -497,7 +520,13 @@ impl WorkspaceState {
         };
 
         let narrative_gateway = Arc::new(SqliteNarrativeGateway::new(db.pool().clone()));
-        let session_manager = Arc::new(WorkspaceSessionManager::new(Arc::new(db.pool().clone())));
+        let session_manager = Arc::new(
+            WorkspaceSessionManager::new_recoverable(
+                Arc::new(db.pool().clone()),
+                db_path.clone(),
+            )
+            .expect("workspace authority lease"),
+        );
         CreatorDbOutcome {
             db: Some(db),
             db_path: Some(db_path),
@@ -560,6 +589,10 @@ impl WorkspaceState {
             if let (Some(db), Some(db_path), Some(narrative_gateway), Some(session_manager)) =
                 (db, db_path, narrative_gateway, session_manager)
             {
+                session_manager
+                    .startup_recovery()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("workspace startup recovery failed: {e}"))?;
                 {
                     let mut slot = self.creator_db_write();
                     if slot.db.is_none() {
@@ -727,10 +760,11 @@ impl WorkspaceState {
             self.agent_host().map(|host| {
                 let host_config = self.agent_host_config();
                 let executor: Arc<dyn nexus_orchestration::capability::PromptExecutor> =
-                    Arc::new(crate::prompt_executor::HostPromptExecutor::new(
+                    Arc::new(crate::prompt_executor::HostPromptExecutor::new_with_run_event_sinks(
                         host,
                         workflow_store.clone(),
                         host_config.timeouts.clone(),
+                        Some(self.run_event_sinks()),
                     ));
                 executor
             });
@@ -745,12 +779,23 @@ impl WorkspaceState {
         // (`with_runtime_deps_and_user_caps`), so user capabilities and the
         // daemon-wide WASM singleton are preserved.
         let holder = {
+            let workspace_executor: Option<
+                Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>,
+            > = self.session_manager().and_then(|mgr| {
+                self.workspace_path().map(|root| {
+                    Arc::new(crate::workspace::executor::DaemonWorkspaceExecutor::new(
+                        mgr,
+                        root,
+                    )) as Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>
+                })
+            });
             let deps = nexus_orchestration::capability::CapabilityRuntimeDeps {
                 pool: Some(pool_arc.as_ref().clone()),
                 prompt_executor: prompt_executor.clone(),
                 session_cancels: self.session_cancels(),
                 daemon_tool_dispatch: self.daemon_tool_dispatch(),
                 cdn_config: None,
+                workspace_executor,
             };
             let scan_dir = crate::boot::user_capabilities_scan_dir(self);
             let (registry, _outcome) = match (self.wasm_engine(), self.module_cache()) {
@@ -790,6 +835,14 @@ impl WorkspaceState {
             engine.set_prompt_executor(executor.clone(), self.session_cancels());
         }
         engine.set_nexus_home(self.nexus_home().clone());
+        // v1.188 P3: resolve `_context.workspace.*` from the SAME shared
+        // workspace authority the commit executor writes through, so preset
+        // conditional edges observe real durable state.
+        if let (Some(mgr), Some(root)) = (self.session_manager(), self.workspace_path()) {
+            engine.set_workspace_state_provider(Arc::new(
+                crate::workspace::state_provider::DaemonWorkspaceStateProvider::new(mgr, root),
+            ));
+        }
 
         let engine_arc = Arc::new(engine);
 
@@ -817,6 +870,9 @@ impl WorkspaceState {
         {
             coordinator_builder = coordinator_builder.with_binding_provider(provider_id);
         }
+        coordinator_builder = coordinator_builder
+            .with_run_events(self.run_event_registry())
+            .with_run_event_sinks(self.run_event_sinks());
         let coordinator = Arc::new(coordinator_builder);
 
         // Schedule supervisor with the daemon admission callback.
@@ -1137,6 +1193,14 @@ impl WorkspaceState {
 
     /// Get the shared per-run cancellation tokens (A1).
     #[must_use]
+    pub fn run_event_registry(&self) -> Arc<crate::run_events::RunEventRegistry> {
+        Arc::clone(&self.run_event_registry)
+    }
+
+    pub fn run_event_sinks(&self) -> crate::run_events::RunEventSinkMap {
+        Arc::clone(&self.run_event_sinks)
+    }
+
     pub fn session_cancels(
         &self,
     ) -> Arc<
@@ -1338,6 +1402,12 @@ impl WorkspaceState {
                 poisoned.into_inner()
             })
             .is_some()
+    }
+
+    /// Get workspace path.
+    #[must_use]
+    pub fn workspace_path_handle(&self) -> Arc<std::sync::Mutex<Option<String>>> {
+        Arc::clone(&self.workspace_path)
     }
 
     /// Get workspace path.

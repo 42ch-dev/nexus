@@ -90,6 +90,7 @@ pub struct HostPromptExecutor {
     /// request cannot race a successor's launch. The future P2 coordinator
     /// shares this mechanism as its per-run operation admission lock.
     op_locks: std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    run_event_sinks: Option<crate::run_events::RunEventSinkMap>,
 }
 
 impl HostPromptExecutor {
@@ -100,6 +101,16 @@ impl HostPromptExecutor {
         workflow_store: Arc<dyn WorkflowStateStore>,
         timeouts: TimeoutConfig,
     ) -> Self {
+        Self::new_with_run_event_sinks(host, workflow_store, timeouts, None)
+    }
+
+    #[must_use]
+    pub fn new_with_run_event_sinks(
+        host: Arc<dyn HostFacade>,
+        workflow_store: Arc<dyn WorkflowStateStore>,
+        timeouts: TimeoutConfig,
+        run_event_sinks: Option<crate::run_events::RunEventSinkMap>,
+    ) -> Self {
         Self {
             host,
             workflow_store,
@@ -107,6 +118,7 @@ impl HostPromptExecutor {
             sessions: tokio::sync::RwLock::new(HashMap::new()),
             creation_locks: std::sync::Mutex::new(HashMap::new()),
             op_locks: std::sync::Mutex::new(HashMap::new()),
+            run_event_sinks,
         }
     }
 
@@ -708,6 +720,15 @@ impl PromptExecutor for HostPromptExecutor {
         // remove the session — no leaked Host session.
         let mut cancel_triggered = false;
         let mut cancel_unconfirmed = false;
+        // The prompt may execute under a CHILD session id
+        // (`<root>:child:<uuid>`, recursively) while the SSE ring belongs to
+        // the driven ROOT run — resolve through the owning root so the
+        // OpStarted/content/OpFinished lifecycle lands on that ring.
+        let run_event_sink = if let Some(sinks) = &self.run_event_sinks {
+            crate::run_events::sink_for_run(sinks, &request.run_id).await
+        } else {
+            None
+        };
         let terminal = loop {
             tokio::select! {
                 biased;
@@ -752,12 +773,27 @@ impl PromptExecutor for HostPromptExecutor {
                 }
                 event = stream.next() => {
                     match event {
-                        Some(Ok(HostEvent::MessageDelta(delta))) => {
+                        Some(Ok(ev)) => {
+                            if let Some(sink) = &run_event_sink {
+                                sink.publish_host_event(
+                                    expected_step.as_deref().unwrap_or("prompt"),
+                                    &attempt_id,
+                                    &ev,
+                                );
+                            }
+                            match ev {
+                        HostEvent::MessageDelta(delta) => {
                             if !cancel_triggered {
+                                const MAX_PROMPT_BYTES: usize = 4 * 1024 * 1024;
+                                if full_text.len() + delta.text.len() > MAX_PROMPT_BYTES {
+                                    break Err(CapabilityError::TransientExternal(
+                                        "prompt result exceeded 4 MiB bound".to_string(),
+                                    ));
+                                }
                                 full_text.push_str(&delta.text);
                             }
                         }
-                        Some(Ok(HostEvent::OpFinished(finished))) => {
+                        HostEvent::OpFinished(finished) => {
                             if cancel_triggered {
                                 break Err(CapabilityError::Cancelled);
                             }
@@ -773,7 +809,7 @@ impl PromptExecutor for HostPromptExecutor {
                                 finished.reason
                             )));
                         }
-                        Some(Ok(HostEvent::OpFailed(_))) => {
+                        HostEvent::OpFailed(_) => {
                             if cancel_triggered {
                                 break Err(CapabilityError::Cancelled);
                             }
@@ -781,9 +817,8 @@ impl PromptExecutor for HostPromptExecutor {
                                 "host operation failed".to_string(),
                             ));
                         }
-                        Some(Ok(_)) => {
-                            // Ignore non-message events (thoughts, tool calls,
-                            // status, plan updates).
+                        _ => {}
+                            }
                         }
                         Some(Err(e)) => {
                             if cancel_triggered {
@@ -829,8 +864,17 @@ impl PromptExecutor for HostPromptExecutor {
                 let drain_result = tokio::time::timeout(self.timeouts.shutdown_duration(), async {
                     let mut drain = std::pin::pin!(stream);
                     while let Some(event) = drain.next().await {
-                        if let Ok(HostEvent::OpFinished(_) | HostEvent::OpFailed(_)) = event {
-                            break;
+                        if let Ok(ev) = event {
+                            if let Some(sink) = &run_event_sink {
+                                sink.publish_host_event(
+                                    expected_step.as_deref().unwrap_or("prompt"),
+                                    &attempt_id,
+                                    &ev,
+                                );
+                            }
+                            if matches!(ev, HostEvent::OpFinished(_) | HostEvent::OpFailed(_)) {
+                                break;
+                            }
                         }
                     }
                 })
