@@ -84,6 +84,11 @@ pub enum LocalDbError {
     ActorNotFound { resource: &'static str, id: String },
     /// Stable actor-contract product conflict (HTTP 409 at the Daemon).
     ActorContractConflict { code: ActorContractConflict },
+    /// Malformed durable workspace commit intent row.
+    CorruptIntent {
+        revision: String,
+        workspace_root: String,
+    },
 }
 
 /// Stable actor-contract conflict codes (wire `error.code` at HTTP 409).
@@ -344,6 +349,12 @@ impl fmt::Display for LocalDbError {
             }
             Self::ActorContractConflict { code } => {
                 write!(f, "{}", code.message())
+            }
+            Self::CorruptIntent { revision, workspace_root } => {
+                write!(
+                    f,
+                    "corrupt workspace commit intent {revision} at {workspace_root}"
+                )
             }
         }
     }

@@ -5509,6 +5509,7 @@ fn judge_registry_holder(
         session_cancels,
         daemon_tool_dispatch: None,
         cdn_config: None,
+    workspace_executor: None,
     };
     nexus_orchestration::CapabilityRegistryHolder::with_registry(std::sync::Arc::new(
         nexus_orchestration::CapabilityRegistry::with_runtime_deps(&deps),

@@ -559,6 +559,16 @@ pub trait OrchestrationEngine: Send + Sync {
     /// corrupt/unsupported — all non-replayable.
     async fn ensure_recovered_runner(&self, session_id: &SessionId) -> Result<(), EngineError>;
 
+    /// Live workspace state provider for wired preset graphs (v1.188 P3).
+    ///
+    /// Default `None`: in-memory/test engines expose no provider, so wired
+    /// graphs fall back to the configured fixed state (if any).
+    fn workspace_state_provider(
+        &self,
+    ) -> Option<std::sync::Arc<dyn crate::capability::WorkspaceStateProvider>> {
+        None
+    }
+
     /// Start a session using a loaded preset (outer graph + inner graphs wired).
     async fn start_session_with_preset(
         &self,
@@ -613,6 +623,10 @@ pub struct EngineSharedState {
     /// bounded owned-Host teardown before persisting terminal `Cancelled`
     /// (C-001). `None` for in-memory/test engines.
     pub prompt_executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+    /// Live workspace state provider (v1.188 P3) — shared by the engine and
+    /// every `EngineProxy` so wired preset graphs resolve
+    /// `_context.workspace.*` against the daemon's workspace authority.
+    pub workspace_state_provider: Option<std::sync::Arc<dyn crate::capability::WorkspaceStateProvider>>,
 }
 
 impl EngineSharedState {
@@ -628,6 +642,7 @@ impl EngineSharedState {
                 std::collections::HashMap::new(),
             )),
             prompt_executor: None,
+            workspace_state_provider: None,
         }
     }
 
@@ -646,7 +661,20 @@ impl EngineSharedState {
                 std::collections::HashMap::new(),
             )),
             prompt_executor: None,
+            workspace_state_provider: None,
         }
+    }
+
+    /// Set the live workspace state provider (v1.188 P3).
+    ///
+    /// Stored on the SHARED state (not the engine) so `EngineProxy` — the
+    /// handle the preset loader receives at graph-build time — resolves the
+    /// same provider the daemon wired.
+    pub fn set_workspace_state_provider(
+        &mut self,
+        provider: std::sync::Arc<dyn crate::capability::WorkspaceStateProvider>,
+    ) {
+        self.workspace_state_provider = Some(provider);
     }
 
     /// Register a run's coordinator cancellation token (A1, fail-closed
@@ -2946,6 +2974,12 @@ struct EngineProxy {
 
 #[async_trait]
 impl OrchestrationEngine for EngineProxy {
+    fn workspace_state_provider(
+        &self,
+    ) -> Option<std::sync::Arc<dyn crate::capability::WorkspaceStateProvider>> {
+        self.state.workspace_state_provider.clone()
+    }
+
     async fn run_step(&self, session_id: &SessionId) -> Result<StepOutcome, EngineError> {
         // Delegate to shared state (WS3 R1: eliminates duplication).
         let result = self.state.run_step_internal(session_id).await?;
@@ -3339,6 +3373,25 @@ impl GraphFlowEngine {
         if let Some(state) = std::sync::Arc::get_mut(&mut self.state) {
             state.session_cancels = session_cancels;
             state.prompt_executor = Some(executor);
+        }
+    }
+
+    /// Wire the live workspace state provider (v1.188 P3).
+    ///
+    /// Must be called during daemon boot so wired preset graphs resolve
+    /// `_context.workspace.*` from the shared workspace authority. Mirrors
+    /// `set_prompt_executor`'s unified-shared-state contract: the daemon
+    /// calls this on a freshly constructed engine, so the provider lands on
+    /// the ONE `EngineSharedState` that every `EngineProxy` clone shares.
+    pub fn set_workspace_state_provider(
+        &mut self,
+        provider: std::sync::Arc<dyn crate::capability::WorkspaceStateProvider>,
+    ) {
+        match std::sync::Arc::get_mut(&mut self.state) {
+            Some(state) => state.set_workspace_state_provider(provider),
+            None => tracing::warn!(
+                "workspace state provider not wired: engine shared state is aliased"
+            ),
         }
     }
 
@@ -4250,6 +4303,12 @@ impl GraphFlowEngine {
 
 #[async_trait]
 impl OrchestrationEngine for GraphFlowEngine {
+    fn workspace_state_provider(
+        &self,
+    ) -> Option<std::sync::Arc<dyn crate::capability::WorkspaceStateProvider>> {
+        self.state.workspace_state_provider.clone()
+    }
+
     async fn run_step(&self, session_id: &SessionId) -> Result<StepOutcome, EngineError> {
         // Delegate to shared state (WS3 R1: uses Arc<FlowRunner> internally).
         let result = self.state.run_step_internal(session_id).await?;

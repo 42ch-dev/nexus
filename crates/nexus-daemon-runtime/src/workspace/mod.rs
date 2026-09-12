@@ -9,8 +9,18 @@
 //! preferable to a hard crash.
 
 pub mod actor_sessions;
+pub mod authority;
+pub mod bounds;
+pub mod commit_fs;
+pub mod executor;
 pub mod manager;
+pub mod scope;
 pub mod session;
+pub mod session_commit;
+pub mod state_provider;
+/// Test-only seams — absent from production builds.
+#[cfg(any(test, feature = "test-hooks"))]
+pub mod test_hooks;
 
 use crate::api::errors::NexusApiError;
 use crate::db::pool::{DbPool, PoolConfig};
@@ -228,7 +238,13 @@ impl WorkspaceState {
             .await
             .expect("Failed to create test database pool");
         let narrative_gateway = Arc::new(SqliteNarrativeGateway::new(db.pool().clone()));
-        let session_manager = Arc::new(WorkspaceSessionManager::new(Arc::new(db.pool().clone())));
+        let session_manager = Arc::new(
+            WorkspaceSessionManager::new_recoverable(
+                Arc::new(db.pool().clone()),
+                db_path.clone(),
+            )
+            .expect("workspace authority lease"),
+        );
         let creator_db = Arc::new(RwLock::new(CreatorDbSlot {
             db: Some(db),
             db_path: Some(db_path.clone()),
@@ -504,7 +520,13 @@ impl WorkspaceState {
         };
 
         let narrative_gateway = Arc::new(SqliteNarrativeGateway::new(db.pool().clone()));
-        let session_manager = Arc::new(WorkspaceSessionManager::new(Arc::new(db.pool().clone())));
+        let session_manager = Arc::new(
+            WorkspaceSessionManager::new_recoverable(
+                Arc::new(db.pool().clone()),
+                db_path.clone(),
+            )
+            .expect("workspace authority lease"),
+        );
         CreatorDbOutcome {
             db: Some(db),
             db_path: Some(db_path),
@@ -567,6 +589,10 @@ impl WorkspaceState {
             if let (Some(db), Some(db_path), Some(narrative_gateway), Some(session_manager)) =
                 (db, db_path, narrative_gateway, session_manager)
             {
+                session_manager
+                    .startup_recovery()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("workspace startup recovery failed: {e}"))?;
                 {
                     let mut slot = self.creator_db_write();
                     if slot.db.is_none() {
@@ -753,12 +779,23 @@ impl WorkspaceState {
         // (`with_runtime_deps_and_user_caps`), so user capabilities and the
         // daemon-wide WASM singleton are preserved.
         let holder = {
+            let workspace_executor: Option<
+                Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>,
+            > = self.session_manager().and_then(|mgr| {
+                self.workspace_path().map(|root| {
+                    Arc::new(crate::workspace::executor::DaemonWorkspaceExecutor::new(
+                        mgr,
+                        root,
+                    )) as Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>
+                })
+            });
             let deps = nexus_orchestration::capability::CapabilityRuntimeDeps {
                 pool: Some(pool_arc.as_ref().clone()),
                 prompt_executor: prompt_executor.clone(),
                 session_cancels: self.session_cancels(),
                 daemon_tool_dispatch: self.daemon_tool_dispatch(),
                 cdn_config: None,
+                workspace_executor,
             };
             let scan_dir = crate::boot::user_capabilities_scan_dir(self);
             let (registry, _outcome) = match (self.wasm_engine(), self.module_cache()) {
@@ -798,6 +835,14 @@ impl WorkspaceState {
             engine.set_prompt_executor(executor.clone(), self.session_cancels());
         }
         engine.set_nexus_home(self.nexus_home().clone());
+        // v1.188 P3: resolve `_context.workspace.*` from the SAME shared
+        // workspace authority the commit executor writes through, so preset
+        // conditional edges observe real durable state.
+        if let (Some(mgr), Some(root)) = (self.session_manager(), self.workspace_path()) {
+            engine.set_workspace_state_provider(Arc::new(
+                crate::workspace::state_provider::DaemonWorkspaceStateProvider::new(mgr, root),
+            ));
+        }
 
         let engine_arc = Arc::new(engine);
 
@@ -1340,6 +1385,12 @@ impl WorkspaceState {
                 poisoned.into_inner()
             })
             .is_some()
+    }
+
+    /// Get workspace path.
+    #[must_use]
+    pub fn workspace_path_handle(&self) -> Arc<std::sync::Mutex<Option<String>>> {
+        Arc::clone(&self.workspace_path)
     }
 
     /// Get workspace path.
