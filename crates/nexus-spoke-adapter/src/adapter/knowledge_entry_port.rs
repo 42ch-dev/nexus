@@ -437,6 +437,7 @@ async fn put_update_unbound(
 /// `entry_updates`: `(candidate entry, expected_base_revision)` pairs.
 /// `session_update`: optional `(session_id, state_json)` to persist after
 /// all entry CAS succeeds, still inside the same transaction.
+#[cfg(feature = "compute")]
 pub(crate) async fn commit_compute_settlement(
     adapter: &NexusAdapter<'_>,
     entry_updates: Vec<(KnowledgeEntry, u64)>,
