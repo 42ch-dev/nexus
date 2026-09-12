@@ -1436,3 +1436,60 @@ async fn crash_after_modify_rollback_restore_before_finalize_settles_rolled_back
     );
     assert!(!ws.path().join("new.txt").exists());
 }
+
+#[tokio::test]
+#[serial]
+async fn crash_before_modify_apply_reverse_rollback_treats_unapplied_modify_as_noop() {
+    let (pool, db_dir) = fresh_pool().await;
+    let mgr = recoverable_mgr(pool, &db_dir);
+    let ws = tempfile::tempdir().unwrap();
+    let root = ws.path().to_string_lossy().to_string();
+    // `z.txt` is STAGED with a post_hash before apply; `a.txt` sorts first, so
+    // the crash lands right after a.txt applied and z.txt was never applied.
+    std::fs::write(ws.path().join("z.txt"), b"z-original").unwrap();
+    mgr.startup_recovery().await.expect("startup");
+    let session = mgr.open_session(&root, "", true).await.expect("open");
+
+    let changes = vec![
+        create_change("a.txt", b"a-created"),
+        modify_change("z.txt", &hash_bytes(b"z-original"), b"z-modified"),
+    ];
+
+    set_crash_point(Some("after_file_apply"));
+    let err = mgr
+        .commit_session_durable(&session, &changes, &root)
+        .await
+        .unwrap_err();
+    set_crash_point(None);
+    assert!(matches!(err, SessionError::Internal(_)));
+    // a.txt applied; z.txt untouched (still the preimage).
+    assert_eq!(std::fs::read(ws.path().join("a.txt")).unwrap(), b"a-created");
+    assert_eq!(std::fs::read(ws.path().join("z.txt")).unwrap(), b"z-original");
+
+    // Reverse rollback hits z.txt FIRST, with post_hash staged but the target
+    // already equal to pre_hash because it was never applied.
+    mgr.startup_recovery()
+        .await
+        .expect("unapplied modify must be an idempotent rollback no-op");
+
+    let state: String = sqlx::query_scalar(
+        "SELECT state FROM workspace_commit_intents WHERE session_id = ? ORDER BY revision DESC LIMIT 1",
+    )
+    .bind(session.to_string())
+    .fetch_one(mgr.pool().as_ref())
+    .await
+    .unwrap();
+    assert_eq!(
+        state, "rolled_back",
+        "a staged-but-never-applied modify must settle, not conflict"
+    );
+    assert_eq!(
+        std::fs::read(ws.path().join("z.txt")).unwrap(),
+        b"z-original",
+        "exact preimage bytes survive"
+    );
+    assert!(
+        !ws.path().join("a.txt").exists(),
+        "the applied create is undone"
+    );
+}
