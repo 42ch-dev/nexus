@@ -102,19 +102,41 @@ export function rustTokens(source) {
 
 const values = tokens => tokens.map(token => token.string ? JSON.stringify(token.value) : token.value).join(' ');
 
-/** Exclude cfg(test) items, including test wrappers preceding production functions. */
+/** Evaluate cfg with test seams disabled; other build predicates remain unknown. */
+function productionCfg(tokens, start, end) {
+  const name = tokens[start]?.value;
+  if (end - start === 1 && name === 'test') return false;
+  if (end - start === 3 && name === 'feature' && tokens[start + 1].value === '=' && tokens[start + 2].string && tokens[start + 2].value === 'test-hooks') return false;
+  if (tokens[start + 1]?.value !== '(' || tokens[start + 1].close !== end - 1) return undefined;
+  if (name === 'not') {
+    const value = productionCfg(tokens, start + 2, tokens[end - 2]?.value === ',' ? end - 2 : end - 1);
+    return value === undefined ? undefined : !value;
+  }
+  if (name !== 'all' && name !== 'any') return undefined;
+  let result = name === 'all';
+  for (let i = start + 2; i < end - 1;) {
+    let next = i;
+    while (next < end - 1 && tokens[next].value !== ',') next = (tokens[next].close ?? next) + 1;
+    const value = productionCfg(tokens, i, next);
+    if ((name === 'all' && value === false) || (name === 'any' && value === true)) return value;
+    if (value === undefined) result = undefined;
+    i = next + 1;
+  }
+  return result;
+}
+
+/** Exclude test-only cfg items without dropping any possible production cohort. */
 export function productionSource(source) {
   const tokens = rustTokens(source);
   const cuts = [];
   for (let i = 0; i < tokens.length; i++) {
     if (tokens[i].value !== '#' || tokens[i + 1]?.value !== '[') continue;
     const end = tokens[i + 1].close;
-    const attr = values(tokens.slice(i + 2, end));
-    if (!/^cfg \( test \)$/.test(attr) && !/^cfg \( all \([^)]*\btest\b[^)]*\) \)$/.test(attr)) continue;
+    if (tokens[i + 2]?.value !== 'cfg' || tokens[i + 3]?.value !== '(' || productionCfg(tokens, i + 4, end - 1) !== false) continue;
     let j = end + 1;
     while (tokens[j]?.value === '#') j = tokens[j + 1].close + 1;
     while (tokens[j] && !['{', ';', ','].includes(tokens[j].value)) j = (tokens[j].close ?? j) + 1;
-    if (!tokens[j]) throw new Error('Cannot delimit cfg(test) item');
+    if (!tokens[j]) throw new Error('Cannot delimit test-only cfg item');
     const last = tokens[j].close ?? j;
     cuts.push([tokens[i].start, tokens[last].end]);
     i = last;
@@ -479,7 +501,9 @@ export function summarize(rows, expected = [], discrepancies = []) {
   const registered = new Set(expected);
   return {
     missing_registrations: sorted([...registered].filter(id => !ids.has(id))),
-    extra_unregistered: rows.filter(value => value.kind === 'dormant-route').map(value => ({ id: value.id, disposition: value.retirement_gate })),
+    extra_unregistered: rows
+      .filter(value => value.kind === 'dormant-route' || (value.kind === 'callable' && value.declaration && !registered.has(value.id)))
+      .map(value => ({ id: value.id, kind: value.kind === 'dormant-route' ? 'dormant-route' : 'clap-extra', disposition: value.retirement_gate })),
     unknown_production_writer_table: rows.filter(value => (value.kind === 'writer' && !value.writer_class) || (value.kind === 'table' && !value.table_class)).map(value => value.id),
     unknown_destination: rows.filter(value => !/^RFT-(?:0[0-9]|1[01])$/.test(value.destination_rft)).map(value => value.id),
     unresolved_m1_schema_auth: rows.filter(value => value.m1 && (value.gap !== null || !value.schema_refs.length || !value.auth)).map(value => value.id),

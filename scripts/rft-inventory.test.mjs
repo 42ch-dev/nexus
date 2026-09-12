@@ -97,6 +97,19 @@ test('test-only fields and wrappers do not consume following production code or 
 test('compound test cfg and manifest comments cannot masquerade as production feature registrations', () => {
   const code = productionSource('#[cfg(all(test, feature = "connect-host"))] mod interop; fn live() {}');
   assert.ok(!rustTokens(code).some(token => token.value === 'interop'));
+  const alternations = productionSource(`
+    #[cfg(any(test, feature = "test-hooks"))] pub mod test_hooks;
+    #[cfg(any(feature = "test-hooks", all(unix, test),))] fn helper() {}
+    #[cfg(feature = "test-hooks")] fn hook_only() {}
+    #[cfg(all(feature = "connect-host", not(test)))] fn live_connect() {}
+    #[cfg(any(test, feature = "connect-host"))] fn live_alternative() {}
+    #[cfg(not(any(test, feature = "test-hooks")))] fn live_without_hooks() {}
+    #[cfg(not(feature = "connect-host"))] fn live_without_connect() {}
+    fn live() {}
+  `);
+  const declarations = rustTokens(alternations).filter(token => !token.string).map(token => token.value);
+  for (const name of ['test_hooks', 'helper', 'hook_only']) assert.ok(!declarations.includes(name), name);
+  for (const name of ['live_connect', 'live_alternative', 'live_without_hooks', 'live_without_connect', 'live']) assert.ok(declarations.includes(name), name);
   assert.deepEqual(manifestFeatures('# Forwarding (see [features])\n[dependencies]\none = "1"\n[features]\nconnect-host = ["dep:spoke"]\nweb-embed = []\ndefault = ["web-embed"]\n'), [
     { name: 'connect-host', definition: '["dep:spoke"]' },
     { name: 'web-embed', definition: '[]' },
@@ -132,7 +145,34 @@ test('fixture closure is empty only when actual identity, storage, destination a
   assert.deepEqual(unknown.unknown_destination, ['writer:2']);
   assert.deepEqual(summarize([{ ...rows[0], auth: '' }], ['route:1']).unresolved_m1_schema_auth, ['route:1']);
   const dormant = { id: 'old:1', kind: 'dormant-route', destination_rft: 'RFT-11', retirement_gate: 'External consumer deletion block' };
-  assert.deepEqual(summarize([dormant]).extra_unregistered, [{ id: 'old:1', disposition: 'External consumer deletion block' }]);
+  assert.deepEqual(summarize([dormant]).extra_unregistered, [{ id: 'old:1', kind: 'dormant-route', disposition: 'External consumer deletion block' }]);
+});
+
+test('summary includes source clap declarations absent from every executable cohort with their disposition', () => {
+  const declarations = declaredClapPaths(new Map([['apps/nexus42/src/cli.rs', `
+    enum Commands {
+      Live,
+      #[cfg(feature = "connect-host")] Connect,
+      SourceOnly,
+    }
+  `]]));
+  const rows = declarations.map(item => {
+    const value = {
+      kind: 'callable', symbol_or_route: item.path, feature_condition: item.feature_condition,
+      declaration: `${item.source_path}:${item.symbol}`, destination_rft: 'RFT-11',
+      retirement_gate: 'Resolve source registration and retain until RFT-11 parity decision',
+    };
+    return { ...value, id: identity(value) };
+  });
+  const defaultCohort = [rows[0].id];
+  const connectCohort = [rows[0].id, rows[1].id];
+  const runtime = { id: 'runtime:1', kind: 'callable', destination_rft: 'RFT-11' };
+  const summary = summarize([...rows, runtime], [...defaultCohort, ...connectCohort]);
+  assert.deepEqual(summary.extra_unregistered, [{
+    id: rows[2].id, kind: 'clap-extra',
+    disposition: 'Resolve source registration and retain until RFT-11 parity decision',
+  }]);
+  assert.deepEqual(summary.missing_registrations, []);
 });
 
 test('CLI accepts exactly frozen flags and rejects missing, duplicate, malformed or unknown values', () => {
