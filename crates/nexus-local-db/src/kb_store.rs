@@ -944,6 +944,58 @@ fn validation_err(e: nexus_knowledge::world_kb::KbError) -> KbStoreError {
     }
 }
 
+/// Read a knowledge entry inside a caller-owned transaction.
+pub async fn get_knowledge_entry_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    key_block_id: &str,
+) -> Result<KnowledgeEntryRecord, KbStoreError> {
+    let row = sqlx::query_as::<_, KeyBlockRow>(
+        r"SELECT
+                key_block_id, owner_kind, world_id, character_id,
+                actor_world_binding_id, creator_only,
+                block_type, canonical_name, status,
+                revision, body_json, source_anchor_json, created_from_command_id,
+                created_at, updated_at, source_work_id, source_chapter,
+                source_provenance_kind, extensions_nexus_json, modules_json
+            FROM kb_key_blocks
+            WHERE key_block_id = ?",
+    )
+    .bind(key_block_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|e| db_err(&e))?
+    .ok_or_else(|| KbStoreError::NotFound(key_block_id.to_string()))?;
+    row.to_record()
+}
+
+/// List active world-owned knowledge entries inside a caller-owned transaction.
+pub async fn list_by_world_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    world_id: &str,
+    limit: usize,
+) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
+    let rows = sqlx::query_as::<_, KeyBlockRow>(sqlx::AssertSqlSafe(format!(
+        r"SELECT
+                key_block_id, owner_kind, world_id, character_id,
+                actor_world_binding_id, creator_only,
+                block_type, canonical_name, status,
+                revision, body_json, source_anchor_json, created_from_command_id,
+                created_at, updated_at, source_work_id, source_chapter,
+                source_provenance_kind, extensions_nexus_json, modules_json
+            FROM kb_key_blocks
+            WHERE owner_kind = 'world'
+              AND world_id = ?
+              AND status NOT IN ('deleted', 'merged', 'deprecated')
+            ORDER BY created_at ASC
+            LIMIT {limit}"
+    )))
+    .bind(world_id)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|e| db_err(&e))?;
+    rows.iter().map(KeyBlockRow::to_record).collect()
+}
+
 // SAFETY: sqlx SQLite futures borrow the connection pool internally;
 // safe for single-threaded SQLite usage within our tokio runtime.
 #[allow(clippy::future_not_send)]

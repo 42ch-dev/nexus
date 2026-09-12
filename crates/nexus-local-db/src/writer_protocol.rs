@@ -704,6 +704,19 @@ pub async fn open_admitted_pool_with(
     open_guarded_pool_with(&guard, options).await
 }
 
+/// Open another cooperative pool on a live in-process engine guard when one
+/// already exists (e.g. daemon `DbPool` + `CoreService` co-hosted in one process).
+pub async fn join_live_engine_pool(
+    db_path: &Path,
+    options: GuardedPoolOptions,
+) -> Result<Option<GuardedPool>, LocalDbError> {
+    if let Some(guard) = retained_guard(db_path, WriterMode::Engine) {
+        let guarded = open_guarded_pool_arc_with(guard, options).await?;
+        return Ok(Some(guarded));
+    }
+    Ok(None)
+}
+
 /// Migrate, take the single engine ownership, and open a guarded pool.
 ///
 /// This is the engine-owner entry point (the daemon's `DbPool`): the returned

@@ -1,9 +1,11 @@
 //! P1-T2 world_kb contract tests (core service semantics).
 
 use nexus_contracts::WorldKbPatchEntityRequest;
-use nexus_core::{CoreAccess, CoreAttachedPool, CoreError, CoreOpenOptions, CoreService};
-use nexus_local_db::writer_protocol::{GuardedPool, GuardedPoolOptions, init_engine_pool};
+use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
+use nexus_local_db::writer_protocol::{GuardedPoolOptions, init_engine_pool};
+use nexus_local_db::open_pool_read_only;
 use sqlx::SqlitePool;
+use std::path::Path;
 use tempfile::TempDir;
 
 const CREATOR: &str = "test_creator";
@@ -13,7 +15,6 @@ const FOREIGN_WORLD: &str = "wld_foreign";
 
 struct Fixture {
     _tmp: TempDir,
-    _guarded: GuardedPool,
     core: CoreService,
     principal: nexus_core::Principal,
 }
@@ -75,6 +76,11 @@ async fn seed_pending(pool: &SqlitePool, job_id: &str, world_id: &str, name: &st
     .unwrap();
 }
 
+async fn read_only_pool(user_home: &Path) -> SqlitePool {
+    let db_path = nexus_home_layout::workspace_state_db_path(user_home, CREATOR, SLUG);
+    open_pool_read_only(&db_path).await.expect("read-only pool")
+}
+
 async fn setup() -> Fixture {
     let tmp = TempDir::new().unwrap();
     let user_home = tmp.path().to_path_buf();
@@ -92,43 +98,45 @@ async fn setup() -> Fixture {
     )
     .unwrap();
     let db_path = nexus_home_layout::workspace_state_db_path(&user_home, CREATOR, SLUG);
-    let guarded = init_engine_pool(&db_path, CREATOR, GuardedPoolOptions::default())
-        .await
-        .unwrap();
-    let pool = guarded.clone_pool();
-    seed_world(&pool, OWNED_WORLD, CREATOR).await;
-    seed_world(&pool, FOREIGN_WORLD, "other_creator").await;
-    seed_kb(&pool, "kb_dead", OWNED_WORLD, "Dead", "deleted", Some(1), None).await;
-    seed_kb(
-        &pool,
-        "kb_mod",
-        OWNED_WORLD,
-        "Mod",
-        "confirmed",
-        Some(0),
-        Some(r#"{"mental":{"goals":["old"]}}"#),
-    )
-    .await;
-    seed_kb(&pool, "kb_cas", OWNED_WORLD, "Cas", "confirmed", Some(2), None).await;
-    seed_pending(&pool, "xj_job1", OWNED_WORLD, "Cand1", "2020-01-01T00:00:01Z").await;
-    seed_pending(&pool, "xj_job2", OWNED_WORLD, "Cand2", "2020-01-01T00:00:02Z").await;
+    {
+        let guarded = init_engine_pool(&db_path, CREATOR, GuardedPoolOptions::default())
+            .await
+            .unwrap();
+        let pool = guarded.clone_pool();
+        seed_world(&pool, OWNED_WORLD, CREATOR).await;
+        seed_world(&pool, FOREIGN_WORLD, "other_creator").await;
+        seed_kb(&pool, "kb_dead", OWNED_WORLD, "Dead", "deleted", Some(1), None).await;
+        seed_kb(
+            &pool,
+            "kb_mod",
+            OWNED_WORLD,
+            "Mod",
+            "confirmed",
+            Some(0),
+            Some(r#"{"mental":{"goals":["old"]}}"#),
+        )
+        .await;
+        seed_kb(&pool, "kb_cas", OWNED_WORLD, "Cas", "confirmed", Some(2), None).await;
+        seed_kb(&pool, "kb_merged", OWNED_WORLD, "Merged", "merged", Some(1), None).await;
+        seed_kb(&pool, "kb_nullmod", OWNED_WORLD, "NullMod", "confirmed", Some(1), None).await;
+        sqlx::query("UPDATE kb_key_blocks SET modules_json = NULL WHERE key_block_id = 'kb_nullmod'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        seed_pending(&pool, "xj_job1", OWNED_WORLD, "Cand1", "2020-01-01T00:00:01Z").await;
+        seed_pending(&pool, "xj_job2", OWNED_WORLD, "Cand2", "2020-01-01T00:00:02Z").await;
+        pool.close().await;
+    }
 
-    let core = CoreService::open_attached(
-        CoreOpenOptions {
-            user_home,
-            access: CoreAccess::EngineOwner,
-        },
-        CREATOR.to_string(),
-        SLUG.to_string(),
-        db_path,
-        CoreAttachedPool::from_admitted_engine_pool(pool),
-    )
+    let core = CoreService::open(CoreOpenOptions {
+        user_home,
+        access: CoreAccess::EngineOwner,
+    })
     .await
     .unwrap();
     let principal = core.active_principal().await.unwrap();
     Fixture {
         _tmp: tmp,
-        _guarded: guarded,
         core,
         principal,
     }
@@ -289,33 +297,34 @@ async fn world_kb_contract() {
         .unwrap_err();
     assert!(matches!(err, CoreError::Forbidden { .. }));
 }
-
 #[tokio::test]
 async fn world_kb_contract_merged_terminal_and_modules() {
     let fx = setup().await;
-    let pool = fx._guarded.clone_pool();
-    seed_kb(&pool, "kb_merged", OWNED_WORLD, "Merged", "merged", Some(1), None).await;
-    seed_kb(&pool, "kb_nullmod", OWNED_WORLD, "NullMod", "confirmed", Some(0), None).await;
-    sqlx::query("UPDATE kb_key_blocks SET modules_json = NULL WHERE key_block_id = 'kb_nullmod'")
-        .execute(&pool)
-        .await
-        .unwrap();
     let merged: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
         "entity_id": "kb_merged",
         "expected_version": 1,
         "patch": {"title": "Nope"}
-    })).unwrap();
-    let err = fx.core.patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), merged).await.unwrap_err();
+    }))
+    .unwrap();
+    let err = fx
+        .core
+        .patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), merged)
+        .await
+        .unwrap_err();
     assert!(matches!(err, CoreError::WorldKbValidation(_)));
 
     let absent: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
         "entity_id": "kb_nullmod",
-        "expected_version": 1,
+        "expected_version": 2,
         "patch": {"modules": {"mental": {"goals": ["a"]}}}
-    })).unwrap();
-    let resp = fx.core.patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), absent).await.unwrap();
+    }))
+    .unwrap();
+    let resp = fx
+        .core
+        .patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), absent)
+        .await
+        .unwrap();
     assert!(resp.entity.modules.contains_key("mental"));
-
 }
 
 #[tokio::test]
@@ -325,16 +334,23 @@ async fn world_kb_contract_cas_reports_committed_revision() {
         "entity_id": "kb_cas",
         "expected_version": 1,
         "patch": {"title": "Stale"}
-    })).unwrap();
-    let err = fx.core.patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), stale).await.unwrap_err();
-    let CoreError::WorldKbConflict(details) = err else { panic!("expected conflict") };
+    }))
+    .unwrap();
+    let err = fx
+        .core
+        .patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), stale)
+        .await
+        .unwrap_err();
+    let CoreError::WorldKbConflict(details) = err else {
+        panic!("expected conflict")
+    };
     assert_eq!(details.current_version, 2);
 }
 
 #[tokio::test]
 async fn world_kb_contract_patch_event_atomicity() {
     let fx = setup().await;
-    let pool = fx._guarded.clone_pool();
+    let pool = read_only_pool(fx._tmp.path()).await;
     let before: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(sequence), 0) FROM core_changes")
         .fetch_one(&pool)
         .await
@@ -343,8 +359,13 @@ async fn world_kb_contract_patch_event_atomicity() {
         "entity_id": "kb_abc124",
         "expected_version": 0,
         "patch": {"title": "Evt", "block_type": "character"}
-    })).unwrap();
-    let resp = fx.core.patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), req).await.unwrap();
+    }))
+    .unwrap();
+    let resp = fx
+        .core
+        .patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), req)
+        .await
+        .unwrap();
     let row: (i64, Option<String>) = sqlx::query_as(
         "SELECT sequence, resource_revision FROM core_changes WHERE sequence > ? AND resource_id = 'kb_abc124' ORDER BY sequence DESC LIMIT 1",
     )
@@ -365,7 +386,11 @@ async fn world_kb_contract_stale_principal_after_config_change() {
         "active_creator_id = \"other_creator\"\n[active_workspace_slug_by_creator]\n\"other_creator\" = \"default\"\n",
     )
     .unwrap();
-    let err = fx.core.world_kb_graph(&fx.principal, OWNED_WORLD.to_string(), false).await.unwrap_err();
+    let err = fx
+        .core
+        .world_kb_graph(&fx.principal, OWNED_WORLD.to_string(), false)
+        .await
+        .unwrap_err();
     assert!(matches!(err, CoreError::AuthRequired));
 }
 
@@ -379,7 +404,9 @@ async fn world_kb_contract_legacy_json_open() {
     std::fs::create_dir_all(&op).unwrap();
     std::fs::write(
         nexus_home.join("config.json"),
-        format!(r#"{{"active_creator_id":"{CREATOR}","active_workspace_slug_by_creator":{{"{CREATOR}":"{SLUG}"}}}}"#),
+        format!(
+            r#"{{"active_creator_id":"{CREATOR}","active_workspace_slug_by_creator":{{"{CREATOR}":"{SLUG}"}}}}"#
+        ),
     )
     .unwrap();
     let core = CoreService::open(CoreOpenOptions {
@@ -389,5 +416,8 @@ async fn world_kb_contract_legacy_json_open() {
     .await
     .unwrap();
     let principal = core.active_principal().await.unwrap();
-    let _ = core.world_kb_graph(&principal, OWNED_WORLD.to_string(), false).await.unwrap_err(); // world missing is fine — open + principal succeeded
+    let _ = core
+        .world_kb_graph(&principal, OWNED_WORLD.to_string(), false)
+        .await
+        .unwrap_err();
 }

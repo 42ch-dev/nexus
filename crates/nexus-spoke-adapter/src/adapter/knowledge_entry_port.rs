@@ -682,6 +682,152 @@ fn reject<T>(
     })
 }
 
+
+/// Caller-owned `BEGIN IMMEDIATE` transaction entry point for knowledge-entry
+/// writes. Avoids the `with_tx_cell` lifetime coupling used by daemon promote.
+pub async fn put_knowledge_entry_in_tx(
+    pool: &sqlx::SqlitePool,
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    entry: KnowledgeEntry,
+    expected_base_revision: Option<u64>,
+) -> SpokeResult<KnowledgeEntry> {
+    let adapter = NexusAdapter::new(pool.clone());
+    match expected_base_revision {
+        None => put_create_in_tx(&adapter, pool, tx, entry).await,
+        Some(expected) => put_update_in_tx(tx, entry, expected).await,
+    }
+}
+
+async fn entry_exists_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    entry_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(entry_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    Ok(row.is_some())
+}
+
+#[allow(clippy::too_many_lines)]
+async fn put_create_in_tx(
+    _adapter: &NexusAdapter<'_>,
+    pool: &sqlx::SqlitePool,
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    entry: KnowledgeEntry,
+) -> SpokeResult<KnowledgeEntry> {
+    let store = SqliteKbStore::new(pool.clone());
+    let entry_id = entry.entry_id.clone();
+
+    match entry_exists_in_tx(tx, &entry_id).await {
+        Ok(true) => {
+            return reject(
+                SpokeRejectCode::KnowledgeEntryAlreadyExists,
+                format!("Entry already exists: {entry_id}"),
+                json!({ "entry_id": entry_id }),
+            );
+        }
+        Ok(false) => {}
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("storage error on create pre-check: {e}"),
+                json!({ "entry_id": entry_id }),
+            );
+        }
+    }
+
+    let mut world_entry: KnowledgeEntryRecord = match spoke_to_knowledge_record(entry.clone()) {
+        Ok(v) => v,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InvalidInput,
+                format!("create entry lacks canonical owner metadata: {e}"),
+                json!({ "entry_id": entry_id }),
+            );
+        }
+    };
+    world_entry.revision = Some(1);
+
+    let extensions_nexus_json = serde_json::to_string(&build_extensions_nexus(
+        &world_entry.owner,
+        world_entry.creator_only,
+        world_entry.created_from_command_id.as_deref(),
+        world_entry.source_work_id.as_deref(),
+        world_entry.source_chapter,
+        world_entry.source_provenance_kind.as_deref(),
+        &nexus_extras_extension_map(world_entry.extensions_nexus_extras.as_ref()),
+    ))
+    .unwrap_or_default();
+
+    let insert_result = store
+        .insert_key_block_with_extensions_in_tx(tx, world_entry, extensions_nexus_json)
+        .await;
+
+    match insert_result {
+        Ok(_) => {
+            let mut result = entry;
+            result.revision = Some(1);
+            SpokeResult::Ok(result)
+        }
+        Err(KbStoreError::Duplicate {
+            owner,
+            name,
+            block_type,
+        }) => reject(
+            SpokeRejectCode::KnowledgeEntryAlreadyExists,
+            format!("Entry already exists: {entry_id}"),
+            json!({
+                "entry_id": entry_id,
+                "owner": owner,
+                "canonical_name": name,
+                "block_type": format!("{block_type:?}"),
+            }),
+        ),
+        Err(
+            e @ (KbStoreError::Validation(_)
+            | KbStoreError::ValidationLegacy(_)
+            | KbStoreError::ImmutableOwner(_)),
+        ) => reject(
+            SpokeRejectCode::InvalidInput,
+            format!("invalid entry on create: {e}"),
+            json!({ "entry_id": entry_id }),
+        ),
+        Err(e) => reject(
+            SpokeRejectCode::InternalError,
+            format!("storage error on create: {e}"),
+            json!({ "entry_id": entry_id }),
+        ),
+    }
+}
+
+async fn put_update_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    entry: KnowledgeEntry,
+    expected: u64,
+) -> SpokeResult<KnowledgeEntry> {
+    let entry_id = entry.entry_id.clone();
+    let world_entry: KnowledgeEntryRecord = match spoke_to_knowledge_record(entry.clone()) {
+        Ok(v) => v,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InvalidInput,
+                format!("knowledge entry lacks canonical owner metadata: {e}"),
+                json!({ "entry_id": entry_id }),
+            );
+        }
+    };
+    let new_rev = match run_cas_update_in_tx(tx, &entry_id, &world_entry, expected).await {
+        SpokeResult::Ok(rev) => rev,
+        SpokeResult::Reject(r) => return SpokeResult::Reject(r),
+    };
+    let mut result = entry;
+    result.revision = Some(new_rev);
+    SpokeResult::Ok(result)
+}
+
+
 // ── Tests ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]

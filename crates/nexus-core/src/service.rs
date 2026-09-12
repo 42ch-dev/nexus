@@ -14,7 +14,7 @@ use nexus_home_layout::active_context::{
 };
 use nexus_local_db::open_pool_read_only;
 use nexus_local_db::writer_protocol::{
-    init_engine_pool, open_admitted_pool, GuardedPool, GuardedPoolOptions, WriterMode,
+    init_engine_pool, init_guarded_pool, GuardedPool, GuardedPoolOptions,
 };
 use sqlx::SqlitePool;
 
@@ -36,27 +36,9 @@ pub struct CoreOpenOptions {
     pub access: CoreAccess,
 }
 
-/// Opaque admitted engine pool handle (host integration only).
-#[doc(hidden)]
-pub struct CoreAttachedPool {
-    pool: SqlitePool,
-}
-
-impl CoreAttachedPool {
-    #[doc(hidden)]
-    pub fn from_admitted_engine_pool(pool: SqlitePool) -> Self {
-        Self { pool }
-    }
-
-    pub(crate) fn from_guarded(guarded: &GuardedPool) -> Self {
-        Self {
-            pool: guarded.clone_pool(),
-        }
-    }
-}
-
 struct CoreInner {
     pool: SqlitePool,
+    _guarded: Option<GuardedPool>,
     nexus_home: PathBuf,
     creator_id: String,
     workspace_slug: String,
@@ -86,52 +68,41 @@ impl CoreService {
             return Err(CoreError::Uninitialized);
         }
 
-        let pool = match options.access {
-            CoreAccess::ReadOnly => open_pool_read_only(&db_path).await.map_err(map_db)?,
+        let (pool, guarded) = match options.access {
+            CoreAccess::ReadOnly => {
+                let pool = open_pool_read_only(&db_path).await.map_err(map_db)?;
+                (pool, None)
+            }
             CoreAccess::DirectWriter => {
-                open_admitted_pool(&db_path, &creator_id, WriterMode::Direct)
+                let guarded = init_guarded_pool(&db_path, &creator_id)
                     .await
-                    .map_err(map_db)?
+                    .map_err(map_db)?;
+                let pool = guarded.clone_pool();
+                (pool, Some(guarded))
             }
             CoreAccess::EngineOwner => {
-                init_engine_pool(
+                let options = GuardedPoolOptions::default();
+                let guarded = match nexus_local_db::writer_protocol::join_live_engine_pool(
                     &db_path,
-                    &creator_id,
-                    GuardedPoolOptions::default(),
+                    options,
                 )
                 .await
                 .map_err(map_db)?
-                .clone_pool()
+                {
+                    Some(guarded) => guarded,
+                    None => init_engine_pool(&db_path, &creator_id, options)
+                        .await
+                        .map_err(map_db)?,
+                };
+                let pool = guarded.clone_pool();
+                (pool, Some(guarded))
             }
         };
 
         Ok(Self {
             inner: Arc::new(CoreInner {
                 pool,
-                nexus_home,
-                creator_id,
-                workspace_slug,
-                generation: AtomicU64::new(1),
-                access: options.access,
-                closing: AtomicBool::new(false),
-            }),
-        })
-    }
-
-    /// Host integration: attach an already-admitted engine pool without exposing
-    /// `SqlitePool` in the public `open` contract.
-    #[doc(hidden)]
-    pub async fn open_attached(
-        options: CoreOpenOptions,
-        creator_id: String,
-        workspace_slug: String,
-        _db_path: PathBuf,
-        attached: CoreAttachedPool,
-    ) -> CoreResult<Self> {
-        let nexus_home = nexus_home_layout::nexus_root_from_home(&options.user_home);
-        Ok(Self {
-            inner: Arc::new(CoreInner {
-                pool: attached.pool,
+                _guarded: guarded,
                 nexus_home,
                 creator_id,
                 workspace_slug,
@@ -274,11 +245,23 @@ impl CoreService {
     }
 }
 
+fn is_sqlite_busy(err: &sqlx::Error) -> bool {
+    match err {
+        sqlx::Error::Database(db) => {
+            db.code().as_deref() == Some("5")
+                || db.message().contains("database is locked")
+                || db.message().contains("SQLITE_BUSY")
+        }
+        _ => false,
+    }
+}
+
 fn map_db(e: nexus_local_db::LocalDbError) -> CoreError {
     match e {
         nexus_local_db::LocalDbError::OwnerBusy { .. } => CoreError::OwnerBusy,
         nexus_local_db::LocalDbError::WriterFenced { .. } => CoreError::WriterFenced,
         nexus_local_db::LocalDbError::SchemaMismatch { .. } => CoreError::SchemaMismatch,
+        nexus_local_db::LocalDbError::Sqlx(err) if is_sqlite_busy(&err) => CoreError::Busy,
         other => CoreError::Internal {
             category: format!("database_error: {other}"),
         },

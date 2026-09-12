@@ -1204,7 +1204,6 @@ impl WorkspaceState {
         if let Some(core) = self.core_service.get() {
             return Ok(Arc::clone(core));
         }
-        let pool = self.pool_or_uninit()?;
         let user_home = self
             .nexus_home()
             .parent()
@@ -1213,24 +1212,10 @@ impl WorkspaceState {
                 message: "Workspace nexus home has no parent directory".to_string(),
             })?
             .to_path_buf();
-        let (creator_id, workspace_slug) = self
-            .verified_creator_context()
-            .ok_or(crate::api::errors::NexusApiError::AuthRequired)?;
-        let db_path = self
-            .creator_db_read()
-            .db_path
-            .clone()
-            .ok_or(crate::api::errors::NexusApiError::Uninitialized)?;
-        let core = nexus_core::CoreService::open_attached(
-            nexus_core::CoreOpenOptions {
-                user_home,
-                access: nexus_core::CoreAccess::EngineOwner,
-            },
-            creator_id,
-            workspace_slug,
-            db_path,
-            nexus_core::CoreAttachedPool::from_admitted_engine_pool(pool.clone()),
-        )
+        let core = nexus_core::CoreService::open(nexus_core::CoreOpenOptions {
+            user_home,
+            access: nexus_core::CoreAccess::EngineOwner,
+        })
         .await
         .map_err(crate::api::errors::NexusApiError::from)?;
         let arc = Arc::new(core);

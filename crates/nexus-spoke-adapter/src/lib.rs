@@ -182,3 +182,4 @@ pub use spoke_operations::{
 // production callers (daemon `check.rs`, Connect `invoke.rs` Route::Check)
 // cross this single choke point.
 pub use adapter::rule_query_port::orchestrate_check_world_scoped;
+pub use adapter::knowledge_entry_port::put_knowledge_entry_in_tx;
