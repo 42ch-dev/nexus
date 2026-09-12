@@ -23,4 +23,8 @@ impl Principal {
     pub(crate) fn creator_id(&self) -> &str {
         &self.creator_id
     }
+
+    pub(crate) fn workspace_slug(&self) -> &str {
+        &self.workspace_slug
+    }
 }

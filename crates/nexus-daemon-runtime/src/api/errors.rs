@@ -757,11 +757,11 @@ impl From<nexus_core::CoreError> for NexusApiError {
         match err {
             nexus_core::CoreError::Uninitialized => Self::Uninitialized,
             nexus_core::CoreError::AuthRequired => Self::AuthRequired,
-            nexus_core::CoreError::Forbidden { resource, reason } => Self::Forbidden {
+            nexus_core::CoreError::Forbidden { resource } => Self::Forbidden {
                 resource,
-                reason,
+                reason: "forbidden".to_string(),
             },
-            nexus_core::CoreError::NotFound(resource) => Self::NotFound(resource),
+            nexus_core::CoreError::NotFound { resource } => Self::NotFound(resource),
             nexus_core::CoreError::InvalidInput { field, reason } => Self::InvalidInput {
                 field,
                 reason,

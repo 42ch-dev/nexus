@@ -12,10 +12,10 @@ pub enum CoreError {
     Uninitialized,
     #[error("authentication required")]
     AuthRequired,
-    #[error("forbidden: {resource} — {reason}")]
-    Forbidden { resource: String, reason: String },
-    #[error("not found: {0}")]
-    NotFound(String),
+    #[error("forbidden: {resource}")]
+    Forbidden { resource: String },
+    #[error("not found: {resource}")]
+    NotFound { resource: String },
     #[error("invalid input: {field} — {reason}")]
     InvalidInput { field: String, reason: String },
     #[error("world kb conflict")]

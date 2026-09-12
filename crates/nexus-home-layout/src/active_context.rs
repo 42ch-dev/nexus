@@ -76,7 +76,7 @@ pub fn resolve_state_db_path(user_home: &Path, nexus_root: &Path) -> Result<Path
     Ok(crate::workspace_state_db_path(user_home, cid, &slug))
 }
 
-/// Read the active `creator_id` from CLI config.
+/// Read the active `creator_id` from CLI config (migration-aware).
 #[must_use]
 pub fn read_active_creator_id(nexus_home: &Path) -> Option<String> {
     if !nexus_home.is_absolute()
@@ -86,13 +86,9 @@ pub fn read_active_creator_id(nexus_home: &Path) -> Option<String> {
     {
         return None;
     }
-    let config_path = nexus_home.join("config.toml");
-    let content = std::fs::read_to_string(&config_path).ok()?;
-    let config: toml::Value = toml::from_str(&content).ok()?;
-    config
-        .get("active_creator_id")
-        .and_then(|v| v.as_str())
-        .map(std::string::ToString::to_string)
+    CliConfigSnapshot::load(nexus_home)
+        .ok()
+        .and_then(|cfg| cfg.active_creator_id)
 }
 
 /// Read the active workspace slug for `creator_id` (default `"default"`).

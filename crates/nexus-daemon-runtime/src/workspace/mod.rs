@@ -1199,8 +1199,6 @@ impl WorkspaceState {
     ///
     /// This is the single authority — the HTTP guard delegates here and the
     /// probe owner calls it, so the two can never drift.
-    #[must_use]
-
     /// Resolve the attached [`nexus_core::CoreService`] or initialize it lazily.
     pub async fn core_or_uninit(&self) -> Result<Arc<nexus_core::CoreService>, crate::api::errors::NexusApiError> {
         if let Some(core) = self.core_service.get() {
@@ -1223,7 +1221,7 @@ impl WorkspaceState {
             .db_path
             .clone()
             .ok_or(crate::api::errors::NexusApiError::Uninitialized)?;
-        let core = nexus_core::CoreService::attach_pool(
+        let core = nexus_core::CoreService::open_attached(
             nexus_core::CoreOpenOptions {
                 user_home,
                 access: nexus_core::CoreAccess::EngineOwner,
@@ -1231,7 +1229,7 @@ impl WorkspaceState {
             creator_id,
             workspace_slug,
             db_path,
-            pool.clone(),
+            nexus_core::CoreAttachedPool::from_admitted_engine_pool(pool.clone()),
         )
         .await
         .map_err(crate::api::errors::NexusApiError::from)?;

@@ -26,7 +26,7 @@ use nexus_spoke_adapter::{
     is_world_conflict_reject, orchestrate_upsert, KnowledgeEntry as SpokeKnowledgeEntry,
     NexusAdapter, SpokeReject, SpokeRejectCode, SpokeResult, UpsertRequest, UpsertResponse,
 };
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool};
 use tracing::warn;
 
 use crate::error::{CoreError, CoreResult};
@@ -130,47 +130,45 @@ fn project_candidate(c: &nexus_local_db::kb_extract_job::KbExtractPromotion) -> 
     }
 }
 
-pub mod guards {
+mod guards {
     use super::*;
 
-    pub async fn require_world_owner(
-        pool: &SqlitePool,
+    pub(super) async fn require_world_owner(
+        executor: impl sqlx::Executor<'_, Database = Sqlite>,
         world_id: &str,
         creator_id: &str,
     ) -> CoreResult<()> {
         let owner: Option<Option<String>> =
             sqlx::query_scalar("SELECT owner_creator_id FROM narrative_worlds WHERE world_id = ?")
                 .bind(world_id)
-                .fetch_optional(pool)
+                .fetch_optional(executor)
                 .await
                 .map_err(db_err)?;
         match owner {
-            None => Err(CoreError::NotFound(format!("world {world_id}"))),
+            None => Err(CoreError::NotFound { resource: format!("world {world_id}") }),
             Some(Some(owner_id)) if owner_id == creator_id => Ok(()),
             Some(Some(_)) => Err(CoreError::Forbidden {
-                resource: format!("world {world_id}"),
-                reason:
-                    "active creator does not own this world; cross-author World KB edits are forbidden"
-                        .to_string(),
+                resource: format!("world {world_id}: active creator does not own this world; cross-author World KB edits are forbidden"),
             }),
             Some(None) => Err(CoreError::Forbidden {
-                resource: format!("world {world_id}"),
-                reason: "world has no owner_creator_id; cannot authorize World KB edit".to_string(),
+                resource: format!("world {world_id}: world has no owner_creator_id; cannot authorize World KB edit"),
             }),
         }
     }
 }
 
-pub mod graph {
+pub(crate) mod graph {
     use super::*;
 
-    pub async fn get_graph(
+    pub(crate) async fn get_graph(
         pool: &SqlitePool,
         creator_id: &str,
         world_id: &str,
         include_suggested: bool,
     ) -> CoreResult<WorldKbGraphResponse> {
-        guards::require_world_owner(pool, world_id, creator_id).await?;
+        let mut tx = pool.begin().await.map_err(db_err)?;
+        guards::require_world_owner(&mut *tx, world_id, creator_id).await?;
+        let _snapshot_watermark: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(sequence), 0) FROM core_changes").fetch_one(&mut *tx).await.map_err(db_err)?;
 
         let store = kb_store::SqliteKbStore::new(pool.clone());
         let blocks = store.list_by_world(world_id).await.map_err(store_err)?;
@@ -203,12 +201,12 @@ pub mod graph {
             entities.push(project_entity(&kb));
         }
 
+        let relationships = project_relationships_for_world(pool, world_id, include_suggested).await?;
+        tx.commit().await.map_err(db_err)?;
         Ok(WorldKbGraphResponse {
             entities: wire_cast(entities),
             source_anchors: wire_cast(source_anchors),
-            relationships: wire_cast(
-                project_relationships_for_world(pool, world_id, include_suggested).await?,
-            ),
+            relationships: wire_cast(relationships),
         })
     }
 
@@ -296,10 +294,10 @@ pub mod graph {
     }
 }
 
-pub mod candidates {
+pub(crate) mod candidates {
     use super::*;
 
-    pub async fn get_candidates(
+    pub(crate) async fn get_candidates(
         pool: &SqlitePool,
         creator_id: &str,
         world_id: &str,
@@ -383,16 +381,17 @@ pub mod candidates {
     }
 }
 
-pub mod patch {
+pub(crate) mod patch {
     use super::*;
 
-    pub async fn patch_entity(
+    pub(crate) async fn patch_entity(
         pool: &SqlitePool,
         creator_id: &str,
         world_id: &str,
         req: WorldKbPatchEntityRequest,
     ) -> CoreResult<WorldKbPatchEntityResponse> {
-        guards::require_world_owner(pool, world_id, creator_id).await?;
+        let pool = pool.clone();
+        guards::require_world_owner(&pool, world_id, creator_id).await?;
 
         let store = kb_store::SqliteKbStore::with_validation_mode(
             pool.clone(),
@@ -401,7 +400,7 @@ pub mod patch {
         let kb = match store.get_knowledge_entry(&req.entity_id).await {
             Ok(kb) => kb,
             Err(KbStoreError::NotFound(_)) if req.expected_version == 0 => {
-                return patch_entity_create(pool, world_id, &req).await;
+                return patch_entity_create(&pool, world_id, &req).await;
             }
             Err(KbStoreError::NotFound(_)) => {
                 return Err(CoreError::world_kb_conflict(
@@ -418,10 +417,7 @@ pub mod patch {
             }
         };
         if kb.world_id() != Some(world_id) {
-            return Err(CoreError::NotFound(format!(
-                "entity {} in world {world_id}",
-                req.entity_id
-            )));
+            return Err(CoreError::NotFound { resource: format!("entity {} in world {world_id}", req.entity_id) });
         }
         if kb.status == "deleted" || kb.status == "merged" {
             return Err(CoreError::world_kb_validation_failed(
@@ -464,36 +460,23 @@ pub mod patch {
         let post_patch = build_post_patch(&kb, &req.patch, body_for_validation.as_ref());
         let spoke_req = build_spoke_upsert_request(&post_patch);
 
-        let tx = pool.begin().await.map_err(db_err)?;
+        let mut tx = pool.begin().await.map_err(db_err)?;
+        guards::require_world_owner(&mut *tx, world_id, creator_id).await?;
         let tx_cell = Arc::new(Mutex::new(Some(tx)));
         let adapter = NexusAdapter::new(pool.clone()).with_tx_cell(Arc::clone(&tx_cell));
         let result = adapter
             .with_bound_tx(|| orchestrate_upsert(&adapter, spoke_req))
             .await;
 
-        let persisted = match map_upsert_response_in_tx(result, &req.entity_id).await {
+        let mut bound_tx = tx_cell.lock().expect("patch tx mutex poisoned").take().expect("patch tx cell must hold the open transaction");
+        let persisted = match map_upsert_response_in_tx(result, &req.entity_id, &pool).await {
             Ok(entry) => entry,
-            Err(e) => {
-                if let Some(mut guard) = tx_cell.lock().ok().and_then(|mut g| g.take()) {
-                    let _ = guard.rollback().await;
-                }
-                return Err(e);
-            }
+            Err(e) => { let _ = bound_tx.rollback().await; return Err(e); }
         };
         let new_version = persisted.revision.unwrap_or(0);
-
-        let mut tx = tx_cell
-            .lock()
-            .expect("patch tx mutex poisoned")
-            .take()
-            .expect("patch tx cell must hold the open transaction");
-        tx.commit().await.map_err(db_err)?;
-
-        Ok(WorldKbPatchEntityResponse {
-            entity: wire_cast(project_entity(&persisted)),
-            version: new_version,
-            validation_summary: wire_cast(validation_summary(&[], &[])),
-        })
+        let response = WorldKbPatchEntityResponse { entity: wire_cast(project_entity(&persisted)), version: new_version, validation_summary: wire_cast(validation_summary(&[], &[])) };
+        bound_tx.commit().await.map_err(db_err)?;
+        Ok(response)
     }
 
     async fn patch_entity_create(
@@ -559,34 +542,32 @@ pub mod patch {
             .with_bound_tx(|| orchestrate_upsert(&adapter, spoke_req))
             .await;
 
-        let persisted = match map_upsert_response_in_tx(result, &req.entity_id).await {
-            Ok(entry) => entry,
-            Err(e) => {
-                if let Some(mut guard) = tx_cell.lock().ok().and_then(|mut g| g.take()) {
-                    let _ = guard.rollback().await;
-                }
-                return Err(e);
-            }
-        };
-        let new_version = persisted.revision.unwrap_or(0);
-
-        let mut tx = tx_cell
+        let mut bound_tx = tx_cell
             .lock()
             .expect("patch create tx mutex poisoned")
             .take()
             .expect("patch create tx cell must hold the open transaction");
-        tx.commit().await.map_err(db_err)?;
-
-        Ok(WorldKbPatchEntityResponse {
+        let persisted = match map_upsert_response_in_tx(result, &req.entity_id, pool).await {
+            Ok(entry) => entry,
+            Err(e) => {
+                let _ = bound_tx.rollback().await;
+                return Err(e);
+            }
+        };
+        let new_version = persisted.revision.unwrap_or(0);
+        let response = WorldKbPatchEntityResponse {
             entity: wire_cast(project_entity(&persisted)),
             version: new_version,
             validation_summary: wire_cast(validation_summary(&[], &[])),
-        })
+        };
+        bound_tx.commit().await.map_err(db_err)?;
+        Ok(response)
     }
 
     async fn map_upsert_response_in_tx(
         result: SpokeResult<UpsertResponse>,
         entity_id: &str,
+        pool: &SqlitePool,
     ) -> CoreResult<KnowledgeEntryRecord> {
         match result {
             SpokeResult::Ok(UpsertResponse::Variant0 { knowledge_entries, .. }) => {
@@ -609,17 +590,26 @@ pub mod patch {
                 })?;
                 Ok(record)
             }
-            SpokeResult::Reject(reject) => Err(map_upsert_reject(reject, entity_id)),
+            SpokeResult::Reject(reject) => Err(map_upsert_reject(reject, entity_id, pool).await),
             SpokeResult::Ok(UpsertResponse::Variant1 { .. }) => Err(CoreError::Internal {
                 category: format!("unexpected upsert error envelope for {entity_id}"),
             }),
         }
     }
 
-    fn map_upsert_reject(reject: SpokeReject, entity_id: &str) -> CoreError {
+    fn extract_store_revision(reject: &SpokeReject) -> Option<u64> {
+        let details = reject.details.as_ref()?;
+        for key in ["actualRevision", "storeRevision"] { if let Some(v)=details.get(key) { if let Some(n)=v.as_u64() { return Some(n); } } }
+        None
+    }
+    async fn reread_entity_revision(pool: &SqlitePool, entity_id: &str) -> u64 {
+        kb_store::SqliteKbStore::new(pool.clone()).get_knowledge_entry(entity_id).await.ok().and_then(|e| e.revision).unwrap_or(0)
+    }
+    async fn map_upsert_reject(reject: SpokeReject, entity_id: &str, pool: &SqlitePool) -> CoreError {
+        let current = match extract_store_revision(&reject) { Some(r)=>r, None => reread_entity_revision(pool, entity_id).await };
         if is_world_conflict_reject(&reject) {
             return CoreError::world_kb_conflict(
-                0,
+                current,
                 entity_id,
                 "world",
                 "the entry moved to another world; refetch it in its stored world and reapply",
@@ -629,7 +619,7 @@ pub mod patch {
             SpokeRejectCode::StoredRevisionStale
             | SpokeRejectCode::RevisionConflict
             | SpokeRejectCode::KnowledgeEntryAlreadyExists => CoreError::world_kb_conflict(
-                0,
+                current,
                 entity_id,
                 "version",
                 "refetch the World KB graph and reapply",

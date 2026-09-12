@@ -6,6 +6,7 @@ use std::process::Command;
 fn main() {
     let mut scenario = String::new();
     let mut cli_bin: Option<PathBuf> = None;
+    let mut http_bin: Option<PathBuf> = None;
     let mut out_dir: Option<PathBuf> = None;
     let args: Vec<String> = std::env::args().collect();
     let mut i = 1;
@@ -13,6 +14,10 @@ fn main() {
         match args[i].as_str() {
             "--scenario" if i + 1 < args.len() => {
                 scenario = args[i + 1].clone();
+                i += 2;
+            }
+            "--http-bin" if i + 1 < args.len() => {
+                http_bin = Some(PathBuf::from(&args[i + 1]));
                 i += 2;
             }
             "--cli-bin" if i + 1 < args.len() => {
@@ -37,6 +42,16 @@ fn main() {
 
     let out = out_dir.unwrap_or_else(|| PathBuf::from("evidence"));
     std::fs::create_dir_all(&out).expect("create evidence dir");
+
+    if let Some(http) = &http_bin {
+        let status = Command::new(http)
+            .arg("--help")
+            .status()
+            .expect("spawn http host");
+        if !status.success() {
+            eprintln!("HTTP host binary at {} failed --help; continuing scaffold", http.display());
+        }
+    }
 
     match cli_bin {
         Some(bin) => {

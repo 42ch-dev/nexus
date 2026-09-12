@@ -10,10 +10,11 @@ use nexus_contracts::{
 };
 use nexus_home_layout::active_context::{
     read_active_creator_id, read_active_workspace_slug, try_resolve_state_db_path,
+    CliConfigSnapshot,
 };
 use nexus_local_db::open_pool_read_only;
 use nexus_local_db::writer_protocol::{
-    init_engine_pool, open_admitted_pool, GuardedPoolOptions, WriterMode,
+    init_engine_pool, open_admitted_pool, GuardedPool, GuardedPoolOptions, WriterMode,
 };
 use sqlx::SqlitePool;
 
@@ -35,13 +36,30 @@ pub struct CoreOpenOptions {
     pub access: CoreAccess,
 }
 
+/// Opaque admitted engine pool handle (host integration only).
+#[doc(hidden)]
+pub struct CoreAttachedPool {
+    pool: SqlitePool,
+}
+
+impl CoreAttachedPool {
+    #[doc(hidden)]
+    pub fn from_admitted_engine_pool(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+
+    pub(crate) fn from_guarded(guarded: &GuardedPool) -> Self {
+        Self {
+            pool: guarded.clone_pool(),
+        }
+    }
+}
+
 struct CoreInner {
     pool: SqlitePool,
     nexus_home: PathBuf,
-    user_home: PathBuf,
     creator_id: String,
     workspace_slug: String,
-    db_path: PathBuf,
     generation: AtomicU64,
     access: CoreAccess,
     closing: AtomicBool,
@@ -54,10 +72,14 @@ pub struct CoreService {
 impl CoreService {
     pub async fn open(options: CoreOpenOptions) -> CoreResult<Self> {
         let nexus_home = nexus_home_layout::nexus_root_from_home(&options.user_home);
-        let creator_id = read_active_creator_id(&nexus_home).ok_or(CoreError::AuthRequired)?;
-        let workspace_slug = read_active_workspace_slug(&nexus_home, &creator_id)
-            .filter(|s| !s.trim().is_empty())
-            .ok_or(CoreError::AuthRequired)?;
+        let cfg = CliConfigSnapshot::load(&nexus_home).map_err(|e| CoreError::Internal {
+            category: format!("config_load: {e}"),
+        })?;
+        let creator_id = cfg.active_creator_id.clone().ok_or(CoreError::AuthRequired)?;
+        let workspace_slug = cfg.workspace_slug_for_creator(&creator_id);
+        if workspace_slug.trim().is_empty() {
+            return Err(CoreError::AuthRequired);
+        }
         let db_path = try_resolve_state_db_path(&options.user_home, &nexus_home)
             .ok_or(CoreError::Uninitialized)?;
         if !db_path.exists() && options.access == CoreAccess::ReadOnly {
@@ -87,10 +109,8 @@ impl CoreService {
             inner: Arc::new(CoreInner {
                 pool,
                 nexus_home,
-                user_home: options.user_home,
                 creator_id,
                 workspace_slug,
-                db_path,
                 generation: AtomicU64::new(1),
                 access: options.access,
                 closing: AtomicBool::new(false),
@@ -98,23 +118,23 @@ impl CoreService {
         })
     }
 
-    /// Attach an already-admitted engine/direct pool (daemon boot path).
-    pub async fn attach_pool(
+    /// Host integration: attach an already-admitted engine pool without exposing
+    /// `SqlitePool` in the public `open` contract.
+    #[doc(hidden)]
+    pub async fn open_attached(
         options: CoreOpenOptions,
         creator_id: String,
         workspace_slug: String,
-        db_path: PathBuf,
-        pool: SqlitePool,
+        _db_path: PathBuf,
+        attached: CoreAttachedPool,
     ) -> CoreResult<Self> {
         let nexus_home = nexus_home_layout::nexus_root_from_home(&options.user_home);
         Ok(Self {
             inner: Arc::new(CoreInner {
-                pool,
+                pool: attached.pool,
                 nexus_home,
-                user_home: options.user_home,
                 creator_id,
                 workspace_slug,
-                db_path,
                 generation: AtomicU64::new(1),
                 access: options.access,
                 closing: AtomicBool::new(false),
@@ -129,16 +149,7 @@ impl CoreService {
         Ok(())
     }
 
-    fn verify_principal(&self, principal: &Principal) -> CoreResult<()> {
-        self.ensure_open()?;
-        if !principal.verify_generation(self.inner.generation.load(Ordering::SeqCst)) {
-            return Err(CoreError::AuthRequired);
-        }
-        Ok(())
-    }
-
-    pub async fn active_principal(&self) -> CoreResult<Principal> {
-        self.ensure_open()?;
+    fn verify_selected_context(&self) -> CoreResult<()> {
         if read_active_creator_id(&self.inner.nexus_home).as_deref()
             != Some(self.inner.creator_id.as_str())
         {
@@ -148,6 +159,26 @@ impl CoreService {
         if slug.as_deref() != Some(self.inner.workspace_slug.as_str()) {
             return Err(CoreError::AuthRequired);
         }
+        Ok(())
+    }
+
+    fn verify_principal(&self, principal: &Principal) -> CoreResult<()> {
+        self.ensure_open()?;
+        if !principal.verify_generation(self.inner.generation.load(Ordering::SeqCst)) {
+            return Err(CoreError::AuthRequired);
+        }
+        if principal.creator_id() != self.inner.creator_id.as_str()
+            || principal.workspace_slug() != self.inner.workspace_slug.as_str()
+        {
+            return Err(CoreError::AuthRequired);
+        }
+        self.verify_selected_context()?;
+        Ok(())
+    }
+
+    pub async fn active_principal(&self) -> CoreResult<Principal> {
+        self.ensure_open()?;
+        self.verify_selected_context()?;
         Ok(Principal::new(
             self.inner.creator_id.clone(),
             self.inner.workspace_slug.clone(),
@@ -180,8 +211,7 @@ impl CoreService {
         self.verify_principal(principal)?;
         if self.inner.access == CoreAccess::ReadOnly {
             return Err(CoreError::Forbidden {
-                resource: "world_kb_patch".to_string(),
-                reason: "read-only core access".to_string(),
+                resource: "world_kb_patch: read-only core access".to_string(),
             });
         }
         patch::patch_entity(
@@ -242,25 +272,15 @@ impl CoreService {
             reason: None,
         })
     }
-
-    #[must_use]
-    pub(crate) fn pool(&self) -> &SqlitePool {
-        &self.inner.pool
-    }
 }
 
 fn map_db(e: nexus_local_db::LocalDbError) -> CoreError {
-    let msg = e.to_string();
-    if msg.contains("WRITER_FENCED") || msg.contains("writer_fenced") {
-        return CoreError::WriterFenced;
-    }
-    if msg.contains("OWNER_BUSY") || msg.contains("owner_busy") {
-        return CoreError::OwnerBusy;
-    }
-    if msg.contains("database is locked") || msg.contains("SQLITE_BUSY") {
-        return CoreError::Busy;
-    }
-    CoreError::Internal {
-        category: format!("database_error: {msg}"),
+    match e {
+        nexus_local_db::LocalDbError::OwnerBusy { .. } => CoreError::OwnerBusy,
+        nexus_local_db::LocalDbError::WriterFenced { .. } => CoreError::WriterFenced,
+        nexus_local_db::LocalDbError::SchemaMismatch { .. } => CoreError::SchemaMismatch,
+        other => CoreError::Internal {
+            category: format!("database_error: {other}"),
+        },
     }
 }

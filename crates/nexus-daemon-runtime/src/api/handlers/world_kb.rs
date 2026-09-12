@@ -24,6 +24,7 @@
 #![allow(clippy::missing_errors_doc)]
 
 use super::wire_cast;
+use nexus_core::projection::project_entity;
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::world_kb_guards::{self, require_creator, require_world_owner};
 use crate::workspace::WorkspaceState;
@@ -49,11 +50,11 @@ use nexus_knowledge::world_kb::validation::{
 };
 use nexus_knowledge::world_kb::{KbStore, KbStoreError};
 use nexus_local_db::kb_extract_job::{
-    get_promotion, list_pending_for_world_after, mark_confirmed_in_tx_with_cas, KbExtractPromotion,
+    get_promotion, mark_confirmed_in_tx_with_cas, KbExtractPromotion,
 };
 use nexus_local_db::kb_relationships::{
     delete_relationship_in_tx, generate_relationship_id, get_relationship,
-    list_relationships_for_world, KbRelationshipRow,
+    KbRelationshipRow,
 };
 use nexus_local_db::kb_store::{self, cas_update_key_block_fields};
 use nexus_local_db::LocalDbError;
@@ -74,29 +75,19 @@ use nexus_spoke_adapter::NexusAdapter;
 use nexus_spoke_adapter::conversion::{knowledge_record_to_spoke, spoke_to_knowledge_record};
 use nexus_spoke_adapter::extensions::set_nexus_body;
 use nexus_spoke_adapter::{
-    is_world_conflict_reject, orchestrate_promote, orchestrate_relate, orchestrate_upsert,
+    is_world_conflict_reject, orchestrate_promote, orchestrate_relate,
     KnowledgeEntry as SpokeKnowledgeEntry, PromoteRequest, PromoteResponse, RelateRequest,
     RelateResponse, Relation as SpokeRelation, RelationExtensionsKey, SpokeReject, SpokeRejectCode,
     SpokeResult, UpsertRequest, UpsertResponse,
 };
 use serde::Deserialize;
-use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::sync::{Arc, Mutex};
-use tracing::{info, warn};
+use tracing::warn;
 
 /// Maximum entities returned by the graph projection (mirrors `kb_store`
 /// `LIST_BY_WORLD_LIMIT` safety cap).
 const GRAPH_ENTITY_CAP: usize = 500;
-/// Maximum stored relationships projected by the graph endpoint before
-/// symmetric-reverse derivation (qc1 F-003 / `R-V176QC1-S002`). Bounds the
-/// payload for worlds that have accumulated many extraction suggestions across
-/// rescans, mirroring `GRAPH_ENTITY_CAP`. The cap is applied to *stored* rows
-/// so a stored edge and its symmetric reverse are never split across the
-/// boundary. Pre-1.0 local-first datasets stay well under this; a future
-/// `limit`/`cursor` pagination pass (see `get_graph` TODO) can replace it once
-/// the wire contract gains a `truncated`/`next_cursor` envelope.
-const GRAPH_RELATIONSHIP_CAP: usize = 1000;
 /// Default page size for the candidates endpoint. 50 matches the UI's default
 /// list viewport plus one buffer page, so the first render does not block on a
 /// large fetch while still amortizing pagination overhead.
@@ -109,7 +100,6 @@ const MAX_CANDIDATE_LIMIT: i64 = 250;
 /// Prefix for candidate-list keyset cursors (`kb promotion`). Distinguishes
 /// the V1.73 qc3 W-01 keyset cursor from any legacy bare-`job_id` cursor so a
 /// malformed/old cursor surfaces as 400 instead of silently mis-paginating.
-const CANDIDATE_CURSOR_PREFIX: &str = "kbp:";
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────
 
@@ -167,48 +157,6 @@ async fn reread_promotion_version(
         .await
         .map_err(NexusApiError::from)?
         .map_or(0, |j| u64::try_from(j.version).unwrap_or(0)))
-}
-
-/// Build the wire projection of a `KnowledgeEntryRecord`.
-fn project_entity(kb: &KnowledgeEntryRecord) -> WorldKbEntityProjection {
-    let body_value = kb
-        .body
-        .as_ref()
-        .map(|b| serde_json::to_value(b).unwrap_or_default());
-    let aliases = body_value
-        .as_ref()
-        .and_then(|v| v.get("attributes"))
-        .and_then(|a| a.get("aliases"))
-        .and_then(|a| a.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(std::string::ToString::to_string))
-                .collect::<Vec<_>>()
-        });
-    let source_anchor_count = u64::from(kb.source_work_id.is_some());
-    WorldKbEntityProjection {
-        key_block_id: kb.entry_id.clone(),
-        world_id: kb.world_id().map(str::to_string).unwrap_or_default(),
-        block_type: wire_cast(kb.block_type),
-        canonical_name: wire_cast(kb.canonical_name.clone()),
-        status: kb.status.clone(),
-        version: kb.revision.unwrap_or(0),
-        body: body_value
-            .and_then(|v| v.as_object().cloned())
-            .unwrap_or_default(),
-        // V1.164 P3 T1 (AR-2): carry the functional-dialect modules verbatim
-        // from `kb_key_blocks.modules_json` (`KnowledgeEntryRecord.modules`). None →
-        // empty map → omitted from the wire (schema: "Absent when no modules
-        // data is present"), matching the `body` projection pattern.
-        modules: kb
-            .modules
-            .as_ref()
-            .and_then(|v| v.as_object().cloned())
-            .unwrap_or_default(),
-        aliases: aliases.unwrap_or_default(),
-        source_anchor_count: Some(source_anchor_count),
-        updated_at: kb.updated_at.clone(),
-    }
 }
 
 /// Build the wire projection of a pending promotion candidate.
@@ -296,278 +244,6 @@ pub async fn patch_entity(
     Ok(Json(wire_cast(response)))
 }
 
-
-/// V1.160 P1 create-on-absent branch of [`patch_entity`] (entity-scope-model
-/// §5.1.2). Fires only when the store reports `NotFound` AND the client sent
-/// `expected_version: 0` — the create convention (client-minted `entity_id`,
-/// PATH `world_id` already authz-checked by `require_world_owner`).
-///
-/// Unlike update, there is no pre-read entity to inherit unchanged fields
-/// from, so `patch.title` (→ `canonical_name`) and `patch.block_type` are
-/// REQUIRED; missing either is a 422. `patch.body` / `patch.aliases` are
-/// optional and merged through the same [`compute_body`] seam as the update
-/// path. `canonical_name` / `body` run the same V1.40 validation
-/// (`validate_canonical_name` + `validate_body(..., ValidationMode::Novel)`).
-///
-/// The fresh entry is routed through the same `orchestrate_upsert` seam as
-/// update: the orchestrator derives `expected_base_revision = None` from its
-/// own absent read and `put_create` INSERTs at revision 1. Success returns
-/// HTTP 200 (NOT 201) with the standard `WorldKbPatchEntityResponse`
-/// (`version = 1`) — byte-for-byte indistinguishable from an update response,
-/// so existing clients need no new parsing branch.
-async fn patch_entity_create(
-    pool: &sqlx::SqlitePool,
-    world_id: &str,
-    req: &WorldKbPatchEntityRequest,
-) -> Result<Json<WorldKbPatchEntityResponse>, NexusApiError> {
-    // Create has no pre-read entity to inherit from: title + block_type are
-    // required, body/aliases optional.
-    let Some(title) = req.patch.title.as_ref() else {
-        return Err(NexusApiError::world_kb_validation_failed(
-            &["create requires patch.title (canonical_name)".to_string()],
-            &[],
-        ));
-    };
-    let Some(block_type) = req.patch.block_type else {
-        return Err(NexusApiError::world_kb_validation_failed(
-            &["create requires patch.block_type".to_string()],
-            &[],
-        ));
-    };
-    let block_type: nexus_contracts::BlockType = wire_cast(block_type);
-
-    // V1.160 P1 fix-wave (QC2-F001): a whitespace-only title (e.g. `"   "`)
-    // passes `validate_canonical_name` (spaces are legal there) and the
-    // schema `minLength: 1`, but the orchestrator rejects it with
-    // `EmptyCanonicalName` — which previously fell through `map_upsert_reject`
-    // to a 500. Reject here, before the spoke request is built.
-    if title.trim().is_empty() {
-        return Err(NexusApiError::world_kb_validation_failed(
-            &[
-                "create requires a non-empty patch.title (whitespace-only titles are rejected)"
-                    .to_string(),
-            ],
-            &[],
-        ));
-    }
-
-    validate_canonical_name(title.as_str())
-        .map_err(|e| NexusApiError::world_kb_validation_failed(&[e.to_string()], &[]))?;
-
-    // V1.160 P1 fix-wave (QC2-F002 / QC3-S004): the `kb_key_blocks` CHECK
-    // constraint only enforces the `kb_%` prefix, so an arbitrary `entity_id`
-    // passes the handler and fails the INSERT with a CHECK error → 500. Spec
-    // §5.1.2 makes `kb_<hex>` normative — enforce the prefix + non-empty hex
-    // suffix here, before the orchestrator / store see the id.
-    let entity_id_conforms = req
-        .entity_id
-        .strip_prefix("kb_")
-        .is_some_and(|suffix| !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_hexdigit()));
-    if !entity_id_conforms {
-        return Err(NexusApiError::world_kb_validation_failed(
-            &["entity_id must follow kb_<hex> convention".to_string()],
-            &[],
-        ));
-    }
-
-    // Fresh entity: client-minted `entity_id`, PATH `world_id`, default
-    // new-entity status (provisional), create revision 0 (the orchestrator's
-    // `validate_create_path` accepts None/0; `put_create` sets it to 1).
-    let mut fresh = KnowledgeEntryRecord::new(world_id, block_type, title.as_str());
-    fresh.entry_id = req.entity_id.clone();
-    fresh.revision = Some(0);
-
-    // Body/aliases merge + validation (same seam as the update path).
-    let body_for_validation = compute_body(&fresh, &req.patch)?;
-    if let Some(body) = &body_for_validation {
-        validate_body(block_type, Some(body), ValidationMode::Novel)
-            .map_err(|e| NexusApiError::world_kb_validation_failed(&[e.to_string()], &[]))?;
-    }
-    fresh.body = body_for_validation;
-
-    // V1.165 P2 (AR-4): create has no pre-read entity to inherit modules
-    // from — a provided `modules` map becomes the fresh entry's modules
-    // (empty map = omitted, identical to the update path's no-op).
-    apply_patch_modules(&mut fresh, None, &req.patch);
-
-    let spoke_req = build_spoke_upsert_request(&fresh);
-    let adapter = NexusAdapter::new(pool.clone());
-    let result = adapter
-        .with_bound_tx(|| orchestrate_upsert(&adapter, spoke_req))
-        .await;
-    let persisted = map_upsert_response(result, pool, &req.entity_id).await?;
-    let new_version = persisted.revision.unwrap_or(0);
-
-    info!(entity_id = %req.entity_id, new_version, "world_kb.patch_entity create committed");
-
-    // Re-read canonical post-write state for the response projection (mirrors
-    // the update path's re-read — server-side timestamps are not carried by
-    // the orchestrator's returned entry).
-    let store = nexus_local_db::kb_store::SqliteKbStore::with_validation_mode(
-        pool.clone(),
-        ValidationMode::Novel,
-    );
-    let updated = store
-        .get_knowledge_entry(&req.entity_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
-
-    Ok(Json(WorldKbPatchEntityResponse {
-        entity: wire_cast(project_entity(&updated)),
-        version: new_version,
-        validation_summary: wire_cast(validation_summary(&[], &[])),
-    }))
-}
-
-/// `true` when the patch carries no editable field.
-///
-/// V1.165 P2 (AR-4): `modules` counts as a provided field — a modules-only
-/// patch is valid. `modules: {}` deserializes to an empty map and is
-/// therefore NOT a provided field (identical to omit, PD-12).
-fn patch_is_empty(patch: &NexusWorldKbEntityPatch) -> bool {
-    patch.title.is_none()
-        && patch.body.is_empty()
-        && patch.aliases.is_empty()
-        && patch.block_type.is_none()
-        && patch.modules.is_empty()
-}
-
-/// Build the POST-PATCH entity: clone `kb` and apply the patch's
-/// `title`/`block_type`/`body` fields, the current (pre-bump) revision, and
-/// (V1.165 P2 / AR-4) the merged `modules` (see [`apply_patch_modules`]).
-///
-/// Extracted from [`patch_entity`] to keep the handler under the
-/// `too_many_lines` budget (same convention as `merge_candidate_summary`).
-fn build_post_patch(
-    kb: &KnowledgeEntryRecord,
-    patch: &NexusWorldKbEntityPatch,
-    body_for_validation: Option<&KnowledgeEntryBody>,
-) -> KnowledgeEntryRecord {
-    let mut post_patch = kb.clone();
-    if let Some(ref name) = patch.title {
-        post_patch.canonical_name = name.to_string();
-    }
-    if let Some(bt) = patch.block_type {
-        post_patch.block_type = wire_cast(bt);
-    }
-    if let Some(body) = body_for_validation {
-        post_patch.body = Some(body.clone());
-    }
-    post_patch.revision = Some(kb.revision.unwrap_or(0));
-    apply_patch_modules(&mut post_patch, kb.modules.as_ref(), patch);
-    post_patch
-}
-
-/// Apply the patch's `modules` onto the post-patch entity (V1.165 P2 /
-/// AR-4): no-op when the patch carries no modules keys; otherwise first-level
-/// key-merge over `base` (the pre-patch entity's stored modules).
-///
-/// Extracted from [`patch_entity`] / [`patch_entity_create`] to keep both
-/// handlers under the `too_many_lines` budget.
-fn apply_patch_modules(
-    post_patch: &mut KnowledgeEntryRecord,
-    base: Option<&serde_json::Value>,
-    patch: &NexusWorldKbEntityPatch,
-) {
-    if !patch.modules.is_empty() {
-        post_patch.modules = merge_modules(base, &patch.modules);
-    }
-}
-
-/// Merge provided patch `modules` into the entry's modules JSON (AR-4 /
-/// PD-12): first-level key upsert — provided keys replace the whole
-/// first-level value (not a deep merge); unspecified sibling keys are
-/// preserved; `{}` (empty map) is a no-op; an omitted `modules` field
-/// inherits the stored modules via `base`.
-///
-/// The generated patch type already enforces the spoke `ModuleMap` shape at
-/// JSON deserialization — `NexusWorldKbEntityPatchModulesKey` is a regex
-/// newtype (`^[a-z][a-z0-9_-]*$`) and `NexusWorldKbEntityPatchModulesValue`
-/// is an untagged `{object, array}` enum — so non-matching keys / scalar
-/// values reject as 400 before this runs (axum `Json` extractor). This is
-/// what makes PD-12 fidelity true: the `knowledge_record_to_spoke` conversion seam
-/// silently drops non-conforming entries
-/// (`conversion/knowledge_entry.rs:366-374`), so the wire boundary is the
-/// rejection point (AR-4 lock 4).
-fn merge_modules(
-    base: Option<&serde_json::Value>,
-    provided: &HashMap<NexusWorldKbEntityPatchModulesKey, NexusWorldKbEntityPatchModulesValue>,
-) -> Option<serde_json::Value> {
-    if provided.is_empty() {
-        return base.cloned();
-    }
-    // `KnowledgeEntryRecord.modules` is documented as a JSON object; a non-object
-    // base (should not occur) is treated as empty and replaced by the
-    // provided keys.
-    let mut map = base
-        .and_then(|v| v.as_object())
-        .cloned()
-        .unwrap_or_default();
-    for (key, value) in provided {
-        let json_val = match value {
-            NexusWorldKbEntityPatchModulesValue::Object(obj) => {
-                serde_json::Value::Object(obj.clone())
-            }
-            NexusWorldKbEntityPatchModulesValue::Array(arr) => {
-                serde_json::Value::Array(arr.clone())
-            }
-        };
-        map.insert(key.to_string(), json_val);
-    }
-    Some(serde_json::Value::Object(map))
-}
-
-/// Resolve the new `KnowledgeEntryBody` for validation from the patch + the current
-/// entity body. `aliases` are merged into `body.attributes.aliases`.
-///
-/// V1.143: the DB-format `body_json` string is no longer returned — the write
-/// now routes through `orchestrate_upsert`, and the production adapter
-/// serializes the spoke `KnowledgeEntry` body itself. Only the typed
-/// `KnowledgeEntryBody` is needed (validation + building the post-patch entity).
-fn compute_body(
-    kb: &KnowledgeEntryRecord,
-    patch: &NexusWorldKbEntityPatch,
-) -> Result<Option<KnowledgeEntryBody>, NexusApiError> {
-    if patch.body.is_empty() && patch.aliases.is_empty() {
-        return Ok(None);
-    }
-    // Start from the patch body, else the current body, else an empty body.
-    let mut value = if patch.body.is_empty() {
-        kb.body.as_ref().map_or_else(
-            || serde_json::json!({}),
-            |b| serde_json::to_value(b).unwrap_or_default(),
-        )
-    } else {
-        serde_json::Value::Object(patch.body.clone())
-    };
-    if !patch.aliases.is_empty() {
-        let obj = value
-            .as_object_mut()
-            .ok_or_else(|| NexusApiError::InvalidInput {
-                field: "body".to_string(),
-                reason: "body must be a JSON object to set aliases".to_string(),
-            })?;
-        let attrs = obj
-            .entry("attributes")
-            .or_insert_with(|| serde_json::json!({}));
-        attrs["aliases"] = serde_json::Value::Array(
-            patch
-                .aliases
-                .iter()
-                .map(|a| serde_json::Value::String(a.clone()))
-                .collect(),
-        );
-    }
-    let body: KnowledgeEntryBody =
-        serde_json::from_value(value).map_err(|e| NexusApiError::InvalidInput {
-            field: "body".to_string(),
-            reason: format!("body is not a valid KnowledgeEntryBody: {e}"),
-        })?;
-    Ok(Some(body))
-}
 
 // ─── promote-candidate ──────────────────────────────────────────────────────
 
@@ -1810,58 +1486,6 @@ pub struct GraphQuery {
 /// emitted (qc3 W-QC3-P1-002) so operators/authors have an observable signal
 /// that older relationships were dropped. A wire `truncated` flag remains a
 /// future contract change; the warn is the interim server-side observability.
-async fn project_relationships_for_world(
-    pool: &sqlx::SqlitePool,
-    world_id: &str,
-    include_suggested: bool,
-) -> Result<Vec<WorldKbRelationshipProjection>, NexusApiError> {
-    // Fetch CAP + 1 rows so truncation is detectable: if the DAO returns more
-    // than GRAPH_RELATIONSHIP_CAP rows, the world exceeded the safety cap and
-    // older relationships are silently dropped from the projection. The cap is
-    // pushed into SQL (qc3 W-QC3-P1-001) so the hot path never materializes
-    // unbounded rows.
-    let fetch_limit = i64::try_from(GRAPH_RELATIONSHIP_CAP + 1).unwrap_or(i64::MAX);
-    let rows = list_relationships_for_world(pool, world_id, include_suggested, fetch_limit)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
-
-    let observed = rows.len();
-    if observed > GRAPH_RELATIONSHIP_CAP {
-        // qc3 W-QC3-P1-002: surface silent truncation so operators/authors can
-        // detect that older relationships were dropped from the projection. A
-        // wire `truncated` flag is a future contract change; this server-side
-        // warn is the interim observable signal.
-        warn!(
-            metric = "world_kb_graph_relationships_truncated",
-            world_id,
-            include_suggested,
-            cap = GRAPH_RELATIONSHIP_CAP,
-            observed_count = observed,
-            "graph relationship cap reached; older relationships are not projected"
-        );
-    }
-
-    // Cap stored rows before projection so the symmetric-reverse derivation
-    // never splits a stored edge from its reverse (qc1 F-003 / `R-V176QC1-S002`).
-    // Each stored row yields at most 2 projections, so the wire payload is
-    // bounded by `2 * GRAPH_RELATIONSHIP_CAP`. The `.take()` is belt-and-
-    // suspenders: the SQL LIMIT already caps the DAO output, but this guards
-    // correctness if a future caller raises the DAO limit above the cap.
-    let mut projections = Vec::with_capacity(rows.len().min(GRAPH_RELATIONSHIP_CAP) * 2);
-    for row in rows.into_iter().take(GRAPH_RELATIONSHIP_CAP) {
-        projections.push(project_relationship(&row, "stored"));
-        if row.symmetric != 0 {
-            let mut reverse = row.clone();
-            std::mem::swap(&mut reverse.source_entity_id, &mut reverse.target_entity_id);
-            projections.push(project_relationship(&reverse, "symmetric_reverse"));
-        }
-    }
-    Ok(projections)
-}
-
 #[derive(Debug, Deserialize)]
 pub struct CandidatesQuery {
     pub limit: Option<i64>,
@@ -1874,53 +1498,6 @@ pub struct CandidatesQuery {
 ///
 /// Format: `kbp:<created_at>|<job_id>`. `|` never appears in either field
 /// (`created_at` is `datetime('now')` ISO8601; `job_id` is `xj_<uuid hex>`).
-fn decode_candidate_cursor(
-    cursor: Option<&String>,
-) -> Result<(Option<String>, Option<String>), NexusApiError> {
-    let Some(raw) = cursor else {
-        return Ok((None, None));
-    };
-    let stripped =
-        raw.strip_prefix(CANDIDATE_CURSOR_PREFIX)
-            .ok_or_else(|| NexusApiError::BadRequest {
-                code: "invalid_input".to_string(),
-                message: "invalid candidates cursor; pass the next_cursor value unchanged"
-                    .to_string(),
-            })?;
-    let mut parts = stripped.splitn(2, '|');
-    let created_at =
-        parts
-            .next()
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| NexusApiError::BadRequest {
-                code: "invalid_input".to_string(),
-                message: "invalid candidates cursor: missing created_at".to_string(),
-            })?;
-    let job_id =
-        parts
-            .next()
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| NexusApiError::BadRequest {
-                code: "invalid_input".to_string(),
-                message: "invalid candidates cursor: missing job_id".to_string(),
-            })?;
-    Ok((Some(created_at.to_string()), Some(job_id.to_string())))
-}
-
-/// Encode the keyset tuple of the last row visible on the current page into an
-/// opaque cursor token for the next page request.
-fn encode_candidate_cursor(created_at: &str, job_id: &str) -> String {
-    format!("{CANDIDATE_CURSOR_PREFIX}{created_at}|{job_id}")
-}
-
-/// `GET /v1/daemon/worlds/{world_id}/kb/candidates` — pending candidates list.
-///
-/// Cursor-paginated via a `(created_at, job_id)` keyset applied **inside** the
-/// storage query (V1.73 qc3 W-01 fix). The previous implementation fetched the
-/// first `limit + 1` rows and then skipped forward to the cursor in Rust,
-/// which made page 2+ unreachable once a world had more than one page of
-/// candidates. The keyset filter now lives in the SQL `WHERE` clause so every
-/// row beyond the cursor is reachable.
 pub async fn get_candidates(
     State(state): State<WorkspaceState>,
     Path(world_id): Path<String>,
