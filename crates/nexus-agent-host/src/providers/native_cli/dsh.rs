@@ -3968,7 +3968,10 @@ mod tests {
 
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             reunify.await.expect("reunify task");
-            close.await.expect("confirmed close")
+            match close.await {
+                Ok(()) => {}
+                Err(_) => panic!("confirmed close"),
+            }
         })
         .await
         .expect("final close must not hang on reunify notify race");
