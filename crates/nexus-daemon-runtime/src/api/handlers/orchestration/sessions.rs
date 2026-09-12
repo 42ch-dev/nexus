@@ -1236,20 +1236,35 @@ async fn authorize_orchestration_session_read(
             code: "ENGINE_ERROR".into(),
             message: e.to_string(),
         })?;
-    let owner = if let Some(active) = sessions.iter().find(|s| s.session_id == sid) {
-        active.creator_id.clone()
-    } else {
-        let pool = state.pool_or_uninit()?;
-        let storage = SqliteSessionStorage::new(Arc::new(pool.clone()));
-        let row = storage
-            .get_checkpoint_row(session_id)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "STORAGE_ERROR".into(),
-                message: e.to_string(),
-            })?
-            .ok_or_else(|| NexusApiError::NotFound(format!("session {session_id}")))?;
-        row.creator_id
+    // The DURABLE row is the ownership SSOT, exactly as `get_session` treats
+    // it for status. The in-memory active summary is only a fast path for a
+    // row the durable store does not know about: after an ownership change
+    // (or any writer that moved `orchestration_sessions.creator_id`), a stale
+    // in-memory summary would otherwise authorize a FOREIGN creator to read
+    // another creator's live event stream.
+    let durable_owner = match state.pool() {
+        Some(pool) => {
+            let storage = SqliteSessionStorage::new(Arc::new(pool.clone()));
+            storage
+                .get_checkpoint_row(session_id)
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    code: "STORAGE_ERROR".into(),
+                    message: e.to_string(),
+                })?
+                .map(|row| row.creator_id)
+        }
+        None => None,
+    };
+    let owner = match durable_owner {
+        Some(owner) => owner,
+        None => {
+            let active = sessions
+                .iter()
+                .find(|s| s.session_id == sid)
+                .ok_or_else(|| NexusApiError::NotFound(format!("session {session_id}")))?;
+            active.creator_id.clone()
+        }
     };
     if owner != active_creator {
         return Err(NexusApiError::NotFound(format!("session {session_id}")));

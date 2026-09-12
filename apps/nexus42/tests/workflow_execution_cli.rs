@@ -4571,6 +4571,33 @@ async fn p4_cleanup_failure_recovery_projection() {
     );
 }
 
+
+/// Drive a freshly admitted public run to its durable terminal `completed`.
+///
+/// The `memory-augmented` preset parks at the `persist` state
+/// (`exit_when: kind: manual`), so a terminal — and therefore a retained
+/// terminal SSE ring — is only reachable by consuming the durable wait token
+/// with an authorized `continue`, exactly as a real operator would. Tests that
+/// assert on a TERMINAL ring must go through this; asserting `completed`
+/// straight after admission can only ever observe `waiting_for_input`.
+async fn drive_public_run_to_terminal(daemon: &LiveDaemon, schedule_id: &str, sid: &str) {
+    let (status, state) = wait_for_run_status(daemon, sid, "waiting_for_input", 20).await;
+    assert_eq!(status, "waiting_for_input");
+    let wait_id = state["wait"]["wait_id"]
+        .as_str()
+        .expect("durable wait id")
+        .to_string();
+    let (code, body) = post_json(
+        daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "continue", "wait_id": wait_id }),
+    )
+    .await;
+    assert_eq!(code, reqwest::StatusCode::OK, "{body}");
+    let (run_status, _) = wait_for_run_status(daemon, sid, "completed", 20).await;
+    assert_eq!(run_status, "completed");
+}
+
 /// P4 T4: Last-Event-ID reconnect returns strictly-later frames without duplicates.
 #[tokio::test]
 async fn p4_public_sse_last_event_id_strict_later_dedupe() {
@@ -4586,8 +4613,7 @@ async fn p4_public_sse_last_event_id_strict_later_dedupe() {
         .as_deref()
         .expect("session")
         .to_string();
-    let (run_status, _) = wait_for_run_status(&daemon, &sid, "completed", 20).await;
-    assert_eq!(run_status, "completed");
+    drive_public_run_to_terminal(&daemon, schedule_id, &sid).await;
     let (status, full_body) = fetch_session_events(&daemon, &sid, None).await;
     assert_eq!(status, reqwest::StatusCode::OK, "{full_body}");
     let all = parse_sse_frames(&full_body);
@@ -4807,8 +4833,7 @@ async fn p4_public_sse_gap_on_evicted_cursor() {
         .as_deref()
         .expect("session")
         .to_string();
-    let (run_status, _) = wait_for_run_status(&daemon, &sid, "completed", 30).await;
-    assert_eq!(run_status, "completed");
+    drive_public_run_to_terminal(&daemon, schedule_id, &sid).await;
     let (status, full_body) = fetch_session_events(&daemon, &sid, None).await;
     assert_eq!(status, reqwest::StatusCode::OK, "{full_body}");
     let all = parse_sse_frames(&full_body);
