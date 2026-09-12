@@ -367,7 +367,7 @@ impl ProviderAdapter for ClaudeCliProvider {
         // Owned child (never `Command::output()`): the probe keeps an explicit
         // handle so a timeout or error can kill and reap the `--version` child
         // within the bound instead of dropping the future and leaking it.
-        let Ok(mut child) = tokio::process::Command::new(&command)
+        let mut child = match tokio::process::Command::new(&command)
             .arg("--version")
             .current_dir(&cwd)
             .envs(&env)
@@ -376,13 +376,24 @@ impl ProviderAdapter for ClaudeCliProvider {
             .stderr(std::process::Stdio::null())
             .kill_on_drop(true)
             .spawn()
-        else {
-            return Ok(ProviderHealth {
-                provider_id,
-                available: false,
-                latency_ms: None,
-                message: Some("cli handshake failed".to_string()),
-            });
+        {
+            Ok(child) => child,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(ProviderHealth {
+                    provider_id,
+                    available: false,
+                    latency_ms: None,
+                    message: Some(format!("cli command not found: {command}")),
+                });
+            }
+            Err(_) => {
+                return Ok(ProviderHealth {
+                    provider_id,
+                    available: false,
+                    latency_ms: None,
+                    message: Some("cli handshake failed".to_string()),
+                });
+            }
         };
 
         // Poll the owned child to completion under the bound, so the deadline

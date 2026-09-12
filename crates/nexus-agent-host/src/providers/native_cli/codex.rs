@@ -767,7 +767,7 @@ impl ProviderAdapter for CodexNativeProvider {
                 latency_ms: None,
                 message: Some("app-server handshake succeeded".to_string()),
             },
-            Ok(Err(_error)) => ProviderHealth {
+            Ok(Err(error)) => ProviderHealth {
                 provider_id,
                 available: false,
                 latency_ms: None,
@@ -775,7 +775,13 @@ impl ProviderAdapter for CodexNativeProvider {
                 // failure Display can embed arbitrary subprocess output
                 // (including secrets) and this string is published in the
                 // live provider catalog / API. Never echo the raw Display.
-                message: Some("app-server handshake failed".to_string()),
+                message: Some(
+                    if matches!(error, codex_codes::Error::BinaryNotFound { .. }) {
+                        "app-server command not found".to_string()
+                    } else {
+                        "app-server handshake failed".to_string()
+                    },
+                ),
             },
             Err(_) => ProviderHealth {
                 provider_id,

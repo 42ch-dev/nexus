@@ -18,10 +18,10 @@
 //! # Trust model (exact)
 //!
 //! The boundary enforced here excludes mutation by OTHER users: every
-//! anchor component must be non-group-writable and either
-//! non-other-writable or a sticky world-writable system directory (like
-//! `/tmp`, where the sticky bit already prevents other users from
-//! removing/renaming entries they do not own); the selected home,
+//! anchor component must not be group- or other-writable unless the
+//! sticky bit is set (the `/tmp` shape at `01777`, where sticky already
+//! prevents other users from removing/renaming entries they do not own);
+//! the selected home,
 //! `nexus/` and the leaf must additionally be owned by the effective
 //! uid. NO protection is claimed against malicious processes running as
 //! the SAME uid — the OS grants them equivalent authority (architecture
@@ -63,12 +63,12 @@ fn open_dir_at<Fd: std::os::fd::AsFd>(
     rustix::fs::openat(dirfd, name, DIR_OPEN, Mode::empty())
 }
 
-/// Boundary check for one pinned directory (trust model above): never
-/// group-writable; other-writable only when the sticky bit is set (the
-/// `/tmp` shape, where the OS already prevents other users from
-/// removing/renaming entries they do not own); when `require_owner`,
-/// also owned by the effective uid (selected home / `nexus` / leaf —
-/// anything another user owns can be mutated by them).
+/// Boundary check for one pinned directory (trust model above): group-
+/// or other-writable only when the sticky bit is set (the `/tmp` shape,
+/// where the OS already prevents other users from removing/renaming
+/// entries they do not own); when `require_owner`, also owned by the
+/// effective uid (selected home / `nexus` / leaf — anything another user
+/// owns can be mutated by them).
 pub fn check_dir_boundary(fd: &OwnedFd, require_owner: bool) -> Result<(), String> {
     let stat = rustix::fs::fstat(fd).map_err(|error| {
         format!(
@@ -77,8 +77,8 @@ pub fn check_dir_boundary(fd: &OwnedFd, require_owner: bool) -> Result<(), Strin
         )
     })?;
     let mode = stat.st_mode & 0o7777;
-    if mode & 0o020 != 0 {
-        return Err("a sealed-home directory is group-writable".to_string());
+    if mode & 0o020 != 0 && mode & 0o1000 == 0 {
+        return Err("a sealed-home directory is group-writable without the sticky bit".to_string());
     }
     if mode & 0o002 != 0 && mode & 0o1000 == 0 {
         return Err("a sealed-home directory is world-writable without the sticky bit".to_string());
@@ -463,6 +463,41 @@ mod tests {
             "keep",
             "the symlink target is never followed or deleted"
         );
+    }
+
+    #[test]
+    fn boundary_rejects_group_writable_without_sticky() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let canonical_temp = std::fs::canonicalize(temp_dir.path()).expect("canonical temp");
+        let fd = ensure_dir_nofollow_absolute(&canonical_temp).expect("open temp");
+        let loose = mkdir_exclusive_at(&fd, "loose", 0o700).expect("create dir");
+        std::fs::set_permissions(
+            temp_dir.path().join("loose"),
+            std::fs::Permissions::from_mode(0o770),
+        )
+        .expect("chmod 0770");
+        assert!(
+            check_dir_boundary(&loose, false).is_err(),
+            "a non-sticky group-writable directory must fail the boundary"
+        );
+    }
+
+    #[test]
+    fn boundary_accepts_sticky_group_and_other_writable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let canonical_temp = std::fs::canonicalize(temp_dir.path()).expect("canonical temp");
+        let fd = ensure_dir_nofollow_absolute(&canonical_temp).expect("open temp");
+        let sticky = mkdir_exclusive_at(&fd, "sticky", 0o700).expect("create dir");
+        std::fs::set_permissions(
+            temp_dir.path().join("sticky"),
+            std::fs::Permissions::from_mode(0o1777),
+        )
+        .expect("chmod 1777");
+        check_dir_boundary(&sticky, false).expect("the /tmp shape must pass the boundary");
     }
 
     #[test]
