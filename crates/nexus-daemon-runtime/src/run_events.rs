@@ -473,27 +473,6 @@ impl RunEventRegistryInner {
         self.push_record_locked(ring, frame);
     }
 
-    fn append_gap_record(&self, run_id: &str) {
-        if self.ring_closed(run_id) {
-            return;
-        }
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let ring = if let Some(r) = state.live.get_mut(run_id) {
-            if r.closed {
-                return;
-            }
-            r
-        } else if let Some(r) = state.terminal.get_mut(run_id) {
-            r
-        } else {
-            return;
-        };
-        self.append_gap_record_locked(ring, run_id);
-    }
-
     fn append_gap_record_locked(&self, ring: &mut RunRing, run_id: &str) {
         let sequence = ring.next_sequence;
         ring.next_sequence += 1;

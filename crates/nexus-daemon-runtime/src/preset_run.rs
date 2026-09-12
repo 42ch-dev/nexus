@@ -4962,7 +4962,6 @@ mod tests {
     impl BoundaryFaultStore {
         fn new(
             inner: Arc<dyn WorkflowStateStore>,
-            storage: Arc<dyn SessionStorage>,
             pool: Arc<sqlx::SqlitePool>,
             fault: BoundaryFault,
         ) -> Self {
@@ -8741,7 +8740,6 @@ mod tests {
         let dispatches = Arc::new(AtomicUsize::new(0));
         let barrier_store: Arc<dyn WorkflowStateStore> = Arc::new(SettlePairBarrierStore {
             inner: real_store.clone(),
-            storage: storage.clone(),
             arrived: arrived.clone(),
             dispatches: dispatches.clone(),
         });

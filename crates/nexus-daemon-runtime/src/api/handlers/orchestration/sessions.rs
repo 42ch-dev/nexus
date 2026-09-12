@@ -1236,7 +1236,7 @@ pub async fn session_events(
         .get("last-event-id")
         .and_then(|v| v.to_str().ok());
     let registry = state.run_event_registry();
-    let mut sub = match registry.subscribe_live(&session_id, last_event_id, inspect_url) {
+    let sub = match registry.subscribe_live(&session_id, last_event_id, inspect_url) {
         Ok(rx) => rx,
         Err(crate::run_events::SubscribeError::MalformedCursor)
         | Err(crate::run_events::SubscribeError::FutureCursor) => {
