@@ -34,6 +34,37 @@ const SUBSCRIBER_CHANNEL_CAPACITY: usize = MAX_PENDING_FRAMES_PER_SUB + 1;
 pub type RunEventSinkMap =
     Arc<tokio::sync::Mutex<std::collections::HashMap<String, RunEventSink>>>;
 
+/// Root run id of any session id.
+///
+/// Nested prompt steps execute against CHILD sessions minted as
+/// `<parent>:child:<uuid>` (recursively), but every host event belongs to the
+/// one SSE ring owned by the driven ROOT run. Stripping at the FIRST
+/// `:child:` yields that root for any descendant depth.
+#[must_use]
+pub fn root_run_id(session_id: &str) -> &str {
+    session_id
+        .split_once(CHILD_SESSION_INFIX)
+        .map_or(session_id, |(root, _)| root)
+}
+
+/// Child-session id infix (mirrors `spawn_child_session_internal`).
+pub const CHILD_SESSION_INFIX: &str = ":child:";
+
+/// Resolve the sink that owns `run_id`: an exact match, else the sink of the
+/// ROOT run that admitted it.
+///
+/// Without the root fallback a nested prompt (whose `run_id` is a child
+/// session id) finds no sink and its `OpStarted`/content/`OpFinished` events
+/// are silently dropped from the root ring — the very frames a late
+/// subscriber replays from a retained terminal ring.
+pub async fn sink_for_run(sinks: &RunEventSinkMap, run_id: &str) -> Option<RunEventSink> {
+    let guard = sinks.lock().await;
+    guard.get(run_id).cloned().or_else(|| {
+        let root = root_run_id(run_id);
+        (root != run_id).then(|| guard.get(root).cloned()).flatten()
+    })
+}
+
 #[derive(Clone)]
 pub struct RunEventSink {
     run_id: String,
@@ -750,6 +781,40 @@ mod tests {
         let seq = frame.id.split(':').nth(1).unwrap();
         assert!(seq.parse::<u64>().is_ok());
         assert_ne!(seq, "gap");
+    }
+
+    /// Nested prompt steps run under child session ids; the root must be
+    /// recoverable at any depth so their lifecycle events land on the driven
+    /// root run's single ring.
+    #[test]
+    fn root_run_id_strips_every_child_level() {
+        assert_eq!(root_run_id("root-run"), "root-run");
+        assert_eq!(root_run_id("root-run:child:a"), "root-run");
+        assert_eq!(root_run_id("root-run:child:a:child:b"), "root-run");
+    }
+
+    /// A descendant prompt resolves to the OWNING root ring; an unknown run
+    /// resolves to nothing (never a wrong ring).
+    #[tokio::test]
+    async fn sink_for_run_resolves_descendant_to_owning_root_ring() {
+        let registry = RunEventRegistry::new();
+        let sink = registry.try_register_live("root-run").expect("register");
+        let mut map = std::collections::HashMap::new();
+        map.insert("root-run".to_string(), sink);
+        let sinks: RunEventSinkMap = Arc::new(tokio::sync::Mutex::new(map));
+
+        let exact = sink_for_run(&sinks, "root-run").await.expect("exact match");
+        assert_eq!(exact.run_id(), "root-run");
+
+        let nested = sink_for_run(&sinks, "root-run:child:a:child:b")
+            .await
+            .expect("descendant resolves to the owning root ring");
+        assert_eq!(nested.run_id(), "root-run");
+
+        assert!(
+            sink_for_run(&sinks, "unrelated-run").await.is_none(),
+            "an unowned run must not borrow another run's ring"
+        );
     }
 
     #[test]

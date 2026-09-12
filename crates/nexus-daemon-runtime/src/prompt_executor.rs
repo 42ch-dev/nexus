@@ -720,8 +720,12 @@ impl PromptExecutor for HostPromptExecutor {
         // remove the session — no leaked Host session.
         let mut cancel_triggered = false;
         let mut cancel_unconfirmed = false;
+        // The prompt may execute under a CHILD session id
+        // (`<root>:child:<uuid>`, recursively) while the SSE ring belongs to
+        // the driven ROOT run — resolve through the owning root so the
+        // OpStarted/content/OpFinished lifecycle lands on that ring.
         let run_event_sink = if let Some(sinks) = &self.run_event_sinks {
-            sinks.lock().await.get(&request.run_id).cloned()
+            crate::run_events::sink_for_run(sinks, &request.run_id).await
         } else {
             None
         };
