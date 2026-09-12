@@ -119,7 +119,7 @@ def handle_request(req):
                 os.makedirs(blocker, exist_ok=True)
                 os.chmod(blocker, 0o500)
                 # Prevent anchored removal from unlinking the leaf entry.
-                os.chmod(dsh_home, 0o555)
+                os.chmod(dsh_home, 0o500)
             send({
                 "jsonrpc": "2.0",
                 "id": req["id"],

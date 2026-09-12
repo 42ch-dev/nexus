@@ -4691,8 +4691,9 @@ mod tests {
             .mode()
             & 0o777;
         assert_eq!(
-            leaf_mode, 0o555,
-            "the mock made the leaf unwritable for removal"
+            leaf_mode & 0o077,
+            0,
+            "failed initialization must not expose the sealed home to other users"
         );
 
         let first = {
@@ -4714,7 +4715,7 @@ mod tests {
 
         std::fs::set_permissions(&lease, std::fs::Permissions::from_mode(0o700))
             .expect("restore leaf perms");
-        std::fs::set_permissions(&blocker, std::fs::Permissions::from_mode(0o755))
+        std::fs::set_permissions(&blocker, std::fs::Permissions::from_mode(0o700))
             .expect("restore blocker perms");
         {
             let _env_lock = lock_test_env();
