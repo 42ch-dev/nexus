@@ -428,6 +428,38 @@ async fn wait_consumer_drop(consumer_dropped: &AtomicBool, consumer_drop_notify:
     }
 }
 
+
+async fn wait_run_harness_reunify(
+    state: &Mutex<ClientState>,
+    active_run: &AtomicBool,
+    run_reunified: &Notify,
+) -> Option<DeepSeekHarness> {
+    loop {
+        {
+            let mut guard = state.lock().await;
+            if let Some(harness) = guard.harness.take() {
+                return Some(harness);
+            }
+        }
+        // reunify latches `active_run` false after returning the harness;
+        // check the latch before registering a Notify waiter.
+        if !active_run.load(Ordering::Acquire) {
+            let mut guard = state.lock().await;
+            return guard.harness.take();
+        }
+        let notified = run_reunified.notified();
+        tokio::pin!(notified);
+        if !active_run.load(Ordering::Acquire) {
+            let mut guard = state.lock().await;
+            if let Some(harness) = guard.harness.take() {
+                return Some(harness);
+            }
+            return guard.harness.take();
+        }
+        notified.as_mut().await;
+    }
+}
+
 async fn reunify_run_harness(
     run_harness: &Mutex<Option<DeepSeekHarness>>,
     state: &Mutex<ClientState>,
@@ -738,10 +770,8 @@ fn start_final_close(
             let mut guard = state.lock().await;
             guard.harness.take()
         };
-        while harness.is_none() && active_run.load(Ordering::Acquire) {
-            run_reunified.notified().await;
-            let mut guard = state.lock().await;
-            harness = guard.harness.take();
+        if harness.is_none() {
+            harness = wait_run_harness_reunify(&state, &active_run, &run_reunified).await;
         }
         close_and_reap(harness, sealed_home, &retained).await?;
         if let Some(path) = session_failed_lease {
@@ -3883,6 +3913,107 @@ mod tests {
             !sessions.contains_key(&handle.session_id),
             "a confirmed close removes the session record"
         );
+    }
+
+
+    /// Regression for fe78386b7: reunify can clear `active_run` and notify
+    /// between the old `while` latch check and `notified()` registration,
+    /// leaving the retained final close hung or skipping the reunified
+    /// harness. The latch-safe waiter must observe reunify and close the
+    /// harness.
+    #[tokio::test]
+    async fn start_final_close_race_with_reunify_observes_harness() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = temp_dir.path().join("reqs.jsonl");
+        let provider = stub_provider(
+            "test-dsh-reunify-race",
+            stub_env(&req_log, &temp_dir.path().join("dsh-home")),
+        );
+        let handle = launch_hermetic(&provider).await;
+
+        let (state, run_harness, active_run, run_reunified, retained) = {
+            let sessions = provider.sessions.read().await;
+            let native = sessions.get(&handle.session_id).expect("session");
+            (
+                Arc::clone(&native.state),
+                Arc::clone(&native.run_harness),
+                Arc::clone(&native.active_run),
+                Arc::clone(&native.run_reunified),
+                Arc::clone(&provider.retained_leases),
+            )
+        };
+
+        {
+            let mut guard = state.lock().await;
+            let harness = guard.harness.take().expect("launch initializes harness");
+            *run_harness.lock().await = Some(harness);
+        }
+        active_run.store(true, Ordering::Release);
+
+        let close = start_final_close(
+            state.clone(),
+            active_run.clone(),
+            run_reunified.clone(),
+            retained,
+        );
+        let reunify = tokio::spawn({
+            let run_harness = Arc::clone(&run_harness);
+            let state = Arc::clone(&state);
+            let active_run = Arc::clone(&active_run);
+            let run_reunified = Arc::clone(&run_reunified);
+            async move {
+                reunify_run_harness(&run_harness, &state, &active_run, &run_reunified).await;
+            }
+        });
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            reunify.await.expect("reunify task");
+            close.await.expect("confirmed close")
+        })
+        .await
+        .expect("final close must not hang on reunify notify race");
+
+        let methods = method_sequence(&req_log_entries(&req_log));
+        assert!(
+            methods.contains(&"shutdown".to_string()),
+            "the reunified harness must be closed: {methods:?}"
+        );
+        let guard = state.lock().await;
+        assert!(
+            guard.harness.is_none(),
+            "fe78386b7 could skip reunify and leave harness in ClientState"
+        );
+    }
+
+    #[tokio::test]
+    async fn wait_run_harness_reunify_observes_latched_reunify_without_notify() {
+        let state = Arc::new(Mutex::new(ClientState {
+            dsh_session_id: "test".to_string(),
+            harness: None,
+            closed: false,
+            recipe: Recipe::Ordinary,
+            policy_locked: false,
+            sealed_home: None,
+            failed_lease: None,
+            cleanup: None,
+        }));
+        let active_run = Arc::new(AtomicBool::new(true));
+        let run_reunified = Arc::new(Notify::new());
+
+        let waiter = tokio::spawn({
+            let state = Arc::clone(&state);
+            let active_run = Arc::clone(&active_run);
+            let run_reunified = Arc::clone(&run_reunified);
+            async move {
+                wait_run_harness_reunify(&state, &active_run, &run_reunified).await
+            }
+        });
+
+        active_run.store(false, Ordering::Release);
+
+        tokio::time::timeout(std::time::Duration::from_millis(200), waiter)
+            .await
+            .expect("latched reunify must complete without Notify");
     }
 
     /// Finding 2: a sealed-home provisioning failure on the first
