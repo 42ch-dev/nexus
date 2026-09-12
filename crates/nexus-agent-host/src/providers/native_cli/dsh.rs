@@ -5032,12 +5032,15 @@ mod tests {
         // Rendezvous: hold the returned stream idle until the fixture burst
         // marker; overflow is latched before the first poll, then turn/end
         // completes and the producer must surface delivery overflow.
+        // Observable prefix is m0..m64: one staged/deliverable item outside
+        // the 64-slot MPSC plus 64 still pending; the 65th notification
+        // overflows (consistent with pending-channel bound + release-on-dequeue).
         wait_for_flood_burst_complete(&req_log).await;
         let events = collect_events(stream).await;
         assert_eq!(
             message_texts(&events),
-            (0..64).map(|i| format!("m{i}")).collect::<Vec<_>>(),
-            "with idle receiver, 64 pending slots fill then the 65th notification overflows"
+            (0..65).map(|i| format!("m{i}")).collect::<Vec<_>>(),
+            "one staged delivered item plus 64 pending, then overflow on the next notification"
         );
         assert_delivery_overflow_terminal(&events);
     }
