@@ -56,7 +56,8 @@ async fn publish_production_bundle(state: &WorkspaceState) {
 
 async fn new_events_test_ctx() -> EventsTestCtx {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
-    let mut state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
+    let mut state =
+        WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
     test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
     state.set_agent_host_config(production_agent_host_config());
     publish_production_bundle(&state).await;
@@ -99,7 +100,9 @@ async fn seed_terminal_session(pool: &sqlx::SqlitePool, session_id: &str, state_
 }
 
 fn publish_terminal_run_state(registry: &RunEventRegistry, run_id: &str, state_revision: u64) {
-    let _sink = registry.try_register_live(run_id).expect("register live ring");
+    let _sink = registry
+        .try_register_live(run_id)
+        .expect("register live ring");
     registry.publish_run_state(
         run_id,
         &nexus_orchestration::run_state::RunRecord {
@@ -138,7 +141,9 @@ async fn session_events_live_replay_and_terminal_close() {
     seed_terminal_session(&ctx.pool, run_id, 2).await;
     let server = test_server(ctx.state);
     let resp = server
-        .get(&format!("/v1/daemon/orchestration/sessions/{run_id}/events"))
+        .get(&format!(
+            "/v1/daemon/orchestration/sessions/{run_id}/events"
+        ))
         .await;
     assert_eq!(resp.status_code(), StatusCode::OK, "{}", resp.text());
     let body = resp.text();
@@ -158,7 +163,9 @@ async fn session_events_restart_yields_history_unavailable_after_ring_eviction()
     let restarted = restart_workspace_state(&ctx).await;
     let server = test_server(restarted);
     let resp = server
-        .get(&format!("/v1/daemon/orchestration/sessions/{run_id}/events"))
+        .get(&format!(
+            "/v1/daemon/orchestration/sessions/{run_id}/events"
+        ))
         .await;
     assert_eq!(
         resp.status_code(),
@@ -205,7 +212,9 @@ async fn session_events_foreign_owner_returns_404() {
     seed_foreign_terminal_session(&ctx.pool, run_id).await;
     let server = test_server(ctx.state);
     let resp = server
-        .get(&format!("/v1/daemon/orchestration/sessions/{run_id}/events"))
+        .get(&format!(
+            "/v1/daemon/orchestration/sessions/{run_id}/events"
+        ))
         .await;
     assert_eq!(
         resp.status_code(),
@@ -224,13 +233,13 @@ async fn session_events_replay_exceeds_pending_cap_without_subscriber_error() {
         .run_event_registry()
         .try_register_live(run_id)
         .expect("register");
-    for i in 0..20 {
+    for i in 0_u64..20 {
         ctx.state.run_event_registry().publish_run_state(
             run_id,
             &nexus_orchestration::run_state::RunRecord {
                 session_id: SessionId(run_id.to_string()),
                 status: SessionStatus::Running,
-                state_revision: i as u64 + 1,
+                state_revision: i + 1,
                 execution_version: 1,
                 descriptor: None,
                 state: None,
@@ -242,7 +251,9 @@ async fn session_events_replay_exceeds_pending_cap_without_subscriber_error() {
     ctx.state.run_event_registry().mark_terminal(run_id);
     let server = test_server(ctx.state);
     let resp = server
-        .get(&format!("/v1/daemon/orchestration/sessions/{run_id}/events"))
+        .get(&format!(
+            "/v1/daemon/orchestration/sessions/{run_id}/events"
+        ))
         .await;
     assert_eq!(resp.status_code(), StatusCode::OK, "{}", resp.text());
     let body = resp.text();

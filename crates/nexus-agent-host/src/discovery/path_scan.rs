@@ -25,6 +25,7 @@ use crate::capability::model::{CapabilityDescriptor, ProtocolKind, ProviderHealt
 use crate::config::AgentHostConfig;
 use crate::error::{HostError, HostResult};
 use crate::ids::ProviderId;
+use crate::providers::candidate_unavailable_health;
 use crate::{DiscoverySource, LaunchStrategy, ProviderCatalogEntry, TrustLevel};
 
 /// Known CLI commands and their provider ID mappings.
@@ -131,12 +132,7 @@ pub fn scan_path_in(
                 health,
             });
         };
-        let available = |message: Option<String>| ProviderHealth {
-            provider_id: pid.clone(),
-            available: true,
-            latency_ms: None,
-            message,
-        };
+        let candidate = |message: &str| candidate_unavailable_health(&pid, message);
         let unavailable = |message: String| ProviderHealth {
             provider_id: pid.clone(),
             available: false,
@@ -146,7 +142,10 @@ pub fn scan_path_in(
 
         // Search the provided dirs (and process PATH as a which fallback).
         if let Some(found_path) = find_command(path_dirs, cmd) {
-            push_row(found_path.to_string_lossy().into_owned(), available(None));
+            push_row(
+                found_path.to_string_lossy().into_owned(),
+                candidate("path candidate; bounded probe required"),
+            );
         } else if cmd == "dsh" {
             // Env route (PD-4): a non-empty `DSH_RUNTIME_BIN` counts as
             // present even when `dsh` is not on PATH — same catalog row,
@@ -161,12 +160,11 @@ pub fn scan_path_in(
                     match crate::providers::native_cli::dsh::resolve_dsh_executable(None) {
                         Ok(resolved) => push_row(
                             resolved.to_string_lossy().into_owned(),
-                            available(Some("DSH_RUNTIME_BIN is set".to_string())),
+                            candidate("path candidate via DSH_RUNTIME_BIN; bounded probe required"),
                         ),
-                        Err(reason) => push_row(
-                            env_bin.to_string_lossy().into_owned(),
-                            unavailable(reason),
-                        ),
+                        Err(reason) => {
+                            push_row(env_bin.to_string_lossy().into_owned(), unavailable(reason));
+                        }
                     }
                 }
             }
@@ -251,6 +249,7 @@ pub fn scan_custom_path(
         if suppressed.contains(&pid) {
             continue;
         }
+        let candidate = |message: &str| candidate_unavailable_health(&pid, message);
 
         // Same capability honesty as the production scan: the dsh row
         // carries the AR-6 narrower descriptor. The `DSH_RUNTIME_BIN`
@@ -276,12 +275,9 @@ pub fn scan_custom_path(
                 source: DiscoverySource::PathScan,
                 trust: TrustLevel::LocalPath,
                 capabilities,
-                health: ProviderHealth {
-                    provider_id: pid,
-                    available: true,
-                    latency_ms: None,
-                    message: None,
-                },
+                // Same truthful-candidate contract as the production scan: an
+                // executable on a scanned dir is a candidate, not readiness.
+                health: candidate("path candidate; bounded probe required"),
             });
         }
     }
@@ -498,7 +494,21 @@ mod tests {
             assert_eq!(entry.protocol_kind, ProtocolKind::NativeCli);
             assert_eq!(entry.source, DiscoverySource::PathScan);
             assert_eq!(entry.trust, TrustLevel::LocalPath);
-            assert!(entry.health.available, "entry should be marked available");
+            // Truthful catalog: an executable on PATH is a CANDIDATE. It is not
+            // available until a bounded probe proves it, so discovery must not
+            // claim readiness.
+            assert!(
+                !entry.health.available,
+                "a PATH candidate is unavailable until probed: {entry:?}"
+            );
+            assert!(
+                entry
+                    .health
+                    .message
+                    .as_deref()
+                    .is_some_and(|m| m.contains("bounded probe required")),
+                "candidate health must state why it is unavailable"
+            );
         }
 
         // B-2: the dsh row advertises the AR-6 narrower descriptor —
@@ -562,7 +572,17 @@ mod tests {
         assert_eq!(dsh.protocol_kind, ProtocolKind::NativeCli);
         assert_eq!(dsh.source, DiscoverySource::PathScan);
         assert_eq!(dsh.trust, TrustLevel::LocalPath);
-        assert!(dsh.health.available, "a valid override is available");
+        assert!(
+            !dsh.health.available,
+            "a valid override is still only a candidate until probed"
+        );
+        assert!(
+            dsh.health
+                .message
+                .as_deref()
+                .is_some_and(|m| m.contains("bounded probe required")),
+            "the env-route row must state the bounded-probe requirement"
+        );
         let LaunchStrategy::NativeCli { command, args, env } = &dsh.launch else {
             panic!("dsh row must be a NativeCli launch");
         };

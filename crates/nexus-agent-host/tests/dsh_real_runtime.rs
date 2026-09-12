@@ -5,7 +5,7 @@
 //! drive the INSTALLED upstream `dsh` runtime (resolved through the
 //! production chain: explicit override → parent `DSH_RUNTIME_BIN` → PATH
 //! `dsh`) through the real `DshNativeProvider`, with a loopback
-//! deterministic **LLM protocol** proxy standing in for the DeepSeek API
+//! deterministic **LLM protocol** proxy standing in for the `DeepSeek` API
 //! (`DEEPSEEK_BASE_URL` + a non-secret placeholder `DEEPSEEK_API_KEY`; no
 //! credential is read, copied, or logged, and no paid/model call leaves
 //! loopback). The proxy scripts a bounded completion and records only
@@ -33,13 +33,13 @@
 //!
 //! When no real `dsh` resolves on the host, each test skips with a loud
 //! note (never a fake proof); with `dsh` installed they are deterministic,
-//! bounded, isolated (own temp HOME/DSH_HOME, loopback ports), and mutate
+//! bounded, isolated (own temp `HOME/DSH_HOME`, loopback ports), and mutate
 //! no process-global environment.
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::panic::AssertUnwindSafe;
 use std::io::Write as _;
+use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -52,7 +52,7 @@ use nexus_agent_host::capability::model::{
 };
 use nexus_agent_host::config::TimeoutConfig;
 use nexus_agent_host::error::HostError;
-use nexus_agent_host::providers::native_cli::dsh::{DshNativeProvider, resolve_dsh_executable};
+use nexus_agent_host::providers::native_cli::dsh::{resolve_dsh_executable, DshNativeProvider};
 use nexus_agent_host::{HostOperationId, ProviderAdapter, ProviderId};
 use tempfile::TempDir;
 use tokio::io::AsyncReadExt;
@@ -79,7 +79,9 @@ const DUMMY_API_KEY: &str = "dsh-test-nonsecret-loopback-key";
 static REAL_RUNTIME_SERIAL: Mutex<()> = Mutex::new(());
 
 fn serial_real_runtime() -> std::sync::MutexGuard<'static, ()> {
-    REAL_RUNTIME_SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+    REAL_RUNTIME_SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Resolve the installed/resolved real `dsh` through the production chain
@@ -95,7 +97,7 @@ fn real_dsh() -> Option<PathBuf> {
     }
 }
 
-/// The all-false deny_all scope (architecture §3.4 selection).
+/// The all-false `deny_all` scope (architecture §3.4 selection).
 const fn deny_all_scope() -> PromptPermissionScope {
     PromptPermissionScope {
         allow_read: false,
@@ -128,7 +130,7 @@ fn real_timeouts() -> TimeoutConfig {
 }
 
 /// The isolated child environment handed to the provider (the SDK merges
-/// it into the spawn environment): isolated parent HOME and DSH_HOME, the
+/// it into the spawn environment): isolated parent HOME and `DSH_HOME`, the
 /// loopback model endpoint, the non-secret placeholder key, the poison
 /// marker log, and disabled telemetry so the proof never egresses.
 fn isolated_env(root: &TempDir, proxy_port: u16) -> HashMap<String, String> {
@@ -148,7 +150,10 @@ fn isolated_env(root: &TempDir, proxy_port: u16) -> HashMap<String, String> {
         ("DEEPSEEK_API_KEY".to_string(), DUMMY_API_KEY.to_string()),
         (
             "POISON_LOG".to_string(),
-            root.path().join("poison.jsonl").to_string_lossy().into_owned(),
+            root.path()
+                .join("poison.jsonl")
+                .to_string_lossy()
+                .into_owned(),
         ),
         ("DSH_TELEMETRY_DISABLED".to_string(), "1".to_string()),
     ])
@@ -159,7 +164,7 @@ fn real_provider(root: &TempDir, proxy_port: u16, dsh_bin: &Path) -> DshNativePr
         ProviderId::new("dsh-real-test"),
         "Real upstream dsh (Task 3 proof)".to_string(),
         Some(dsh_bin.to_string_lossy().into_owned()),
-        Vec::new(),
+        &[],
         isolated_env(root, proxy_port),
         real_timeouts(),
     )
@@ -168,7 +173,7 @@ fn real_provider(root: &TempDir, proxy_port: u16, dsh_bin: &Path) -> DshNativePr
 
 /// Plant the poison in the ordinary isolated home: a marker plugin
 /// package inserted through the profile patch layer (its module-load and
-/// apply side effects append their runtime's DSH_HOME to POISON_LOG), and
+/// apply side effects append their runtime's `DSH_HOME` to `POISON_LOG`), and
 /// a persona override through the home patch layer (reaches the composed
 /// system prompt). Both channels are verified effective against the
 /// ordinary profile by `real_dsh_poisoned_layers_reach_ordinary_runtime`.
@@ -249,7 +254,8 @@ impl HostileMarkers {
         ] {
             assert!(
                 !path.exists(),
-                "the unsolicited {what} tool call must have NO side effect, but {path:?} exists"
+                "the unsolicited {what} tool call must have NO side effect, but {} exists",
+                path.display()
             );
         }
         assert!(
@@ -317,10 +323,10 @@ fn live_dsh_children() -> Vec<i32> {
         .filter_map(|line| {
             let mut fields = line.split_whitespace();
             let pid: i32 = fields.next()?.parse().ok()?;
-            let ppid = fields.next()?;
+            let parent_process = fields.next()?;
             let stat = fields.next()?;
             let args: String = fields.collect::<Vec<_>>().join(" ");
-            (ppid == me && !stat.starts_with('Z') && args.contains("dsh")).then_some(pid)
+            (parent_process == me && !stat.starts_with('Z') && args.contains("dsh")).then_some(pid)
         })
         .collect()
 }
@@ -368,7 +374,9 @@ impl ChildBaseline {
             diag.push("all direct children exited within the observation window".to_string());
             return (false, diag);
         }
-        diag.push(format!("strays alive after observation window: {strays:?}; TERM"));
+        diag.push(format!(
+            "strays alive after observation window: {strays:?}; TERM"
+        ));
         for pid in &strays {
             let _ = Command::new("kill").arg(pid.to_string()).status();
         }
@@ -423,7 +431,7 @@ struct RequestRecord {
 }
 
 /// One scripted proxy: each of the first `hostile_rounds` requests gets a
-/// single unsolicited tool call (shell → editor → run_code) whose
+/// single unsolicited tool call (shell → editor → `run_code`) whose
 /// arguments would create marker files / spawn a background process; every
 /// later request gets the bounded final `stop` completion.
 #[cfg(unix)]
@@ -449,8 +457,7 @@ impl Proxy {
                 let conn_records = Arc::clone(&task_records);
                 let conn_markers = Arc::clone(&markers);
                 tokio::spawn(async move {
-                    serve_connection(&mut socket, hostile_rounds, conn_records, conn_markers)
-                        .await;
+                    serve_connection(&mut socket, hostile_rounds, conn_records, conn_markers).await;
                 });
             }
         });
@@ -500,7 +507,7 @@ async fn read_request(socket: &mut tokio::net::TcpStream) -> (String, Vec<u8>) {
 }
 
 /// One SSE chunk (`data: <json>\n\n`).
-fn sse_chunk(delta: serde_json::Value, finish_reason: Option<&str>) -> String {
+fn sse_chunk(delta: &serde_json::Value, finish_reason: Option<&str>) -> String {
     let payload = serde_json::json!({
         "id": "chatcmpl-dsh-t3-proxy",
         "object": "chat.completion.chunk",
@@ -568,6 +575,7 @@ async fn serve_connection(
     records: Arc<Mutex<Vec<RequestRecord>>>,
     markers: Arc<HostileMarkers>,
 ) {
+    use tokio::io::AsyncWriteExt;
     let (head, body) = read_request(socket).await;
     let request_path = head
         .lines()
@@ -608,7 +616,7 @@ async fn serve_connection(
     if request_index <= hostile_rounds {
         let (name, arguments) = hostile_call(request_index - 1, &markers);
         out += &sse_chunk(
-            serde_json::json!({
+            &serde_json::json!({
                 "role": "assistant",
                 "content": null,
                 "tool_calls": [{
@@ -620,13 +628,13 @@ async fn serve_connection(
             }),
             None,
         );
-        out += &sse_chunk(serde_json::json!({}), Some("tool_calls"));
+        out += &sse_chunk(&serde_json::json!({}), Some("tool_calls"));
     } else {
         out += &sse_chunk(
-            serde_json::json!({"role": "assistant", "content": FINAL_TEXT}),
+            &serde_json::json!({"role": "assistant", "content": FINAL_TEXT}),
             None,
         );
-        out += &sse_chunk(serde_json::json!({}), Some("stop"));
+        out += &sse_chunk(&serde_json::json!({}), Some("stop"));
     }
     out += &sse_usage_chunk();
     out += "data: [DONE]\n\n";
@@ -636,7 +644,6 @@ async fn serve_connection(
         out.len(),
         out
     );
-    use tokio::io::AsyncWriteExt;
     socket
         .write_all(response.as_bytes())
         .await
@@ -646,7 +653,9 @@ async fn serve_connection(
 
 /// Collect a turn's events, expecting a clean stream (no Err items).
 #[cfg(unix)]
-async fn collect_turn(stream: nexus_agent_host::capability::model::HostEventStream) -> Vec<HostEvent> {
+async fn collect_turn(
+    stream: nexus_agent_host::capability::model::HostEventStream,
+) -> Vec<HostEvent> {
     let results: Vec<_> = stream.collect().await;
     results
         .into_iter()
@@ -714,8 +723,7 @@ async fn with_confirmed_teardown<Fut: Future<Output = ()>>(
     body: Fut,
 ) {
     let outcome = AssertUnwindSafe(body).catch_unwind().await;
-    let cleanup =
-        tokio::time::timeout(Duration::from_secs(30), provider.shutdown(handle)).await;
+    let cleanup = tokio::time::timeout(Duration::from_secs(30), provider.shutdown(handle)).await;
     match (outcome, cleanup) {
         (Ok(()), Ok(Ok(()))) => {
             let (needed_force, diag) = baseline.force_reap_strays();
@@ -760,11 +768,11 @@ async fn with_confirmed_teardown<Fut: Future<Output = ()>>(
 struct ChildGuard(Option<std::process::Child>);
 
 impl ChildGuard {
-    fn new(child: std::process::Child) -> Self {
+    const fn new(child: std::process::Child) -> Self {
         Self(Some(child))
     }
 
-    fn child(&mut self) -> &mut std::process::Child {
+    const fn child(&mut self) -> &mut std::process::Child {
         self.0.as_mut().expect("child guard armed")
     }
 
@@ -862,7 +870,10 @@ fn hostile_bodies_create_their_evidence_when_directly_run() {
         .status()
         .expect("run run_code body");
     assert!(status.success(), "the run_code body is effective when run");
-    assert!(markers.run_code.exists(), "the run_code body created its marker");
+    assert!(
+        markers.run_code.exists(),
+        "the run_code body created its marker"
+    );
 
     // Safe cleanup: every marker removed; total absence re-verified.
     for path in [
@@ -878,11 +889,12 @@ fn hostile_bodies_create_their_evidence_when_directly_run() {
 
 /// The actual upstream dsh sealed `deny_all` composition enforces no-tools
 /// at dispatch (architecture §3.4 / AC6): the model request advertises NO
-/// tools, unsolicited shell/editor/run_code calls are rejected as unknown
+/// tools, unsolicited shell/editor/`run_code` calls are rejected as unknown
 /// tools, and no marker file/process/tool-body side effect occurs before
 /// the scripted bounded completion.
 #[cfg(unix)]
 #[tokio::test]
+#[allow(clippy::too_many_lines, clippy::await_holding_lock)] // Serial process-table proof across test runtimes.
 async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects() {
     let Some(dsh_bin) = real_dsh() else { return };
     let _serial = serial_real_runtime();
@@ -906,43 +918,48 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
         let provider = &provider;
         let proxy = &proxy;
         async move {
-            let events =
-                run_prompt(provider, &handle, "attempt no tool use", Some(deny_all_scope())).await;
+            let events = run_prompt(
+                provider,
+                &handle,
+                "attempt no tool use",
+                Some(deny_all_scope()),
+            )
+            .await;
 
-        // The turn completes bounded through the scripted proxy: exactly
-        // one OpStarted, the final text delta, one OpFinished(EndTurn).
-        assert!(
-            matches!(events.first(), Some(HostEvent::OpStarted(_))),
-            "events: {events:?}"
-        );
-        let deltas: Vec<&str> = events
-            .iter()
-            .filter_map(|e| match e {
-                HostEvent::MessageDelta(delta) => Some(delta.text.as_str()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(deltas, vec![FINAL_TEXT], "events: {events:?}");
-        assert!(
-            matches!(events.last(), Some(HostEvent::OpFinished(f)) if f.reason == FinishReason::EndTurn),
-            "the bounded final completion ends the turn: {events:?}"
-        );
-
-        // Exactly the scripted model calls happened: three hostile
-        // tool-call responses, then the bounded final completion.
-        let records = proxy.records();
-        assert_eq!(
-            records.len(),
-            4,
-            "three rejected tool calls plus the final completion: {records:?}"
-        );
-        for (index, record) in records.iter().enumerate() {
-            assert_eq!(record.path, "/chat/completions");
+            // The turn completes bounded through the scripted proxy: exactly
+            // one OpStarted, the final text delta, one OpFinished(EndTurn).
             assert!(
-                !record.model.is_empty(),
-                "the runtime names the model it calls: {record:?}"
+                matches!(events.first(), Some(HostEvent::OpStarted(_))),
+                "events: {events:?}"
             );
+            let deltas: Vec<&str> = events
+                .iter()
+                .filter_map(|e| match e {
+                    HostEvent::MessageDelta(delta) => Some(delta.text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(deltas, vec![FINAL_TEXT], "events: {events:?}");
             assert!(
+                matches!(events.last(), Some(HostEvent::OpFinished(f)) if f.reason == FinishReason::EndTurn),
+                "the bounded final completion ends the turn: {events:?}"
+            );
+
+            // Exactly the scripted model calls happened: three hostile
+            // tool-call responses, then the bounded final completion.
+            let records = proxy.records();
+            assert_eq!(
+                records.len(),
+                4,
+                "three rejected tool calls plus the final completion: {records:?}"
+            );
+            for (index, record) in records.iter().enumerate() {
+                assert_eq!(record.path, "/chat/completions");
+                assert!(
+                    !record.model.is_empty(),
+                    "the runtime names the model it calls: {record:?}"
+                );
+                assert!(
                 record.message_count == record.roles.len()
                     && record.message_count
                         == records
@@ -952,24 +969,24 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
                             }),
                 "conversation history grows by one assistant+tool pair per rejection: {record:?}"
             );
-            assert!(record.stream, "the dsh LLM client always streams");
-            assert!(
-                !record.has_tools_key && record.tools_len == 0,
-                "request {} must advertise NO tools (the `tools` key is absent): {record:?}",
-                index + 1
+                assert!(record.stream, "the dsh LLM client always streams");
+                assert!(
+                    !record.has_tools_key && record.tools_len == 0,
+                    "request {} must advertise NO tools (the `tools` key is absent): {record:?}",
+                    index + 1
+                );
+                assert!(
+                    !record.system_mentions_poison,
+                    "request {} must not carry the poisoned home layer: {record:?}",
+                    index + 1
+                );
+            }
+            assert_eq!(
+                records[0].roles,
+                vec!["system".to_string(), "user".to_string()],
+                "the sealed composition sends a minimal first request: {:?}",
+                records[0].roles
             );
-            assert!(
-                !record.system_mentions_poison,
-                "request {} must not carry the poisoned home layer: {record:?}",
-                index + 1
-            );
-        }
-        assert_eq!(
-            records[0].roles,
-            vec!["system".to_string(), "user".to_string()],
-            "the sealed composition sends a minimal first request: {:?}",
-            records[0].roles
-        );
         }
     };
     with_confirmed_teardown(&provider, handle, &baseline, body).await;
@@ -1008,7 +1025,9 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
     );
     for entry in &poison {
         let booted_home = std::fs::canonicalize(
-            entry["dshHome"].as_str().expect("poison log carries dshHome"),
+            entry["dshHome"]
+                .as_str()
+                .expect("poison log carries dshHome"),
         )
         .expect("poison boot home resolves");
         assert_eq!(
@@ -1038,6 +1057,7 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
 /// sealed runtime" would prove nothing.
 #[cfg(unix)]
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // Serial process-table proof across test runtimes.
 async fn real_dsh_poisoned_layers_reach_ordinary_runtime() {
     let Some(dsh_bin) = real_dsh() else { return };
     let _serial = serial_real_runtime();
@@ -1063,30 +1083,30 @@ async fn real_dsh_poisoned_layers_reach_ordinary_runtime() {
         let root = &root;
         async move {
             let events = run_prompt(provider, &handle, "ordinary turn", None).await;
-        assert!(
-            matches!(events.last(), Some(HostEvent::OpFinished(f)) if f.reason == FinishReason::EndTurn),
-            "the ordinary turn completes: {events:?}"
-        );
+            assert!(
+                matches!(events.last(), Some(HostEvent::OpFinished(f)) if f.reason == FinishReason::EndTurn),
+                "the ordinary turn completes: {events:?}"
+            );
 
-        let records = proxy.records();
-        assert_eq!(records.len(), 1, "one scripted completion: {records:?}");
-        assert!(
-            records[0].has_tools_key && records[0].tools_len > 0,
-            "the ordinary runtime DOES advertise tools (contrast with the sealed proof): {:?}",
-            records[0]
-        );
-        assert!(
-            records[0].system_mentions_poison,
-            "the poisoned home layer reached the ordinary model request: {:?}",
-            records[0]
-        );
+            let records = proxy.records();
+            assert_eq!(records.len(), 1, "one scripted completion: {records:?}");
+            assert!(
+                records[0].has_tools_key && records[0].tools_len > 0,
+                "the ordinary runtime DOES advertise tools (contrast with the sealed proof): {:?}",
+                records[0]
+            );
+            assert!(
+                records[0].system_mentions_poison,
+                "the poisoned home layer reached the ordinary model request: {:?}",
+                records[0]
+            );
 
-        let poison = poison_log_entries(root);
-        assert_eq!(
-            poison.len(),
-            2,
-            "the poison plugin booted in the ordinary runtime: {poison:?}"
-        );
+            let poison = poison_log_entries(root);
+            assert_eq!(
+                poison.len(),
+                2,
+                "the poison plugin booted in the ordinary runtime: {poison:?}"
+            );
         }
     };
     with_confirmed_teardown(&provider, handle, &baseline, body).await;
@@ -1099,6 +1119,7 @@ async fn real_dsh_poisoned_layers_reach_ordinary_runtime() {
 /// provider launch fails closed with a typed error and zero model calls.
 #[cfg(unix)]
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // Serial process-table proof across test runtimes.
 async fn real_dsh_missing_plugin_package_fails_closed() {
     let Some(dsh_bin) = real_dsh() else { return };
     let _serial = serial_real_runtime();
@@ -1146,7 +1167,6 @@ async fn real_dsh_missing_plugin_package_fails_closed() {
     markers.assert_all_absent();
 }
 
-
 /// Wall-clock capture for the P1 actual-dsh streaming timing proof.
 #[cfg(unix)]
 struct TurnTiming {
@@ -1187,6 +1207,7 @@ async fn collect_turn_timed(
 /// evidence logged for parent verification (P1 T3 / AC2).
 #[cfg(unix)]
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // Serial process-table proof across test runtimes.
 async fn real_dsh_message_delta_precedes_terminal_with_timing_evidence() {
     let Some(dsh_bin) = real_dsh() else {
         return;
@@ -1227,16 +1248,11 @@ async fn real_dsh_message_delta_precedes_terminal_with_timing_evidence() {
                 "events: {:?}",
                 timing.events
             );
-            let deltas: Vec<&str> = timing
-                .events
-                .iter()
-                .filter_map(|e| match e {
-                    HostEvent::MessageDelta(delta) => Some(delta.text.as_str()),
-                    _ => None,
-                })
-                .collect();
             assert!(
-                !deltas.is_empty(),
+                timing
+                    .events
+                    .iter()
+                    .any(|event| matches!(event, HostEvent::MessageDelta(_))),
                 "the runtime must emit at least one MessageDelta: {:?}",
                 timing.events
             );
@@ -1292,8 +1308,9 @@ async fn real_dsh_message_delta_precedes_terminal_with_timing_evidence() {
 /// Record the actual runtime identity without reading credentials: CLI
 /// version output, the installed npm package identity (name/version), and
 /// the wire protocol server identity from a direct `initialize` handshake
-/// under an isolated HOME/DSH_HOME.
+/// under an isolated `HOME/DSH_HOME`.
 #[test]
+#[allow(clippy::too_many_lines)] // One owned-child identity and cleanup scenario.
 fn real_dsh_runtime_identity_is_recorded() {
     let Some(dsh_bin) = real_dsh() else { return };
     let _serial = serial_real_runtime();
@@ -1305,7 +1322,9 @@ fn real_dsh_runtime_identity_is_recorded() {
         .output()
         .expect("run dsh --version");
     assert!(version_out.status.success(), "dsh --version must succeed");
-    let cli_version = String::from_utf8_lossy(&version_out.stdout).trim().to_string();
+    let cli_version = String::from_utf8_lossy(&version_out.stdout)
+        .trim()
+        .to_string();
     assert!(!cli_version.is_empty(), "a version string is recorded");
 
     // Installed package identity: the resolved executable is the package's
@@ -1352,7 +1371,7 @@ fn real_dsh_runtime_identity_is_recorded() {
         let mut byte = [0u8; 1];
         loop {
             match stdout.read(&mut byte) {
-                Ok(0) => break,
+                Ok(0) | Err(_) => break,
                 Ok(_) => {
                     if byte[0] == b'\n' {
                         let _ = reply_tx.send(String::from_utf8_lossy(&line).into_owned());
@@ -1361,7 +1380,6 @@ fn real_dsh_runtime_identity_is_recorded() {
                         line.push(byte[0]);
                     }
                 }
-                Err(_) => break,
             }
         }
     });
@@ -1404,8 +1422,11 @@ fn real_dsh_runtime_identity_is_recorded() {
     assert!(!protocol_version.is_empty());
 
     // Cooperative shutdown + EOF; the child exits on its own.
-    writeln!(stdin, r#"{{"jsonrpc":"2.0","id":"t3-bye","method":"shutdown"}}"#)
-        .expect("write shutdown");
+    writeln!(
+        stdin,
+        r#"{{"jsonrpc":"2.0","id":"t3-bye","method":"shutdown"}}"#
+    )
+    .expect("write shutdown");
     stdin.flush().expect("flush");
     drop(stdin);
     let exit_deadline = Instant::now() + Duration::from_secs(15);

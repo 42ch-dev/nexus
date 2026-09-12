@@ -499,4 +499,3 @@ async fn qc1_duplicate_driven_terminal_callback_hooks_exactly_once() {
         "duplicate driven terminal callback must not create a second finding"
     );
 }
-

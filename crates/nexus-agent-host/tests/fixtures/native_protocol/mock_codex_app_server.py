@@ -18,6 +18,9 @@ Behavior knobs (env vars):
 - STALE_TURN_COMPLETED=1  on the SECOND `turn/start`, emit a leftover
   `turn/completed` for the FIRST turn before the new turn's frames —
   exercises the B-1 stale-terminal filter.
+- INIT_ERROR_SENTINEL=<text>  fail `initialize` with a JSON-RPC error whose
+  message is that text. Lets a test plant a hostile/secret-bearing string in
+  the SDK failure path and prove the probe's public diagnostic never echoes it.
 """
 
 import json
@@ -85,6 +88,13 @@ def handle_request(req):
     msg_id = req.get("id")
     log_request(req)
     if method == "initialize":
+        sentinel = os.environ.get("INIT_ERROR_SENTINEL")
+        if sentinel:
+            send({
+                "id": msg_id,
+                "error": {"code": -32000, "message": sentinel},
+            })
+            return
         send({"id": msg_id, "result": {}})
     elif method == "thread/start":
         send(

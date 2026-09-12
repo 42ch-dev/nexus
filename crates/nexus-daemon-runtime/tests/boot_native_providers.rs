@@ -1,9 +1,9 @@
 //! V1.127 P1 — daemon boot registers native CLI providers (greploop hardened).
 //!
 //! Regression guard for R-V1116P0QA-001 + greptile P1/P2 (PR #161):
-//! - The daemon probes CLI presence via `which::which()` before calling
-//!   `register_provider`. Providers whose CLI is absent from PATH are NOT
-//!   registered, so the `/providers` endpoint does not surface them.
+//! - v1.188 P2: discovery surfaces PATH candidates at host start; missing
+//!   CLIs are omitted from the catalog. Present CLIs appear as candidates
+//!   (`available: false`) until a bounded probe runs with verified owner context.
 //! - Tests use RAII guards (`PathGuard` + `BootTestGuard`) so env-var
 //!   mutation and daemon task cleanup are panic-safe — a failed assertion
 //!   restores `HOME`/`PATH` and aborts the daemon task automatically.
@@ -136,7 +136,7 @@ async fn http_get(host: &str, port: u16, path: &str) -> String {
 }
 
 /// Write an executable stub binary into `dir` (greptile P1 — the daemon's
-/// `which::which()` probe must find it).
+/// PATH scan must find it).
 fn write_cli_stub(dir: &std::path::Path, name: &str) {
     let path = dir.join(name);
     std::fs::write(&path, "#!/bin/sh\necho hello\n").expect("write stub");
@@ -175,7 +175,7 @@ async fn run_daemon_registers_native_providers_when_clis_on_path() {
     write_cli_stub(&bin_dir, "claude");
     write_cli_stub(&bin_dir, "dsh");
 
-    // Isolate PATH so the daemon's `which::which()` finds only the stubs.
+    // Isolate PATH so discovery finds only the stubs.
     let _path_guard = PathGuard::replace(&bin_dir);
 
     // Set HOME + track daemon task for panic-safe cleanup (greptile P2).

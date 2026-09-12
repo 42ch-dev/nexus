@@ -106,6 +106,38 @@ pub fn resolve_state_db_path(user_home: &Path, nexus_root: &Path) -> anyhow::Res
     ))
 }
 
+/// Read the active `creator_id` from the CLI config (`config.toml`).
+///
+/// State-layer authority: this lives beside the rest of the config readers, NOT
+/// in an HTTP handler module, so non-HTTP consumers (workspace state, the
+/// agent-host probe owner) share one read/validation path with the handlers.
+#[must_use]
+pub fn read_active_creator_id(nexus_home: &Path) -> Option<String> {
+    let config_path = nexus_home.join("config.toml");
+    let content = std::fs::read_to_string(&config_path).ok()?;
+    let config: toml::Value = toml::from_str(&content).ok()?;
+    config
+        .get("active_creator_id")
+        .and_then(|v| v.as_str())
+        .map(std::string::ToString::to_string)
+}
+
+/// Read the active workspace slug for `creator_id` from the CLI config.
+///
+/// Missing or empty slug entries fall back to `"default"` — the same contract as
+/// [`CliConfigSnapshot::workspace_slug_for_creator`] and `resolve_state_db_path`.
+/// Profile switch intentionally clears a stale slug (`set_active_creator` /
+/// desktop `switch_active_creator`) and relies on this default; returning
+/// `None` here surfaces a misleading `Authentication required`.
+#[must_use]
+pub fn read_active_workspace_slug(nexus_home: &Path, creator_id: &str) -> Option<String> {
+    Some(
+        CliConfigSnapshot::load(nexus_home)
+            .unwrap_or_default()
+            .workspace_slug_for_creator(creator_id),
+    )
+}
+
 /// Read `active_creator_id` from `~/.nexus42/config.toml` without failing.
 ///
 /// Used by Tier-0/Tier-1 handlers and [`require_active_creator`](crate::api::middleware::require_active_creator)

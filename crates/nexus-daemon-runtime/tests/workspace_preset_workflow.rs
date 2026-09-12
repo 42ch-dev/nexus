@@ -94,9 +94,10 @@ async fn routed_state(
             if state == "committed_state" || state == "pending_state" {
                 return state;
             }
-            if state == "done" {
-                panic!("{label}: reached terminal without a recorded branch target");
-            }
+            assert_ne!(
+                state, "done",
+                "{label}: reached terminal without a recorded branch target"
+            );
         }
         engine.run_step(&session).await.expect("step succeeds");
     }
@@ -174,7 +175,10 @@ async fn production_preset_workflow_branches_on_live_workspace_state() {
         }))
         .await
         .expect("workspace.commit runs");
-    let revision = committed["revision"].as_str().expect("revision").to_string();
+    let revision = committed["revision"]
+        .as_str()
+        .expect("revision")
+        .to_string();
     assert!(revision.starts_with("rev_"), "got {revision}");
 
     // The bytes really landed in the workspace on disk.

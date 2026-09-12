@@ -30,28 +30,40 @@ enum AgentHostState {
 pub struct AgentHostSubsystem {
     /// The host facade (from `nexus-agent-host`).
     host: Arc<dyn HostFacade>,
+    /// Retained validated host configuration (single load at boot).
+    host_config: nexus_agent_host::config::AgentHostConfig,
+    /// Static, sanitized reason the structural config is unusable (file exists
+    /// but could not be read/parsed). `Some` means `host_config` is a
+    /// placeholder: start refuses instead of serving defaults as if the
+    /// operator had configured them.
+    host_config_error: Option<String>,
     /// Path to the agent-host config file.
     config_path: std::path::PathBuf,
     /// Workspace root for the agent host.
     workspace_root: std::path::PathBuf,
+    /// Optional verified probe owner resolved from workspace state.
+    probe_owner: Option<nexus_agent_host::capability::model::SessionOwner>,
     /// Current state (behind Mutex for async access).
     state: Arc<Mutex<AgentHostState>>,
 }
 
 impl AgentHostSubsystem {
     /// Create a new Agent Host subsystem.
-    ///
-    /// The `host` should be a fully-constructed `HostManager` (or other `HostFacade` impl)
-    /// with providers already registered.
     pub fn new(
         host: Arc<dyn HostFacade>,
+        host_config: nexus_agent_host::config::AgentHostConfig,
+        host_config_error: Option<String>,
         config_path: std::path::PathBuf,
         workspace_root: std::path::PathBuf,
+        probe_owner: Option<nexus_agent_host::capability::model::SessionOwner>,
     ) -> Self {
         Self {
             host,
+            host_config,
+            host_config_error,
             config_path,
             workspace_root,
+            probe_owner,
             state: Arc::new(Mutex::new(AgentHostState::NotStarted)),
         }
     }
@@ -75,13 +87,23 @@ impl std::fmt::Debug for AgentHostSubsystem {
 #[async_trait::async_trait]
 impl SubsystemBootstrap for AgentHostSubsystem {
     async fn start(&self) -> anyhow::Result<()> {
+        // A structural config failure is NOT recoverable by falling back to
+        // defaults: PATH/default providers the operator never configured would
+        // otherwise become admissible. Refuse to start and surface only the
+        // static category (the raw parser error may quote credential-bearing
+        // source lines).
+        if let Some(reason) = &self.host_config_error {
+            anyhow::bail!("agent host structural config unusable: {reason}");
+        }
+
         let start_config = nexus_agent_host::capability::HostStartConfig {
             config_path: self.config_path.clone(),
             workspace_root: self.workspace_root.clone(),
-            max_sessions: nexus_agent_host::config::AgentHostConfig::default().max_sessions,
-            max_ops_per_session: nexus_agent_host::config::AgentHostConfig::default()
-                .max_ops_per_session,
-            timeouts: nexus_agent_host::config::TimeoutConfig::default(),
+            max_sessions: self.host_config.max_sessions,
+            max_ops_per_session: self.host_config.max_ops_per_session,
+            timeouts: self.host_config.timeouts.clone(),
+            host_config: Some(self.host_config.clone()),
+            probe_owner: self.probe_owner.clone(),
         };
 
         self.host
@@ -112,13 +134,10 @@ impl SubsystemBootstrap for AgentHostSubsystem {
     async fn health(&self) -> SubsystemHealth {
         let state = self.state.lock().await;
         match &*state {
-            AgentHostState::Running => {
-                // Check host health
-                match self.host.health().await {
-                    Ok(h) if h.running => SubsystemHealth::Up,
-                    Ok(_) | Err(_) => SubsystemHealth::Degraded,
-                }
-            }
+            AgentHostState::Running => match self.host.health().await {
+                Ok(h) if h.running => SubsystemHealth::Up,
+                Ok(_) | Err(_) => SubsystemHealth::Degraded,
+            },
             AgentHostState::NotStarted | AgentHostState::Shutdown => SubsystemHealth::Down,
         }
     }
@@ -138,10 +157,44 @@ mod tests {
         let host = Arc::new(HostManager::new());
         let subsystem = AgentHostSubsystem::new(
             host,
+            nexus_agent_host::config::AgentHostConfig::default(),
+            None,
             std::path::PathBuf::from("/tmp/test-config"),
             std::path::PathBuf::from("/tmp/workspace"),
+            None,
         );
         assert_eq!(subsystem.kind(), SubsystemKind::AgentHost);
+    }
+
+    #[tokio::test]
+    async fn structural_config_error_refuses_start_without_leaking_source() {
+        // A file that EXISTS but cannot be parsed must never be replaced by
+        // defaults (PATH providers the operator did not configure). Start
+        // refuses, and the surfaced reason is the static category — never the
+        // raw parser excerpt, which can quote credential-bearing source lines.
+        let host = Arc::new(HostManager::new());
+        let subsystem = AgentHostSubsystem::new(
+            host,
+            nexus_agent_host::config::AgentHostConfig::default(),
+            Some("structural_config_unusable".to_string()),
+            std::path::PathBuf::from("/tmp/test-config"),
+            std::path::PathBuf::from("/tmp/workspace"),
+            None,
+        );
+
+        let err = subsystem
+            .start()
+            .await
+            .expect_err("structural config failure must refuse start");
+        let message = err.to_string();
+        assert!(
+            message.contains("structural_config_unusable"),
+            "must surface the static category, got: {message}"
+        );
+        assert!(
+            !message.contains("providers"),
+            "must not dump config content: {message}"
+        );
     }
 
     #[tokio::test]
@@ -149,8 +202,11 @@ mod tests {
         let host = Arc::new(HostManager::new());
         let subsystem = AgentHostSubsystem::new(
             host,
+            nexus_agent_host::config::AgentHostConfig::default(),
+            None,
             std::path::PathBuf::from("/tmp/test-config"),
             std::path::PathBuf::from("/tmp/workspace"),
+            None,
         );
         assert_eq!(subsystem.health().await, SubsystemHealth::Down);
     }

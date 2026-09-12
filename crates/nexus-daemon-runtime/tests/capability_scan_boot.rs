@@ -88,7 +88,7 @@ async fn server_with_scan(scan_dir: &Path) -> (TestTempRoot, TestServer, Workspa
         )),
         daemon_tool_dispatch: None,
         cdn_config: None,
-    workspace_executor: None,
+        workspace_executor: None,
     };
     let (registry, outcome) = CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, scan_dir);
     assert!(
@@ -172,7 +172,7 @@ async fn boot_never_fails_on_bad_or_missing_capabilities_dir() {
         )),
         daemon_tool_dispatch: None,
         cdn_config: None,
-    workspace_executor: None,
+        workspace_executor: None,
     };
     let (registry, outcome) = CapabilityRegistry::with_runtime_deps_and_user_caps(
         &deps,

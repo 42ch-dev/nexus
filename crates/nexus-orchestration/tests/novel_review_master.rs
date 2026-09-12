@@ -183,7 +183,7 @@ fn registry_with_mock_worker() -> CapabilityRegistry {
         session_cancels: std::sync::Arc::new(std::sync::RwLock::new(cancels)),
         daemon_tool_dispatch: None,
         cdn_config: None,
-    workspace_executor: None,
+        workspace_executor: None,
     };
     CapabilityRegistry::with_runtime_deps(&deps)
 }

@@ -4206,9 +4206,6 @@ async fn settlement_restart_reconciles_no_second_child() {
     );
 }
 
-
-
-
 #[derive(Debug, Clone)]
 struct SseFrameParsed {
     id: String,
@@ -4236,12 +4233,8 @@ fn parse_sse_frames(body: &str) -> Vec<SseFrameParsed> {
             let json = serde_json::from_str::<Value>(data).unwrap_or(Value::Null);
             let sequence = json
                 .get("sequence")
-                .and_then(|v| v.as_u64())
-                .or_else(|| {
-                    id.split(':')
-                        .nth(1)
-                        .and_then(|s| s.parse().ok())
-                })
+                .and_then(serde_json::Value::as_u64)
+                .or_else(|| id.split(':').nth(1).and_then(|s| s.parse().ok()))
                 .unwrap_or(0);
             out.push(SseFrameParsed {
                 id,
@@ -4258,7 +4251,12 @@ fn assert_monotonic_sse_frames(frames: &[SseFrameParsed]) {
     let mut last = 0u64;
     let mut seen = std::collections::HashSet::new();
     for frame in frames {
-        assert!(frame.sequence > last, "sequence must increase: {} after {}", frame.sequence, last);
+        assert!(
+            frame.sequence > last,
+            "sequence must increase: {} after {}",
+            frame.sequence,
+            last
+        );
         assert!(seen.insert(frame.id.clone()), "duplicate id {}", frame.id);
         last = frame.sequence;
     }
@@ -4267,15 +4265,18 @@ fn assert_monotonic_sse_frames(frames: &[SseFrameParsed]) {
 fn host_event_kind(data: &Value) -> Option<String> {
     data.get("host_event")
         .and_then(|v| v.as_object())
-        .and_then(|obj| obj.keys().next().map(|k| k.to_string()))
+        .and_then(|obj| obj.keys().next().map(std::string::ToString::to_string))
 }
 
-async fn fetch_session_events(daemon: &LiveDaemon, sid: &str, last_event_id: Option<&str>) -> (reqwest::StatusCode, String) {
+async fn fetch_session_events(
+    daemon: &LiveDaemon,
+    sid: &str,
+    last_event_id: Option<&str>,
+) -> (reqwest::StatusCode, String) {
     let client = reqwest::Client::new();
     let mut req = client.get(format!(
         "{}/v1/daemon/orchestration/sessions/{}/events",
-        daemon.http_url,
-        sid
+        daemon.http_url, sid
     ));
     if let Some(cursor) = last_event_id {
         req = req.header("Last-Event-ID", cursor);
@@ -4289,9 +4290,7 @@ fn assert_host_lifecycle_before_terminal(frames: &[SseFrameParsed], terminal_sta
     assert_monotonic_sse_frames(frames);
     let terminal = frames
         .iter()
-        .rfind(|f| {
-            f.event == "run_state" && f.data["status"].as_str() == Some(terminal_status)
-        })
+        .rfind(|f| f.event == "run_state" && f.data["status"].as_str() == Some(terminal_status))
         .expect("terminal run_state");
     let terminal_seq = terminal.sequence;
     let host_frames: Vec<_> = frames
@@ -4310,7 +4309,10 @@ fn assert_host_lifecycle_before_terminal(frames: &[SseFrameParsed], terminal_sta
         .iter()
         .map(|f| host_event_kind(&f.data).expect("host_event kind"))
         .collect();
-    let started = kinds.iter().position(|k| k == "OpStarted").expect("OpStarted");
+    let started = kinds
+        .iter()
+        .position(|k| k == "OpStarted")
+        .expect("OpStarted");
     let content = kinds
         .iter()
         .position(|k| k == "MessageDelta")
@@ -4337,8 +4339,7 @@ async fn fetch_session_inspect(daemon: &LiveDaemon, sid: &str) -> Value {
     reqwest::Client::new()
         .get(format!(
             "{}/v1/daemon/orchestration/sessions/{}",
-            daemon.http_url,
-            sid
+            daemon.http_url, sid
         ))
         .send()
         .await
@@ -4382,7 +4383,10 @@ fn assert_monotonic_run_state_frames(frames: &[Value], expected_terminal_status:
         let seq = frame["sequence"]
             .as_u64()
             .expect("run_state frame must carry numeric sequence");
-        assert!(seq > last_seq, "sequences must increase: {seq} after {last_seq}");
+        assert!(
+            seq > last_seq,
+            "sequences must increase: {seq} after {last_seq}"
+        );
         assert!(seen.insert(seq), "duplicate sequence {seq}");
         last_seq = seq;
     }
@@ -4439,8 +4443,7 @@ async fn p4_cancel_inspect_events_db_journey() {
     let events = reqwest::Client::new()
         .get(format!(
             "{}/v1/daemon/orchestration/sessions/{}/events",
-            daemon.http_url,
-            sid
+            daemon.http_url, sid
         ))
         .send()
         .await
@@ -4451,7 +4454,7 @@ async fn p4_cancel_inspect_events_db_journey() {
     assert_monotonic_run_state_frames(&run_states, "cancelled");
 }
 
-/// P4 T4: late subscribe after a terminal run replays retained run_state.
+/// P4 T4: late subscribe after a terminal run replays retained `run_state`.
 #[tokio::test]
 async fn p4_late_subscribe_replays_terminal_run_state() {
     let host = BlockingHost::new();
@@ -4478,8 +4481,7 @@ async fn p4_late_subscribe_replays_terminal_run_state() {
         .as_deref()
         .expect("session")
         .to_string();
-    let (parked_status, state) =
-        wait_for_run_status(&daemon, &sid, "waiting_for_input", 15).await;
+    let (parked_status, state) = wait_for_run_status(&daemon, &sid, "waiting_for_input", 15).await;
     assert_eq!(parked_status, "waiting_for_input");
     let wait_id = state["wait"]["wait_id"]
         .as_str()
@@ -4497,13 +4499,16 @@ async fn p4_late_subscribe_replays_terminal_run_state() {
     let events = reqwest::Client::new()
         .get(format!(
             "{}/v1/daemon/orchestration/sessions/{}/events",
-            daemon.http_url,
-            sid
+            daemon.http_url, sid
         ))
         .send()
         .await
         .expect("events");
-    assert!(events.status().is_success(), "{}", events.text().await.unwrap_or_default());
+    assert!(
+        events.status().is_success(),
+        "{}",
+        events.text().await.unwrap_or_default()
+    );
     let text = events.text().await.expect("events body");
     let frames = parse_sse_frames(&text);
     assert_host_lifecycle_before_terminal(&frames, "completed");
@@ -4570,7 +4575,6 @@ async fn p4_cleanup_failure_recovery_projection() {
         "inspect must carry actionable cleanup reason: {inspect}"
     );
 }
-
 
 /// Drive a freshly admitted public run to its durable terminal `completed`.
 ///
@@ -4641,7 +4645,8 @@ async fn p4_public_sse_last_event_id_strict_later_dedupe() {
             cursor_seq
         );
         assert!(
-            !all.iter().any(|f| f.id == frame.id && f.sequence <= cursor_seq),
+            !all.iter()
+                .any(|f| f.id == frame.id && f.sequence <= cursor_seq),
             "duplicate or non-later frame id {}",
             frame.id
         );
@@ -4670,11 +4675,13 @@ async fn p4_public_sse_foreign_owner_denied() {
     .execute(&daemon.pool)
     .await
     .expect("seed foreign creator");
-    sqlx::query("UPDATE orchestration_sessions SET creator_id = 'other_creator' WHERE session_id = ?")
-        .bind(&sid)
-        .execute(&daemon.pool)
-        .await
-        .expect("reassign owner");
+    sqlx::query(
+        "UPDATE orchestration_sessions SET creator_id = 'other_creator' WHERE session_id = ?",
+    )
+    .bind(&sid)
+    .execute(&daemon.pool)
+    .await
+    .expect("reassign owner");
     let (status, body) = fetch_session_events(&daemon, &sid, None).await;
     assert_eq!(
         status,
@@ -4683,8 +4690,7 @@ async fn p4_public_sse_foreign_owner_denied() {
     );
 }
 
-
-/// Emits OpStarted + many MessageDelta frames + OpFinished in one operation.
+/// Emits `OpStarted` + many `MessageDelta` frames + `OpFinished` in one operation.
 struct EventFloodHost {
     deltas: usize,
     prompts: Mutex<Vec<String>>,
@@ -4745,7 +4751,7 @@ impl HostFacade for EventFloodHost {
             op_id: op_id.clone(),
             session_id: session_id.clone(),
         });
-        let mut events = vec![Ok(started.clone())];
+        let mut events = vec![Ok(started)];
         for i in 0..self.deltas {
             events.push(Ok(HostEvent::MessageDelta(TextDeltaEvent {
                 session_id: session_id.clone(),
@@ -4758,7 +4764,7 @@ impl HostFacade for EventFloodHost {
             op_id,
             reason: FinishReason::EndTurn,
         });
-        events.push(Ok(finished.clone()));
+        events.push(Ok(finished));
         Ok(Box::pin(futures_util::stream::iter(events)))
     }
 

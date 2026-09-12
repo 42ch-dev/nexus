@@ -33,6 +33,7 @@ impl IntentState {
         }
     }
 
+    #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "applying" => Some(Self::Applying),
@@ -87,6 +88,12 @@ pub enum ClaimSessionResult {
     DigestConflict,
 }
 
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the claiming transaction fails: invalid
+/// `entries_json` (over the raw byte bound), a database error while
+/// checking the committed digest, claiming the session, or inserting the
+/// intent row.
 pub async fn claim_session_and_insert_intent(
     pool: &SqlitePool,
     session_id: &str,
@@ -132,9 +139,13 @@ pub async fn claim_session_and_insert_intent(
         return Ok(match row {
             None => ClaimSessionResult::NotFound,
             Some(s) if s.consumed => ClaimSessionResult::AlreadyConsumed,
-            Some(s) if s.claimed_by_revision.as_deref().is_some_and(|r| !r.is_empty()) => {
+            Some(s)
+                if s.claimed_by_revision
+                    .as_deref()
+                    .is_some_and(|r| !r.is_empty()) =>
+            {
                 ClaimSessionResult::AlreadyClaimed {
-                    revision: s.claimed_by_revision.clone().unwrap_or_default(),
+                    revision: s.claimed_by_revision.unwrap_or_default(),
                 }
             }
             _ => ClaimSessionResult::Expired,
@@ -158,6 +169,10 @@ pub async fn claim_session_and_insert_intent(
     Ok(ClaimSessionResult::Claimed)
 }
 
+/// # Errors
+///
+/// Returns [`LocalDbError`] on a database failure, or when the stored
+/// `entries_json` fails bounded validation.
 pub async fn get_committed_intent_by_digest(
     pool: &SqlitePool,
     session_id: &str,
@@ -172,9 +187,13 @@ pub async fn get_committed_intent_by_digest(
     .bind(request_digest)
     .fetch_optional(pool)
     .await?;
-    row.map(|r| r.try_into_row()).transpose()
+    row.map(IntentRowRaw::try_into_row).transpose()
 }
 
+/// # Errors
+///
+/// Returns [`LocalDbError`] on a database failure, or when the stored
+/// `entries_json` fails bounded validation.
 pub async fn get_intent_by_revision(
     pool: &SqlitePool,
     revision: &str,
@@ -186,9 +205,12 @@ pub async fn get_intent_by_revision(
     .bind(revision)
     .fetch_optional(pool)
     .await?;
-    row.map(|r| r.try_into_row()).transpose()
+    row.map(IntentRowRaw::try_into_row).transpose()
 }
 
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the state update cannot be written.
 pub async fn update_intent_state(
     pool: &SqlitePool,
     revision: &str,
@@ -207,6 +229,9 @@ pub async fn update_intent_state(
     Ok(())
 }
 
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the finalizing transaction fails.
 pub async fn finalize_committed_intent(
     pool: &SqlitePool,
     revision: &str,
@@ -237,6 +262,9 @@ pub async fn finalize_committed_intent(
     Ok(true)
 }
 
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the rollback-finalizing transaction fails.
 pub async fn finalize_rolled_back_intent(
     pool: &SqlitePool,
     revision: &str,
@@ -260,6 +288,9 @@ pub async fn finalize_rolled_back_intent(
     Ok(())
 }
 
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the claim cannot be cleared.
 pub async fn release_session_claim(
     pool: &SqlitePool,
     session_id: &str,
@@ -276,13 +307,16 @@ pub async fn release_session_claim(
     Ok(())
 }
 
-
 /// Remove an intent that never applied and release its claim, atomically.
 ///
 /// Staging failures happen before any target mutation, so there is no durable
 /// material to recover: the row is DELETED and the claim CLEARED in one
 /// transaction. Neither an orphaned `rolling_back` row nor a claimed-but-
 /// abandoned session can survive this call.
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the aborting transaction fails; in that
+/// case the intent row and claim are left untouched.
 pub async fn abort_intent_and_release_claim(
     pool: &SqlitePool,
     revision: &str,
@@ -310,6 +344,10 @@ pub async fn abort_intent_and_release_claim(
 /// Root comparison canonicalizes both sides (the stored value may be a
 /// non-canonical alias, e.g. `/var` vs `/private/var`); `rowid DESC` makes
 /// the pick deterministic.
+/// # Errors
+///
+/// Returns [`LocalDbError`] on a database failure, or when the selected
+/// row's metadata fails bounded validation.
 pub async fn latest_committed_intent_for_root(
     pool: &SqlitePool,
     workspace_root: &str,
@@ -334,9 +372,12 @@ pub async fn latest_committed_intent_for_root(
 /// commit path uses. A malformed row must fail closed — the caller skips it and
 /// preserves the evidence — rather than forward an unvalidated basename to a
 /// directory-relative unlink.
-pub fn validate_cleanup_entries(
-    entries_json: &str,
-) -> Result<Vec<IntentEntryJson>, LocalDbError> {
+/// # Errors
+///
+/// Returns [`LocalDbError::ValidationError`] when the document exceeds the
+/// raw byte bound, is not valid JSON, or contains an entry that fails
+/// path/hash/artifact-basename validation.
+pub fn validate_cleanup_entries(entries_json: &str) -> Result<Vec<IntentEntryJson>, LocalDbError> {
     if entries_json.len() > MAX_ENTRIES_JSON_BYTES {
         return Err(LocalDbError::ValidationError(format!(
             "settled intent entries_json exceeds {MAX_ENTRIES_JSON_BYTES} bytes"
@@ -355,6 +396,9 @@ pub fn validate_cleanup_entries(
 /// Committed and rolled-back intents are already durable, so a row whose
 /// metadata cannot be parsed must never fail startup: the caller skips what it
 /// cannot read.
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the settled-intent query fails.
 pub async fn list_settled_intents_for_cleanup(
     pool: &SqlitePool,
 ) -> Result<Vec<(String, String, String)>, LocalDbError> {
@@ -384,39 +428,56 @@ async fn mark_intent_recovery_conflict(
 
 fn validate_intent_entry(entry: &IntentEntryJson) -> Result<(), LocalDbError> {
     if entry.path.is_empty() || entry.path.len() > 4096 {
-        return Err(LocalDbError::ValidationError("invalid intent entry path".into()));
+        return Err(LocalDbError::ValidationError(
+            "invalid intent entry path".into(),
+        ));
     }
     if entry.path.contains("..") || entry.path.starts_with('/') {
-        return Err(LocalDbError::ValidationError("intent entry path must be relative".into()));
+        return Err(LocalDbError::ValidationError(
+            "intent entry path must be relative".into(),
+        ));
     }
     match entry.op.as_str() {
         "create" => {
             if entry.pre_hash.is_some() {
-                return Err(LocalDbError::ValidationError("create entry must not have pre_hash".into()));
+                return Err(LocalDbError::ValidationError(
+                    "create entry must not have pre_hash".into(),
+                ));
             }
             if entry.post_hash.as_deref().is_none_or(|h| h.len() != 64) {
-                return Err(LocalDbError::ValidationError("create entry requires post_hash".into()));
+                return Err(LocalDbError::ValidationError(
+                    "create entry requires post_hash".into(),
+                ));
             }
         }
         "modify" => {
             if entry.pre_hash.as_deref().is_none_or(|h| h.len() != 64)
                 || entry.post_hash.as_deref().is_none_or(|h| h.len() != 64)
             {
-                return Err(LocalDbError::ValidationError("modify entry requires pre/post hash".into()));
+                return Err(LocalDbError::ValidationError(
+                    "modify entry requires pre/post hash".into(),
+                ));
             }
         }
         "delete" => {
-            if entry.pre_hash.as_deref().is_none_or(|h| h.len() != 64) || entry.post_hash.is_some() {
-                return Err(LocalDbError::ValidationError("delete entry requires pre_hash only".into()));
+            if entry.pre_hash.as_deref().is_none_or(|h| h.len() != 64) || entry.post_hash.is_some()
+            {
+                return Err(LocalDbError::ValidationError(
+                    "delete entry requires pre_hash only".into(),
+                ));
             }
         }
         other => {
-            return Err(LocalDbError::ValidationError(format!("unknown intent op: {other}")));
+            return Err(LocalDbError::ValidationError(format!(
+                "unknown intent op: {other}"
+            )));
         }
     }
     for hash in entry.pre_hash.iter().chain(entry.post_hash.iter()) {
         if !hash.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')) || hash.len() != 64 {
-            return Err(LocalDbError::ValidationError("intent hash must be lowercase hex".into()));
+            return Err(LocalDbError::ValidationError(
+                "intent hash must be lowercase hex".into(),
+            ));
         }
     }
     if entry.stage_basename.is_empty()
@@ -424,7 +485,9 @@ fn validate_intent_entry(entry: &IntentEntryJson) -> Result<(), LocalDbError> {
         || !entry.stage_basename.starts_with(".nexus-")
         || entry.stage_basename.contains('/')
     {
-        return Err(LocalDbError::ValidationError("invalid stage basename".into()));
+        return Err(LocalDbError::ValidationError(
+            "invalid stage basename".into(),
+        ));
     }
     if let Some(ref backup) = entry.backup_basename {
         if backup.is_empty()
@@ -432,26 +495,30 @@ fn validate_intent_entry(entry: &IntentEntryJson) -> Result<(), LocalDbError> {
             || !backup.starts_with(".nexus-")
             || backup.contains('/')
         {
-            return Err(LocalDbError::ValidationError("invalid backup basename".into()));
+            return Err(LocalDbError::ValidationError(
+                "invalid backup basename".into(),
+            ));
         }
     }
     Ok(())
 }
 
-async fn decode_intent_rows(pool: &SqlitePool, rows: Vec<IntentRowRaw>) -> Result<Vec<CommitIntentRow>, LocalDbError> {
+async fn decode_intent_rows(
+    pool: &SqlitePool,
+    rows: Vec<IntentRowRaw>,
+) -> Result<Vec<CommitIntentRow>, LocalDbError> {
     let mut out = Vec::new();
     for raw in rows {
         let revision = raw.revision.clone();
         let workspace_root = raw.workspace_root.clone();
-        match raw.try_into_row() {
-            Ok(row) => out.push(row),
-            Err(_) => {
-                mark_intent_recovery_conflict(pool, &revision, "corrupt_entries_json").await?;
-                return Err(LocalDbError::CorruptIntent {
-                    revision,
-                    workspace_root,
-                });
-            }
+        if let Ok(row) = raw.try_into_row() {
+            out.push(row);
+        } else {
+            mark_intent_recovery_conflict(pool, &revision, "corrupt_entries_json").await?;
+            return Err(LocalDbError::CorruptIntent {
+                revision,
+                workspace_root,
+            });
         }
     }
     Ok(out)
@@ -472,6 +539,9 @@ fn workspace_roots_match(stored: &str, workspace_root: &str) -> bool {
 }
 
 /// Return the committed request digest for a session, if one exists.
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the digest query fails.
 pub async fn get_committed_request_digest(
     pool: &SqlitePool,
     session_id: &str,
@@ -486,6 +556,9 @@ pub async fn get_committed_request_digest(
 }
 
 /// Whether any intent is in `recovery_conflict` for the canonical workspace root.
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the recovery-conflict query fails.
 pub async fn workspace_has_recovery_conflict(
     pool: &SqlitePool,
     workspace_root: &str,
@@ -500,6 +573,10 @@ pub async fn workspace_has_recovery_conflict(
         .any(|stored| workspace_roots_match(stored, workspace_root)))
 }
 
+/// # Errors
+///
+/// Returns [`LocalDbError`] on a database failure, or when an unsettled
+/// row's metadata fails bounded validation.
 pub async fn list_unsettled_intents(
     pool: &SqlitePool,
     workspace_root: &str,
@@ -518,7 +595,13 @@ pub async fn list_unsettled_intents(
     decode_intent_rows(pool, rows).await
 }
 
-pub async fn list_all_unsettled_intents(pool: &SqlitePool) -> Result<Vec<CommitIntentRow>, LocalDbError> {
+/// # Errors
+///
+/// Returns [`LocalDbError`] on a database failure, or when an unsettled
+/// row's metadata fails bounded validation.
+pub async fn list_all_unsettled_intents(
+    pool: &SqlitePool,
+) -> Result<Vec<CommitIntentRow>, LocalDbError> {
     let rows = sqlx::query_as::<_, IntentRowRaw>(
         "SELECT session_id, workspace_root, revision, request_digest, state, entries_json, error_category \
          FROM workspace_commit_intents \
@@ -552,10 +635,12 @@ impl IntentRowRaw {
         let entries: Vec<IntentEntryJson> = match serde_json::from_str(&self.entries_json) {
             Ok(v) => v,
             Err(e) => {
-                return Err(LocalDbError::Sqlx(sqlx::Error::Decode(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("corrupt intent entries_json: {e}"),
-                )))));
+                return Err(LocalDbError::Sqlx(sqlx::Error::Decode(Box::new(
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("corrupt intent entries_json: {e}"),
+                    ),
+                ))));
             }
         };
         for entry in &entries {

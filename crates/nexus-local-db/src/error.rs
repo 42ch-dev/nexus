@@ -256,6 +256,9 @@ impl LocalDbError {
 }
 
 impl fmt::Display for LocalDbError {
+    // One flat variant-to-text match: the arm order mirrors the enum, and
+    // splitting it across helpers would scatter a single user-facing mapping.
+    #[allow(clippy::too_many_lines)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MissingWorkspaceMetaTable => {
@@ -350,7 +353,10 @@ impl fmt::Display for LocalDbError {
             Self::ActorContractConflict { code } => {
                 write!(f, "{}", code.message())
             }
-            Self::CorruptIntent { revision, workspace_root } => {
+            Self::CorruptIntent {
+                revision,
+                workspace_root,
+            } => {
                 write!(
                     f,
                     "corrupt workspace commit intent {revision} at {workspace_root}"

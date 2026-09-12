@@ -417,10 +417,10 @@ async fn codex_mutated_frame_turns_runner_red() {
 
 // ── Dsh (deepseek-harness-sdk runtime) ──────────────────────────────────
 
-/// Hermetic dsh provider env (P0 T2): the SDK resolves/creates DSH_HOME
+/// Hermetic dsh provider env (P0 T2): the SDK resolves/creates `DSH_HOME`
 /// at harness start, so every dsh conformance run gets an isolated
-/// caller-env DSH_HOME plus a REQ_LOG the fixture records its launch
-/// identity (`_spawn`: exact argv + DSH_HOME) and requests into.
+/// caller-env `DSH_HOME` plus a `REQ_LOG` the fixture records its launch
+/// identity (`_spawn`: exact argv + `DSH_HOME`) and requests into.
 fn dsh_env(scenario: &str, label: &str) -> (HashMap<String, String>, PathBuf, PathBuf) {
     let log = req_log(label);
     let home = std::env::temp_dir().join(format!(
@@ -437,7 +437,7 @@ fn dsh_env(scenario: &str, label: &str) -> (HashMap<String, String>, PathBuf, Pa
 
 /// Assert the P0 T2 ordinary launch identity from the fixture's request
 /// log: exactly one runtime spawn with argv exactly `--profile sdk`, the
-/// caller-env DSH_HOME injected, and `initialize` before the one wire
+/// caller-env `DSH_HOME` injected, and `initialize` before the one wire
 /// prompt. The log is fixture-written JSONL (default `json.dumps`
 /// separators), asserted by exact substring rather than a serde dep.
 fn assert_ordinary_launch_identity(log: &Path, home: &Path) {
@@ -446,11 +446,7 @@ fn assert_ordinary_launch_identity(log: &Path, home: &Path) {
         .lines()
         .filter(|line| line.contains("\"method\": \"_spawn\""))
         .collect();
-    assert_eq!(
-        spawn_lines.len(),
-        1,
-        "exactly one runtime spawn: {content}"
-    );
+    assert_eq!(spawn_lines.len(), 1, "exactly one runtime spawn: {content}");
     assert!(
         spawn_lines[0].contains("\"argv\": [\"--profile\", \"sdk\"]"),
         "ordinary argv is exactly --profile sdk: {}",
@@ -480,7 +476,7 @@ async fn dsh_happy_path_conforms() {
         ProviderId::new("conformance-dsh"),
         "Conformance".to_string(),
         Some(DSH_FIXTURE.to_string()),
-        Vec::new(),
+        &[],
         env,
         TimeoutConfig::default(),
     )
@@ -505,7 +501,7 @@ async fn dsh_mid_stream_tool_call_conforms() {
         ProviderId::new("conformance-dsh"),
         "Conformance".to_string(),
         Some(DSH_FIXTURE.to_string()),
-        Vec::new(),
+        &[],
         env,
         TimeoutConfig::default(),
     )
@@ -533,7 +529,7 @@ async fn dsh_malformed_frame_fails_once_with_decode_error() {
         ProviderId::new("conformance-dsh"),
         "Conformance".to_string(),
         Some(DSH_FIXTURE.to_string()),
-        Vec::new(),
+        &[],
         env,
         TimeoutConfig::default(),
     )
@@ -565,7 +561,7 @@ async fn dsh_cancel_is_honest_noop() {
         ProviderId::new("conformance-dsh"),
         "Conformance".to_string(),
         Some(DSH_FIXTURE.to_string()),
-        Vec::new(),
+        &[],
         env,
         TimeoutConfig::default(),
     )
@@ -622,7 +618,7 @@ async fn dsh_two_messages_conforms() {
         ProviderId::new("conformance-dsh"),
         "Conformance".to_string(),
         Some(DSH_FIXTURE.to_string()),
-        Vec::new(),
+        &[],
         env,
         TimeoutConfig::default(),
     )
@@ -646,7 +642,7 @@ async fn dsh_partial_then_fail_conforms_with_one_terminal() {
         ProviderId::new("conformance-dsh"),
         "Conformance".to_string(),
         Some(DSH_FIXTURE.to_string()),
-        Vec::new(),
+        &[],
         env,
         TimeoutConfig::default(),
     )
@@ -668,4 +664,3 @@ async fn dsh_partial_then_fail_conforms_with_one_terminal() {
     // P1 maps non-success finish reasons to typed OpFailed categories; the
     // neutral runner's closed error_category set is unchanged in P1.
 }
-

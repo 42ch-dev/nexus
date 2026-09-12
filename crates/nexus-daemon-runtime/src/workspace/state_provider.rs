@@ -21,7 +21,7 @@ pub struct DaemonWorkspaceStateProvider {
 impl DaemonWorkspaceStateProvider {
     /// Bind the provider to one shared manager and workspace root.
     #[must_use]
-    pub fn new(
+    pub const fn new(
         session_manager: Arc<WorkspaceSessionManager>,
         canonical_workspace_root: String,
     ) -> Self {

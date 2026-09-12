@@ -12,24 +12,19 @@ use tokio::sync::RwLock;
 
 use crate::capability::model::{
     CreateSessionRequest, HostEvent, HostEventStream, HostHealth, HostStartConfig,
-    ManagedSessionHandle,
+    ManagedSessionHandle, ProbeRequest, SessionOwner,
 };
 use crate::config::AgentHostConfig;
+use crate::core::readiness::{
+    discover_provider_entries, is_launch_class_failure, probe_request_for_owner,
+    safe_provider_message, CandidateIdentity, ProviderEntry,
+};
 use crate::core::session::SessionRegistry;
 use crate::error::{HostError, HostResult};
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
 use crate::policy::admission::AdmissionPolicy;
+use crate::policy::permission::HostPermissionResolver;
 use crate::ProviderAdapter;
-
-/// Entry in the provider map.
-struct ProviderEntry {
-    /// The provider adapter.
-    adapter: Arc<dyn ProviderAdapter>,
-    /// Whether this provider is currently available.
-    available: bool,
-    /// The configured launch recipe (truthful catalog reporting).
-    launch: crate::LaunchStrategy,
-}
 
 /// Broadcast channel capacity for host events.
 ///
@@ -127,11 +122,7 @@ impl HostManager {
         let mut providers = self.providers.write().await;
         providers.insert(
             provider_id,
-            ProviderEntry {
-                adapter,
-                available: false,
-                launch,
-            },
+            ProviderEntry::from_registration(adapter, launch),
         );
     }
 
@@ -159,9 +150,98 @@ impl HostManager {
                 })?
                 .adapter
                 .clone()
+                .ok_or_else(|| {
+                    HostError::provider_unavailable(
+                        provider_id.clone(),
+                        "provider adapter not constructed",
+                    )
+                })?
         };
 
         Ok((adapter, provider_id))
+    }
+
+    async fn mark_probe_context_unavailable(&self) {
+        let mut providers = self.providers.write().await;
+        for entry in providers.values_mut() {
+            // EVERY entry becomes unavailable without a verified probe owner.
+            // A prior owner-bound start may have published `available = true`;
+            // that success must not survive a re-start that has no owner, or
+            // the catalog/admission would expose a provider this process can no
+            // longer prove ready. Stale latency/success state is cleared too.
+            entry.health.available = false;
+            entry.health.latency_ms = None;
+            entry.health.message = Some("probe_context_unavailable".to_string());
+        }
+    }
+
+    async fn publish_probe_result(
+        &self,
+        identity: &CandidateIdentity,
+        health: crate::capability::model::ProviderHealth,
+        latency_ms: u64,
+    ) {
+        let mut providers = self.providers.write().await;
+        if let Some(entry) = providers.get_mut(&identity.provider_id) {
+            if entry.identity != *identity {
+                return;
+            }
+            entry.health = crate::capability::model::ProviderHealth {
+                latency_ms: Some(latency_ms),
+                ..health
+            };
+        }
+    }
+
+    async fn invalidate_provider(&self, provider_id: &ProviderId, message: String) {
+        let mut providers = self.providers.write().await;
+        if let Some(entry) = providers.get_mut(provider_id) {
+            entry.health.available = false;
+            entry.health.latency_ms = None;
+            entry.health.message = Some(message);
+        }
+    }
+
+    async fn probe_all_providers(
+        &self,
+        owner: &SessionOwner,
+        probe_cwd: &std::path::Path,
+        timeout_ms: u64,
+    ) -> HostResult<()> {
+        let probes: Vec<(CandidateIdentity, Arc<dyn ProviderAdapter>, ProbeRequest)> = {
+            let providers = self.providers.read().await;
+            providers
+                .values()
+                .filter_map(|entry| {
+                    entry.adapter.clone().map(|adapter| {
+                        (
+                            entry.identity.clone(),
+                            adapter,
+                            probe_request_for_owner(owner, probe_cwd, timeout_ms),
+                        )
+                    })
+                })
+                .collect()
+        };
+
+        for (identity, adapter, request) in probes {
+            let started = std::time::Instant::now();
+            let health = match adapter.probe(request).await {
+                Ok(health) => health,
+                Err(error) => crate::capability::model::ProviderHealth {
+                    provider_id: identity.provider_id.clone(),
+                    available: false,
+                    latency_ms: None,
+                    message: Some(safe_provider_message(&error)),
+                },
+            };
+            // Saturating rather than wrapping: a probe latency beyond u64 ms
+            // is not representable, and clamping is truthful for telemetry.
+            let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+            self.publish_probe_result(&identity, health, latency_ms)
+                .await;
+        }
+        Ok(())
     }
 }
 
@@ -254,26 +334,45 @@ impl crate::HostFacade for HostManager {
             admission.check_workspace_root(&config.workspace_root)?;
         }
 
-        // Load config using the resolved (when the file exists) canonical
-        // path — a raw-path re-read after validation would be a TOCTOU window
-        // (QC2 F-003); `NotFound` → defaults for the absent optional config.
-        let host_config = crate::config::load_config_from_path(&resolved_config_path)?;
+        // Retain the validated config from boot when provided; otherwise load once.
+        let host_config = if let Some(cfg) = config.host_config.clone() {
+            crate::providers::validate_agent_host_config_providers(&cfg)?;
+            cfg
+        } else {
+            crate::config::load_config_from_path(&resolved_config_path)?
+        };
         *self.config.write().await = Some(host_config.clone());
 
         // Store canonical workspace boundary for session cwd validation.
-        *self.workspace_root.write().await = Some(canonical_workspace_root);
+        *self.workspace_root.write().await = Some(canonical_workspace_root.clone());
 
-        // Mark all registered providers as available and collect their IDs.
-        let provider_count;
-        let registered_ids: HashSet<ProviderId>;
-        {
-            let mut providers = self.providers.write().await;
-            provider_count = providers.len();
-            registered_ids = providers.keys().cloned().collect();
-            for entry in providers.values_mut() {
-                entry.available = true;
-            }
+        let permission_resolver = HostPermissionResolver::new_native_only(&host_config.policy);
+
+        // Discovery replaces ambient boot registration unless tests pre-registered.
+        let pre_registered = !self.providers.read().await.is_empty();
+        if !pre_registered {
+            let discovered =
+                discover_provider_entries(&host_config, &config.timeouts, &permission_resolver)?;
+            *self.providers.write().await = discovered;
         }
+
+        if let Some(owner) = config.probe_owner.clone() {
+            let probe_cwd = crate::config::validate_workspace_path_under(
+                &owner.workspace_root,
+                &canonical_workspace_root,
+            )?;
+            let probe_budget = config.timeouts.initialize_ms;
+            self.probe_all_providers(&owner, &probe_cwd, probe_budget)
+                .await?;
+        } else {
+            self.mark_probe_context_unavailable().await;
+        }
+
+        let registered_ids: HashSet<ProviderId> = {
+            let providers = self.providers.read().await;
+            providers.keys().cloned().collect()
+        };
+        let provider_count = registered_ids.len();
 
         // Rebuild admission policy from loaded config + registered providers,
         // but only if no custom policy was set via `with_admission()`.
@@ -314,13 +413,18 @@ impl crate::HostFacade for HostManager {
             HostError::provider_unavailable(request.provider_id.clone(), "provider not registered")
         })?;
 
-        if !entry.available {
+        if !entry.is_available() {
             return Err(HostError::provider_unavailable(
                 request.provider_id.clone(),
                 "provider not available",
             ));
         }
-        let adapter = entry.adapter.clone();
+        let adapter = entry.adapter.clone().ok_or_else(|| {
+            HostError::provider_unavailable(
+                request.provider_id.clone(),
+                "provider adapter not constructed",
+            )
+        })?;
         drop(providers);
 
         // Build launch spec with cwd validated against workspace boundary (QC2 F-002)
@@ -360,18 +464,30 @@ impl crate::HostFacade for HostManager {
             |c| c.timeouts.session_duration(),
         );
         let provider_id_for_timeout = request.provider_id.clone();
-        let handle = tokio::time::timeout(session_timeout, adapter.launch(launch_spec))
-            .await
-            .map_err(|_| {
-                HostError::timeout(
+        let handle = match tokio::time::timeout(session_timeout, adapter.launch(launch_spec)).await
+        {
+            Ok(Ok(handle)) => handle,
+            Ok(Err(error)) => {
+                if is_launch_class_failure(&error) {
+                    self.invalidate_provider(&request.provider_id, safe_provider_message(&error))
+                        .await;
+                }
+                return Err(error);
+            }
+            Err(_) => {
+                let error = HostError::timeout(
                     "launch",
                     format!(
                         "session creation timed out after {}ms",
                         session_timeout.as_millis()
                     ),
                 )
-                .with_provider(provider_id_for_timeout)
-            })??;
+                .with_provider(provider_id_for_timeout);
+                self.invalidate_provider(&request.provider_id, safe_provider_message(&error))
+                    .await;
+                return Err(error);
+            }
+        };
 
         // Register in our session registry
         let mut sessions = self.sessions.write().await;
@@ -403,7 +519,7 @@ impl crate::HostFacade for HostManager {
         session_id: HostSessionId,
         op: crate::capability::model::HostOperation,
     ) -> HostResult<HostEventStream> {
-        let (adapter, _) = self.get_provider_for_session(&session_id).await?;
+        let (adapter, provider_id) = self.get_provider_for_session(&session_id).await?;
 
         // Admission check: ops-per-session limit.
         {
@@ -453,6 +569,17 @@ impl crate::HostFacade for HostManager {
                     .write()
                     .await
                     .transition_busy_to_ready(&session_id, &op_id);
+                // An early execution failure (sealed/ordinary initialization or
+                // a confirmed-close failure on the first denied prompt, or a
+                // lazy child setup failure) is the same launch-class failure
+                // `create_session` already handles: the candidate is no longer
+                // ready, so invalidate it. Ordinary prompt/content timeouts are
+                // excluded by the category+stage gate inside
+                // `is_launch_class_failure`.
+                if is_launch_class_failure(&e) {
+                    self.invalidate_provider(&provider_id, safe_provider_message(&e))
+                        .await;
+                }
                 return Err(e);
             }
         };
@@ -594,7 +721,7 @@ impl crate::HostFacade for HostManager {
                 .filter_map(|session_id| {
                     let provider_id = provider_map.get(session_id)?;
                     let entry = providers.get(provider_id)?;
-                    let adapter = entry.adapter.clone();
+                    let adapter = entry.adapter.clone()?;
                     let session = sessions.get(session_id)?;
                     let handle = ManagedSessionHandle {
                         provider_id: provider_id.clone(),
@@ -819,47 +946,23 @@ impl crate::HostFacade for HostManager {
     }
 
     async fn provider_catalog(&self) -> HostResult<crate::discovery::ProviderCatalog> {
-        // Collect adapter descriptors and their configured launch recipes
-        // under a short-lived read lock.
-        let descs: Vec<(
-            ProviderId,
-            bool,
-            crate::capability::model::ProviderDescriptor,
-            crate::LaunchStrategy,
-        )> = {
-            let providers = self.providers.read().await;
-            providers
-                .iter()
-                .map(|(pid, entry)| {
-                    (
-                        pid.clone(),
-                        entry.available,
-                        entry.adapter.descriptor(),
-                        entry.launch.clone(),
-                    )
-                })
-                .collect()
-        };
-
-        let mut entries = Vec::new();
-        for (provider_id, available, desc, launch) in descs {
-            entries.push(crate::ProviderCatalogEntry {
-                provider_id: provider_id.clone(),
-                display_name: desc.display_name.clone(),
-                protocol_kind: desc.protocol_kind,
-                launch,
-                source: crate::DiscoverySource::Config,
-                trust: crate::TrustLevel::Explicit,
-                capabilities: desc.capabilities,
-                health: crate::capability::model::ProviderHealth {
-                    provider_id: provider_id.clone(),
-                    available,
-                    latency_ms: None,
-                    message: None,
-                },
-            });
-        }
-
+        let providers = self.providers.read().await;
+        let entries = providers
+            .values()
+            .map(|entry| crate::ProviderCatalogEntry {
+                provider_id: entry.metadata.provider_id.clone(),
+                display_name: entry.metadata.display_name.clone(),
+                protocol_kind: entry.metadata.protocol_kind,
+                launch: entry.metadata.launch.clone(),
+                source: entry.metadata.source.clone(),
+                trust: entry.metadata.trust.clone(),
+                capabilities: entry.metadata.capabilities.clone(),
+                health: entry.health.clone(),
+            })
+            .collect();
+        // Snapshot built: release the read guard before returning it rather
+        // than holding it to the end of scope.
+        drop(providers);
         Ok(crate::discovery::ProviderCatalog { entries })
     }
 
@@ -1148,6 +1251,8 @@ mod tests {
             max_sessions: 4,
             max_ops_per_session: 1,
             timeouts: crate::config::TimeoutConfig::default(),
+            host_config: None,
+            probe_owner: Some(test_owner()),
         }
     }
 
@@ -1181,6 +1286,11 @@ mod tests {
         let cfg = HostStartConfig {
             config_path,
             workspace_root: temp_dir.path().to_path_buf(),
+            // The probe owner must sit at (or under) the host workspace
+            // boundary: `start_config()` defaults to `/tmp`, which is outside
+            // this temp boundary (and on macOS canonicalizes to
+            // `/private/tmp`). Align the fixture's owner with the boundary.
+            probe_owner: Some(test_owner_for(temp_dir.path().to_path_buf())),
             ..start_config()
         };
         let manager = HostManager::new();
@@ -1494,12 +1604,10 @@ mod tests {
         std::fs::write(&config_path, "[timeouts]\nshutdown_ms = 100\n").expect("write config");
 
         manager
-            .start(HostStartConfig {
-                config_path: config_path.clone(),
-                workspace_root: std::path::PathBuf::from("/tmp"),
-                max_sessions: 4,
-                max_ops_per_session: 1,
-                timeouts: crate::config::TimeoutConfig::default(),
+            .start({
+                let mut cfg = start_config();
+                cfg.config_path = config_path.clone();
+                cfg
             })
             .await
             .expect("start");
@@ -1874,12 +1982,12 @@ mod tests {
 
         // Start with workspace_root = temp_dir
         manager
-            .start(HostStartConfig {
-                config_path,
-                workspace_root: temp_dir.path().to_path_buf(),
-                max_sessions: 4,
-                max_ops_per_session: 1,
-                timeouts: crate::config::TimeoutConfig::default(),
+            .start({
+                let mut cfg = start_config();
+                cfg.config_path = config_path;
+                cfg.workspace_root = temp_dir.path().to_path_buf();
+                cfg.probe_owner = Some(test_owner_for(temp_dir.path().to_path_buf()));
+                cfg
             })
             .await
             .expect("start");
@@ -1992,12 +2100,12 @@ mod tests {
             .await;
 
         manager
-            .start(HostStartConfig {
-                config_path,
-                workspace_root: temp_dir.path().to_path_buf(),
-                max_sessions: 4,
-                max_ops_per_session: 1,
-                timeouts: crate::config::TimeoutConfig::default(),
+            .start({
+                let mut cfg = start_config();
+                cfg.config_path = config_path;
+                cfg.workspace_root = temp_dir.path().to_path_buf();
+                cfg.probe_owner = Some(test_owner_for(temp_dir.path().to_path_buf()));
+                cfg
             })
             .await
             .expect("start");
@@ -2024,6 +2132,383 @@ mod tests {
         assert!(
             err.to_string().contains("session creation timed out"),
             "expected session creation timeout message, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn start_without_probe_owner_marks_candidates_unavailable() {
+        let manager = HostManager::new();
+        manager
+            .register_provider(
+                Arc::new(MockProvider {
+                    provider_id: ProviderId::new("mock"),
+                }),
+                mock_launch(),
+            )
+            .await;
+        let mut cfg = start_config();
+        cfg.probe_owner = None;
+        manager.start(cfg).await.expect("start");
+
+        let catalog = manager.provider_catalog().await.expect("catalog");
+        let entry = catalog
+            .entries
+            .iter()
+            .find(|e| e.provider_id == ProviderId::new("mock"))
+            .expect("mock provider in catalog");
+        assert!(!entry.health.available);
+        assert_eq!(
+            entry.health.message.as_deref(),
+            Some("probe_context_unavailable")
+        );
+
+        let denied = manager
+            .create_session(CreateSessionRequest {
+                provider_id: ProviderId::new("mock"),
+                cwd: std::path::PathBuf::from("/tmp"),
+                model: None,
+                mode: None,
+                mcp_servers: vec![],
+                metadata: serde_json::Value::Null,
+                owner: test_owner(),
+            })
+            .await;
+        assert!(
+            denied.is_err(),
+            "admission must match catalog unavailable health"
+        );
+    }
+
+    /// A provider whose probe succeeds and whose first `execute` fails with a
+    /// chosen error — the post-ready launch-failure shape.
+    struct ExecFailingMockProvider {
+        provider_id: ProviderId,
+        error: fn() -> HostError,
+    }
+
+    #[async_trait]
+    impl ProviderAdapter for ExecFailingMockProvider {
+        fn descriptor(&self) -> crate::capability::model::ProviderDescriptor {
+            crate::capability::model::ProviderDescriptor {
+                provider_id: self.provider_id.clone(),
+                display_name: "ExecFail".to_string(),
+                protocol_kind: crate::capability::model::ProtocolKind::Acp,
+                capabilities: crate::capability::model::CapabilityDescriptor::acp_full(),
+            }
+        }
+
+        async fn probe(
+            &self,
+            _request: ProbeRequest,
+        ) -> HostResult<crate::capability::model::ProviderHealth> {
+            Ok(crate::capability::model::ProviderHealth {
+                provider_id: self.provider_id.clone(),
+                available: true,
+                latency_ms: Some(1),
+                message: Some("probe ok".to_string()),
+            })
+        }
+
+        async fn launch(&self, _spec: LaunchSpec) -> HostResult<ManagedSessionHandle> {
+            Ok(ManagedSessionHandle {
+                provider_id: self.provider_id.clone(),
+                session_id: HostSessionId::new(),
+                capabilities: crate::capability::model::CapabilityDescriptor::acp_full(),
+                process_identity: None,
+            })
+        }
+
+        async fn execute(
+            &self,
+            _handle: &ManagedSessionHandle,
+            _op: crate::capability::model::HostOperation,
+        ) -> HostResult<HostEventStream> {
+            Err((self.error)())
+        }
+
+        async fn cancel(
+            &self,
+            _session: &ManagedSessionHandle,
+            _op_id: HostOperationId,
+        ) -> HostResult<()> {
+            Ok(())
+        }
+
+        async fn shutdown(&self, _session: ManagedSessionHandle) -> HostResult<()> {
+            Ok(())
+        }
+
+        fn capabilities(&self) -> crate::capability::model::CapabilityDescriptor {
+            crate::capability::model::CapabilityDescriptor::acp_full()
+        }
+    }
+
+    async fn exec_probe_then_fail(
+        manager: &HostManager,
+        provider: Arc<dyn ProviderAdapter>,
+    ) -> String {
+        manager.register_provider(provider, mock_launch()).await;
+        manager.start(start_config()).await.expect("start");
+        let session = manager
+            .create_session(CreateSessionRequest {
+                provider_id: ProviderId::new("exec-fail"),
+                cwd: std::path::PathBuf::from("/tmp"),
+                model: None,
+                mode: None,
+                mcp_servers: vec![],
+                metadata: serde_json::Value::Null,
+                owner: test_owner(),
+            })
+            .await
+            .expect("session created from a probed-available provider");
+        match manager
+            .exec(
+                session.id.clone(),
+                crate::capability::model::HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![crate::capability::model::HostContentBlock::Text {
+                        text: "hi".to_string(),
+                    }],
+                    permission_scope: None,
+                },
+            )
+            .await
+        {
+            Err(error) => error.category().to_string(),
+            Ok(_) => panic!("execute must fail"),
+        }
+    }
+
+    async fn catalog_availability(manager: &HostManager) -> bool {
+        manager
+            .provider_catalog()
+            .await
+            .expect("catalog")
+            .entries
+            .iter()
+            .find(|e| e.provider_id == ProviderId::new("exec-fail"))
+            .expect("provider in catalog")
+            .health
+            .available
+    }
+
+    #[tokio::test]
+    async fn exec_launch_class_failure_invalidates_provider() {
+        // A launch-class failure from `exec` (the dsh sealed/ordinary init or a
+        // lazy child-setup failure) must invalidate the SAME candidate health
+        // `create_session` does, so a later admission cannot keep using a
+        // provider that is no longer ready.
+        let manager = HostManager::new();
+        let category = exec_probe_then_fail(
+            &manager,
+            Arc::new(ExecFailingMockProvider {
+                provider_id: ProviderId::new("exec-fail"),
+                error: || {
+                    HostError::cleanup_unconfirmed("probe cleanup unconfirmed")
+                        .with_provider(ProviderId::new("exec-fail"))
+                },
+            }),
+        )
+        .await;
+        assert_eq!(category, "cleanup_unconfirmed");
+        assert!(
+            !catalog_availability(&manager).await,
+            "a launch-class exec failure must invalidate the candidate"
+        );
+    }
+
+    #[tokio::test]
+    async fn exec_content_timeout_keeps_provider_ready() {
+        // The counterpart: an ordinary PROMPT timeout is not a launch-class
+        // failure. A provider that initialized successfully must stay ready —
+        // blanket-classifying every `operation_timeout` would tear down a
+        // working recipe.
+        let manager = HostManager::new();
+        let category = exec_probe_then_fail(
+            &manager,
+            Arc::new(ExecFailingMockProvider {
+                provider_id: ProviderId::new("exec-fail"),
+                error: || {
+                    HostError::timeout("prompt", "prompt exceeded its budget")
+                        .with_provider(ProviderId::new("exec-fail"))
+                },
+            }),
+        )
+        .await;
+        assert_eq!(category, "operation_timeout");
+        assert!(
+            catalog_availability(&manager).await,
+            "a content/prompt timeout must NOT invalidate a probed-ready provider"
+        );
+    }
+
+    #[tokio::test]
+    async fn launch_stage_timeout_is_launch_class() {
+        // The stage-specific half of the same rule: a timeout AT a launch
+        // boundary is launch-class.
+        let launch_stage = HostError::timeout("launch", "initialize handshake timed out");
+        assert!(is_launch_class_failure(&launch_stage));
+        let init_stage = HostError::timeout("initialize", "init timed out");
+        assert!(is_launch_class_failure(&init_stage));
+        let prompt_stage = HostError::timeout("prompt", "content timed out");
+        assert!(!is_launch_class_failure(&prompt_stage));
+        // The safe diagnostic must use the REAL category.
+        assert_eq!(safe_provider_message(&prompt_stage), "operation timed out");
+    }
+
+    #[tokio::test]
+    async fn restart_without_probe_owner_invalidates_previously_healthy_entries() {
+        // F6: a manager that completed an owner-bound start publishes
+        // `available = true`. Re-starting it with NO verified owner must clear
+        // EVERY row (not only rows already unavailable), including latency.
+        let manager = HostManager::new();
+        manager
+            .register_provider(
+                Arc::new(MockProvider {
+                    provider_id: ProviderId::new("mock"),
+                }),
+                mock_launch(),
+            )
+            .await;
+        manager
+            .start(start_config())
+            .await
+            .expect("owner-bound start");
+        assert!(
+            manager
+                .provider_catalog()
+                .await
+                .expect("catalog")
+                .entries
+                .iter()
+                .find(|e| e.provider_id == ProviderId::new("mock"))
+                .expect("mock in catalog")
+                .health
+                .available,
+            "the probed provider must be available after an owner-bound start"
+        );
+
+        let mut cfg = start_config();
+        cfg.probe_owner = None;
+        manager.start(cfg).await.expect("owner-less re-start");
+
+        let entry = manager
+            .provider_catalog()
+            .await
+            .expect("catalog")
+            .entries
+            .into_iter()
+            .find(|e| e.provider_id == ProviderId::new("mock"))
+            .expect("mock in catalog");
+        assert!(
+            !entry.health.available,
+            "a re-start without a verified owner must invalidate every entry"
+        );
+        assert_eq!(
+            entry.health.message.as_deref(),
+            Some("probe_context_unavailable")
+        );
+        assert!(
+            entry.health.latency_ms.is_none(),
+            "stale latency/success state must be cleared"
+        );
+    }
+
+    struct LaunchFailingMockProvider {
+        provider_id: ProviderId,
+    }
+
+    #[async_trait]
+    impl ProviderAdapter for LaunchFailingMockProvider {
+        fn descriptor(&self) -> crate::capability::model::ProviderDescriptor {
+            crate::capability::model::ProviderDescriptor {
+                provider_id: self.provider_id.clone(),
+                display_name: "LaunchFail".to_string(),
+                protocol_kind: crate::capability::model::ProtocolKind::Acp,
+                capabilities: crate::capability::model::CapabilityDescriptor::acp_full(),
+            }
+        }
+
+        async fn probe(
+            &self,
+            _request: ProbeRequest,
+        ) -> HostResult<crate::capability::model::ProviderHealth> {
+            Ok(crate::capability::model::ProviderHealth {
+                provider_id: self.provider_id.clone(),
+                available: true,
+                latency_ms: Some(1),
+                message: Some("probe ok".to_string()),
+            })
+        }
+
+        async fn launch(&self, _spec: LaunchSpec) -> HostResult<ManagedSessionHandle> {
+            Err(HostError::launch_failed(
+                self.provider_id.clone(),
+                "simulated spawn failure",
+                None,
+            ))
+        }
+
+        async fn execute(
+            &self,
+            _session: &ManagedSessionHandle,
+            _op: crate::capability::model::HostOperation,
+        ) -> HostResult<HostEventStream> {
+            unreachable!()
+        }
+
+        async fn cancel(
+            &self,
+            _session: &ManagedSessionHandle,
+            _op_id: HostOperationId,
+        ) -> HostResult<()> {
+            Ok(())
+        }
+
+        async fn shutdown(&self, _session: ManagedSessionHandle) -> HostResult<()> {
+            Ok(())
+        }
+
+        fn capabilities(&self) -> crate::capability::model::CapabilityDescriptor {
+            crate::capability::model::CapabilityDescriptor::acp_full()
+        }
+    }
+
+    #[tokio::test]
+    async fn launch_failure_invalidates_catalog_health() {
+        let manager = HostManager::new();
+        manager
+            .register_provider(
+                Arc::new(LaunchFailingMockProvider {
+                    provider_id: ProviderId::new("fail-mock"),
+                }),
+                mock_launch(),
+            )
+            .await;
+        manager.start(start_config()).await.expect("start");
+
+        let _ = manager
+            .create_session(CreateSessionRequest {
+                provider_id: ProviderId::new("fail-mock"),
+                cwd: std::path::PathBuf::from("/tmp"),
+                model: None,
+                mode: None,
+                mcp_servers: vec![],
+                metadata: serde_json::Value::Null,
+                owner: test_owner(),
+            })
+            .await
+            .expect_err("launch should fail");
+
+        let catalog = manager.provider_catalog().await.expect("catalog");
+        let entry = catalog
+            .entries
+            .iter()
+            .find(|e| e.provider_id == ProviderId::new("fail-mock"))
+            .expect("provider still listed");
+        assert!(
+            !entry.health.available,
+            "launch failure must invalidate readiness"
         );
     }
 }

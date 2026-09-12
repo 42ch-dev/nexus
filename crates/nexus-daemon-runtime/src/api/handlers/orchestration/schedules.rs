@@ -25,9 +25,9 @@
 #![allow(clippy::missing_errors_doc)]
 
 use crate::api::errors::NexusApiError;
-use crate::api::handlers::works::read_active_creator_id;
 use crate::api::pagination::{decode_offset_cursor, encode_offset_cursor};
 use crate::api::sort::parse_sort_terms;
+use crate::config::read_active_creator_id;
 use crate::workspace::WorkspaceState;
 use axum::{
     extract::{Path, Query, State},

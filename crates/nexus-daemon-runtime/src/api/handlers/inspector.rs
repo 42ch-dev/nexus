@@ -50,7 +50,7 @@
 //! onto the `MomentInspectResponse` wire shape.
 
 use crate::api::errors::NexusApiError;
-use crate::api::handlers::works::read_active_creator_id;
+use crate::config::read_active_creator_id;
 use crate::directive_store::ReadOnlyDirectiveStore;
 use crate::workspace::WorkspaceState;
 use axum::{extract::State, Json};

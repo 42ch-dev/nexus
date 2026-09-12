@@ -153,16 +153,24 @@ pub struct FileSnapshots {
     pub hashes: std::collections::HashMap<String, String>,
 }
 
-
 /// Parse persisted snapshot hashes; fail closed on corrupt JSON.
-pub fn parse_snapshot_hashes(json: &str) -> Result<std::collections::HashMap<String, String>, SessionError> {
-    let value: serde_json::Value = serde_json::from_str(json)
-        .map_err(|e| SessionError::CorruptSnapshot(e.to_string()))?;
+///
+/// # Errors
+///
+/// Returns [`SessionError::CorruptSnapshot`] when `json` is not a string-keyed
+/// map of hashes.
+pub fn parse_snapshot_hashes(
+    json: &str,
+) -> Result<std::collections::HashMap<String, String>, SessionError> {
+    let value: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| SessionError::CorruptSnapshot(e.to_string()))?;
     if !value.is_object() {
-        return Err(SessionError::CorruptSnapshot("snapshot must be object".into()));
+        return Err(SessionError::CorruptSnapshot(
+            "snapshot must be object".into(),
+        ));
     }
-    let map: std::collections::HashMap<String, String> = serde_json::from_value(value)
-        .map_err(|e| SessionError::CorruptSnapshot(e.to_string()))?;
+    let map: std::collections::HashMap<String, String> =
+        serde_json::from_value(value).map_err(|e| SessionError::CorruptSnapshot(e.to_string()))?;
     Ok(map)
 }
 
@@ -299,6 +307,15 @@ async fn compute_content_hashes_inner(
 
 // ── Workspace session manager (DB-backed) ───────────────────────────────────
 
+/// Recoverable commit configuration (v1.188 P3).
+pub struct RecoverableCommitConfig {
+    pub db_path: PathBuf,
+    pub mutation_guard: Arc<tokio::sync::Mutex<()>>,
+    pub authority_lease: Arc<WorkspaceAuthorityLease>,
+    /// Retained commit operation owner (survives caller cancellation).
+    pub commit_owner: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
+}
+
 /// DB-backed workspace session manager.
 ///
 /// Replaces the V1.55 in-memory `WorkspaceSessionManager`.
@@ -314,16 +331,6 @@ async fn compute_content_hashes_inner(
 ///   [`SessionError::HashConflict`].
 /// - The session is atomically consumed (marked `consumed = 1`) only if all
 ///   change entries validate. This guarantees single-consumer semantics.
-
-/// Recoverable commit configuration (v1.188 P3).
-pub struct RecoverableCommitConfig {
-    pub db_path: PathBuf,
-    pub mutation_guard: Arc<tokio::sync::Mutex<()>>,
-    pub authority_lease: Arc<WorkspaceAuthorityLease>,
-    /// Retained commit operation owner (survives caller cancellation).
-    pub commit_owner: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
-}
-
 pub struct WorkspaceSessionManager {
     pool: Arc<SqlitePool>,
     recoverable: Option<RecoverableCommitConfig>,
@@ -333,12 +340,15 @@ impl Clone for WorkspaceSessionManager {
     fn clone(&self) -> Self {
         Self {
             pool: Arc::clone(&self.pool),
-            recoverable: self.recoverable.as_ref().map(|cfg| RecoverableCommitConfig {
-                db_path: cfg.db_path.clone(),
-                mutation_guard: Arc::clone(&cfg.mutation_guard),
-                authority_lease: Arc::clone(&cfg.authority_lease),
-                commit_owner: Arc::clone(&cfg.commit_owner),
-            }),
+            recoverable: self
+                .recoverable
+                .as_ref()
+                .map(|cfg| RecoverableCommitConfig {
+                    db_path: cfg.db_path.clone(),
+                    mutation_guard: Arc::clone(&cfg.mutation_guard),
+                    authority_lease: Arc::clone(&cfg.authority_lease),
+                    commit_owner: Arc::clone(&cfg.commit_owner),
+                }),
         }
     }
 }
@@ -349,11 +359,19 @@ impl WorkspaceSessionManager {
 
     /// Create a session manager for tests (validate+consume only).
     #[must_use]
-    pub fn new(pool: Arc<SqlitePool>) -> Self {
-        Self { pool, recoverable: None }
+    pub const fn new(pool: Arc<SqlitePool>) -> Self {
+        Self {
+            pool,
+            recoverable: None,
+        }
     }
 
     /// Create a session manager with recoverable commit support (v1.188 P3).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError::Io`] when the exclusive workspace-authority
+    /// lease beside `db_path` cannot be acquired (another manager holds it).
     pub fn new_recoverable(pool: Arc<SqlitePool>, db_path: PathBuf) -> Result<Self, SessionError> {
         let authority_lease = WorkspaceAuthorityLease::acquire(&db_path)
             .map_err(|e| SessionError::Io(e.to_string()))?;
@@ -369,7 +387,7 @@ impl WorkspaceSessionManager {
     }
 
     #[must_use]
-    pub fn recoverable_config(&self) -> Option<&RecoverableCommitConfig> {
+    pub const fn recoverable_config(&self) -> Option<&RecoverableCommitConfig> {
         self.recoverable.as_ref()
     }
 
@@ -492,8 +510,17 @@ impl WorkspaceSessionManager {
         Ok(row)
     }
 
-
     /// Validate a v1.188 P3 contract manifest against the session snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError::ManifestInvalid`] for a malformed manifest, the
+    /// [`SessionError::NotFound`]/[`SessionError::AlreadyCommitted`]/
+    /// [`SessionError::Expired`] failures from [`Self::validate_session`],
+    /// [`SessionError::CorruptSnapshot`] for unreadable snapshot hashes,
+    /// [`SessionError::HashConflict`] when a declared entry does not match the
+    /// stored snapshot, [`SessionError::PathEscape`] for a symlinked target
+    /// outside the boundary, and [`SessionError::Io`] on filesystem failure.
     pub async fn validate_contract_manifest(
         &self,
         session_id: &SessionId,
@@ -517,16 +544,18 @@ impl WorkspaceSessionManager {
                         workspace_root: row.workspace_root.clone(),
                     });
                 }
-                enforce_path_boundary(&file_path, &canonical_root)?;
+                enforce_path_boundary(&file_path, canonical_root)?;
             }
 
             match change.op {
                 WorkspaceChangeOp::Modify => {
-                    let stored_hash = stored_hashes.get(&change.path).ok_or_else(|| SessionError::HashConflict {
-                        session_id: session_id.clone(),
-                        path: change.path.clone(),
-                        expected_hash: "present-in-snapshot".to_string(),
-                        actual_hash: "not-in-snapshot".to_string(),
+                    let stored_hash = stored_hashes.get(&change.path).ok_or_else(|| {
+                        SessionError::HashConflict {
+                            session_id: session_id.clone(),
+                            path: change.path.clone(),
+                            expected_hash: "present-in-snapshot".to_string(),
+                            actual_hash: "not-in-snapshot".to_string(),
+                        }
                     })?;
                     if !file_path.exists() {
                         return Err(SessionError::HashConflict {
@@ -558,11 +587,13 @@ impl WorkspaceSessionManager {
                     }
                 }
                 WorkspaceChangeOp::Delete => {
-                    let stored_hash = stored_hashes.get(&change.path).ok_or_else(|| SessionError::HashConflict {
-                        session_id: session_id.clone(),
-                        path: change.path.clone(),
-                        expected_hash: "present-in-snapshot".to_string(),
-                        actual_hash: "not-in-snapshot".to_string(),
+                    let stored_hash = stored_hashes.get(&change.path).ok_or_else(|| {
+                        SessionError::HashConflict {
+                            session_id: session_id.clone(),
+                            path: change.path.clone(),
+                            expected_hash: "present-in-snapshot".to_string(),
+                            actual_hash: "not-in-snapshot".to_string(),
+                        }
                     })?;
                     if !file_path.exists() {
                         return Err(SessionError::HashConflict {
@@ -827,10 +858,7 @@ impl WorkspaceSessionManager {
         }
 
         if !changes.is_empty() {
-            if let Err(err) = self
-                .validate_contract_manifest(session_id, changes)
-                .await
-            {
+            if let Err(err) = self.validate_contract_manifest(session_id, changes).await {
                 if matches!(err, SessionError::HashConflict { .. }) {
                     tracing::warn!(
                         session_id = %session_id,
@@ -847,6 +875,13 @@ impl WorkspaceSessionManager {
     }
 
     /// Durable commit returning revision metadata (v1.188 P3).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError::Internal`] when this manager has no recoverable
+    /// authority, otherwise whatever
+    /// [`session_commit::commit_recoverable`](super::session_commit::commit_recoverable)
+    /// reports for the manifest.
     pub async fn commit_session_durable(
         &self,
         session_id: &SessionId,
@@ -862,6 +897,12 @@ impl WorkspaceSessionManager {
     }
 
     /// Durable commit on an `Arc` manager; retains ownership through caller cancellation.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever
+    /// [`session_commit::commit_recoverable_owned`](super::session_commit::commit_recoverable_owned)
+    /// reports; caller cancellation does not abandon the owned commit.
     pub async fn commit_session_durable_owned(
         self_arc: Arc<Self>,
         session_id: SessionId,
@@ -871,6 +912,12 @@ impl WorkspaceSessionManager {
     }
 
     /// Run startup recovery for all unsettled intents (call before publishing executor).
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever
+    /// [`session_commit::startup_recovery_all`](super::session_commit::startup_recovery_all)
+    /// reports; a corrupt intent row is surfaced rather than skipped.
     pub async fn startup_recovery(&self) -> Result<(), SessionError> {
         super::session_commit::startup_recovery_all(self).await
     }
@@ -1054,7 +1101,8 @@ mod tests {
 
     #[test]
     fn change_entry_deserialization() {
-        let json = r#"{"path":"test.txt","expectedHash":"abc123","op":"modify","contentBase64":"YQ=="}"#;
+        let json =
+            r#"{"path":"test.txt","expectedHash":"abc123","op":"modify","contentBase64":"YQ=="}"#;
         let entry: ChangeEntry = serde_json::from_str(json).expect("deserialize");
         assert_eq!(entry.path, "test.txt");
         assert_eq!(entry.expected_hash.as_deref(), Some("abc123"));

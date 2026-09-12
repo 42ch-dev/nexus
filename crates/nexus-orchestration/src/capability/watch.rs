@@ -353,7 +353,7 @@ mod tests {
             )),
             daemon_tool_dispatch: None,
             cdn_config: None,
-        workspace_executor: None,
+            workspace_executor: None,
         }
     }
 

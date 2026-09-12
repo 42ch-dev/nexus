@@ -1125,7 +1125,8 @@ pub struct WorkflowRunCoordinator {
     /// Bounded per-run SSE rings (P4 §6.3).
     run_events: Option<Arc<crate::run_events::RunEventRegistry>>,
     /// Active run event sinks registered before drive spawn.
-    run_event_sinks: Arc<tokio::sync::Mutex<std::collections::HashMap<String, crate::run_events::RunEventSink>>>,
+    run_event_sinks:
+        Arc<tokio::sync::Mutex<std::collections::HashMap<String, crate::run_events::RunEventSink>>>,
 }
 
 /// An in-flight (or completed) drive owner for one session.
@@ -2751,37 +2752,34 @@ impl WorkflowRunCoordinator {
             // cancel-requested/terminal/incompatible state is
             // `workflow_state_conflict`.
             Err(nexus_orchestration::engine::EngineError::RevisionMismatch {
-                session_id: lost_sid, ..
-            }) => {
-                match self.workflow_store.load_run(session_id).await {
-                    Ok(Some(record)) => {
-                        let state = record.state.as_ref();
-                        let cancel_requested = state.is_some_and(|s| s.cancel_requested);
-                        if record.status == SessionStatus::WaitingForInput
-                            && !cancel_requested
-                        {
-                            let current_wait_id = state
-                                .and_then(|s| s.wait.as_ref())
-                                .map(|w| w.wait_id.clone());
-                            Err(RunControlError::WaitConflict {
-                                session_id: lost_sid,
-                                status: record.status.as_db_str().to_string(),
-                                current_wait_id,
-                            })
-                        } else {
-                            Err(RunControlError::StateConflict(
-                                lost_sid,
-                                format!(
-                                    "revision moved; current status is {}",
-                                    record.status.as_db_str()
-                                ),
-                            ))
-                        }
+                session_id: lost_sid,
+                ..
+            }) => match self.workflow_store.load_run(session_id).await {
+                Ok(Some(record)) => {
+                    let state = record.state.as_ref();
+                    let cancel_requested = state.is_some_and(|s| s.cancel_requested);
+                    if record.status == SessionStatus::WaitingForInput && !cancel_requested {
+                        let current_wait_id = state
+                            .and_then(|s| s.wait.as_ref())
+                            .map(|w| w.wait_id.clone());
+                        Err(RunControlError::WaitConflict {
+                            session_id: lost_sid,
+                            status: record.status.as_db_str().to_string(),
+                            current_wait_id,
+                        })
+                    } else {
+                        Err(RunControlError::StateConflict(
+                            lost_sid,
+                            format!(
+                                "revision moved; current status is {}",
+                                record.status.as_db_str()
+                            ),
+                        ))
                     }
-                    Ok(None) => Err(RunControlError::ScheduleNotFound(lost_sid)),
-                    Err(e) => Err(RunControlError::Drive(e.to_string())),
                 }
-            }
+                Ok(None) => Err(RunControlError::ScheduleNotFound(lost_sid)),
+                Err(e) => Err(RunControlError::Drive(e.to_string())),
+            },
             Err(e) => Err(match e {
                 nexus_orchestration::engine::EngineError::WaitConflict {
                     session_id,
@@ -3160,7 +3158,7 @@ mod tests {
         ChildSessionParams, Context, EngineError, SessionFilter, SessionKey, SessionSummary,
     };
 
-    /// P4 T1: durable Failed+cancel_requested+driver_failed counts as cancel outcome
+    /// P4 T1: durable `Failed+cancel_requested+driver_failed` counts as cancel outcome
     /// (concurrent cancel vs drive-failure race — R-V1186P3-004).
     #[test]
     fn cancel_fence_accepts_failed_driver_failed_when_cancel_requested() {
@@ -8278,6 +8276,7 @@ mod tests {
     }
     /// P4 T1 placement: cancel committed before the step marker (provider start).
     #[tokio::test]
+    #[allow(clippy::too_many_lines)] // Keep the deterministic race and durable observations together.
     async fn cancel_drive_race_provider_start_one_winner_no_extra_step() {
         use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
         struct CountingTask {
@@ -8309,7 +8308,8 @@ mod tests {
             async fn load_run(
                 &self,
                 session_id: &SessionId,
-            ) -> Result<Option<nexus_orchestration::run_state::RunRecord>, EngineError> {
+            ) -> Result<Option<nexus_orchestration::run_state::RunRecord>, EngineError>
+            {
                 self.inner.load_run(session_id).await
             }
             async fn start_run(
@@ -8527,13 +8527,14 @@ mod tests {
                 while !at_barrier.load(Ordering::SeqCst) {
                     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
                 }
-                let _ = coordinator
-                    .signal_run(&session_id, RunSignal::Cancel)
-                    .await;
+                let _ = coordinator.signal_run(&session_id, RunSignal::Cancel).await;
                 release.store(true, Ordering::SeqCst);
             }
         });
-        coordinator.ensure_driving(&session_id).await.expect("drive");
+        coordinator
+            .ensure_driving(&session_id)
+            .await
+            .expect("drive");
         tokio::time::timeout(std::time::Duration::from_secs(10), async {
             while coordinator
                 .drives
@@ -8568,6 +8569,7 @@ mod tests {
 
     /// P4 T1 placement: cancel during an in-flight step (active operation).
     #[tokio::test]
+    #[allow(clippy::too_many_lines)] // Keep the deterministic race and durable observations together.
     async fn cancel_drive_race_active_operation_one_winner_no_extra_step() {
         use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
         struct SlowTask {
@@ -8634,7 +8636,10 @@ mod tests {
             .start_session("novel-writing", graph)
             .await
             .expect("start");
-        coordinator.ensure_driving(&session_id).await.expect("drive");
+        coordinator
+            .ensure_driving(&session_id)
+            .await
+            .expect("drive");
         tokio::time::timeout(std::time::Duration::from_secs(10), async {
             while !in_flight.load(Ordering::SeqCst) {
                 tokio::time::sleep(std::time::Duration::from_millis(5)).await;
@@ -8661,7 +8666,11 @@ mod tests {
         })
         .await
         .expect("drive finished");
-        let record = store.load_run(&session_id).await.expect("load").expect("row");
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load")
+            .expect("row");
         assert_eq!(record.status, SessionStatus::Cancelled);
         assert_eq!(
             dispatches.load(Ordering::SeqCst),
@@ -8728,7 +8737,10 @@ mod tests {
             .start_session("novel-writing", graph)
             .await
             .expect("start");
-        coordinator.ensure_driving(&session_id).await.expect("drive");
+        coordinator
+            .ensure_driving(&session_id)
+            .await
+            .expect("drive");
         wait_until("cancelled winner", || async {
             let record = real_store.load_run(&session_id).await.expect("load");
             record
@@ -8737,7 +8749,11 @@ mod tests {
         })
         .await;
         coordinator.abort_all_drives().await;
-        let record = real_store.load_run(&session_id).await.expect("load").expect("row");
+        let record = real_store
+            .load_run(&session_id)
+            .await
+            .expect("load")
+            .expect("row");
         assert_eq!(record.status, SessionStatus::Cancelled);
         assert!(
             record.state.as_ref().is_some_and(|s| s.cancel_requested),
@@ -8775,7 +8791,8 @@ mod tests {
             async fn load_run(
                 &self,
                 session_id: &SessionId,
-            ) -> Result<Option<nexus_orchestration::run_state::RunRecord>, EngineError> {
+            ) -> Result<Option<nexus_orchestration::run_state::RunRecord>, EngineError>
+            {
                 self.inner.load_run(session_id).await
             }
             async fn start_run(
@@ -8997,12 +9014,13 @@ mod tests {
                 while arrived.load(Ordering::SeqCst) == 0 {
                     tokio::time::sleep(std::time::Duration::from_millis(2)).await;
                 }
-                let _ = coordinator
-                    .signal_run(&session_id, RunSignal::Cancel)
-                    .await;
+                let _ = coordinator.signal_run(&session_id, RunSignal::Cancel).await;
             }
         });
-        coordinator.ensure_driving(&session_id).await.expect("drive");
+        coordinator
+            .ensure_driving(&session_id)
+            .await
+            .expect("drive");
         tokio::time::timeout(std::time::Duration::from_secs(10), async {
             while coordinator
                 .drives
@@ -9017,7 +9035,11 @@ mod tests {
         .await
         .expect("drive finished");
         cancel_task.await.expect("cancel task");
-        let record = real_store.load_run(&session_id).await.expect("load").expect("row");
+        let record = real_store
+            .load_run(&session_id)
+            .await
+            .expect("load")
+            .expect("row");
         assert_eq!(
             record.status,
             SessionStatus::Failed,
@@ -9046,9 +9068,7 @@ mod tests {
             classify_cancel_outcome(&record).is_some(),
             "failed+cancel_requested+driver_failed must count as accomplished cancel outcome"
         );
-        let second_cancel = coordinator
-            .signal_run(&session_id, RunSignal::Cancel)
-            .await;
+        let second_cancel = coordinator.signal_run(&session_id, RunSignal::Cancel).await;
         assert!(
             second_cancel.is_ok(),
             "second public cancel must be idempotent, not generic conflict: {:?}",
@@ -9056,7 +9076,7 @@ mod tests {
         );
     }
 
-    /// Live SSE handoff: subscriber registered before publish receives host_event.
+    /// Live SSE handoff: subscriber registered before publish receives `host_event`.
     #[tokio::test]
     async fn run_events_live_handoff_receives_published_host_event() {
         let registry = Arc::new(crate::run_events::RunEventRegistry::new());
@@ -9088,6 +9108,7 @@ mod tests {
     /// run's retry cancel can still publish the confirmed winner, and the
     /// final SSE frame matches the durable DB status exactly.
     #[tokio::test]
+    #[allow(clippy::too_many_lines)] // One interrupted-to-confirmed cleanup lifecycle.
     async fn interrupted_run_keeps_ring_live_until_retry_cancel_confirms() {
         struct NoopTask;
         #[async_trait]
@@ -9108,7 +9129,11 @@ mod tests {
 
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = Arc::new(nexus_local_db::open_pool(&db_path).await.expect("open pool"));
+        let pool = Arc::new(
+            nexus_local_db::open_pool(&db_path)
+                .await
+                .expect("open pool"),
+        );
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -9148,8 +9173,16 @@ mod tests {
             .expect("start session");
 
         // Durable winner #1 — cleanup unconfirmed: Interrupted + cancel intent.
-        let record = store.load_run(&session_id).await.expect("load").expect("row");
-        let root = storage.get(&session_id.0).await.expect("get").expect("root");
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load")
+            .expect("row");
+        let root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get")
+            .expect("root");
         let interrupted_state = nexus_orchestration::run_state::RunStateV1 {
             cancel_requested: true,
             failure: Some(nexus_orchestration::run_state::RunFailure {
@@ -9204,8 +9237,16 @@ mod tests {
         );
 
         // Retry cancel confirms: durable winner #2 = Cancelled.
-        let record = store.load_run(&session_id).await.expect("load").expect("row");
-        let root = storage.get(&session_id.0).await.expect("get").expect("root");
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load")
+            .expect("row");
+        let root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get")
+            .expect("root");
         let cancelled_state = record.state.clone().unwrap_or_default();
         let settled = store
             .settle_run(
@@ -9233,7 +9274,11 @@ mod tests {
             .expect("final frame");
         assert_eq!(last.event, "run_state");
         let payload: serde_json::Value = serde_json::from_str(&last.data).expect("json");
-        let durable = store.load_run(&session_id).await.expect("load").expect("row");
+        let durable = store
+            .load_run(&session_id)
+            .await
+            .expect("load")
+            .expect("row");
         assert_eq!(durable.status, SessionStatus::Cancelled);
         assert_eq!(
             payload["status"].as_str(),
@@ -9256,6 +9301,7 @@ mod tests {
     /// drive owner is registered, and the durable existing work is untouched;
     /// an existing ring is reused rather than refused.
     #[tokio::test]
+    #[allow(clippy::too_many_lines)] // One capacity boundary with durable-state observations.
     async fn ensure_driving_refuses_capacity_without_touching_durable_work() {
         struct NoopTask;
         #[async_trait]
@@ -9276,7 +9322,11 @@ mod tests {
 
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = Arc::new(nexus_local_db::open_pool(&db_path).await.expect("open pool"));
+        let pool = Arc::new(
+            nexus_local_db::open_pool(&db_path)
+                .await
+                .expect("open pool"),
+        );
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -9314,7 +9364,11 @@ mod tests {
             .start_session_with_graph("novel-writing", graph)
             .await
             .expect("start session");
-        let before = store.load_run(&session_id).await.expect("load").expect("row");
+        let before = store
+            .load_run(&session_id)
+            .await
+            .expect("load")
+            .expect("row");
 
         // Exhaust every live-ring slot.
         let mut held = Vec::new();
@@ -9350,7 +9404,11 @@ mod tests {
         );
 
         // Durable existing work is untouched.
-        let after = store.load_run(&session_id).await.expect("load").expect("row");
+        let after = store
+            .load_run(&session_id)
+            .await
+            .expect("load")
+            .expect("row");
         assert_eq!(after.state_revision, before.state_revision);
         assert_eq!(after.status, before.status);
 
@@ -9361,5 +9419,4 @@ mod tests {
         );
         drop(held);
     }
-
 }

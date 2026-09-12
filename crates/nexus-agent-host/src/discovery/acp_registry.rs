@@ -6,10 +6,11 @@
 
 use std::collections::HashMap;
 
-use crate::capability::model::{CapabilityDescriptor, ProtocolKind, ProviderHealth};
+use crate::capability::model::{CapabilityDescriptor, ProtocolKind};
 use crate::config::AgentHostConfig;
 use crate::error::HostResult;
 use crate::ids::ProviderId;
+use crate::providers::candidate_unavailable_health;
 use crate::{DiscoverySource, LaunchStrategy, ProviderCatalogEntry, TrustLevel};
 
 /// Map ACP registry entries to catalog entries.
@@ -47,12 +48,10 @@ pub fn entries_from_registry(
             source: DiscoverySource::AcpRegistry,
             trust: TrustLevel::Registry,
             capabilities: CapabilityDescriptor::acp_full(),
-            health: ProviderHealth {
-                provider_id: pid,
-                available: true,
-                latency_ms: None,
-                message: None,
-            },
+            health: candidate_unavailable_health(
+                &pid,
+                "registry candidate; bounded probe required",
+            ),
         });
     }
 

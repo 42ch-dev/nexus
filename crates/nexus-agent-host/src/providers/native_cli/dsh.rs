@@ -39,14 +39,14 @@
 //! An all-false `PromptPermissionScope` selects the sealed recipe BEFORE
 //! operation admission: the already-initialized ordinary harness is closed
 //! through the retained cleanup owner, an exclusive owner-only child
-//! DSH_HOME is provisioned under `<selected home>/nexus/<random id>`
+//! `DSH_HOME` is provisioned under `<selected home>/nexus/<random id>`
 //! (empty-bundles `sdk` manifest, startup-frozen reload, empty profile/home
 //! patch layers), and the sealed harness is initialized with the
 //! Nexus-owned closed no-tool Cordis asset (`deny_all.cordis.patch.yml`,
 //! embedded beside this file) as its only patch — no user/plugin/MCP layer
 //! enters that runtime. The prompt is never sent to the ordinary runtime.
 //! The selected recipe is retained for the session; once a prompt has been
-//! admitted, any scope change (deny_all ↔ None included) is rejected
+//! admitted, any scope change (`deny_all` ↔ None included) is rejected
 //! rather than losing the conversation or escalating permissions. `None`
 //! preserves the existing ordinary policy — it is not a tool-isolation
 //! claim; partially permissive scopes stay `not_supported`.
@@ -85,17 +85,17 @@
 
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
-use std::sync::atomic::{AtomicBool, Ordering};
 
+#[cfg(unix)]
+use super::sealed_fs;
 use async_trait::async_trait;
 use deepseek_harness_sdk::{Config, DeepSeekHarness, Error as DshError, Input, Notification};
 use futures_util::future::{BoxFuture, FutureExt, Shared};
 use futures_util::StreamExt;
 use tokio::sync::{mpsc, Mutex, RwLock};
-#[cfg(unix)]
-use super::sealed_fs;
 
 use crate::capability::model::{
     CapabilityDescriptor, HostContentBlock, HostEvent, HostEventStream, ManagedSessionHandle,
@@ -110,10 +110,10 @@ use crate::providers::native_cli::map_dsh::{
     operation_delivery_overflow_failure, operation_protocol_failure, ClassifyNotificationError,
     DshNotificationClass, RunReconciliation,
 };
+use crate::ProviderAdapter;
 use deepseek_harness_sdk::RunResult;
 use std::time::Instant;
 use tokio::sync::Notify;
-use crate::ProviderAdapter;
 
 /// The bare command resolved through PATH when no explicit configured
 /// command/path and no nonblank parent `DSH_RUNTIME_BIN` exists (P0 T2: the
@@ -125,7 +125,7 @@ const DEFAULT_DSH_COMMAND: &str = "dsh";
 /// and the PATH fallback.
 const DSH_RUNTIME_BIN_ENV: &str = "DSH_RUNTIME_BIN";
 
-/// Subdirectory under the selected DSH_HOME that owns every Nexus-managed
+/// Subdirectory under the selected `DSH_HOME` that owns every Nexus-managed
 /// child home (architecture §3.4: `<selected home>/nexus/<random id>`).
 const SEALED_HOME_SUBDIR: &str = "nexus";
 
@@ -171,12 +171,19 @@ impl DeliveryBudget {
         if bytes > DSCH_MAX_EVENT_TEXT_BYTES {
             return false;
         }
-        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
-        let mut emitted = self.emitted.lock().unwrap_or_else(|e| e.into_inner());
+        // Check and update all three counters under one hold.
+        let mut pending = self
+            .pending
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut emitted = self
+            .emitted
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut pending_messages = self
             .pending_messages
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if *pending_messages >= DSCH_MAX_QUEUED_MESSAGES {
             return false;
         }
@@ -189,17 +196,24 @@ impl DeliveryBudget {
         *pending_messages += 1;
         *pending += bytes;
         *emitted += bytes;
+        drop((pending_messages, emitted, pending));
         true
     }
 
     fn release(&self, bytes: usize) {
-        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        // Both counters are released under one hold so a concurrent admission
+        // never observes a half-released budget.
+        let mut pending = self
+            .pending
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *pending = pending.saturating_sub(bytes);
         let mut pending_messages = self
             .pending_messages
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *pending_messages = pending_messages.saturating_sub(1);
+        drop((pending_messages, pending));
     }
 
     #[cfg(test)]
@@ -207,12 +221,15 @@ impl DeliveryBudget {
         *self
             .pending_messages
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     #[cfg(test)]
     fn test_pending_payload_bytes(&self) -> usize {
-        *self.pending.lock().unwrap_or_else(|e| e.into_inner())
+        *self
+            .pending
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
@@ -225,19 +242,22 @@ pub struct DshStreamingRunTiming {
     pub run_completed: Option<Instant>,
 }
 
-type RunTimingSnapshots =
-    Arc<StdMutex<HashMap<HostOperationId, DshStreamingRunTiming>>>;
+type RunTimingSnapshots = Arc<StdMutex<HashMap<HostOperationId, DshStreamingRunTiming>>>;
 
 fn publish_completed_run_timing(
     op_id: &HostOperationId,
     run_timing: &StdMutex<DshStreamingRunTiming>,
     snapshots: &RunTimingSnapshots,
 ) {
-    let timing = run_timing.lock().unwrap_or_else(|e| e.into_inner());
+    let timing = run_timing
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let (Some(first_callback), Some(run_completed)) =
         (timing.first_callback, timing.run_completed)
     {
-        let mut map = snapshots.lock().unwrap_or_else(|e| e.into_inner());
+        let mut map = snapshots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         map.insert(
             op_id.clone(),
             DshStreamingRunTiming {
@@ -311,7 +331,10 @@ impl StreamObserver {
                     return;
                 }
                 {
-                    let mut timing = self.run_timing.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut timing = self
+                        .run_timing
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     if timing.first_callback.is_none() {
                         timing.first_callback = Some(Instant::now());
                     }
@@ -329,7 +352,7 @@ impl StreamObserver {
                     Ok(()) => {
                         self.reconciliation
                             .lock()
-                            .unwrap_or_else(|e| e.into_inner())
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
                             .note_root_text_emitted();
                     }
                     Err(_) => self.signal_failure(false, true),
@@ -374,12 +397,7 @@ fn dispatch_successful_run_events(
     Ok(terminals)
 }
 
-
-
-fn delivery_failure_signaled(
-    classifier_failed: &AtomicBool,
-    delivery_failed: &AtomicBool,
-) -> bool {
+fn delivery_failure_signaled(classifier_failed: &AtomicBool, delivery_failed: &AtomicBool) -> bool {
     classifier_failed.load(Ordering::Acquire) || delivery_failed.load(Ordering::Acquire)
 }
 
@@ -434,7 +452,6 @@ async fn wait_consumer_drop(consumer_dropped: &AtomicBool, consumer_drop_notify:
         consumer_drop_notify.notified().await;
     }
 }
-
 
 async fn wait_run_harness_reunify(
     state: &Mutex<ClientState>,
@@ -516,6 +533,12 @@ async fn invalidate_session_after_failed_operation(
 /// An invalid explicit or env override is an error WITHOUT fallback to
 /// another binary (fail closed). The returned message is safe static
 /// category text (no environment dumps); only handshake proves readiness.
+///
+/// # Errors
+///
+/// Returns a static message when a configured override is not an executable
+/// file, or when no override is set and the bare `dsh` command is not
+/// resolvable through `PATH`.
 pub fn resolve_dsh_executable(explicit: Option<&str>) -> Result<PathBuf, String> {
     let override_value = explicit
         .map(str::trim)
@@ -527,14 +550,16 @@ pub fn resolve_dsh_executable(explicit: Option<&str>) -> Result<PathBuf, String>
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
         });
-    match override_value {
-        Some(value) => resolve_override(&value),
-        None => resolve_bare_command(DEFAULT_DSH_COMMAND).ok_or_else(|| {
-            "dsh runtime not found: no configured command, DSH_RUNTIME_BIN unset, \
-             and `dsh` is not on PATH"
-                .to_string()
-        }),
-    }
+    override_value.map_or_else(
+        || {
+            resolve_bare_command(DEFAULT_DSH_COMMAND).ok_or_else(|| {
+                "dsh runtime not found: no configured command, DSH_RUNTIME_BIN unset, \
+                 and `dsh` is not on PATH"
+                    .to_string()
+            })
+        },
+        |value| resolve_override(&value),
+    )
 }
 
 /// Resolve one explicit/env override value: absolute path, or bare command
@@ -600,9 +625,7 @@ fn recipe_for_scope(
 ) -> HostResult<Recipe> {
     match scope {
         None => Ok(Recipe::Ordinary),
-        Some(scope)
-            if !scope.allow_read && !scope.allow_write && !scope.allow_destructive =>
-        {
+        Some(scope) if !scope.allow_read && !scope.allow_write && !scope.allow_destructive => {
             Ok(Recipe::SealedDenyAll)
         }
         Some(_) => Err(HostError::capability_unsupported(
@@ -644,7 +667,7 @@ type RetainedLeases = Arc<std::sync::Mutex<BTreeSet<PathBuf>>>;
 fn retain_lease_path(retained: &RetainedLeases, path: PathBuf) {
     retained
         .lock()
-        .unwrap_or_else(|error| error.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .insert(path);
 }
 
@@ -656,7 +679,7 @@ fn retain_lease_path(retained: &RetainedLeases, path: PathBuf) {
 fn reconcile_retained_leases(retained: &RetainedLeases) {
     let paths: Vec<PathBuf> = retained
         .lock()
-        .unwrap_or_else(|error| error.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .iter()
         .cloned()
         .collect();
@@ -664,7 +687,7 @@ fn reconcile_retained_leases(retained: &RetainedLeases) {
         if remove_lease_at_path(&path).is_ok() {
             retained
                 .lock()
-                .unwrap_or_else(|error| error.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .remove(&path);
         }
     }
@@ -698,10 +721,9 @@ async fn close_and_reap(
                 if remove_lease_tree(&lease).is_err() {
                     retain_lease_path(retained, lease.path.clone());
                     return Err(CleanupError {
-                        message:
-                            "dsh close completed but the sealed home could not be removed; \
+                        message: "dsh close completed but the sealed home could not be removed; \
                              cleanup is unconfirmed and the lease evidence is retained"
-                                .to_string(),
+                            .to_string(),
                         close_confirmed: true,
                         failed_lease: Some(lease.path),
                     });
@@ -805,7 +827,7 @@ fn start_final_close(
     cleanup
 }
 
-/// Resolve the DSH_HOME the SDK would select for this environment
+/// Resolve the `DSH_HOME` the SDK would select for this environment
 /// (explicit `dsh_home` is never set on the ordinary path, so the chain is
 /// caller env `DSH_HOME` → parent `DSH_HOME` → parent `~/.dsh`). Uses the
 /// SDK's own resolution rather than re-implementing it; no process-global
@@ -825,7 +847,7 @@ fn selected_dsh_home(env: &HashMap<String, String>) -> PathBuf {
     probe.resolve_dsh_home(&parent)
 }
 
-/// Provision the exclusive owner-only sealed child DSH_HOME under
+/// Provision the exclusive owner-only sealed child `DSH_HOME` under
 /// `<selected home>/nexus/<random id>` (architecture §3.4). The selected
 /// home's own files are never rewritten — only the `nexus/` subtree is
 /// created. Returns the RESOLVED child path (the anchor's pre-existing
@@ -887,25 +909,21 @@ fn canonical_anchor(path: &Path) -> Result<(PathBuf, Vec<std::ffi::OsString>), S
     let mut missing = Vec::new();
     let mut cursor = path;
     loop {
-        match std::fs::canonicalize(cursor) {
-            Ok(canonical) => {
-                if !canonical.is_dir() {
-                    return Err("sealed dsh home anchor is not a directory".to_string());
-                }
-                missing.reverse();
-                return Ok((canonical, missing));
+        if let Ok(canonical) = std::fs::canonicalize(cursor) {
+            if !canonical.is_dir() {
+                return Err("sealed dsh home anchor is not a directory".to_string());
             }
-            Err(_) => {
-                let Some(name) = cursor.file_name() else {
-                    return Err("sealed dsh home anchor has no existing ancestor".to_string());
-                };
-                missing.push(name.to_os_string());
-                let Some(parent) = cursor.parent() else {
-                    return Err("sealed dsh home anchor has no existing ancestor".to_string());
-                };
-                cursor = parent;
-            }
+            missing.reverse();
+            return Ok((canonical, missing));
         }
+        let Some(name) = cursor.file_name() else {
+            return Err("sealed dsh home anchor has no existing ancestor".to_string());
+        };
+        missing.push(name.to_os_string());
+        let Some(parent) = cursor.parent() else {
+            return Err("sealed dsh home anchor has no existing ancestor".to_string());
+        };
+        cursor = parent;
     }
 }
 
@@ -1081,9 +1099,21 @@ fn provision_sealed_home_fd(child: &Path) -> Result<SealedLease, String> {
             "package.json",
             format!("{SEALED_PROFILE_MANIFEST}\n").as_bytes(),
         )?;
-        sealed_fs::write_file_exclusive_at(&sdk_fd, "cordis.patch.yml", EMPTY_PATCH_LAYER.as_bytes())?;
-        sealed_fs::write_file_exclusive_at(&leaf_fd, "cordis.patch.yml", EMPTY_PATCH_LAYER.as_bytes())?;
-        sealed_fs::write_file_exclusive_at(&leaf_fd, DENY_ALL_PATCH_FILENAME, DENY_ALL_PATCH.as_bytes())?;
+        sealed_fs::write_file_exclusive_at(
+            &sdk_fd,
+            "cordis.patch.yml",
+            EMPTY_PATCH_LAYER.as_bytes(),
+        )?;
+        sealed_fs::write_file_exclusive_at(
+            &leaf_fd,
+            "cordis.patch.yml",
+            EMPTY_PATCH_LAYER.as_bytes(),
+        )?;
+        sealed_fs::write_file_exclusive_at(
+            &leaf_fd,
+            DENY_ALL_PATCH_FILENAME,
+            DENY_ALL_PATCH.as_bytes(),
+        )?;
         sealed_fs::fsync_dir(&sdk_fd)?;
         sealed_fs::fsync_dir(&profiles_fd)?;
         sealed_fs::fsync_dir(&leaf_fd)?;
@@ -1117,9 +1147,11 @@ fn provision_sealed_home_fd(child: &Path) -> Result<SealedLease, String> {
 /// silently weakening the no-follow contract.
 #[cfg(not(unix))]
 fn provision_sealed_home_fd(_child: &Path) -> Result<SealedLease, String> {
-    Err("sealed deny_all home provisioning is unsupported on this platform: \
+    Err(
+        "sealed deny_all home provisioning is unsupported on this platform: \
          descriptor-relative no-follow filesystem primitives are required"
-        .to_string())
+            .to_string(),
+    )
 }
 
 /// Crate-client-scoped state for a managed dsh session, guarded by the
@@ -1145,10 +1177,10 @@ struct ClientState {
     /// first deny-all prompt closes the ordinary harness).
     recipe: Recipe,
     /// Set once the first prompt has been admitted: any later scope change
-    /// (deny_all ↔ None included) is rejected, never a conversation reset
+    /// (`deny_all` ↔ None included) is rejected, never a conversation reset
     /// or a permission escalation (architecture §3.4).
     policy_locked: bool,
-    /// The exclusive owner-only child DSH_HOME lease of the sealed recipe
+    /// The exclusive owner-only child `DSH_HOME` lease of the sealed recipe
     /// (resolved path + pinned anchor/leaf descriptors), retained until
     /// its runtime close is confirmed.
     sealed_home: Option<SealedLease>,
@@ -1219,7 +1251,7 @@ impl std::fmt::Debug for NativeSession {
                 debug.field("client_state", &"<locked>");
             }
         }
-        debug.finish()
+        debug.finish_non_exhaustive()
     }
 }
 
@@ -1243,7 +1275,7 @@ pub struct DshNativeProvider {
     dsh_bin: Option<String>,
     /// Environment variables to inject into the runtime process (one
     /// immutable snapshot handed to the SDK at harness start; the SDK owns
-    /// the spawn merge and DSH_HOME normalization). The dsh runtime argv
+    /// the spawn merge and `DSH_HOME` normalization). The dsh runtime argv
     /// is exactly `--profile sdk [--patch <owned asset>]` composed by the
     /// SDK, so any nonempty `native_args` at construction is unsupported
     /// and rejected — never silently dropped, never stored.
@@ -1271,7 +1303,7 @@ impl DshNativeProvider {
         provider_id: ProviderId,
         display_name: String,
         dsh_bin: Option<String>,
-        native_args: Vec<String>,
+        native_args: &[String],
         env: HashMap<String, String>,
         timeouts: TimeoutConfig,
     ) -> HostResult<Self> {
@@ -1297,19 +1329,23 @@ impl DshNativeProvider {
     /// Create with default configuration: no explicit executable override,
     /// so resolution falls to a nonblank parent `DSH_RUNTIME_BIN` and then
     /// the bare command `dsh` on PATH.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: the no-args constructor input is the only rejection
+    /// this call can hit, and it is passed an empty argv.
     #[must_use]
     pub fn default_config() -> Self {
         Self::new(
             ProviderId::new("dsh-native"),
             "DeepSeek Harness (native)".to_string(),
             None,
-            Vec::new(),
+            &[],
             HashMap::new(),
             TimeoutConfig::default(),
         )
         .expect("empty native args are always accepted")
     }
-
 
     /// Take the completed streaming timing snapshot for one admitted turn.
     pub async fn take_run_timing(
@@ -1325,20 +1361,25 @@ impl DshNativeProvider {
         }?;
         let mut guard = snapshots
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         guard.remove(op_id)
     }
 
     /// Register-time constructor used by daemon boot (P0 T2): `dsh_bin` is
     /// the boot-resolved canonical executable (explicit/env/PATH chain
     /// resolved once at registration), or `None` to resolve at launch.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: the no-args constructor input is the only rejection
+    /// this call can hit, and it is passed an empty argv.
     #[must_use]
     pub fn with_dsh_bin(dsh_bin: Option<String>) -> Self {
         Self::new(
             ProviderId::new("dsh-native"),
             "DeepSeek Harness (native)".to_string(),
             dsh_bin,
-            Vec::new(),
+            &[],
             HashMap::new(),
             TimeoutConfig::default(),
         )
@@ -1352,12 +1393,7 @@ impl DshNativeProvider {
     /// (default 15s) maps to `initialize_timeout` and the session/prompt
     /// request budget to `request_timeout`; the full-run deadline is the
     /// caller-side `tokio::time::timeout` around `Session::run`.
-    fn sdk_config(
-        &self,
-        cwd: &Path,
-        executable: &Path,
-        sealed_home: Option<&Path>,
-    ) -> Config {
+    fn sdk_config(&self, cwd: &Path, executable: &Path, sealed_home: Option<&Path>) -> Config {
         Config {
             cwd: Some(cwd.to_path_buf()),
             dsh_bin: Some(executable.to_string_lossy().into_owned()),
@@ -1365,9 +1401,8 @@ impl DshNativeProvider {
             initialize_timeout: Some(self.timeouts.initialize_duration()),
             request_timeout: Some(self.timeouts.prompt_duration()),
             dsh_home: sealed_home.map(Path::to_path_buf),
-            patches: sealed_home.map_or_else(Vec::new, |home| {
-                vec![home.join(DENY_ALL_PATCH_FILENAME)]
-            }),
+            patches: sealed_home
+                .map_or_else(Vec::new, |home| vec![home.join(DENY_ALL_PATCH_FILENAME)]),
             ..Config::default()
         }
     }
@@ -1383,7 +1418,6 @@ impl DshNativeProvider {
         })
     }
 
-
     /// Initialize the sealed deny-all harness: provision the exclusive
     /// child home (its pinned lease is retained until confirmed close),
     /// revalidate the anchor through the pinned descriptors IMMEDIATELY
@@ -1393,6 +1427,10 @@ impl DshNativeProvider {
     /// boot, so the child is reaped and no runtime can still reference
     /// the files; a removal failure there retains the exact path for
     /// per-session reconciliation (fix wave 3).
+    // `SealedStartFailure` carries the launch error plus lease-reconciliation
+    // state; boxing it would change the type threaded through the whole sealed
+    // start/cleanup ladder for a rare terminal path.
+    #[allow(clippy::result_large_err)]
     async fn start_sealed_harness(
         &self,
         cwd: &Path,
@@ -1420,7 +1458,10 @@ impl DshNativeProvider {
             Ok(harness) => Ok((harness, lease)),
             Err(error) => {
                 let undeleted_lease = self.discard_failed_lease(lease);
-                Err(SealedStartFailure { error, undeleted_lease })
+                Err(SealedStartFailure {
+                    error,
+                    undeleted_lease,
+                })
             }
         }
     }
@@ -1463,7 +1504,11 @@ impl DshNativeProvider {
     /// exact path retained for reconciliation, never healthy with a
     /// leaked lease. Previously retained lease paths get one exact-path
     /// removal retry at the start (reconciliation, no scans).
-    async fn probe_recipes(&self) -> HostResult<ProviderHealth> {
+    async fn probe_recipes(
+        &self,
+        cwd: &std::path::Path,
+        owner: &crate::capability::model::SessionOwner,
+    ) -> HostResult<ProviderHealth> {
         let unavailable = |message: String| ProviderHealth {
             provider_id: self.provider_id.clone(),
             available: false,
@@ -1479,8 +1524,15 @@ impl DshNativeProvider {
             Ok(executable) => executable,
             Err(message) => return Ok(unavailable(message)),
         };
-        let cwd = std::env::current_dir()
-            .map_err(|_io| HostError::internal("probe could not resolve the current directory"))?;
+        // The bounded probe MUST run in the verified Creator/workspace
+        // boundary the caller admitted — never the daemon's ambient cwd, which
+        // could be a different workspace entirely. The owner binding is
+        // retained through both recipe startups below.
+        tracing::debug!(
+            creator_id = %owner.creator_id,
+            cwd = %cwd.display(),
+            "dsh probe bound to verified owner workspace"
+        );
 
         // The ordinary recipe's start + confirmed close run as ONE
         // retained spawned owner (tri-QC F-001, seat 2), installed before
@@ -1489,7 +1541,7 @@ impl DshNativeProvider {
         // never the only owner of the spawned ordinary child; the owner
         // still drives the start to completion and confirms the close,
         // reaping the direct child.
-        let ordinary_config = self.sdk_config(&cwd, &executable, None);
+        let ordinary_config = self.sdk_config(cwd, &executable, None);
         let ordinary_retained = Arc::clone(&self.retained_leases);
         let ordinary_cleanup = async move {
             match DeepSeekHarness::start(ordinary_config).await {
@@ -1534,7 +1586,7 @@ impl DshNativeProvider {
                 )));
             }
         };
-        let config = self.sdk_config(&cwd, &executable, Some(&lease.path));
+        let config = self.sdk_config(cwd, &executable, Some(&lease.path));
         let retained = Arc::clone(&self.retained_leases);
         let sealed_cleanup = async move {
             // The anchor guard lives through the SDK start handoff:
@@ -1607,7 +1659,12 @@ impl DshNativeProvider {
     /// - `Err(DshError)` → one `OpFailed` from `classify_run_error` (AR-7).
     /// - Session closed by `shutdown()` before the run starts → one
     ///   `OpFailed(stream_closed)` (stream-abort backstop).
-    #[allow(clippy::too_many_lines)]
+    // Keep the owned run inputs explicit and the harness locked through transfer/run.
+    #[allow(
+        clippy::too_many_lines,
+        clippy::too_many_arguments,
+        clippy::significant_drop_tightening
+    )]
     fn build_event_stream(
         &self,
         op_id: HostOperationId,
@@ -1684,22 +1741,20 @@ impl DshNativeProvider {
                         .map_err(RunError::Sdk)
                 };
 
-                let run_outcome = if delivery_failure_signaled(
-                    &classifier_failed,
-                    &delivery_failed,
-                ) {
+                let run_outcome = if delivery_failure_signaled(&classifier_failed, &delivery_failed)
+                {
                     RunSelectOutcome::FailureSignal
                 } else if consumer_drop_signaled(&consumer_dropped) {
                     RunSelectOutcome::ReceiverClosed
                 } else {
                     tokio::select! {
                         biased;
-                        _ = wait_delivery_failure(
+                        () = wait_delivery_failure(
                             &failure_notify,
                             &classifier_failed,
                             &delivery_failed,
                         ) => RunSelectOutcome::FailureSignal,
-                        _ = wait_consumer_drop(&consumer_dropped, &consumer_drop_notify) => {
+                        () = wait_consumer_drop(&consumer_dropped, &consumer_drop_notify) => {
                             RunSelectOutcome::ReceiverClosed
                         }
                         result = tokio::time::timeout(run_timeout, run) => match result {
@@ -1709,13 +1764,7 @@ impl DshNativeProvider {
                     }
                 };
 
-                reunify_run_harness(
-                    &run_harness,
-                    &state,
-                    &active_run,
-                    &run_reunified,
-                )
-                .await;
+                reunify_run_harness(&run_harness, &state, &active_run, &run_reunified).await;
 
                 match run_outcome {
                     RunSelectOutcome::FailureSignal => {
@@ -1775,18 +1824,20 @@ impl DshNativeProvider {
                             )
                         } else {
                             {
-                                let mut timing =
-                                    run_timing.lock().unwrap_or_else(|e| e.into_inner());
+                                let mut timing = run_timing
+                                    .lock()
+                                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                                 timing.run_completed = Some(Instant::now());
                             }
-                            publish_completed_run_timing(&op_id, &run_timing, &completed_run_timings);
-                            let snapshot = reconciliation.lock().unwrap().clone();
-                            match finalize_successful_run(
-                                &result,
-                                &snapshot,
-                                &session_id,
+                            publish_completed_run_timing(
                                 &op_id,
-                            ) {
+                                &run_timing,
+                                &completed_run_timings,
+                            );
+                            let snapshot = *reconciliation
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
+                            match finalize_successful_run(&result, &snapshot, &session_id, &op_id) {
                                 Ok(events) => match dispatch_successful_run_events(
                                     events,
                                     &content_tx,
@@ -1795,9 +1846,7 @@ impl DshNativeProvider {
                                     &op_id,
                                 ) {
                                     Ok(terminals) => (terminals, false),
-                                    Err(failed) => {
-                                        (vec![HostEvent::OpFailed(failed)], true)
-                                    }
+                                    Err(failed) => (vec![HostEvent::OpFailed(failed)], true),
                                 },
                                 Err(failed) => (vec![HostEvent::OpFailed(failed)], true),
                             }
@@ -1845,8 +1894,8 @@ impl DshNativeProvider {
                 terminal_rx,
                 budget,
                 VecDeque::<HostEvent>::new(),
-                op_id_for_stream.clone(),
-                session_id_for_stream.clone(),
+                op_id_for_stream,
+                session_id_for_stream,
                 StreamConsumerDropGuard {
                     stream_finished: stream_finished_for_guard,
                     consumer_dropped: consumer_dropped_for_guard,
@@ -1959,7 +2008,7 @@ impl DshNativeProvider {
                                     pending,
                                     op_id,
                                     session_id,
-                                drop_guard,
+                                    drop_guard,
                                 ),
                             ))
                         } else {
@@ -1972,9 +2021,7 @@ impl DshNativeProvider {
         )
         .boxed()
     }
-
 }
-
 
 enum RunSelectOutcome {
     FailureSignal,
@@ -2012,7 +2059,7 @@ impl ProviderAdapter for DshNativeProvider {
         // all leave the provider unavailable with safe static text.
         match tokio::time::timeout(
             std::time::Duration::from_millis(request.timeout_ms),
-            self.probe_recipes(),
+            self.probe_recipes(&request.cwd, &request.owner),
         )
         .await
         {
@@ -2043,8 +2090,9 @@ impl ProviderAdapter for DshNativeProvider {
         // nonblank parent DSH_RUNTIME_BIN → PATH `dsh`; an invalid override
         // fails here without fallback. Only the initialize handshake below
         // proves readiness.
-        let executable = resolve_dsh_executable(self.dsh_bin.as_deref())
-            .map_err(|message| HostError::provider_unavailable(self.provider_id.clone(), message))?;
+        let executable = resolve_dsh_executable(self.dsh_bin.as_deref()).map_err(|message| {
+            HostError::provider_unavailable(self.provider_id.clone(), message)
+        })?;
 
         // Initialize BEFORE returning the managed Ready handle (P0 T2): a
         // failed spawn/initialize is the typed launch-class failure.
@@ -2148,7 +2196,16 @@ impl ProviderAdapter for DshNativeProvider {
 
         // Fetch the session state under a short registry read (B-2), then
         // admit under the per-session lock only.
-        let (state, closing, cwd, executable, run_harness, active_run, run_reunified, completed_run_timings) = {
+        let (
+            state,
+            closing,
+            cwd,
+            executable,
+            run_harness,
+            active_run,
+            run_reunified,
+            completed_run_timings,
+        ) = {
             let sessions = self.sessions.read().await;
             let native_session = sessions.get(&session.session_id).ok_or_else(|| {
                 HostError::internal(format!(
@@ -2156,7 +2213,7 @@ impl ProviderAdapter for DshNativeProvider {
                     session.session_id
                 ))
             })?;
-            (
+            let taken = (
                 Arc::clone(&native_session.state),
                 Arc::clone(&native_session.closing),
                 native_session.cwd.clone(),
@@ -2165,7 +2222,11 @@ impl ProviderAdapter for DshNativeProvider {
                 Arc::clone(&native_session.active_run),
                 Arc::clone(&native_session.run_reunified),
                 Arc::clone(&native_session.completed_run_timings),
-            )
+            );
+            // Snapshot complete: release the sessions read guard before the
+            // caller continues into its awaiting work.
+            drop(sessions);
+            taken
         };
 
         // Shutdown intent rejects new executes IMMEDIATELY (fix wave):
@@ -2211,11 +2272,8 @@ impl ProviderAdapter for DshNativeProvider {
                     Arc::clone(&self.retained_leases),
                 );
                 guard.cleanup = Some(cleanup.clone());
-                let close_result = tokio::time::timeout(
-                    self.timeouts.shutdown_duration(),
-                    cleanup,
-                )
-                .await;
+                let close_result =
+                    tokio::time::timeout(self.timeouts.shutdown_duration(), cleanup).await;
                 match close_result {
                     Ok(Ok(())) => {
                         // Consumed confirmed close: clear the record so a
@@ -2238,8 +2296,7 @@ impl ProviderAdapter for DshNativeProvider {
                         .with_session(session.session_id.clone()));
                     }
                 }
-                let (sealed, lease) = match self.start_sealed_harness(&cwd, &executable).await
-                {
+                let (sealed, lease) = match self.start_sealed_harness(&cwd, &executable).await {
                     Ok(pair) => pair,
                     Err(failure) => {
                         // Every sealed-home/start failure permanently
@@ -2326,17 +2383,15 @@ impl ProviderAdapter for DshNativeProvider {
         // completion; only a confirmed close removes the session.
         let session_parts = {
             let sessions = self.sessions.read().await;
-            sessions
-                .get(&session.session_id)
-                .map(|native_session| {
-                    (
-                        Arc::clone(&native_session.state),
-                        Arc::clone(&native_session.closing),
-                        Arc::clone(&native_session.cleanup_slot),
-                        Arc::clone(&native_session.active_run),
-                        Arc::clone(&native_session.run_reunified),
-                    )
-                })
+            sessions.get(&session.session_id).map(|native_session| {
+                (
+                    Arc::clone(&native_session.state),
+                    Arc::clone(&native_session.closing),
+                    Arc::clone(&native_session.cleanup_slot),
+                    Arc::clone(&native_session.active_run),
+                    Arc::clone(&native_session.run_reunified),
+                )
+            })
         };
         let Some((state, closing, cleanup_slot, active_run, run_reunified)) = session_parts else {
             // A previous shutdown already observed the confirmed close and
@@ -2349,31 +2404,23 @@ impl ProviderAdapter for DshNativeProvider {
         // Establish (or observe) the ONE final-close owner atomically:
         // this synchronous cell is never held across an await and never
         // behind the run mutex.
-        let cleanup = {
-            let mut slot = cleanup_slot.lock().unwrap_or_else(|error| {
-                // A poisoned cell can only mean a panic between
-                // check-and-insert; recover the value rather than
-                // abandoning the cleanup contract.
-                error.into_inner()
-            });
-            match &*slot {
-                Some(cleanup) => cleanup.clone(),
-                None => {
-                    let cleanup = start_final_close(
-                        state,
-                        active_run,
-                        run_reunified,
-                        Arc::clone(&self.retained_leases),
-                    );
-                    *slot = Some(cleanup.clone());
-                    cleanup
-                }
-            }
-        };
+        let cleanup = cleanup_slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_or_insert_with(|| {
+                start_final_close(
+                    state,
+                    active_run,
+                    run_reunified,
+                    Arc::clone(&self.retained_leases),
+                )
+            })
+            .clone();
         match tokio::time::timeout(self.timeouts.shutdown_duration(), cleanup).await {
             Ok(Ok(())) => {
                 let mut sessions = self.sessions.write().await;
                 sessions.remove(&session.session_id);
+                drop(sessions);
                 tracing::info!(
                     session_id = %session.session_id,
                     provider_id = %self.provider_id,
@@ -2389,18 +2436,18 @@ impl ProviderAdapter for DshNativeProvider {
                 // this session's failed path is confirmed gone — remove
                 // the record and report success (fix wave 2: a completed
                 // shared cleanup error alone is insufficient).
-                if let (true, Some(failed_path)) =
-                    (failure.close_confirmed, &failure.failed_lease)
+                if let (true, Some(failed_path)) = (failure.close_confirmed, &failure.failed_lease)
                 {
                     reconcile_retained_leases(&self.retained_leases);
                     let still_retained = self
                         .retained_leases
                         .lock()
-                        .unwrap_or_else(|error| error.into_inner())
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .contains(failed_path);
                     if !still_retained {
                         let mut sessions = self.sessions.write().await;
                         sessions.remove(&session.session_id);
+                        drop(sessions);
                         tracing::info!(
                             session_id = %session.session_id,
                             provider_id = %self.provider_id,
@@ -2449,6 +2496,19 @@ mod tests {
     use deepseek_harness_sdk::Notification;
     use serde_json::{json, Map};
 
+    fn test_probe_request(timeout_ms: u64) -> crate::capability::model::ProbeRequest {
+        let cwd = std::path::PathBuf::from("/tmp");
+        crate::capability::model::ProbeRequest {
+            timeout_ms,
+            cwd,
+            owner: crate::capability::model::SessionOwner {
+                creator_id: "ctr_test".to_string(),
+                workspace_root: std::path::PathBuf::from("/tmp"),
+                orchestration_run_id: None,
+            },
+        }
+    }
+
     const MOCK_DSH_AGENT: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/native_protocol/mock_dsh_agent.py"
@@ -2469,7 +2529,7 @@ mod tests {
     }
 
     /// Hermetic environment for stub-backed providers: the request log and
-    /// an isolated DSH_HOME (the SDK creates/resolves DSH_HOME at harness
+    /// an isolated `DSH_HOME` (the SDK creates/resolves `DSH_HOME` at harness
     /// start; the caller-env route keeps tests away from any real home).
     fn stub_env(req_log: &Path, home: &Path) -> HashMap<String, String> {
         HashMap::from([
@@ -2477,10 +2537,7 @@ mod tests {
                 "REQ_LOG".to_string(),
                 req_log.to_string_lossy().into_owned(),
             ),
-            (
-                "DSH_HOME".to_string(),
-                home.to_string_lossy().into_owned(),
-            ),
+            ("DSH_HOME".to_string(), home.to_string_lossy().into_owned()),
         ])
     }
 
@@ -2491,7 +2548,7 @@ mod tests {
             ProviderId::new(provider_id),
             "Test".to_string(),
             Some(MOCK_DSH_AGENT.to_string()),
-            Vec::new(),
+            &[],
             env,
             TimeoutConfig::default(),
         )
@@ -2507,7 +2564,7 @@ mod tests {
             ProviderId::new(provider_id),
             "Test".to_string(),
             Some(MOCK_DSH_AGENT.to_string()),
-            Vec::new(),
+            &[],
             env,
             timeouts,
         )
@@ -2517,20 +2574,20 @@ mod tests {
     fn lock_test_env() -> std::sync::MutexGuard<'static, ()> {
         crate::test_support::PROCESS_ENV_LOCK
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Launch under the env lock: launch() now initializes the runtime
+    /// Launch under the env lock: `launch()` now initializes the runtime
     /// eagerly, spawning the python fixture whose `#!/usr/bin/env python3`
     /// shebang resolves python3 through PATH at execve time (see lib.rs
-    /// test_support).
+    /// `test_support`).
     #[allow(clippy::future_not_send)]
     async fn launch_hermetic(provider: &DshNativeProvider) -> ManagedSessionHandle {
         let _env_lock = lock_test_env();
         provider.launch(launch_spec()).await.expect("launch")
     }
 
-    /// All REQ_LOG entries as parsed JSON values.
+    /// All `REQ_LOG` entries as parsed JSON values.
     fn req_log_entries(req_log: &Path) -> Vec<serde_json::Value> {
         std::fs::read_to_string(req_log)
             .expect("REQ_LOG written")
@@ -2606,7 +2663,7 @@ mod tests {
         collect_events(stream).await
     }
 
-    /// The all-false deny_all scope (architecture §3.4 selection).
+    /// The all-false `deny_all` scope (architecture §3.4 selection).
     const fn deny_all_scope() -> PromptPermissionScope {
         PromptPermissionScope {
             allow_read: false,
@@ -2624,17 +2681,18 @@ mod tests {
         scope: Option<PromptPermissionScope>,
     ) -> HostResult<Vec<HostEvent>> {
         let _env_lock = lock_test_env();
-        let stream = provider.execute(
-            handle,
-            HostOperation::Prompt {
-                op_id: HostOperationId::new(),
-                content: vec![HostContentBlock::Text {
-                    text: text.to_string(),
-                }],
-                permission_scope: scope,
-            },
-        )
-        .await?;
+        let stream = provider
+            .execute(
+                handle,
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: text.to_string(),
+                    }],
+                    permission_scope: scope,
+                },
+            )
+            .await?;
         Ok(collect_events(stream).await)
     }
 
@@ -2659,7 +2717,7 @@ mod tests {
 
     /// RAII guard replacing `PATH` with a single directory on construction
     /// and restoring the previous value on drop (mirrors the
-    /// discovery/path_scan.rs test guard).
+    /// `discovery/path_scan.rs` test guard).
     struct PathGuard {
         previous: Option<String>,
     }
@@ -2765,7 +2823,7 @@ mod tests {
             ProviderId::new("args-dsh"),
             "Args".to_string(),
             None,
-            vec!["--verbose".to_string()],
+            &["--verbose".to_string()],
             HashMap::new(),
             TimeoutConfig::default(),
         );
@@ -2855,7 +2913,10 @@ mod tests {
             let _path_guard = PathGuard::isolate(temp_dir.path());
             let _bin_guard = DshRuntimeBinGuard::set(&env_bin);
             let resolved = resolve_dsh_executable(None).expect("env route");
-            assert_eq!(resolved, std::fs::canonicalize(&env_bin).expect("canonical"));
+            assert_eq!(
+                resolved,
+                std::fs::canonicalize(&env_bin).expect("canonical")
+            );
         }
 
         // An invalid env override fails closed — no PATH fallback.
@@ -2878,7 +2939,10 @@ mod tests {
             let _path_guard = PathGuard::isolate(temp_dir.path());
             let _bin_guard = DshRuntimeBinGuard::remove();
             let resolved = resolve_dsh_executable(None).expect("PATH dsh");
-            assert_eq!(resolved, std::fs::canonicalize(&path_bin).expect("canonical"));
+            assert_eq!(
+                resolved,
+                std::fs::canonicalize(&path_bin).expect("canonical")
+            );
 
             let empty_dir = temp_dir.path().join("nothing-here");
             std::fs::create_dir_all(&empty_dir).expect("empty dir");
@@ -2901,7 +2965,10 @@ mod tests {
         // SDK truthiness parity: a blank explicit value counts as absent,
         // so the env route applies.
         let resolved = resolve_dsh_executable(Some("   ")).expect("blank explicit is absent");
-        assert_eq!(resolved, std::fs::canonicalize(&env_bin).expect("canonical"));
+        assert_eq!(
+            resolved,
+            std::fs::canonicalize(&env_bin).expect("canonical")
+        );
     }
 
     // ── Sealed deny_all asset and home provisioning (architecture §3.4) ──
@@ -2961,10 +3028,16 @@ mod tests {
             );
         }
         // The Nexus pins on the upstream tree.
-        assert!(DENY_ALL_PATCH.contains("profile: sdk"), "sdk-app-startup profile pin");
+        assert!(
+            DENY_ALL_PATCH.contains("profile: sdk"),
+            "sdk-app-startup profile pin"
+        );
         assert!(DENY_ALL_PATCH.contains("mode: native"), "tools native pin");
         assert!(DENY_ALL_PATCH.contains("agents: []"), "empty agents pin");
-        assert!(DENY_ALL_PATCH.contains("maxRetries: 0"), "provider retry pin");
+        assert!(
+            DENY_ALL_PATCH.contains("maxRetries: 0"),
+            "provider retry pin"
+        );
         // Upstream platform conditions survive verbatim.
         assert!(DENY_ALL_PATCH.contains("process.platform === 'win32'"));
         assert!(DENY_ALL_PATCH.contains("process.platform !== 'win32'"));
@@ -2999,8 +3072,7 @@ mod tests {
         provision_sealed_home_at(&child).expect("fresh child provisions");
 
         assert_eq!(
-            std::fs::read_to_string(child.join("profiles/sdk/package.json"))
-                .expect("manifest"),
+            std::fs::read_to_string(child.join("profiles/sdk/package.json")).expect("manifest"),
             format!("{SEALED_PROFILE_MANIFEST}\n"),
             "the sdk manifest is the exact empty-bundles startup-frozen tuple"
         );
@@ -3023,7 +3095,11 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(&child).expect("stat").permissions().mode() & 0o777;
+            let mode = std::fs::metadata(&child)
+                .expect("stat")
+                .permissions()
+                .mode()
+                & 0o777;
             assert_eq!(mode, 0o700, "the child home is owner-only");
             let patch_mode = std::fs::metadata(child.join(DENY_ALL_PATCH_FILENAME))
                 .expect("stat patch")
@@ -3517,14 +3593,14 @@ mod tests {
             ProviderId::new("nonexistent-dsh-xyz"),
             "Fake".to_string(),
             Some("nonexistent_dsh_runtime_xyz_12345".to_string()),
-            Vec::new(),
+            &[],
             HashMap::new(),
             TimeoutConfig::default(),
         )
         .expect("empty native args");
 
         let health = provider
-            .probe(crate::capability::model::ProbeRequest { timeout_ms: 5000 })
+            .probe(test_probe_request(5000))
             .await
             .expect("probe should return a health value");
 
@@ -3541,7 +3617,7 @@ mod tests {
     /// probe's sealed lease is deleted after the confirmed close.
     /// Tri-QC F-001 (seat 1): the public success message is STATIC and
     /// discloses neither the explicit runtime path nor the caller
-    /// DSH_HOME path — it is serialized verbatim into the daemon
+    /// `DSH_HOME` path — it is serialized verbatim into the daemon
     /// provider-catalog response (`GET /v1/daemon/agent-host/providers`).
     #[tokio::test]
     async fn probe_initializes_and_closes_both_recipes() {
@@ -3552,13 +3628,13 @@ mod tests {
         let provider = stub_provider("test-dsh-probe", stub_env(&req_log, &dsh_home));
 
         let health = provider
-            .probe(crate::capability::model::ProbeRequest { timeout_ms: 30_000 })
+            .probe(test_probe_request(30_000))
             .await
             .expect("probe should succeed");
         assert!(
             health.available,
             "both recipes initialize and close: {}",
-            health.message.clone().unwrap_or_default()
+            health.message.as_deref().unwrap_or_default()
         );
 
         // The public health diagnostic (copied verbatim into the daemon
@@ -3588,7 +3664,10 @@ mod tests {
         );
         let sealed_argv = argv_of(&spawns[1]);
         assert_eq!(sealed_argv.len(), 4, "sealed argv adds one patch pair");
-        assert_eq!(sealed_argv[0..2], ["--profile".to_string(), "sdk".to_string()]);
+        assert_eq!(
+            sealed_argv[0..2],
+            ["--profile".to_string(), "sdk".to_string()]
+        );
         assert_eq!(sealed_argv[2], "--patch");
         let patch_path = PathBuf::from(&sealed_argv[3]);
         assert!(patch_path.is_absolute(), "the patch is an absolute path");
@@ -3600,7 +3679,9 @@ mod tests {
             "the patch lives inside the owned child home: {patch_path:?}"
         );
         let sealed_home = PathBuf::from(
-            spawns[1]["dsh_home"].as_str().expect("sealed dsh_home logged"),
+            spawns[1]["dsh_home"]
+                .as_str()
+                .expect("sealed dsh_home logged"),
         );
         assert!(
             sealed_home.starts_with(&nexus_root),
@@ -3633,9 +3714,14 @@ mod tests {
         let provider = stub_provider("test-dsh-denyall", stub_env(&req_log, &dsh_home));
         let handle = launch_hermetic(&provider).await;
 
-        let events = run_turn_scoped(&provider, &handle, "no tools please", Some(deny_all_scope()))
-            .await
-            .expect("deny_all turn executes");
+        let events = run_turn_scoped(
+            &provider,
+            &handle,
+            "no tools please",
+            Some(deny_all_scope()),
+        )
+        .await
+        .expect("deny_all turn executes");
         assert!(
             matches!(events.last(), Some(HostEvent::OpFinished(_))),
             "the sealed turn completes: {events:?}"
@@ -3661,7 +3747,10 @@ mod tests {
         );
         let sealed_argv = argv_of(&spawns[1]);
         assert_eq!(sealed_argv.len(), 4);
-        assert_eq!(sealed_argv[0..2], ["--profile".to_string(), "sdk".to_string()]);
+        assert_eq!(
+            sealed_argv[0..2],
+            ["--profile".to_string(), "sdk".to_string()]
+        );
         assert_eq!(sealed_argv[2], "--patch");
         let nexus_root = std::fs::canonicalize(&dsh_home)
             .expect("canonical selected home")
@@ -3669,12 +3758,13 @@ mod tests {
         let patch_path = PathBuf::from(&sealed_argv[3]);
         assert!(patch_path.is_absolute() && patch_path.starts_with(&nexus_root));
         let sealed_home = PathBuf::from(
-            spawns[1]["dsh_home"].as_str().expect("sealed dsh_home logged"),
+            spawns[1]["dsh_home"]
+                .as_str()
+                .expect("sealed dsh_home logged"),
         );
         assert!(sealed_home.starts_with(&nexus_root));
         assert_ne!(
-            sealed_home,
-            dsh_home,
+            sealed_home, dsh_home,
             "the sealed runtime never uses the ordinary home"
         );
 
@@ -3683,7 +3773,10 @@ mod tests {
         // sealed runtime (after its spawn).
         let methods = method_sequence(&entries);
         let prompt_count = methods.iter().filter(|m| *m == "session/prompt").count();
-        assert_eq!(prompt_count, 2, "exactly the two admitted prompts: {methods:?}");
+        assert_eq!(
+            prompt_count, 2,
+            "exactly the two admitted prompts: {methods:?}"
+        );
         let second_spawn = methods
             .iter()
             .enumerate()
@@ -3710,7 +3803,10 @@ mod tests {
 
         // The lease is live while the session runs; the confirmed close of
         // shutdown deletes it.
-        assert!(sealed_home.exists(), "the sealed lease is retained while live");
+        assert!(
+            sealed_home.exists(),
+            "the sealed lease is retained while live"
+        );
         {
             let _env_lock = lock_test_env();
             provider.shutdown(handle).await.expect("confirmed close");
@@ -3721,7 +3817,7 @@ mod tests {
         );
     }
 
-    /// Once an ordinary prompt has been admitted, a deny_all scope change
+    /// Once an ordinary prompt has been admitted, a `deny_all` scope change
     /// is rejected — never a conversation reset or a permission switch.
     #[tokio::test]
     async fn ordinary_then_deny_all_scope_change_is_rejected() {
@@ -3736,8 +3832,7 @@ mod tests {
         let events = run_turn(&provider, &handle, "ordinary first").await;
         assert!(matches!(events.last(), Some(HostEvent::OpFinished(_))));
 
-        let result =
-            run_turn_scoped(&provider, &handle, "deny now", Some(deny_all_scope())).await;
+        let result = run_turn_scoped(&provider, &handle, "deny now", Some(deny_all_scope())).await;
         assert!(
             matches!(result, Err(HostError::PolicyDenied { .. })),
             "scope change after admission must be rejected: {result:?}"
@@ -3749,10 +3844,13 @@ mod tests {
             .iter()
             .filter(|value| value["method"] == "session/prompt")
             .count();
-        assert_eq!(prompt_count, 1, "the rejected prompt never reached a runtime");
+        assert_eq!(
+            prompt_count, 1,
+            "the rejected prompt never reached a runtime"
+        );
     }
 
-    /// Once a deny_all prompt has been admitted, a `None` scope change is
+    /// Once a `deny_all` prompt has been admitted, a `None` scope change is
     /// rejected — `None` never escalates out of the sealed recipe.
     #[tokio::test]
     async fn deny_all_then_none_scope_change_is_rejected() {
@@ -3780,7 +3878,10 @@ mod tests {
             .iter()
             .filter(|value| value["method"] == "session/prompt")
             .count();
-        assert_eq!(prompt_count, 1, "the rejected prompt never reached a runtime");
+        assert_eq!(
+            prompt_count, 1,
+            "the rejected prompt never reached a runtime"
+        );
     }
 
     /// A partially permissive scope is `not_supported` BEFORE admission:
@@ -3814,7 +3915,9 @@ mod tests {
         let entries = req_log_entries(&req_log);
         assert_eq!(spawn_records(&entries).len(), 1, "no sealed spawn happened");
         assert!(
-            !entries.iter().any(|value| value["method"] == "session/prompt"),
+            !entries
+                .iter()
+                .any(|value| value["method"] == "session/prompt"),
             "no prompt was admitted: {entries:?}"
         );
     }
@@ -3919,7 +4022,6 @@ mod tests {
         );
     }
 
-
     /// Regression for fe78386b7: reunify can clear `active_run` and notify
     /// between the old `while` latch check and `notified()` registration,
     /// leaving the retained final close hung or skipping the reunified
@@ -3972,10 +4074,7 @@ mod tests {
 
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             reunify.await.expect("reunify task");
-            match close.await {
-                Ok(()) => {}
-                Err(_) => panic!("confirmed close"),
-            }
+            assert!(close.await.is_ok(), "confirmed close must succeed");
         })
         .await
         .expect("final close must not hang on reunify notify race");
@@ -4011,9 +4110,7 @@ mod tests {
             let state = Arc::clone(&state);
             let active_run = Arc::clone(&active_run);
             let run_reunified = Arc::clone(&run_reunified);
-            async move {
-                wait_run_harness_reunify(&state, &active_run, &run_reunified).await
-            }
+            async move { wait_run_harness_reunify(&state, &active_run, &run_reunified).await }
         });
 
         active_run.store(false, Ordering::Release);
@@ -4021,7 +4118,7 @@ mod tests {
         match tokio::time::timeout(std::time::Duration::from_millis(200), waiter).await {
             Ok(Ok(_)) => {}
             Ok(Err(join_error)) => panic!("waiter join failed: {join_error}"),
-            Err(_) => panic!("latched reunify must complete without Notify"),
+            Err(elapsed) => panic!("latched reunify must complete without Notify: {elapsed:?}"),
         }
     }
 
@@ -4041,8 +4138,7 @@ mod tests {
         let provider = stub_provider("test-dsh-sealfail", stub_env(&req_log, &dsh_home));
         let handle = launch_hermetic(&provider).await;
 
-        let failed =
-            run_turn_scoped(&provider, &handle, "seal me", Some(deny_all_scope())).await;
+        let failed = run_turn_scoped(&provider, &handle, "seal me", Some(deny_all_scope())).await;
         assert!(
             matches!(failed, Err(HostError::LaunchFailed { .. })),
             "provisioning failure is the typed launch-class error: {failed:?}"
@@ -4070,7 +4166,9 @@ mod tests {
         let entries = req_log_entries(&req_log);
         assert_eq!(spawn_records(&entries).len(), 1, "no sealed spawn happened");
         assert!(
-            !entries.iter().any(|value| value["method"] == "session/prompt"),
+            !entries
+                .iter()
+                .any(|value| value["method"] == "session/prompt"),
             "no prompt was admitted: {entries:?}"
         );
 
@@ -4078,7 +4176,10 @@ mod tests {
         // removes the record.
         {
             let _env_lock = lock_test_env();
-            provider.shutdown(handle).await.expect("final close completes");
+            provider
+                .shutdown(handle)
+                .await
+                .expect("final close completes");
         }
     }
 
@@ -4194,7 +4295,7 @@ mod tests {
         assert!(
             retained
                 .lock()
-                .unwrap_or_else(|error| error.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .contains(&lease_path),
             "the exact failed path is retained for a later retry"
         );
@@ -4208,7 +4309,7 @@ mod tests {
         assert!(
             retained
                 .lock()
-                .unwrap_or_else(|error| error.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .is_empty(),
             "only a confirmed removal clears the record"
         );
@@ -4231,9 +4332,7 @@ mod tests {
         env.insert("SHUTDOWN_DELAY_MS".to_string(), "600".to_string());
         let provider = stub_provider("test-dsh-probetimeout", env);
 
-        let probe = provider
-            .probe(crate::capability::model::ProbeRequest { timeout_ms: 800 })
-            .await;
+        let probe = provider.probe(test_probe_request(800)).await;
         assert!(
             matches!(probe, Err(HostError::OperationTimeout { .. })),
             "the probe deadline fires during the sealed close: {probe:?}"
@@ -4246,7 +4345,9 @@ mod tests {
         let spawns = spawn_records(&entries);
         assert_eq!(spawns.len(), 2, "both recipes were spawned: {entries:?}");
         let sealed_home = PathBuf::from(
-            spawns[1]["dsh_home"].as_str().expect("sealed dsh_home logged"),
+            spawns[1]["dsh_home"]
+                .as_str()
+                .expect("sealed dsh_home logged"),
         );
         assert!(
             !sealed_home.exists(),
@@ -4276,9 +4377,7 @@ mod tests {
         env.insert("INIT_DELAY_MS".to_string(), "600".to_string());
         let provider = stub_provider("test-dsh-probeinit", env);
 
-        let probe = provider
-            .probe(crate::capability::model::ProbeRequest { timeout_ms: 1000 })
-            .await;
+        let probe = provider.probe(test_probe_request(1000)).await;
         assert!(
             matches!(probe, Err(HostError::OperationTimeout { .. })),
             "the probe deadline fires during the sealed start: {probe:?}"
@@ -4292,7 +4391,9 @@ mod tests {
         let spawns = spawn_records(&entries);
         assert_eq!(spawns.len(), 2, "both recipes were spawned: {entries:?}");
         let sealed_home = PathBuf::from(
-            spawns[1]["dsh_home"].as_str().expect("sealed dsh_home logged"),
+            spawns[1]["dsh_home"]
+                .as_str()
+                .expect("sealed dsh_home logged"),
         );
         assert!(
             !sealed_home.exists(),
@@ -4302,7 +4403,7 @@ mod tests {
             provider
                 .retained_leases
                 .lock()
-                .unwrap_or_else(|error| error.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .is_empty(),
             "no lease path remains retained"
         );
@@ -4333,9 +4434,7 @@ mod tests {
         env.insert("INIT_DELAY_MS".to_string(), "600".to_string());
         let provider = stub_provider("test-dsh-probeordinit", env);
 
-        let probe = provider
-            .probe(crate::capability::model::ProbeRequest { timeout_ms: 100 })
-            .await;
+        let probe = provider.probe(test_probe_request(100)).await;
         assert!(
             matches!(probe, Err(HostError::OperationTimeout { .. })),
             "the probe deadline fires during the ordinary start: {probe:?}"
@@ -4361,12 +4460,16 @@ mod tests {
              after the dropped wait: {methods:?}"
         );
         let pids = spawn_pids(&entries);
-        assert_pid_reaped(pids[0], "the ordinary child was reaped by the retained owner").await;
+        assert_pid_reaped(
+            pids[0],
+            "the ordinary child was reaped by the retained owner",
+        )
+        .await;
         assert!(
             provider
                 .retained_leases
                 .lock()
-                .unwrap_or_else(|error| error.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .is_empty(),
             "no lease path remains retained"
         );
@@ -4424,7 +4527,7 @@ mod tests {
             provider
                 .retained_leases
                 .lock()
-                .unwrap_or_else(|error| error.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .contains(&lease),
             "the exact failed path is retained for a later attempt"
         );
@@ -4451,7 +4554,7 @@ mod tests {
             provider
                 .retained_leases
                 .lock()
-                .unwrap_or_else(|error| error.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .is_empty(),
             "the retained-path record is cleared"
         );
@@ -4466,10 +4569,11 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn sealed_home_rejects_unsafe_permission_boundary() {
+        use std::os::unix::fs::PermissionsExt;
+
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let home = temp_dir.path().join("home");
         std::fs::create_dir_all(&home).expect("home");
-        use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o777))
             .expect("chmod 0777");
         assert!(
@@ -4512,7 +4616,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let lease = provision_sealed_home_fd(&temp_dir.path().join("nexus").join("leaf"))
             .expect("provision");
-        let path = lease.path.clone();
+        let path = lease.path;
         let victim = temp_dir.path().join("victim");
         std::fs::create_dir_all(&victim).expect("victim");
         std::fs::write(victim.join("keep"), b"keep").expect("victim file");
@@ -4535,7 +4639,7 @@ mod tests {
         assert!(
             retained
                 .lock()
-                .unwrap_or_else(|error| error.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .is_empty(),
             "confirmed anchored removal clears the retained record"
         );
@@ -4547,8 +4651,7 @@ mod tests {
     /// confirms deletion and only then removes the session record.
     #[cfg(unix)]
     #[tokio::test]
-    async fn sealed_switch_start_delete_failure_retains_session_lease_until_shutdown_retry(
-    ) {
+    async fn sealed_switch_start_delete_failure_retains_session_lease_until_shutdown_retry() {
         use std::os::unix::fs::PermissionsExt;
 
         let temp_dir = tempfile::tempdir().expect("temp dir");
@@ -4560,8 +4663,7 @@ mod tests {
         let provider = stub_provider("test-dsh-switchfail", env);
         let handle = launch_hermetic(&provider).await;
 
-        let failed =
-            run_turn_scoped(&provider, &handle, "seal me", Some(deny_all_scope())).await;
+        let failed = run_turn_scoped(&provider, &handle, "seal me", Some(deny_all_scope())).await;
         assert!(
             matches!(failed, Err(HostError::LaunchFailed { .. })),
             "sealed start failure is the typed launch-class error: {failed:?}"
@@ -4571,8 +4673,14 @@ mod tests {
             let sessions = provider.sessions.read().await;
             let native = sessions.get(&handle.session_id).expect("session");
             let guard = native.state.lock().await;
-            assert!(guard.closed, "the switch failure permanently closes the session");
-            guard.failed_lease.clone().expect("failed_lease is associated")
+            assert!(
+                guard.closed,
+                "the switch failure permanently closes the session"
+            );
+            guard
+                .failed_lease
+                .clone()
+                .expect("failed_lease is associated")
         };
         assert!(lease.exists(), "the undeleted anchored lease is retained");
         let blocker = lease.join("blocker");
@@ -4582,7 +4690,10 @@ mod tests {
             .permissions()
             .mode()
             & 0o777;
-        assert_eq!(leaf_mode, 0o555, "the mock made the leaf unwritable for removal");
+        assert_eq!(
+            leaf_mode, 0o555,
+            "the mock made the leaf unwritable for removal"
+        );
 
         let first = {
             let _env_lock = lock_test_env();
@@ -4593,7 +4704,11 @@ mod tests {
             "shutdown must stay cleanup-unconfirmed while the lease remains: {first:?}"
         );
         assert!(
-            provider.sessions.read().await.contains_key(&handle.session_id),
+            provider
+                .sessions
+                .read()
+                .await
+                .contains_key(&handle.session_id),
             "the session record survives until confirmed lease removal"
         );
 
@@ -4610,7 +4725,11 @@ mod tests {
         }
         assert!(!lease.exists(), "the session-associated lease is removed");
         assert!(
-            !provider.sessions.read().await.contains_key(&handle.session_id),
+            !provider
+                .sessions
+                .read()
+                .await
+                .contains_key(&handle.session_id),
             "only confirmed deletion removes the session record"
         );
     }
@@ -4644,7 +4763,9 @@ mod tests {
                 _ if std::time::Instant::now() < deadline => {
                     tokio::time::sleep(std::time::Duration::from_millis(25)).await;
                 }
-                result => panic!("{what} pid {pid} must be reaped (kill(0) → ESRCH), got {result:?}"),
+                result => {
+                    panic!("{what} pid {pid} must be reaped (kill(0) → ESRCH), got {result:?}")
+                }
             }
         }
     }
@@ -4663,20 +4784,19 @@ mod tests {
             std::fs::set_permissions(&dsh, std::fs::Permissions::from_mode(0o755))
                 .expect("chmod +x dsh");
             let python = which::which("python3").expect("python3 on the pre-isolation PATH");
-            std::os::unix::fs::symlink(python, bin_dir.join("python3"))
-                .expect("python3 symlink");
+            std::os::unix::fs::symlink(python, bin_dir.join("python3")).expect("python3 symlink");
         }
         dsh
     }
 
     /// Full SDK-wire proof through a real child process whose executable
     /// name is exactly `dsh`, resolved through an isolated PATH (no
-    /// explicit override, no DSH_RUNTIME_BIN): ordinary argv is exactly
-    /// `--profile sdk` with the caller-env DSH_HOME; the first deny_all
+    /// explicit override, no `DSH_RUNTIME_BIN`): ordinary argv is exactly
+    /// `--profile sdk` with the caller-env `DSH_HOME`; the first `deny_all`
     /// prompt closes the ordinary child (its pid is reaped BEFORE the
     /// sealed turn), initializes the sealed child home with exactly one
     /// owned `--patch`; the turn maps receipt → assistant delta →
-    /// `turn/end: completed` → root idle into OpStarted → MessageDelta →
+    /// `turn/end: completed` → root idle into `OpStarted` → `MessageDelta` →
     /// OpFinished(EndTurn); and the confirmed shutdown reaps the sealed
     /// child pid and deletes the lease.
     #[cfg(unix)]
@@ -4697,13 +4817,11 @@ mod tests {
     }
 
     fn terminal_of(events: &[HostEvent]) -> Option<&HostEvent> {
-        events.iter().rev().find(|event| {
-            matches!(event, HostEvent::OpFinished(_) | HostEvent::OpFailed(_))
-        })
+        events
+            .iter()
+            .rev()
+            .find(|event| matches!(event, HostEvent::OpFinished(_) | HostEvent::OpFailed(_)))
     }
-
-
-
 
     fn test_root_message_notification(root_session_id: &str, text: &str) -> Notification {
         let mut payload = Map::new();
@@ -4721,6 +4839,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::type_complexity)] // 8-tuple of the channels the observer fans out to
     fn test_stream_observer(
         root_session_id: &str,
     ) -> (
@@ -4771,9 +4890,13 @@ mod tests {
         classifier_failed: &AtomicBool,
     ) -> Vec<HostEvent> {
         if classifier_failed.load(Ordering::Acquire) {
-            vec![HostEvent::OpFailed(operation_protocol_failure(session_id, op_id))]
+            vec![HostEvent::OpFailed(operation_protocol_failure(
+                session_id, op_id,
+            ))]
         } else {
-            vec![HostEvent::OpFailed(operation_delivery_overflow_failure(session_id, op_id))]
+            vec![HostEvent::OpFailed(operation_delivery_overflow_failure(
+                session_id, op_id,
+            ))]
         }
     }
 
@@ -4830,7 +4953,6 @@ mod tests {
         let events = run_turn(&provider, &handle, "nested").await;
         assert_eq!(message_texts(&events), vec!["mock dsh reply"], "{events:?}");
     }
-
 
     #[tokio::test]
     async fn dsh_absent_root_event_type_fails_protocol_not_final_fallback() {
@@ -4894,7 +5016,6 @@ mod tests {
         );
     }
 
-
     #[tokio::test]
     async fn dispatch_successful_run_try_send_failure_preserves_prior_pending() {
         let budget = Arc::new(DeliveryBudget::default());
@@ -4915,14 +5036,9 @@ mod tests {
                 text: second,
             }),
         ];
-        let failed = dispatch_successful_run_events(
-            events,
-            &content_tx,
-            &budget,
-            &session_id,
-            &op_id,
-        )
-        .expect_err("second delta must fail when the channel is full");
+        let failed =
+            dispatch_successful_run_events(events, &content_tx, &budget, &session_id, &op_id)
+                .expect_err("second delta must fail when the channel is full");
         assert_eq!(failed.error_category, "provider_error");
         assert_eq!(
             budget.test_pending_message_slots(),
@@ -4955,21 +5071,15 @@ mod tests {
                 reason: FinishReason::EndTurn,
             }),
         ];
-        let dispatched = dispatch_successful_run_events(
-            events,
-            &content_tx,
-            &budget,
-            &session_id,
-            &op_id,
-        )
-        .expect_err("oversized no-callback fallback must fail delivery bounds");
+        let dispatched =
+            dispatch_successful_run_events(events, &content_tx, &budget, &session_id, &op_id)
+                .expect_err("oversized no-callback fallback must fail delivery bounds");
         assert_eq!(dispatched.error_category, "provider_error");
         assert_eq!(
             dispatched.error_message,
             "dsh operation exceeded Nexus delivery bounds"
         );
     }
-
 
     #[tokio::test]
     async fn dsh_oversize_fixture_fails_delivery_bounds() {
@@ -4991,8 +5101,6 @@ mod tests {
         );
         assert_eq!(terminal_count(&events), 1);
     }
-
-
 
     #[test]
     fn publish_completed_run_timing_is_scoped_per_operation() {
@@ -5108,20 +5216,16 @@ mod tests {
 
         let notified = tokio::time::timeout(
             std::time::Duration::from_millis(50),
-            wait_delivery_failure(
-                &failure_notify,
-                &classifier_failed,
-                &delivery_failed,
-            ),
+            wait_delivery_failure(&failure_notify, &classifier_failed, &delivery_failed),
         )
         .await;
-        assert!(notified.is_ok(), "delivery_failed must wake failure waiters");
-
-        let terminal = failure_signal_delivery_overflow_events(
-            &session_id,
-            &op_id,
-            &classifier_failed,
+        assert!(
+            notified.is_ok(),
+            "delivery_failed must wake failure waiters"
         );
+
+        let terminal =
+            failure_signal_delivery_overflow_events(&session_id, &op_id, &classifier_failed);
         assert_delivery_overflow_terminal(&terminal);
     }
 
@@ -5205,7 +5309,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-
+    #[allow(clippy::too_many_lines)] // one end-to-end fixture journey; splitting would obscure the sequence
     async fn wire_child_named_dsh_full_handshake_and_confirmed_exit() {
         // This test holds the env lock itself (PATH isolation must cover
         // resolution AND spawn), so it cannot call the locking helpers —
@@ -5222,7 +5326,7 @@ mod tests {
             ProviderId::new("test-dsh-named"),
             "Test".to_string(),
             None,
-            Vec::new(),
+            &[],
             stub_env(&req_log, &dsh_home),
             TimeoutConfig::default(),
         )
@@ -5267,7 +5371,11 @@ mod tests {
 
         let entries = req_log_entries(&req_log);
         let spawns = spawn_records(&entries);
-        assert_eq!(spawns.len(), 2, "ordinary launch + sealed switch: {entries:?}");
+        assert_eq!(
+            spawns.len(),
+            2,
+            "ordinary launch + sealed switch: {entries:?}"
+        );
         assert_eq!(
             argv_of(&spawns[0]),
             vec!["--profile".to_string(), "sdk".to_string()],
@@ -5279,8 +5387,15 @@ mod tests {
             "the ordinary child env carries the caller-env DSH_HOME"
         );
         let sealed_argv = argv_of(&spawns[1]);
-        assert_eq!(sealed_argv.len(), 4, "sealed argv adds one owned patch pair");
-        assert_eq!(sealed_argv[0..2], ["--profile".to_string(), "sdk".to_string()]);
+        assert_eq!(
+            sealed_argv.len(),
+            4,
+            "sealed argv adds one owned patch pair"
+        );
+        assert_eq!(
+            sealed_argv[0..2],
+            ["--profile".to_string(), "sdk".to_string()]
+        );
         assert_eq!(sealed_argv[2], "--patch");
         let nexus_root = std::fs::canonicalize(&dsh_home)
             .expect("canonical selected home")
@@ -5342,7 +5457,7 @@ mod tests {
                     .to_string_lossy()
                     .into_owned(),
             ),
-            Vec::new(),
+            &[],
             stub_env(&req_log, &temp_dir.path().join("dsh-home")),
             TimeoutConfig::default(),
         )
@@ -5376,7 +5491,7 @@ mod tests {
             ProviderId::new("test-dsh-notexec"),
             "Test".to_string(),
             Some(not_exec.to_string_lossy().into_owned()),
-            Vec::new(),
+            &[],
             stub_env(&req_log, &temp_dir.path().join("dsh-home")),
             TimeoutConfig::default(),
         )
@@ -5482,7 +5597,11 @@ mod tests {
             .await
             .expect("a shutdown RPC error is diagnostic; the ladder still confirms the close");
         assert!(
-            !provider.sessions.read().await.contains_key(&handle.session_id),
+            !provider
+                .sessions
+                .read()
+                .await
+                .contains_key(&handle.session_id),
             "a confirmed close removes the session record"
         );
         let entries = req_log_entries(&req_log);
@@ -5492,7 +5611,10 @@ mod tests {
             "the runtime saw the cooperative shutdown request: {methods:?}"
         );
         let pids = spawn_pids(&entries);
-        assert_pid_reaped(pids[0], "the child was reaped after the failed shutdown RPC").await;
+        assert_pid_reaped(
+            pids[0],
+            "the child was reaped after the failed shutdown RPC",
+        )
+        .await;
     }
-
 }

@@ -47,7 +47,7 @@
 //! hits an already-active directive, and 500 on storage / internal failures.
 
 use crate::api::errors::NexusApiError;
-use crate::api::handlers::works::read_active_creator_id;
+use crate::config::read_active_creator_id;
 use crate::directive_store::now_ms;
 use crate::workspace::WorkspaceState;
 use axum::{extract::State, Json};

@@ -26,7 +26,7 @@ use nexus_local_db::findings::{
 use nexus_local_db::works;
 use serde::{Deserialize, Serialize};
 
-use super::works::read_active_creator_id;
+use crate::config::read_active_creator_id;
 
 // ─── Tri-state serde helper (V1.48 P3 T3 / R-V147P0-03) ────────────────────
 
