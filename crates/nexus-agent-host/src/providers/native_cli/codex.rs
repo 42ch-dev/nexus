@@ -767,11 +767,15 @@ impl ProviderAdapter for CodexNativeProvider {
                 latency_ms: None,
                 message: Some("app-server handshake succeeded".to_string()),
             },
-            Ok(Err(error)) => ProviderHealth {
+            Ok(Err(_error)) => ProviderHealth {
                 provider_id,
                 available: false,
                 latency_ms: None,
-                message: Some(format!("app-server handshake failed: {error}")),
+                // Static, category-only diagnostic: the SDK/`app-server`
+                // failure Display can embed arbitrary subprocess output
+                // (including secrets) and this string is published in the
+                // live provider catalog / API. Never echo the raw Display.
+                message: Some("app-server handshake failed".to_string()),
             },
             Err(_) => ProviderHealth {
                 provider_id,
@@ -1068,6 +1072,43 @@ mod tests {
     fn default_config_command() {
         let provider = CodexNativeProvider::default_config();
         assert_eq!(provider.command, "codex");
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the fixture env is process-global
+    async fn probe_failure_diagnostic_never_echoes_sdk_output() {
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        // A hostile sentinel standing in for anything secret-bearing the SDK
+        // error Display might carry (subprocess stderr, tokens, paths). The
+        // fixture fails `initialize` with it, so it genuinely travels the real
+        // probe failure path.
+        const SENTINEL: &str = "sentinel-secret-do-not-publish-4f2a";
+        let provider = mock_provider(HashMap::from([(
+            "INIT_ERROR_SENTINEL".to_string(),
+            SENTINEL.to_string(),
+        )]));
+
+        let health = provider
+            .probe(test_probe_request(10_000))
+            .await
+            .expect("probe returns health, never a raw error");
+
+        assert!(
+            !health.available,
+            "a failing handshake must be unavailable, got {health:?}"
+        );
+        let message = health.message.unwrap_or_default();
+        assert!(
+            !message.contains(SENTINEL),
+            "the public diagnostic must never echo SDK/subprocess output: {message}"
+        );
+        assert!(
+            message.contains("app-server handshake failed"),
+            "the diagnostic stays the static category text, got: {message}"
+        );
     }
 
     #[tokio::test]

@@ -54,7 +54,7 @@ impl RunReconciliation {
         }
     }
 
-    pub fn note_root_text_emitted(&mut self) {
+    pub const fn note_root_text_emitted(&mut self) {
         self.emitted_root_text = true;
     }
 }
@@ -64,7 +64,12 @@ impl RunReconciliation {
 /// Root equality uses the SDK session id passed to `start_session`, not the
 /// host UUID. Malformed recognized envelopes fail; unknown well-formed event
 /// types are ignored.
-#[must_use]
+///
+/// # Errors
+///
+/// Returns [`ClassifyNotificationError`] when a recognized envelope is
+/// malformed (missing/ill-typed fields), or when the notification is not a
+/// notification-shaped value at all.
 pub fn classify_notification(
     notification: &Notification,
     root_session_id: &str,
@@ -119,13 +124,13 @@ enum RootEventFailure {
 
 fn classify_root_session_event(event: &Value) -> Result<DshNotificationClass, RootEventFailure> {
     match event.get("type") {
-        None => return Err(RootEventFailure::Protocol),
         Some(Value::String(type_name)) => {
             if type_name != "assistant/message" {
                 return Ok(DshNotificationClass::Ignore);
             }
         }
-        Some(_) => return Err(RootEventFailure::Protocol),
+        // Absent or non-string `type` is a malformed recognized envelope.
+        None | Some(_) => return Err(RootEventFailure::Protocol),
     }
     let len = measure_assistant_message_text(event).map_err(|_| RootEventFailure::Protocol)?;
     if len == 0 {
@@ -155,9 +160,9 @@ fn measure_assistant_message_text(event: &Value) -> Result<usize, DshProtocolFai
             continue;
         }
         match block.get("text") {
-            None | Some(Value::Null) => return Err(DshProtocolFailure),
             Some(Value::String(text)) => len += text.len(),
-            Some(_) => return Err(DshProtocolFailure),
+            // Absent, null, or non-string text is a malformed block.
+            None | Some(_) => return Err(DshProtocolFailure),
         }
     }
     Ok(len)
@@ -171,9 +176,9 @@ fn build_assistant_message_text(event: &Value) -> Result<String, DshProtocolFail
             continue;
         }
         match block.get("text") {
-            None | Some(Value::Null) => return Err(DshProtocolFailure),
             Some(Value::String(text)) => out.push_str(text),
-            Some(_) => return Err(DshProtocolFailure),
+            // Absent, null, or non-string text is a malformed block.
+            None | Some(_) => return Err(DshProtocolFailure),
         }
     }
     Ok(out)
@@ -181,23 +186,24 @@ fn build_assistant_message_text(event: &Value) -> Result<String, DshProtocolFail
 
 /// Build terminal (and optional fallback delta) events after a successful
 /// `Session::run`. Streaming deltas emitted during the run are not repeated.
-#[must_use]
+///
+/// # Errors
+///
+/// Returns an [`OperationFailedEvent`] when the terminal turn frame is
+/// malformed (an undecodable finish reason).
 pub fn finalize_successful_run(
     result: &RunResult,
     reconciliation: &RunReconciliation,
     session_id: &HostSessionId,
     op_id: &HostOperationId,
 ) -> Result<Vec<HostEvent>, OperationFailedEvent> {
-    let finish_reason = match extract_finish_reason(&result.events) {
-        Ok(reason) => reason,
-        Err(_) => {
-            return Err(failed_turn(
-                session_id,
-                op_id,
-                "decode_error",
-                "dsh turn ended with a malformed finish reason",
-            ));
-        }
+    let Ok(finish_reason) = extract_finish_reason(&result.events) else {
+        return Err(failed_turn(
+            session_id,
+            op_id,
+            "decode_error",
+            "dsh turn ended with a malformed finish reason",
+        ));
     };
 
     match finish_reason.as_deref() {

@@ -856,7 +856,10 @@ async fn capability_route_cancel_uses_shared_coordinator_token() {
         other => panic!("expected Cancelled through capability route, got: {other:?}"),
     }
 
-    assert_no_session_effect(&ws, "cancelled capability prompt must never spawn the fixture");
+    assert_no_session_effect(
+        &ws,
+        "cancelled capability prompt must never spawn the fixture",
+    );
 
     host.shutdown().await.expect("host shutdown");
 }

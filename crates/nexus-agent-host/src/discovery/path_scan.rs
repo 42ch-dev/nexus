@@ -163,7 +163,7 @@ pub fn scan_path_in(
                             candidate("path candidate via DSH_RUNTIME_BIN; bounded probe required"),
                         ),
                         Err(reason) => {
-                            push_row(env_bin.to_string_lossy().into_owned(), unavailable(reason))
+                            push_row(env_bin.to_string_lossy().into_owned(), unavailable(reason));
                         }
                     }
                 }

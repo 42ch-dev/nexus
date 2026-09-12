@@ -256,6 +256,9 @@ impl LocalDbError {
 }
 
 impl fmt::Display for LocalDbError {
+    // One flat variant-to-text match: the arm order mirrors the enum, and
+    // splitting it across helpers would scatter a single user-facing mapping.
+    #[allow(clippy::too_many_lines)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MissingWorkspaceMetaTable => {

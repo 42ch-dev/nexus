@@ -66,7 +66,6 @@ async fn test_ctx_no_creator() -> TestCtx {
     }
 }
 
-
 fn make_create_body() -> Value {
     json!({
         "title": "Test Novel",
@@ -924,20 +923,20 @@ async fn creator_isolation_get_work_returns_404_for_other_creator() {
         set_pool_active: None,
         work_profile: None,
     };
-    let (_, resp) =
-        nexus_daemon_runtime::api::handlers::works::create_work(State(state_a.clone()), axum::Json(req))
-            .await
-            .unwrap();
+    let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
+        State(state_a.clone()),
+        axum::Json(req),
+    )
+    .await
+    .unwrap();
     let work_id = resp.work_id.clone();
 
     // Switch the active creator on the SAME real state, then try to GET the
     // other creator's work. The creator-scoped lookup must not find it.
     switch_active_creator(&state_a, "ctr_other_creator");
-    let result = nexus_daemon_runtime::api::handlers::works::get_work(
-        State(state_a),
-        Path(work_id.clone()),
-    )
-    .await;
+    let result =
+        nexus_daemon_runtime::api::handlers::works::get_work(State(state_a), Path(work_id.clone()))
+            .await;
 
     let err = result.expect_err("a foreign creator must not read another creator's work");
     assert_eq!(
@@ -963,10 +962,12 @@ async fn creator_isolation_patch_work_returns_404_for_other_creator() {
         set_pool_active: None,
         work_profile: None,
     };
-    let (_, resp) =
-        nexus_daemon_runtime::api::handlers::works::create_work(State(state_a.clone()), axum::Json(req))
-            .await
-            .unwrap();
+    let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
+        State(state_a.clone()),
+        axum::Json(req),
+    )
+    .await
+    .unwrap();
     let work_id = resp.work_id.clone();
 
     // Switch the active creator on the SAME real state (never a second
@@ -1568,8 +1569,7 @@ async fn handler_get_work_lazy_promotes_completed_then_is_idempotent() {
     .unwrap();
     let work_id = resp.work_id.clone();
     let creator_id =
-        nexus_daemon_runtime::config::read_active_creator_id(state.nexus_home())
-            .unwrap();
+        nexus_daemon_runtime::config::read_active_creator_id(state.nexus_home()).unwrap();
 
     // 2. Patch the Work into a novel-profile shape that satisfies §6.1:
     //    work_profile='novel', total_planned_chapters=2, current_chapter=2,

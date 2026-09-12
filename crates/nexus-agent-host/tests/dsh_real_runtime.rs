@@ -163,8 +163,7 @@ fn real_provider(root: &TempDir, proxy_port: u16, dsh_bin: &Path) -> DshNativePr
     DshNativeProvider::new(
         ProviderId::new("dsh-real-test"),
         "Real upstream dsh (Task 3 proof)".to_string(),
-        Some(dsh_bin.to_string_lossy().into_owned()),
-        Vec::new(),
+        Some(dsh_bin.to_string_lossy().into_owned()), &[],
         isolated_env(root, proxy_port),
         real_timeouts(),
     )

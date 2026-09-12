@@ -197,8 +197,8 @@ fn session_start_events<'a>(
     log: &'a [serde_json::Value],
     workspace_root: &Path,
 ) -> Vec<&'a serde_json::Value> {
-    let probe_cwd = std::fs::canonicalize(workspace_root)
-        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let probe_cwd =
+        std::fs::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
     log.iter()
         .filter(|e| e["event"] == "start")
         .filter(|e| {
@@ -239,7 +239,10 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
     let dsh_home = tmp.path().join("dsh-home");
 
     let env = HashMap::from([
-        ("REQ_LOG".to_string(), req_log.to_string_lossy().into_owned()),
+        (
+            "REQ_LOG".to_string(),
+            req_log.to_string_lossy().into_owned(),
+        ),
         (
             "DSH_HOME".to_string(),
             dsh_home.to_string_lossy().into_owned(),
@@ -250,8 +253,7 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
     let explicit = DshNativeProvider::new(
         ProviderId::new("dsh-native"),
         "Configured".to_string(),
-        Some(MOCK_DSH.to_string()),
-        Vec::new(),
+        Some(MOCK_DSH.to_string()), &[],
         env.clone(),
         timeouts(),
     )
@@ -275,8 +277,7 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
         let via_path = DshNativeProvider::new(
             ProviderId::new("dsh-native"),
             "Path".to_string(),
-            None,
-            Vec::new(),
+            None, &[],
             env.clone(),
             timeouts(),
         )
@@ -300,8 +301,7 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
         let via_env = DshNativeProvider::new(
             ProviderId::new("dsh-native"),
             "Env".to_string(),
-            None,
-            Vec::new(),
+            None, &[],
             env.clone(),
             timeouts(),
         )
@@ -323,8 +323,7 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
         let missing = DshNativeProvider::new(
             ProviderId::new("dsh-native"),
             "Missing".to_string(),
-            None,
-            Vec::new(),
+            None, &[],
             env,
             timeouts(),
         )
@@ -361,10 +360,12 @@ async fn dsh_probe_binds_verified_cwd_for_ordinary_and_sealed_recipes() {
     let provider = DshNativeProvider::new(
         ProviderId::new("dsh-native"),
         "Cwd".to_string(),
-        Some(MOCK_DSH.to_string()),
-        Vec::new(),
+        Some(MOCK_DSH.to_string()), &[],
         HashMap::from([
-            ("REQ_LOG".to_string(), req_log.to_string_lossy().into_owned()),
+            (
+                "REQ_LOG".to_string(),
+                req_log.to_string_lossy().into_owned(),
+            ),
             (
                 "DSH_HOME".to_string(),
                 dsh_home.to_string_lossy().into_owned(),
@@ -422,10 +423,12 @@ async fn dsh_probe_initialize_timeout_is_unavailable_with_no_live_child() {
     let provider = DshNativeProvider::new(
         ProviderId::new("dsh-native"),
         "Timeout".to_string(),
-        Some(MOCK_DSH.to_string()),
-        Vec::new(),
+        Some(MOCK_DSH.to_string()), &[],
         HashMap::from([
-            ("REQ_LOG".to_string(), req_log.to_string_lossy().into_owned()),
+            (
+                "REQ_LOG".to_string(),
+                req_log.to_string_lossy().into_owned(),
+            ),
             (
                 "DSH_HOME".to_string(),
                 dsh_home.to_string_lossy().into_owned(),
@@ -653,8 +656,7 @@ async fn acp_probe_runs_in_the_verified_owner_workspace() {
     );
 
     let log = read_log(&fixture_log);
-    let starts: Vec<&serde_json::Value> =
-        log.iter().filter(|e| e["event"] == "start").collect();
+    let starts: Vec<&serde_json::Value> = log.iter().filter(|e| e["event"] == "start").collect();
     assert_eq!(starts.len(), 1, "one probe child: {log:?}");
     let expected = std::fs::canonicalize(&creator_ws).expect("canonical");
     assert_eq!(
@@ -725,7 +727,10 @@ async fn catalog_health_and_admission_agree_on_suppressed_and_missing_providers(
         catalog.entries
     );
     assert!(
-        catalog.entries.iter().all(|e| e.provider_id.0 != "dsh-native"),
+        catalog
+            .entries
+            .iter()
+            .all(|e| e.provider_id.0 != "dsh-native"),
         "a PATH-absent dsh must not appear: {:?}",
         catalog.entries
     );
@@ -898,9 +903,11 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
             session.id.clone(),
             HostOperation::Prompt {
                 op_id: HostOperationId::new(),
-                content: vec![nexus_agent_host::capability::model::HostContentBlock::Text {
-                    text: "blocked-prompt".to_string(),
-                }],
+                content: vec![
+                    nexus_agent_host::capability::model::HostContentBlock::Text {
+                        text: "blocked-prompt".to_string(),
+                    },
+                ],
                 permission_scope: None,
             },
         )

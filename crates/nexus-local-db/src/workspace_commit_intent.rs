@@ -33,6 +33,7 @@ impl IntentState {
         }
     }
 
+    #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "applying" => Some(Self::Applying),
@@ -87,6 +88,12 @@ pub enum ClaimSessionResult {
     DigestConflict,
 }
 
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the claiming transaction fails: invalid
+/// `entries_json` (over the raw byte bound), a database error while
+/// checking the committed digest, claiming the session, or inserting the
+/// intent row.
 pub async fn claim_session_and_insert_intent(
     pool: &SqlitePool,
     session_id: &str,
@@ -138,7 +145,7 @@ pub async fn claim_session_and_insert_intent(
                     .is_some_and(|r| !r.is_empty()) =>
             {
                 ClaimSessionResult::AlreadyClaimed {
-                    revision: s.claimed_by_revision.clone().unwrap_or_default(),
+                    revision: s.claimed_by_revision.unwrap_or_default(),
                 }
             }
             _ => ClaimSessionResult::Expired,
@@ -162,6 +169,10 @@ pub async fn claim_session_and_insert_intent(
     Ok(ClaimSessionResult::Claimed)
 }
 
+/// # Errors
+///
+/// Returns [`LocalDbError`] on a database failure, or when the stored
+/// `entries_json` fails bounded validation.
 pub async fn get_committed_intent_by_digest(
     pool: &SqlitePool,
     session_id: &str,
@@ -176,9 +187,13 @@ pub async fn get_committed_intent_by_digest(
     .bind(request_digest)
     .fetch_optional(pool)
     .await?;
-    row.map(|r| r.try_into_row()).transpose()
+    row.map(IntentRowRaw::try_into_row).transpose()
 }
 
+/// # Errors
+///
+/// Returns [`LocalDbError`] on a database failure, or when the stored
+/// `entries_json` fails bounded validation.
 pub async fn get_intent_by_revision(
     pool: &SqlitePool,
     revision: &str,
@@ -190,9 +205,12 @@ pub async fn get_intent_by_revision(
     .bind(revision)
     .fetch_optional(pool)
     .await?;
-    row.map(|r| r.try_into_row()).transpose()
+    row.map(IntentRowRaw::try_into_row).transpose()
 }
 
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the state update cannot be written.
 pub async fn update_intent_state(
     pool: &SqlitePool,
     revision: &str,
@@ -211,6 +229,9 @@ pub async fn update_intent_state(
     Ok(())
 }
 
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the finalizing transaction fails.
 pub async fn finalize_committed_intent(
     pool: &SqlitePool,
     revision: &str,
@@ -241,6 +262,9 @@ pub async fn finalize_committed_intent(
     Ok(true)
 }
 
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the rollback-finalizing transaction fails.
 pub async fn finalize_rolled_back_intent(
     pool: &SqlitePool,
     revision: &str,
@@ -264,6 +288,9 @@ pub async fn finalize_rolled_back_intent(
     Ok(())
 }
 
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the claim cannot be cleared.
 pub async fn release_session_claim(
     pool: &SqlitePool,
     session_id: &str,
@@ -286,6 +313,10 @@ pub async fn release_session_claim(
 /// material to recover: the row is DELETED and the claim CLEARED in one
 /// transaction. Neither an orphaned `rolling_back` row nor a claimed-but-
 /// abandoned session can survive this call.
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the aborting transaction fails; in that
+/// case the intent row and claim are left untouched.
 pub async fn abort_intent_and_release_claim(
     pool: &SqlitePool,
     revision: &str,
@@ -313,6 +344,10 @@ pub async fn abort_intent_and_release_claim(
 /// Root comparison canonicalizes both sides (the stored value may be a
 /// non-canonical alias, e.g. `/var` vs `/private/var`); `rowid DESC` makes
 /// the pick deterministic.
+/// # Errors
+///
+/// Returns [`LocalDbError`] on a database failure, or when the selected
+/// row's metadata fails bounded validation.
 pub async fn latest_committed_intent_for_root(
     pool: &SqlitePool,
     workspace_root: &str,
@@ -337,6 +372,11 @@ pub async fn latest_committed_intent_for_root(
 /// commit path uses. A malformed row must fail closed — the caller skips it and
 /// preserves the evidence — rather than forward an unvalidated basename to a
 /// directory-relative unlink.
+/// # Errors
+///
+/// Returns [`LocalDbError::ValidationError`] when the document exceeds the
+/// raw byte bound, is not valid JSON, or contains an entry that fails
+/// path/hash/artifact-basename validation.
 pub fn validate_cleanup_entries(entries_json: &str) -> Result<Vec<IntentEntryJson>, LocalDbError> {
     if entries_json.len() > MAX_ENTRIES_JSON_BYTES {
         return Err(LocalDbError::ValidationError(format!(
@@ -356,6 +396,9 @@ pub fn validate_cleanup_entries(entries_json: &str) -> Result<Vec<IntentEntryJso
 /// Committed and rolled-back intents are already durable, so a row whose
 /// metadata cannot be parsed must never fail startup: the caller skips what it
 /// cannot read.
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the settled-intent query fails.
 pub async fn list_settled_intents_for_cleanup(
     pool: &SqlitePool,
 ) -> Result<Vec<(String, String, String)>, LocalDbError> {
@@ -468,15 +511,14 @@ async fn decode_intent_rows(
     for raw in rows {
         let revision = raw.revision.clone();
         let workspace_root = raw.workspace_root.clone();
-        match raw.try_into_row() {
-            Ok(row) => out.push(row),
-            Err(_) => {
-                mark_intent_recovery_conflict(pool, &revision, "corrupt_entries_json").await?;
-                return Err(LocalDbError::CorruptIntent {
-                    revision,
-                    workspace_root,
-                });
-            }
+        if let Ok(row) = raw.try_into_row() {
+            out.push(row);
+        } else {
+            mark_intent_recovery_conflict(pool, &revision, "corrupt_entries_json").await?;
+            return Err(LocalDbError::CorruptIntent {
+                revision,
+                workspace_root,
+            });
         }
     }
     Ok(out)
@@ -497,6 +539,9 @@ fn workspace_roots_match(stored: &str, workspace_root: &str) -> bool {
 }
 
 /// Return the committed request digest for a session, if one exists.
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the digest query fails.
 pub async fn get_committed_request_digest(
     pool: &SqlitePool,
     session_id: &str,
@@ -511,6 +556,9 @@ pub async fn get_committed_request_digest(
 }
 
 /// Whether any intent is in `recovery_conflict` for the canonical workspace root.
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the recovery-conflict query fails.
 pub async fn workspace_has_recovery_conflict(
     pool: &SqlitePool,
     workspace_root: &str,
@@ -525,6 +573,10 @@ pub async fn workspace_has_recovery_conflict(
         .any(|stored| workspace_roots_match(stored, workspace_root)))
 }
 
+/// # Errors
+///
+/// Returns [`LocalDbError`] on a database failure, or when an unsettled
+/// row's metadata fails bounded validation.
 pub async fn list_unsettled_intents(
     pool: &SqlitePool,
     workspace_root: &str,
@@ -543,6 +595,10 @@ pub async fn list_unsettled_intents(
     decode_intent_rows(pool, rows).await
 }
 
+/// # Errors
+///
+/// Returns [`LocalDbError`] on a database failure, or when an unsettled
+/// row's metadata fails bounded validation.
 pub async fn list_all_unsettled_intents(
     pool: &SqlitePool,
 ) -> Result<Vec<CommitIntentRow>, LocalDbError> {

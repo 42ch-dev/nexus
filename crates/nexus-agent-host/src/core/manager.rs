@@ -235,7 +235,9 @@ impl HostManager {
                     message: Some(safe_provider_message(&error)),
                 },
             };
-            let latency_ms = started.elapsed().as_millis() as u64;
+            // Saturating rather than wrapping: a probe latency beyond u64 ms
+            // is not representable, and clamping is truthful for telemetry.
+            let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
             self.publish_probe_result(&identity, health, latency_ms)
                 .await;
         }
@@ -351,8 +353,8 @@ impl crate::HostFacade for HostManager {
         if !pre_registered {
             let discovered = discover_provider_entries(
                 &host_config,
-                config.timeouts.clone(),
-                permission_resolver,
+                &config.timeouts,
+                &permission_resolver,
             )?;
             *self.providers.write().await = discovered;
         }
@@ -961,6 +963,9 @@ impl crate::HostFacade for HostManager {
                 health: entry.health.clone(),
             })
             .collect();
+        // Snapshot built: release the read guard before returning it rather
+        // than holding it to the end of scope.
+        drop(providers);
         Ok(crate::discovery::ProviderCatalog { entries })
     }
 
@@ -2302,9 +2307,8 @@ mod tests {
             Arc::new(ExecFailingMockProvider {
                 provider_id: ProviderId::new("exec-fail"),
                 error: || {
-                    HostError::cleanup_unconfirmed("probe cleanup unconfirmed").with_provider(
-                        ProviderId::new("exec-fail"),
-                    )
+                    HostError::cleanup_unconfirmed("probe cleanup unconfirmed")
+                        .with_provider(ProviderId::new("exec-fail"))
                 },
             }),
         )
@@ -2328,9 +2332,8 @@ mod tests {
             Arc::new(ExecFailingMockProvider {
                 provider_id: ProviderId::new("exec-fail"),
                 error: || {
-                    HostError::timeout("prompt", "prompt exceeded its budget").with_provider(
-                        ProviderId::new("exec-fail"),
-                    )
+                    HostError::timeout("prompt", "prompt exceeded its budget")
+                        .with_provider(ProviderId::new("exec-fail"))
                 },
             }),
         )
@@ -2370,7 +2373,10 @@ mod tests {
                 mock_launch(),
             )
             .await;
-        manager.start(start_config()).await.expect("owner-bound start");
+        manager
+            .start(start_config())
+            .await
+            .expect("owner-bound start");
         assert!(
             manager
                 .provider_catalog()

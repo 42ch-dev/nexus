@@ -132,7 +132,12 @@ async fn build_host(
     ws: &TestWorkspace,
     provider_cfg: ProviderConfig,
 ) -> (Arc<HostManager>, Arc<dyn HostFacade>) {
-    build_host_with_owner(ws, provider_cfg, Some(owner("ctr_probe", ws.workspace_root.clone()))).await
+    build_host_with_owner(
+        ws,
+        provider_cfg,
+        Some(owner("ctr_probe", ws.workspace_root.clone())),
+    )
+    .await
 }
 
 /// Build the host with an explicit probe owner (`None` = no verified context).

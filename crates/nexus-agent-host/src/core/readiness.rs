@@ -50,7 +50,7 @@ pub struct ProviderEntry {
 
 impl ProviderEntry {
     #[must_use]
-    pub fn is_available(&self) -> bool {
+    pub const fn is_available(&self) -> bool {
         self.health.available
     }
 
@@ -97,7 +97,7 @@ impl ProviderEntry {
             health: health.clone(),
         };
         let identity =
-            CandidateIdentity::from_registration(desc.provider_id.clone(), &metadata.launch);
+            CandidateIdentity::from_registration(desc.provider_id, &metadata.launch);
         Self {
             metadata,
             adapter: Some(adapter),
@@ -134,10 +134,18 @@ pub fn fingerprint_launch(launch: &LaunchStrategy) -> u64 {
 }
 
 /// Discover catalog candidates and construct adapters (no probe).
+///
+/// # Errors
+///
+/// Returns a [`HostError`] when the configured provider set is invalid, when
+/// the PATH scan cannot read the process `PATH`, or when the catalog merge
+/// rejects an entry. Adapter construction failures are NOT errors: that
+/// provider is admitted as an unavailable candidate so the catalog can still
+/// explain why it is not ready.
 pub fn discover_provider_entries(
     host_config: &crate::config::AgentHostConfig,
-    timeouts: TimeoutConfig,
-    permission_resolver: HostPermissionResolver,
+    timeouts: &TimeoutConfig,
+    permission_resolver: &HostPermissionResolver,
 ) -> HostResult<std::collections::HashMap<ProviderId, ProviderEntry>> {
     use crate::discovery::{catalog::ProviderCatalog, config, path_scan};
 
