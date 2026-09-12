@@ -4207,6 +4207,68 @@ async fn settlement_restart_reconciles_no_second_child() {
 }
 
 
+
+async fn fetch_session_inspect(daemon: &LiveDaemon, sid: &str) -> Value {
+    reqwest::Client::new()
+        .get(format!(
+            "{}/v1/daemon/orchestration/sessions/{}",
+            daemon.http_url,
+            sid
+        ))
+        .send()
+        .await
+        .expect("inspect")
+        .json::<Value>()
+        .await
+        .expect("inspect json")
+}
+
+fn parse_sse_run_states(body: &str) -> Vec<Value> {
+    let mut out = Vec::new();
+    for block in body.split("\n\n") {
+        let mut event = None;
+        let mut data = None;
+        for line in block.lines() {
+            if let Some(rest) = line.strip_prefix("event: ") {
+                event = Some(rest.trim());
+            } else if let Some(rest) = line.strip_prefix("data: ") {
+                data = Some(rest);
+            }
+        }
+        if event == Some("run_state") {
+            if let Some(d) = data {
+                if let Ok(v) = serde_json::from_str::<Value>(d) {
+                    out.push(v);
+                }
+            }
+        }
+    }
+    out
+}
+
+fn assert_monotonic_run_state_frames(frames: &[Value], expected_terminal_status: &str) {
+    assert!(
+        !frames.is_empty(),
+        "expected at least one run_state SSE frame"
+    );
+    let mut last_seq = 0u64;
+    let mut seen = std::collections::HashSet::new();
+    for frame in frames {
+        let seq = frame["sequence"]
+            .as_u64()
+            .expect("run_state frame must carry numeric sequence");
+        assert!(seq > last_seq, "sequences must increase: {seq} after {last_seq}");
+        assert!(seen.insert(seq), "duplicate sequence {seq}");
+        last_seq = seq;
+    }
+    let terminal = frames.last().expect("terminal frame");
+    assert_eq!(
+        terminal["status"].as_str(),
+        Some(expected_terminal_status),
+        "terminal run_state must match durable status: {terminal}"
+    );
+}
+
 /// P4 T4: cancel/inspect/events/DB agreement on the same run through the live daemon.
 #[tokio::test]
 async fn p4_cancel_inspect_events_db_journey() {
@@ -4245,15 +4307,8 @@ async fn p4_cancel_inspect_events_db_journey() {
     assert_eq!(status, reqwest::StatusCode::OK, "{body}");
     assert_eq!(body["status"].as_str(), Some("cancelled"));
     let (db_status, db_state) = wait_for_run_status(&daemon, sid, "cancelled", 15).await;
-    let inspect = reqwest::Client::new()
-        .get(format!("{}/v1/daemon/orchestration/sessions/{}", daemon.http_url, sid))
-        .send()
-        .await
-        .expect("inspect")
-        .json::<Value>()
-        .await
-        .expect("inspect json");
-    assert_eq!(inspect["status"].as_str(), Some("cancelled"));
+    let inspect = fetch_session_inspect(&daemon, sid).await;
+    assert_eq!(inspect["session"]["status"].as_str(), Some("cancelled"));
     assert_eq!(db_status, "cancelled");
     assert_eq!(db_state["cancel_requested"].as_bool(), Some(true));
     let events = reqwest::Client::new()
@@ -4267,21 +4322,52 @@ async fn p4_cancel_inspect_events_db_journey() {
         .expect("events");
     assert!(events.status().is_success(), "events route must succeed");
     let text = events.text().await.expect("events body");
-    assert!(text.contains("run_state"), "SSE must include terminal run_state: {text}");
+    let run_states = parse_sse_run_states(&text);
+    assert_monotonic_run_state_frames(&run_states, "cancelled");
 }
 
-/// P4 T4: late subscribe after a fast terminal run still replays retained run_state.
+/// P4 T4: late subscribe after a terminal run replays retained run_state.
 #[tokio::test]
 async fn p4_late_subscribe_replays_terminal_run_state() {
-    let host = MockHost::new();
+    let host = BlockingHost::new();
     let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
-    let (status, body) = add_public(&daemon, "p4-fast-replay").await;
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": PUBLIC_PRESET,
+            "label": "p4-late-replay",
+            "seed": "p4-topic",
+            "input": { "keyword": "p4", "topic": "p4-topic" },
+            "agent_bindings": { "default": { "provider_id": MOCK_PROVIDER } }
+        }),
+    )
+    .await;
     assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
     let schedule_id = body["schedule_id"].as_str().expect("schedule_id");
-    let _ = wait_for_prompts(&host, 15).await;
+    host.release();
     let row = load_drive_row(&daemon, schedule_id).await;
-    let sid = row.current_session_id.as_deref().expect("session");
-    let (run_status, _) = wait_for_run_status(&daemon, sid, "completed", 20).await;
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("session")
+        .to_string();
+    let (parked_status, state) =
+        wait_for_run_status(&daemon, &sid, "waiting_for_input", 15).await;
+    assert_eq!(parked_status, "waiting_for_input");
+    let wait_id = state["wait"]["wait_id"]
+        .as_str()
+        .expect("durable wait id")
+        .to_string();
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "continue", "wait_id": wait_id }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{body}");
+    let (run_status, _) = wait_for_run_status(&daemon, &sid, "completed", 15).await;
     assert_eq!(run_status, "completed");
     let events = reqwest::Client::new()
         .get(format!(
@@ -4292,9 +4378,10 @@ async fn p4_late_subscribe_replays_terminal_run_state() {
         .send()
         .await
         .expect("events");
-    assert!(events.status().is_success());
+    assert!(events.status().is_success(), "{}", events.text().await.unwrap_or_default());
     let text = events.text().await.expect("events body");
-    assert!(text.contains("run_state"), "late replay must retain run_state: {text}");
+    let run_states = parse_sse_run_states(&text);
+    assert_monotonic_run_state_frames(&run_states, "completed");
 }
 
 /// P4 T4: unconfirmed cleanup stays actionable Interrupted on inspect/DB.
@@ -4324,9 +4411,12 @@ async fn p4_cleanup_failure_recovery_projection() {
     })
     .await
     .expect("stream started");
-    host.release();
     let row = load_drive_row(&daemon, schedule_id).await;
-    let sid = row.current_session_id.as_deref().expect("session");
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("session")
+        .to_string();
     let (status, body) = post_json(
         &daemon,
         &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
@@ -4334,15 +4424,24 @@ async fn p4_cleanup_failure_recovery_projection() {
     )
     .await;
     assert_eq!(status, reqwest::StatusCode::OK, "{body}");
-    let (run_status, _) = wait_for_run_status(&daemon, sid, "interrupted", 20).await;
+    assert_eq!(
+        body["status"].as_str(),
+        Some("interrupted"),
+        "unconfirmed cancel must report interrupted: {body}"
+    );
+    let (run_status, state) = wait_for_run_status(&daemon, &sid, "interrupted", 20).await;
     assert_eq!(run_status, "interrupted");
-    let inspect = reqwest::Client::new()
-        .get(format!("{}/v1/daemon/orchestration/sessions/{}", daemon.http_url, sid))
-        .send()
-        .await
-        .expect("inspect")
-        .json::<Value>()
-        .await
-        .expect("inspect json");
-    assert_eq!(inspect["status"].as_str(), Some("interrupted"));
+    assert_eq!(
+        state["failure"]["code"].as_str(),
+        Some("cancel_cleanup_unconfirmed"),
+        "actionable cleanup reason must be durable: {state}"
+    );
+    let inspect = fetch_session_inspect(&daemon, &sid).await;
+    assert_eq!(inspect["session"]["status"].as_str(), Some("interrupted"));
+    assert!(
+        inspect["session"]["failureReason"]
+            .as_str()
+            .is_some_and(|r| r.contains("cancel cleanup unconfirmed")),
+        "inspect must carry actionable cleanup reason: {inspect}"
+    );
 }
