@@ -25,6 +25,7 @@ import {
   buildFailurePayload,
   writeEvidence,
   collectProcessTreePids,
+  measureColdLaunchSample,
 } from './proof-rft-dx.mjs';
 
 test('nearestRankP95 uses nearest-rank p95', () => {
@@ -157,4 +158,29 @@ test('collectProcessTreePids includes descendants', () => {
   const ps = `100 1 pnpm dev\n101 100 node vite\n102 101 esbuild\n103 50 foreign`;
   const pids = collectProcessTreePids(100, ps);
   assert.deepEqual(pids.sort((a, b) => a - b), [100, 101, 102]);
+});
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+test('measureColdLaunchSample starts clock at spawn and includes origin resolve in elapsed', async () => {
+  const order = [];
+  const result = await measureColdLaunchSample({
+    spawnChild: () => {
+      order.push('spawn');
+      return { pid: 42 };
+    },
+    resolveOrigin: async () => {
+      order.push('resolve');
+      await sleep(60);
+      return 'http://127.0.0.1:5173';
+    },
+    waitForServed: async () => {
+      order.push('served');
+      await sleep(10);
+    },
+  });
+  assert.deepEqual(order, ['spawn', 'resolve', 'served']);
+  assert.ok(result.originResolveMs >= 55, 'origin resolve is recorded separately');
+  assert.ok(result.elapsedMs >= result.originResolveMs, 'elapsed is not post-listen only');
+  assert.ok(result.elapsedMs >= 65, 'elapsed includes spawn through served-page, not listener-to-page only');
 });

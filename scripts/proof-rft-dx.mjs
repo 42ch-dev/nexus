@@ -400,6 +400,17 @@ async function assertEndpointOwnedByForest(port, rootPids, { psOutput } = {}) {
   return { listenerPid, owned: true };
 }
 
+/** DX-3 cold sample: clock starts at spawn, stops after served-page fetch; origin wait recorded separately. */
+export async function measureColdLaunchSample({ spawnChild, resolveOrigin, waitForServed }) {
+  const t0 = performance.now();
+  const child = spawnChild();
+  const originResolveStart = performance.now();
+  const origin = await resolveOrigin(child);
+  const originResolveMs = performance.now() - originResolveStart;
+  await waitForServed(origin);
+  return { child, origin, elapsedMs: performance.now() - t0, originResolveMs };
+}
+
 export async function resolveViteOrigin({ child, config, rootPids, fallbackOrigin, timeoutMs = 120_000 }) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -510,7 +521,7 @@ export async function runSurfaceLoop(options) {
       children.push(watcherChild);
       await sleep(3000);
     }
-    const warmSamples = []; const coldSampleValues = []; const dx1Traces = [];
+    const warmSamples = []; const coldSampleValues = []; const coldOriginResolveMs = []; const dx1Traces = [];
     const runViteChild = () => spawnLogged(config.devCommand[0], config.devCommand.slice(1), { cwd: repoRoot, env: runEnv, label: surface });
     let viteChild = runViteChild(); children.push(viteChild);
     let rootPids = getDx1RootPids({ viteChild, watcherChild, config });
@@ -518,12 +529,19 @@ export async function runSurfaceLoop(options) {
     for (let i = 0; i < coldSamples; i++) {
       if (viteChild) await killProcessTree(viteChild);
       await waitForPortFree(config.vitePort);
-      viteChild = runViteChild(); children.push(viteChild);
-      rootPids = getDx1RootPids({ viteChild, watcherChild, config });
-      viteOrigin = await resolveViteOrigin({ child: viteChild, config, rootPids, fallbackOrigin });
-      const t0 = performance.now();
-      await waitForHttpOk(`${viteOrigin}${config.servedProbePath}`);
-      coldSampleValues.push(performance.now() - t0);
+      const cold = await measureColdLaunchSample({
+        spawnChild: () => {
+          viteChild = runViteChild();
+          children.push(viteChild);
+          rootPids = getDx1RootPids({ viteChild, watcherChild, config });
+          return viteChild;
+        },
+        resolveOrigin: child => resolveViteOrigin({ child, config, rootPids, fallbackOrigin }),
+        waitForServed: origin => waitForHttpOk(`${origin}${config.servedProbePath}`),
+      });
+      viteOrigin = cold.origin;
+      coldSampleValues.push(cold.elapsedMs);
+      coldOriginResolveMs.push(cold.originResolveMs);
     }
     if (viteChild) await killProcessTree(viteChild);
     await waitForPortFree(config.vitePort);
@@ -559,7 +577,12 @@ export async function runSurfaceLoop(options) {
           samples: dx1Traces,
         },
         'DX-2': { ...dx2, samplesMs: warmSamples },
-        'DX-3': { ...dx3, samplesMs: coldSampleValues },
+        'DX-3': {
+          ...dx3,
+          samplesMs: coldSampleValues,
+          originResolveMs: coldOriginResolveMs,
+          timing: { clockStartsAt: 'spawn', clockStopsAt: 'served-page', originResolveRecordedSeparately: true },
+        },
       },
       endpoint: config.needsDaemon ? { port, baseUrl: `http://127.0.0.1:${port}`, health: endpointCheck.health, graph: endpointCheck.graph, viteOrigin } : { viteOrigin },
       sidecarBaseline,
@@ -568,8 +591,8 @@ export async function runSurfaceLoop(options) {
       environment,
       observedOutcomes: { warmSampleCount: warmSamples.length, coldSampleCount: coldSampleValues.length },
       notes: [
-        'HTTP fetch of Vite-served marker module; no browser automation.',
-        'DX-1 uses interval ps sampling across all loop root PIDs for the full edit→visible window.',
+        'HTTP fetch of Vite-served page; no browser automation.',
+        'DX-3 cold samples measure spawn→served-page; origin-resolution wait is recorded separately and never subtracted.',
         config.needsSidecar ? 'Desktop-web sidecar baseline executed before timed DX-2/DX-3 windows.' : null,
       ].filter(Boolean),
     };
