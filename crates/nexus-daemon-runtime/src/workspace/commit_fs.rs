@@ -508,7 +508,7 @@ pub(crate) fn split_relative(rel_path: &str) -> io::Result<Vec<String>> {
 mod unix_dir {
     use super::{displaced_basename, restore_basename, CREATE_FILE_MODE};
     use nix::fcntl::{openat, renameat, AtFlags, OFlag};
-    use nix::sys::stat::Mode;
+    use nix::sys::stat::{mode_t, Mode};
     use nix::unistd::{linkat, unlinkat};
     use sha2::Digest;
     use std::fs::{File, OpenOptions};
@@ -584,12 +584,12 @@ mod unix_dir {
             if self.exists(name)? {
                 return Err(io::Error::new(io::ErrorKind::AlreadyExists, "stage exists"));
             }
-            // A file mode occupies the low 12 bits; `from_bits_truncate`
-            // immediately masks to the valid bits, so narrowing a restored
-            // mode wider than `mode_t` to its low half is the intended
-            // conversion, not a lossy accident.
+            // `Mode` is a bitflags type over the platform `mode_t` (u16 on
+            // macOS, u32 on Linux), so the narrowing to that alias — not a
+            // hard-coded u16 — is what keeps this portable. `from_bits_truncate`
+            // then masks to the mode bits it recognises.
             #[allow(clippy::cast_possible_truncation)]
-            let mode = Mode::from_bits_truncate(mode.unwrap_or(CREATE_FILE_MODE) as u16);
+            let mode = Mode::from_bits_truncate(mode.unwrap_or(CREATE_FILE_MODE) as mode_t);
             let fd = openat(
                 Some(self.raw_fd()),
                 name,
