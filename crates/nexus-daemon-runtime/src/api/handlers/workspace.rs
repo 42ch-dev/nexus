@@ -283,9 +283,7 @@ pub async fn commit_workspace(
     // shutdown), the already-admitted commit still runs to a durable
     // conclusion instead of being abandoned mid-apply. The response is still
     // the owner's real outcome.
-    match commit_workspace_owned(session_mgr, session_id.clone(), req.changes.clone())
-        .await
-    {
+    match commit_workspace_owned(session_mgr, session_id.clone(), req.changes.clone()).await {
         Ok(outcome) => {
             info!(
                 session_id = %session_id,
@@ -361,16 +359,16 @@ fn map_session_error(
             code: "SESSION_ERROR".into(),
             message: msg,
         },
-        SessionError::CorruptSnapshot(reason) => NexusApiError::Conflict(format!(
-            "corrupt workspace snapshot: {reason}"
-        )),
+        SessionError::CorruptSnapshot(reason) => {
+            NexusApiError::Conflict(format!("corrupt workspace snapshot: {reason}"))
+        }
         SessionError::ManifestInvalid(reason) => NexusApiError::InvalidInput {
             field: "changes".into(),
             reason,
         },
-        SessionError::RecoveryConflict(root) => NexusApiError::Conflict(format!(
-            "workspace recovery conflict: {root}"
-        )),
+        SessionError::RecoveryConflict(root) => {
+            NexusApiError::Conflict(format!("workspace recovery conflict: {root}"))
+        }
         SessionError::Internal(msg) => NexusApiError::Internal {
             code: "SESSION_INTERNAL".into(),
             message: msg,
@@ -416,9 +414,7 @@ mod tests {
             path: path.to_string(),
             op: nexus_contracts::local::orchestration::WorkspaceChangeOp::Create,
             expected_hash: None,
-            content_base64: Some(
-                base64::engine::general_purpose::STANDARD.encode(content),
-            ),
+            content_base64: Some(base64::engine::general_purpose::STANDARD.encode(content)),
         }
     }
 
@@ -551,7 +547,10 @@ mod tests {
         assert!(result.committed);
         assert!(result.revision.starts_with("rev_"));
         let written = committed_file(file);
-        assert_eq!(std::fs::read(&written).expect("committed file"), b"lifecycle");
+        assert_eq!(
+            std::fs::read(&written).expect("committed file"),
+            b"lifecycle"
+        );
         let _ = std::fs::remove_file(&written);
     }
 
@@ -582,9 +581,9 @@ mod tests {
 
         // Park the retained owner at its admission boundary so the abort lands
         // AFTER the commit was admitted — the worst case for abandonment.
-        let gate = std::sync::Arc::new(
-            crate::workspace::test_hooks::OwnerGate::for_session(session_id.clone()),
-        );
+        let gate = std::sync::Arc::new(crate::workspace::test_hooks::OwnerGate::for_session(
+            session_id.clone(),
+        ));
         crate::workspace::test_hooks::set_owner_gate(Some(std::sync::Arc::clone(&gate)));
 
         let state2 = state.clone();
@@ -602,12 +601,9 @@ mod tests {
 
         // Owner admitted -> simulate the client going away. Bounded so a
         // pre-admission failure surfaces the real error instead of hanging.
-        if tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            gate.admitted.notified(),
-        )
-        .await
-        .is_err()
+        if tokio::time::timeout(std::time::Duration::from_secs(10), gate.admitted.notified())
+            .await
+            .is_err()
         {
             crate::workspace::test_hooks::set_owner_gate(None);
             let outcome = request.await.expect("join");

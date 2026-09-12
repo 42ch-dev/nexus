@@ -6,7 +6,10 @@ use super::bounds::validate_relative_path;
 use super::session::{enforce_path_boundary, SessionError};
 
 /// Canonical scope directory for a session (`relative_path` may be empty).
-pub fn scope_directory(canonical_root: &Path, scope_relative: &str) -> Result<PathBuf, SessionError> {
+pub fn scope_directory(
+    canonical_root: &Path,
+    scope_relative: &str,
+) -> Result<PathBuf, SessionError> {
     let base = if scope_relative.is_empty() {
         canonical_root.to_path_buf()
     } else {

@@ -132,7 +132,11 @@ pub async fn claim_session_and_insert_intent(
         return Ok(match row {
             None => ClaimSessionResult::NotFound,
             Some(s) if s.consumed => ClaimSessionResult::AlreadyConsumed,
-            Some(s) if s.claimed_by_revision.as_deref().is_some_and(|r| !r.is_empty()) => {
+            Some(s)
+                if s.claimed_by_revision
+                    .as_deref()
+                    .is_some_and(|r| !r.is_empty()) =>
+            {
                 ClaimSessionResult::AlreadyClaimed {
                     revision: s.claimed_by_revision.clone().unwrap_or_default(),
                 }
@@ -276,7 +280,6 @@ pub async fn release_session_claim(
     Ok(())
 }
 
-
 /// Remove an intent that never applied and release its claim, atomically.
 ///
 /// Staging failures happen before any target mutation, so there is no durable
@@ -334,9 +337,7 @@ pub async fn latest_committed_intent_for_root(
 /// commit path uses. A malformed row must fail closed — the caller skips it and
 /// preserves the evidence — rather than forward an unvalidated basename to a
 /// directory-relative unlink.
-pub fn validate_cleanup_entries(
-    entries_json: &str,
-) -> Result<Vec<IntentEntryJson>, LocalDbError> {
+pub fn validate_cleanup_entries(entries_json: &str) -> Result<Vec<IntentEntryJson>, LocalDbError> {
     if entries_json.len() > MAX_ENTRIES_JSON_BYTES {
         return Err(LocalDbError::ValidationError(format!(
             "settled intent entries_json exceeds {MAX_ENTRIES_JSON_BYTES} bytes"
@@ -384,39 +385,56 @@ async fn mark_intent_recovery_conflict(
 
 fn validate_intent_entry(entry: &IntentEntryJson) -> Result<(), LocalDbError> {
     if entry.path.is_empty() || entry.path.len() > 4096 {
-        return Err(LocalDbError::ValidationError("invalid intent entry path".into()));
+        return Err(LocalDbError::ValidationError(
+            "invalid intent entry path".into(),
+        ));
     }
     if entry.path.contains("..") || entry.path.starts_with('/') {
-        return Err(LocalDbError::ValidationError("intent entry path must be relative".into()));
+        return Err(LocalDbError::ValidationError(
+            "intent entry path must be relative".into(),
+        ));
     }
     match entry.op.as_str() {
         "create" => {
             if entry.pre_hash.is_some() {
-                return Err(LocalDbError::ValidationError("create entry must not have pre_hash".into()));
+                return Err(LocalDbError::ValidationError(
+                    "create entry must not have pre_hash".into(),
+                ));
             }
             if entry.post_hash.as_deref().is_none_or(|h| h.len() != 64) {
-                return Err(LocalDbError::ValidationError("create entry requires post_hash".into()));
+                return Err(LocalDbError::ValidationError(
+                    "create entry requires post_hash".into(),
+                ));
             }
         }
         "modify" => {
             if entry.pre_hash.as_deref().is_none_or(|h| h.len() != 64)
                 || entry.post_hash.as_deref().is_none_or(|h| h.len() != 64)
             {
-                return Err(LocalDbError::ValidationError("modify entry requires pre/post hash".into()));
+                return Err(LocalDbError::ValidationError(
+                    "modify entry requires pre/post hash".into(),
+                ));
             }
         }
         "delete" => {
-            if entry.pre_hash.as_deref().is_none_or(|h| h.len() != 64) || entry.post_hash.is_some() {
-                return Err(LocalDbError::ValidationError("delete entry requires pre_hash only".into()));
+            if entry.pre_hash.as_deref().is_none_or(|h| h.len() != 64) || entry.post_hash.is_some()
+            {
+                return Err(LocalDbError::ValidationError(
+                    "delete entry requires pre_hash only".into(),
+                ));
             }
         }
         other => {
-            return Err(LocalDbError::ValidationError(format!("unknown intent op: {other}")));
+            return Err(LocalDbError::ValidationError(format!(
+                "unknown intent op: {other}"
+            )));
         }
     }
     for hash in entry.pre_hash.iter().chain(entry.post_hash.iter()) {
         if !hash.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')) || hash.len() != 64 {
-            return Err(LocalDbError::ValidationError("intent hash must be lowercase hex".into()));
+            return Err(LocalDbError::ValidationError(
+                "intent hash must be lowercase hex".into(),
+            ));
         }
     }
     if entry.stage_basename.is_empty()
@@ -424,7 +442,9 @@ fn validate_intent_entry(entry: &IntentEntryJson) -> Result<(), LocalDbError> {
         || !entry.stage_basename.starts_with(".nexus-")
         || entry.stage_basename.contains('/')
     {
-        return Err(LocalDbError::ValidationError("invalid stage basename".into()));
+        return Err(LocalDbError::ValidationError(
+            "invalid stage basename".into(),
+        ));
     }
     if let Some(ref backup) = entry.backup_basename {
         if backup.is_empty()
@@ -432,13 +452,18 @@ fn validate_intent_entry(entry: &IntentEntryJson) -> Result<(), LocalDbError> {
             || !backup.starts_with(".nexus-")
             || backup.contains('/')
         {
-            return Err(LocalDbError::ValidationError("invalid backup basename".into()));
+            return Err(LocalDbError::ValidationError(
+                "invalid backup basename".into(),
+            ));
         }
     }
     Ok(())
 }
 
-async fn decode_intent_rows(pool: &SqlitePool, rows: Vec<IntentRowRaw>) -> Result<Vec<CommitIntentRow>, LocalDbError> {
+async fn decode_intent_rows(
+    pool: &SqlitePool,
+    rows: Vec<IntentRowRaw>,
+) -> Result<Vec<CommitIntentRow>, LocalDbError> {
     let mut out = Vec::new();
     for raw in rows {
         let revision = raw.revision.clone();
@@ -518,7 +543,9 @@ pub async fn list_unsettled_intents(
     decode_intent_rows(pool, rows).await
 }
 
-pub async fn list_all_unsettled_intents(pool: &SqlitePool) -> Result<Vec<CommitIntentRow>, LocalDbError> {
+pub async fn list_all_unsettled_intents(
+    pool: &SqlitePool,
+) -> Result<Vec<CommitIntentRow>, LocalDbError> {
     let rows = sqlx::query_as::<_, IntentRowRaw>(
         "SELECT session_id, workspace_root, revision, request_digest, state, entries_json, error_category \
          FROM workspace_commit_intents \
@@ -552,10 +579,12 @@ impl IntentRowRaw {
         let entries: Vec<IntentEntryJson> = match serde_json::from_str(&self.entries_json) {
             Ok(v) => v,
             Err(e) => {
-                return Err(LocalDbError::Sqlx(sqlx::Error::Decode(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("corrupt intent entries_json: {e}"),
-                )))));
+                return Err(LocalDbError::Sqlx(sqlx::Error::Decode(Box::new(
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("corrupt intent entries_json: {e}"),
+                    ),
+                ))));
             }
         };
         for entry in &entries {

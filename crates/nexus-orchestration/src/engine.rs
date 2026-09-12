@@ -626,7 +626,8 @@ pub struct EngineSharedState {
     /// Live workspace state provider (v1.188 P3) — shared by the engine and
     /// every `EngineProxy` so wired preset graphs resolve
     /// `_context.workspace.*` against the daemon's workspace authority.
-    pub workspace_state_provider: Option<std::sync::Arc<dyn crate::capability::WorkspaceStateProvider>>,
+    pub workspace_state_provider:
+        Option<std::sync::Arc<dyn crate::capability::WorkspaceStateProvider>>,
 }
 
 impl EngineSharedState {
@@ -2072,12 +2073,8 @@ impl EngineSharedState {
                             )
                             .await
                         {
-                            Ok(SettlementResult::Applied(record)) => {
-                                Ok((true, record.status))
-                            }
-                            Ok(SettlementResult::Observed(record)) => {
-                                Ok((false, record.status))
-                            }
+                            Ok(SettlementResult::Applied(record)) => Ok((true, record.status)),
+                            Ok(SettlementResult::Observed(record)) => Ok((false, record.status)),
                             Err(e) => Err(e),
                         }
                     } else {
@@ -2100,86 +2097,86 @@ impl EngineSharedState {
                             // Observed terminal winner — leave coordinator
                             // cleanup to the owner that won the CAS.
                         } else {
-                        // The parent's `commit_transition` persisted each
-                        // child checkpoint with `state_revision + 1` (the
-                        // store's ON CONFLICT bump). Synchronize the
-                        // in-memory children map to the persisted revisions
-                        // for exactly the children THIS commit carried —
-                        // otherwise the stale pre-commit revision fails the
-                        // child CAS on the parent's next step and the run is
-                        // misclassified Interrupted (N-7: multi-step inner
-                        // graphs after a child step).
-                        // Reload every carried child checkpoint from
-                        // storage: the commit advanced both the child's
-                        // `state_revision` AND its durable `graph_version`,
-                        // so the cached `Session.version` must come from an
-                        // authoritative reload, not a blind increment (the
-                        // cached snapshot is otherwise a stale OCC
-                        // preimage).
-                        for child in &children {
-                            if let Err(e) = self
-                                .sync_child_checkpoint_after_step(&SessionId(
-                                    child.session.id.clone(),
-                                ))
-                                .await
-                            {
-                                return Err(wrap_step_boundary_err(e));
-                            }
-                        }
-                        if parent_advanced
-                            && children.iter().any(|child| child.status.is_terminal())
-                        {
-                            let mut child_map = self.children.write().await;
-                            if let Some(entries) = child_map.get_mut(&session_id.0) {
-                                entries.retain(|child| !child.status.is_terminal());
-                                if entries.is_empty() {
-                                    child_map.remove(&session_id.0);
+                            // The parent's `commit_transition` persisted each
+                            // child checkpoint with `state_revision + 1` (the
+                            // store's ON CONFLICT bump). Synchronize the
+                            // in-memory children map to the persisted revisions
+                            // for exactly the children THIS commit carried —
+                            // otherwise the stale pre-commit revision fails the
+                            // child CAS on the parent's next step and the run is
+                            // misclassified Interrupted (N-7: multi-step inner
+                            // graphs after a child step).
+                            // Reload every carried child checkpoint from
+                            // storage: the commit advanced both the child's
+                            // `state_revision` AND its durable `graph_version`,
+                            // so the cached `Session.version` must come from an
+                            // authoritative reload, not a blind increment (the
+                            // cached snapshot is otherwise a stale OCC
+                            // preimage).
+                            for child in &children {
+                                if let Err(e) = self
+                                    .sync_child_checkpoint_after_step(&SessionId(
+                                        child.session.id.clone(),
+                                    ))
+                                    .await
+                                {
+                                    return Err(wrap_step_boundary_err(e));
                                 }
                             }
-                        }
-
-                        // I-001 / M-004: a confirmed run-terminal transition
-                        // (Completed/Failed) finalizes every `(run, role)`
-                        // Host session and reclaims the run's coordinator
-                        // cancellation token. The cancel path
-                        // (`persist_signal_transition`) performs the same
-                        // finalization before persisting terminal
-                        // `Cancelled`; cleanup-unconfirmed stays
-                        // non-terminal/actionable (never finalized here).
-                        //
-                        // I-002: the token is reclaimed ONLY when
-                        // finalization is confirmed. On unconfirmed cleanup
-                        // the token and the executor's session entries are
-                        // kept so a later retry can still reap the owned
-                        // sessions; the run is already terminal, so no new
-                        // admission can occur, but the coordinator token
-                        // must remain cancellable for the retry path.
-                        if status.is_terminal() {
-                            let finalized = match &self.prompt_executor {
-                                Some(executor) => {
-                                    match executor.finalize_run(&session_id.0).await {
-                                        Ok(()) => true,
-                                        Err(e) => {
-                                            tracing::warn!(
-                                                session_id = %session_id.0,
-                                                error = %e,
-                                                "run-terminal Host session finalization unconfirmed; keeping cancellation token for retry"
-                                            );
-                                            false
-                                        }
+                            if parent_advanced
+                                && children.iter().any(|child| child.status.is_terminal())
+                            {
+                                let mut child_map = self.children.write().await;
+                                if let Some(entries) = child_map.get_mut(&session_id.0) {
+                                    entries.retain(|child| !child.status.is_terminal());
+                                    if entries.is_empty() {
+                                        child_map.remove(&session_id.0);
                                     }
                                 }
-                                None => true,
-                            };
-                            if finalized {
-                                self.session_cancels
-                                    .write()
-                                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                                    .remove(&session_id.0);
+                            }
+
+                            // I-001 / M-004: a confirmed run-terminal transition
+                            // (Completed/Failed) finalizes every `(run, role)`
+                            // Host session and reclaims the run's coordinator
+                            // cancellation token. The cancel path
+                            // (`persist_signal_transition`) performs the same
+                            // finalization before persisting terminal
+                            // `Cancelled`; cleanup-unconfirmed stays
+                            // non-terminal/actionable (never finalized here).
+                            //
+                            // I-002: the token is reclaimed ONLY when
+                            // finalization is confirmed. On unconfirmed cleanup
+                            // the token and the executor's session entries are
+                            // kept so a later retry can still reap the owned
+                            // sessions; the run is already terminal, so no new
+                            // admission can occur, but the coordinator token
+                            // must remain cancellable for the retry path.
+                            if status.is_terminal() {
+                                let finalized = match &self.prompt_executor {
+                                    Some(executor) => {
+                                        match executor.finalize_run(&session_id.0).await {
+                                            Ok(()) => true,
+                                            Err(e) => {
+                                                tracing::warn!(
+                                                    session_id = %session_id.0,
+                                                    error = %e,
+                                                    "run-terminal Host session finalization unconfirmed; keeping cancellation token for retry"
+                                                );
+                                                false
+                                            }
+                                        }
+                                    }
+                                    None => true,
+                                };
+                                if finalized {
+                                    self.session_cancels
+                                        .write()
+                                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                        .remove(&session_id.0);
+                                }
                             }
                         }
                     }
-                        }
                     Err(commit_err) => {
                         if had_effect {
                             // A failed post-effect commit must NOT blindly rewind
@@ -3389,9 +3386,9 @@ impl GraphFlowEngine {
     ) {
         match std::sync::Arc::get_mut(&mut self.state) {
             Some(state) => state.set_workspace_state_provider(provider),
-            None => tracing::warn!(
-                "workspace state provider not wired: engine shared state is aliased"
-            ),
+            None => {
+                tracing::warn!("workspace state provider not wired: engine shared state is aliased")
+            }
         }
     }
 

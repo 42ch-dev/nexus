@@ -1,10 +1,10 @@
 //! Config-based discovery — parse explicit provider config entries into catalog entries.
 
-use crate::capability::model::{CapabilityDescriptor, ProtocolKind, ProviderHealth};
-use crate::providers::{candidate_unavailable_health, validate_provider_config};
+use crate::capability::model::{CapabilityDescriptor, ProtocolKind};
 use crate::config::AgentHostConfig;
 use crate::error::HostResult;
 use crate::ids::ProviderId;
+use crate::providers::{candidate_unavailable_health, validate_provider_config};
 use crate::{DiscoverySource, LaunchStrategy, ProviderCatalogEntry, TrustLevel};
 
 /// Parse explicit provider config entries into catalog entries.

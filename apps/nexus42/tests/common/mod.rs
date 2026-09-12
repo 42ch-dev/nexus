@@ -412,7 +412,7 @@ impl LiveDaemon {
             session_cancels: state.session_cancels(),
             daemon_tool_dispatch: None,
             cdn_config: None,
-        workspace_executor: None,
+            workspace_executor: None,
         };
         let scan_dir = state
             .nexus_home()

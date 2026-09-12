@@ -350,7 +350,10 @@ impl fmt::Display for LocalDbError {
             Self::ActorContractConflict { code } => {
                 write!(f, "{}", code.message())
             }
-            Self::CorruptIntent { revision, workspace_root } => {
+            Self::CorruptIntent {
+                revision,
+                workspace_root,
+            } => {
                 write!(
                     f,
                     "corrupt workspace commit intent {revision} at {workspace_root}"

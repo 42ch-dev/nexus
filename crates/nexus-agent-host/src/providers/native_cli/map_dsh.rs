@@ -79,8 +79,12 @@ pub fn classify_notification(
                 return Ok(DshNotificationClass::Ignore);
             }
             classify_root_session_event(&event.event).map_err(|failure| match failure {
-                RootEventFailure::Protocol => ClassifyNotificationError::Protocol(DshProtocolFailure),
-                RootEventFailure::TooLarge => ClassifyNotificationError::EventTooLarge(DshEventTooLarge),
+                RootEventFailure::Protocol => {
+                    ClassifyNotificationError::Protocol(DshProtocolFailure)
+                }
+                RootEventFailure::TooLarge => {
+                    ClassifyNotificationError::EventTooLarge(DshEventTooLarge)
+                }
             })
         }
         "session.status" => {
@@ -549,13 +553,9 @@ mod tests {
             })],
             notifications: Vec::new(),
         };
-        let err = finalize_successful_run(
-            &result,
-            &RunReconciliation::default(),
-            &session_id,
-            &op_id,
-        )
-        .expect_err("oversized fallback must fail");
+        let err =
+            finalize_successful_run(&result, &RunReconciliation::default(), &session_id, &op_id)
+                .expect_err("oversized fallback must fail");
         assert_eq!(err.error_category, "provider_error");
         assert_eq!(
             err.error_message,
@@ -576,13 +576,9 @@ mod tests {
             ],
             notifications: Vec::new(),
         };
-        let events = finalize_successful_run(
-            &result,
-            &RunReconciliation::default(),
-            &session_id,
-            &op_id,
-        )
-        .expect("fallback turn");
+        let events =
+            finalize_successful_run(&result, &RunReconciliation::default(), &session_id, &op_id)
+                .expect("fallback turn");
         assert_eq!(events.len(), 2);
         assert!(matches!(&events[0], HostEvent::MessageDelta(d) if d.text == "only final"));
         assert!(matches!(&events[1], HostEvent::OpFinished(_)));
@@ -661,5 +657,4 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], HostEvent::OpFinished(_)));
     }
-
 }

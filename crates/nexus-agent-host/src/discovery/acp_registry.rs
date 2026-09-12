@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use crate::capability::model::{CapabilityDescriptor, ProtocolKind, ProviderHealth};
+use crate::capability::model::{CapabilityDescriptor, ProtocolKind};
 use crate::config::AgentHostConfig;
 use crate::error::HostResult;
 use crate::ids::ProviderId;

@@ -174,7 +174,10 @@ async fn production_preset_workflow_branches_on_live_workspace_state() {
         }))
         .await
         .expect("workspace.commit runs");
-    let revision = committed["revision"].as_str().expect("revision").to_string();
+    let revision = committed["revision"]
+        .as_str()
+        .expect("revision")
+        .to_string();
     assert!(revision.starts_with("rev_"), "got {revision}");
 
     // The bytes really landed in the workspace on disk.

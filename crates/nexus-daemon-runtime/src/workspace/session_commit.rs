@@ -11,8 +11,8 @@ use super::bounds::{
     validate_encoded_body, validate_entries_json_len, validate_hash_hex, validate_relative_path,
 };
 use super::commit_fs::{
-    decode_base64, hash_bytes, require_parent_exists, ScopeMutation, CREATE_FILE_MODE,
-    MAX_CHANGES, MAX_FILE_BYTES, MAX_TOTAL_BYTES,
+    decode_base64, hash_bytes, require_parent_exists, ScopeMutation, CREATE_FILE_MODE, MAX_CHANGES,
+    MAX_FILE_BYTES, MAX_TOTAL_BYTES,
 };
 use super::session::{
     canonicalize_workspace_root, enforce_path_boundary, SessionError, SessionId,
@@ -131,7 +131,9 @@ async fn load_recovery_session(
         .map_err(|e| SessionError::Database(e.to_string()))?
         .ok_or_else(|| SessionError::NotFound(SessionId(intent.session_id.clone())))?;
     if row.claimed_by_revision.as_deref() != Some(intent.revision.as_str()) {
-        return Err(SessionError::RecoveryConflict(intent.workspace_root.clone()));
+        return Err(SessionError::RecoveryConflict(
+            intent.workspace_root.clone(),
+        ));
     }
     Ok(row)
 }
@@ -142,13 +144,20 @@ async fn recover_applying_intent_locked(
     intent: &db::CommitIntentRow,
 ) -> Result<(), SessionError> {
     if !intent.entries_metadata_valid() {
-        return persist_recovery_conflict(mgr, &intent.revision, workspace_root, "corrupt_entries").await;
+        return persist_recovery_conflict(mgr, &intent.revision, workspace_root, "corrupt_entries")
+            .await;
     }
     let row = match load_recovery_session(mgr, intent).await {
         Ok(r) => r,
         Err(e) => {
             if matches!(e, SessionError::RecoveryConflict(_)) {
-                let _ = persist_recovery_conflict(mgr, &intent.revision, workspace_root, "claim_mismatch").await;
+                let _ = persist_recovery_conflict(
+                    mgr,
+                    &intent.revision,
+                    workspace_root,
+                    "claim_mismatch",
+                )
+                .await;
             }
             return Err(e);
         }
@@ -246,14 +255,21 @@ async fn rollback_intent_locked(
     intent: &db::CommitIntentRow,
 ) -> Result<(), SessionError> {
     if !intent.entries_metadata_valid() {
-        return persist_recovery_conflict(mgr, &intent.revision, workspace_root, "corrupt_entries").await;
+        return persist_recovery_conflict(mgr, &intent.revision, workspace_root, "corrupt_entries")
+            .await;
     }
 
     let row = match load_recovery_session(mgr, intent).await {
         Ok(r) => r,
         Err(e) => {
             if matches!(e, SessionError::RecoveryConflict(_)) {
-                let _ = persist_recovery_conflict(mgr, &intent.revision, workspace_root, "claim_mismatch").await;
+                let _ = persist_recovery_conflict(
+                    mgr,
+                    &intent.revision,
+                    workspace_root,
+                    "claim_mismatch",
+                )
+                .await;
             }
             return Err(e);
         }
@@ -315,13 +331,9 @@ async fn rollback_intent_locked(
     test_crash_if("after_rollback_restore_before_finalize")?;
 
     // Durable rolled-back transition BEFORE any artifact removal.
-    db::finalize_rolled_back_intent(
-        mgr.pool().as_ref(),
-        &intent.revision,
-        &intent.session_id,
-    )
-    .await
-    .map_err(|e| SessionError::Database(e.to_string()))?;
+    db::finalize_rolled_back_intent(mgr.pool().as_ref(), &intent.revision, &intent.session_id)
+        .await
+        .map_err(|e| SessionError::Database(e.to_string()))?;
 
     // Settled: removal is best-effort. A crash here leaves dead material that
     // the startup sweep reaps WITHOUT replaying the rollback, so recovery can
@@ -383,7 +395,9 @@ pub fn normalize_changes(
 
 pub fn validate_manifest(changes: &[WorkspaceChangeEntry]) -> Result<(), SessionError> {
     if changes.is_empty() {
-        return Err(SessionError::ManifestInvalid("changes must not be empty".into()));
+        return Err(SessionError::ManifestInvalid(
+            "changes must not be empty".into(),
+        ));
     }
     if changes.len() > MAX_CHANGES {
         return Err(SessionError::ManifestInvalid(format!(
@@ -488,13 +502,10 @@ async fn committed_replay_outcome(
     session_id: &SessionId,
     digest: &str,
 ) -> Result<Option<CommitOutcome>, SessionError> {
-    let existing = db::get_committed_intent_by_digest(
-        mgr.pool().as_ref(),
-        &session_id.to_string(),
-        digest,
-    )
-    .await
-    .map_err(|e| SessionError::Database(e.to_string()))?;
+    let existing =
+        db::get_committed_intent_by_digest(mgr.pool().as_ref(), &session_id.to_string(), digest)
+            .await
+            .map_err(|e| SessionError::Database(e.to_string()))?;
     Ok(existing.map(|row| CommitOutcome {
         revision: row.revision,
         committed: true,
@@ -525,12 +536,10 @@ pub async fn commit_recoverable(
     validate_manifest(changes)?;
     let digest = request_digest(&session_id.to_string(), changes);
 
-    if let Some(committed_digest) = db::get_committed_request_digest(
-        mgr.pool().as_ref(),
-        &session_id.to_string(),
-    )
-    .await
-    .map_err(|e| SessionError::Database(e.to_string()))?
+    if let Some(committed_digest) =
+        db::get_committed_request_digest(mgr.pool().as_ref(), &session_id.to_string())
+            .await
+            .map_err(|e| SessionError::Database(e.to_string()))?
     {
         if committed_digest != digest {
             return Err(SessionError::AlreadyCommitted(session_id.clone()));
@@ -620,7 +629,8 @@ pub async fn commit_recoverable(
         for (idx, change) in changes.iter().enumerate() {
             let target = super::scope::resolve_in_scope(&scope_dir, &change.path)?;
             enforce_path_boundary(&target, &canonical_root)?;
-            require_parent_exists(&target).map_err(|e| SessionError::ManifestInvalid(e.to_string()))?;
+            require_parent_exists(&target)
+                .map_err(|e| SessionError::ManifestInvalid(e.to_string()))?;
             let stage_basename = format!(".nexus-stage-{}-{}", rev_tag, idx);
             let backup_basename = if scope.target_exists(&change.path).unwrap_or(false) {
                 Some(format!(".nexus-backup-{}-{}", rev_tag, idx))
@@ -633,7 +643,12 @@ pub async fn commit_recoverable(
                     let bytes = decode_base64(change.content_base64.as_deref().unwrap_or(""))
                         .map_err(SessionError::ManifestInvalid)?;
                     scope
-                        .write_stage(&change.path, &stage_basename, &bytes, Some(CREATE_FILE_MODE))
+                        .write_stage(
+                            &change.path,
+                            &stage_basename,
+                            &bytes,
+                            Some(CREATE_FILE_MODE),
+                        )
                         .map_err(|e| SessionError::Io(e.to_string()))?;
                     (None, Some(hash_bytes(&bytes)), Some(CREATE_FILE_MODE))
                 }
@@ -651,7 +666,11 @@ pub async fn commit_recoverable(
                     scope
                         .write_stage(&change.path, &stage_basename, &bytes, captured_mode)
                         .map_err(|e| SessionError::Io(e.to_string()))?;
-                    (change.expected_hash.clone(), Some(hash_bytes(&bytes)), captured_mode)
+                    (
+                        change.expected_hash.clone(),
+                        Some(hash_bytes(&bytes)),
+                        captured_mode,
+                    )
                 }
                 WorkspaceChangeOp::Delete => {
                     if let Some(ref backup_name) = backup_basename {
@@ -801,13 +820,10 @@ pub async fn commit_recoverable(
     // Durable committed transition FIRST. Stage/backup artifacts are the
     // recovery evidence for an unsettled intent, so none of them may be
     // removed while the intent is still `applying`.
-    let finalized = db::finalize_committed_intent(
-        mgr.pool().as_ref(),
-        &revision,
-        &session_id.to_string(),
-    )
-    .await
-    .map_err(|e| SessionError::Database(e.to_string()))?;
+    let finalized =
+        db::finalize_committed_intent(mgr.pool().as_ref(), &revision, &session_id.to_string())
+            .await
+            .map_err(|e| SessionError::Database(e.to_string()))?;
     if !finalized {
         return Err(SessionError::AlreadyCommitted(session_id.clone()));
     }
@@ -933,9 +949,14 @@ pub async fn startup_recovery_all(mgr: &WorkspaceSessionManager) -> Result<(), S
     };
     for intent in intents {
         if intent.state == db::IntentState::RecoveryConflict {
-            return Err(SessionError::RecoveryConflict(intent.workspace_root.clone()));
+            return Err(SessionError::RecoveryConflict(
+                intent.workspace_root.clone(),
+            ));
         }
-        if matches!(intent.state, db::IntentState::Applying | db::IntentState::RollingBack) {
+        if matches!(
+            intent.state,
+            db::IntentState::Applying | db::IntentState::RollingBack
+        ) {
             recover_unsettled_locked(mgr, &intent.workspace_root).await?;
         }
     }

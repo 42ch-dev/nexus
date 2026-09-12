@@ -239,9 +239,7 @@ async fn validate_changes_manifest_rejects_symlink_in_modify_path() {
         path: "real.txt".to_string(),
         op: ChangeOp::Modify,
         expected_hash: Some(stored_hash),
-        content_base64: Some(
-            base64::engine::general_purpose::STANDARD.encode(b"placeholder"),
-        ),
+        content_base64: Some(base64::engine::general_purpose::STANDARD.encode(b"placeholder")),
     }];
     let err = mgr
         .validate_contract_manifest(&session_id, &changes)
@@ -279,7 +277,10 @@ async fn recoverable_create_modify_delete_and_idempotent_retry() {
         .expect("create commit");
     assert!(first.committed);
     assert!(first.revision.starts_with("rev_"));
-    assert_eq!(std::fs::read(ws_dir.path().join("note.txt")).unwrap(), create_bytes);
+    assert_eq!(
+        std::fs::read(ws_dir.path().join("note.txt")).unwrap(),
+        create_bytes
+    );
 
     let session2 = mgr.open_session(&ws_root, "", true).await.expect("reopen");
     let hashes = compute_content_hashes(ws_dir.path()).await.expect("hash");

@@ -53,8 +53,7 @@ pub fn validate_provider_config(pc: &ProviderConfig) -> HostResult<()> {
     if protocol != "acp" && protocol != "native_cli" {
         return Err(HostError::internal(format!(
             "unsupported protocol '{}' for provider '{}'",
-            pc.protocol,
-            pc.id
+            pc.protocol, pc.id
         )));
     }
     if pc.command.as_deref().is_none_or(str::is_empty) {
@@ -84,7 +83,9 @@ pub fn validate_provider_config(pc: &ProviderConfig) -> HostResult<()> {
 /// # Errors
 ///
 /// Returns on the first invalid enabled provider entry.
-pub fn validate_agent_host_config_providers(config: &crate::config::AgentHostConfig) -> HostResult<()> {
+pub fn validate_agent_host_config_providers(
+    config: &crate::config::AgentHostConfig,
+) -> HostResult<()> {
     for pc in &config.providers {
         validate_provider_config(pc)?;
     }
@@ -94,16 +95,12 @@ pub fn validate_agent_host_config_providers(config: &crate::config::AgentHostCon
 /// Build a [`ProviderConfig`] from a selected catalog entry for factory dispatch.
 fn provider_config_from_entry(entry: &ProviderCatalogEntry) -> HostResult<ProviderConfig> {
     let (protocol, command, args, env) = match &entry.launch {
-        LaunchStrategy::Acp {
-            command,
-            args,
-            env,
-        } => ("acp", command.clone(), args.clone(), env.clone()),
-        LaunchStrategy::NativeCli {
-            command,
-            args,
-            env,
-        } => ("native_cli", command.clone(), args.clone(), env.clone()),
+        LaunchStrategy::Acp { command, args, env } => {
+            ("acp", command.clone(), args.clone(), env.clone())
+        }
+        LaunchStrategy::NativeCli { command, args, env } => {
+            ("native_cli", command.clone(), args.clone(), env.clone())
+        }
     };
     if command.trim().is_empty() {
         return Err(HostError::internal(format!(
@@ -140,11 +137,8 @@ pub fn adapter_from_catalog_entry(
 
     match entry.protocol_kind {
         ProtocolKind::Acp => {
-            let provider = acp::AcpProvider::from_config(
-                provider_config,
-                timeouts,
-                permission_resolver,
-            )?;
+            let provider =
+                acp::AcpProvider::from_config(provider_config, timeouts, permission_resolver)?;
             Ok(Arc::new(provider))
         }
         ProtocolKind::NativeCli => match entry.provider_id.0.as_str() {
@@ -186,6 +180,6 @@ pub fn adapter_from_catalog_entry(
                 "unsupported native provider id '{}'",
                 other
             ))),
-        }
+        },
     }
 }

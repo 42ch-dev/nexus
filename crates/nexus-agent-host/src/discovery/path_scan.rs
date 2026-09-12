@@ -142,7 +142,10 @@ pub fn scan_path_in(
 
         // Search the provided dirs (and process PATH as a which fallback).
         if let Some(found_path) = find_command(path_dirs, cmd) {
-            push_row(found_path.to_string_lossy().into_owned(), candidate("path candidate; bounded probe required"));
+            push_row(
+                found_path.to_string_lossy().into_owned(),
+                candidate("path candidate; bounded probe required"),
+            );
         } else if cmd == "dsh" {
             // Env route (PD-4): a non-empty `DSH_RUNTIME_BIN` counts as
             // present even when `dsh` is not on PATH — same catalog row,
@@ -159,10 +162,9 @@ pub fn scan_path_in(
                             resolved.to_string_lossy().into_owned(),
                             candidate("path candidate via DSH_RUNTIME_BIN; bounded probe required"),
                         ),
-                        Err(reason) => push_row(
-                            env_bin.to_string_lossy().into_owned(),
-                            unavailable(reason),
-                        ),
+                        Err(reason) => {
+                            push_row(env_bin.to_string_lossy().into_owned(), unavailable(reason))
+                        }
                     }
                 }
             }

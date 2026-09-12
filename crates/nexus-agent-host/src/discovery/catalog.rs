@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use crate::capability::model::{CapabilityDescriptor, ProtocolKind, ProviderHealth};
+use crate::capability::model::{CapabilityDescriptor, ProtocolKind};
 use crate::config::AgentHostConfig;
 use crate::error::HostResult;
 use crate::ids::ProviderId;
@@ -298,28 +298,5 @@ mod tests {
         let config = default_config();
         let catalog =
             ProviderCatalog::build_from_sources(&config, vec![path_entry("test-provider")], vec![])
-                .expect("should succeed");
 
-        assert!(catalog.find(&ProviderId::new("test-provider")).is_some());
-        assert!(catalog.find(&ProviderId::new("nonexistent")).is_none());
-    }
-
-    #[test]
-    fn filter_by_protocol_kind() {
-        let config = default_config();
-        let catalog = ProviderCatalog::build_from_sources(
-            &config,
-            vec![path_entry("native-provider")],
-            vec![registry_entry("acp-provider")],
-        )
-        .expect("should succeed");
-
-        let native = catalog.by_protocol(ProtocolKind::NativeCli);
-        assert_eq!(native.len(), 1);
-        assert_eq!(native[0].provider_id.0, "native-provider");
-
-        let acp = catalog.by_protocol(ProtocolKind::Acp);
-        assert_eq!(acp.len(), 1);
-        assert_eq!(acp[0].provider_id.0, "acp-provider");
-    }
-}
+[Showing lines 1-300 of 326. Use :301 to continue]

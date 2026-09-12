@@ -1396,7 +1396,6 @@ async fn run_settle_failed_cas(
 /// non-steppable row, with corrupt clock/status shapes surfaced as hard
 /// storage errors before either (Important 6).
 
-
 async fn classify_restore_fence_miss(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     session_id: &SessionId,
@@ -2358,31 +2357,37 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 )))
             })?;
         let cas_result = match terminal_target {
-            TerminalSettlementTarget::Cancelled => run_settle_cancelled_cas(
-                &mut tx,
-                session_id,
-                &payload,
-                expected_revision,
-                expected_graph_version,
-            )
-            .await,
-            TerminalSettlementTarget::Failed => run_settle_failed_cas(
-                &mut tx,
-                session_id,
-                &payload,
-                expected_revision,
-                expected_graph_version,
-            )
-            .await,
-            TerminalSettlementTarget::Completed => run_commit_transition_cas(
-                &mut tx,
-                session_id,
-                &payload,
-                "completed",
-                expected_revision,
-                expected_graph_version,
-            )
-            .await,
+            TerminalSettlementTarget::Cancelled => {
+                run_settle_cancelled_cas(
+                    &mut tx,
+                    session_id,
+                    &payload,
+                    expected_revision,
+                    expected_graph_version,
+                )
+                .await
+            }
+            TerminalSettlementTarget::Failed => {
+                run_settle_failed_cas(
+                    &mut tx,
+                    session_id,
+                    &payload,
+                    expected_revision,
+                    expected_graph_version,
+                )
+                .await
+            }
+            TerminalSettlementTarget::Completed => {
+                run_commit_transition_cas(
+                    &mut tx,
+                    session_id,
+                    &payload,
+                    "completed",
+                    expected_revision,
+                    expected_graph_version,
+                )
+                .await
+            }
         };
         if let Err(EngineError::TerminalState(_)) = &cas_result {
             tx.rollback().await.ok();

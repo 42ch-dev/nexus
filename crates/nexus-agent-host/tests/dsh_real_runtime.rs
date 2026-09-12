@@ -38,8 +38,8 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::panic::AssertUnwindSafe;
 use std::io::Write as _;
+use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -52,7 +52,7 @@ use nexus_agent_host::capability::model::{
 };
 use nexus_agent_host::config::TimeoutConfig;
 use nexus_agent_host::error::HostError;
-use nexus_agent_host::providers::native_cli::dsh::{DshNativeProvider, resolve_dsh_executable};
+use nexus_agent_host::providers::native_cli::dsh::{resolve_dsh_executable, DshNativeProvider};
 use nexus_agent_host::{HostOperationId, ProviderAdapter, ProviderId};
 use tempfile::TempDir;
 use tokio::io::AsyncReadExt;
@@ -79,7 +79,9 @@ const DUMMY_API_KEY: &str = "dsh-test-nonsecret-loopback-key";
 static REAL_RUNTIME_SERIAL: Mutex<()> = Mutex::new(());
 
 fn serial_real_runtime() -> std::sync::MutexGuard<'static, ()> {
-    REAL_RUNTIME_SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+    REAL_RUNTIME_SERIAL
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
 }
 
 /// Resolve the installed/resolved real `dsh` through the production chain
@@ -148,7 +150,10 @@ fn isolated_env(root: &TempDir, proxy_port: u16) -> HashMap<String, String> {
         ("DEEPSEEK_API_KEY".to_string(), DUMMY_API_KEY.to_string()),
         (
             "POISON_LOG".to_string(),
-            root.path().join("poison.jsonl").to_string_lossy().into_owned(),
+            root.path()
+                .join("poison.jsonl")
+                .to_string_lossy()
+                .into_owned(),
         ),
         ("DSH_TELEMETRY_DISABLED".to_string(), "1".to_string()),
     ])
@@ -368,7 +373,9 @@ impl ChildBaseline {
             diag.push("all direct children exited within the observation window".to_string());
             return (false, diag);
         }
-        diag.push(format!("strays alive after observation window: {strays:?}; TERM"));
+        diag.push(format!(
+            "strays alive after observation window: {strays:?}; TERM"
+        ));
         for pid in &strays {
             let _ = Command::new("kill").arg(pid.to_string()).status();
         }
@@ -449,8 +456,7 @@ impl Proxy {
                 let conn_records = Arc::clone(&task_records);
                 let conn_markers = Arc::clone(&markers);
                 tokio::spawn(async move {
-                    serve_connection(&mut socket, hostile_rounds, conn_records, conn_markers)
-                        .await;
+                    serve_connection(&mut socket, hostile_rounds, conn_records, conn_markers).await;
                 });
             }
         });
@@ -646,7 +652,9 @@ async fn serve_connection(
 
 /// Collect a turn's events, expecting a clean stream (no Err items).
 #[cfg(unix)]
-async fn collect_turn(stream: nexus_agent_host::capability::model::HostEventStream) -> Vec<HostEvent> {
+async fn collect_turn(
+    stream: nexus_agent_host::capability::model::HostEventStream,
+) -> Vec<HostEvent> {
     let results: Vec<_> = stream.collect().await;
     results
         .into_iter()
@@ -714,8 +722,7 @@ async fn with_confirmed_teardown<Fut: Future<Output = ()>>(
     body: Fut,
 ) {
     let outcome = AssertUnwindSafe(body).catch_unwind().await;
-    let cleanup =
-        tokio::time::timeout(Duration::from_secs(30), provider.shutdown(handle)).await;
+    let cleanup = tokio::time::timeout(Duration::from_secs(30), provider.shutdown(handle)).await;
     match (outcome, cleanup) {
         (Ok(()), Ok(Ok(()))) => {
             let (needed_force, diag) = baseline.force_reap_strays();
@@ -862,7 +869,10 @@ fn hostile_bodies_create_their_evidence_when_directly_run() {
         .status()
         .expect("run run_code body");
     assert!(status.success(), "the run_code body is effective when run");
-    assert!(markers.run_code.exists(), "the run_code body created its marker");
+    assert!(
+        markers.run_code.exists(),
+        "the run_code body created its marker"
+    );
 
     // Safe cleanup: every marker removed; total absence re-verified.
     for path in [
@@ -906,43 +916,48 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
         let provider = &provider;
         let proxy = &proxy;
         async move {
-            let events =
-                run_prompt(provider, &handle, "attempt no tool use", Some(deny_all_scope())).await;
+            let events = run_prompt(
+                provider,
+                &handle,
+                "attempt no tool use",
+                Some(deny_all_scope()),
+            )
+            .await;
 
-        // The turn completes bounded through the scripted proxy: exactly
-        // one OpStarted, the final text delta, one OpFinished(EndTurn).
-        assert!(
-            matches!(events.first(), Some(HostEvent::OpStarted(_))),
-            "events: {events:?}"
-        );
-        let deltas: Vec<&str> = events
-            .iter()
-            .filter_map(|e| match e {
-                HostEvent::MessageDelta(delta) => Some(delta.text.as_str()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(deltas, vec![FINAL_TEXT], "events: {events:?}");
-        assert!(
-            matches!(events.last(), Some(HostEvent::OpFinished(f)) if f.reason == FinishReason::EndTurn),
-            "the bounded final completion ends the turn: {events:?}"
-        );
-
-        // Exactly the scripted model calls happened: three hostile
-        // tool-call responses, then the bounded final completion.
-        let records = proxy.records();
-        assert_eq!(
-            records.len(),
-            4,
-            "three rejected tool calls plus the final completion: {records:?}"
-        );
-        for (index, record) in records.iter().enumerate() {
-            assert_eq!(record.path, "/chat/completions");
+            // The turn completes bounded through the scripted proxy: exactly
+            // one OpStarted, the final text delta, one OpFinished(EndTurn).
             assert!(
-                !record.model.is_empty(),
-                "the runtime names the model it calls: {record:?}"
+                matches!(events.first(), Some(HostEvent::OpStarted(_))),
+                "events: {events:?}"
             );
+            let deltas: Vec<&str> = events
+                .iter()
+                .filter_map(|e| match e {
+                    HostEvent::MessageDelta(delta) => Some(delta.text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(deltas, vec![FINAL_TEXT], "events: {events:?}");
             assert!(
+                matches!(events.last(), Some(HostEvent::OpFinished(f)) if f.reason == FinishReason::EndTurn),
+                "the bounded final completion ends the turn: {events:?}"
+            );
+
+            // Exactly the scripted model calls happened: three hostile
+            // tool-call responses, then the bounded final completion.
+            let records = proxy.records();
+            assert_eq!(
+                records.len(),
+                4,
+                "three rejected tool calls plus the final completion: {records:?}"
+            );
+            for (index, record) in records.iter().enumerate() {
+                assert_eq!(record.path, "/chat/completions");
+                assert!(
+                    !record.model.is_empty(),
+                    "the runtime names the model it calls: {record:?}"
+                );
+                assert!(
                 record.message_count == record.roles.len()
                     && record.message_count
                         == records
@@ -952,24 +967,24 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
                             }),
                 "conversation history grows by one assistant+tool pair per rejection: {record:?}"
             );
-            assert!(record.stream, "the dsh LLM client always streams");
-            assert!(
-                !record.has_tools_key && record.tools_len == 0,
-                "request {} must advertise NO tools (the `tools` key is absent): {record:?}",
-                index + 1
+                assert!(record.stream, "the dsh LLM client always streams");
+                assert!(
+                    !record.has_tools_key && record.tools_len == 0,
+                    "request {} must advertise NO tools (the `tools` key is absent): {record:?}",
+                    index + 1
+                );
+                assert!(
+                    !record.system_mentions_poison,
+                    "request {} must not carry the poisoned home layer: {record:?}",
+                    index + 1
+                );
+            }
+            assert_eq!(
+                records[0].roles,
+                vec!["system".to_string(), "user".to_string()],
+                "the sealed composition sends a minimal first request: {:?}",
+                records[0].roles
             );
-            assert!(
-                !record.system_mentions_poison,
-                "request {} must not carry the poisoned home layer: {record:?}",
-                index + 1
-            );
-        }
-        assert_eq!(
-            records[0].roles,
-            vec!["system".to_string(), "user".to_string()],
-            "the sealed composition sends a minimal first request: {:?}",
-            records[0].roles
-        );
         }
     };
     with_confirmed_teardown(&provider, handle, &baseline, body).await;
@@ -1008,7 +1023,9 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
     );
     for entry in &poison {
         let booted_home = std::fs::canonicalize(
-            entry["dshHome"].as_str().expect("poison log carries dshHome"),
+            entry["dshHome"]
+                .as_str()
+                .expect("poison log carries dshHome"),
         )
         .expect("poison boot home resolves");
         assert_eq!(
@@ -1063,30 +1080,30 @@ async fn real_dsh_poisoned_layers_reach_ordinary_runtime() {
         let root = &root;
         async move {
             let events = run_prompt(provider, &handle, "ordinary turn", None).await;
-        assert!(
-            matches!(events.last(), Some(HostEvent::OpFinished(f)) if f.reason == FinishReason::EndTurn),
-            "the ordinary turn completes: {events:?}"
-        );
+            assert!(
+                matches!(events.last(), Some(HostEvent::OpFinished(f)) if f.reason == FinishReason::EndTurn),
+                "the ordinary turn completes: {events:?}"
+            );
 
-        let records = proxy.records();
-        assert_eq!(records.len(), 1, "one scripted completion: {records:?}");
-        assert!(
-            records[0].has_tools_key && records[0].tools_len > 0,
-            "the ordinary runtime DOES advertise tools (contrast with the sealed proof): {:?}",
-            records[0]
-        );
-        assert!(
-            records[0].system_mentions_poison,
-            "the poisoned home layer reached the ordinary model request: {:?}",
-            records[0]
-        );
+            let records = proxy.records();
+            assert_eq!(records.len(), 1, "one scripted completion: {records:?}");
+            assert!(
+                records[0].has_tools_key && records[0].tools_len > 0,
+                "the ordinary runtime DOES advertise tools (contrast with the sealed proof): {:?}",
+                records[0]
+            );
+            assert!(
+                records[0].system_mentions_poison,
+                "the poisoned home layer reached the ordinary model request: {:?}",
+                records[0]
+            );
 
-        let poison = poison_log_entries(root);
-        assert_eq!(
-            poison.len(),
-            2,
-            "the poison plugin booted in the ordinary runtime: {poison:?}"
-        );
+            let poison = poison_log_entries(root);
+            assert_eq!(
+                poison.len(),
+                2,
+                "the poison plugin booted in the ordinary runtime: {poison:?}"
+            );
         }
     };
     with_confirmed_teardown(&provider, handle, &baseline, body).await;
@@ -1145,7 +1162,6 @@ async fn real_dsh_missing_plugin_package_fails_closed() {
     );
     markers.assert_all_absent();
 }
-
 
 /// Wall-clock capture for the P1 actual-dsh streaming timing proof.
 #[cfg(unix)]
@@ -1305,7 +1321,9 @@ fn real_dsh_runtime_identity_is_recorded() {
         .output()
         .expect("run dsh --version");
     assert!(version_out.status.success(), "dsh --version must succeed");
-    let cli_version = String::from_utf8_lossy(&version_out.stdout).trim().to_string();
+    let cli_version = String::from_utf8_lossy(&version_out.stdout)
+        .trim()
+        .to_string();
     assert!(!cli_version.is_empty(), "a version string is recorded");
 
     // Installed package identity: the resolved executable is the package's
@@ -1404,8 +1422,11 @@ fn real_dsh_runtime_identity_is_recorded() {
     assert!(!protocol_version.is_empty());
 
     // Cooperative shutdown + EOF; the child exits on its own.
-    writeln!(stdin, r#"{{"jsonrpc":"2.0","id":"t3-bye","method":"shutdown"}}"#)
-        .expect("write shutdown");
+    writeln!(
+        stdin,
+        r#"{{"jsonrpc":"2.0","id":"t3-bye","method":"shutdown"}}"#
+    )
+    .expect("write shutdown");
     stdin.flush().expect("flush");
     drop(stdin);
     let exit_deadline = Instant::now() + Duration::from_secs(15);

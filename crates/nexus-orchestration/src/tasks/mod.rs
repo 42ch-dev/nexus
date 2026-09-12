@@ -3138,7 +3138,7 @@ mod tests {
             session_cancels: session_cancels_with_default(),
             daemon_tool_dispatch: None,
             cdn_config: None,
-        workspace_executor: None,
+            workspace_executor: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -3183,7 +3183,7 @@ mod tests {
             session_cancels: session_cancels_with_default(),
             daemon_tool_dispatch: None,
             cdn_config: None,
-        workspace_executor: None,
+            workspace_executor: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -3278,7 +3278,7 @@ mod tests {
             session_cancels: map,
             daemon_tool_dispatch: None,
             cdn_config: None,
-        workspace_executor: None,
+            workspace_executor: None,
         };
         Arc::new(CapabilityRegistry::with_runtime_deps(&deps))
     }
@@ -3515,7 +3515,7 @@ mod tests {
             session_cancels: session_cancels_with_default(),
             daemon_tool_dispatch: None,
             cdn_config: None,
-        workspace_executor: None,
+            workspace_executor: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -3569,7 +3569,7 @@ mod tests {
             session_cancels: session_cancels_with_default(),
             daemon_tool_dispatch: None,
             cdn_config: None,
-        workspace_executor: None,
+            workspace_executor: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -4176,7 +4176,7 @@ mod tests {
             session_cancels,
             daemon_tool_dispatch: None,
             cdn_config: None,
-        workspace_executor: None,
+            workspace_executor: None,
         };
         Arc::new(CapabilityRegistry::with_runtime_deps(&deps))
     }
@@ -5104,14 +5104,12 @@ mod tests {
             "change_count": 0,
             "workspace_root": "/tmp/ws"
         }))
-        .with_workspace_state_provider(Arc::new(FixedWorkspaceStateProvider(
-            serde_json::json!({
-                "session_id": "ws_live",
-                "committed": false,
-                "change_count": 0,
-                "workspace_root": "/tmp/ws"
-            }),
-        )));
+        .with_workspace_state_provider(Arc::new(FixedWorkspaceStateProvider(serde_json::json!({
+            "session_id": "ws_live",
+            "committed": false,
+            "change_count": 0,
+            "workspace_root": "/tmp/ws"
+        }))));
 
         let ctx = graph_flow::Context::new();
         let result = task.run(ctx).await.unwrap();

@@ -706,8 +706,6 @@ mod tests {
     use super::*;
     use crate::capability::model::{FinishReason, HostOperation, LaunchSpec};
 
-
-
     const MOCK_CLAUDE_CLI: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/native_protocol/mock_claude_cli.py"

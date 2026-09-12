@@ -31,8 +31,7 @@ const SUBSCRIBER_CHANNEL_CAPACITY: usize = MAX_PENDING_FRAMES_PER_SUB + 1;
 
 /// Shared map of per-run sinks registered before drive; the coordinator and
 /// [`crate::prompt_executor::HostPromptExecutor`] share this handle.
-pub type RunEventSinkMap =
-    Arc<tokio::sync::Mutex<std::collections::HashMap<String, RunEventSink>>>;
+pub type RunEventSinkMap = Arc<tokio::sync::Mutex<std::collections::HashMap<String, RunEventSink>>>;
 
 /// Root run id of any session id.
 ///
@@ -72,12 +71,7 @@ pub struct RunEventSink {
 }
 
 impl RunEventSink {
-    pub fn publish_host_event(
-        &self,
-        step_id: &str,
-        attempt_id: &str,
-        host_event: &HostEvent,
-    ) {
+    pub fn publish_host_event(&self, step_id: &str, attempt_id: &str, host_event: &HostEvent) {
         let Some(registry) = self.registry.upgrade() else {
             return;
         };
@@ -216,11 +210,7 @@ impl LiveSubscription {
         }
         let queued = self.rx.recv().await?;
         if let Some(inner) = self.inner.upgrade() {
-            inner.decrement_subscriber_pending(
-                &self.run_id,
-                self.subscriber_id,
-                queued.wire_bytes,
-            );
+            inner.decrement_subscriber_pending(&self.run_id, self.subscriber_id, queued.wire_bytes);
         }
         Some(queued.frame)
     }
@@ -265,15 +255,18 @@ impl RunEventRegistry {
             return None;
         }
         let epoch = current_epoch();
-        state.live.entry(run_id.to_string()).or_insert_with(|| RunRing {
-            run_id: run_id.to_string(),
-            epoch,
-            records: VecDeque::new(),
-            total_bytes: 0,
-            next_sequence: 1,
-            subscribers: HashMap::new(),
-            closed: false,
-        });
+        state
+            .live
+            .entry(run_id.to_string())
+            .or_insert_with(|| RunRing {
+                run_id: run_id.to_string(),
+                epoch,
+                records: VecDeque::new(),
+                total_bytes: 0,
+                next_sequence: 1,
+                subscribers: HashMap::new(),
+                closed: false,
+            });
         Some(RunEventSink {
             run_id: run_id.to_string(),
             registry: Arc::downgrade(&self.inner),
@@ -287,7 +280,8 @@ impl RunEventRegistry {
         attempt_id: &str,
         host_event: &HostEvent,
     ) {
-        self.inner.publish_host_event(run_id, step_id, attempt_id, host_event);
+        self.inner
+            .publish_host_event(run_id, step_id, attempt_id, host_event);
     }
 
     pub fn publish_run_state(&self, run_id: &str, record: &RunRecord) {
@@ -405,10 +399,7 @@ impl RunEventRegistry {
                 },
             });
         }
-        let subscriber_id = self
-            .inner
-            .next_subscriber_id
-            .fetch_add(1, Ordering::SeqCst);
+        let subscriber_id = self.inner.next_subscriber_id.fetch_add(1, Ordering::SeqCst);
         ring.subscribers.insert(
             subscriber_id,
             Subscriber {
@@ -491,10 +482,7 @@ impl RunEventRegistryInner {
         if let Some(ring) = state.live.get(run_id) {
             return ring.closed;
         }
-        state
-            .terminal
-            .get(run_id)
-            .is_some_and(|ring| ring.closed)
+        state.terminal.get(run_id).is_some_and(|ring| ring.closed)
     }
 
     fn publish_host_event(
@@ -564,12 +552,7 @@ impl RunEventRegistryInner {
         self.push_record_locked(ring, frame);
     }
 
-    fn append_gap_record_locked(
-        &self,
-        ring: &mut RunRing,
-        run_id: &str,
-        skipped_sequence: u64,
-    ) {
+    fn append_gap_record_locked(&self, ring: &mut RunRing, run_id: &str, skipped_sequence: u64) {
         let gap_sequence = ring.next_sequence;
         ring.next_sequence += 1;
         let gap = GapWire {
@@ -661,7 +644,6 @@ fn fanout(ring: &mut RunRing, frame: SseFrame) {
     }
 }
 
-
 fn gap_wire_from_frame(frame: &SseFrame) -> Option<GapWire> {
     if frame.event != "gap" {
         return None;
@@ -674,9 +656,8 @@ fn range_covered_by_explicit_gap(ring: &RunRing, from: u64, to: u64) -> bool {
         return true;
     }
     ring.records.iter().any(|rec| {
-        gap_wire_from_frame(&rec.frame).is_some_and(|gap| {
-            gap.from_sequence <= from && gap.to_sequence >= to
-        })
+        gap_wire_from_frame(&rec.frame)
+            .is_some_and(|gap| gap.from_sequence <= from && gap.to_sequence >= to)
     })
 }
 
@@ -690,7 +671,12 @@ fn collect_from(ring: &RunRing, run_id: &str, after: Option<u64>) -> Vec<SseFram
         }
     } else if after_seq > 0 && after_seq < first_retained {
         if !range_covered_by_explicit_gap(ring, after_seq + 1, first_retained - 1) {
-            out.push(gap_frame(run_id, ring.epoch, after_seq + 1, first_retained - 1));
+            out.push(gap_frame(
+                run_id,
+                ring.epoch,
+                after_seq + 1,
+                first_retained - 1,
+            ));
         }
     }
     for rec in &ring.records {
@@ -901,8 +887,7 @@ mod tests {
             .expect("replay tail frame");
         assert_eq!(only.id, f2.id);
         assert_eq!(frame_sequence(&only), frame_sequence(&f2));
-        let more = tokio::time::timeout(std::time::Duration::from_millis(200), second.recv())
-            .await;
+        let more = tokio::time::timeout(std::time::Duration::from_millis(200), second.recv()).await;
         assert!(
             more.is_err(),
             "must not wait for events already covered by the replay snapshot"
@@ -947,7 +932,6 @@ mod tests {
         assert_eq!(only.event, "run_state");
         assert!(sub.recv().await.is_none());
     }
-
 
     #[tokio::test]
     async fn subscriber_limit_returns_too_many_subscribers() {
@@ -997,11 +981,9 @@ mod tests {
         let registry = RunEventRegistry::new();
         let _sink = registry.try_register_live("run-1").expect("register");
         for i in 0..(MAX_RECORDS_PER_RUN + 5) {
-            registry.inner.append_json(
-                "run-1",
-                "host_event",
-                &serde_json::json!({ "n": i }),
-            );
+            registry
+                .inner
+                .append_json("run-1", "host_event", &serde_json::json!({ "n": i }));
         }
         let state = registry
             .inner
@@ -1045,7 +1027,11 @@ mod tests {
             .expect("gap frame timeout")
             .expect("gap frame");
         assert_eq!(gap.event, "gap");
-        assert_eq!(frame_sequence(&gap), 2, "gap keeps its own monotonic sequence id");
+        assert_eq!(
+            frame_sequence(&gap),
+            2,
+            "gap keeps its own monotonic sequence id"
+        );
         let payload: serde_json::Value = serde_json::from_str(&gap.data).expect("gap json");
         assert_eq!(payload["from_sequence"].as_u64(), Some(1));
         assert_eq!(payload["to_sequence"].as_u64(), Some(1));
@@ -1074,11 +1060,9 @@ mod tests {
         let _sink = registry.try_register_live("run-1").expect("register");
         let huge = "x".repeat(MAX_FRAME_BYTES);
         for _ in 0..300 {
-            registry.inner.append_json(
-                "run-1",
-                "host_event",
-                &serde_json::json!({ "blob": huge }),
-            );
+            registry
+                .inner
+                .append_json("run-1", "host_event", &serde_json::json!({ "blob": huge }));
         }
         let state = registry
             .inner
@@ -1109,7 +1093,10 @@ mod tests {
         assert_eq!(frame.event, "run_state");
         let (frames_after, bytes_after) = registry.subscriber_pending("run-1", subscriber_id);
         assert_eq!(frames_after, 0, "dequeue must release frame reservation");
-        assert_eq!(bytes_after, 0, "dequeue must release full wire-byte reservation");
+        assert_eq!(
+            bytes_after, 0,
+            "dequeue must release full wire-byte reservation"
+        );
     }
 
     #[tokio::test]
@@ -1129,9 +1116,15 @@ mod tests {
                 .await
                 .expect("timed out while draining")
                 .expect("subscriber closed while draining");
-            assert_ne!(frame.event, "gap", "draining subscriber must not false-gap at frame {i}");
+            assert_ne!(
+                frame.event, "gap",
+                "draining subscriber must not false-gap at frame {i}"
+            );
             let (_, bytes_after) = registry.subscriber_pending("run-1", subscriber_id);
-            assert_eq!(bytes_after, 0, "pending bytes must not leak wire overhead at frame {i}");
+            assert_eq!(
+                bytes_after, 0,
+                "pending bytes must not leak wire overhead at frame {i}"
+            );
         }
         assert_eq!(registry.live_subscriber_count("run-1"), 1);
     }
@@ -1208,5 +1201,4 @@ mod tests {
         }
         assert_eq!(registry.live_subscriber_count("run-1"), 1);
     }
-
 }

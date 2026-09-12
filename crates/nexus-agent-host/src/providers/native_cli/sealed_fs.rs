@@ -33,8 +33,8 @@
 //! silently weakening it.
 
 use std::ffi::OsStr;
-use std::os::unix::ffi::OsStrExt;
 use std::io::Write;
+use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use rustix::fd::OwnedFd;
@@ -56,7 +56,10 @@ fn errno_name(error: &rustix::io::Errno) -> String {
 
 /// Open one directory component relative to `dirfd`, never following a
 /// symlink. `NotFound` propagates for the caller's create-or-open choice.
-fn open_dir_at<Fd: std::os::fd::AsFd>(dirfd: Fd, name: &OsStr) -> Result<OwnedFd, rustix::io::Errno> {
+fn open_dir_at<Fd: std::os::fd::AsFd>(
+    dirfd: Fd,
+    name: &OsStr,
+) -> Result<OwnedFd, rustix::io::Errno> {
     rustix::fs::openat(dirfd, name, DIR_OPEN, Mode::empty())
 }
 
@@ -67,16 +70,18 @@ fn open_dir_at<Fd: std::os::fd::AsFd>(dirfd: Fd, name: &OsStr) -> Result<OwnedFd
 /// also owned by the effective uid (selected home / `nexus` / leaf —
 /// anything another user owns can be mutated by them).
 pub fn check_dir_boundary(fd: &OwnedFd, require_owner: bool) -> Result<(), String> {
-    let stat = rustix::fs::fstat(fd)
-        .map_err(|error| format!("could not stat a sealed-home directory ({})", errno_name(&error)))?;
+    let stat = rustix::fs::fstat(fd).map_err(|error| {
+        format!(
+            "could not stat a sealed-home directory ({})",
+            errno_name(&error)
+        )
+    })?;
     let mode = stat.st_mode & 0o7777;
     if mode & 0o020 != 0 {
         return Err("a sealed-home directory is group-writable".to_string());
     }
     if mode & 0o002 != 0 && mode & 0o1000 == 0 {
-        return Err(
-            "a sealed-home directory is world-writable without the sticky bit".to_string()
-        );
+        return Err("a sealed-home directory is world-writable without the sticky bit".to_string());
     }
     if require_owner {
         let euid = rustix::process::geteuid().as_raw();
@@ -90,8 +95,12 @@ pub fn check_dir_boundary(fd: &OwnedFd, require_owner: bool) -> Result<(), Strin
 /// Inode identity of one pinned descriptor (dev + ino) for swap
 /// revalidation.
 pub fn inode_of(fd: &OwnedFd) -> Result<(u64, u64), String> {
-    let stat = rustix::fs::fstat(fd)
-        .map_err(|error| format!("could not stat a pinned descriptor ({})", errno_name(&error)))?;
+    let stat = rustix::fs::fstat(fd).map_err(|error| {
+        format!(
+            "could not stat a pinned descriptor ({})",
+            errno_name(&error)
+        )
+    })?;
     Ok((stat.st_dev as u64, stat.st_ino as u64))
 }
 
@@ -112,8 +121,12 @@ pub fn ensure_dir_nofollow_absolute(path: &Path) -> Result<OwnedFd, String> {
 
 fn walk_absolute(path: &Path, create_missing: bool) -> Result<OwnedFd, String> {
     debug_assert!(path.is_absolute());
-    let mut fd = rustix::fs::open("/", DIR_OPEN, Mode::empty())
-        .map_err(|error| format!("could not open the filesystem root ({})", errno_name(&error)))?;
+    let mut fd = rustix::fs::open("/", DIR_OPEN, Mode::empty()).map_err(|error| {
+        format!(
+            "could not open the filesystem root ({})",
+            errno_name(&error)
+        )
+    })?;
     for component in path.components() {
         let name = match component {
             std::path::Component::RootDir => continue,
@@ -232,11 +245,7 @@ pub fn mkdir_exclusive_at(dirfd: &OwnedFd, name: &str, mode: u16) -> Result<Owne
 /// Exclusively create file `name` under `dirfd` with owner-only content
 /// (`0o600` via `fchmod`), write `contents`, and fsync it. A pre-existing
 /// entry or a raced symlink fails closed.
-pub fn write_file_exclusive_at(
-    dirfd: &OwnedFd,
-    name: &str,
-    contents: &[u8],
-) -> Result<(), String> {
+pub fn write_file_exclusive_at(dirfd: &OwnedFd, name: &str, contents: &[u8]) -> Result<(), String> {
     debug_assert!(!name.contains('/'));
     let fd = rustix::fs::openat(dirfd, name, FILE_CREATE, Mode::from_bits_truncate(0o600))
         .map_err(|error| {
@@ -263,7 +272,9 @@ pub fn open_file_nofollow_at(dirfd: &OwnedFd, name: &str) -> Result<OwnedFd, Str
     rustix::fs::openat(
         dirfd,
         name,
-        OFlags::RDONLY.union(OFlags::NOFOLLOW).union(OFlags::CLOEXEC),
+        OFlags::RDONLY
+            .union(OFlags::NOFOLLOW)
+            .union(OFlags::CLOEXEC),
         Mode::empty(),
     )
     .map_err(|error| {
@@ -277,8 +288,12 @@ pub fn open_file_nofollow_at(dirfd: &OwnedFd, name: &str) -> Result<OwnedFd, Str
 /// fsync a directory descriptor so the entries created beneath it are
 /// durable (where the platform applies directory fsync).
 pub fn fsync_dir(fd: &OwnedFd) -> Result<(), String> {
-    rustix::fs::fsync(fd)
-        .map_err(|error| format!("could not fsync a sealed-home directory ({})", errno_name(&error)))
+    rustix::fs::fsync(fd).map_err(|error| {
+        format!(
+            "could not fsync a sealed-home directory ({})",
+            errno_name(&error)
+        )
+    })
 }
 
 /// Recursively delete directory `name` below `dirfd` — descriptor-rooted
@@ -320,11 +335,19 @@ pub fn remove_tree_at(dirfd: &OwnedFd, name: &str) -> Result<(), String> {
 /// Remove every entry inside the pinned directory `fd`, recursing only
 /// into entries that re-open as real directories no-follow.
 fn empty_dir_at(fd: &OwnedFd) -> Result<(), String> {
-    let dir = rustix::fs::Dir::read_from(fd)
-        .map_err(|error| format!("could not read a retained lease directory ({})", errno_name(&error)))?;
+    let dir = rustix::fs::Dir::read_from(fd).map_err(|error| {
+        format!(
+            "could not read a retained lease directory ({})",
+            errno_name(&error)
+        )
+    })?;
     for entry in dir {
-        let entry = entry
-            .map_err(|error| format!("could not read a retained lease entry ({})", errno_name(&error)))?;
+        let entry = entry.map_err(|error| {
+            format!(
+                "could not read a retained lease entry ({})",
+                errno_name(&error)
+            )
+        })?;
         let name = entry.file_name();
         if name.to_bytes() == b"." || name.to_bytes() == b".." {
             continue;

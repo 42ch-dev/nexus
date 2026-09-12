@@ -234,11 +234,7 @@ impl ScopeMutation {
     }
 
     /// Backup an existing target into a sibling basename; returns captured mode.
-    pub fn backup_target(
-        &self,
-        rel_path: &str,
-        backup_basename: &str,
-    ) -> io::Result<Option<u32>> {
+    pub fn backup_target(&self, rel_path: &str, backup_basename: &str) -> io::Result<Option<u32>> {
         self.with_parent(rel_path, |parent, name| {
             parent.backup_file(name, backup_basename)
         })
@@ -246,7 +242,9 @@ impl ScopeMutation {
 
     /// Atomic no-clobber create, coupled to the parent descriptor.
     pub fn atomic_create(&self, rel_path: &str, stage_basename: &str) -> io::Result<()> {
-        self.with_parent(rel_path, |parent, name| parent.atomic_create(name, stage_basename))
+        self.with_parent(rel_path, |parent, name| {
+            parent.atomic_create(name, stage_basename)
+        })
     }
 
     /// Replace via atomic capture + verify + no-clobber install.
@@ -615,7 +613,10 @@ mod unix_dir {
                     }
                     // create rollback (no preimage): only the postimage is ours.
                     (Some(post), None) if current != post => {
-                        return Err(third_state("rollback", "target is not the applied postimage"));
+                        return Err(third_state(
+                            "rollback",
+                            "target is not the applied postimage",
+                        ));
                     }
                     // delete rollback (no postimage): only the original is ours.
                     (None, Some(pre)) if current != pre => {

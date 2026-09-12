@@ -240,7 +240,6 @@ pub trait DaemonToolDispatch: Send + Sync {
     ) -> Result<serde_json::Value, CapabilityError>;
 }
 
-
 /// Provider trait for production workspace open/commit (v1.188 P3).
 #[async_trait]
 pub trait WorkspaceExecutor: Send + Sync {
@@ -295,8 +294,6 @@ pub struct CapabilityRuntimeDeps {
     /// Production workspace executor for `workspace.open` / `workspace.commit`.
     pub workspace_executor: Option<std::sync::Arc<dyn WorkspaceExecutor>>,
 }
-
-
 
 // ---------------------------------------------------------------------------
 // Capability trait
@@ -749,14 +746,18 @@ impl CapabilityRegistry {
                 builtins::OutboxCompact::with_pool(pool.clone())
             });
 
-        let workspace_open = deps.workspace_executor.as_ref().map_or_else(
-            builtins::WorkspaceOpen::new,
-            |executor| builtins::WorkspaceOpen::with_workspace_executor(executor.clone()),
-        );
-        let workspace_commit = deps.workspace_executor.as_ref().map_or_else(
-            builtins::WorkspaceCommit::new,
-            |executor| builtins::WorkspaceCommit::with_workspace_executor(executor.clone()),
-        );
+        let workspace_open = deps
+            .workspace_executor
+            .as_ref()
+            .map_or_else(builtins::WorkspaceOpen::new, |executor| {
+                builtins::WorkspaceOpen::with_workspace_executor(executor.clone())
+            });
+        let workspace_commit = deps
+            .workspace_executor
+            .as_ref()
+            .map_or_else(builtins::WorkspaceCommit::new, |executor| {
+                builtins::WorkspaceCommit::with_workspace_executor(executor.clone())
+            });
 
         let caps: Vec<Box<dyn Capability>> = vec![
             Box::new(builtins::SyncPull),
@@ -1117,7 +1118,7 @@ mod tests {
             )),
             daemon_tool_dispatch: None,
             cdn_config: None,
-        workspace_executor: None,
+            workspace_executor: None,
         };
         // Base builtin count of the runtime-deps constructor (33 — the shared
         // `build_with_narrative_compute` vec; `essay.draft_status.finalize`
@@ -1164,7 +1165,7 @@ mod tests {
             )),
             daemon_tool_dispatch: None,
             cdn_config: None,
-        workspace_executor: None,
+            workspace_executor: None,
         };
         let (reg, outcome) = CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, tmp.path());
         assert_eq!(outcome.admitted.len(), 0, "colliding user cap not admitted");
@@ -1198,7 +1199,7 @@ mod tests {
             )),
             daemon_tool_dispatch: None,
             cdn_config: None,
-        workspace_executor: None,
+            workspace_executor: None,
         };
         let engine = std::sync::Arc::new(nexus_wasm_host::WasmEngine::new().unwrap());
         let cache = std::sync::Arc::new(nexus_wasm_host::ModuleCache::new());

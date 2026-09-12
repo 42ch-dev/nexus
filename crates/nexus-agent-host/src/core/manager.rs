@@ -14,16 +14,16 @@ use crate::capability::model::{
     CreateSessionRequest, HostEvent, HostEventStream, HostHealth, HostStartConfig,
     ManagedSessionHandle, ProbeRequest, SessionOwner,
 };
+use crate::config::AgentHostConfig;
 use crate::core::readiness::{
     discover_provider_entries, is_launch_class_failure, probe_request_for_owner,
     safe_provider_message, CandidateIdentity, ProviderEntry,
 };
-use crate::policy::permission::HostPermissionResolver;
-use crate::config::AgentHostConfig;
 use crate::core::session::SessionRegistry;
 use crate::error::{HostError, HostResult};
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
 use crate::policy::admission::AdmissionPolicy;
+use crate::policy::permission::HostPermissionResolver;
 use crate::ProviderAdapter;
 
 /// Broadcast channel capacity for host events.
@@ -231,11 +231,11 @@ impl HostManager {
                 },
             };
             let latency_ms = started.elapsed().as_millis() as u64;
-            self.publish_probe_result(&identity, health, latency_ms).await;
+            self.publish_probe_result(&identity, health, latency_ms)
+                .await;
         }
         Ok(())
     }
-
 }
 
 impl Default for HostManager {
@@ -339,8 +339,7 @@ impl crate::HostFacade for HostManager {
         // Store canonical workspace boundary for session cwd validation.
         *self.workspace_root.write().await = Some(canonical_workspace_root.clone());
 
-        let permission_resolver =
-            HostPermissionResolver::new_native_only(&host_config.policy);
+        let permission_resolver = HostPermissionResolver::new_native_only(&host_config.policy);
 
         // Discovery replaces ambient boot registration unless tests pre-registered.
         let pre_registered = !self.providers.read().await.is_empty();
@@ -416,15 +415,12 @@ impl crate::HostFacade for HostManager {
                 "provider not available",
             ));
         }
-        let adapter = entry
-            .adapter
-            .clone()
-            .ok_or_else(|| {
-                HostError::provider_unavailable(
-                    request.provider_id.clone(),
-                    "provider adapter not constructed",
-                )
-            })?;
+        let adapter = entry.adapter.clone().ok_or_else(|| {
+            HostError::provider_unavailable(
+                request.provider_id.clone(),
+                "provider adapter not constructed",
+            )
+        })?;
         drop(providers);
 
         // Build launch spec with cwd validated against workspace boundary (QC2 F-002)
@@ -464,17 +460,13 @@ impl crate::HostFacade for HostManager {
             |c| c.timeouts.session_duration(),
         );
         let provider_id_for_timeout = request.provider_id.clone();
-        let handle = match tokio::time::timeout(session_timeout, adapter.launch(launch_spec))
-            .await
+        let handle = match tokio::time::timeout(session_timeout, adapter.launch(launch_spec)).await
         {
             Ok(Ok(handle)) => handle,
             Ok(Err(error)) => {
                 if is_launch_class_failure(&error) {
-                    self.invalidate_provider(
-                        &request.provider_id,
-                        safe_provider_message(&error),
-                    )
-                    .await;
+                    self.invalidate_provider(&request.provider_id, safe_provider_message(&error))
+                        .await;
                 }
                 return Err(error);
             }
@@ -487,11 +479,8 @@ impl crate::HostFacade for HostManager {
                     ),
                 )
                 .with_provider(provider_id_for_timeout);
-                self.invalidate_provider(
-                    &request.provider_id,
-                    safe_provider_message(&error),
-                )
-                .await;
+                self.invalidate_provider(&request.provider_id, safe_provider_message(&error))
+                    .await;
                 return Err(error);
             }
         };
@@ -1246,14 +1235,6 @@ mod tests {
             timeouts: crate::config::TimeoutConfig::default(),
             host_config: None,
             probe_owner: Some(test_owner()),
-        }
-    }
-
-    fn test_probe_request() -> ProbeRequest {
-        ProbeRequest {
-            timeout_ms: 5_000,
-            cwd: std::path::PathBuf::from("/tmp"),
-            owner: test_owner(),
         }
     }
 
@@ -2169,7 +2150,10 @@ mod tests {
                 owner: test_owner(),
             })
             .await;
-        assert!(denied.is_err(), "admission must match catalog unavailable health");
+        assert!(
+            denied.is_err(),
+            "admission must match catalog unavailable health"
+        );
     }
 
     struct LaunchFailingMockProvider {
@@ -2264,7 +2248,9 @@ mod tests {
             .iter()
             .find(|e| e.provider_id == ProviderId::new("fail-mock"))
             .expect("provider still listed");
-        assert!(!entry.health.available, "launch failure must invalidate readiness");
+        assert!(
+            !entry.health.available,
+            "launch failure must invalidate readiness"
+        );
     }
-
 }

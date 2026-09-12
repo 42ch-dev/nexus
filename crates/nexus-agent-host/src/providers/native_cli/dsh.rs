@@ -85,17 +85,17 @@
 
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
-use std::sync::atomic::{AtomicBool, Ordering};
 
+#[cfg(unix)]
+use super::sealed_fs;
 use async_trait::async_trait;
 use deepseek_harness_sdk::{Config, DeepSeekHarness, Error as DshError, Input, Notification};
 use futures_util::future::{BoxFuture, FutureExt, Shared};
 use futures_util::StreamExt;
 use tokio::sync::{mpsc, Mutex, RwLock};
-#[cfg(unix)]
-use super::sealed_fs;
 
 use crate::capability::model::{
     CapabilityDescriptor, HostContentBlock, HostEvent, HostEventStream, ManagedSessionHandle,
@@ -110,10 +110,10 @@ use crate::providers::native_cli::map_dsh::{
     operation_delivery_overflow_failure, operation_protocol_failure, ClassifyNotificationError,
     DshNotificationClass, RunReconciliation,
 };
+use crate::ProviderAdapter;
 use deepseek_harness_sdk::RunResult;
 use std::time::Instant;
 use tokio::sync::Notify;
-use crate::ProviderAdapter;
 
 /// The bare command resolved through PATH when no explicit configured
 /// command/path and no nonblank parent `DSH_RUNTIME_BIN` exists (P0 T2: the
@@ -225,8 +225,7 @@ pub struct DshStreamingRunTiming {
     pub run_completed: Option<Instant>,
 }
 
-type RunTimingSnapshots =
-    Arc<StdMutex<HashMap<HostOperationId, DshStreamingRunTiming>>>;
+type RunTimingSnapshots = Arc<StdMutex<HashMap<HostOperationId, DshStreamingRunTiming>>>;
 
 fn publish_completed_run_timing(
     op_id: &HostOperationId,
@@ -374,12 +373,7 @@ fn dispatch_successful_run_events(
     Ok(terminals)
 }
 
-
-
-fn delivery_failure_signaled(
-    classifier_failed: &AtomicBool,
-    delivery_failed: &AtomicBool,
-) -> bool {
+fn delivery_failure_signaled(classifier_failed: &AtomicBool, delivery_failed: &AtomicBool) -> bool {
     classifier_failed.load(Ordering::Acquire) || delivery_failed.load(Ordering::Acquire)
 }
 
@@ -434,7 +428,6 @@ async fn wait_consumer_drop(consumer_dropped: &AtomicBool, consumer_drop_notify:
         consumer_drop_notify.notified().await;
     }
 }
-
 
 async fn wait_run_harness_reunify(
     state: &Mutex<ClientState>,
@@ -600,9 +593,7 @@ fn recipe_for_scope(
 ) -> HostResult<Recipe> {
     match scope {
         None => Ok(Recipe::Ordinary),
-        Some(scope)
-            if !scope.allow_read && !scope.allow_write && !scope.allow_destructive =>
-        {
+        Some(scope) if !scope.allow_read && !scope.allow_write && !scope.allow_destructive => {
             Ok(Recipe::SealedDenyAll)
         }
         Some(_) => Err(HostError::capability_unsupported(
@@ -698,10 +689,9 @@ async fn close_and_reap(
                 if remove_lease_tree(&lease).is_err() {
                     retain_lease_path(retained, lease.path.clone());
                     return Err(CleanupError {
-                        message:
-                            "dsh close completed but the sealed home could not be removed; \
+                        message: "dsh close completed but the sealed home could not be removed; \
                              cleanup is unconfirmed and the lease evidence is retained"
-                                .to_string(),
+                            .to_string(),
                         close_confirmed: true,
                         failed_lease: Some(lease.path),
                     });
@@ -1081,9 +1071,21 @@ fn provision_sealed_home_fd(child: &Path) -> Result<SealedLease, String> {
             "package.json",
             format!("{SEALED_PROFILE_MANIFEST}\n").as_bytes(),
         )?;
-        sealed_fs::write_file_exclusive_at(&sdk_fd, "cordis.patch.yml", EMPTY_PATCH_LAYER.as_bytes())?;
-        sealed_fs::write_file_exclusive_at(&leaf_fd, "cordis.patch.yml", EMPTY_PATCH_LAYER.as_bytes())?;
-        sealed_fs::write_file_exclusive_at(&leaf_fd, DENY_ALL_PATCH_FILENAME, DENY_ALL_PATCH.as_bytes())?;
+        sealed_fs::write_file_exclusive_at(
+            &sdk_fd,
+            "cordis.patch.yml",
+            EMPTY_PATCH_LAYER.as_bytes(),
+        )?;
+        sealed_fs::write_file_exclusive_at(
+            &leaf_fd,
+            "cordis.patch.yml",
+            EMPTY_PATCH_LAYER.as_bytes(),
+        )?;
+        sealed_fs::write_file_exclusive_at(
+            &leaf_fd,
+            DENY_ALL_PATCH_FILENAME,
+            DENY_ALL_PATCH.as_bytes(),
+        )?;
         sealed_fs::fsync_dir(&sdk_fd)?;
         sealed_fs::fsync_dir(&profiles_fd)?;
         sealed_fs::fsync_dir(&leaf_fd)?;
@@ -1117,9 +1119,11 @@ fn provision_sealed_home_fd(child: &Path) -> Result<SealedLease, String> {
 /// silently weakening the no-follow contract.
 #[cfg(not(unix))]
 fn provision_sealed_home_fd(_child: &Path) -> Result<SealedLease, String> {
-    Err("sealed deny_all home provisioning is unsupported on this platform: \
+    Err(
+        "sealed deny_all home provisioning is unsupported on this platform: \
          descriptor-relative no-follow filesystem primitives are required"
-        .to_string())
+            .to_string(),
+    )
 }
 
 /// Crate-client-scoped state for a managed dsh session, guarded by the
@@ -1310,7 +1314,6 @@ impl DshNativeProvider {
         .expect("empty native args are always accepted")
     }
 
-
     /// Take the completed streaming timing snapshot for one admitted turn.
     pub async fn take_run_timing(
         &self,
@@ -1323,9 +1326,7 @@ impl DshNativeProvider {
                 .get(session_id)
                 .map(|native| Arc::clone(&native.completed_run_timings))
         }?;
-        let mut guard = snapshots
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut guard = snapshots.lock().unwrap_or_else(|e| e.into_inner());
         guard.remove(op_id)
     }
 
@@ -1352,12 +1353,7 @@ impl DshNativeProvider {
     /// (default 15s) maps to `initialize_timeout` and the session/prompt
     /// request budget to `request_timeout`; the full-run deadline is the
     /// caller-side `tokio::time::timeout` around `Session::run`.
-    fn sdk_config(
-        &self,
-        cwd: &Path,
-        executable: &Path,
-        sealed_home: Option<&Path>,
-    ) -> Config {
+    fn sdk_config(&self, cwd: &Path, executable: &Path, sealed_home: Option<&Path>) -> Config {
         Config {
             cwd: Some(cwd.to_path_buf()),
             dsh_bin: Some(executable.to_string_lossy().into_owned()),
@@ -1365,9 +1361,8 @@ impl DshNativeProvider {
             initialize_timeout: Some(self.timeouts.initialize_duration()),
             request_timeout: Some(self.timeouts.prompt_duration()),
             dsh_home: sealed_home.map(Path::to_path_buf),
-            patches: sealed_home.map_or_else(Vec::new, |home| {
-                vec![home.join(DENY_ALL_PATCH_FILENAME)]
-            }),
+            patches: sealed_home
+                .map_or_else(Vec::new, |home| vec![home.join(DENY_ALL_PATCH_FILENAME)]),
             ..Config::default()
         }
     }
@@ -1382,7 +1377,6 @@ impl DshNativeProvider {
             HostError::launch_failed(self.provider_id.clone(), message, None)
         })
     }
-
 
     /// Initialize the sealed deny-all harness: provision the exclusive
     /// child home (its pinned lease is retained until confirmed close),
@@ -1420,7 +1414,10 @@ impl DshNativeProvider {
             Ok(harness) => Ok((harness, lease)),
             Err(error) => {
                 let undeleted_lease = self.discard_failed_lease(lease);
-                Err(SealedStartFailure { error, undeleted_lease })
+                Err(SealedStartFailure {
+                    error,
+                    undeleted_lease,
+                })
             }
         }
     }
@@ -1684,10 +1681,8 @@ impl DshNativeProvider {
                         .map_err(RunError::Sdk)
                 };
 
-                let run_outcome = if delivery_failure_signaled(
-                    &classifier_failed,
-                    &delivery_failed,
-                ) {
+                let run_outcome = if delivery_failure_signaled(&classifier_failed, &delivery_failed)
+                {
                     RunSelectOutcome::FailureSignal
                 } else if consumer_drop_signaled(&consumer_dropped) {
                     RunSelectOutcome::ReceiverClosed
@@ -1709,13 +1704,7 @@ impl DshNativeProvider {
                     }
                 };
 
-                reunify_run_harness(
-                    &run_harness,
-                    &state,
-                    &active_run,
-                    &run_reunified,
-                )
-                .await;
+                reunify_run_harness(&run_harness, &state, &active_run, &run_reunified).await;
 
                 match run_outcome {
                     RunSelectOutcome::FailureSignal => {
@@ -1779,14 +1768,13 @@ impl DshNativeProvider {
                                     run_timing.lock().unwrap_or_else(|e| e.into_inner());
                                 timing.run_completed = Some(Instant::now());
                             }
-                            publish_completed_run_timing(&op_id, &run_timing, &completed_run_timings);
-                            let snapshot = reconciliation.lock().unwrap().clone();
-                            match finalize_successful_run(
-                                &result,
-                                &snapshot,
-                                &session_id,
+                            publish_completed_run_timing(
                                 &op_id,
-                            ) {
+                                &run_timing,
+                                &completed_run_timings,
+                            );
+                            let snapshot = reconciliation.lock().unwrap().clone();
+                            match finalize_successful_run(&result, &snapshot, &session_id, &op_id) {
                                 Ok(events) => match dispatch_successful_run_events(
                                     events,
                                     &content_tx,
@@ -1795,9 +1783,7 @@ impl DshNativeProvider {
                                     &op_id,
                                 ) {
                                     Ok(terminals) => (terminals, false),
-                                    Err(failed) => {
-                                        (vec![HostEvent::OpFailed(failed)], true)
-                                    }
+                                    Err(failed) => (vec![HostEvent::OpFailed(failed)], true),
                                 },
                                 Err(failed) => (vec![HostEvent::OpFailed(failed)], true),
                             }
@@ -1959,7 +1945,7 @@ impl DshNativeProvider {
                                     pending,
                                     op_id,
                                     session_id,
-                                drop_guard,
+                                    drop_guard,
                                 ),
                             ))
                         } else {
@@ -1972,9 +1958,7 @@ impl DshNativeProvider {
         )
         .boxed()
     }
-
 }
-
 
 enum RunSelectOutcome {
     FailureSignal,
@@ -2043,8 +2027,9 @@ impl ProviderAdapter for DshNativeProvider {
         // nonblank parent DSH_RUNTIME_BIN → PATH `dsh`; an invalid override
         // fails here without fallback. Only the initialize handshake below
         // proves readiness.
-        let executable = resolve_dsh_executable(self.dsh_bin.as_deref())
-            .map_err(|message| HostError::provider_unavailable(self.provider_id.clone(), message))?;
+        let executable = resolve_dsh_executable(self.dsh_bin.as_deref()).map_err(|message| {
+            HostError::provider_unavailable(self.provider_id.clone(), message)
+        })?;
 
         // Initialize BEFORE returning the managed Ready handle (P0 T2): a
         // failed spawn/initialize is the typed launch-class failure.
@@ -2148,7 +2133,16 @@ impl ProviderAdapter for DshNativeProvider {
 
         // Fetch the session state under a short registry read (B-2), then
         // admit under the per-session lock only.
-        let (state, closing, cwd, executable, run_harness, active_run, run_reunified, completed_run_timings) = {
+        let (
+            state,
+            closing,
+            cwd,
+            executable,
+            run_harness,
+            active_run,
+            run_reunified,
+            completed_run_timings,
+        ) = {
             let sessions = self.sessions.read().await;
             let native_session = sessions.get(&session.session_id).ok_or_else(|| {
                 HostError::internal(format!(
@@ -2211,11 +2205,8 @@ impl ProviderAdapter for DshNativeProvider {
                     Arc::clone(&self.retained_leases),
                 );
                 guard.cleanup = Some(cleanup.clone());
-                let close_result = tokio::time::timeout(
-                    self.timeouts.shutdown_duration(),
-                    cleanup,
-                )
-                .await;
+                let close_result =
+                    tokio::time::timeout(self.timeouts.shutdown_duration(), cleanup).await;
                 match close_result {
                     Ok(Ok(())) => {
                         // Consumed confirmed close: clear the record so a
@@ -2238,8 +2229,7 @@ impl ProviderAdapter for DshNativeProvider {
                         .with_session(session.session_id.clone()));
                     }
                 }
-                let (sealed, lease) = match self.start_sealed_harness(&cwd, &executable).await
-                {
+                let (sealed, lease) = match self.start_sealed_harness(&cwd, &executable).await {
                     Ok(pair) => pair,
                     Err(failure) => {
                         // Every sealed-home/start failure permanently
@@ -2326,17 +2316,15 @@ impl ProviderAdapter for DshNativeProvider {
         // completion; only a confirmed close removes the session.
         let session_parts = {
             let sessions = self.sessions.read().await;
-            sessions
-                .get(&session.session_id)
-                .map(|native_session| {
-                    (
-                        Arc::clone(&native_session.state),
-                        Arc::clone(&native_session.closing),
-                        Arc::clone(&native_session.cleanup_slot),
-                        Arc::clone(&native_session.active_run),
-                        Arc::clone(&native_session.run_reunified),
-                    )
-                })
+            sessions.get(&session.session_id).map(|native_session| {
+                (
+                    Arc::clone(&native_session.state),
+                    Arc::clone(&native_session.closing),
+                    Arc::clone(&native_session.cleanup_slot),
+                    Arc::clone(&native_session.active_run),
+                    Arc::clone(&native_session.run_reunified),
+                )
+            })
         };
         let Some((state, closing, cleanup_slot, active_run, run_reunified)) = session_parts else {
             // A previous shutdown already observed the confirmed close and
@@ -2389,8 +2377,7 @@ impl ProviderAdapter for DshNativeProvider {
                 // this session's failed path is confirmed gone — remove
                 // the record and report success (fix wave 2: a completed
                 // shared cleanup error alone is insufficient).
-                if let (true, Some(failed_path)) =
-                    (failure.close_confirmed, &failure.failed_lease)
+                if let (true, Some(failed_path)) = (failure.close_confirmed, &failure.failed_lease)
                 {
                     reconcile_retained_leases(&self.retained_leases);
                     let still_retained = self
@@ -2449,7 +2436,6 @@ mod tests {
     use deepseek_harness_sdk::Notification;
     use serde_json::{json, Map};
 
-
     fn test_probe_request(timeout_ms: u64) -> crate::capability::model::ProbeRequest {
         let cwd = std::path::PathBuf::from("/tmp");
         crate::capability::model::ProbeRequest {
@@ -2491,10 +2477,7 @@ mod tests {
                 "REQ_LOG".to_string(),
                 req_log.to_string_lossy().into_owned(),
             ),
-            (
-                "DSH_HOME".to_string(),
-                home.to_string_lossy().into_owned(),
-            ),
+            ("DSH_HOME".to_string(), home.to_string_lossy().into_owned()),
         ])
     }
 
@@ -2638,17 +2621,18 @@ mod tests {
         scope: Option<PromptPermissionScope>,
     ) -> HostResult<Vec<HostEvent>> {
         let _env_lock = lock_test_env();
-        let stream = provider.execute(
-            handle,
-            HostOperation::Prompt {
-                op_id: HostOperationId::new(),
-                content: vec![HostContentBlock::Text {
-                    text: text.to_string(),
-                }],
-                permission_scope: scope,
-            },
-        )
-        .await?;
+        let stream = provider
+            .execute(
+                handle,
+                HostOperation::Prompt {
+                    op_id: HostOperationId::new(),
+                    content: vec![HostContentBlock::Text {
+                        text: text.to_string(),
+                    }],
+                    permission_scope: scope,
+                },
+            )
+            .await?;
         Ok(collect_events(stream).await)
     }
 
@@ -2869,7 +2853,10 @@ mod tests {
             let _path_guard = PathGuard::isolate(temp_dir.path());
             let _bin_guard = DshRuntimeBinGuard::set(&env_bin);
             let resolved = resolve_dsh_executable(None).expect("env route");
-            assert_eq!(resolved, std::fs::canonicalize(&env_bin).expect("canonical"));
+            assert_eq!(
+                resolved,
+                std::fs::canonicalize(&env_bin).expect("canonical")
+            );
         }
 
         // An invalid env override fails closed — no PATH fallback.
@@ -2892,7 +2879,10 @@ mod tests {
             let _path_guard = PathGuard::isolate(temp_dir.path());
             let _bin_guard = DshRuntimeBinGuard::remove();
             let resolved = resolve_dsh_executable(None).expect("PATH dsh");
-            assert_eq!(resolved, std::fs::canonicalize(&path_bin).expect("canonical"));
+            assert_eq!(
+                resolved,
+                std::fs::canonicalize(&path_bin).expect("canonical")
+            );
 
             let empty_dir = temp_dir.path().join("nothing-here");
             std::fs::create_dir_all(&empty_dir).expect("empty dir");
@@ -2915,7 +2905,10 @@ mod tests {
         // SDK truthiness parity: a blank explicit value counts as absent,
         // so the env route applies.
         let resolved = resolve_dsh_executable(Some("   ")).expect("blank explicit is absent");
-        assert_eq!(resolved, std::fs::canonicalize(&env_bin).expect("canonical"));
+        assert_eq!(
+            resolved,
+            std::fs::canonicalize(&env_bin).expect("canonical")
+        );
     }
 
     // ── Sealed deny_all asset and home provisioning (architecture §3.4) ──
@@ -2975,10 +2968,16 @@ mod tests {
             );
         }
         // The Nexus pins on the upstream tree.
-        assert!(DENY_ALL_PATCH.contains("profile: sdk"), "sdk-app-startup profile pin");
+        assert!(
+            DENY_ALL_PATCH.contains("profile: sdk"),
+            "sdk-app-startup profile pin"
+        );
         assert!(DENY_ALL_PATCH.contains("mode: native"), "tools native pin");
         assert!(DENY_ALL_PATCH.contains("agents: []"), "empty agents pin");
-        assert!(DENY_ALL_PATCH.contains("maxRetries: 0"), "provider retry pin");
+        assert!(
+            DENY_ALL_PATCH.contains("maxRetries: 0"),
+            "provider retry pin"
+        );
         // Upstream platform conditions survive verbatim.
         assert!(DENY_ALL_PATCH.contains("process.platform === 'win32'"));
         assert!(DENY_ALL_PATCH.contains("process.platform !== 'win32'"));
@@ -3013,8 +3012,7 @@ mod tests {
         provision_sealed_home_at(&child).expect("fresh child provisions");
 
         assert_eq!(
-            std::fs::read_to_string(child.join("profiles/sdk/package.json"))
-                .expect("manifest"),
+            std::fs::read_to_string(child.join("profiles/sdk/package.json")).expect("manifest"),
             format!("{SEALED_PROFILE_MANIFEST}\n"),
             "the sdk manifest is the exact empty-bundles startup-frozen tuple"
         );
@@ -3037,7 +3035,11 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(&child).expect("stat").permissions().mode() & 0o777;
+            let mode = std::fs::metadata(&child)
+                .expect("stat")
+                .permissions()
+                .mode()
+                & 0o777;
             assert_eq!(mode, 0o700, "the child home is owner-only");
             let patch_mode = std::fs::metadata(child.join(DENY_ALL_PATCH_FILENAME))
                 .expect("stat patch")
@@ -3602,7 +3604,10 @@ mod tests {
         );
         let sealed_argv = argv_of(&spawns[1]);
         assert_eq!(sealed_argv.len(), 4, "sealed argv adds one patch pair");
-        assert_eq!(sealed_argv[0..2], ["--profile".to_string(), "sdk".to_string()]);
+        assert_eq!(
+            sealed_argv[0..2],
+            ["--profile".to_string(), "sdk".to_string()]
+        );
         assert_eq!(sealed_argv[2], "--patch");
         let patch_path = PathBuf::from(&sealed_argv[3]);
         assert!(patch_path.is_absolute(), "the patch is an absolute path");
@@ -3614,7 +3619,9 @@ mod tests {
             "the patch lives inside the owned child home: {patch_path:?}"
         );
         let sealed_home = PathBuf::from(
-            spawns[1]["dsh_home"].as_str().expect("sealed dsh_home logged"),
+            spawns[1]["dsh_home"]
+                .as_str()
+                .expect("sealed dsh_home logged"),
         );
         assert!(
             sealed_home.starts_with(&nexus_root),
@@ -3647,9 +3654,14 @@ mod tests {
         let provider = stub_provider("test-dsh-denyall", stub_env(&req_log, &dsh_home));
         let handle = launch_hermetic(&provider).await;
 
-        let events = run_turn_scoped(&provider, &handle, "no tools please", Some(deny_all_scope()))
-            .await
-            .expect("deny_all turn executes");
+        let events = run_turn_scoped(
+            &provider,
+            &handle,
+            "no tools please",
+            Some(deny_all_scope()),
+        )
+        .await
+        .expect("deny_all turn executes");
         assert!(
             matches!(events.last(), Some(HostEvent::OpFinished(_))),
             "the sealed turn completes: {events:?}"
@@ -3675,7 +3687,10 @@ mod tests {
         );
         let sealed_argv = argv_of(&spawns[1]);
         assert_eq!(sealed_argv.len(), 4);
-        assert_eq!(sealed_argv[0..2], ["--profile".to_string(), "sdk".to_string()]);
+        assert_eq!(
+            sealed_argv[0..2],
+            ["--profile".to_string(), "sdk".to_string()]
+        );
         assert_eq!(sealed_argv[2], "--patch");
         let nexus_root = std::fs::canonicalize(&dsh_home)
             .expect("canonical selected home")
@@ -3683,12 +3698,13 @@ mod tests {
         let patch_path = PathBuf::from(&sealed_argv[3]);
         assert!(patch_path.is_absolute() && patch_path.starts_with(&nexus_root));
         let sealed_home = PathBuf::from(
-            spawns[1]["dsh_home"].as_str().expect("sealed dsh_home logged"),
+            spawns[1]["dsh_home"]
+                .as_str()
+                .expect("sealed dsh_home logged"),
         );
         assert!(sealed_home.starts_with(&nexus_root));
         assert_ne!(
-            sealed_home,
-            dsh_home,
+            sealed_home, dsh_home,
             "the sealed runtime never uses the ordinary home"
         );
 
@@ -3697,7 +3713,10 @@ mod tests {
         // sealed runtime (after its spawn).
         let methods = method_sequence(&entries);
         let prompt_count = methods.iter().filter(|m| *m == "session/prompt").count();
-        assert_eq!(prompt_count, 2, "exactly the two admitted prompts: {methods:?}");
+        assert_eq!(
+            prompt_count, 2,
+            "exactly the two admitted prompts: {methods:?}"
+        );
         let second_spawn = methods
             .iter()
             .enumerate()
@@ -3724,7 +3743,10 @@ mod tests {
 
         // The lease is live while the session runs; the confirmed close of
         // shutdown deletes it.
-        assert!(sealed_home.exists(), "the sealed lease is retained while live");
+        assert!(
+            sealed_home.exists(),
+            "the sealed lease is retained while live"
+        );
         {
             let _env_lock = lock_test_env();
             provider.shutdown(handle).await.expect("confirmed close");
@@ -3750,8 +3772,7 @@ mod tests {
         let events = run_turn(&provider, &handle, "ordinary first").await;
         assert!(matches!(events.last(), Some(HostEvent::OpFinished(_))));
 
-        let result =
-            run_turn_scoped(&provider, &handle, "deny now", Some(deny_all_scope())).await;
+        let result = run_turn_scoped(&provider, &handle, "deny now", Some(deny_all_scope())).await;
         assert!(
             matches!(result, Err(HostError::PolicyDenied { .. })),
             "scope change after admission must be rejected: {result:?}"
@@ -3763,7 +3784,10 @@ mod tests {
             .iter()
             .filter(|value| value["method"] == "session/prompt")
             .count();
-        assert_eq!(prompt_count, 1, "the rejected prompt never reached a runtime");
+        assert_eq!(
+            prompt_count, 1,
+            "the rejected prompt never reached a runtime"
+        );
     }
 
     /// Once a deny_all prompt has been admitted, a `None` scope change is
@@ -3794,7 +3818,10 @@ mod tests {
             .iter()
             .filter(|value| value["method"] == "session/prompt")
             .count();
-        assert_eq!(prompt_count, 1, "the rejected prompt never reached a runtime");
+        assert_eq!(
+            prompt_count, 1,
+            "the rejected prompt never reached a runtime"
+        );
     }
 
     /// A partially permissive scope is `not_supported` BEFORE admission:
@@ -3828,7 +3855,9 @@ mod tests {
         let entries = req_log_entries(&req_log);
         assert_eq!(spawn_records(&entries).len(), 1, "no sealed spawn happened");
         assert!(
-            !entries.iter().any(|value| value["method"] == "session/prompt"),
+            !entries
+                .iter()
+                .any(|value| value["method"] == "session/prompt"),
             "no prompt was admitted: {entries:?}"
         );
     }
@@ -3933,7 +3962,6 @@ mod tests {
         );
     }
 
-
     /// Regression for fe78386b7: reunify can clear `active_run` and notify
     /// between the old `while` latch check and `notified()` registration,
     /// leaving the retained final close hung or skipping the reunified
@@ -4025,9 +4053,7 @@ mod tests {
             let state = Arc::clone(&state);
             let active_run = Arc::clone(&active_run);
             let run_reunified = Arc::clone(&run_reunified);
-            async move {
-                wait_run_harness_reunify(&state, &active_run, &run_reunified).await
-            }
+            async move { wait_run_harness_reunify(&state, &active_run, &run_reunified).await }
         });
 
         active_run.store(false, Ordering::Release);
@@ -4055,8 +4081,7 @@ mod tests {
         let provider = stub_provider("test-dsh-sealfail", stub_env(&req_log, &dsh_home));
         let handle = launch_hermetic(&provider).await;
 
-        let failed =
-            run_turn_scoped(&provider, &handle, "seal me", Some(deny_all_scope())).await;
+        let failed = run_turn_scoped(&provider, &handle, "seal me", Some(deny_all_scope())).await;
         assert!(
             matches!(failed, Err(HostError::LaunchFailed { .. })),
             "provisioning failure is the typed launch-class error: {failed:?}"
@@ -4084,7 +4109,9 @@ mod tests {
         let entries = req_log_entries(&req_log);
         assert_eq!(spawn_records(&entries).len(), 1, "no sealed spawn happened");
         assert!(
-            !entries.iter().any(|value| value["method"] == "session/prompt"),
+            !entries
+                .iter()
+                .any(|value| value["method"] == "session/prompt"),
             "no prompt was admitted: {entries:?}"
         );
 
@@ -4092,7 +4119,10 @@ mod tests {
         // removes the record.
         {
             let _env_lock = lock_test_env();
-            provider.shutdown(handle).await.expect("final close completes");
+            provider
+                .shutdown(handle)
+                .await
+                .expect("final close completes");
         }
     }
 
@@ -4245,9 +4275,7 @@ mod tests {
         env.insert("SHUTDOWN_DELAY_MS".to_string(), "600".to_string());
         let provider = stub_provider("test-dsh-probetimeout", env);
 
-        let probe = provider
-            .probe(test_probe_request(800))
-            .await;
+        let probe = provider.probe(test_probe_request(800)).await;
         assert!(
             matches!(probe, Err(HostError::OperationTimeout { .. })),
             "the probe deadline fires during the sealed close: {probe:?}"
@@ -4260,7 +4288,9 @@ mod tests {
         let spawns = spawn_records(&entries);
         assert_eq!(spawns.len(), 2, "both recipes were spawned: {entries:?}");
         let sealed_home = PathBuf::from(
-            spawns[1]["dsh_home"].as_str().expect("sealed dsh_home logged"),
+            spawns[1]["dsh_home"]
+                .as_str()
+                .expect("sealed dsh_home logged"),
         );
         assert!(
             !sealed_home.exists(),
@@ -4290,9 +4320,7 @@ mod tests {
         env.insert("INIT_DELAY_MS".to_string(), "600".to_string());
         let provider = stub_provider("test-dsh-probeinit", env);
 
-        let probe = provider
-            .probe(test_probe_request(1000))
-            .await;
+        let probe = provider.probe(test_probe_request(1000)).await;
         assert!(
             matches!(probe, Err(HostError::OperationTimeout { .. })),
             "the probe deadline fires during the sealed start: {probe:?}"
@@ -4306,7 +4334,9 @@ mod tests {
         let spawns = spawn_records(&entries);
         assert_eq!(spawns.len(), 2, "both recipes were spawned: {entries:?}");
         let sealed_home = PathBuf::from(
-            spawns[1]["dsh_home"].as_str().expect("sealed dsh_home logged"),
+            spawns[1]["dsh_home"]
+                .as_str()
+                .expect("sealed dsh_home logged"),
         );
         assert!(
             !sealed_home.exists(),
@@ -4347,9 +4377,7 @@ mod tests {
         env.insert("INIT_DELAY_MS".to_string(), "600".to_string());
         let provider = stub_provider("test-dsh-probeordinit", env);
 
-        let probe = provider
-            .probe(test_probe_request(100))
-            .await;
+        let probe = provider.probe(test_probe_request(100)).await;
         assert!(
             matches!(probe, Err(HostError::OperationTimeout { .. })),
             "the probe deadline fires during the ordinary start: {probe:?}"
@@ -4375,7 +4403,11 @@ mod tests {
              after the dropped wait: {methods:?}"
         );
         let pids = spawn_pids(&entries);
-        assert_pid_reaped(pids[0], "the ordinary child was reaped by the retained owner").await;
+        assert_pid_reaped(
+            pids[0],
+            "the ordinary child was reaped by the retained owner",
+        )
+        .await;
         assert!(
             provider
                 .retained_leases
@@ -4561,8 +4593,7 @@ mod tests {
     /// confirms deletion and only then removes the session record.
     #[cfg(unix)]
     #[tokio::test]
-    async fn sealed_switch_start_delete_failure_retains_session_lease_until_shutdown_retry(
-    ) {
+    async fn sealed_switch_start_delete_failure_retains_session_lease_until_shutdown_retry() {
         use std::os::unix::fs::PermissionsExt;
 
         let temp_dir = tempfile::tempdir().expect("temp dir");
@@ -4574,8 +4605,7 @@ mod tests {
         let provider = stub_provider("test-dsh-switchfail", env);
         let handle = launch_hermetic(&provider).await;
 
-        let failed =
-            run_turn_scoped(&provider, &handle, "seal me", Some(deny_all_scope())).await;
+        let failed = run_turn_scoped(&provider, &handle, "seal me", Some(deny_all_scope())).await;
         assert!(
             matches!(failed, Err(HostError::LaunchFailed { .. })),
             "sealed start failure is the typed launch-class error: {failed:?}"
@@ -4585,8 +4615,14 @@ mod tests {
             let sessions = provider.sessions.read().await;
             let native = sessions.get(&handle.session_id).expect("session");
             let guard = native.state.lock().await;
-            assert!(guard.closed, "the switch failure permanently closes the session");
-            guard.failed_lease.clone().expect("failed_lease is associated")
+            assert!(
+                guard.closed,
+                "the switch failure permanently closes the session"
+            );
+            guard
+                .failed_lease
+                .clone()
+                .expect("failed_lease is associated")
         };
         assert!(lease.exists(), "the undeleted anchored lease is retained");
         let blocker = lease.join("blocker");
@@ -4596,7 +4632,10 @@ mod tests {
             .permissions()
             .mode()
             & 0o777;
-        assert_eq!(leaf_mode, 0o555, "the mock made the leaf unwritable for removal");
+        assert_eq!(
+            leaf_mode, 0o555,
+            "the mock made the leaf unwritable for removal"
+        );
 
         let first = {
             let _env_lock = lock_test_env();
@@ -4607,7 +4646,11 @@ mod tests {
             "shutdown must stay cleanup-unconfirmed while the lease remains: {first:?}"
         );
         assert!(
-            provider.sessions.read().await.contains_key(&handle.session_id),
+            provider
+                .sessions
+                .read()
+                .await
+                .contains_key(&handle.session_id),
             "the session record survives until confirmed lease removal"
         );
 
@@ -4624,7 +4667,11 @@ mod tests {
         }
         assert!(!lease.exists(), "the session-associated lease is removed");
         assert!(
-            !provider.sessions.read().await.contains_key(&handle.session_id),
+            !provider
+                .sessions
+                .read()
+                .await
+                .contains_key(&handle.session_id),
             "only confirmed deletion removes the session record"
         );
     }
@@ -4658,7 +4705,9 @@ mod tests {
                 _ if std::time::Instant::now() < deadline => {
                     tokio::time::sleep(std::time::Duration::from_millis(25)).await;
                 }
-                result => panic!("{what} pid {pid} must be reaped (kill(0) → ESRCH), got {result:?}"),
+                result => {
+                    panic!("{what} pid {pid} must be reaped (kill(0) → ESRCH), got {result:?}")
+                }
             }
         }
     }
@@ -4677,8 +4726,7 @@ mod tests {
             std::fs::set_permissions(&dsh, std::fs::Permissions::from_mode(0o755))
                 .expect("chmod +x dsh");
             let python = which::which("python3").expect("python3 on the pre-isolation PATH");
-            std::os::unix::fs::symlink(python, bin_dir.join("python3"))
-                .expect("python3 symlink");
+            std::os::unix::fs::symlink(python, bin_dir.join("python3")).expect("python3 symlink");
         }
         dsh
     }
@@ -4711,13 +4759,11 @@ mod tests {
     }
 
     fn terminal_of(events: &[HostEvent]) -> Option<&HostEvent> {
-        events.iter().rev().find(|event| {
-            matches!(event, HostEvent::OpFinished(_) | HostEvent::OpFailed(_))
-        })
+        events
+            .iter()
+            .rev()
+            .find(|event| matches!(event, HostEvent::OpFinished(_) | HostEvent::OpFailed(_)))
     }
-
-
-
 
     fn test_root_message_notification(root_session_id: &str, text: &str) -> Notification {
         let mut payload = Map::new();
@@ -4785,9 +4831,13 @@ mod tests {
         classifier_failed: &AtomicBool,
     ) -> Vec<HostEvent> {
         if classifier_failed.load(Ordering::Acquire) {
-            vec![HostEvent::OpFailed(operation_protocol_failure(session_id, op_id))]
+            vec![HostEvent::OpFailed(operation_protocol_failure(
+                session_id, op_id,
+            ))]
         } else {
-            vec![HostEvent::OpFailed(operation_delivery_overflow_failure(session_id, op_id))]
+            vec![HostEvent::OpFailed(operation_delivery_overflow_failure(
+                session_id, op_id,
+            ))]
         }
     }
 
@@ -4844,7 +4894,6 @@ mod tests {
         let events = run_turn(&provider, &handle, "nested").await;
         assert_eq!(message_texts(&events), vec!["mock dsh reply"], "{events:?}");
     }
-
 
     #[tokio::test]
     async fn dsh_absent_root_event_type_fails_protocol_not_final_fallback() {
@@ -4908,7 +4957,6 @@ mod tests {
         );
     }
 
-
     #[tokio::test]
     async fn dispatch_successful_run_try_send_failure_preserves_prior_pending() {
         let budget = Arc::new(DeliveryBudget::default());
@@ -4929,14 +4977,9 @@ mod tests {
                 text: second,
             }),
         ];
-        let failed = dispatch_successful_run_events(
-            events,
-            &content_tx,
-            &budget,
-            &session_id,
-            &op_id,
-        )
-        .expect_err("second delta must fail when the channel is full");
+        let failed =
+            dispatch_successful_run_events(events, &content_tx, &budget, &session_id, &op_id)
+                .expect_err("second delta must fail when the channel is full");
         assert_eq!(failed.error_category, "provider_error");
         assert_eq!(
             budget.test_pending_message_slots(),
@@ -4969,21 +5012,15 @@ mod tests {
                 reason: FinishReason::EndTurn,
             }),
         ];
-        let dispatched = dispatch_successful_run_events(
-            events,
-            &content_tx,
-            &budget,
-            &session_id,
-            &op_id,
-        )
-        .expect_err("oversized no-callback fallback must fail delivery bounds");
+        let dispatched =
+            dispatch_successful_run_events(events, &content_tx, &budget, &session_id, &op_id)
+                .expect_err("oversized no-callback fallback must fail delivery bounds");
         assert_eq!(dispatched.error_category, "provider_error");
         assert_eq!(
             dispatched.error_message,
             "dsh operation exceeded Nexus delivery bounds"
         );
     }
-
 
     #[tokio::test]
     async fn dsh_oversize_fixture_fails_delivery_bounds() {
@@ -5005,8 +5042,6 @@ mod tests {
         );
         assert_eq!(terminal_count(&events), 1);
     }
-
-
 
     #[test]
     fn publish_completed_run_timing_is_scoped_per_operation() {
@@ -5122,20 +5157,16 @@ mod tests {
 
         let notified = tokio::time::timeout(
             std::time::Duration::from_millis(50),
-            wait_delivery_failure(
-                &failure_notify,
-                &classifier_failed,
-                &delivery_failed,
-            ),
+            wait_delivery_failure(&failure_notify, &classifier_failed, &delivery_failed),
         )
         .await;
-        assert!(notified.is_ok(), "delivery_failed must wake failure waiters");
-
-        let terminal = failure_signal_delivery_overflow_events(
-            &session_id,
-            &op_id,
-            &classifier_failed,
+        assert!(
+            notified.is_ok(),
+            "delivery_failed must wake failure waiters"
         );
+
+        let terminal =
+            failure_signal_delivery_overflow_events(&session_id, &op_id, &classifier_failed);
         assert_delivery_overflow_terminal(&terminal);
     }
 
@@ -5281,7 +5312,11 @@ mod tests {
 
         let entries = req_log_entries(&req_log);
         let spawns = spawn_records(&entries);
-        assert_eq!(spawns.len(), 2, "ordinary launch + sealed switch: {entries:?}");
+        assert_eq!(
+            spawns.len(),
+            2,
+            "ordinary launch + sealed switch: {entries:?}"
+        );
         assert_eq!(
             argv_of(&spawns[0]),
             vec!["--profile".to_string(), "sdk".to_string()],
@@ -5293,8 +5328,15 @@ mod tests {
             "the ordinary child env carries the caller-env DSH_HOME"
         );
         let sealed_argv = argv_of(&spawns[1]);
-        assert_eq!(sealed_argv.len(), 4, "sealed argv adds one owned patch pair");
-        assert_eq!(sealed_argv[0..2], ["--profile".to_string(), "sdk".to_string()]);
+        assert_eq!(
+            sealed_argv.len(),
+            4,
+            "sealed argv adds one owned patch pair"
+        );
+        assert_eq!(
+            sealed_argv[0..2],
+            ["--profile".to_string(), "sdk".to_string()]
+        );
         assert_eq!(sealed_argv[2], "--patch");
         let nexus_root = std::fs::canonicalize(&dsh_home)
             .expect("canonical selected home")
@@ -5496,7 +5538,11 @@ mod tests {
             .await
             .expect("a shutdown RPC error is diagnostic; the ladder still confirms the close");
         assert!(
-            !provider.sessions.read().await.contains_key(&handle.session_id),
+            !provider
+                .sessions
+                .read()
+                .await
+                .contains_key(&handle.session_id),
             "a confirmed close removes the session record"
         );
         let entries = req_log_entries(&req_log);
@@ -5506,7 +5552,10 @@ mod tests {
             "the runtime saw the cooperative shutdown request: {methods:?}"
         );
         let pids = spawn_pids(&entries);
-        assert_pid_reaped(pids[0], "the child was reaped after the failed shutdown RPC").await;
+        assert_pid_reaped(
+            pids[0],
+            "the child was reaped after the failed shutdown RPC",
+        )
+        .await;
     }
-
 }

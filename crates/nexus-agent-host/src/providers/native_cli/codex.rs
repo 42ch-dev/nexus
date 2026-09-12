@@ -957,8 +957,6 @@ mod tests {
     use super::*;
     use crate::capability::model::{FinishReason, HostOperation, LaunchSpec};
 
-
-
     const MOCK_APP_SERVER: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/native_protocol/mock_codex_app_server.py"

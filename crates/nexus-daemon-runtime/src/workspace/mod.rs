@@ -239,11 +239,8 @@ impl WorkspaceState {
             .expect("Failed to create test database pool");
         let narrative_gateway = Arc::new(SqliteNarrativeGateway::new(db.pool().clone()));
         let session_manager = Arc::new(
-            WorkspaceSessionManager::new_recoverable(
-                Arc::new(db.pool().clone()),
-                db_path.clone(),
-            )
-            .expect("workspace authority lease"),
+            WorkspaceSessionManager::new_recoverable(Arc::new(db.pool().clone()), db_path.clone())
+                .expect("workspace authority lease"),
         );
         let creator_db = Arc::new(RwLock::new(CreatorDbSlot {
             db: Some(db),
@@ -521,11 +518,8 @@ impl WorkspaceState {
 
         let narrative_gateway = Arc::new(SqliteNarrativeGateway::new(db.pool().clone()));
         let session_manager = Arc::new(
-            WorkspaceSessionManager::new_recoverable(
-                Arc::new(db.pool().clone()),
-                db_path.clone(),
-            )
-            .expect("workspace authority lease"),
+            WorkspaceSessionManager::new_recoverable(Arc::new(db.pool().clone()), db_path.clone())
+                .expect("workspace authority lease"),
         );
         CreatorDbOutcome {
             db: Some(db),
@@ -759,13 +753,14 @@ impl WorkspaceState {
         let prompt_executor: Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>> =
             self.agent_host().map(|host| {
                 let host_config = self.agent_host_config();
-                let executor: Arc<dyn nexus_orchestration::capability::PromptExecutor> =
-                    Arc::new(crate::prompt_executor::HostPromptExecutor::new_with_run_event_sinks(
+                let executor: Arc<dyn nexus_orchestration::capability::PromptExecutor> = Arc::new(
+                    crate::prompt_executor::HostPromptExecutor::new_with_run_event_sinks(
                         host,
                         workflow_store.clone(),
                         host_config.timeouts.clone(),
                         Some(self.run_event_sinks()),
-                    ));
+                    ),
+                );
                 executor
             });
 
@@ -784,9 +779,9 @@ impl WorkspaceState {
             > = self.session_manager().and_then(|mgr| {
                 self.workspace_path().map(|root| {
                     Arc::new(crate::workspace::executor::DaemonWorkspaceExecutor::new(
-                        mgr,
-                        root,
-                    )) as Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>
+                        mgr, root,
+                    ))
+                        as Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>
                 })
             });
             let deps = nexus_orchestration::capability::CapabilityRuntimeDeps {

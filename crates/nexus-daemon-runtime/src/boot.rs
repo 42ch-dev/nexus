@@ -632,12 +632,14 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         let workflow_store: Arc<dyn WorkflowStateStore> = sqlite_storage.clone();
         let host_config = state.agent_host_config();
         let executor: std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor> =
-            std::sync::Arc::new(crate::prompt_executor::HostPromptExecutor::new_with_run_event_sinks(
-                agent_host_facade.clone(),
-                workflow_store,
-                host_config.timeouts.clone(),
-                Some(state.run_event_sinks()),
-            ));
+            std::sync::Arc::new(
+                crate::prompt_executor::HostPromptExecutor::new_with_run_event_sinks(
+                    agent_host_facade.clone(),
+                    workflow_store,
+                    host_config.timeouts.clone(),
+                    Some(state.run_event_sinks()),
+                ),
+            );
         executor
     });
 
@@ -660,8 +662,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     > = state.session_manager().and_then(|mgr| {
         state.workspace_path().map(|root| {
             std::sync::Arc::new(crate::workspace::executor::DaemonWorkspaceExecutor::new(
-                mgr,
-                root,
+                mgr, root,
             )) as std::sync::Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>
         })
     });
@@ -829,7 +830,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             coordinator_builder = coordinator_builder
                 .with_run_events(state.run_event_registry())
                 .with_run_event_sinks(state.run_event_sinks());
-        let coordinator = Arc::new(coordinator_builder);
+            let coordinator = Arc::new(coordinator_builder);
             state.set_run_coordinator(coordinator.clone());
             if let Some(executor) = &prompt_executor {
                 state.set_prompt_executor(executor.clone());
@@ -2085,7 +2086,7 @@ mod tests {
             )),
             daemon_tool_dispatch: None,
             cdn_config: None,
-        workspace_executor: None,
+            workspace_executor: None,
         }
     }
 

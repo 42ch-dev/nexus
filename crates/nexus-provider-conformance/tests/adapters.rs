@@ -446,11 +446,7 @@ fn assert_ordinary_launch_identity(log: &Path, home: &Path) {
         .lines()
         .filter(|line| line.contains("\"method\": \"_spawn\""))
         .collect();
-    assert_eq!(
-        spawn_lines.len(),
-        1,
-        "exactly one runtime spawn: {content}"
-    );
+    assert_eq!(spawn_lines.len(), 1, "exactly one runtime spawn: {content}");
     assert!(
         spawn_lines[0].contains("\"argv\": [\"--profile\", \"sdk\"]"),
         "ordinary argv is exactly --profile sdk: {}",
@@ -668,4 +664,3 @@ async fn dsh_partial_then_fail_conforms_with_one_terminal() {
     // P1 maps non-success finish reasons to typed OpFailed categories; the
     // neutral runner's closed error_category set is unchanged in P1.
 }
-

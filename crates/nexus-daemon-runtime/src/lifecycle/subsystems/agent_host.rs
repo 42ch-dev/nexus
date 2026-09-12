@@ -118,12 +118,10 @@ impl SubsystemBootstrap for AgentHostSubsystem {
     async fn health(&self) -> SubsystemHealth {
         let state = self.state.lock().await;
         match &*state {
-            AgentHostState::Running => {
-                match self.host.health().await {
-                    Ok(h) if h.running => SubsystemHealth::Up,
-                    Ok(_) | Err(_) => SubsystemHealth::Degraded,
-                }
-            }
+            AgentHostState::Running => match self.host.health().await {
+                Ok(h) if h.running => SubsystemHealth::Up,
+                Ok(_) | Err(_) => SubsystemHealth::Degraded,
+            },
             AgentHostState::NotStarted | AgentHostState::Shutdown => SubsystemHealth::Down,
         }
     }

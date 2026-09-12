@@ -6,11 +6,11 @@ use base64::Engine;
 use nexus_contracts::local::orchestration::{
     WorkspaceChangeEntry, WorkspaceChangeOp, WorkspaceCommitInput, WorkspaceOpenInput,
 };
+use nexus_daemon_runtime::workspace::commit_fs::hash_bytes;
 use nexus_daemon_runtime::workspace::executor::DaemonWorkspaceExecutor;
 use nexus_daemon_runtime::workspace::session::{
     ChangeEntry, ChangeOp, SessionError, SessionId, WorkspaceSessionManager,
 };
-use nexus_daemon_runtime::workspace::commit_fs::hash_bytes;
 use nexus_daemon_runtime::workspace::test_hooks::{
     set_after_delete_capture_hook, set_crash_point, set_owner_gate, OwnerGate,
 };
@@ -32,7 +32,10 @@ async fn fresh_pool() -> (Arc<sqlx::SqlitePool>, tempfile::TempDir) {
     (Arc::new(pool), dir)
 }
 
-fn recoverable_mgr(pool: Arc<sqlx::SqlitePool>, db_dir: &tempfile::TempDir) -> Arc<WorkspaceSessionManager> {
+fn recoverable_mgr(
+    pool: Arc<sqlx::SqlitePool>,
+    db_dir: &tempfile::TempDir,
+) -> Arc<WorkspaceSessionManager> {
     Arc::new(
         WorkspaceSessionManager::new_recoverable(pool, db_dir.path().join("state.db"))
             .expect("recoverable"),
@@ -96,7 +99,10 @@ async fn subdirectory_scope_create_bytes() {
         std::fs::read(ws.path().join("pkg/nested.txt")).unwrap(),
         b"scoped"
     );
-    assert_eq!(intent_state(mgr.pool().as_ref(), &outcome.revision).await, "committed");
+    assert_eq!(
+        intent_state(mgr.pool().as_ref(), &outcome.revision).await,
+        "committed"
+    );
 }
 
 #[tokio::test]
@@ -152,7 +158,10 @@ async fn different_digest_rejected_after_success() {
         .await
         .unwrap_err();
     assert!(matches!(err, SessionError::AlreadyCommitted(_)));
-    assert_eq!(intent_state(mgr.pool().as_ref(), &first.revision).await, "committed");
+    assert_eq!(
+        intent_state(mgr.pool().as_ref(), &first.revision).await,
+        "committed"
+    );
 }
 
 #[tokio::test]
@@ -225,12 +234,11 @@ async fn corrupt_intent_blocks_startup() {
     .unwrap();
     let err = mgr.startup_recovery().await.unwrap_err();
     assert!(matches!(err, SessionError::RecoveryConflict(_)));
-    let state: String = sqlx::query_scalar(
-        "SELECT state FROM workspace_commit_intents WHERE revision = 'rev_bad'",
-    )
-    .fetch_one(mgr.pool().as_ref())
-    .await
-    .unwrap();
+    let state: String =
+        sqlx::query_scalar("SELECT state FROM workspace_commit_intents WHERE revision = 'rev_bad'")
+            .fetch_one(mgr.pool().as_ref())
+            .await
+            .unwrap();
     assert_eq!(state, "recovery_conflict");
 }
 
@@ -303,7 +311,10 @@ async fn retained_owner_survives_caller_drop() {
     gate.settled.notified().await;
     set_owner_gate(None);
 
-    assert_eq!(std::fs::read(ws.path().join("owner.txt")).unwrap(), b"owned");
+    assert_eq!(
+        std::fs::read(ws.path().join("owner.txt")).unwrap(),
+        b"owned"
+    );
     let state: String = sqlx::query_scalar(
         "SELECT state FROM workspace_commit_intents WHERE session_id = ? ORDER BY revision DESC LIMIT 1",
     )
@@ -524,7 +535,10 @@ async fn multi_file_commit_survives_new_manager_restart() {
         WorkspaceSessionManager::new_recoverable(Arc::clone(&pool), db_path.clone())
             .expect("restart recoverable"),
     );
-    restarted.startup_recovery().await.expect("restart recovery");
+    restarted
+        .startup_recovery()
+        .await
+        .expect("restart recovery");
     assert_eq!(std::fs::read(ws.path().join("a.txt")).unwrap(), b"alpha");
     assert_eq!(std::fs::read(ws.path().join("b.txt")).unwrap(), b"beta");
     assert_eq!(std::fs::read(ws.path().join("c.txt")).unwrap(), b"gamma");
@@ -694,7 +708,8 @@ async fn external_writer_at_mutation_boundary_blocks_and_preserves_evidence() {
     let changes = vec![modify_change("a.txt", &pre, b"two")];
     let owner_root = root.clone();
     let handle = tokio::spawn(async move {
-        mgr2.commit_session_durable(&session_id, &changes, &owner_root).await
+        mgr2.commit_session_durable(&session_id, &changes, &owner_root)
+            .await
     });
     gate.admitted.notified().await;
     std::fs::write(ws.path().join("a.txt"), b"tampered").unwrap();
@@ -810,7 +825,10 @@ async fn unknown_session_rejected() {
         "unknown session must be NotFound, got {err:?}"
     );
     assert!(!ws.path().join("ghost.txt").exists());
-    assert_eq!(intent_row_count(mgr.pool().as_ref(), &ghost.to_string()).await, 0);
+    assert_eq!(
+        intent_row_count(mgr.pool().as_ref(), &ghost.to_string()).await,
+        0
+    );
 }
 
 #[tokio::test]
@@ -851,7 +869,10 @@ async fn recoverable_claim_race_has_single_winner() {
 
     assert!(!revisions.is_empty(), "one contender must win");
     assert_eq!(
-        revisions.iter().collect::<std::collections::HashSet<_>>().len(),
+        revisions
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
         1,
         "all winners must report the SAME revision, got {revisions:?}"
     );
@@ -1463,8 +1484,14 @@ async fn crash_before_modify_apply_reverse_rollback_treats_unapplied_modify_as_n
     set_crash_point(None);
     assert!(matches!(err, SessionError::Internal(_)));
     // a.txt applied; z.txt untouched (still the preimage).
-    assert_eq!(std::fs::read(ws.path().join("a.txt")).unwrap(), b"a-created");
-    assert_eq!(std::fs::read(ws.path().join("z.txt")).unwrap(), b"z-original");
+    assert_eq!(
+        std::fs::read(ws.path().join("a.txt")).unwrap(),
+        b"a-created"
+    );
+    assert_eq!(
+        std::fs::read(ws.path().join("z.txt")).unwrap(),
+        b"z-original"
+    );
 
     // Reverse rollback hits z.txt FIRST, with post_hash staged but the target
     // already equal to pre_hash because it was never applied.

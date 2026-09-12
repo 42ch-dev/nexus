@@ -12,8 +12,6 @@ use axum::{
     response::sse::{Event, KeepAlive, Sse},
     Json,
 };
-use std::convert::Infallible;
-use tokio_stream::Stream;
 use nexus_contracts::local::orchestration::http::{
     CreateSessionRequest, CreateSessionResponse, GetSessionResponse, ListSessionsQuery,
     ListSessionsResponse, SessionSummary, SignalSessionRequest,
@@ -22,7 +20,9 @@ use nexus_contracts::PaginationInfo;
 use nexus_orchestration::engine::{EngineSignal, SessionStatus};
 use nexus_orchestration::run_state::WorkflowStateStore;
 use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
+use std::convert::Infallible;
 use std::sync::Arc;
+use tokio_stream::Stream;
 
 /// `POST /v1/daemon/orchestration/sessions` — create a new session from a preset.
 pub async fn create_session(
@@ -931,7 +931,10 @@ mod tests {
             checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
             next_state: &nexus_orchestration::run_state::RunStateV1,
             terminal_target: nexus_orchestration::run_state::TerminalSettlementTarget,
-        ) -> Result<nexus_orchestration::run_state::SettlementResult, nexus_orchestration::engine::EngineError> {
+        ) -> Result<
+            nexus_orchestration::run_state::SettlementResult,
+            nexus_orchestration::engine::EngineError,
+        > {
             self.inner
                 .settle_run(
                     session_id,
@@ -1215,7 +1218,6 @@ mod tests {
     }
 }
 
-
 /// Resolve a session through the same durable owner lookup as inspect, then
 /// verify the active Creator owns it. Foreign/missing sessions are 404.
 async fn authorize_orchestration_session_read(
@@ -1280,9 +1282,7 @@ pub async fn session_events(
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, NexusApiError> {
     authorize_orchestration_session_read(&state, &session_id).await?;
     let inspect_url = format!("/v1/daemon/orchestration/sessions/{session_id}");
-    let last_event_id = headers
-        .get("last-event-id")
-        .and_then(|v| v.to_str().ok());
+    let last_event_id = headers.get("last-event-id").and_then(|v| v.to_str().ok());
     let registry = state.run_event_registry();
     let sub = match registry.subscribe_live(&session_id, last_event_id, inspect_url) {
         Ok(rx) => rx,
@@ -1324,4 +1324,3 @@ pub async fn session_events(
     });
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
-
