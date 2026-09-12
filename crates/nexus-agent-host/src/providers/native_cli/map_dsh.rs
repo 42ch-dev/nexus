@@ -114,8 +114,14 @@ enum RootEventFailure {
 }
 
 fn classify_root_session_event(event: &Value) -> Result<DshNotificationClass, RootEventFailure> {
-    if event.get("type").and_then(Value::as_str) != Some("assistant/message") {
-        return Ok(DshNotificationClass::Ignore);
+    match event.get("type") {
+        None => return Err(RootEventFailure::Protocol),
+        Some(Value::String(type_name)) => {
+            if type_name != "assistant/message" {
+                return Ok(DshNotificationClass::Ignore);
+            }
+        }
+        Some(_) => return Err(RootEventFailure::Protocol),
     }
     let len = measure_assistant_message_text(event).map_err(|_| RootEventFailure::Protocol)?;
     if len == 0 {
@@ -411,6 +417,41 @@ mod tests {
             json!([{"type": "text", "text": "child prose"}]),
         );
         let n = notification("subagent.finished", payload);
+        assert_eq!(
+            classify_notification(&n, "root-sess"),
+            Ok(DshNotificationClass::Ignore)
+        );
+    }
+
+    #[test]
+    fn absent_type_on_root_session_event_is_protocol_failure() {
+        let n = root_event(json!({
+            "data": {"content": [{"type": "text", "text": "orphan"}]}
+        }));
+        assert_eq!(
+            classify_notification(&n, "root-sess"),
+            Err(ClassifyNotificationError::Protocol(DshProtocolFailure))
+        );
+    }
+
+    #[test]
+    fn non_string_type_on_root_session_event_is_protocol_failure() {
+        let n = root_event(json!({
+            "type": 1,
+            "data": {"content": [{"type": "text", "text": "bad"}]}
+        }));
+        assert_eq!(
+            classify_notification(&n, "root-sess"),
+            Err(ClassifyNotificationError::Protocol(DshProtocolFailure))
+        );
+    }
+
+    #[test]
+    fn unrelated_string_type_on_root_session_event_is_ignored() {
+        let n = root_event(json!({
+            "type": "agent/inbox/spliced",
+            "data": {"inserted": []}
+        }));
         assert_eq!(
             classify_notification(&n, "root-sess"),
             Ok(DshNotificationClass::Ignore)

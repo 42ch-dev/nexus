@@ -177,6 +177,10 @@ def handle_request(req):
                 "type": "assistant/message",
                 "data": {"content": [{"type": "text", "text": 1}]},
             })
+        elif scenario == "malformed_root_event_type":
+            session_event(session_id, {
+                "data": {"content": [{"type": "text", "text": "would-be-streamed"}]},
+            })
         elif scenario == "oversize":
             big = "x" * (int(os.environ.get("OVERSIZE_BYTES", str(256 * 1024 + 1))))
             session_event(session_id, {

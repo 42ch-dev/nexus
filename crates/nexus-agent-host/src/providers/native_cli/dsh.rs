@@ -161,9 +161,9 @@ const DSCH_MAX_EMITTED_TEXT_BYTES: usize = 4 * 1024 * 1024;
 struct DeliveryBudget {
     pending: StdMutex<usize>,
     emitted: StdMutex<usize>,
-    /// Accepted message deltas this turn (queue depth can shrink while the
-    /// consumer drains; overflow is keyed off total accepts, not buffer fill).
-    accepted_messages: StdMutex<usize>,
+    /// In-flight message deltas awaiting consumer dequeue; released when the
+    /// queued payload is consumed or dropped (architecture §4.3 pending cap).
+    pending_messages: StdMutex<usize>,
 }
 
 impl DeliveryBudget {
@@ -173,11 +173,11 @@ impl DeliveryBudget {
         }
         let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
         let mut emitted = self.emitted.lock().unwrap_or_else(|e| e.into_inner());
-        let mut accepted_messages = self
-            .accepted_messages
+        let mut pending_messages = self
+            .pending_messages
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        if *accepted_messages >= DSCH_MAX_QUEUED_MESSAGES {
+        if *pending_messages >= DSCH_MAX_QUEUED_MESSAGES {
             return false;
         }
         if *pending + bytes > DSCH_MAX_PENDING_PAYLOAD_BYTES {
@@ -186,7 +186,7 @@ impl DeliveryBudget {
         if *emitted + bytes > DSCH_MAX_EMITTED_TEXT_BYTES {
             return false;
         }
-        *accepted_messages += 1;
+        *pending_messages += 1;
         *pending += bytes;
         *emitted += bytes;
         true
@@ -195,6 +195,11 @@ impl DeliveryBudget {
     fn release(&self, bytes: usize) {
         let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
         *pending = pending.saturating_sub(bytes);
+        let mut pending_messages = self
+            .pending_messages
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *pending_messages = pending_messages.saturating_sub(1);
     }
 }
 
@@ -4746,6 +4751,28 @@ mod tests {
         assert_eq!(message_texts(&events), vec!["mock dsh reply"], "{events:?}");
     }
 
+
+    #[tokio::test]
+    async fn dsh_absent_root_event_type_fails_protocol_not_final_fallback() {
+        let req_log_dir = tempfile::tempdir().expect("temp dir");
+        let req_log = req_log_dir.path().join("reqs.jsonl");
+        let dsh_home = req_log_dir.path().join("dsh-home");
+        let provider = stub_provider(
+            "test-dsh-absent-type",
+            stub_env_scenario(&req_log, &dsh_home, "malformed_root_event_type"),
+        );
+        let handle = launch_hermetic(&provider).await;
+        let events = run_turn(&provider, &handle, "bad-type").await;
+        assert!(
+            matches!(
+                terminal_of(&events),
+                Some(HostEvent::OpFailed(f)) if f.error_category == "decode_error"
+            ),
+            "absent root event type must fail closed, not final_response fallback: {events:?}"
+        );
+        assert_eq!(terminal_count(&events), 1);
+    }
+
     #[tokio::test]
     async fn dsh_malformed_text_block_fails_after_partial_delivery() {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
@@ -4841,6 +4868,55 @@ mod tests {
             "{events:?}"
         );
         assert_eq!(terminal_count(&events), 1);
+    }
+
+
+    #[test]
+    fn delivery_budget_allows_sequential_drained_messages_beyond_64() {
+        let budget = DeliveryBudget::default();
+        for i in 0..70 {
+            assert!(budget.try_reserve(10), "reserve at {i}");
+            budget.release(10);
+        }
+    }
+
+    #[test]
+    fn delivery_budget_rejects_65th_concurrent_pending_message() {
+        let budget = DeliveryBudget::default();
+        for i in 0..64 {
+            assert!(budget.try_reserve(1), "pending slot {i}");
+        }
+        assert!(
+            !budget.try_reserve(1),
+            "the 65th concurrent pending message must overflow"
+        );
+        budget.release(1);
+        assert!(budget.try_reserve(1), "a released permit may be reused");
+    }
+
+    #[tokio::test]
+    async fn delivery_budget_queued_payload_recycles_pending_message_permit() {
+        let budget = Arc::new(DeliveryBudget::default());
+        let (tx, mut rx) = mpsc::channel(DSCH_MAX_QUEUED_MESSAGES);
+        let session_id = HostSessionId::new();
+        let op_id = HostOperationId::new();
+        for i in 0..70 {
+            let text = format!("m{i}");
+            let bytes = text.len();
+            assert!(budget.try_reserve(bytes), "reserve at {i}");
+            tx.try_send(QueuedPayload {
+                event: Some(HostEvent::MessageDelta(TextDeltaEvent {
+                    session_id: session_id.clone(),
+                    op_id: op_id.clone(),
+                    text,
+                })),
+                reservation: Some(bytes),
+                budget: Arc::clone(&budget),
+            })
+            .expect("channel accepts drained turn");
+            let payload = rx.recv().await.expect("consumer drains");
+            let _ = payload.into_event();
+        }
     }
 
     #[tokio::test]
