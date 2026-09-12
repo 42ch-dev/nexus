@@ -5013,6 +5013,7 @@ mod tests {
         let dsh_home = req_log_dir.path().join("dsh-home");
         let mut env = stub_env_scenario(&req_log, &dsh_home, "flood_messages");
         env.insert("FLOOD_HOLD".to_string(), "1".to_string());
+        env.insert("FLOOD_COUNT".to_string(), "66".to_string());
         let provider = stub_provider("test-dsh-flood", env);
         let handle = launch_hermetic(&provider).await;
         let _env_lock = lock_test_env();
@@ -5033,8 +5034,8 @@ mod tests {
         // marker; overflow is latched before the first poll, then turn/end
         // completes and the producer must surface delivery overflow.
         // Observable prefix is m0..m64: one staged/deliverable item outside
-        // the 64-slot MPSC plus 64 still pending; the 65th notification
-        // overflows (consistent with pending-channel bound + release-on-dequeue).
+        // the 64-slot MPSC plus 64 still pending; the 66th notification
+        // overflows (65 notifications would finish without overflow).
         wait_for_flood_burst_complete(&req_log).await;
         let events = collect_events(stream).await;
         assert_eq!(
