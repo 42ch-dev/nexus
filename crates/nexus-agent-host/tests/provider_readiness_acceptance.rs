@@ -206,7 +206,8 @@ fn spawn_events(log: &[serde_json::Value]) -> Vec<&serde_json::Value> {
 /// Every fixture pid recorded in a log.
 fn fixture_pids(log: &[serde_json::Value]) -> Vec<u32> {
     log.iter()
-        .filter_map(|e| e["pid"].as_u64().map(|p| p as u32))
+        .filter_map(|e| e["pid"].as_u64())
+        .map(|pid| u32::try_from(pid).expect("fixture PID must fit u32"))
         .collect()
 }
 
@@ -466,7 +467,8 @@ async fn dsh_probe_initialize_timeout_is_unavailable_with_no_live_child() {
     for _ in 0..100 {
         pids = spawn_records(&read_log(&req_log))
             .iter()
-            .filter_map(|s| s["pid"].as_u64().map(|p| p as u32))
+            .filter_map(|s| s["pid"].as_u64())
+            .map(|pid| u32::try_from(pid).expect("fixture PID must fit u32"))
             .collect();
         if !pids.is_empty() {
             break;
@@ -756,6 +758,7 @@ async fn catalog_health_and_admission_agree_on_suppressed_and_missing_providers(
 /// A ready-path provider whose LATER launch fails is invalidated; an ordinary
 /// prompt/content timeout leaves the same provider ready.
 #[tokio::test]
+#[allow(clippy::too_many_lines)] // Keep the two lifecycle transitions and their observations together.
 async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready() {
     let _lock = ENV_LOCK.lock().await;
     let tmp = tempfile::tempdir().expect("temp dir");

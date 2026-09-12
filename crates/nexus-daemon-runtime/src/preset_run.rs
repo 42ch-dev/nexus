@@ -3158,7 +3158,7 @@ mod tests {
         ChildSessionParams, Context, EngineError, SessionFilter, SessionKey, SessionSummary,
     };
 
-    /// P4 T1: durable Failed+cancel_requested+driver_failed counts as cancel outcome
+    /// P4 T1: durable `Failed+cancel_requested+driver_failed` counts as cancel outcome
     /// (concurrent cancel vs drive-failure race — R-V1186P3-004).
     #[test]
     fn cancel_fence_accepts_failed_driver_failed_when_cancel_requested() {
@@ -8276,6 +8276,7 @@ mod tests {
     }
     /// P4 T1 placement: cancel committed before the step marker (provider start).
     #[tokio::test]
+    #[allow(clippy::too_many_lines)] // Keep the deterministic race and durable observations together.
     async fn cancel_drive_race_provider_start_one_winner_no_extra_step() {
         use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
         struct CountingTask {
@@ -8568,6 +8569,7 @@ mod tests {
 
     /// P4 T1 placement: cancel during an in-flight step (active operation).
     #[tokio::test]
+    #[allow(clippy::too_many_lines)] // Keep the deterministic race and durable observations together.
     async fn cancel_drive_race_active_operation_one_winner_no_extra_step() {
         use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
         struct SlowTask {
@@ -9074,7 +9076,7 @@ mod tests {
         );
     }
 
-    /// Live SSE handoff: subscriber registered before publish receives host_event.
+    /// Live SSE handoff: subscriber registered before publish receives `host_event`.
     #[tokio::test]
     async fn run_events_live_handoff_receives_published_host_event() {
         let registry = Arc::new(crate::run_events::RunEventRegistry::new());
@@ -9106,6 +9108,7 @@ mod tests {
     /// run's retry cancel can still publish the confirmed winner, and the
     /// final SSE frame matches the durable DB status exactly.
     #[tokio::test]
+    #[allow(clippy::too_many_lines)] // One interrupted-to-confirmed cleanup lifecycle.
     async fn interrupted_run_keeps_ring_live_until_retry_cancel_confirms() {
         struct NoopTask;
         #[async_trait]
@@ -9298,6 +9301,7 @@ mod tests {
     /// drive owner is registered, and the durable existing work is untouched;
     /// an existing ring is reused rather than refused.
     #[tokio::test]
+    #[allow(clippy::too_many_lines)] // One capacity boundary with durable-state observations.
     async fn ensure_driving_refuses_capacity_without_touching_durable_work() {
         struct NoopTask;
         #[async_trait]

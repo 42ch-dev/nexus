@@ -535,6 +535,113 @@ fn session_status_to_str(status: &SessionStatus) -> String {
     }
 }
 
+/// Resolve a session through the same durable owner lookup as inspect, then
+/// verify the active Creator owns it. Foreign/missing sessions are 404.
+async fn authorize_orchestration_session_read(
+    state: &WorkspaceState,
+    session_id: &str,
+) -> Result<(), NexusApiError> {
+    use crate::config::read_active_creator_id;
+    let active_creator =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+    let engine = state
+        .engine()
+        .ok_or_else(|| NexusApiError::service_unavailable("engine not available"))?;
+    let sid = nexus_orchestration::engine::SessionId(session_id.to_string());
+    let sessions = engine
+        .list_active(nexus_orchestration::engine::SessionFilter::default())
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "ENGINE_ERROR".into(),
+            message: e.to_string(),
+        })?;
+    // The DURABLE row is the ownership SSOT, exactly as `get_session` treats
+    // it for status. The in-memory active summary is only a fast path for a
+    // row the durable store does not know about: after an ownership change
+    // (or any writer that moved `orchestration_sessions.creator_id`), a stale
+    // in-memory summary would otherwise authorize a FOREIGN creator to read
+    // another creator's live event stream.
+    let durable_owner = match state.pool() {
+        Some(pool) => {
+            let storage = SqliteSessionStorage::new(Arc::new(pool.clone()));
+            storage
+                .get_checkpoint_row(session_id)
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    code: "STORAGE_ERROR".into(),
+                    message: e.to_string(),
+                })?
+                .map(|row| row.creator_id)
+        }
+        None => None,
+    };
+    let owner = if let Some(owner) = durable_owner {
+        owner
+    } else {
+        let active = sessions
+            .iter()
+            .find(|s| s.session_id == sid)
+            .ok_or_else(|| NexusApiError::NotFound(format!("session {session_id}")))?;
+        active.creator_id.clone()
+    };
+    if owner != active_creator {
+        return Err(NexusApiError::NotFound(format!("session {session_id}")));
+    }
+    Ok(())
+}
+
+/// `GET /v1/daemon/orchestration/sessions/{session_id}/events` — live SSE replay.
+pub async fn session_events(
+    State(state): State<WorkspaceState>,
+    Path(session_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, NexusApiError> {
+    authorize_orchestration_session_read(&state, &session_id).await?;
+    let inspect_url = format!("/v1/daemon/orchestration/sessions/{session_id}");
+    let last_event_id = headers.get("last-event-id").and_then(|v| v.to_str().ok());
+    let registry = state.run_event_registry();
+    let sub = match registry.subscribe_live(&session_id, last_event_id, inspect_url) {
+        Ok(rx) => rx,
+        Err(
+            crate::run_events::SubscribeError::MalformedCursor
+            | crate::run_events::SubscribeError::FutureCursor,
+        ) => {
+            return Err(NexusApiError::BadRequest {
+                code: "invalid_cursor".into(),
+                message: "malformed or future Last-Event-ID".into(),
+            });
+        }
+        Err(crate::run_events::SubscribeError::TooManySubscribers) => {
+            return Err(NexusApiError::ConflictCoded {
+                code: "sse_subscriber_limit".into(),
+                message: "too many concurrent SSE subscribers for this run".into(),
+            });
+        }
+        Err(crate::run_events::SubscribeError::HistoryUnavailable(body)) => {
+            return Err(NexusApiError::BadRequestCodedDetails {
+                code: "history_unavailable".into(),
+                message: "run event history is not available for replay".into(),
+                details: serde_json::json!({
+                    "run_id": body.run_id,
+                    "inspect_url": body.inspect_url,
+                }),
+            });
+        }
+    };
+    let stream = futures_util::stream::unfold(sub, |mut sub| async move {
+        match sub.recv().await {
+            Some(frame) => {
+                let event = Event::default()
+                    .id(frame.id)
+                    .event(frame.event)
+                    .data(frame.data);
+                Some((Ok(event), sub))
+            }
+            None => None,
+        }
+    });
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1216,112 +1323,4 @@ mod tests {
             "the durable cancel intent is present (the run stays actionable)"
         );
     }
-}
-
-/// Resolve a session through the same durable owner lookup as inspect, then
-/// verify the active Creator owns it. Foreign/missing sessions are 404.
-async fn authorize_orchestration_session_read(
-    state: &WorkspaceState,
-    session_id: &str,
-) -> Result<(), NexusApiError> {
-    use crate::config::read_active_creator_id;
-    let active_creator =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let engine = state
-        .engine()
-        .ok_or_else(|| NexusApiError::service_unavailable("engine not available"))?;
-    let sid = nexus_orchestration::engine::SessionId(session_id.to_string());
-    let sessions = engine
-        .list_active(nexus_orchestration::engine::SessionFilter::default())
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "ENGINE_ERROR".into(),
-            message: e.to_string(),
-        })?;
-    // The DURABLE row is the ownership SSOT, exactly as `get_session` treats
-    // it for status. The in-memory active summary is only a fast path for a
-    // row the durable store does not know about: after an ownership change
-    // (or any writer that moved `orchestration_sessions.creator_id`), a stale
-    // in-memory summary would otherwise authorize a FOREIGN creator to read
-    // another creator's live event stream.
-    let durable_owner = match state.pool() {
-        Some(pool) => {
-            let storage = SqliteSessionStorage::new(Arc::new(pool.clone()));
-            storage
-                .get_checkpoint_row(session_id)
-                .await
-                .map_err(|e| NexusApiError::Internal {
-                    code: "STORAGE_ERROR".into(),
-                    message: e.to_string(),
-                })?
-                .map(|row| row.creator_id)
-        }
-        None => None,
-    };
-    let owner = if let Some(owner) = durable_owner {
-        owner
-    } else {
-        let active = sessions
-            .iter()
-            .find(|s| s.session_id == sid)
-            .ok_or_else(|| NexusApiError::NotFound(format!("session {session_id}")))?;
-        active.creator_id.clone()
-    };
-    if owner != active_creator {
-        return Err(NexusApiError::NotFound(format!("session {session_id}")));
-    }
-    Ok(())
-}
-
-/// `GET /v1/daemon/orchestration/sessions/{session_id}/events` — live SSE replay.
-pub async fn session_events(
-    State(state): State<WorkspaceState>,
-    Path(session_id): Path<String>,
-    headers: HeaderMap,
-) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, NexusApiError> {
-    authorize_orchestration_session_read(&state, &session_id).await?;
-    let inspect_url = format!("/v1/daemon/orchestration/sessions/{session_id}");
-    let last_event_id = headers.get("last-event-id").and_then(|v| v.to_str().ok());
-    let registry = state.run_event_registry();
-    let sub = match registry.subscribe_live(&session_id, last_event_id, inspect_url) {
-        Ok(rx) => rx,
-        Err(
-            crate::run_events::SubscribeError::MalformedCursor
-            | crate::run_events::SubscribeError::FutureCursor,
-        ) => {
-            return Err(NexusApiError::BadRequest {
-                code: "invalid_cursor".into(),
-                message: "malformed or future Last-Event-ID".into(),
-            });
-        }
-        Err(crate::run_events::SubscribeError::TooManySubscribers) => {
-            return Err(NexusApiError::ConflictCoded {
-                code: "sse_subscriber_limit".into(),
-                message: "too many concurrent SSE subscribers for this run".into(),
-            });
-        }
-        Err(crate::run_events::SubscribeError::HistoryUnavailable(body)) => {
-            return Err(NexusApiError::BadRequestCodedDetails {
-                code: "history_unavailable".into(),
-                message: "run event history is not available for replay".into(),
-                details: serde_json::json!({
-                    "run_id": body.run_id,
-                    "inspect_url": body.inspect_url,
-                }),
-            });
-        }
-    };
-    let stream = futures_util::stream::unfold(sub, |mut sub| async move {
-        match sub.recv().await {
-            Some(frame) => {
-                let event = Event::default()
-                    .id(frame.id)
-                    .event(frame.event)
-                    .data(frame.data);
-                Some((Ok(event), sub))
-            }
-            None => None,
-        }
-    });
-    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }

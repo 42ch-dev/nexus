@@ -94,9 +94,10 @@ async fn routed_state(
             if state == "committed_state" || state == "pending_state" {
                 return state;
             }
-            if state == "done" {
-                panic!("{label}: reached terminal without a recorded branch target");
-            }
+            assert_ne!(
+                state, "done",
+                "{label}: reached terminal without a recorded branch target"
+            );
         }
         engine.run_step(&session).await.expect("step succeeds");
     }

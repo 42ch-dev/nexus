@@ -233,13 +233,13 @@ async fn session_events_replay_exceeds_pending_cap_without_subscriber_error() {
         .run_event_registry()
         .try_register_live(run_id)
         .expect("register");
-    for i in 0..20 {
+    for i in 0_u64..20 {
         ctx.state.run_event_registry().publish_run_state(
             run_id,
             &nexus_orchestration::run_state::RunRecord {
                 session_id: SessionId(run_id.to_string()),
                 status: SessionStatus::Running,
-                state_revision: i as u64 + 1,
+                state_revision: i + 1,
                 execution_version: 1,
                 descriptor: None,
                 state: None,

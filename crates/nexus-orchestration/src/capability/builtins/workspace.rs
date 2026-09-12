@@ -116,12 +116,12 @@ impl Capability for WorkspaceCommit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use crate::capability::WorkspaceExecutor;
     use async_trait::async_trait;
     use nexus_contracts::local::orchestration::{
         WorkspaceCommitOutput, WorkspaceOpenInput, WorkspaceOpenOutput,
     };
+    use std::collections::HashMap;
 
     struct StubExecutor;
 

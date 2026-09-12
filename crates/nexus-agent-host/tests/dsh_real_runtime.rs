@@ -5,7 +5,7 @@
 //! drive the INSTALLED upstream `dsh` runtime (resolved through the
 //! production chain: explicit override → parent `DSH_RUNTIME_BIN` → PATH
 //! `dsh`) through the real `DshNativeProvider`, with a loopback
-//! deterministic **LLM protocol** proxy standing in for the DeepSeek API
+//! deterministic **LLM protocol** proxy standing in for the `DeepSeek` API
 //! (`DEEPSEEK_BASE_URL` + a non-secret placeholder `DEEPSEEK_API_KEY`; no
 //! credential is read, copied, or logged, and no paid/model call leaves
 //! loopback). The proxy scripts a bounded completion and records only
@@ -33,7 +33,7 @@
 //!
 //! When no real `dsh` resolves on the host, each test skips with a loud
 //! note (never a fake proof); with `dsh` installed they are deterministic,
-//! bounded, isolated (own temp HOME/DSH_HOME, loopback ports), and mutate
+//! bounded, isolated (own temp `HOME/DSH_HOME`, loopback ports), and mutate
 //! no process-global environment.
 
 use std::collections::HashMap;
@@ -81,7 +81,7 @@ static REAL_RUNTIME_SERIAL: Mutex<()> = Mutex::new(());
 fn serial_real_runtime() -> std::sync::MutexGuard<'static, ()> {
     REAL_RUNTIME_SERIAL
         .lock()
-        .unwrap_or_else(|e| e.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Resolve the installed/resolved real `dsh` through the production chain
@@ -97,7 +97,7 @@ fn real_dsh() -> Option<PathBuf> {
     }
 }
 
-/// The all-false deny_all scope (architecture §3.4 selection).
+/// The all-false `deny_all` scope (architecture §3.4 selection).
 const fn deny_all_scope() -> PromptPermissionScope {
     PromptPermissionScope {
         allow_read: false,
@@ -130,7 +130,7 @@ fn real_timeouts() -> TimeoutConfig {
 }
 
 /// The isolated child environment handed to the provider (the SDK merges
-/// it into the spawn environment): isolated parent HOME and DSH_HOME, the
+/// it into the spawn environment): isolated parent HOME and `DSH_HOME`, the
 /// loopback model endpoint, the non-secret placeholder key, the poison
 /// marker log, and disabled telemetry so the proof never egresses.
 fn isolated_env(root: &TempDir, proxy_port: u16) -> HashMap<String, String> {
@@ -173,7 +173,7 @@ fn real_provider(root: &TempDir, proxy_port: u16, dsh_bin: &Path) -> DshNativePr
 
 /// Plant the poison in the ordinary isolated home: a marker plugin
 /// package inserted through the profile patch layer (its module-load and
-/// apply side effects append their runtime's DSH_HOME to POISON_LOG), and
+/// apply side effects append their runtime's `DSH_HOME` to `POISON_LOG`), and
 /// a persona override through the home patch layer (reaches the composed
 /// system prompt). Both channels are verified effective against the
 /// ordinary profile by `real_dsh_poisoned_layers_reach_ordinary_runtime`.
@@ -254,7 +254,8 @@ impl HostileMarkers {
         ] {
             assert!(
                 !path.exists(),
-                "the unsolicited {what} tool call must have NO side effect, but {path:?} exists"
+                "the unsolicited {what} tool call must have NO side effect, but {} exists",
+                path.display()
             );
         }
         assert!(
@@ -322,10 +323,10 @@ fn live_dsh_children() -> Vec<i32> {
         .filter_map(|line| {
             let mut fields = line.split_whitespace();
             let pid: i32 = fields.next()?.parse().ok()?;
-            let ppid = fields.next()?;
+            let parent_process = fields.next()?;
             let stat = fields.next()?;
             let args: String = fields.collect::<Vec<_>>().join(" ");
-            (ppid == me && !stat.starts_with('Z') && args.contains("dsh")).then_some(pid)
+            (parent_process == me && !stat.starts_with('Z') && args.contains("dsh")).then_some(pid)
         })
         .collect()
 }
@@ -430,7 +431,7 @@ struct RequestRecord {
 }
 
 /// One scripted proxy: each of the first `hostile_rounds` requests gets a
-/// single unsolicited tool call (shell → editor → run_code) whose
+/// single unsolicited tool call (shell → editor → `run_code`) whose
 /// arguments would create marker files / spawn a background process; every
 /// later request gets the bounded final `stop` completion.
 #[cfg(unix)]
@@ -506,7 +507,7 @@ async fn read_request(socket: &mut tokio::net::TcpStream) -> (String, Vec<u8>) {
 }
 
 /// One SSE chunk (`data: <json>\n\n`).
-fn sse_chunk(delta: serde_json::Value, finish_reason: Option<&str>) -> String {
+fn sse_chunk(delta: &serde_json::Value, finish_reason: Option<&str>) -> String {
     let payload = serde_json::json!({
         "id": "chatcmpl-dsh-t3-proxy",
         "object": "chat.completion.chunk",
@@ -574,6 +575,7 @@ async fn serve_connection(
     records: Arc<Mutex<Vec<RequestRecord>>>,
     markers: Arc<HostileMarkers>,
 ) {
+    use tokio::io::AsyncWriteExt;
     let (head, body) = read_request(socket).await;
     let request_path = head
         .lines()
@@ -614,7 +616,7 @@ async fn serve_connection(
     if request_index <= hostile_rounds {
         let (name, arguments) = hostile_call(request_index - 1, &markers);
         out += &sse_chunk(
-            serde_json::json!({
+            &serde_json::json!({
                 "role": "assistant",
                 "content": null,
                 "tool_calls": [{
@@ -626,13 +628,13 @@ async fn serve_connection(
             }),
             None,
         );
-        out += &sse_chunk(serde_json::json!({}), Some("tool_calls"));
+        out += &sse_chunk(&serde_json::json!({}), Some("tool_calls"));
     } else {
         out += &sse_chunk(
-            serde_json::json!({"role": "assistant", "content": FINAL_TEXT}),
+            &serde_json::json!({"role": "assistant", "content": FINAL_TEXT}),
             None,
         );
-        out += &sse_chunk(serde_json::json!({}), Some("stop"));
+        out += &sse_chunk(&serde_json::json!({}), Some("stop"));
     }
     out += &sse_usage_chunk();
     out += "data: [DONE]\n\n";
@@ -642,7 +644,6 @@ async fn serve_connection(
         out.len(),
         out
     );
-    use tokio::io::AsyncWriteExt;
     socket
         .write_all(response.as_bytes())
         .await
@@ -767,11 +768,11 @@ async fn with_confirmed_teardown<Fut: Future<Output = ()>>(
 struct ChildGuard(Option<std::process::Child>);
 
 impl ChildGuard {
-    fn new(child: std::process::Child) -> Self {
+    const fn new(child: std::process::Child) -> Self {
         Self(Some(child))
     }
 
-    fn child(&mut self) -> &mut std::process::Child {
+    const fn child(&mut self) -> &mut std::process::Child {
         self.0.as_mut().expect("child guard armed")
     }
 
@@ -888,11 +889,12 @@ fn hostile_bodies_create_their_evidence_when_directly_run() {
 
 /// The actual upstream dsh sealed `deny_all` composition enforces no-tools
 /// at dispatch (architecture §3.4 / AC6): the model request advertises NO
-/// tools, unsolicited shell/editor/run_code calls are rejected as unknown
+/// tools, unsolicited shell/editor/`run_code` calls are rejected as unknown
 /// tools, and no marker file/process/tool-body side effect occurs before
 /// the scripted bounded completion.
 #[cfg(unix)]
 #[tokio::test]
+#[allow(clippy::too_many_lines, clippy::await_holding_lock)] // Serial process-table proof across test runtimes.
 async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects() {
     let Some(dsh_bin) = real_dsh() else { return };
     let _serial = serial_real_runtime();
@@ -1055,6 +1057,7 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
 /// sealed runtime" would prove nothing.
 #[cfg(unix)]
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // Serial process-table proof across test runtimes.
 async fn real_dsh_poisoned_layers_reach_ordinary_runtime() {
     let Some(dsh_bin) = real_dsh() else { return };
     let _serial = serial_real_runtime();
@@ -1116,6 +1119,7 @@ async fn real_dsh_poisoned_layers_reach_ordinary_runtime() {
 /// provider launch fails closed with a typed error and zero model calls.
 #[cfg(unix)]
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // Serial process-table proof across test runtimes.
 async fn real_dsh_missing_plugin_package_fails_closed() {
     let Some(dsh_bin) = real_dsh() else { return };
     let _serial = serial_real_runtime();
@@ -1203,6 +1207,7 @@ async fn collect_turn_timed(
 /// evidence logged for parent verification (P1 T3 / AC2).
 #[cfg(unix)]
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // Serial process-table proof across test runtimes.
 async fn real_dsh_message_delta_precedes_terminal_with_timing_evidence() {
     let Some(dsh_bin) = real_dsh() else {
         return;
@@ -1243,16 +1248,11 @@ async fn real_dsh_message_delta_precedes_terminal_with_timing_evidence() {
                 "events: {:?}",
                 timing.events
             );
-            let deltas: Vec<&str> = timing
-                .events
-                .iter()
-                .filter_map(|e| match e {
-                    HostEvent::MessageDelta(delta) => Some(delta.text.as_str()),
-                    _ => None,
-                })
-                .collect();
             assert!(
-                !deltas.is_empty(),
+                timing
+                    .events
+                    .iter()
+                    .any(|event| matches!(event, HostEvent::MessageDelta(_))),
                 "the runtime must emit at least one MessageDelta: {:?}",
                 timing.events
             );
@@ -1308,8 +1308,9 @@ async fn real_dsh_message_delta_precedes_terminal_with_timing_evidence() {
 /// Record the actual runtime identity without reading credentials: CLI
 /// version output, the installed npm package identity (name/version), and
 /// the wire protocol server identity from a direct `initialize` handshake
-/// under an isolated HOME/DSH_HOME.
+/// under an isolated `HOME/DSH_HOME`.
 #[test]
+#[allow(clippy::too_many_lines)] // One owned-child identity and cleanup scenario.
 fn real_dsh_runtime_identity_is_recorded() {
     let Some(dsh_bin) = real_dsh() else { return };
     let _serial = serial_real_runtime();
@@ -1370,7 +1371,7 @@ fn real_dsh_runtime_identity_is_recorded() {
         let mut byte = [0u8; 1];
         loop {
             match stdout.read(&mut byte) {
-                Ok(0) => break,
+                Ok(0) | Err(_) => break,
                 Ok(_) => {
                     if byte[0] == b'\n' {
                         let _ = reply_tx.send(String::from_utf8_lossy(&line).into_owned());
@@ -1379,7 +1380,6 @@ fn real_dsh_runtime_identity_is_recorded() {
                         line.push(byte[0]);
                     }
                 }
-                Err(_) => break,
             }
         }
     });

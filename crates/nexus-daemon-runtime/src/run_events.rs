@@ -463,8 +463,7 @@ impl RunEventRegistry {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .live
             .get(run_id)
-            .map(|r| r.subscribers.len())
-            .unwrap_or(0)
+            .map_or(0, |r| r.subscribers.len())
     }
 
     /// Pending backpressure counters for a live subscriber (test/diagnostic).
@@ -477,8 +476,7 @@ impl RunEventRegistry {
             .live
             .get(run_id)
             .and_then(|r| r.subscribers.get(&subscriber_id))
-            .map(|s| (s.pending_frames, s.pending_bytes))
-            .unwrap_or((0, 0))
+            .map_or((0, 0), |s| (s.pending_frames, s.pending_bytes))
     }
 }
 
@@ -577,13 +575,13 @@ impl RunEventRegistryInner {
             data: payload,
         };
         if encoded_sse_frame_bytes(&frame) > MAX_FRAME_BYTES {
-            self.append_gap_record_locked(ring, run_id, sequence);
+            Self::append_gap_record_locked(ring, run_id, sequence);
             return;
         }
-        Self::push_record_locked(ring, frame);
+        Self::push_record_locked(ring, &frame);
     }
 
-    fn append_gap_record_locked(&self, ring: &mut RunRing, run_id: &str, skipped_sequence: u64) {
+    fn append_gap_record_locked(ring: &mut RunRing, run_id: &str, skipped_sequence: u64) {
         let gap_sequence = ring.next_sequence;
         ring.next_sequence += 1;
         let gap = GapWire {
@@ -598,11 +596,11 @@ impl RunEventRegistryInner {
             event: "gap".to_string(),
             data,
         };
-        Self::push_record_locked(ring, frame);
+        Self::push_record_locked(ring, &frame);
     }
 
-    fn push_record_locked(ring: &mut RunRing, frame: SseFrame) {
-        let byte_len = encoded_sse_frame_bytes(&frame);
+    fn push_record_locked(ring: &mut RunRing, frame: &SseFrame) {
+        let byte_len = encoded_sse_frame_bytes(frame);
         ring.records.push_back(StoredRecord {
             sequence: ring.next_sequence.saturating_sub(1),
             frame: frame.clone(),
@@ -614,7 +612,7 @@ impl RunEventRegistryInner {
                 ring.total_bytes = ring.total_bytes.saturating_sub(front.byte_len);
             }
         }
-        fanout(ring, &frame);
+        fanout(ring, frame);
     }
 }
 
@@ -879,11 +877,8 @@ mod tests {
             .subscribe_live("run-1", None, "/inspect".into())
             .expect("subscribe");
         let mut frames = Vec::with_capacity(32);
-        for i in 0..32 {
-            registry.publish_run_state(
-                "run-1",
-                &mk_record("run-1", SessionStatus::Running, i as u64 + 1),
-            );
+        for i in 0_u64..32 {
+            registry.publish_run_state("run-1", &mk_record("run-1", SessionStatus::Running, i + 1));
             let frame = tokio::time::timeout(std::time::Duration::from_secs(1), sub.recv())
                 .await
                 .expect("timed out waiting for live frame while publishing")
@@ -980,17 +975,15 @@ mod tests {
             registry.subscribe_live("run-1", None, "/inspect".into()),
             Err(SubscribeError::TooManySubscribers)
         ));
+        drop(subs);
     }
 
     #[tokio::test]
     async fn replay_exceeds_pending_cap_replays_without_subscriber_error() {
         let registry = RunEventRegistry::new();
         let _sink = registry.try_register_live("run-1").expect("register");
-        for i in 0..20 {
-            registry.publish_run_state(
-                "run-1",
-                &mk_record("run-1", SessionStatus::Running, i as u64 + 1),
-            );
+        for i in 0_u64..20 {
+            registry.publish_run_state("run-1", &mk_record("run-1", SessionStatus::Running, i + 1));
         }
         let mut sub = registry
             .subscribe_live("run-1", None, "/inspect".into())
@@ -1016,16 +1009,16 @@ mod tests {
                 .inner
                 .append_json("run-1", "host_event", &serde_json::json!({ "n": i }));
         }
-        let state = registry
+        let (first_retained, cursor_epoch) = registry
             .inner
             .state
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let ring = state.live.get("run-1").expect("ring");
-        let first_retained = ring.records.front().expect("retained").sequence;
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .live
+            .get("run-1")
+            .map(|ring| (ring.records.front().expect("retained").sequence, ring.epoch))
+            .expect("ring");
         assert!(first_retained > 1, "ring must have evicted early sequences");
-        let cursor_epoch = ring.epoch;
-        drop(state);
         let cursor = format!("{}:{}", cursor_epoch, 1);
         let mut sub = registry
             .subscribe_live("run-1", Some(&cursor), "/inspect".into())
@@ -1104,6 +1097,7 @@ mod tests {
         assert!(ring.records.len() <= MAX_RECORDS_PER_RUN);
         assert!(ring.total_bytes <= MAX_BYTES_PER_RUN);
         assert!(ring.records.iter().any(|r| r.frame.event == "gap"));
+        drop(state);
     }
     #[tokio::test]
     async fn dequeue_releases_wire_byte_reservation_not_payload_only() {
@@ -1138,11 +1132,8 @@ mod tests {
             .subscribe_live("run-1", None, "/inspect".into())
             .expect("subscribe");
         let subscriber_id = sub.subscriber_id;
-        for i in 0..512 {
-            registry.publish_run_state(
-                "run-1",
-                &mk_record("run-1", SessionStatus::Running, i as u64 + 1),
-            );
+        for i in 0_u64..512 {
+            registry.publish_run_state("run-1", &mk_record("run-1", SessionStatus::Running, i + 1));
             let frame = tokio::time::timeout(std::time::Duration::from_secs(1), sub.recv())
                 .await
                 .expect("timed out while draining")
@@ -1174,7 +1165,7 @@ mod tests {
             .expect("subscribe");
         // Never drain while the ring fans out: the data queue fills to its
         // cap and the subscriber is evicted as lagging.
-        for i in 0..(MAX_PENDING_FRAMES_PER_SUB + 1) {
+        for i in 0..=MAX_PENDING_FRAMES_PER_SUB {
             registry.publish_run_state(
                 "run-1",
                 &mk_record("run-1", SessionStatus::Running, i as u64 + 1),
@@ -1199,7 +1190,7 @@ mod tests {
                     );
                 }
                 Ok(None) => panic!("channel closed with silent EOF before the lag gap"),
-                Err(_) => panic!("timed out waiting for the explicit lag gap"),
+                Err(error) => panic!("timed out waiting for the explicit lag gap: {error}"),
             }
         }
         // After the gap the evicted subscriber's channel closes.

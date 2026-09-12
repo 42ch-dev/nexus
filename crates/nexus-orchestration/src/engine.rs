@@ -2172,7 +2172,6 @@ impl EngineSharedState {
                                         .remove(&session_id.0);
                                 }
                             }
-                        
                         } else {
                             // Observed terminal winner — leave coordinator
                             // cleanup to the owner that won the CAS.

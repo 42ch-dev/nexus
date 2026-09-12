@@ -1077,15 +1077,15 @@ mod tests {
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // the fixture env is process-global
     async fn probe_failure_diagnostic_never_echoes_sdk_output() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-
         // A hostile sentinel standing in for anything secret-bearing the SDK
         // error Display might carry (subprocess stderr, tokens, paths). The
         // fixture fails `initialize` with it, so it genuinely travels the real
         // probe failure path.
         const SENTINEL: &str = "sentinel-secret-do-not-publish-4f2a";
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
         // The fixture's own request log is the evidence that this probe really
         // reached it. Without a receipt a probe that never spawned (bad
         // interpreter, missing fixture) would also report "unavailable" and the

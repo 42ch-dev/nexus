@@ -171,12 +171,7 @@ impl DeliveryBudget {
         if bytes > DSCH_MAX_EVENT_TEXT_BYTES {
             return false;
         }
-        // The three counters are read, checked, and incremented under one
-        // hold: splitting this into per-counter critical sections would let two
-        // concurrent admissions both pass the limit checks and then both
-        // increment, exceeding the queue/payload/text caps. The lint's
-        // tightening suggestion would therefore weaken the invariant.
-        #[allow(clippy::significant_drop_tightening)]
+        // Check and update all three counters under one hold.
         let mut pending = self
             .pending
             .lock()
@@ -201,13 +196,13 @@ impl DeliveryBudget {
         *pending_messages += 1;
         *pending += bytes;
         *emitted += bytes;
+        drop((pending_messages, emitted, pending));
         true
     }
 
     fn release(&self, bytes: usize) {
         // Both counters are released under one hold so a concurrent admission
         // never observes a half-released budget.
-        #[allow(clippy::significant_drop_tightening)]
         let mut pending = self
             .pending
             .lock()
@@ -218,6 +213,7 @@ impl DeliveryBudget {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         *pending_messages = pending_messages.saturating_sub(1);
+        drop((pending_messages, pending));
     }
 
     #[cfg(test)]
@@ -1255,7 +1251,7 @@ impl std::fmt::Debug for NativeSession {
                 debug.field("client_state", &"<locked>");
             }
         }
-        debug.finish()
+        debug.finish_non_exhaustive()
     }
 }
 
@@ -1663,7 +1659,12 @@ impl DshNativeProvider {
     /// - `Err(DshError)` → one `OpFailed` from `classify_run_error` (AR-7).
     /// - Session closed by `shutdown()` before the run starts → one
     ///   `OpFailed(stream_closed)` (stream-abort backstop).
-    #[allow(clippy::too_many_lines)]
+    // Keep the owned run inputs explicit and the harness locked through transfer/run.
+    #[allow(
+        clippy::too_many_lines,
+        clippy::too_many_arguments,
+        clippy::significant_drop_tightening
+    )]
     fn build_event_stream(
         &self,
         op_id: HostOperationId,
@@ -2403,27 +2404,18 @@ impl ProviderAdapter for DshNativeProvider {
         // Establish (or observe) the ONE final-close owner atomically:
         // this synchronous cell is never held across an await and never
         // behind the run mutex.
-        let cleanup = {
-            let mut slot = cleanup_slot.lock().unwrap_or_else(|error| {
-                // A poisoned cell can only mean a panic between
-                // check-and-insert; recover the value rather than
-                // abandoning the cleanup contract.
-                error.into_inner()
-            });
-            // Read the shared slot into an owned value FIRST, so the closure
-            // below is the only place holding a borrow of the guard.
-            let existing = slot.clone();
-            existing.unwrap_or_else(|| {
-                let cleanup = start_final_close(
+        let cleanup = cleanup_slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_or_insert_with(|| {
+                start_final_close(
                     state,
                     active_run,
                     run_reunified,
                     Arc::clone(&self.retained_leases),
-                );
-                *slot = Some(cleanup.clone());
-                cleanup
+                )
             })
-        };
+            .clone();
         match tokio::time::timeout(self.timeouts.shutdown_duration(), cleanup).await {
             Ok(Ok(())) => {
                 let mut sessions = self.sessions.write().await;
@@ -4082,12 +4074,7 @@ mod tests {
 
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             reunify.await.expect("reunify task");
-            match close.await {
-                Ok(()) => {}
-                // `CleanupError` deliberately has no `Debug`; this test only
-                // needs to know the close did not confirm.
-                Err(_error) => panic!("confirmed close must succeed"),
-            }
+            assert!(close.await.is_ok(), "confirmed close must succeed");
         })
         .await
         .expect("final close must not hang on reunify notify race");

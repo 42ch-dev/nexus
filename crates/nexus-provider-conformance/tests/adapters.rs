@@ -417,10 +417,10 @@ async fn codex_mutated_frame_turns_runner_red() {
 
 // ── Dsh (deepseek-harness-sdk runtime) ──────────────────────────────────
 
-/// Hermetic dsh provider env (P0 T2): the SDK resolves/creates DSH_HOME
+/// Hermetic dsh provider env (P0 T2): the SDK resolves/creates `DSH_HOME`
 /// at harness start, so every dsh conformance run gets an isolated
-/// caller-env DSH_HOME plus a REQ_LOG the fixture records its launch
-/// identity (`_spawn`: exact argv + DSH_HOME) and requests into.
+/// caller-env `DSH_HOME` plus a `REQ_LOG` the fixture records its launch
+/// identity (`_spawn`: exact argv + `DSH_HOME`) and requests into.
 fn dsh_env(scenario: &str, label: &str) -> (HashMap<String, String>, PathBuf, PathBuf) {
     let log = req_log(label);
     let home = std::env::temp_dir().join(format!(
@@ -437,7 +437,7 @@ fn dsh_env(scenario: &str, label: &str) -> (HashMap<String, String>, PathBuf, Pa
 
 /// Assert the P0 T2 ordinary launch identity from the fixture's request
 /// log: exactly one runtime spawn with argv exactly `--profile sdk`, the
-/// caller-env DSH_HOME injected, and `initialize` before the one wire
+/// caller-env `DSH_HOME` injected, and `initialize` before the one wire
 /// prompt. The log is fixture-written JSONL (default `json.dumps`
 /// separators), asserted by exact substring rather than a serde dep.
 fn assert_ordinary_launch_identity(log: &Path, home: &Path) {
