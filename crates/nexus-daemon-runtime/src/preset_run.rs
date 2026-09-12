@@ -139,14 +139,24 @@ pub async fn drive_preset_run(
 ) -> PresetRunOutcome {
     let mut steps: u32 = 0;
 
+    eprintln!("[gap-diag] drive entry session={}", session_id.0);
+
     loop {
         if cancel.is_some_and(CancellationToken::is_cancelled) {
+            eprintln!(
+                "[gap-diag] arm=cancel-before-step steps={steps} session={}",
+                session_id.0
+            );
             return PresetRunOutcome::Cancelled { steps };
         }
         if steps > 0 && !config.step_delay.is_zero() {
             tokio::time::sleep(config.step_delay).await;
         }
         if steps >= config.max_steps {
+            eprintln!(
+                "[gap-diag] arm=max-steps steps={steps} session={}",
+                session_id.0
+            );
             return PresetRunOutcome::MaxStepsExceeded { steps };
         }
 
@@ -154,13 +164,33 @@ pub async fn drive_preset_run(
         // semantics: Failed = cancelled, WaitingForInput = external-input
         // stop unless resume_waiting; Paused is the normal boundary).
         match engine.get_status(session_id).await {
-            Ok(SessionStatus::Completed) => return PresetRunOutcome::Completed { steps },
-            Ok(SessionStatus::Failed) => return PresetRunOutcome::Cancelled { steps },
+            Ok(SessionStatus::Completed) => {
+                eprintln!(
+                    "[gap-diag] arm=status-completed steps={steps} session={}",
+                    session_id.0
+                );
+                return PresetRunOutcome::Completed { steps };
+            }
+            Ok(SessionStatus::Failed) => {
+                eprintln!(
+                    "[gap-diag] arm=status-failed steps={steps} session={}",
+                    session_id.0
+                );
+                return PresetRunOutcome::Cancelled { steps };
+            }
             // Cancelled/Interrupted are terminal — never auto-driven (A2).
             Ok(SessionStatus::Cancelled | SessionStatus::Interrupted) => {
+                eprintln!(
+                    "[gap-diag] arm=status-terminal steps={steps} session={}",
+                    session_id.0
+                );
                 return PresetRunOutcome::Cancelled { steps };
             }
             Ok(SessionStatus::WaitingForInput) if !config.resume_waiting => {
+                eprintln!(
+                    "[gap-diag] arm=status-waiting steps={steps} session={}",
+                    session_id.0
+                );
                 return PresetRunOutcome::WaitingForInput { steps };
             }
             Ok(SessionStatus::WaitingForInput | SessionStatus::Running | SessionStatus::Paused) => {
@@ -170,11 +200,39 @@ pub async fn drive_preset_run(
                 let settlement =
                     settle_drive_failure(engine, workflow_store, storage, session_id, &error, None)
                         .await;
+                eprintln!(
+                    "[gap-diag] arm=get-status-err steps={steps} session={} error={error}",
+                    session_id.0
+                );
                 return failed_outcome(steps, error, &settlement);
             }
         }
 
-        match engine.run_step(session_id).await {
+        eprintln!(
+            "[gap-diag] step-begin steps={steps} session={}",
+            session_id.0
+        );
+        let step_result = engine.run_step(session_id).await;
+        eprintln!(
+            "[gap-diag] step-end steps={steps} session={} outcome={}",
+            session_id.0,
+            match &step_result {
+                Ok(StepOutcome::Completed { .. }) => "completed",
+                Ok(StepOutcome::Paused { .. }) => "paused",
+                Ok(StepOutcome::WaitingForInput { .. }) => "waiting_for_input",
+                Err(e) => {
+                    if matches!(
+                        e,
+                        EngineError::GraphFlow(graph_flow::GraphError::SessionConflict(_))
+                    ) {
+                        "err/session_conflict"
+                    } else {
+                        "err/other"
+                    }
+                }
+            }
+        );
+        match step_result {
             Ok(StepOutcome::Completed { .. }) => {
                 return PresetRunOutcome::Completed {
                     steps: steps.saturating_add(1),
@@ -185,6 +243,10 @@ pub async fn drive_preset_run(
                 steps = steps.saturating_add(1);
             }
             Ok(StepOutcome::WaitingForInput { .. }) => {
+                eprintln!(
+                    "[gap-diag] arm=step-waiting steps={steps} session={}",
+                    session_id.0
+                );
                 return PresetRunOutcome::WaitingForInput {
                     steps: steps.saturating_add(1),
                 };
@@ -198,6 +260,11 @@ pub async fn drive_preset_run(
             // persists, A7 recovery classifies it as interrupted.
             Err(e @ EngineError::GraphFlow(graph_flow::GraphError::SessionConflict(_))) => {
                 let error = e.to_string();
+                eprintln!(
+                    "[gap-diag] arm=losing-drive-session-conflict steps={steps} \
+                     session={} error={error}",
+                    session_id.0
+                );
                 tracing::warn!(
                     session_id = %session_id.0,
                     error = %error,
@@ -220,7 +287,20 @@ pub async fn drive_preset_run(
                     witness.as_ref(),
                 )
                 .await;
-                return failed_outcome(steps.saturating_add(1), error, &settlement);
+                let outcome = failed_outcome(steps.saturating_add(1), error, &settlement);
+                eprintln!(
+                    "[gap-diag] arm=step-err outcome={} steps={steps} session={}",
+                    match &outcome {
+                        PresetRunOutcome::SessionConflict { .. } => "session_conflict",
+                        PresetRunOutcome::Failed { .. } => "failed",
+                        PresetRunOutcome::Cancelled { .. } => "cancelled",
+                        PresetRunOutcome::Completed { .. } => "completed",
+                        PresetRunOutcome::WaitingForInput { .. } => "waiting_for_input",
+                        PresetRunOutcome::MaxStepsExceeded { .. } => "max_steps",
+                    },
+                    session_id.0
+                );
+                return outcome;
             }
         }
     }
@@ -1718,6 +1798,10 @@ impl WorkflowRunCoordinator {
         // fenced. `ensure_driving` refuses re-entry until the transition is
         // durable — the failed driver is never silently re-driven.
         if self.failed_owners.lock().await.contains(&session_id.0) {
+            eprintln!(
+                "[gap-diag] arm=ensure-driving-refused-fenced session={}",
+                session_id.0
+            );
             return Ok(DriveDisposition::NotDriving);
         }
 
@@ -1740,6 +1824,10 @@ impl WorkflowRunCoordinator {
                     | nexus_orchestration::resume_rules::RecoveryClass::Interrupted
                     | nexus_orchestration::resume_rules::RecoveryClass::HumanWait
                     | nexus_orchestration::resume_rules::RecoveryClass::Unreadable => {
+                        eprintln!(
+                            "[gap-diag] arm=ensure-driving-refused-class session={}",
+                            session_id.0
+                        );
                         return Ok(DriveDisposition::NotDriving);
                     }
                     _ => {}
@@ -1785,6 +1873,7 @@ impl WorkflowRunCoordinator {
         let drive_cancel = cancel.clone();
         let coordinator = self.clone();
         let join = tokio::spawn(async move {
+            eprintln!("[gap-diag] drive task spawn session={}", sid.0);
             let outcome = drive_preset_run(
                 &*engine,
                 Some(&storage),
@@ -1794,6 +1883,18 @@ impl WorkflowRunCoordinator {
                 Some(&drive_cancel),
             )
             .await;
+            eprintln!(
+                "[gap-diag] drive task settled outcome={} session={}",
+                match &outcome {
+                    PresetRunOutcome::Completed { .. } => "completed",
+                    PresetRunOutcome::WaitingForInput { .. } => "waiting_for_input",
+                    PresetRunOutcome::Cancelled { .. } => "cancelled",
+                    PresetRunOutcome::Failed { .. } => "failed",
+                    PresetRunOutcome::SessionConflict { .. } => "session_conflict",
+                    PresetRunOutcome::MaxStepsExceeded { .. } => "max_steps",
+                },
+                sid.0
+            );
             // Closure 8: a failed driver persists a durable non-replayable
             // `Failed` transition so the v1 record is never classified
             // runnable again after owner cleanup. When the transition
@@ -1801,6 +1902,7 @@ impl WorkflowRunCoordinator {
             // `ensure_driving` refuses re-entry until it is durable.
             if let PresetRunOutcome::Failed { settlement, .. } = &outcome {
                 if !coordinator.persist_drive_failure(&sid, settlement).await {
+                    eprintln!("[gap-diag] arm=failed-owner-fenced session={}", sid.0);
                     coordinator.failed_owners.lock().await.insert(sid.0.clone());
                 }
             }
