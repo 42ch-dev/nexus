@@ -311,6 +311,11 @@ impl RunEventRegistry {
             None
         };
         let replay = collect_from(ring, run_id, after_seq);
+        let replay_pending = replay.len();
+        let replay_bytes = replay
+            .iter()
+            .map(|frame| encoded_sse_frame_bytes(frame))
+            .sum();
         for frame in replay {
             if tx.try_send(frame).is_err() {
                 return Err(SubscribeError::TooManySubscribers);
@@ -337,8 +342,8 @@ impl RunEventRegistry {
             subscriber_id,
             Subscriber {
                 tx,
-                pending_frames: 0,
-                pending_bytes: 0,
+                pending_frames: replay_pending,
+                pending_bytes: replay_bytes,
             },
         );
         Ok(LiveSubscription {
@@ -615,6 +620,27 @@ mod tests {
         }
     }
 
+    fn frame_sequence(frame: &SseFrame) -> u64 {
+        frame
+            .id
+            .split(':')
+            .nth(1)
+            .expect("cursor id")
+            .parse()
+            .expect("numeric sequence")
+    }
+
+    fn assert_monotonic_no_duplicates(frames: &[SseFrame]) {
+        let mut last = 0u64;
+        let mut seen = std::collections::HashSet::new();
+        for frame in frames {
+            let seq = frame_sequence(frame);
+            assert!(seq > last, "sequences must increase: {seq} after {last}");
+            assert!(seen.insert(frame.id.clone()), "duplicate id {}", frame.id);
+            last = seq;
+        }
+    }
+
     #[test]
     fn gap_cursor_is_numeric_sequence() {
         let frame = gap_frame("run-1", 42, 3, 7);
@@ -668,20 +694,21 @@ mod tests {
         let mut sub = registry
             .subscribe_live("run-1", None, "/inspect".into())
             .expect("subscribe");
+        let mut frames = Vec::with_capacity(32);
         for i in 0..32 {
             registry.publish_run_state(
                 "run-1",
                 &mk_record("run-1", SessionStatus::Running, i as u64 + 1),
             );
-        }
-        let mut received = 0usize;
-        while let Ok(Some(frame)) =
-            tokio::time::timeout(std::time::Duration::from_millis(200), sub.recv()).await
-        {
+            let frame = tokio::time::timeout(std::time::Duration::from_secs(1), sub.recv())
+                .await
+                .expect("timed out waiting for live frame while publishing")
+                .expect("subscriber closed while draining");
             assert_eq!(frame.event, "run_state");
-            received += 1;
+            frames.push(frame);
         }
-        assert!(received >= 16, "expected live tail frames, got {received}");
+        assert_eq!(frames.len(), 32);
+        assert_monotonic_no_duplicates(&frames);
         assert_eq!(registry.live_subscriber_count("run-1"), 1);
     }
 
@@ -696,13 +723,23 @@ mod tests {
             .expect("subscribe");
         let f1 = first.recv().await.expect("first");
         let f2 = first.recv().await.expect("second");
+        assert_monotonic_no_duplicates(&[f1.clone(), f2.clone()]);
         drop(first);
         let mut second = registry
             .subscribe_live("run-1", Some(&f1.id), "/inspect".into())
             .expect("reconnect");
-        let only = second.recv().await.expect("tail");
+        let only = tokio::time::timeout(std::time::Duration::from_secs(1), second.recv())
+            .await
+            .expect("replay handoff must not hang")
+            .expect("replay tail frame");
         assert_eq!(only.id, f2.id);
-        assert!(second.recv().await.is_some());
+        assert_eq!(frame_sequence(&only), frame_sequence(&f2));
+        let more = tokio::time::timeout(std::time::Duration::from_millis(200), second.recv())
+            .await;
+        assert!(
+            more.is_err(),
+            "must not wait for events already covered by the replay snapshot"
+        );
     }
 
     #[tokio::test]
