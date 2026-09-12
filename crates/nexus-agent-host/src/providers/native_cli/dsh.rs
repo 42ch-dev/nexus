@@ -431,14 +431,18 @@ async fn wait_consumer_drop(consumer_dropped: &AtomicBool, consumer_drop_notify:
 async fn reunify_run_harness(
     run_harness: &Mutex<Option<DeepSeekHarness>>,
     state: &Mutex<ClientState>,
+    active_run: &AtomicBool,
+    run_reunified: &Notify,
 ) {
     let harness = run_harness.lock().await.take();
     if let Some(harness) = harness {
         let mut guard = state.lock().await;
-        if !guard.closed && guard.harness.is_none() {
+        if guard.harness.is_none() {
             guard.harness = Some(harness);
         }
     }
+    active_run.store(false, Ordering::Release);
+    run_reunified.notify_waiters();
 }
 
 async fn invalidate_session_after_failed_operation(
@@ -709,14 +713,18 @@ fn start_close(
 /// failure retains its exact anchored lease in `ClientState`) — the
 /// session record may only be removed after that specific lease's
 /// confirmed deletion.
-fn start_final_close(state: Arc<Mutex<ClientState>>, retained: RetainedLeases) -> CleanupWait {
+fn start_final_close(
+    state: Arc<Mutex<ClientState>>,
+    active_run: Arc<AtomicBool>,
+    run_reunified: Arc<Notify>,
+    retained: RetainedLeases,
+) -> CleanupWait {
     let cleanup = async move {
-        let (pending, harness, sealed_home, session_failed_lease) = {
+        let (pending, sealed_home, session_failed_lease) = {
             let mut guard = state.lock().await;
             guard.closed = true;
             (
                 guard.cleanup.take(),
-                guard.harness.take(),
                 guard.sealed_home.take(),
                 guard.failed_lease.take(),
             )
@@ -725,6 +733,15 @@ fn start_final_close(state: Arc<Mutex<ClientState>>, retained: RetainedLeases) -
             // A pending (switch) close must resolve before the final
             // close completes; its failure IS the unconfirmed result.
             pending.await?;
+        }
+        let mut harness = {
+            let mut guard = state.lock().await;
+            guard.harness.take()
+        };
+        while harness.is_none() && active_run.load(Ordering::Acquire) {
+            run_reunified.notified().await;
+            let mut guard = state.lock().await;
+            harness = guard.harness.take();
         }
         close_and_reap(harness, sealed_home, &retained).await?;
         if let Some(path) = session_failed_lease {
@@ -1129,6 +1146,12 @@ struct NativeSession {
     /// await, never behind the run mutex): concurrent/retried shutdowns
     /// observe the same shared completion.
     cleanup_slot: Arc<std::sync::Mutex<Option<CleanupWait>>>,
+    /// Harness slot while a turn holds `Session::run` outside `ClientState`.
+    run_harness: Arc<Mutex<Option<DeepSeekHarness>>>,
+    /// True while the producer owns the harness in [`run_harness`].
+    active_run: Arc<AtomicBool>,
+    /// Wakes the retained final-close owner when reunify returns the harness.
+    run_reunified: Arc<Notify>,
     /// Working directory for the runtime, retained from `LaunchSpec::cwd`
     /// (N-1).
     cwd: PathBuf,
@@ -1143,6 +1166,7 @@ impl std::fmt::Debug for NativeSession {
         debug.field("cwd", &self.cwd.display());
         debug.field("executable", &self.executable.display());
         debug.field("closing", &self.closing.load(Ordering::Acquire));
+        debug.field("active_run", &self.active_run.load(Ordering::Acquire));
         match self.state.try_lock() {
             Ok(state) => {
                 debug
@@ -1533,6 +1557,9 @@ impl DshNativeProvider {
         prompt_text: String,
         state: Arc<Mutex<ClientState>>,
         closing: Arc<AtomicBool>,
+        run_harness: Arc<Mutex<Option<DeepSeekHarness>>>,
+        active_run: Arc<AtomicBool>,
+        run_reunified: Arc<Notify>,
     ) -> HostEventStream {
         let retained = Arc::clone(&self.retained_leases);
         let run_timeout = self.timeouts.prompt_duration();
@@ -1561,7 +1588,6 @@ impl DshNativeProvider {
                 let run_timing = Arc::new(StdMutex::new(DshStreamingRunTiming::default()));
                 clear_last_dsh_run_timing();
 
-                let run_harness = Arc::new(Mutex::new(None::<DeepSeekHarness>));
                 let run_harness_for_run = Arc::clone(&run_harness);
 
                 let run = async {
@@ -1574,6 +1600,7 @@ impl DshNativeProvider {
                         let Some(harness) = guard.harness.take() else {
                             return Err(RunError::SessionGone);
                         };
+                        active_run.store(true, Ordering::Release);
                         *run_harness_for_run.lock().await = Some(harness);
                         root_session_id
                     };
@@ -1625,7 +1652,13 @@ impl DshNativeProvider {
                     }
                 };
 
-                reunify_run_harness(&run_harness, &state).await;
+                reunify_run_harness(
+                    &run_harness,
+                    &state,
+                    &active_run,
+                    &run_reunified,
+                )
+                .await;
 
                 match run_outcome {
                     RunSelectOutcome::FailureSignal => {
@@ -1986,6 +2019,9 @@ impl ProviderAdapter for DshNativeProvider {
                     })),
                     closing: Arc::new(AtomicBool::new(false)),
                     cleanup_slot: Arc::new(std::sync::Mutex::new(None)),
+                    run_harness: Arc::new(Mutex::new(None)),
+                    active_run: Arc::new(AtomicBool::new(false)),
+                    run_reunified: Arc::new(Notify::new()),
                     cwd: spec.cwd.clone(),
                     executable,
                 },
@@ -2054,7 +2090,7 @@ impl ProviderAdapter for DshNativeProvider {
 
         // Fetch the session state under a short registry read (B-2), then
         // admit under the per-session lock only.
-        let (state, closing, cwd, executable) = {
+        let (state, closing, cwd, executable, run_harness, active_run, run_reunified) = {
             let sessions = self.sessions.read().await;
             let native_session = sessions.get(&session.session_id).ok_or_else(|| {
                 HostError::internal(format!(
@@ -2067,6 +2103,9 @@ impl ProviderAdapter for DshNativeProvider {
                 Arc::clone(&native_session.closing),
                 native_session.cwd.clone(),
                 native_session.executable.clone(),
+                Arc::clone(&native_session.run_harness),
+                Arc::clone(&native_session.active_run),
+                Arc::clone(&native_session.run_reunified),
             )
         };
 
@@ -2188,6 +2227,9 @@ impl ProviderAdapter for DshNativeProvider {
             prompt_text,
             state,
             closing,
+            run_harness,
+            active_run,
+            run_reunified,
         ))
     }
 
@@ -2231,10 +2273,12 @@ impl ProviderAdapter for DshNativeProvider {
                         Arc::clone(&native_session.state),
                         Arc::clone(&native_session.closing),
                         Arc::clone(&native_session.cleanup_slot),
+                        Arc::clone(&native_session.active_run),
+                        Arc::clone(&native_session.run_reunified),
                     )
                 })
         };
-        let Some((state, closing, cleanup_slot)) = session_parts else {
+        let Some((state, closing, cleanup_slot, active_run, run_reunified)) = session_parts else {
             // A previous shutdown already observed the confirmed close and
             // removed the record: this is the retained completed result,
             // never a new reap of an already-closed client.
@@ -2255,7 +2299,12 @@ impl ProviderAdapter for DshNativeProvider {
             match &*slot {
                 Some(cleanup) => cleanup.clone(),
                 None => {
-                    let cleanup = start_final_close(state, Arc::clone(&self.retained_leases));
+                    let cleanup = start_final_close(
+                        state,
+                        active_run,
+                        run_reunified,
+                        Arc::clone(&self.retained_leases),
+                    );
                     *slot = Some(cleanup.clone());
                     cleanup
                 }
