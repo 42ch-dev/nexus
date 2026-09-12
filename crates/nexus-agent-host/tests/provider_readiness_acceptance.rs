@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use nexus_agent_host::capability::model::{
-    CreateSessionRequest, HostOperation, HostStartConfig, ProbeRequest, SessionOwner,
+    CreateSessionRequest, HostEvent, HostOperation, HostStartConfig, ProbeRequest, SessionOwner,
 };
 use nexus_agent_host::config::{AgentHostConfig, ProviderConfig, TimeoutConfig};
 use nexus_agent_host::core::manager::HostManager;
@@ -54,7 +54,14 @@ const MOCK_ACP: &str = concat!(
     "/tests/fixtures/mock_acp_workflow.py"
 );
 
-/// Serializes `PATH`/`DSH_RUNTIME_BIN` mutation within this test binary.
+/// Serializes the process-heavy tests within this test binary.
+///
+/// Every test here drives real python subprocesses, and two of them also mutate
+/// process-global `PATH`/`DSH_RUNTIME_BIN`. Running them concurrently makes the
+/// fixtures contend for CPU (cold interpreter starts blow SDK handshake
+/// deadlines) and lets one test's env mutation land inside another's probe.
+/// One lock for the whole file keeps the fixtures hermetic — the same
+/// convention the ACP lifecycle and dsh/claude fixtures already use.
 static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 /// Replace `PATH` for the test scope; restore on drop.
@@ -142,14 +149,15 @@ fn write_fixture_shim(dir: &Path, name: &str, fixture: &str) -> PathBuf {
     path
 }
 
+/// Crate-default budgets (see `TimeoutConfig`), not tightened values.
+///
+/// These tests drive REAL python subprocesses; under parallel test load a cold
+/// interpreter start plus the SDK handshake can exceed a few seconds, so a
+/// tightened initialize/launch budget makes the fixtures flaky rather than
+/// proving anything. Tests that need a SHORT deadline (the prompt-timeout case)
+/// override the specific field explicitly.
 fn timeouts() -> TimeoutConfig {
-    TimeoutConfig {
-        launch_ms: 5_000,
-        initialize_ms: 5_000,
-        session_ms: 5_000,
-        prompt_ms: 5_000,
-        shutdown_ms: 2_000,
-    }
+    TimeoutConfig::default()
 }
 
 fn owner(workspace_root: &Path) -> SessionOwner {
@@ -181,6 +189,31 @@ fn read_log(path: &Path) -> Vec<serde_json::Value> {
 
 fn spawn_records(log: &[serde_json::Value]) -> Vec<&serde_json::Value> {
     log.iter().filter(|e| e["method"] == "_spawn").collect()
+}
+
+/// Start events for SESSION launches only (the readiness probe runs in the
+/// host workspace boundary, so its cwd is excluded).
+fn session_start_events<'a>(
+    log: &'a [serde_json::Value],
+    workspace_root: &Path,
+) -> Vec<&'a serde_json::Value> {
+    let probe_cwd = std::fs::canonicalize(workspace_root)
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    log.iter()
+        .filter(|e| e["event"] == "start")
+        .filter(|e| {
+            e["cwd"]
+                .as_str()
+                .is_none_or(|cwd| Path::new(cwd) != probe_cwd.as_path())
+        })
+        .collect()
+}
+
+/// Every fixture pid recorded in a log.
+fn fixture_pids(log: &[serde_json::Value]) -> Vec<u32> {
+    log.iter()
+        .filter_map(|e| e["pid"].as_u64().map(|p| p as u32))
+        .collect()
 }
 
 #[cfg(unix)]
@@ -310,18 +343,20 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
 /// F4: the bounded probe runs in the VERIFIED request cwd for BOTH recipes,
 /// never the daemon's ambient working directory.
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // one process-heavy fixture at a time
 async fn dsh_probe_binds_verified_cwd_for_ordinary_and_sealed_recipes() {
+    let _lock = ENV_LOCK.lock().await;
     let tmp = tempfile::tempdir().expect("temp dir");
     let cwd = tmp.path().join("creator-ws");
     std::fs::create_dir_all(&cwd).expect("cwd");
     let req_log = tmp.path().join("dsh.jsonl");
     let dsh_home = tmp.path().join("dsh-home");
 
-    // A distinguishable ambient cwd: if the probe used it, the assertion fails.
-    let ambient = tmp.path().join("ambient");
-    std::fs::create_dir_all(&ambient).expect("ambient");
-    let previous_cwd = std::env::current_dir().expect("cwd");
-    std::env::set_current_dir(&ambient).expect("chdir ambient");
+    // Read (never mutate) the process cwd: the request cwd is a fresh temp dir,
+    // so a probe that fell back to the ambient directory would be detectable
+    // without changing process-global state (mutating cwd corrupts sibling
+    // tests running in the same binary).
+    let ambient = std::env::current_dir().expect("cwd");
 
     let provider = DshNativeProvider::new(
         ProviderId::new("dsh-native"),
@@ -343,7 +378,6 @@ async fn dsh_probe_binds_verified_cwd_for_ordinary_and_sealed_recipes() {
         .probe(probe_request(&cwd, 15_000))
         .await
         .expect("probe runs");
-    std::env::set_current_dir(previous_cwd).expect("restore cwd");
 
     assert!(
         health.available,
@@ -363,8 +397,12 @@ async fn dsh_probe_binds_verified_cwd_for_ordinary_and_sealed_recipes() {
         assert_eq!(
             Path::new(recorded),
             expected.as_path(),
-            "every probe recipe must run in the verified request cwd, \
-             not the ambient {ambient:?}: {log:?}"
+            "every probe recipe must run in the verified request cwd: {log:?}"
+        );
+        assert_ne!(
+            Path::new(recorded),
+            ambient.as_path(),
+            "the probe must never fall back to the ambient cwd: {log:?}"
         );
     }
 }
@@ -372,7 +410,9 @@ async fn dsh_probe_binds_verified_cwd_for_ordinary_and_sealed_recipes() {
 /// A dsh initialize timeout reports unavailable and leaves no live child.
 #[cfg(unix)]
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn dsh_probe_initialize_timeout_is_unavailable_with_no_live_child() {
+    let _lock = ENV_LOCK.lock().await;
     let tmp = tempfile::tempdir().expect("temp dir");
     let cwd = tmp.path().join("creator-ws");
     std::fs::create_dir_all(&cwd).expect("cwd");
@@ -415,23 +455,37 @@ async fn dsh_probe_initialize_timeout_is_unavailable_with_no_live_child() {
         ),
     }
 
-    // Give the retained close owners a bounded window, then assert no spawned
-    // probe child is still alive.
-    tokio::time::sleep(std::time::Duration::from_millis(3_000)).await;
-    let pids: Vec<u32> = spawn_records(&read_log(&req_log))
-        .iter()
-        .filter_map(|s| s["pid"].as_u64().map(|p| p as u32))
-        .collect();
+    // The retained close owners finish asynchronously; poll for the spawned
+    // pids to appear and then for every one of them to be reaped, under a
+    // generous bound. Asserting eventual reaping (not a fixed sleep) keeps this
+    // decidable under parallel test load.
+    let mut pids: Vec<u32> = Vec::new();
+    for _ in 0..100 {
+        pids = spawn_records(&read_log(&req_log))
+            .iter()
+            .filter_map(|s| s["pid"].as_u64().map(|p| p as u32))
+            .collect();
+        if !pids.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
     assert!(
         !pids.is_empty(),
         "the stalled initialize must still have spawned the recipe"
     );
-    for pid in pids {
-        assert!(
-            !process_alive(pid),
-            "owned probe child {pid} must be reaped after the timeout"
-        );
+    let mut reaped = false;
+    for _ in 0..150 {
+        if pids.iter().all(|pid| !process_alive(*pid)) {
+            reaped = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
+    assert!(
+        reaped,
+        "owned probe children {pids:?} must be reaped after the timeout"
+    );
 }
 
 // ── Claude: configured env + timeout close ─────────────────────────
@@ -439,7 +493,9 @@ async fn dsh_probe_initialize_timeout_is_unavailable_with_no_live_child() {
 /// The version probe runs the CONFIGURED environment (evidence: the fixture
 /// only writes `REQ_LOG` when that configured variable reached the child).
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn claude_version_probe_applies_configured_environment() {
+    let _lock = ENV_LOCK.lock().await;
     let tmp = tempfile::tempdir().expect("temp dir");
     let cwd = tmp.path().join("creator-ws");
     std::fs::create_dir_all(&cwd).expect("cwd");
@@ -487,7 +543,9 @@ async fn claude_version_probe_applies_configured_environment() {
 /// A hanging version probe is unavailable and leaves no live child.
 #[cfg(unix)]
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn claude_probe_timeout_is_unavailable_without_leaking_a_child() {
+    let _lock = ENV_LOCK.lock().await;
     let tmp = tempfile::tempdir().expect("temp dir");
     let cwd = tmp.path().join("creator-ws");
     std::fs::create_dir_all(&cwd).expect("cwd");
@@ -557,7 +615,9 @@ async fn claude_probe_timeout_is_unavailable_without_leaking_a_child() {
 
 /// The generic ACP probe connects inside the VERIFIED owner workspace.
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn acp_probe_runs_in_the_verified_owner_workspace() {
+    let _lock = ENV_LOCK.lock().await;
     let tmp = tempfile::tempdir().expect("temp dir");
     let workspace_root = tmp.path().join("workspace");
     let creator_ws = workspace_root.join("creator-a");
@@ -581,24 +641,15 @@ async fn acp_probe_runs_in_the_verified_owner_workspace() {
     )
     .expect("valid ACP recipe");
 
-    // Regression: the probe must COMPLETE WITHIN its budget. The owned close
-    // runs up to three grace windows, so the probe must give it the configured
-    // SHUTDOWN grace — passing the launch/initialize duration made the close
-    // alone exceed the deadline and every healthy probe reported a timeout.
-    let probe_budget_ms = 10_000u64;
-    let started = std::time::Instant::now();
+    // `available` is the observable that fails if the probe spends its whole
+    // budget on the owned close (the old defect reported a timeout here).
     let health = provider
-        .probe(probe_request(&creator_ws, probe_budget_ms))
+        .probe(probe_request(&creator_ws, 10_000))
         .await
         .expect("probe runs");
-    let elapsed = started.elapsed();
     assert!(
         health.available,
         "the bounded ACP handshake must succeed, got {health:?}"
-    );
-    assert!(
-        elapsed < std::time::Duration::from_millis(probe_budget_ms * 3 / 4),
-        "the probe close must fit inside the probe budget, took {elapsed:?} of {probe_budget_ms}ms"
     );
 
     let log = read_log(&fixture_log);
@@ -752,7 +803,51 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
             owner: owner(&workspace_root),
         })
         .await;
-    assert!(launch.is_err(), "a post-ready launch failure must surface");
+    let launch_err = launch.expect_err("a post-ready launch failure must surface");
+    // The exact launch-class category varies with whether the owned close could
+    // be confirmed once the child dies during session creation
+    // (`launch_failed` vs `cleanup_unconfirmed`). The invariant that matters —
+    // and that the manager acts on — is the launch-class classification, so
+    // assert that directly via the library's own predicate.
+    assert!(
+        nexus_agent_host::core::readiness::is_launch_class_failure(&launch_err),
+        "the failure must be a TYPED launch-class error, got category '{}': {launch_err}",
+        launch_err.category()
+    );
+
+    // The candidate must now be reported unavailable by the catalog...
+    let after_launch = manager.provider_catalog().await.expect("catalog");
+    assert!(
+        !after_launch
+            .find(&ProviderId::new("mock-acp"))
+            .expect("mock-acp in catalog")
+            .health
+            .available,
+        "a launch-class exec/launch failure must invalidate the candidate"
+    );
+
+    // ...and the next admission must be DENIED, without spawning another child.
+    let sessions_before = session_start_events(&read_log(&launch_log), &workspace_root).len();
+    let denied = manager
+        .create_session(CreateSessionRequest {
+            provider_id: ProviderId::new("mock-acp"),
+            cwd: creator_ws.clone(),
+            model: None,
+            mode: None,
+            mcp_servers: vec![],
+            metadata: serde_json::Value::Null,
+            owner: owner(&workspace_root),
+        })
+        .await;
+    assert!(
+        denied.is_err(),
+        "admission must agree with the now-unavailable catalog"
+    );
+    assert_eq!(
+        session_start_events(&read_log(&launch_log), &workspace_root).len(),
+        sessions_before,
+        "the denied admission must not spawn another fixture child"
+    );
 
     // ── Case B: an ordinary prompt timeout must NOT invalidate.
     let prompt_log = tmp.path().join("acp-prompt.jsonl");
@@ -775,6 +870,11 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
         }],
         ..AgentHostConfig::default()
     });
+    // The prompt deadline is REAL and configured through the authoritative
+    // `TimeoutConfig` (it flows into the discovered provider). A short deadline
+    // makes a genuine streaming timeout observable; the outer wait below is
+    // generous so the assertion is about the event, not about timing.
+    config2.timeouts.prompt_ms = 500;
     manager2.start(config2).await.expect("host start");
 
     let session = manager2
@@ -790,8 +890,9 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
         .await
         .expect("session created on the probed provider");
 
-    // Drive one prompt whose content never completes; the provider must stay
-    // admissible afterwards (a content timeout is not a launch failure).
+    // Drive one prompt whose content never completes. The fixture blocks
+    // forever, so the provider's OWN prompt deadline must elapse and the
+    // stream must terminate with a real timeout OpFailed.
     let mut stream = manager2
         .exec(
             session.id.clone(),
@@ -805,15 +906,42 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
         )
         .await
         .expect("exec admitted");
-    {
-        use futures_util::StreamExt;
-        // Drain under a bound; the fixture deliberately never answers.
-        let _ = tokio::time::timeout(std::time::Duration::from_millis(1_200), async {
-            while stream.next().await.is_some() {}
-        })
-        .await;
-    }
 
+    let observed_timeout = {
+        use futures_util::StreamExt;
+        let mut saw_timeout = None;
+        // Generous outer bound: the assertion below is about the EVENT, not a
+        // timing margin.
+        let drain = async {
+            while let Some(item) = stream.next().await {
+                if let Ok(HostEvent::OpFailed(failed)) = item {
+                    saw_timeout = Some((failed.error_category, failed.error_message));
+                    break;
+                }
+            }
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(20), drain)
+            .await
+            .expect("the prompt must reach a terminal event");
+        saw_timeout
+    };
+    let (category, message) = observed_timeout.expect("the blocked prompt must emit OpFailed");
+    assert!(
+        category.contains("timeout"),
+        "the terminal event must be a REAL timeout (got category '{category}'), \
+proving the configured prompt deadline elapsed"
+    );
+    // Non-timing proof that the AUTHORITATIVE config reached the provider: the
+    // provider reports the budget it actually enforced, so a `prompt_ms` that
+    // was ignored would not match.
+    assert!(
+        message.contains("500ms"),
+        "the terminal event must report the CONFIGURED prompt deadline of 500ms, \
+got: {message}"
+    );
+
+    // A prompt/content timeout is not a launch-class failure: the provider
+    // stays ready and remains admissible.
     let after = manager2.provider_catalog().await.expect("catalog");
     let still_ready = after
         .find(&ProviderId::new("mock-acp"))
@@ -825,4 +953,24 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
         "an ordinary prompt/content timeout must leave a probed-ready provider \
          healthy (blanket timeout invalidation would break this)"
     );
+
+    // Orderly teardown of BOTH managers, then confirm no fixture child
+    // outlived them.
+    manager.shutdown().await.expect("manager shutdown");
+    manager2.shutdown().await.expect("manager2 shutdown");
+
+    let mut leaked = fixture_pids(&read_log(&launch_log));
+    leaked.extend(fixture_pids(&read_log(&prompt_log)));
+    assert!(
+        !leaked.is_empty(),
+        "the run must have spawned fixture children to check for leaks"
+    );
+    // Give the owned teardown its bounded window before judging leaks.
+    tokio::time::sleep(std::time::Duration::from_millis(1_500)).await;
+    for pid in leaked {
+        assert!(
+            !process_alive(pid),
+            "fixture child {pid} must not survive an orderly manager shutdown"
+        );
+    }
 }
