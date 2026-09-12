@@ -260,6 +260,66 @@ pub enum NexusApiError {
     InputValidationFailed { details: serde_json::Value },
 }
 
+impl From<crate::preset_run::RunControlError> for NexusApiError {
+    /// The SINGLE projection of a coordinator control failure onto the
+    /// public error surface (QC2 F-002).
+    ///
+    /// Both cancel surfaces (session signal + schedule signal) and every
+    /// other coordinator-routed signal share this mapping, so an identical
+    /// durable outcome can never project two different envelopes — and a
+    /// capacity refusal is a typed retryable 503, never a 500.
+    fn from(err: crate::preset_run::RunControlError) -> Self {
+        use crate::preset_run::RunControlError as E;
+        match err {
+            E::WaitConflict {
+                session_id,
+                status,
+                current_wait_id,
+            } => Self::ConflictCodedDetails {
+                code: "workflow_wait_conflict".into(),
+                message: format!(
+                    "wait conflict for {session_id}: current status {status}, current_wait_id {current_wait_id:?}"
+                ),
+                details: serde_json::json!({
+                    "session_id": session_id,
+                    "status": status,
+                    "current_wait_id": current_wait_id,
+                }),
+            },
+            E::StateConflict(sid, msg) => Self::ConflictCoded {
+                code: "workflow_state_conflict".into(),
+                message: format!("state conflict for {sid}: {msg}"),
+            },
+            E::ReconstructionUnavailable { session_id, reason } => Self::ConflictCodedDetails {
+                code: "reconstruction_unavailable".into(),
+                message: format!(
+                    "cannot continue session {session_id}: {reason} — \
+                     human wait preserved, cancel-only"
+                ),
+                details: serde_json::json!({
+                    "session_id": session_id,
+                    "reason": reason,
+                    "allowed_actions": ["cancel", "new_run"],
+                }),
+            },
+            E::ScheduleNotFound(sid) => Self::NotFound(format!("session {sid} not found")),
+            // QC2 F-004: the per-run live event-ring quota is exhausted; the
+            // admission/drive was refused with no durable mutation, so the
+            // caller may retry once a live run closes its ring.
+            E::RunEventCapacity(sid) => Self::ServiceUnavailable {
+                message: format!(
+                    "run event capacity exhausted for session {sid}: \
+                     no live ring slot is available; retry once a live run closes"
+                ),
+            },
+            other => Self::Internal {
+                code: "RUN_CONTROL_ERROR".into(),
+                message: other.to_string(),
+            },
+        }
+    }
+}
+
 impl NexusApiError {
     /// Get the HTTP status code for this error variant.
     ///

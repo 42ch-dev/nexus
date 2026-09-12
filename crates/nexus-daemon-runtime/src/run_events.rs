@@ -15,8 +15,19 @@ pub const MAX_FRAME_BYTES: usize = 512 * 1024;
 pub const MAX_LIVE_RINGS: usize = 64;
 pub const MAX_TERMINAL_RINGS: usize = 64;
 pub const MAX_SUBSCRIBERS_PER_RUN: usize = 16;
+/// Data frames a live subscriber may lag behind before it is evicted as
+/// lagging.
 pub const MAX_PENDING_FRAMES_PER_SUB: usize = 16;
 pub const MAX_PENDING_BYTES_PER_SUB: usize = 1024 * 1024;
+/// Live-subscriber channel capacity: the data-frame cap PLUS one reserved
+/// control slot (QC2 F-005).
+///
+/// The eviction path must ALWAYS be able to enqueue its terminal lag gap.
+/// Parking the gap in a reserved slot (never handed out to data frames)
+/// means a lagging reader drains its buffered data frames, then reads the
+/// explicit gap, then observes a clean close — never a silent EOF on a
+/// saturated channel.
+const SUBSCRIBER_CHANNEL_CAPACITY: usize = MAX_PENDING_FRAMES_PER_SUB + 1;
 
 /// Shared map of per-run sinks registered before drive; the coordinator and
 /// [`crate::prompt_executor::HostPromptExecutor`] share this handle.
@@ -272,6 +283,14 @@ impl RunEventRegistry {
         self.inner.append_json(run_id, "run_state", &wire);
     }
 
+    /// Close a run's live ring after its durable **authoritative terminal**
+    /// winner was published (Completed/Failed/Cancelled).
+    ///
+    /// Callers must NOT use this for `Interrupted` (QC2 F-001): an
+    /// unconfirmed cancel/failure cleanup leaves the run actionable, so its
+    /// ring stays live for the retry that may still settle it. Closing it
+    /// would turn the actionable run into a replay-only history and drop
+    /// every live subscriber.
     pub fn mark_terminal(&self, run_id: &str) {
         let mut state = self
             .inner
@@ -300,7 +319,7 @@ impl RunEventRegistry {
         last_event_id: Option<&str>,
         inspect_url: String,
     ) -> Result<LiveSubscription, SubscribeError> {
-        let (tx, rx) = mpsc::channel(MAX_PENDING_FRAMES_PER_SUB);
+        let (tx, rx) = mpsc::channel(SUBSCRIBER_CHANNEL_CAPACITY);
         let mut state = self
             .inner
             .state
@@ -559,6 +578,13 @@ fn encoded_sse_frame_bytes(frame: &SseFrame) -> usize {
     frame.id.len() + frame.event.len() + frame.data.len() + 16
 }
 
+/// Fan a frame out to every live subscriber.
+///
+/// A subscriber that has fallen behind (data-frame or pending-byte cap) is
+/// evicted with an explicit terminal lag gap (QC2 F-005). The gap is written
+/// into the channel's reserved control slot, so it is deliverable even when
+/// the data queue is full; the subscriber entry is then removed, closing the
+/// channel after the gap.
 fn fanout(ring: &mut RunRing, frame: SseFrame) {
     let byte_len = encoded_sse_frame_bytes(&frame);
     let lag_sequence = ring.next_sequence.saturating_sub(1);
@@ -1045,13 +1071,20 @@ mod tests {
         assert_eq!(registry.live_subscriber_count("run-1"), 1);
     }
 
+    /// QC2 F-005: a lagging subscriber must ALWAYS receive the explicit lag
+    /// gap, even when its data channel is completely full — the gap is
+    /// parked in the channel's reserved control slot. The reader drains the
+    /// buffered frames, reads the gap, then observes a clean close; a silent
+    /// EOF (or a hang) fails this test.
     #[tokio::test]
-    async fn lagging_subscriber_is_removed_when_pending_cap_exceeded() {
+    async fn lag_gap_is_delivered_even_when_data_channel_is_full() {
         let registry = RunEventRegistry::new();
         let _sink = registry.try_register_live("run-1").expect("register");
-        let _sub = registry
+        let mut sub = registry
             .subscribe_live("run-1", None, "/inspect".into())
             .expect("subscribe");
+        // Never drain while the ring fans out: the data queue fills to its
+        // cap and the subscriber is evicted as lagging.
         for i in 0..(MAX_PENDING_FRAMES_PER_SUB + 1) {
             registry.publish_run_state(
                 "run-1",
@@ -1061,14 +1094,54 @@ mod tests {
         assert_eq!(
             registry.live_subscriber_count("run-1"),
             0,
-            "lagging subscriber must be removed once pending cap is exceeded"
+            "lagging subscriber must be evicted once the pending cap is exceeded"
         );
+        // Drain buffered data frames until the explicit gap arrives.
+        let mut drained = 0usize;
+        loop {
+            match tokio::time::timeout(std::time::Duration::from_secs(1), sub.recv()).await {
+                Ok(Some(frame)) if frame.event == "gap" => break,
+                Ok(Some(frame)) => {
+                    assert_eq!(frame.event, "run_state");
+                    drained += 1;
+                    assert!(
+                        drained <= MAX_PENDING_FRAMES_PER_SUB,
+                        "gap must arrive within the data cap"
+                    );
+                }
+                Ok(None) => panic!("channel closed with silent EOF before the lag gap"),
+                Err(_) => panic!("timed out waiting for the explicit lag gap"),
+            }
+        }
+        // After the gap the evicted subscriber's channel closes.
+        let closed = tokio::time::timeout(std::time::Duration::from_secs(1), sub.recv()).await;
         assert!(
-            registry
-                .subscribe_live("run-1", None, "/inspect".into())
-                .is_ok(),
-            "a fresh subscriber must still be admitted after lag eviction"
+            matches!(closed, Ok(None)),
+            "the lag gap must be followed by a clean close, got {closed:?}"
         );
+    }
+
+    /// QC2 F-005 (control): a slow-but-draining subscriber must never be
+    /// evicted — eviction is for readers that actually stop consuming.
+    #[tokio::test]
+    async fn draining_subscriber_is_never_evicted_with_reserved_control_slot() {
+        let registry = RunEventRegistry::new();
+        let _sink = registry.try_register_live("run-1").expect("register");
+        let mut sub = registry
+            .subscribe_live("run-1", None, "/inspect".into())
+            .expect("subscribe");
+        for i in 0..(MAX_PENDING_FRAMES_PER_SUB * 4) {
+            registry.publish_run_state(
+                "run-1",
+                &mk_record("run-1", SessionStatus::Running, i as u64 + 1),
+            );
+            let frame = tokio::time::timeout(std::time::Duration::from_secs(1), sub.recv())
+                .await
+                .expect("draining recv timed out")
+                .expect("draining subscriber must stay open");
+            assert_eq!(frame.event, "run_state");
+        }
+        assert_eq!(registry.live_subscriber_count("run-1"), 1);
     }
 
 }

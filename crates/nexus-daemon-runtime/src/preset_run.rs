@@ -619,6 +619,10 @@ pub enum ResumeDecision {
     /// tracked-but-not-driven; driving it would fail with `NoGraphLoaded`
     /// and the driver would mark it failed.
     SkippedNoRunner { session_id: SessionId },
+    /// Skipped: the per-run live event-ring quota is exhausted (QC2 F-004).
+    /// The session stays tracked-but-not-driven with its durable record
+    /// untouched; a later boot/retry reserves a freed slot.
+    SkippedRunEventCapacity { session_id: SessionId },
     /// Skipped: the persisted session could not be loaded from storage.
     SkippedUnreadable {
         session_id: SessionId,
@@ -950,6 +954,11 @@ pub enum RunControlError {
     /// The run is in a state that does not accept the requested signal.
     #[error("workflow state conflict for session {0}: {1}")]
     StateConflict(String, String),
+    /// The per-run live event-ring quota is exhausted (QC2 F-004). No drive
+    /// was started and no durable work was touched — the caller may retry
+    /// once a live run closes its ring.
+    #[error("run event capacity exhausted for session {0}")]
+    RunEventCapacity(String),
     /// The run's source preset cannot be reconstructed (missing/changed/
     /// moved source or corrupt child identity — A7 rule 4). The human wait
     /// is preserved, legal actions are cancel-only, and continue returns
@@ -992,18 +1001,61 @@ pub struct RunControlResult {
     pub status: String,
     /// Current durable wait id (null when the run is not waiting).
     pub current_wait_id: Option<String>,
+    /// Typed Cancel projection (QC2 F-002). `None` for non-cancel signals.
+    pub cancel_outcome: Option<CancelOutcome>,
 }
 
-/// Cancel fence-loss idempotence (A5): a `Cancel` signal that exhausts the
-/// engine's revision-fence retry bound and loses the race still has its
-/// goal durably accomplished when the record already settled `cancelled`
-/// (confirmed stop) or `interrupted` (unconfirmed stop) — a concurrent
-/// cancel committed the same intent. The loser reports the persisted
-/// outcome as success instead of a conflict that would contradict the
-/// durable truth. A run that settled `completed`/`failed` (or is still
-/// live) keeps the conflict: the cancel genuinely did not happen.
-fn cancel_fence_loss_accomplished(record: &nexus_orchestration::run_state::RunRecord) -> bool {
-    nexus_orchestration::run_state::durable_cancel_outcome_accomplished(record)
+/// Typed projection of a Cancel signal's durable outcome (QC2 F-002).
+///
+/// Resolved by the coordinator from the durable record — never derived from
+/// an error string — so every public cancel surface (session signal and
+/// schedule signal) projects exactly the same truth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelOutcome {
+    /// Durable terminal `cancelled`: cleanup confirmed (or an idempotent
+    /// re-cancel of an already-cancelled run).
+    Confirmed,
+    /// Durable `interrupted` with the cancel intent: cleanup unconfirmed.
+    /// The run stays actionable and a retry cancel can still confirm it.
+    Unconfirmed,
+    /// Durable `failed` carrying the cancel intent and a `driver_failed`
+    /// record: the cancel converged on the driver failure the run already
+    /// committed.
+    Failed,
+}
+
+impl CancelOutcome {
+    /// Stable wire label for public responses.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Confirmed => "confirmed",
+            Self::Unconfirmed => "unconfirmed",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// Typed classification of a run's durable cancel outcome (QC2 F-002).
+///
+/// A `Cancel` signal whose goal is durably accomplished must report the
+/// persisted outcome as success instead of a conflict that would contradict
+/// the durable truth (A5 fence-loss idempotence), and an unconfirmed cleanup
+/// must project `interrupted` rather than a 500. A run that settled
+/// `completed`/`failed`-without-cancel-intent (or is still live) has no
+/// cancel outcome: the cancel genuinely did not happen.
+fn classify_cancel_outcome(
+    record: &nexus_orchestration::run_state::RunRecord,
+) -> Option<CancelOutcome> {
+    if !nexus_orchestration::run_state::durable_cancel_outcome_accomplished(record) {
+        return None;
+    }
+    match record.status {
+        SessionStatus::Cancelled => Some(CancelOutcome::Confirmed),
+        SessionStatus::Interrupted => Some(CancelOutcome::Unconfirmed),
+        SessionStatus::Failed => Some(CancelOutcome::Failed),
+        _ => None,
+    }
 }
 
 /// One cancellation/join owner per (Creator DB identity, session) (A3).
@@ -1240,11 +1292,22 @@ impl WorkflowRunCoordinator {
         self
     }
 
+    /// Publish the durable winner to the run's live SSE ring, then close it
+    /// only for an **authoritative terminal** status (QC2 F-001).
+    ///
+    /// `Interrupted` is NOT authoritative terminal: it is the actionable
+    /// "cleanup unconfirmed" outcome, so its ring stays live — a retry
+    /// cancel can still confirm the run and publish the final `cancelled`
+    /// winner on the SAME ring. Closing it there would strand the retry as
+    /// replay-only history and drop every live subscriber.
     async fn publish_durable_run_state(&self, session_id: &SessionId) {
         if let Some(registry) = &self.run_events {
             if let Ok(Some(record)) = self.workflow_store.load_run(session_id).await {
                 registry.publish_run_state(&session_id.0, &record);
-                if record.status.is_terminal() {
+                if matches!(
+                    record.status,
+                    SessionStatus::Completed | SessionStatus::Failed | SessionStatus::Cancelled
+                ) {
                     registry.mark_terminal(&session_id.0);
                 }
             }
@@ -1691,16 +1754,20 @@ impl WorkflowRunCoordinator {
             drives.remove(&session_id.0);
         }
 
-        // Register (or refresh) the run's cancellation token in the shared
-        // map so the prompt executor and out-of-band cancel resolve the SAME
-        // token the drive loop checks.
+        // QC2 F-004: RESERVE the run's live event-ring quota BEFORE any
+        // drive is spawned. `try_register_live` is the reservation: it
+        // succeeds when a slot is free OR when this run already owns a ring
+        // (reuse). When the quota is exhausted the drive is refused with a
+        // typed capacity error and NO durable work is touched — a driver can
+        // never outlive its ring and silently lose every event.
         if let Some(registry) = &self.run_events {
-            if let Some(sink) = registry.try_register_live(&session_id.0) {
-                self.run_event_sinks
-                    .lock()
-                    .await
-                    .insert(session_id.0.clone(), sink);
-            }
+            let Some(sink) = registry.try_register_live(&session_id.0) else {
+                return Err(RunControlError::RunEventCapacity(session_id.0.clone()));
+            };
+            self.run_event_sinks
+                .lock()
+                .await
+                .insert(session_id.0.clone(), sink);
         }
 
         let cancel = tokio_util::sync::CancellationToken::new();
@@ -1928,13 +1995,19 @@ impl WorkflowRunCoordinator {
                 }
                 drives.remove(&session_id.0);
             }
+            // QC2 F-004: the recovery re-drive reserves the same live-ring
+            // quota before spawning. A session that cannot reserve is left
+            // tracked-but-not-driven (its durable record is untouched); the
+            // next boot/retry reserves a freed slot.
             if let Some(registry) = &self.run_events {
-                if let Some(sink) = registry.try_register_live(&session_id.0) {
-                    self.run_event_sinks
-                        .lock()
-                        .await
-                        .insert(session_id.0.clone(), sink);
-                }
+                let Some(sink) = registry.try_register_live(&session_id.0) else {
+                    decisions.push(ResumeDecision::SkippedRunEventCapacity { session_id });
+                    continue;
+                };
+                self.run_event_sinks
+                    .lock()
+                    .await
+                    .insert(session_id.0.clone(), sink);
             }
             let cancel = parent_cancel.child_token();
             self.session_cancels
@@ -2649,28 +2722,24 @@ impl WorkflowRunCoordinator {
             }
         }
 
+        // QC2 F-002: Cancel has ONE projection owner (`cancel_run`) shared by
+        // the session and schedule public surfaces — no per-handler error
+        // strings, no divergent 500, and the durable `interrupted` outcome is
+        // reported as a typed success instead of an engine error.
+        if matches!(signal, RunSignal::Cancel) {
+            return self.cancel_run(session_id).await;
+        }
+
         let engine_signal = match &signal {
             RunSignal::Continue { wait_id } => EngineSignal::Continue {
                 wait_id: wait_id.clone(),
             },
-            RunSignal::Cancel => EngineSignal::Cancel,
+            RunSignal::Cancel => unreachable!("cancel is projected by `cancel_run`"),
             RunSignal::Pause => EngineSignal::Pause,
             RunSignal::Resume => EngineSignal::Resume,
         };
 
-        let mut engine_result = self.engine.signal(session_id, engine_signal).await;
-        if matches!(signal, RunSignal::Cancel) {
-            if matches!(
-                &engine_result,
-                Err(nexus_orchestration::engine::EngineError::TerminalState(_))
-            ) {
-                if let Ok(Some(record)) = self.workflow_store.load_run(session_id).await {
-                    if cancel_fence_loss_accomplished(&record) {
-                        engine_result = Ok(());
-                    }
-                }
-            }
-        }
+        let engine_result = self.engine.signal(session_id, engine_signal).await;
         let engine_result = match engine_result {
             Ok(()) => Ok(()),
             // Finding 2: a CAS/revision loss is a linearized control race —
@@ -2688,16 +2757,7 @@ impl WorkflowRunCoordinator {
                     Ok(Some(record)) => {
                         let state = record.state.as_ref();
                         let cancel_requested = state.is_some_and(|s| s.cancel_requested);
-                        // A5 idempotence: a Cancel that lost the fence race
-                        // but finds the run durably settled (cancelled /
-                        // interrupted) has its goal accomplished by the
-                        // concurrent winner — project the persisted outcome
-                        // as success, never a conflict.
-                        if matches!(signal, RunSignal::Cancel)
-                            && cancel_fence_loss_accomplished(&record)
-                        {
-                            Ok(())
-                        } else if record.status == SessionStatus::WaitingForInput
+                        if record.status == SessionStatus::WaitingForInput
                             && !cancel_requested
                         {
                             let current_wait_id = state
@@ -2772,7 +2832,116 @@ impl WorkflowRunCoordinator {
         Ok(RunControlResult {
             status: record.status.as_db_str().to_string(),
             current_wait_id,
+            cancel_outcome: None,
         })
+    }
+
+    /// Cancel one driven run and project the DURABLE outcome (QC2 F-002).
+    ///
+    /// The single production cancel path for BOTH public surfaces (session
+    /// signal and schedule signal). The engine performs the revision-fenced
+    /// cancel (durable cancel-intent fence → bounded owned-Host teardown →
+    /// terminal `cancelled`, or durable `interrupted` when cleanup cannot be
+    /// confirmed). Whatever the engine returns, the coordinator re-reads the
+    /// durable record and:
+    ///
+    /// - publishes the durable winner to the run's SSE ring and projects it
+    ///   as a TYPED success ([`CancelOutcome`]) whenever the run's cancel
+    ///   goal is durably accomplished — confirmed `cancelled`, unconfirmed
+    ///   `interrupted`, or the `driver_failed` failure the cancel converged
+    ///   on — including a fence loss that lost to a concurrent winner;
+    /// - otherwise maps the failure to the exact typed conflict envelope
+    ///   (wait conflict / state conflict / not-found).
+    ///
+    /// It never inspects an error message and never fabricates success for a
+    /// run that did not actually stop.
+    ///
+    /// # Errors
+    /// Returns [`RunControlError`] for the typed conflict envelopes and for
+    /// storage failures.
+    pub async fn cancel_run(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<RunControlResult, RunControlError> {
+        let engine_result = self.engine.signal(session_id, EngineSignal::Cancel).await;
+
+        let durable = self
+            .workflow_store
+            .load_run(session_id)
+            .await
+            .map_err(|e| RunControlError::Drive(e.to_string()))?;
+
+        if let Some(record) = &durable {
+            if let Some(outcome) = classify_cancel_outcome(record) {
+                self.publish_durable_run_state(session_id).await;
+                return Ok(RunControlResult {
+                    status: record.status.as_db_str().to_string(),
+                    current_wait_id: None,
+                    cancel_outcome: Some(outcome),
+                });
+            }
+        }
+
+        match engine_result {
+            Ok(()) => {
+                let record = durable
+                    .ok_or_else(|| RunControlError::ScheduleNotFound(session_id.0.clone()))?;
+                self.publish_durable_run_state(session_id).await;
+                Ok(RunControlResult {
+                    status: record.status.as_db_str().to_string(),
+                    current_wait_id: None,
+                    cancel_outcome: None,
+                })
+            }
+            Err(nexus_orchestration::engine::EngineError::RevisionMismatch {
+                session_id: lost_sid,
+                ..
+            }) => {
+                let record =
+                    durable.ok_or_else(|| RunControlError::ScheduleNotFound(lost_sid.clone()))?;
+                let state = record.state.as_ref();
+                let cancel_requested = state.is_some_and(|s| s.cancel_requested);
+                if record.status == SessionStatus::WaitingForInput && !cancel_requested {
+                    let current_wait_id = state
+                        .and_then(|s| s.wait.as_ref())
+                        .map(|w| w.wait_id.clone());
+                    Err(RunControlError::WaitConflict {
+                        session_id: lost_sid,
+                        status: record.status.as_db_str().to_string(),
+                        current_wait_id,
+                    })
+                } else {
+                    Err(RunControlError::StateConflict(
+                        lost_sid,
+                        format!(
+                            "revision moved; current status is {}",
+                            record.status.as_db_str()
+                        ),
+                    ))
+                }
+            }
+            Err(e) => Err(match e {
+                nexus_orchestration::engine::EngineError::WaitConflict {
+                    session_id,
+                    status,
+                    current_wait_id,
+                } => RunControlError::WaitConflict {
+                    session_id,
+                    status: status.as_db_str().to_string(),
+                    current_wait_id,
+                },
+                nexus_orchestration::engine::EngineError::TerminalState(sid) => {
+                    RunControlError::StateConflict(
+                        sid,
+                        "run is terminal or not in a signalable state".to_string(),
+                    )
+                }
+                nexus_orchestration::engine::EngineError::SessionNotFound(sid) => {
+                    RunControlError::ScheduleNotFound(sid)
+                }
+                other => RunControlError::Drive(other.to_string()),
+            }),
+        }
     }
 }
 
@@ -3012,7 +3181,7 @@ mod tests {
             }),
             graph_version: 4,
         };
-        assert!(cancel_fence_loss_accomplished(&record));
+        assert!(classify_cancel_outcome(&record).is_some());
     }
 
     /// A5 idempotence: a fence-losing Cancel is a success only when the run
@@ -3020,7 +3189,7 @@ mod tests {
     /// live, or settled completed/failed) keeps the conflict — the cancel
     /// genuinely did not happen.
     #[test]
-    fn cancel_fence_loss_accomplished_only_for_cancel_outcomes() {
+    fn classify_cancel_outcome_only_for_durable_cancel_outcomes() {
         use nexus_orchestration::run_state::{RunRecord, RunStateV1};
         let mk = |status, cancel_requested: bool| -> RunRecord {
             RunRecord {
@@ -3036,9 +3205,23 @@ mod tests {
                 graph_version: 1,
             }
         };
-        assert!(cancel_fence_loss_accomplished(&mk(SessionStatus::Cancelled, false)));
-        assert!(cancel_fence_loss_accomplished(&mk(SessionStatus::Interrupted, true)));
-        assert!(!cancel_fence_loss_accomplished(&mk(SessionStatus::Interrupted, false)));
+        assert_eq!(
+            classify_cancel_outcome(&mk(SessionStatus::Cancelled, false)),
+            Some(CancelOutcome::Confirmed)
+        );
+        assert_eq!(
+            classify_cancel_outcome(&mk(SessionStatus::Cancelled, true)),
+            Some(CancelOutcome::Confirmed)
+        );
+        assert_eq!(
+            classify_cancel_outcome(&mk(SessionStatus::Interrupted, true)),
+            Some(CancelOutcome::Unconfirmed)
+        );
+        assert_eq!(
+            classify_cancel_outcome(&mk(SessionStatus::Interrupted, false)),
+            None,
+            "an interrupted run without the cancel intent is not a cancel outcome"
+        );
         for status in [
             SessionStatus::Running,
             SessionStatus::Paused,
@@ -3046,11 +3229,34 @@ mod tests {
             SessionStatus::Completed,
             SessionStatus::Failed,
         ] {
-            assert!(
-                !cancel_fence_loss_accomplished(&mk(status.clone(), true)),
+            assert_eq!(
+                classify_cancel_outcome(&mk(status.clone(), true)),
+                None,
                 "{status:?} must keep the conflict"
             );
         }
+
+        // A failed winner counts only when the cancel intent AND the
+        // `driver_failed` record are both durable.
+        let driver_failed = |code: &str| -> RunRecord {
+            let mut record = mk(SessionStatus::Failed, true);
+            if let Some(state) = record.state.as_mut() {
+                state.failure = Some(nexus_orchestration::run_state::RunFailure {
+                    code: code.to_string(),
+                    message: "drive failed".to_string(),
+                });
+            }
+            record
+        };
+        assert_eq!(
+            classify_cancel_outcome(&driver_failed("driver_failed")),
+            Some(CancelOutcome::Failed)
+        );
+        assert_eq!(
+            classify_cancel_outcome(&driver_failed("failure_cleanup_unconfirmed")),
+            None,
+            "an unrelated failure code is not a cancel outcome"
+        );
     }
     use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
 
@@ -5233,6 +5439,18 @@ mod tests {
             next_state: &nexus_orchestration::run_state::RunStateV1,
             terminal_target: nexus_orchestration::run_state::TerminalSettlementTarget,
         ) -> Result<nexus_orchestration::run_state::SettlementResult, EngineError> {
+            use nexus_orchestration::run_state::TerminalSettlementTarget;
+            // QC2: P4 §6.2 consolidated the anchored `settle_cancelled` /
+            // `settle_failed` cleanup writes into `settle_run`. The fault must
+            // follow the boundary it proves, or the fixture silently stops
+            // injecting and the boundary test can only ever time out.
+            if matches!(
+                terminal_target,
+                TerminalSettlementTarget::Cancelled | TerminalSettlementTarget::Failed
+            ) && self.file_once()
+            {
+                return Err(Self::injected("injected cleanup-settle storage fault"));
+            }
             self.inner
                 .settle_run(
                     session_id,
@@ -8344,7 +8562,7 @@ mod tests {
             .signal_run(&session_id, RunSignal::Cancel)
             .await
             .is_ok()
-            || cancel_fence_loss_accomplished(&record);
+            || classify_cancel_outcome(&record).is_some();
         assert!(cancel_ok, "public cancel must not surface generic conflict");
     }
 
@@ -8825,7 +9043,7 @@ mod tests {
             "no later step launch after settlement race"
         );
         assert!(
-            cancel_fence_loss_accomplished(&record),
+            classify_cancel_outcome(&record).is_some(),
             "failed+cancel_requested+driver_failed must count as accomplished cancel outcome"
         );
         let second_cancel = coordinator
@@ -8863,6 +9081,285 @@ mod tests {
         assert_eq!(frame.event, "run_state");
         let payload: serde_json::Value = serde_json::from_str(&frame.data).expect("json");
         assert_eq!(payload["sequence"].as_u64(), Some(1));
+    }
+
+    /// QC2 F-001: a durable `interrupted` winner (unconfirmed cleanup) is
+    /// NOT authoritative terminal — its live SSE ring stays OPEN so the same
+    /// run's retry cancel can still publish the confirmed winner, and the
+    /// final SSE frame matches the durable DB status exactly.
+    #[tokio::test]
+    async fn interrupted_run_keeps_ring_live_until_retry_cancel_confirms() {
+        struct NoopTask;
+        #[async_trait]
+        impl graph_flow::Task for NoopTask {
+            fn id(&self) -> &'static str {
+                "noop"
+            }
+            async fn run(
+                &self,
+                _context: graph_flow::Context,
+            ) -> Result<graph_flow::TaskResult, graph_flow::GraphError> {
+                Ok(graph_flow::TaskResult::new(
+                    Some("done".to_string()),
+                    graph_flow::NextAction::Continue,
+                ))
+            }
+        }
+
+        let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let _ = &tmp;
+        let pool = Arc::new(nexus_local_db::open_pool(&db_path).await.expect("open pool"));
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = Arc::new(
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+                storage.clone(),
+                store.clone(),
+                caps,
+            ),
+        );
+        let session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let registry = Arc::new(crate::run_events::RunEventRegistry::new());
+        let coordinator = WorkflowRunCoordinator::new(
+            engine.clone(),
+            storage.clone(),
+            pool.clone(),
+            session_cancels,
+        )
+        .with_run_events(registry.clone());
+
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("p4-f001-interrupted-graph")
+                .add_task(Arc::new(NoopTask))
+                .build()
+                .expect("graph"),
+        );
+        let session_id = engine
+            .start_session_with_graph("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // Durable winner #1 — cleanup unconfirmed: Interrupted + cancel intent.
+        let record = store.load_run(&session_id).await.expect("load").expect("row");
+        let root = storage.get(&session_id.0).await.expect("get").expect("root");
+        let interrupted_state = nexus_orchestration::run_state::RunStateV1 {
+            cancel_requested: true,
+            failure: Some(nexus_orchestration::run_state::RunFailure {
+                code: "cancel_cleanup_unconfirmed".to_string(),
+                message: "cancel cleanup unconfirmed for run".to_string(),
+            }),
+            ..Default::default()
+        };
+        store
+            .commit_transition(
+                &session_id,
+                record.state_revision,
+                nexus_orchestration::run_state::RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                SessionStatus::Interrupted,
+                &interrupted_state,
+            )
+            .await
+            .expect("commit interrupted winner");
+
+        // The ring is registered BEFORE the publish and must survive BOTH
+        // settles (interrupted is actionable, not terminal).
+        let _sink = registry
+            .try_register_live(&session_id.0)
+            .expect("live ring reserved");
+        let mut sub = registry
+            .subscribe_live(&session_id.0, None, "/inspect".into())
+            .expect("subscribe");
+
+        coordinator.publish_durable_run_state(&session_id).await;
+        let first = tokio::time::timeout(std::time::Duration::from_secs(2), sub.recv())
+            .await
+            .expect("first frame timeout")
+            .expect("first frame");
+        assert_eq!(first.event, "run_state");
+        let payload: serde_json::Value = serde_json::from_str(&first.data).expect("json");
+        assert_eq!(
+            payload["status"].as_str(),
+            Some("interrupted"),
+            "unconfirmed cleanup must be published as interrupted"
+        );
+
+        // ACTIONABLE: the ring is still live (a held subscriber blocks, it is
+        // not closed).
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(200), sub.recv())
+                .await
+                .is_err(),
+            "an interrupted run must keep its live ring open for the retry cancel"
+        );
+
+        // Retry cancel confirms: durable winner #2 = Cancelled.
+        let record = store.load_run(&session_id).await.expect("load").expect("row");
+        let root = storage.get(&session_id.0).await.expect("get").expect("root");
+        let cancelled_state = record.state.clone().unwrap_or_default();
+        let settled = store
+            .settle_run(
+                &session_id,
+                record.state_revision,
+                None,
+                nexus_orchestration::run_state::RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                &cancelled_state,
+                nexus_orchestration::run_state::TerminalSettlementTarget::Cancelled,
+            )
+            .await
+            .expect("confirmed retry settle");
+        assert!(matches!(
+            settled,
+            nexus_orchestration::run_state::SettlementResult::Applied(_)
+        ));
+
+        coordinator.publish_durable_run_state(&session_id).await;
+        let last = tokio::time::timeout(std::time::Duration::from_secs(2), sub.recv())
+            .await
+            .expect("final frame timeout")
+            .expect("final frame");
+        assert_eq!(last.event, "run_state");
+        let payload: serde_json::Value = serde_json::from_str(&last.data).expect("json");
+        let durable = store.load_run(&session_id).await.expect("load").expect("row");
+        assert_eq!(durable.status, SessionStatus::Cancelled);
+        assert_eq!(
+            payload["status"].as_str(),
+            Some(durable.status.as_db_str()),
+            "the final SSE frame must match the durable DB status"
+        );
+
+        // Confirmed winner CLOSES the ring (gap-then-close contract).
+        assert!(
+            matches!(
+                tokio::time::timeout(std::time::Duration::from_secs(1), sub.recv()).await,
+                Ok(None)
+            ),
+            "an authoritative terminal winner must close the live ring"
+        );
+    }
+
+    /// QC2 F-004: the per-run live event-ring quota is RESERVED before any
+    /// drive spawn. The 65th run is refused with a TYPED capacity error, no
+    /// drive owner is registered, and the durable existing work is untouched;
+    /// an existing ring is reused rather than refused.
+    #[tokio::test]
+    async fn ensure_driving_refuses_capacity_without_touching_durable_work() {
+        struct NoopTask;
+        #[async_trait]
+        impl graph_flow::Task for NoopTask {
+            fn id(&self) -> &'static str {
+                "noop"
+            }
+            async fn run(
+                &self,
+                _context: graph_flow::Context,
+            ) -> Result<graph_flow::TaskResult, graph_flow::GraphError> {
+                Ok(graph_flow::TaskResult::new(
+                    Some("done".to_string()),
+                    graph_flow::NextAction::Continue,
+                ))
+            }
+        }
+
+        let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let _ = &tmp;
+        let pool = Arc::new(nexus_local_db::open_pool(&db_path).await.expect("open pool"));
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = Arc::new(
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+                storage.clone(),
+                store.clone(),
+                caps,
+            ),
+        );
+        let session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let registry = Arc::new(crate::run_events::RunEventRegistry::new());
+        let coordinator = WorkflowRunCoordinator::new(
+            engine.clone(),
+            storage.clone(),
+            pool.clone(),
+            session_cancels,
+        )
+        .with_run_events(registry.clone());
+
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("p4-f004-capacity-graph")
+                .add_task(Arc::new(NoopTask))
+                .build()
+                .expect("graph"),
+        );
+        let session_id = engine
+            .start_session_with_graph("novel-writing", graph)
+            .await
+            .expect("start session");
+        let before = store.load_run(&session_id).await.expect("load").expect("row");
+
+        // Exhaust every live-ring slot.
+        let mut held = Vec::new();
+        for i in 0..crate::run_events::MAX_LIVE_RINGS {
+            held.push(
+                registry
+                    .try_register_live(&format!("other-run-{i}"))
+                    .expect("live ring slot"),
+            );
+        }
+
+        let err = coordinator
+            .ensure_driving(&session_id)
+            .await
+            .expect_err("the 65th live ring must be refused");
+        assert!(
+            matches!(&err, RunControlError::RunEventCapacity(sid) if sid == &session_id.0),
+            "capacity refusal must be typed, got {err:?}"
+        );
+
+        // No drive owner and no sink were registered for the refused run.
+        assert!(
+            coordinator.drives.lock().await.is_empty(),
+            "a refused run must not be driven"
+        );
+        assert!(
+            !coordinator
+                .run_event_sinks
+                .lock()
+                .await
+                .contains_key(&session_id.0),
+            "a refused run must not own a sink"
+        );
+
+        // Durable existing work is untouched.
+        let after = store.load_run(&session_id).await.expect("load").expect("row");
+        assert_eq!(after.state_revision, before.state_revision);
+        assert_eq!(after.status, before.status);
+
+        // An EXISTING ring is reused rather than refused at quota.
+        assert!(
+            registry.try_register_live("other-run-0").is_some(),
+            "an existing live ring must be reused, not refused"
+        );
+        drop(held);
     }
 
 }
