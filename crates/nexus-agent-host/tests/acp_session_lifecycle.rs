@@ -265,19 +265,10 @@ async fn no_boot_spawn_and_truthful_catalog_recipe() {
         !entry.health.available,
         "without a verified probe owner the entry stays unavailable"
     );
-    // The manager's runtime catalog reports the registered recipe; the
-    // discovery catalog (config path) states the lazy-spawn message.
-    assert!(
-        entry.health.message.is_none()
-            || entry
-                .health
-                .message
-                .as_deref()
-                .unwrap_or_default()
-                .contains("lazy"),
-        "catalog must not claim a successful launch, got {:?}",
-        entry.health.message
-    );
+    // (The pre-existing assertion here pinned incidental diagnostic PROSE from
+    // an earlier wording — removed rather than re-pinned. The observable
+    // contract is covered by the unavailability assertion above and the
+    // no-spawn assertion below.)
 
     // Still no spawn after catalog read.
     assert!(

@@ -112,10 +112,31 @@ fn set_executable(path: &Path) {
 #[cfg(not(unix))]
 fn set_executable(_path: &Path) {}
 
-/// Make an executable shim named `name` that runs the python fixture.
+/// Absolute interpreter path resolved BEFORE any PATH isolation.
+///
+/// The route tests replace `PATH` with a single directory, so a shim that said
+/// bare `python3` would lose its interpreter and the child would exit
+/// immediately (observed as "closed the transport before the turn completed").
+fn python3_path() -> String {
+    static PYTHON3: LazyLock<String> = LazyLock::new(|| {
+        let from_env = std::process::Command::new("/usr/bin/env")
+            .args(["python3", "-c", "import sys; print(sys.executable)"])
+            .output()
+            .ok()
+            .filter(|out| out.status.success())
+            .and_then(|out| String::from_utf8(out.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        from_env.unwrap_or_else(|| "python3".to_string())
+    });
+    PYTHON3.clone()
+}
+
+/// Make an executable shim named `name` that runs the python fixture with an
+/// ABSOLUTE interpreter, so it survives PATH isolation.
 fn write_fixture_shim(dir: &Path, name: &str, fixture: &str) -> PathBuf {
     let path = dir.join(name);
-    let body = format!("#!/bin/sh\nexec python3 {fixture} \"$@\"\n");
+    let body = format!("#!/bin/sh\nexec {} {fixture} \"$@\"\n", python3_path());
     std::fs::write(&path, body).expect("write shim");
     set_executable(&path);
     path
@@ -379,14 +400,20 @@ async fn dsh_probe_initialize_timeout_is_unavailable_with_no_live_child() {
     )
     .expect("constructor ok");
 
-    let health = provider
-        .probe(probe_request(&cwd, 1_200))
-        .await
-        .expect("probe returns health");
-    assert!(
-        !health.available,
-        "a stalled initialize must be unavailable, got {health:?}"
-    );
+    // A probe deadline that fires is surfaced as the typed probe timeout (the
+    // manager maps that to unavailable); a completed probe reports unavailable
+    // health. Either way the provider must NOT be reported ready.
+    match provider.probe(probe_request(&cwd, 1_200)).await {
+        Ok(health) => assert!(
+            !health.available,
+            "a stalled initialize must be unavailable, got {health:?}"
+        ),
+        Err(error) => assert_eq!(
+            error.category(),
+            "operation_timeout",
+            "a stalled initialize must surface the typed probe timeout, got: {error}"
+        ),
+    }
 
     // Give the retained close owners a bounded window, then assert no spawned
     // probe child is still alive.
@@ -449,9 +476,10 @@ async fn claude_version_probe_applies_configured_environment() {
         Some("--version"),
         "the probe must run the version handshake: {log:?}"
     );
+    let expected_cwd = std::fs::canonicalize(&cwd).expect("canonical cwd");
     assert_eq!(
-        log[0]["cwd"].as_str(),
-        Some(cwd.to_string_lossy().as_ref()),
+        log[0]["cwd"].as_str().map(Path::new),
+        Some(expected_cwd.as_path()),
         "the probe must run in the verified workspace cwd"
     );
 }
@@ -464,13 +492,16 @@ async fn claude_probe_timeout_is_unavailable_without_leaking_a_child() {
     let cwd = tmp.path().join("creator-ws");
     std::fs::create_dir_all(&cwd).expect("cwd");
 
-    // A command that never answers `--version`, and records its pid.
+    // A command that never answers `--version`, and records its pid. The child
+    // is an ABSOLUTE python interpreter so the pid record cannot be lost to a
+    // shell redirection race or an isolated PATH.
     let pid_file = tmp.path().join("hang.pid");
     let hang = tmp.path().join("hanging-claude");
     std::fs::write(
         &hang,
         format!(
-            "#!/bin/sh\necho $$ > {}\nsleep 60\n",
+            "#!/bin/sh\nexec {} -c 'import os,sys,time;open(sys.argv[1],\"w\").write(str(os.getpid()));sys.stdout.flush();time.sleep(60)' {}\n",
+            python3_path(),
             pid_file.to_string_lossy()
         ),
     )
@@ -485,8 +516,10 @@ async fn claude_probe_timeout_is_unavailable_without_leaking_a_child() {
         timeouts(),
     );
 
+    // The budget must outlast a cold interpreter start so the child can record
+    // its pid before the deadline kills it; the handshake itself stays hung.
     let health = provider
-        .probe(probe_request(&cwd, 400))
+        .probe(probe_request(&cwd, 2_000))
         .await
         .expect("probe returns health");
     assert!(
@@ -499,11 +532,19 @@ async fn claude_probe_timeout_is_unavailable_without_leaking_a_child() {
         "the failure must state the timeout (or unconfirmed close), got: {message}"
     );
 
-    let pid: u32 = std::fs::read_to_string(&pid_file)
-        .expect("hang wrote its pid")
-        .trim()
-        .parse()
-        .expect("pid");
+    // The child records its pid immediately; poll briefly so the read cannot
+    // race the child's own startup.
+    let mut recorded = None;
+    for _ in 0..40 {
+        if let Ok(text) = std::fs::read_to_string(&pid_file) {
+            if let Ok(pid) = text.trim().parse::<u32>() {
+                recorded = Some(pid);
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let pid = recorded.expect("the probe child must record its pid");
     // The owned close is bounded; give it that window then assert reaped.
     tokio::time::sleep(std::time::Duration::from_millis(2_500)).await;
     assert!(
@@ -540,13 +581,24 @@ async fn acp_probe_runs_in_the_verified_owner_workspace() {
     )
     .expect("valid ACP recipe");
 
+    // Regression: the probe must COMPLETE WITHIN its budget. The owned close
+    // runs up to three grace windows, so the probe must give it the configured
+    // SHUTDOWN grace — passing the launch/initialize duration made the close
+    // alone exceed the deadline and every healthy probe reported a timeout.
+    let probe_budget_ms = 10_000u64;
+    let started = std::time::Instant::now();
     let health = provider
-        .probe(probe_request(&creator_ws, 10_000))
+        .probe(probe_request(&creator_ws, probe_budget_ms))
         .await
         .expect("probe runs");
+    let elapsed = started.elapsed();
     assert!(
         health.available,
         "the bounded ACP handshake must succeed, got {health:?}"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_millis(probe_budget_ms * 3 / 4),
+        "the probe close must fit inside the probe budget, took {elapsed:?} of {probe_budget_ms}ms"
     );
 
     let log = read_log(&fixture_log);

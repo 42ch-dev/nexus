@@ -731,11 +731,20 @@ impl ProviderAdapter for AcpProvider {
             owner: request.owner.clone(),
         };
 
+        // The bounded close must fit INSIDE the probe budget, so it uses the
+        // configured SHUTDOWN grace — not the launch/initialize duration. The
+        // owned close runs up to three granted windows (cooperative exit, then
+        // group-quiescence checks), so passing the launch duration made the
+        // close alone exceed the probe deadline and every healthy probe
+        // reported a timeout. A close that still cannot be confirmed inside its
+        // own budget is reported as unconfirmed, never as a clean close.
+        let close_grace = self.timeouts.shutdown_duration();
+
         let health = match tokio::time::timeout(launch_dur, async {
             let connected = self.connect_session(&spec).await?;
             let mut process = connected.process;
             drop(connected.client);
-            process.shutdown(launch_dur).await.map_err(|e| {
+            process.shutdown(close_grace).await.map_err(|e| {
                 HostError::cleanup_unconfirmed(format!("ACP probe cleanup unconfirmed: {e}"))
                     .with_provider(self.provider_id.clone())
             })?;
