@@ -68,7 +68,7 @@ pub struct RunStateWire<'a> {
     pub reason: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
 pub struct GapWire {
     pub run_id: String,
     pub epoch: u64,
@@ -468,24 +468,29 @@ impl RunEventRegistryInner {
             data: payload,
         };
         if encoded_sse_frame_bytes(&frame) > MAX_FRAME_BYTES {
-            self.append_gap_record_locked(ring, run_id);
+            self.append_gap_record_locked(ring, run_id, sequence);
             return;
         }
         self.push_record_locked(ring, frame);
     }
 
-    fn append_gap_record_locked(&self, ring: &mut RunRing, run_id: &str) {
-        let sequence = ring.next_sequence;
+    fn append_gap_record_locked(
+        &self,
+        ring: &mut RunRing,
+        run_id: &str,
+        skipped_sequence: u64,
+    ) {
+        let gap_sequence = ring.next_sequence;
         ring.next_sequence += 1;
         let gap = GapWire {
             run_id: run_id.to_string(),
             epoch: ring.epoch,
-            from_sequence: sequence,
-            to_sequence: sequence,
+            from_sequence: skipped_sequence,
+            to_sequence: skipped_sequence,
         };
         let data = serde_json::to_string(&gap).unwrap_or_default();
         let frame = SseFrame {
-            id: format!("{}:{}", ring.epoch, sequence),
+            id: format!("{}:{}", ring.epoch, gap_sequence),
             event: "gap".to_string(),
             data,
         };
@@ -547,14 +552,37 @@ fn fanout(ring: &mut RunRing, frame: SseFrame) {
     }
 }
 
+
+fn gap_wire_from_frame(frame: &SseFrame) -> Option<GapWire> {
+    if frame.event != "gap" {
+        return None;
+    }
+    serde_json::from_str(&frame.data).ok()
+}
+
+fn range_covered_by_explicit_gap(ring: &RunRing, from: u64, to: u64) -> bool {
+    if from > to {
+        return true;
+    }
+    ring.records.iter().any(|rec| {
+        gap_wire_from_frame(&rec.frame).is_some_and(|gap| {
+            gap.from_sequence <= from && gap.to_sequence >= to
+        })
+    })
+}
+
 fn collect_from(ring: &RunRing, run_id: &str, after: Option<u64>) -> Vec<SseFrame> {
     let mut out = Vec::new();
     let first_retained = ring.records.front().map(|r| r.sequence).unwrap_or(1);
     let after_seq = after.unwrap_or(0);
     if after_seq == 0 && first_retained > 1 {
-        out.push(gap_frame(run_id, ring.epoch, 1, first_retained - 1));
+        if !range_covered_by_explicit_gap(ring, 1, first_retained - 1) {
+            out.push(gap_frame(run_id, ring.epoch, 1, first_retained - 1));
+        }
     } else if after_seq > 0 && after_seq < first_retained {
-        out.push(gap_frame(run_id, ring.epoch, after_seq + 1, first_retained - 1));
+        if !range_covered_by_explicit_gap(ring, after_seq + 1, first_retained - 1) {
+            out.push(gap_frame(run_id, ring.epoch, after_seq + 1, first_retained - 1));
+        }
     }
     for rec in &ring.records {
         if rec.sequence > after_seq {
@@ -842,7 +870,7 @@ mod tests {
         assert!(first_retained > 1, "ring must have evicted early sequences");
         let cursor_epoch = ring.epoch;
         drop(state);
-        let cursor = format!("{}:{}", cursor_epoch, first_retained - 1);
+        let cursor = format!("{}:{}", cursor_epoch, 1);
         let mut sub = registry
             .subscribe_live("run-1", Some(&cursor), "/inspect".into())
             .expect("reconnect");
@@ -852,7 +880,8 @@ mod tests {
             .expect("gap frame");
         assert_eq!(gap.event, "gap");
         let payload: serde_json::Value = serde_json::from_str(&gap.data).expect("gap json");
-        assert_eq!(payload["from_sequence"].as_u64(), Some(first_retained));
+        assert_eq!(payload["from_sequence"].as_u64(), Some(2));
+        assert_eq!(payload["to_sequence"].as_u64(), Some(first_retained - 1));
     }
 
     #[tokio::test]
@@ -868,25 +897,32 @@ mod tests {
         let mut sub = registry
             .subscribe_live("run-1", None, "/inspect".into())
             .expect("subscribe");
-        let mut frames = Vec::new();
-        for _ in 0..4 {
-            if let Ok(Some(frame)) =
-                tokio::time::timeout(std::time::Duration::from_millis(200), sub.recv()).await
-            {
-                frames.push(frame);
-            }
-        }
-        assert!(
-            frames.iter().any(|f| f.event == "gap"),
-            "oversize skip must surface explicit gap, got: {:?}",
-            frames.iter().map(|f| &f.event).collect::<Vec<_>>()
-        );
-        assert!(
-            frames.iter().any(|f| f.event == "run_state"),
-            "durable run_state must still replay after gap: {:?}",
-            frames.iter().map(|f| &f.event).collect::<Vec<_>>()
-        );
-        assert_monotonic_no_duplicates(&frames);
+        let gap = tokio::time::timeout(std::time::Duration::from_secs(1), sub.recv())
+            .await
+            .expect("gap frame timeout")
+            .expect("gap frame");
+        assert_eq!(gap.event, "gap");
+        assert_eq!(frame_sequence(&gap), 2, "gap keeps its own monotonic sequence id");
+        let payload: serde_json::Value = serde_json::from_str(&gap.data).expect("gap json");
+        assert_eq!(payload["from_sequence"].as_u64(), Some(1));
+        assert_eq!(payload["to_sequence"].as_u64(), Some(1));
+        let run_state = tokio::time::timeout(std::time::Duration::from_secs(1), sub.recv())
+            .await
+            .expect("run_state timeout")
+            .expect("run_state");
+        assert_eq!(run_state.event, "run_state");
+        assert_eq!(frame_sequence(&run_state), 3);
+        let mut replay = registry
+            .subscribe_live("run-1", Some(&gap.id), "/inspect".into())
+            .expect("reconnect after gap cursor");
+        let tail = tokio::time::timeout(std::time::Duration::from_secs(1), replay.recv())
+            .await
+            .expect("strict-later replay timeout")
+            .expect("strict-later replay");
+        assert_eq!(tail.event, "run_state");
+        assert_eq!(frame_sequence(&tail), 3);
+        let more = tokio::time::timeout(std::time::Duration::from_millis(200), replay.recv()).await;
+        assert!(more.is_err(), "cursor at gap must not replay gap again");
     }
 
     #[tokio::test]
