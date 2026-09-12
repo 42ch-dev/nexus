@@ -10,7 +10,9 @@ use nexus_daemon_runtime::workspace::executor::DaemonWorkspaceExecutor;
 use nexus_daemon_runtime::workspace::session::{
     ChangeEntry, ChangeOp, SessionError, SessionId, WorkspaceSessionManager,
 };
-use nexus_daemon_runtime::workspace::commit_fs::hash_bytes;
+use nexus_daemon_runtime::workspace::commit_fs::{
+    hash_bytes, set_test_after_delete_capture_hook,
+};
 use nexus_daemon_runtime::workspace::session_commit::{
     set_test_crash_point, set_test_owner_gate, OwnerGate,
 };
@@ -982,4 +984,80 @@ async fn external_writer_after_delete_is_detected_at_recovery() {
     .await
     .unwrap();
     assert_eq!(state, "recovery_conflict");
+}
+
+#[tokio::test]
+#[serial]
+async fn delete_detects_target_recreated_after_capture() {
+    let (pool, db_dir) = fresh_pool().await;
+    let mgr = recoverable_mgr(pool, &db_dir);
+    let ws = tempfile::tempdir().unwrap();
+    let root = ws.path().to_string_lossy().to_string();
+    std::fs::write(ws.path().join("d.txt"), b"original").unwrap();
+    mgr.startup_recovery().await.expect("startup");
+    let session = mgr.open_session(&root, "", true).await.expect("open");
+
+    // Deterministic injection EXACTLY in the capture/finalize window: the hook
+    // fires after the delete captured the original and before it finalizes.
+    let target = ws.path().join("d.txt");
+    set_test_after_delete_capture_hook(Some(Arc::new(move || {
+        std::fs::write(&target, b"recreated-by-external-writer").expect("external write");
+    })));
+
+    let err = mgr
+        .commit_session_durable(
+            &session,
+            &[ChangeEntry {
+                path: "d.txt".to_string(),
+                op: ChangeOp::Delete,
+                expected_hash: Some(hash_bytes(b"original")),
+                content_base64: None,
+            }],
+            &root,
+        )
+        .await
+        .unwrap_err();
+    set_test_after_delete_capture_hook(None);
+
+    assert!(
+        matches!(err, SessionError::Internal(_) | SessionError::Io(_)),
+        "a re-created target after capture must never finalize a delete, got {err:?}"
+    );
+
+    // The commit is NOT recorded as committed, and the writer's bytes survive
+    // untouched — the original is preserved as capture evidence.
+    let state: String = sqlx::query_scalar(
+        "SELECT state FROM workspace_commit_intents WHERE session_id = ? ORDER BY revision DESC LIMIT 1",
+    )
+    .bind(session.to_string())
+    .fetch_one(mgr.pool().as_ref())
+    .await
+    .unwrap();
+    assert_eq!(state, "recovery_conflict");
+    assert_eq!(
+        std::fs::read(ws.path().join("d.txt")).unwrap(),
+        b"recreated-by-external-writer",
+        "the delete must not remove bytes it did not capture"
+    );
+
+    // The displaced original is preserved as evidence, not discarded.
+    let preserved: Vec<_> = std::fs::read_dir(ws.path())
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.contains("displaced"))
+        .collect();
+    assert!(
+        !preserved.is_empty(),
+        "the captured original must survive as evidence, found: {preserved:?}"
+    );
+
+    // And the workspace stays blocked until an operator resolves the conflict.
+    let next = mgr.open_session(&root, "", true).await.expect("open2");
+    let err = mgr
+        .commit_session_durable(&next, &[create_change("after.txt", b"x")], &root)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, SessionError::RecoveryConflict(_)));
+    assert!(!ws.path().join("after.txt").exists());
 }

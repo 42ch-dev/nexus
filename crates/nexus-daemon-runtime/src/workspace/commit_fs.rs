@@ -40,6 +40,29 @@ pub const MAX_CHANGES: usize = 128;
 /// Owner-read/write for newly created workspace files.
 pub const CREATE_FILE_MODE: u32 = 0o600;
 
+/// Test-only hook fired immediately after a delete captures the target name
+/// and before the delete is finalized.
+///
+/// Lets a test inject an external writer's re-create DETERMINISTICALLY into
+/// the capture/finalize window — no sleeps, no timing assumptions.
+static TEST_AFTER_DELETE_CAPTURE: std::sync::Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>> =
+    std::sync::Mutex::new(None);
+
+/// Install (or clear) the after-delete-capture hook.
+pub fn set_test_after_delete_capture_hook(hook: Option<std::sync::Arc<dyn Fn() + Send + Sync>>) {
+    *TEST_AFTER_DELETE_CAPTURE.lock().expect("hook lock") = hook;
+}
+
+fn run_after_delete_capture_hook() {
+    let hook = TEST_AFTER_DELETE_CAPTURE
+        .lock()
+        .expect("hook lock")
+        .clone();
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
 /// Name holding the bytes displaced by a mutation, derived from the stage name.
 fn displaced_basename(stage_basename: &str) -> String {
     format!("{stage_basename}-displaced")
@@ -536,6 +559,25 @@ mod unix_dir {
                     "displaced bytes are not the expected preimage",
                 ));
             }
+
+            // Deterministic injection point for the capture/finalize window.
+            super::run_after_delete_capture_hook();
+
+            // A delete is only valid while the target name is STILL absent.
+            // A writer that re-created it during the window means the workspace
+            // does not match the committed post-state: keep every artifact
+            // (the capture, the backup, and the writer's bytes) and report a
+            // conflict rather than finalizing a delete that left unrelated
+            // bytes behind.
+            if self.exists(target)? {
+                self.sync()?;
+                return Err(third_state(
+                    "delete",
+                    "target name recreated by an external writer after capture; \
+                     evidence preserved",
+                ));
+            }
+
             self.unlink(&displaced)?;
             self.sync()
         }
