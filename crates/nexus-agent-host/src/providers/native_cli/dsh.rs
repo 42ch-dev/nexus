@@ -4014,9 +4014,11 @@ mod tests {
 
         active_run.store(false, Ordering::Release);
 
-        tokio::time::timeout(std::time::Duration::from_millis(200), waiter)
-            .await
-            .expect("latched reunify must complete without Notify");
+        match tokio::time::timeout(std::time::Duration::from_millis(200), waiter).await {
+            Ok(Ok(_)) => {}
+            Ok(Err(join_error)) => panic!("waiter join failed: {join_error}"),
+            Err(_) => panic!("latched reunify must complete without Notify"),
+        }
     }
 
     /// Finding 2: a sealed-home provisioning failure on the first
@@ -4907,6 +4909,7 @@ mod tests {
         );
     }
 
+    #[tokio::test]
     async fn dsh_lag_fixture_still_delivers_message_before_terminal() {
         let req_log_dir = tempfile::tempdir().expect("temp dir");
         let req_log = req_log_dir.path().join("reqs.jsonl");
