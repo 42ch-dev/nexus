@@ -28,13 +28,15 @@ echo "==> backend artifact compatible (${BIN})"
 echo "==> daemon endpoint ${VITE_DAEMON_URL}"
 
 echo "==> ensuring daemon on ${VITE_DAEMON_URL}"
-if ! "${BIN}" daemon status --port "${PORT}" >/dev/null 2>&1; then
-  "${BIN}" daemon start --port "${PORT}"
-  echo "    daemon started (detached)"
-else
+DAEMON_STATUS_OUTPUT="$("${BIN}" daemon status --port "${PORT}" 2>&1 || true)"
+export DAEMON_STATUS_OUTPUT
+if node --input-type=module -e "import { isDaemonCliStatusRunning } from './scripts/dev-backend-manifest.mjs'; process.exit(isDaemonCliStatusRunning(process.env.DAEMON_STATUS_OUTPUT ?? '') ? 0 : 1)"; then
   echo "    daemon already running"
   echo "==> validating running daemon compatibility"
-  node --input-type=module -e "import { readBackendManifest, assertCompatibleRunningDaemon } from './scripts/dev-backend-manifest.mjs'; const manifest = await readBackendManifest(process.env.NEXUS42_ARTIFACT); await assertCompatibleRunningDaemon({ baseUrl: process.env.VITE_DAEMON_URL, manifest, port: Number(process.env.NEXUS42_DAEMON_PORT) }); console.log('    running daemon compatible (version ' + manifest.packageVersion + ')');"
+  node --input-type=module -e "import { readBackendManifest, assertCompatibleRunningDaemon } from './scripts/dev-backend-manifest.mjs'; const manifest = await readBackendManifest(process.env.NEXUS42_ARTIFACT); await assertCompatibleRunningDaemon({ baseUrl: process.env.VITE_DAEMON_URL, manifest, port: Number(process.env.NEXUS42_DAEMON_PORT), daemonStatusOutput: process.env.DAEMON_STATUS_OUTPUT ?? '' }); console.log('    running daemon compatible (version ' + manifest.packageVersion + ')');"
+else
+  "${BIN}" daemon start --port "${PORT}"
+  echo "    daemon started (detached)"
 fi
 
 echo "==> validating daemon health"

@@ -11,9 +11,11 @@ import {
   RunningDaemonCompatibilityError,
   assertCompatibleBackend,
   assertCompatibleRunningDaemon,
+  assertDaemonHealthIdentityMatchesManifest,
   computeContractHash,
   computeDbSchemaRange,
   computeDbSchemaRangeFromNames,
+  isDaemonCliStatusRunning,
   manifestPathForArtifact,
   readBackendManifest,
   refreshBackend,
@@ -315,6 +317,83 @@ test('assertCompatibleRunningDaemon refuses incompatible running daemon with act
       assert.ok(err instanceof RunningDaemonCompatibilityError);
       assert.match(err.message, /Stop it with: nexus42 daemon stop --port 19999/);
       assert.match(err.message, new RegExp(REMEDIATION_COMMAND.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      return true;
+    },
+  );
+});
+
+test('isDaemonCliStatusRunning treats successful not-running status as not running', () => {
+  const output = `Daemon Status:
+  URL: http://127.0.0.1:8420
+  Status: ✗ Not running
+
+Start with: nexus42 daemon start`;
+  assert.equal(isDaemonCliStatusRunning(output), false);
+});
+
+test('isDaemonCliStatusRunning treats reported running status as running', () => {
+  const output = `Daemon Status:
+  URL: http://127.0.0.1:8420
+  Status: ✓ Running
+  Version: "0.1.0"
+  PID: 4242`;
+  assert.equal(isDaemonCliStatusRunning(output), true);
+});
+
+test('assertDaemonHealthIdentityMatchesManifest refuses same-version stale contract hash', () => {
+  const manifest = {
+    contractHash: 'a'.repeat(64),
+    writerProtocol: CURRENT_WRITER_PROTOCOL,
+    dbSchemaRange: computeDbSchemaRangeFromNames(['20260417_000001_initial']),
+    sha256: 'b'.repeat(64),
+  };
+  const reason = assertDaemonHealthIdentityMatchesManifest(
+    {
+      status: 'ok',
+      version: '0.1.0',
+      contractHash: 'c'.repeat(64),
+      writerProtocol: CURRENT_WRITER_PROTOCOL,
+      dbSchemaRange: manifest.dbSchemaRange,
+    },
+    manifest,
+  );
+  assert.match(reason, /contractHash/);
+});
+
+test('assertCompatibleRunningDaemon refuses same-version stale contract identity without killing', async () => {
+  const manifest = {
+    packageVersion: '0.1.0',
+    contractHash: 'a'.repeat(64),
+    writerProtocol: CURRENT_WRITER_PROTOCOL,
+    dbSchemaRange: computeDbSchemaRangeFromNames(['20260417_000001_initial']),
+    sha256: 'b'.repeat(64),
+  };
+  await assert.rejects(
+    () =>
+      assertCompatibleRunningDaemon({
+        baseUrl: 'http://127.0.0.1:18888',
+        manifest,
+        port: 18888,
+        fetchImpl: async () => ({
+          ok: true,
+          text: async () =>
+            JSON.stringify({
+              status: 'ok',
+              version: manifest.packageVersion,
+              contractHash: 'c'.repeat(64),
+              writerProtocol: CURRENT_WRITER_PROTOCOL,
+              dbSchemaRange: manifest.dbSchemaRange,
+            }),
+        }),
+        execImpl: async () => {
+          throw new Error('must not inspect or kill foreign daemon process');
+        },
+      }),
+    err => {
+      assert.ok(err instanceof RunningDaemonCompatibilityError);
+      assert.match(err.message, /contractHash/);
+      assert.match(err.message, /Stop it with: nexus42 daemon stop --port 18888/);
+      assert.doesNotMatch(err.message, /must not inspect or kill foreign daemon process/);
       return true;
     },
   );

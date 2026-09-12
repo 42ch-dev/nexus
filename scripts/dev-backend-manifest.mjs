@@ -379,6 +379,213 @@ export function resolveDaemonEndpoint({ portEnv, urlEnv } = {}) {
   const baseUrl = `http://${DEFAULT_DAEMON_HOST}:${port}`;
   return { baseUrl, port };
 }
+export function isDaemonCliStatusRunning(statusOutput) {
+  return /Status:\s*✓\s*Running/.test(statusOutput);
+}
+
+export function parseDaemonStatusPid(statusOutput) {
+  const match = statusOutput.match(/^\s*PID:\s*(\d+)\s*$/m);
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
+export function extractDaemonHealthIdentity(health) {
+  if (!health || typeof health !== 'object') {
+    return null;
+  }
+
+  const identity = {};
+  if (typeof health.contractHash === 'string') {
+    identity.contractHash = health.contractHash;
+  }
+  if (Number.isInteger(health.writerProtocol) && health.writerProtocol >= 0) {
+    identity.writerProtocol = health.writerProtocol;
+  }
+  if (
+    health.dbSchemaRange &&
+    typeof health.dbSchemaRange === 'object' &&
+    typeof health.dbSchemaRange.min === 'string' &&
+    typeof health.dbSchemaRange.max === 'string'
+  ) {
+    identity.dbSchemaRange = {
+      min: health.dbSchemaRange.min,
+      max: health.dbSchemaRange.max,
+    };
+  }
+  if (typeof health.sha256 === 'string') {
+    identity.sha256 = health.sha256;
+  }
+  if (typeof health.artifactSha256 === 'string') {
+    identity.artifactSha256 = health.artifactSha256;
+  }
+
+  return Object.keys(identity).length ? identity : null;
+}
+
+function formatDbSchemaRange(range) {
+  return `${range.min}..${range.max}`;
+}
+
+export function assertDaemonHealthIdentityMatchesManifest(health, manifest) {
+  const exposed = extractDaemonHealthIdentity(health);
+  if (!exposed) {
+    return null;
+  }
+
+  if (exposed.contractHash !== undefined && exposed.contractHash !== manifest.contractHash) {
+    return `Daemon contractHash ${JSON.stringify(exposed.contractHash)} does not match manifest contractHash ${manifest.contractHash}.`;
+  }
+  if (exposed.writerProtocol !== undefined && exposed.writerProtocol !== manifest.writerProtocol) {
+    return `Daemon writerProtocol ${exposed.writerProtocol} does not match manifest writerProtocol ${manifest.writerProtocol}.`;
+  }
+  if (exposed.dbSchemaRange !== undefined) {
+    const daemonRange = formatDbSchemaRange(exposed.dbSchemaRange);
+    const manifestRange = formatDbSchemaRange(manifest.dbSchemaRange);
+    if (daemonRange !== manifestRange) {
+      return `Daemon dbSchemaRange ${daemonRange} does not match manifest dbSchemaRange ${manifestRange}.`;
+    }
+  }
+
+  const artifactDigest = exposed.sha256 ?? exposed.artifactSha256;
+  if (artifactDigest !== undefined && artifactDigest !== manifest.sha256) {
+    return `Daemon artifact sha256 ${artifactDigest} does not match manifest sha256 ${manifest.sha256}.`;
+  }
+
+  const hasFullContractIdentity =
+    exposed.contractHash !== undefined &&
+    exposed.writerProtocol !== undefined &&
+    exposed.dbSchemaRange !== undefined;
+  const hasArtifactIdentity = artifactDigest !== undefined;
+
+  if (hasFullContractIdentity || hasArtifactIdentity) {
+    return null;
+  }
+
+  return 'Daemon health response exposes partial backend identity fields that do not cover the manifest compatibility contract.';
+}
+
+export async function resolveListenerPid(port, execImpl = exec) {
+  try {
+    const { stdout } = await execImpl('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t']);
+    const pid = stdout
+      .trim()
+      .split('\n')
+      .map(line => Number.parseInt(line.trim(), 10))
+      .find(value => Number.isInteger(value) && value > 0);
+    return pid ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function resolveProcessExecutablePath(pid, execImpl = exec) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return null;
+  }
+
+  if (process.platform === 'linux') {
+    try {
+      const { readlink } = await import('node:fs/promises');
+      return await readlink(`/proc/${pid}/exe`);
+    } catch {
+      return null;
+    }
+  }
+
+  try {
+    const { stdout } = await execImpl('lsof', ['-p', String(pid), '-Fn']);
+    const lines = stdout.split('\n');
+    for (let index = 0; index < lines.length; index += 1) {
+      if (lines[index] !== 'ftxt') {
+        continue;
+      }
+      const pathLine = lines[index + 1];
+      if (!pathLine?.startsWith('n/')) {
+        continue;
+      }
+      const path = pathLine.slice(1).trim();
+      if (path && !path.endsWith(' (deleted)')) {
+        return path;
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+export async function verifyRunningDaemonArtifactIdentity({
+  manifest,
+  port,
+  daemonStatusOutput = '',
+  execImpl = exec,
+}) {
+  const pid = parseDaemonStatusPid(daemonStatusOutput) ?? await resolveListenerPid(port, execImpl);
+  if (!pid) {
+    return {
+      verified: false,
+      reason:
+        'Unable to resolve the running daemon process to verify artifact identity against the selected manifest.',
+    };
+  }
+
+  const executablePath = await resolveProcessExecutablePath(pid, execImpl);
+  if (!executablePath) {
+    return {
+      verified: false,
+      reason:
+        `Unable to resolve executable path for running daemon PID ${pid} to verify artifact identity against the selected manifest.`,
+    };
+  }
+
+  const digest = await sha256File(executablePath);
+  if (digest !== manifest.sha256) {
+    return {
+      verified: false,
+      reason: `Running daemon executable digest ${digest} does not match manifest sha256 ${manifest.sha256}.`,
+    };
+  }
+
+  return { verified: true, executablePath, digest };
+}
+
+export async function verifyRunningDaemonIdentity({
+  health,
+  manifest,
+  port,
+  daemonStatusOutput = '',
+  execImpl = exec,
+}) {
+  const healthMismatch = assertDaemonHealthIdentityMatchesManifest(health, manifest);
+  if (healthMismatch) {
+    return { compatible: false, reason: healthMismatch };
+  }
+
+  const exposed = extractDaemonHealthIdentity(health);
+  if (exposed) {
+    const hasFullContractIdentity =
+      exposed.contractHash !== undefined &&
+      exposed.writerProtocol !== undefined &&
+      exposed.dbSchemaRange !== undefined;
+    const hasArtifactIdentity = exposed.sha256 !== undefined || exposed.artifactSha256 !== undefined;
+    if (hasFullContractIdentity || hasArtifactIdentity) {
+      return { compatible: true, source: 'health' };
+    }
+  }
+
+  const artifactIdentity = await verifyRunningDaemonArtifactIdentity({
+    manifest,
+    port,
+    daemonStatusOutput,
+    execImpl,
+  });
+  if (!artifactIdentity.verified) {
+    return { compatible: false, reason: artifactIdentity.reason };
+  }
+
+  return { compatible: true, source: 'process-artifact' };
+}
+
 
 export function formatRunningDaemonRefusal({ baseUrl, port, reason }) {
   return (
@@ -436,9 +643,12 @@ export async function assertCompatibleRunningDaemon({
   manifest,
   port,
   fetchImpl = globalThis.fetch,
+  daemonStatusOutput = '',
+  execImpl = exec,
 }) {
+  let healthResult;
   try {
-    await validateDaemonHealth(baseUrl, {
+    healthResult = await validateDaemonHealth(baseUrl, {
       fetchImpl,
       expectedPackageVersion: manifest.packageVersion,
     });
@@ -447,6 +657,20 @@ export async function assertCompatibleRunningDaemon({
     throw new RunningDaemonCompatibilityError(formatRunningDaemonRefusal({ baseUrl, port, reason }), {
       port,
     });
+  }
+
+  const identity = await verifyRunningDaemonIdentity({
+    health: healthResult.health,
+    manifest,
+    port,
+    daemonStatusOutput,
+    execImpl,
+  });
+  if (!identity.compatible) {
+    throw new RunningDaemonCompatibilityError(
+      formatRunningDaemonRefusal({ baseUrl, port, reason: identity.reason }),
+      { port },
+    );
   }
 }
 
