@@ -5,7 +5,7 @@
 
 #![allow(clippy::unwrap_used)]
 
-use nexus_local_db::{read_versions, seed_versions, DB_SCHEMA_VERSION};
+use nexus_local_db::{read_versions, DB_SCHEMA_VERSION};
 use sqlx::migrate::{Migration, Migrator};
 use sqlx::SqlitePool;
 
@@ -110,18 +110,24 @@ async fn seed_v21_fixture(pool: &SqlitePool) {
 
 #[tokio::test]
 async fn binding_revision_migration_upgrades_populated_v21_db() {
-    let (pool, _dir) = fresh_pool().await;
-    run_migrator(&pool, pre_binding_revision_migrator()).await;
-    seed_v21_fixture(&pool).await;
+    let (pre_pool, dir) = fresh_pool().await;
+    run_migrator(&pre_pool, pre_binding_revision_migrator()).await;
+    seed_v21_fixture(&pre_pool).await;
 
     let pre_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM actor_world_bindings")
-        .fetch_one(&pool)
+        .fetch_one(&pre_pool)
         .await
         .unwrap();
     assert_eq!(pre_count, 1);
 
-    nexus_local_db::run_migrations(&pool).await.unwrap();
-    seed_versions(&pool).await.unwrap();
+    // The pre-revision fixture was built by a raw pool (a pre-protocol
+    // writer). Applying the remaining migrations through the protocol-admitted
+    // factory is what a real upgrade does; the raw pool itself must not write
+    // guarded tables afterwards (asserted in `writer_protocol.rs`).
+    drop(pre_pool);
+    let pool = nexus_local_db::init_pool(&dir.path().join("test.db"))
+        .await
+        .unwrap();
 
     let row: (String, String, String, String, Option<String>, i64) = sqlx::query_as(
         "SELECT binding_id, character_id, world_id, status, world_sheet_entry_id, revision \

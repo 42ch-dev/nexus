@@ -20,6 +20,7 @@ uuid = { workspace = true }
 blake3 = { workspace = true }
 tracing = { workspace = true }
 nexus-contracts = { path = "../nexus-contracts" }
+nexus-storage-guard = { path = "../nexus-storage-guard" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-narrative = { path = "../nexus-narrative" }
 nexus-knowledge = { path = "../nexus-knowledge" }

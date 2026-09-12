@@ -84,6 +84,10 @@ pub enum LocalDbError {
     ActorNotFound { resource: &'static str, id: String },
     /// Stable actor-contract product conflict (HTTP 409 at the Daemon).
     ActorContractConflict { code: ActorContractConflict },
+    /// Writer / engine lock or epoch could not be acquired within the bounded window.
+    OwnerBusy { resource: String },
+    /// Writer registration or protocol epoch rejected the connection.
+    WriterFenced { reason: String },
     /// Malformed durable workspace commit intent row.
     CorruptIntent {
         revision: String,
@@ -352,6 +356,12 @@ impl fmt::Display for LocalDbError {
             }
             Self::ActorContractConflict { code } => {
                 write!(f, "{}", code.message())
+            }
+            Self::OwnerBusy { resource } => {
+                write!(f, "workspace writer busy: {resource}")
+            }
+            Self::WriterFenced { reason } => {
+                write!(f, "workspace writer fenced: {reason}")
             }
             Self::CorruptIntent {
                 revision,

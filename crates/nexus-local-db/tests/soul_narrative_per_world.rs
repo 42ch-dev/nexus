@@ -8,13 +8,20 @@
 
 #![allow(clippy::unwrap_used)]
 
-use nexus_local_db::{memory_fragment, open_pool, run_migrations, soul_narrative_fragment_stats};
+use nexus_local_db::{memory_fragment, init_pool, soul_narrative_fragment_stats};
 
 /// Create the pre-V1.81 `memory_soul_narratives` table (as created by migration
 /// 20260701) and seed one Creator-level narrative row. Running the full
 /// migration chain from this state exercises the 20260702 stats-cache add,
 /// the 20260703 nullable-narrative recreation, and the 20260704 composite-key
 /// recreation, proving the V1.81 row survives all of them.
+async fn seed_v181_schema_raw(db_path: &std::path::Path) {
+    let url = format!("sqlite://{}?mode=rwc", db_path.display());
+    let pool = sqlx::SqlitePool::connect(&url).await.unwrap();
+    seed_v181_schema(&pool).await;
+    pool.close().await;
+}
+
 async fn seed_v181_schema(pool: &sqlx::SqlitePool) {
     // SAFETY: test-only schema setup for migration survival verification.
     sqlx::query(
@@ -54,10 +61,11 @@ async fn seed_v181_schema(pool: &sqlx::SqlitePool) {
 async fn v181_creator_narrative_survives_as_null_world_id() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
-    let pool = open_pool(&db_path).await.unwrap();
-
-    seed_v181_schema(&pool).await;
-    run_migrations(&pool).await.unwrap();
+    // A pre-V1.81 binary had no writer protocol, so the legacy schema is built
+    // by a raw pool; the upgrade itself then runs through the production
+    // admitted factory (which is what a real upgrade does).
+    seed_v181_schema_raw(&db_path).await;
+    let pool = init_pool(&db_path).await.unwrap();
 
     // The V1.81 row should now live at (creator_id, world_id=NULL).
     // SAFETY: test-only direct query.
@@ -80,10 +88,11 @@ async fn v181_creator_narrative_survives_as_null_world_id() {
 async fn partial_unique_index_blocks_duplicate_creator_level_row() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
-    let pool = open_pool(&db_path).await.unwrap();
-
-    seed_v181_schema(&pool).await;
-    run_migrations(&pool).await.unwrap();
+    // A pre-V1.81 binary had no writer protocol, so the legacy schema is built
+    // by a raw pool; the upgrade itself then runs through the production
+    // admitted factory (which is what a real upgrade does).
+    seed_v181_schema_raw(&db_path).await;
+    let pool = init_pool(&db_path).await.unwrap();
 
     // A second NULL-world_id row for the same creator must fail.
     let result = sqlx::query(
@@ -154,8 +163,7 @@ async fn insert_fragment(
 async fn per_world_stats_are_distinct_from_creator_whole() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
-    let pool = open_pool(&db_path).await.unwrap();
-    run_migrations(&pool).await.unwrap();
+    let pool = init_pool(&db_path).await.unwrap();
 
     let creator_id = "ctr_world_stats";
     let world_a = "wld_a";
