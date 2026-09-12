@@ -625,10 +625,11 @@ mod tests {
         );
         let mgr = state.session_manager().expect("session manager");
         // Scoped to THIS session: sibling tests share the fixture workspace DB.
-        let committed: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM workspace_commit_intents WHERE session_id = ? AND state = 'committed'",
+        let committed: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM workspace_commit_intents \
+             WHERE session_id = ? AND state = 'committed'",
+            session_for_count
         )
-        .bind(&session_for_count)
         .fetch_one(mgr.pool().as_ref())
         .await
         .expect("intent count");

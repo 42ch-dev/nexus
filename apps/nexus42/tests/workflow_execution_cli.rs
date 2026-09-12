@@ -3699,9 +3699,10 @@ async fn settlement_completed_inspect_agrees() {
     );
 
     // Session inspect agrees.
+    let session_id = session_id_for_request(&sid);
     let resp = reqwest::Client::new()
         .get(format!(
-            "{}/v1/daemon/orchestration/sessions/{sid}",
+            "{}/v1/daemon/orchestration/sessions/{session_id}",
             daemon.http_url
         ))
         .send()
@@ -4329,18 +4330,41 @@ fn host_event_kind(data: &Value) -> Option<String> {
         .and_then(|obj| obj.keys().next().map(std::string::ToString::to_string))
 }
 
+/// Shape-validate a session id read from a DB row before it is transmitted.
+///
+/// The daemon's own handlers parse session ids as UUIDs (`parse_session_id`);
+/// mirroring that here means the value placed into the request URL is a parsed
+/// UUID rendered from its own components, never the raw stored string.
+fn session_id_for_request(stored: &str) -> uuid::Uuid {
+    uuid::Uuid::parse_str(stored).expect("stored session id must be a UUID")
+}
+
+/// Shape-validate an SSE resume cursor (`<epoch-uuid>:<sequence>`) before it is
+/// sent as a request header.
+fn resume_cursor_for_request(cursor: &str) -> String {
+    let (epoch, sequence) = cursor
+        .split_once(':')
+        .expect("resume cursor must be '<epoch>:<sequence>'");
+    let epoch = uuid::Uuid::parse_str(epoch).expect("cursor epoch must be a UUID");
+    let sequence: u64 = sequence
+        .parse()
+        .expect("cursor sequence must be an integer");
+    format!("{epoch}:{sequence}")
+}
+
 async fn fetch_session_events(
     daemon: &LiveDaemon,
     sid: &str,
     last_event_id: Option<&str>,
 ) -> (reqwest::StatusCode, String) {
+    let session_id = session_id_for_request(sid);
     let client = reqwest::Client::new();
     let mut req = client.get(format!(
-        "{}/v1/daemon/orchestration/sessions/{}/events",
-        daemon.http_url, sid
+        "{}/v1/daemon/orchestration/sessions/{session_id}/events",
+        daemon.http_url
     ));
     if let Some(cursor) = last_event_id {
-        req = req.header("Last-Event-ID", cursor);
+        req = req.header("Last-Event-ID", resume_cursor_for_request(cursor));
     }
     let resp = req.send().await.expect("events");
     (resp.status(), resp.text().await.expect("events body"))
@@ -4397,10 +4421,11 @@ fn assert_host_lifecycle_before_terminal(frames: &[SseFrameParsed], terminal_sta
 }
 
 async fn fetch_session_inspect(daemon: &LiveDaemon, sid: &str) -> Value {
+    let session_id = session_id_for_request(sid);
     reqwest::Client::new()
         .get(format!(
-            "{}/v1/daemon/orchestration/sessions/{}",
-            daemon.http_url, sid
+            "{}/v1/daemon/orchestration/sessions/{session_id}",
+            daemon.http_url
         ))
         .send()
         .await
@@ -4501,10 +4526,11 @@ async fn p4_cancel_inspect_events_db_journey() {
     assert_eq!(inspect["session"]["status"].as_str(), Some("cancelled"));
     assert_eq!(db_status, "cancelled");
     assert_eq!(db_state["cancel_requested"].as_bool(), Some(true));
+    let session_id = session_id_for_request(&sid);
     let events = reqwest::Client::new()
         .get(format!(
-            "{}/v1/daemon/orchestration/sessions/{}/events",
-            daemon.http_url, sid
+            "{}/v1/daemon/orchestration/sessions/{session_id}/events",
+            daemon.http_url
         ))
         .send()
         .await
@@ -4557,10 +4583,11 @@ async fn p4_late_subscribe_replays_terminal_run_state() {
     assert_eq!(status, reqwest::StatusCode::OK, "{body}");
     let (run_status, _) = wait_for_run_status(&daemon, &sid, "completed", 15).await;
     assert_eq!(run_status, "completed");
+    let session_id = session_id_for_request(&sid);
     let events = reqwest::Client::new()
         .get(format!(
-            "{}/v1/daemon/orchestration/sessions/{}/events",
-            daemon.http_url, sid
+            "{}/v1/daemon/orchestration/sessions/{session_id}/events",
+            daemon.http_url
         ))
         .send()
         .await

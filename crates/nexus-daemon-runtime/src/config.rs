@@ -113,6 +113,19 @@ pub fn resolve_state_db_path(user_home: &Path, nexus_root: &Path) -> anyhow::Res
 /// agent-host probe owner) share one read/validation path with the handlers.
 #[must_use]
 pub fn read_active_creator_id(nexus_home: &Path) -> Option<String> {
+    // `nexus_home` is caller/config-derived, so normalize before it is used to
+    // build a path: an absolute, `..`-free home is the only shape whose join
+    // cannot escape the intended home directory. Every real caller passes the
+    // resolved home from the layout helpers, so valid inputs are unaffected;
+    // a malformed home now reads as "no active creator" instead of producing a
+    // path outside the home.
+    if !nexus_home.is_absolute()
+        || nexus_home
+            .components()
+            .any(|component| component == std::path::Component::ParentDir)
+    {
+        return None;
+    }
     let config_path = nexus_home.join("config.toml");
     let content = std::fs::read_to_string(&config_path).ok()?;
     let config: toml::Value = toml::from_str(&content).ok()?;
