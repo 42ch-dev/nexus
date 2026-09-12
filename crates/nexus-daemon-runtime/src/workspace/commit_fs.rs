@@ -40,27 +40,10 @@ pub const MAX_CHANGES: usize = 128;
 /// Owner-read/write for newly created workspace files.
 pub const CREATE_FILE_MODE: u32 = 0o600;
 
-/// Test-only hook fired immediately after a delete captures the target name
-/// and before the delete is finalized.
-///
-/// Lets a test inject an external writer's re-create DETERMINISTICALLY into
-/// the capture/finalize window — no sleeps, no timing assumptions.
-static TEST_AFTER_DELETE_CAPTURE: std::sync::Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>> =
-    std::sync::Mutex::new(None);
-
-/// Install (or clear) the after-delete-capture hook.
-pub fn set_test_after_delete_capture_hook(hook: Option<std::sync::Arc<dyn Fn() + Send + Sync>>) {
-    *TEST_AFTER_DELETE_CAPTURE.lock().expect("hook lock") = hook;
-}
-
+/// Fire the gated after-delete-capture seam (no-op in production).
 fn run_after_delete_capture_hook() {
-    let hook = TEST_AFTER_DELETE_CAPTURE
-        .lock()
-        .expect("hook lock")
-        .clone();
-    if let Some(hook) = hook {
-        hook();
-    }
+    #[cfg(any(test, feature = "test-hooks"))]
+    super::test_hooks::run_after_delete_capture_hook();
 }
 
 /// Name holding the bytes displaced by a mutation, derived from the stage name.
@@ -338,7 +321,7 @@ impl ScopeMutation {
 /// Split a validated relative path into its components.
 ///
 /// Rejects absolute paths, `..`, `.`, path prefixes, and empty segments.
-fn split_relative(rel_path: &str) -> io::Result<Vec<String>> {
+pub(crate) fn split_relative(rel_path: &str) -> io::Result<Vec<String>> {
     let path = Path::new(rel_path);
     let mut out = Vec::new();
     for comp in path.components() {

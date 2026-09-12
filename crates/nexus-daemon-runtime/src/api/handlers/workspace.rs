@@ -3,7 +3,7 @@
 //! Workspace handlers
 
 use crate::api::errors::NexusApiError;
-use crate::workspace::session::SessionError;
+use crate::workspace::session::{SessionError, WorkspaceSessionManager};
 use crate::workspace::WorkspaceState;
 use axum::extract::State;
 use axum::Json;
@@ -266,17 +266,24 @@ pub async fn commit_workspace(
         .ok_or(NexusApiError::Uninitialized)?;
     let session_id = crate::workspace::session::SessionId(req.session_id.clone());
 
-    // Get workspace root for path resolution
-    let Some(workspace_root) = state.workspace_path() else {
+    // The workspace must be initialized; the owner resolves the root itself
+    // from the session row, so only presence is asserted here.
+    if state.workspace_path().is_none() {
         return Err(NexusApiError::Uninitialized);
-    };
+    }
 
     // V1.58 P0 T5 (R-V156P0-M005): validate + consume in one atomic step.
     // The previous two-call sequence (validate_changes_manifest then
-    // consume_session) left a TOCTOU window; `commit_session` closes it by
+    // consume_session) left a TOCTOU window; the durable commit closes it by
     // binding the two into a single transaction-guarded operation.
-    match session_mgr
-        .commit_session_durable(&session_id, &req.changes, &workspace_root)
+    //
+    // v1.188 P3: the PUBLIC request path uses the retained-owner entry point.
+    // The commit runs on a separately spawned owner that holds the workspace
+    // authority; if this request future is dropped (client disconnect, server
+    // shutdown), the already-admitted commit still runs to a durable
+    // conclusion instead of being abandoned mid-apply. The response is still
+    // the owner's real outcome.
+    match commit_workspace_owned(session_mgr, session_id.clone(), req.changes.clone())
         .await
     {
         Ok(outcome) => {
@@ -310,6 +317,18 @@ pub async fn commit_workspace(
         }
         Err(e) => Err(map_session_error(&session_id, e)),
     }
+}
+
+/// Run a durable commit on the retained owner and await its outcome.
+///
+/// The owner outlives this future, so request cancellation cannot abandon an
+/// admitted commit.
+async fn commit_workspace_owned(
+    session_mgr: std::sync::Arc<WorkspaceSessionManager>,
+    session_id: crate::workspace::session::SessionId,
+    changes: Vec<nexus_contracts::local::orchestration::WorkspaceChangeEntry>,
+) -> Result<crate::workspace::session_commit::CommitOutcome, SessionError> {
+    WorkspaceSessionManager::commit_session_durable_owned(session_mgr, session_id, changes).await
 }
 
 /// Map a [`SessionError`] to the appropriate [`NexusApiError`] variant.
@@ -537,6 +556,90 @@ mod tests {
     }
 
     // ── Commit conflict rejection tests ───────────────────────────────
+
+    /// v1.188 P3: an aborted HTTP commit request must not abandon the commit.
+    ///
+    /// The handler awaits the retained owner, so cancelling the request future
+    /// (client disconnect) leaves the admitted commit running to a durable
+    /// conclusion.
+    #[tokio::test]
+    async fn aborted_request_completes_commit_through_owner() {
+        let (_tmp, state) = make_state().await;
+        ensure_scope_dir();
+        // The commit scope is a fixed fixture path shared with sibling tests
+        // and with previous runs, so clear this test's target before opening:
+        // a stale file would make the `create` an OCC conflict.
+        let _ = std::fs::remove_file(committed_file("aborted.txt"));
+        let open_result = open_workspace(
+            AxumState(state.clone()),
+            Json(WorkspaceOpenRequest {
+                path: COMMIT_SCOPE.to_string(),
+            }),
+        )
+        .await
+        .expect("open_workspace should succeed");
+        let session_id = open_result.session_id.clone();
+
+        // Park the retained owner at its admission boundary so the abort lands
+        // AFTER the commit was admitted — the worst case for abandonment.
+        let gate = std::sync::Arc::new(
+            crate::workspace::test_hooks::OwnerGate::for_session(session_id.clone()),
+        );
+        crate::workspace::test_hooks::set_owner_gate(Some(std::sync::Arc::clone(&gate)));
+
+        let state2 = state.clone();
+        let session_for_count = session_id.clone();
+        let request = tokio::spawn(async move {
+            commit_workspace(
+                AxumState(state2),
+                Json(WorkspaceCommitRequest {
+                    session_id,
+                    changes: vec![create_entry("aborted.txt", b"survives-abort")],
+                }),
+            )
+            .await
+        });
+
+        // Owner admitted -> simulate the client going away. Bounded so a
+        // pre-admission failure surfaces the real error instead of hanging.
+        if tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            gate.admitted.notified(),
+        )
+        .await
+        .is_err()
+        {
+            crate::workspace::test_hooks::set_owner_gate(None);
+            let outcome = request.await.expect("join");
+            panic!("owner never reached admission; handler returned: {outcome:?}");
+        }
+        request.abort();
+        // Release the owner; it settles on its own.
+        gate.proceed.notify_one();
+        tokio::time::timeout(std::time::Duration::from_secs(30), gate.settled.notified())
+            .await
+            .expect("owner must settle after cancellation");
+        crate::workspace::test_hooks::set_owner_gate(None);
+
+        // The commit reached the durable committed transition and the bytes are
+        // on disk, despite the aborted request.
+        let written = committed_file("aborted.txt");
+        assert_eq!(
+            std::fs::read(&written).expect("committed file after abort"),
+            b"survives-abort"
+        );
+        let mgr = state.session_manager().expect("session manager");
+        // Scoped to THIS session: sibling tests share the fixture workspace DB.
+        let committed: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM workspace_commit_intents WHERE session_id = ? AND state = 'committed'",
+        )
+        .bind(&session_for_count)
+        .fetch_one(mgr.pool().as_ref())
+        .await
+        .expect("intent count");
+        assert_eq!(committed, 1);
+        let _ = std::fs::remove_file(&written);
+    }
 
     #[tokio::test]
     async fn commit_rejects_stale_session() {

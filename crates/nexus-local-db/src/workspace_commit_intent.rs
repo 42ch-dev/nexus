@@ -326,6 +326,23 @@ pub async fn latest_committed_intent_for_root(
     row.map(IntentRowRaw::try_into_row).transpose()
 }
 
+/// Rows for post-settle artifact cleanup, parsed leniently by the caller.
+///
+/// Committed and rolled-back intents are already durable, so a row whose
+/// metadata cannot be parsed must never fail startup: the caller skips what it
+/// cannot read.
+pub async fn list_settled_intents_for_cleanup(
+    pool: &SqlitePool,
+) -> Result<Vec<(String, String, String)>, LocalDbError> {
+    let rows: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT session_id, workspace_root, entries_json FROM workspace_commit_intents \
+         WHERE state IN ('committed', 'rolled_back')",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
 async fn mark_intent_recovery_conflict(
     pool: &SqlitePool,
     revision: &str,

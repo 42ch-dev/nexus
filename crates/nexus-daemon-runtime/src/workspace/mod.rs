@@ -18,6 +18,9 @@ pub mod scope;
 pub mod session;
 pub mod session_commit;
 pub mod state_provider;
+/// Test-only seams — absent from production builds.
+#[cfg(any(test, feature = "test-hooks"))]
+pub mod test_hooks;
 
 use crate::api::errors::NexusApiError;
 use crate::db::pool::{DbPool, PoolConfig};

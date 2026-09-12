@@ -1,7 +1,7 @@
 //! Recoverable multi-file workspace commit (v1.188 P3 L2).
 
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use nexus_contracts::local::orchestration::{WorkspaceChangeEntry, WorkspaceChangeOp};
 use nexus_local_db as db;
@@ -19,62 +19,40 @@ use super::session::{
     WorkspaceSessionManager,
 };
 
-/// Test-only crash barrier labels (integration tests simulate interruption).
-static TEST_CRASH_POINT: Mutex<Option<&'static str>> = Mutex::new(None);
-
-/// Set the next commit crash point (`None` disables simulation).
-pub fn set_test_crash_point(point: Option<&'static str>) {
-    *TEST_CRASH_POINT.lock().expect("crash point lock") = point;
-}
-
+/// Fail the commit when a test has armed this crash point.
+///
+/// Compiled to a no-op in production: the crash points live in the gated
+/// `workspace::test_hooks` seam.
 fn test_crash_if(point: &str) -> Result<(), SessionError> {
-    if *TEST_CRASH_POINT.lock().expect("crash point lock") == Some(point) {
+    #[cfg(any(test, feature = "test-hooks"))]
+    if super::test_hooks::crash_point_is(point) {
         return Err(SessionError::Internal(format!("test_crash:{point}")));
     }
+    let _ = point;
     Ok(())
 }
 
-/// Test-only rendezvous at the commit owner's admission boundary (v1.188 P3).
-///
-/// Lets a test prove caller-cancellation safety DETERMINISTICALLY: the owner
-/// signals `admitted` once it holds the claim, the test cancels the awaiting
-/// caller, then releases `proceed` and awaits `settled`. No sleeps, no races.
-#[derive(Debug, Default)]
-pub struct OwnerGate {
-    /// Signalled when the owner has been admitted (claim held).
-    pub admitted: Arc<tokio::sync::Notify>,
-    /// The owner waits for this before continuing past admission.
-    pub proceed: Arc<tokio::sync::Notify>,
-    /// Signalled after the owner task settles.
-    pub settled: Arc<tokio::sync::Notify>,
+/// Rendezvous at the owner's admission boundary when a test gate is armed.
+async fn test_owner_gate_admitted(session_id: &str) {
+    #[cfg(any(test, feature = "test-hooks"))]
+    super::test_hooks::owner_gate_admitted(session_id).await;
+    let _ = session_id;
 }
 
-static TEST_OWNER_GATE: Mutex<Option<Arc<OwnerGate>>> = Mutex::new(None);
-
-/// Install (or clear) the test owner gate.
-pub fn set_test_owner_gate(gate: Option<Arc<OwnerGate>>) {
-    *TEST_OWNER_GATE.lock().expect("owner gate lock") = gate;
+/// Signal that the retained owner task has settled, when a gate is armed.
+fn test_owner_gate_settled(session_id: &str) {
+    #[cfg(any(test, feature = "test-hooks"))]
+    super::test_hooks::owner_gate_settled(session_id);
+    let _ = session_id;
 }
 
-fn current_owner_gate() -> Option<Arc<OwnerGate>> {
-    TEST_OWNER_GATE
-        .lock()
-        .expect("owner gate lock")
-        .as_ref()
-        .map(Arc::clone)
-}
+#[cfg(any(test, feature = "test-hooks"))]
+use super::test_hooks::clear_crash_point;
 
-async fn test_owner_gate_admitted() {
-    if let Some(gate) = current_owner_gate() {
-        gate.admitted.notify_one();
-        gate.proceed.notified().await;
-    }
-}
-
-fn test_owner_gate_settled() {
-    if let Some(gate) = current_owner_gate() {
-        gate.settled.notify_one();
-    }
+/// Clear an inherited crash point at owner spawn.
+fn clear_inherited_crash_point() {
+    #[cfg(any(test, feature = "test-hooks"))]
+    clear_crash_point();
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -308,6 +286,10 @@ async fn rollback_intent_locked(
 
     test_crash_if("during_rollback")?;
 
+    // Restore every preimage FIRST, and clean nothing up yet: while the intent
+    // is still `rolling_back` the stage/backup artifacts are the evidence a
+    // replayed rollback needs, and removing a restored delete target before the
+    // rollback is durable is exactly the corruption this ordering prevents.
     for entry in intent.entries.iter().rev() {
         enforce_path_boundary(&scope_dir.join(&entry.path), &canonical_root)?;
         let restore = scope.restore_preimage(
@@ -328,13 +310,11 @@ async fn rollback_intent_locked(
             .await;
             return Err(SessionError::Io(e.to_string()));
         }
-        scope.cleanup_entry(
-            &entry.path,
-            &entry.stage_basename,
-            entry.backup_basename.as_deref(),
-        );
     }
 
+    test_crash_if("after_rollback_restore_before_finalize")?;
+
+    // Durable rolled-back transition BEFORE any artifact removal.
     db::finalize_rolled_back_intent(
         mgr.pool().as_ref(),
         &intent.revision,
@@ -342,7 +322,63 @@ async fn rollback_intent_locked(
     )
     .await
     .map_err(|e| SessionError::Database(e.to_string()))?;
+
+    // Settled: removal is best-effort. A crash here leaves dead material that
+    // the startup sweep reaps WITHOUT replaying the rollback, so recovery can
+    // never delete a live restored file.
+    for entry in &intent.entries {
+        scope.cleanup_entry(
+            &entry.path,
+            &entry.stage_basename,
+            entry.backup_basename.as_deref(),
+        );
+    }
     Ok(())
+}
+
+/// Canonicalize a manifest into fixed, deterministic order (v1.188 P3).
+///
+/// Each path is lexically normalized (`.` components dropped, separators
+/// collapsed) and the entries are SORTED BY NORMALIZED PATH. Both the request
+/// digest and the mutation order are derived from this canonical form, so:
+///
+/// * a retry that merely REORDERS the same entries produces an identical
+///   digest and is served as an idempotent replay of the original revision;
+/// * the lock/mutation order is fixed, never caller-dependent.
+///
+/// Duplicates and prefix-overlaps are rejected AFTER normalization (`a.txt`
+/// and `./a.txt` are the same target).
+pub fn normalize_changes(
+    changes: &[WorkspaceChangeEntry],
+) -> Result<Vec<WorkspaceChangeEntry>, SessionError> {
+    let mut normalized = Vec::with_capacity(changes.len());
+    for change in changes {
+        let components = super::commit_fs::split_relative(&change.path)
+            .map_err(|e| SessionError::ManifestInvalid(e.to_string()))?;
+        let mut cloned = change.clone();
+        cloned.path = components.join("/");
+        normalized.push(cloned);
+    }
+
+    normalized.sort_by(|a, b| a.path.cmp(&b.path));
+
+    for window in normalized.windows(2) {
+        let (previous, current) = (&window[0], &window[1]);
+        if previous.path == current.path {
+            return Err(SessionError::ManifestInvalid(format!(
+                "duplicate path after normalization: {}",
+                current.path
+            )));
+        }
+        if current.path.starts_with(&format!("{}/", previous.path)) {
+            return Err(SessionError::ManifestInvalid(format!(
+                "overlapping paths: {} and {}",
+                previous.path, current.path
+            )));
+        }
+    }
+
+    Ok(normalized)
 }
 
 pub fn validate_manifest(changes: &[WorkspaceChangeEntry]) -> Result<(), SessionError> {
@@ -481,6 +517,11 @@ pub async fn commit_recoverable(
         .map_err(|e| SessionError::Database(e.to_string()))?
         .ok_or_else(|| SessionError::NotFound(session_id.clone()))?;
 
+    // Canonical form first: the digest and the mutation order below are both
+    // derived from it, so a reordered-equivalent retry is identical.
+    let changes = normalize_changes(changes)?;
+    let changes = changes.as_slice();
+
     validate_manifest(changes)?;
     let digest = request_digest(&session_id.to_string(), changes);
 
@@ -563,7 +604,7 @@ pub async fn commit_recoverable(
         db::ClaimSessionResult::Expired => return Err(SessionError::Expired(session_id.clone())),
     }
 
-    test_owner_gate_admitted().await;
+    test_owner_gate_admitted(&session_id.to_string()).await;
 
     test_crash_if("after_intent")?;
 
@@ -757,8 +798,9 @@ pub async fn commit_recoverable(
 
     test_crash_if("before_finalize")?;
 
-    cleanup_staged(&scope, &staged);
-
+    // Durable committed transition FIRST. Stage/backup artifacts are the
+    // recovery evidence for an unsettled intent, so none of them may be
+    // removed while the intent is still `applying`.
     let finalized = db::finalize_committed_intent(
         mgr.pool().as_ref(),
         &revision,
@@ -769,6 +811,13 @@ pub async fn commit_recoverable(
     if !finalized {
         return Err(SessionError::AlreadyCommitted(session_id.clone()));
     }
+
+    test_crash_if("after_finalize_before_cleanup")?;
+
+    // The commit is durable; artifact removal is now best-effort. A crash here
+    // leaves dead material behind, which the startup sweep reaps without
+    // reapplying anything and without raising a conflict.
+    cleanup_staged(&scope, &staged);
 
     tracing::info!(
         session_id = %session_id,
@@ -800,15 +849,64 @@ pub async fn commit_recoverable_owned(
     let mgr2 = Arc::clone(&mgr);
     let sid = session_id.clone();
     let owner = tokio::spawn(async move {
-        set_test_crash_point(None);
+        clear_inherited_crash_point();
         let result = commit_recoverable(&mgr2, &sid, &changes).await;
-        test_owner_gate_settled();
+        test_owner_gate_settled(&sid.to_string());
         let _ = tx.send(result);
     });
     mgr.register_commit_owner(owner).await;
     match rx.await {
         Ok(result) => result,
         Err(_) => Err(SessionError::Internal("commit owner channel closed".into())),
+    }
+}
+
+/// Reap stage/backup artifacts left behind by ALREADY-SETTLED intents.
+///
+/// A crash between a durable settled transition (`committed` or `rolled_back`)
+/// and the best-effort artifact cleanup leaves dead material on disk. This
+/// sweep only removes that material: it never reapplies a change and never
+/// replays a rollback (so it can never overwrite or delete bytes an external
+/// writer produced afterwards) and never raises a conflict. Unreadable or
+/// unresolvable rows are skipped.
+async fn cleanup_settled_artifacts(mgr: &WorkspaceSessionManager) {
+    let rows = match db::list_settled_intents_for_cleanup(mgr.pool().as_ref()).await {
+        Ok(rows) => rows,
+        Err(err) => {
+            tracing::warn!(error = %err, "committed-artifact sweep: listing failed");
+            return;
+        }
+    };
+
+    for (session_id, workspace_root, entries_json) in rows {
+        let entries: Vec<db::IntentEntryJson> = match serde_json::from_str(&entries_json) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+        if entries.is_empty() {
+            continue;
+        }
+        let Some(row) = db::get_session(mgr.pool().as_ref(), &session_id)
+            .await
+            .ok()
+            .flatten()
+        else {
+            continue;
+        };
+        let Ok(canonical_root) = canonicalize_workspace_root(Path::new(&workspace_root)).await
+        else {
+            continue;
+        };
+        let Ok(scope) = ScopeMutation::open(&canonical_root, &row.relative_path) else {
+            continue;
+        };
+        for entry in &entries {
+            scope.cleanup_entry(
+                &entry.path,
+                &entry.stage_basename,
+                entry.backup_basename.as_deref(),
+            );
+        }
     }
 }
 
@@ -829,5 +927,9 @@ pub async fn startup_recovery_all(mgr: &WorkspaceSessionManager) -> Result<(), S
             recover_unsettled_locked(mgr, &intent.workspace_root).await?;
         }
     }
+
+    // Unsettled work is resolved above; only now reap material belonging to
+    // commits that already reached the durable committed transition.
+    cleanup_settled_artifacts(mgr).await;
     Ok(())
 }

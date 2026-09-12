@@ -3954,6 +3954,7 @@ dependencies = [
  "nexus-contracts",
  "nexus-creator",
  "nexus-creator-memory",
+ "nexus-daemon-runtime",
  "nexus-home-layout",
  "nexus-knowledge",
  "nexus-local-db",

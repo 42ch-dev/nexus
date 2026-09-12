@@ -130,6 +130,9 @@ rmcp = { version = "=3.2.0", default-features = false, features = ["server"], op
 spoke-operations = { workspace = true }
 
 [dev-dependencies]
+# Enable the gated `workspace::test_hooks` seam for this package's own tests
+# without exposing it in the production build.
+nexus-daemon-runtime = { path = ".", features = ["test-hooks"] }
 axum-test = "19.1"
 graph-flow = { version = "=0.8.0", default-features = false }
 nexus-orchestration = { path = "../nexus-orchestration" }
@@ -167,6 +170,8 @@ required-features = ["connect-client", "embedded-mcp"]
 
 [features]
 test-support = []
+# v1.188 P3: enables `workspace::test_hooks` (injected crash/race/owner seams).
+test-hooks = ["test-support"]
 # V1.174 P0 (AR-61): peer-tools client stack — WS `Transport` (T1),
 # accept loop + session manager (T2), manifest ingestion (T3), outbound
 # authz (T4), honesty lockstep tests (T5). Everything behind it compiles

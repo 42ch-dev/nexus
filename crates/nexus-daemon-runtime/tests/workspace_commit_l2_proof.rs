@@ -10,11 +10,9 @@ use nexus_daemon_runtime::workspace::executor::DaemonWorkspaceExecutor;
 use nexus_daemon_runtime::workspace::session::{
     ChangeEntry, ChangeOp, SessionError, SessionId, WorkspaceSessionManager,
 };
-use nexus_daemon_runtime::workspace::commit_fs::{
-    hash_bytes, set_test_after_delete_capture_hook,
-};
-use nexus_daemon_runtime::workspace::session_commit::{
-    set_test_crash_point, set_test_owner_gate, OwnerGate,
+use nexus_daemon_runtime::workspace::commit_fs::hash_bytes;
+use nexus_daemon_runtime::workspace::test_hooks::{
+    set_after_delete_capture_hook, set_crash_point, set_owner_gate, OwnerGate,
 };
 use nexus_local_db as db;
 use nexus_orchestration::capability::WorkspaceExecutor;
@@ -165,12 +163,12 @@ async fn simulated_crash_after_entries_then_startup_recovery() {
     let ws = tempfile::tempdir().unwrap();
     let root = ws.path().to_string_lossy().to_string();
     let session = mgr.open_session(&root, "", true).await.expect("open");
-    set_test_crash_point(Some("after_entries_persisted"));
+    set_crash_point(Some("after_entries_persisted"));
     let err = mgr
         .commit_session_durable(&session, &[create_change("crash.txt", b"payload")], &root)
         .await
         .unwrap_err();
-    set_test_crash_point(None);
+    set_crash_point(None);
     assert!(matches!(err, SessionError::Internal(_)));
     assert!(!ws.path().join("crash.txt").exists());
     mgr.startup_recovery().await.expect("recovery");
@@ -193,12 +191,12 @@ async fn simulated_crash_after_file_apply_then_recovery_completes() {
     let ws = tempfile::tempdir().unwrap();
     let root = ws.path().to_string_lossy().to_string();
     let session = mgr.open_session(&root, "", true).await.expect("open");
-    set_test_crash_point(Some("after_file_apply"));
+    set_crash_point(Some("after_file_apply"));
     let err = mgr
         .commit_session_durable(&session, &[create_change("applied.txt", b"payload")], &root)
         .await
         .unwrap_err();
-    set_test_crash_point(None);
+    set_crash_point(None);
     assert!(matches!(err, SessionError::Internal(_)));
     assert!(ws.path().join("applied.txt").exists());
     mgr.startup_recovery().await.expect("recovery");
@@ -286,8 +284,8 @@ async fn retained_owner_survives_caller_drop() {
     let session = mgr.open_session(&root, "", true).await.expect("open");
 
     // Deterministic rendezvous at the owner's admission boundary — no sleeps.
-    let gate = Arc::new(OwnerGate::default());
-    set_test_owner_gate(Some(Arc::clone(&gate)));
+    let gate = Arc::new(OwnerGate::for_session(session.to_string()));
+    set_owner_gate(Some(Arc::clone(&gate)));
 
     let mgr2 = Arc::clone(&mgr);
     let session_id = session.clone();
@@ -303,7 +301,7 @@ async fn retained_owner_survives_caller_drop() {
     gate.proceed.notify_one();
     // The retained owner settles on its own: no polling window.
     gate.settled.notified().await;
-    set_test_owner_gate(None);
+    set_owner_gate(None);
 
     assert_eq!(std::fs::read(ws.path().join("owner.txt")).unwrap(), b"owned");
     let state: String = sqlx::query_scalar(
@@ -353,12 +351,12 @@ async fn crash_after_intent_then_startup_recovery_rolls_back() {
     let root = ws.path().to_string_lossy().to_string();
     let session = mgr.open_session(&root, "", true).await.expect("open");
 
-    set_test_crash_point(Some("after_intent"));
+    set_crash_point(Some("after_intent"));
     let err = mgr
         .commit_session_durable(&session, &[create_change("intent.txt", b"never")], &root)
         .await
         .unwrap_err();
-    set_test_crash_point(None);
+    set_crash_point(None);
     assert!(matches!(err, SessionError::Internal(_)));
 
     // The admitted intent is durable and still `applying` — never dropped.
@@ -393,12 +391,12 @@ async fn crash_before_finalize_then_recovery_settles_committed() {
     let root = ws.path().to_string_lossy().to_string();
     let session = mgr.open_session(&root, "", true).await.expect("open");
 
-    set_test_crash_point(Some("before_finalize"));
+    set_crash_point(Some("before_finalize"));
     let err = mgr
         .commit_session_durable(&session, &[create_change("kept.txt", b"durable")], &root)
         .await
         .unwrap_err();
-    set_test_crash_point(None);
+    set_crash_point(None);
     assert!(matches!(err, SessionError::Internal(_)));
     // The postimage is already on disk; only the settle is missing.
     assert_eq!(
@@ -438,7 +436,7 @@ async fn crash_during_rollback_then_recovery_completes_rollback() {
     let session = mgr.open_session(&root, "", true).await.expect("open");
 
     // First change applies, then the commit dies: recovery must roll back.
-    set_test_crash_point(Some("after_file_apply"));
+    set_crash_point(Some("after_file_apply"));
     let err = mgr
         .commit_session_durable(
             &session,
@@ -450,14 +448,14 @@ async fn crash_during_rollback_then_recovery_completes_rollback() {
         )
         .await
         .unwrap_err();
-    set_test_crash_point(None);
+    set_crash_point(None);
     assert!(matches!(err, SessionError::Internal(_)));
     assert!(ws.path().join("f1.txt").exists());
 
     // Recovery reaches the rollback and is interrupted mid-way.
-    set_test_crash_point(Some("during_rollback"));
+    set_crash_point(Some("during_rollback"));
     let err = mgr.startup_recovery().await.unwrap_err();
-    set_test_crash_point(None);
+    set_crash_point(None);
     assert!(matches!(err, SessionError::Internal(_)));
     let state: String = sqlx::query_scalar(
         "SELECT state FROM workspace_commit_intents WHERE session_id = ? ORDER BY revision DESC LIMIT 1",
@@ -689,8 +687,8 @@ async fn external_writer_at_mutation_boundary_blocks_and_preserves_evidence() {
     let pre = hash_bytes(b"one");
 
     // Park the owner past validation, then let an external writer swap bytes.
-    let gate = Arc::new(OwnerGate::default());
-    set_test_owner_gate(Some(Arc::clone(&gate)));
+    let gate = Arc::new(OwnerGate::for_session(session.to_string()));
+    set_owner_gate(Some(Arc::clone(&gate)));
     let mgr2 = Arc::clone(&mgr);
     let session_id = session.clone();
     let changes = vec![modify_change("a.txt", &pre, b"two")];
@@ -702,7 +700,7 @@ async fn external_writer_at_mutation_boundary_blocks_and_preserves_evidence() {
     std::fs::write(ws.path().join("a.txt"), b"tampered").unwrap();
     gate.proceed.notify_one();
     let err = handle.await.unwrap().unwrap_err();
-    set_test_owner_gate(None);
+    set_owner_gate(None);
 
     assert!(
         matches!(err, SessionError::Internal(ref m) if m.contains("recovery evidence preserved")),
@@ -894,7 +892,7 @@ async fn external_writer_after_replace_is_detected_at_recovery() {
     let session = mgr.open_session(&root, "", true).await.expect("open");
 
     // Apply succeeds, then the commit dies before finalize.
-    set_test_crash_point(Some("after_file_apply"));
+    set_crash_point(Some("after_file_apply"));
     let err = mgr
         .commit_session_durable(
             &session,
@@ -903,7 +901,7 @@ async fn external_writer_after_replace_is_detected_at_recovery() {
         )
         .await
         .unwrap_err();
-    set_test_crash_point(None);
+    set_crash_point(None);
     assert!(matches!(err, SessionError::Internal(_)));
     assert_eq!(std::fs::read(ws.path().join("r.txt")).unwrap(), b"two");
 
@@ -942,7 +940,7 @@ async fn external_writer_after_delete_is_detected_at_recovery() {
     mgr.startup_recovery().await.expect("startup");
     let session = mgr.open_session(&root, "", true).await.expect("open");
 
-    set_test_crash_point(Some("after_file_apply"));
+    set_crash_point(Some("after_file_apply"));
     let err = mgr
         .commit_session_durable(
             &session,
@@ -956,7 +954,7 @@ async fn external_writer_after_delete_is_detected_at_recovery() {
         )
         .await
         .unwrap_err();
-    set_test_crash_point(None);
+    set_crash_point(None);
     assert!(matches!(err, SessionError::Internal(_)));
     assert!(
         !ws.path().join("d.txt").exists(),
@@ -1000,7 +998,7 @@ async fn delete_detects_target_recreated_after_capture() {
     // Deterministic injection EXACTLY in the capture/finalize window: the hook
     // fires after the delete captured the original and before it finalizes.
     let target = ws.path().join("d.txt");
-    set_test_after_delete_capture_hook(Some(Arc::new(move || {
+    set_after_delete_capture_hook(Some(Arc::new(move || {
         std::fs::write(&target, b"recreated-by-external-writer").expect("external write");
     })));
 
@@ -1017,7 +1015,7 @@ async fn delete_detects_target_recreated_after_capture() {
         )
         .await
         .unwrap_err();
-    set_test_after_delete_capture_hook(None);
+    set_after_delete_capture_hook(None);
 
     assert!(
         matches!(err, SessionError::Internal(_) | SessionError::Io(_)),
@@ -1060,4 +1058,272 @@ async fn delete_detects_target_recreated_after_capture() {
         .unwrap_err();
     assert!(matches!(err, SessionError::RecoveryConflict(_)));
     assert!(!ws.path().join("after.txt").exists());
+}
+
+#[tokio::test]
+#[serial]
+async fn reordered_equivalent_retry_replays_same_revision() {
+    let (pool, db_dir) = fresh_pool().await;
+    let mgr = recoverable_mgr(pool, &db_dir);
+    let ws = tempfile::tempdir().unwrap();
+    let root = ws.path().to_string_lossy().to_string();
+    mgr.startup_recovery().await.expect("startup");
+    let session = mgr.open_session(&root, "", true).await.expect("open");
+
+    let forward = vec![
+        create_change("a.txt", b"alpha"),
+        create_change("b.txt", b"beta"),
+        create_change("c.txt", b"gamma"),
+    ];
+    let first = mgr
+        .commit_session_durable(&session, &forward, &root)
+        .await
+        .expect("commit");
+
+    // Same entries, different order: must be an idempotent replay.
+    let reordered = vec![
+        create_change("c.txt", b"gamma"),
+        create_change("a.txt", b"alpha"),
+        create_change("b.txt", b"beta"),
+    ];
+    let retry = mgr
+        .commit_session_durable(&session, &reordered, &root)
+        .await
+        .expect("reordered retry must replay, not conflict");
+    assert_eq!(retry.revision, first.revision);
+    assert!(retry.committed);
+
+    // Exactly one revision, and the files hold the committed bytes.
+    let rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM workspace_commit_intents WHERE session_id = ? AND state = 'committed'",
+    )
+    .bind(session.to_string())
+    .fetch_one(mgr.pool().as_ref())
+    .await
+    .unwrap();
+    assert_eq!(rows, 1);
+    assert_eq!(std::fs::read(ws.path().join("a.txt")).unwrap(), b"alpha");
+    assert_eq!(std::fs::read(ws.path().join("c.txt")).unwrap(), b"gamma");
+}
+
+#[tokio::test]
+#[serial]
+async fn duplicate_after_normalization_rejected() {
+    let (pool, db_dir) = fresh_pool().await;
+    let mgr = recoverable_mgr(pool, &db_dir);
+    let ws = tempfile::tempdir().unwrap();
+    let root = ws.path().to_string_lossy().to_string();
+    let session = mgr.open_session(&root, "", true).await.expect("open");
+
+    // `x.txt` and `./x.txt` are the SAME target; a literal-string duplicate
+    // check would miss it.
+    let err = mgr
+        .commit_session_durable(
+            &session,
+            &[
+                create_change("x.txt", b"one"),
+                create_change("./x.txt", b"two"),
+            ],
+            &root,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, SessionError::ManifestInvalid(_)),
+        "normalized duplicates must be rejected, got {err:?}"
+    );
+    assert_eq!(
+        intent_row_count(mgr.pool().as_ref(), &session.to_string()).await,
+        0
+    );
+    assert!(!ws.path().join("x.txt").exists());
+}
+
+#[tokio::test]
+#[serial]
+async fn crash_after_commit_before_cleanup_recovery_reaps_without_reapply() {
+    let (pool, db_dir) = fresh_pool().await;
+    let mgr = recoverable_mgr(pool, &db_dir);
+    let ws = tempfile::tempdir().unwrap();
+    let root = ws.path().to_string_lossy().to_string();
+    std::fs::write(ws.path().join("m.txt"), b"before").unwrap();
+    mgr.startup_recovery().await.expect("startup");
+    let session = mgr.open_session(&root, "", true).await.expect("open");
+
+    // Crash in the window AFTER the durable committed transition and BEFORE
+    // the best-effort artifact cleanup.
+    set_crash_point(Some("after_finalize_before_cleanup"));
+    let err = mgr
+        .commit_session_durable(
+            &session,
+            &[modify_change("m.txt", &hash_bytes(b"before"), b"after")],
+            &root,
+        )
+        .await
+        .unwrap_err();
+    set_crash_point(None);
+    assert!(matches!(err, SessionError::Internal(_)));
+
+    // The commit IS durable, the modification applied, and the backup artifact
+    // is still on disk (cleanup never ran).
+    let revision: String = sqlx::query_scalar(
+        "SELECT revision FROM workspace_commit_intents WHERE session_id = ? ORDER BY revision DESC LIMIT 1",
+    )
+    .bind(session.to_string())
+    .fetch_one(mgr.pool().as_ref())
+    .await
+    .unwrap();
+    assert_eq!(
+        intent_state(mgr.pool().as_ref(), &revision).await,
+        "committed"
+    );
+    assert_eq!(std::fs::read(ws.path().join("m.txt")).unwrap(), b"after");
+    let artifacts = |dir: &std::path::Path| -> Vec<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with(".nexus-"))
+            .collect()
+    };
+    assert!(
+        !artifacts(ws.path()).is_empty(),
+        "the backup artifact must still exist before recovery"
+    );
+
+    // An external writer lands after the commit; the sweep must NOT reapply and
+    // must NOT touch these bytes.
+    std::fs::write(ws.path().join("m.txt"), b"writer-after-commit").unwrap();
+
+    mgr.startup_recovery().await.expect("recovery");
+
+    // No false conflict: the intent stays committed.
+    assert_eq!(
+        intent_state(mgr.pool().as_ref(), &revision).await,
+        "committed"
+    );
+    // Dead artifacts reaped.
+    assert!(
+        artifacts(ws.path()).is_empty(),
+        "recovery must reap committed-intent artifacts"
+    );
+    // No reapply, no overwrite.
+    assert_eq!(
+        std::fs::read(ws.path().join("m.txt")).unwrap(),
+        b"writer-after-commit",
+        "the sweep must never rewrite a committed file"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn crash_after_rollback_restore_before_finalize_recovery_preserves_restored_file() {
+    let (pool, db_dir) = fresh_pool().await;
+    let mgr = recoverable_mgr(pool, &db_dir);
+    let ws = tempfile::tempdir().unwrap();
+    let root = ws.path().to_string_lossy().to_string();
+    std::fs::write(ws.path().join("k.txt"), b"original").unwrap();
+    mgr.startup_recovery().await.expect("startup");
+    let session = mgr.open_session(&root, "", true).await.expect("open");
+
+    let doomed = vec![
+        ChangeEntry {
+            path: "k.txt".to_string(),
+            op: ChangeOp::Delete,
+            expected_hash: Some(hash_bytes(b"original")),
+            content_base64: None,
+        },
+        create_change("z.txt", b"applied-then-rolled-back"),
+    ];
+
+    // Die after the first change applied, so recovery rolls back.
+    set_crash_point(Some("after_file_apply"));
+    let err = mgr
+        .commit_session_durable(&session, &doomed, &root)
+        .await
+        .unwrap_err();
+    set_crash_point(None);
+    assert!(matches!(err, SessionError::Internal(_)));
+
+    // Recovery restores the preimages, then dies BEFORE the durable
+    // rolled_back transition and before any cleanup.
+    set_crash_point(Some("after_rollback_restore_before_finalize"));
+    let err = mgr.startup_recovery().await.unwrap_err();
+    set_crash_point(None);
+    assert!(matches!(err, SessionError::Internal(_)));
+
+    // The restored delete target is LIVE again — recovery must not remove it.
+    assert_eq!(
+        std::fs::read(ws.path().join("k.txt")).unwrap(),
+        b"original",
+        "the restore put the original bytes back"
+    );
+
+    // A full recovery pass must settle WITHOUT replaying the rollback.
+    mgr.startup_recovery().await.expect("recovery settles");
+    assert_eq!(
+        std::fs::read(ws.path().join("k.txt")).unwrap(),
+        b"original",
+        "recovery replay must never delete a live restored file"
+    );
+    assert!(!ws.path().join("z.txt").exists());
+
+    let state: String = sqlx::query_scalar(
+        "SELECT state FROM workspace_commit_intents WHERE session_id = ? ORDER BY revision DESC LIMIT 1",
+    )
+    .bind(session.to_string())
+    .fetch_one(mgr.pool().as_ref())
+    .await
+    .unwrap();
+    assert_eq!(state, "rolled_back");
+}
+
+#[tokio::test]
+#[serial]
+async fn alias_equivalent_paths_rejected_after_normalization() {
+    let (pool, db_dir) = fresh_pool().await;
+    let mgr = recoverable_mgr(pool, &db_dir);
+    let ws = tempfile::tempdir().unwrap();
+    let root = ws.path().to_string_lossy().to_string();
+    let session = mgr.open_session(&root, "", true).await.expect("open");
+
+    // `foo/bar` and `foo/./bar` are the SAME target; a literal-string check
+    // would let the alias through.
+    let err = mgr
+        .commit_session_durable(
+            &session,
+            &[
+                create_change("foo/bar", b"one"),
+                create_change("foo/./bar", b"two"),
+            ],
+            &root,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, SessionError::ManifestInvalid(_)),
+        "alias-equivalent duplicates must be rejected, got {err:?}"
+    );
+
+    // And an alias whose parent/child relationship is only visible after
+    // normalization is rejected as an overlap.
+    let err = mgr
+        .commit_session_durable(
+            &session,
+            &[
+                create_change("p", b"file"),
+                create_change("./p/q.txt", b"child"),
+            ],
+            &root,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, SessionError::ManifestInvalid(_)),
+        "alias-equivalent overlap must be rejected, got {err:?}"
+    );
+    assert_eq!(
+        intent_row_count(mgr.pool().as_ref(), &session.to_string()).await,
+        0
+    );
 }
