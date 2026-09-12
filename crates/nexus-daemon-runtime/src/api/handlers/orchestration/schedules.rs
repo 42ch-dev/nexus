@@ -937,6 +937,9 @@ async fn admit_new_schedule(
     {
         Ok(_sid) => Ok("running".to_string()),
         Err(e) => {
+            if matches!(e, crate::preset_run::RunControlError::RunEventCapacity(_)) {
+                return Err(NexusApiError::from(e));
+            }
             let msg = e.to_string();
             if msg.contains("not eligible") {
                 sqlx::query!(
@@ -1418,6 +1421,10 @@ pub async fn signal_schedule(
                 )
                 .await
                 .map_err(|e| {
+                    // QC2 F-004: typed capacity refusal (retryable), not 500.
+                    if matches!(e, crate::preset_run::RunControlError::RunEventCapacity(_)) {
+                        return NexusApiError::from(e);
+                    }
                     let msg = e.to_string();
                     if msg.contains("not eligible")
                         || msg.contains("execution_policy")

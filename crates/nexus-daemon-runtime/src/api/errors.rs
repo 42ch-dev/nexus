@@ -1001,6 +1001,43 @@ mod tests {
         assert_eq!(body.error.message, "Session expired");
     }
     #[test]
+    fn run_control_errors_project_one_canonical_envelope() {
+        // QC2 F-002: both cancel surfaces share this projection — a durable
+        // wait conflict carries the A4 details, and a state conflict is the
+        // 409 conflict code (never a 500 derived from an error string).
+        let wait = NexusApiError::from(crate::preset_run::RunControlError::WaitConflict {
+            session_id: "s1".into(),
+            status: "waiting_for_input".into(),
+            current_wait_id: Some("w1".into()),
+        });
+        assert_eq!(wait.status_code(), StatusCode::CONFLICT);
+        assert_eq!(wait.error_code(), "workflow_wait_conflict");
+        let details = wait.error_details().expect("A4 details");
+        assert_eq!(details["session_id"], "s1");
+        assert_eq!(details["current_wait_id"], "w1");
+
+        let state = NexusApiError::from(crate::preset_run::RunControlError::StateConflict(
+            "s1".into(),
+            "revision moved".into(),
+        ));
+        assert_eq!(state.status_code(), StatusCode::CONFLICT);
+        assert_eq!(state.error_code(), "workflow_state_conflict");
+
+        // QC2 F-004: exhausting the per-run live-ring quota is a TYPED,
+        // retryable capacity refusal — never a 500.
+        let capacity = NexusApiError::from(crate::preset_run::RunControlError::RunEventCapacity(
+            "s1".into(),
+        ));
+        assert_eq!(capacity.status_code(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(capacity.error_code(), "service_unavailable");
+        assert!(
+            capacity.to_string().contains("s1")
+                && capacity.to_string().contains("capacity exhausted"),
+            "the refusal must name the run and the exhausted capacity, got {capacity}"
+        );
+    }
+
+    #[test]
     fn service_unavailable_maps_to_503() {
         let err = NexusApiError::service_unavailable("engine not available");
         assert_eq!(err.status_code(), StatusCode::SERVICE_UNAVAILABLE);

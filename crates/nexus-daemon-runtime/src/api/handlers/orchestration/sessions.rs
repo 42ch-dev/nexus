@@ -86,6 +86,11 @@ pub async fn create_session(
         )
         .await
         .map_err(|e| {
+            // QC2 F-004: the live-ring capacity refusal keeps its typed,
+            // retryable envelope instead of collapsing into a generic 500.
+            if matches!(e, crate::preset_run::RunControlError::RunEventCapacity(_)) {
+                return NexusApiError::from(e);
+            }
             let msg = e.to_string();
             if msg.contains("not eligible")
                 || msg.contains("system preset")
