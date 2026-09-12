@@ -354,6 +354,49 @@ async fn decode_intent_rows(pool: &SqlitePool, rows: Vec<IntentRowRaw>) -> Resul
     Ok(out)
 }
 
+fn canonicalize_workspace_path(path: &str) -> Result<std::path::PathBuf, LocalDbError> {
+    std::fs::canonicalize(path).map_err(|e| LocalDbError::ValidationError(e.to_string()))
+}
+
+fn workspace_roots_match(stored: &str, workspace_root: &str) -> bool {
+    match (
+        canonicalize_workspace_path(stored),
+        canonicalize_workspace_path(workspace_root),
+    ) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => stored == workspace_root,
+    }
+}
+
+/// Return the committed request digest for a session, if one exists.
+pub async fn get_committed_request_digest(
+    pool: &SqlitePool,
+    session_id: &str,
+) -> Result<Option<String>, LocalDbError> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT request_digest FROM workspace_commit_intents          WHERE session_id = ? AND state = 'committed' LIMIT 1",
+    )
+    .bind(session_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(LocalDbError::from)
+}
+
+/// Whether any intent is in `recovery_conflict` for the canonical workspace root.
+pub async fn workspace_has_recovery_conflict(
+    pool: &SqlitePool,
+    workspace_root: &str,
+) -> Result<bool, LocalDbError> {
+    let roots: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT workspace_root FROM workspace_commit_intents          WHERE state = 'recovery_conflict'",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(roots
+        .iter()
+        .any(|stored| workspace_roots_match(stored, workspace_root)))
+}
+
 pub async fn list_unsettled_intents(
     pool: &SqlitePool,
     workspace_root: &str,
@@ -361,11 +404,14 @@ pub async fn list_unsettled_intents(
     let rows = sqlx::query_as::<_, IntentRowRaw>(
         "SELECT session_id, workspace_root, revision, request_digest, state, entries_json, error_category \
          FROM workspace_commit_intents \
-         WHERE workspace_root = ? AND state IN ('applying', 'rolling_back', 'recovery_conflict')",
+         WHERE state IN ('applying', 'rolling_back', 'recovery_conflict')",
     )
-    .bind(workspace_root)
     .fetch_all(pool)
     .await?;
+    let rows = rows
+        .into_iter()
+        .filter(|row| workspace_roots_match(&row.workspace_root, workspace_root))
+        .collect();
     decode_intent_rows(pool, rows).await
 }
 

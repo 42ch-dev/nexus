@@ -411,8 +411,19 @@ pub async fn commit_recoverable(
     validate_manifest(changes)?;
     let digest = request_digest(&session_id.to_string(), changes);
 
-    if let Some(outcome) = committed_replay_outcome(mgr, session_id, &digest).await? {
-        return Ok(outcome);
+    if let Some(committed_digest) = db::get_committed_request_digest(
+        mgr.pool().as_ref(),
+        &session_id.to_string(),
+    )
+    .await
+    .map_err(|e| SessionError::Database(e.to_string()))?
+    {
+        if committed_digest != digest {
+            return Err(SessionError::AlreadyCommitted(session_id.clone()));
+        }
+        if let Some(outcome) = committed_replay_outcome(mgr, session_id, &digest).await? {
+            return Ok(outcome);
+        }
     }
 
     if row.consumed {
@@ -429,6 +440,13 @@ pub async fn commit_recoverable(
     let canonical_root = canonicalize_workspace_root(Path::new(&row.workspace_root)).await?;
     let workspace_root = canonical_root.to_string_lossy().into_owned();
     let scope_dir = super::scope::scope_directory(&canonical_root, &row.relative_path)?;
+
+    if db::workspace_has_recovery_conflict(mgr.pool().as_ref(), &workspace_root)
+        .await
+        .map_err(|e| SessionError::Database(e.to_string()))?
+    {
+        return Err(SessionError::RecoveryConflict(workspace_root));
+    }
 
     recover_unsettled(mgr, &workspace_root).await?;
 
@@ -660,14 +678,12 @@ pub async fn commit_recoverable_owned(
     let (tx, rx) = tokio::sync::oneshot::channel();
     let mgr2 = Arc::clone(&mgr);
     let sid = session_id.clone();
-    let worker = tokio::spawn(async move {
+    let owner = tokio::spawn(async move {
+        set_test_crash_point(None);
         let result = commit_recoverable(&mgr2, &sid, &changes).await;
         let _ = tx.send(result);
     });
-    let retained = tokio::spawn(async move {
-        let _ = worker.await;
-    });
-    mgr.register_commit_owner(retained);
+    mgr.register_commit_owner(owner).await;
     match rx.await {
         Ok(result) => result,
         Err(_) => Err(SessionError::Internal("commit owner channel closed".into())),

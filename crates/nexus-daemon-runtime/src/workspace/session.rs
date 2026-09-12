@@ -383,13 +383,10 @@ impl WorkspaceSessionManager {
     }
 
     /// Register the retained commit operation owner spawned for caller cancellation safety.
-    pub fn register_commit_owner(&self, handle: tokio::task::JoinHandle<()>) {
+    pub async fn register_commit_owner(&self, handle: tokio::task::JoinHandle<()>) {
         if let Some(cfg) = &self.recoverable {
-            let slot = Arc::clone(&cfg.commit_owner);
-            tokio::spawn(async move {
-                let mut guard = slot.lock().await;
-                *guard = Some(handle);
-            });
+            let mut guard = cfg.commit_owner.lock().await;
+            *guard = Some(handle);
         }
     }
 

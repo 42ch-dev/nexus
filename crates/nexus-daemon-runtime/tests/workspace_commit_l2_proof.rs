@@ -10,7 +10,7 @@ use nexus_daemon_runtime::workspace::executor::DaemonWorkspaceExecutor;
 use nexus_daemon_runtime::workspace::session::{
     ChangeEntry, ChangeOp, SessionError, WorkspaceSessionManager,
 };
-use nexus_daemon_runtime::workspace::session_commit::{set_test_crash_point, CommitOutcome};
+use nexus_daemon_runtime::workspace::session_commit::set_test_crash_point;
 use nexus_local_db as db;
 use nexus_orchestration::capability::WorkspaceExecutor;
 use serial_test::serial;
@@ -127,12 +127,11 @@ async fn different_digest_rejected_after_success() {
         .commit_session_durable(&session, &[create_change("a.txt", b"one")], &root)
         .await
         .expect("first");
-    let session2 = mgr.open_session(&root, "", true).await.expect("open2");
     let err = mgr
-        .commit_session_durable(&session2, &[create_change("b.txt", b"two")], &root)
+        .commit_session_durable(&session, &[create_change("b.txt", b"two")], &root)
         .await
         .unwrap_err();
-    assert!(matches!(err, SessionError::HashConflict { .. } | SessionError::ManifestInvalid(_)));
+    assert!(matches!(err, SessionError::AlreadyCommitted(_)));
     assert_eq!(intent_state(mgr.pool().as_ref(), &first.revision).await, "committed");
 }
 
@@ -263,25 +262,35 @@ async fn retained_owner_survives_caller_drop() {
     let root = ws.path().to_string_lossy().to_string();
     mgr.startup_recovery().await.expect("startup");
     let session = mgr.open_session(&root, "", true).await.expect("open");
-    set_test_crash_point(Some("before_finalize"));
     let mgr2 = Arc::clone(&mgr);
     let session_id = session.clone();
     let changes = vec![create_change("owner.txt", b"owned")];
-    let handle = tokio::spawn(async move {
-        mgr2.commit_session_durable(&session_id, &changes, &root).await
+    let caller = tokio::spawn(async move {
+        WorkspaceSessionManager::commit_session_durable_owned(mgr2, session_id, changes).await
     });
-    // Drop waiter immediately — retained owner should still run.
-    let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
-        .await
-        .expect("timeout")
-        .expect("join")
-        .expect("commit");
-    set_test_crash_point(None);
-    assert!(matches!(outcome, CommitOutcome { .. }));
+    // Let the admitted owner start before cancelling the awaiting caller.
+    tokio::task::yield_now().await;
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    caller.abort();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    while tokio::time::Instant::now() < deadline {
+        if ws.path().join("owner.txt").exists() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
     assert_eq!(
         std::fs::read(ws.path().join("owner.txt")).unwrap(),
         b"owned"
     );
+    let state: String = sqlx::query_scalar(
+        "SELECT state FROM workspace_commit_intents WHERE session_id = ? ORDER BY revision DESC LIMIT 1",
+    )
+    .bind(session.to_string())
+    .fetch_one(mgr.pool().as_ref())
+    .await
+    .unwrap();
+    assert_eq!(state, "committed");
 }
 
 #[tokio::test]
