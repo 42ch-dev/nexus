@@ -202,6 +202,10 @@ pub fn finalize_successful_run(
                         "dsh turn completed without any assistant text",
                     ));
                 }
+                let bytes = result.final_response.len();
+                if bytes > DSCH_MAX_ROOT_MESSAGE_TEXT_BYTES {
+                    return Err(operation_delivery_overflow_failure(session_id, op_id));
+                }
                 events.push(message_delta(
                     session_id,
                     op_id,
@@ -488,6 +492,34 @@ mod tests {
             .expect("completed turn");
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], HostEvent::OpFinished(_)));
+    }
+
+    #[test]
+    fn oversized_fallback_final_response_fails_delivery_bounds() {
+        let (session_id, op_id) = ids();
+        let huge = "x".repeat(DSCH_MAX_ROOT_MESSAGE_TEXT_BYTES + 1);
+        let result = RunResult {
+            session_id: "root-sess".to_string(),
+            final_response: huge,
+            finish_reason: Some("completed".to_string()),
+            events: vec![json!({
+                "type": "turn/end",
+                "data": {"reason": {"kind": "completed"}}
+            })],
+            notifications: Vec::new(),
+        };
+        let err = finalize_successful_run(
+            &result,
+            &RunReconciliation::default(),
+            &session_id,
+            &op_id,
+        )
+        .expect_err("oversized fallback must fail");
+        assert_eq!(err.error_category, "provider_error");
+        assert_eq!(
+            err.error_message,
+            "dsh operation exceeded Nexus delivery bounds"
+        );
     }
 
     #[test]

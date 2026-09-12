@@ -333,6 +333,40 @@ impl StreamObserver {
         }
     }
 }
+/// Enqueue fallback `MessageDelta` events through the same delivery budget as
+/// callback text; terminal events are returned for the one-slot channel.
+fn dispatch_successful_run_events(
+    events: Vec<HostEvent>,
+    content_tx: &mpsc::Sender<QueuedPayload>,
+    budget: &Arc<DeliveryBudget>,
+    session_id: &HostSessionId,
+    op_id: &HostOperationId,
+) -> Result<Vec<HostEvent>, OperationFailedEvent> {
+    let mut terminals = Vec::new();
+    for event in events {
+        if let HostEvent::MessageDelta(delta) = event {
+            let bytes = delta.text.len();
+            if bytes > DSCH_MAX_EVENT_TEXT_BYTES || !budget.try_reserve(bytes) {
+                return Err(operation_delivery_overflow_failure(session_id, op_id));
+            }
+            if content_tx
+                .try_send(QueuedPayload {
+                    event: Some(HostEvent::MessageDelta(delta)),
+                    reservation: Some(bytes),
+                    budget: Arc::clone(budget),
+                })
+                .is_err()
+            {
+                budget.release(bytes);
+                return Err(operation_delivery_overflow_failure(session_id, op_id));
+            }
+        } else {
+            terminals.push(event);
+        }
+    }
+    Ok(terminals)
+}
+
 
 
 fn delivery_failure_signaled(
@@ -1482,8 +1516,11 @@ impl DshNativeProvider {
     /// SDK's inbox-receipt / root-idle waits are unbounded by design.
     /// Emits at most one terminal event:
     ///
-    /// - `Ok(RunResult)` → exactly one `MessageDelta(final_response)` + one
-    ///   `OpFinished` (AR-1 dsh table / AR-6).
+    /// - `Ok(RunResult)` with streamed root text → callback `MessageDelta`(s)
+    ///   during the run, then exactly one `OpFinished` (AR-1 dsh table / AR-6).
+    /// - `Ok(RunResult)` without streamed root text → one budget-checked
+    ///   fallback `MessageDelta(final_response)` on the content channel, then
+    ///   `OpFinished`.
     /// - `tokio::time::error::Elapsed` → one `OpFailed(timeout)`.
     /// - `Err(DshError)` → one `OpFailed` from `classify_run_error` (AR-7).
     /// - Session closed by `shutdown()` before the run starts → one
@@ -1660,7 +1697,18 @@ impl DshNativeProvider {
                                 &session_id,
                                 &op_id,
                             ) {
-                                Ok(events) => (events, false),
+                                Ok(events) => match dispatch_successful_run_events(
+                                    events,
+                                    &content_tx,
+                                    &budget_for_observer,
+                                    &session_id,
+                                    &op_id,
+                                ) {
+                                    Ok(terminals) => (terminals, false),
+                                    Err(failed) => {
+                                        (vec![HostEvent::OpFailed(failed)], true)
+                                    }
+                                },
                                 Err(failed) => (vec![HostEvent::OpFailed(failed)], true),
                             }
                         }
@@ -2286,7 +2334,9 @@ mod tests {
     #![allow(clippy::await_holding_lock)]
 
     use super::*;
-    use crate::capability::model::{FinishReason, HostOperation, LaunchSpec, McpServerConfig};
+    use crate::capability::model::{
+        FinishReason, HostOperation, LaunchSpec, McpServerConfig, OperationFinishedEvent,
+    };
 
     const MOCK_DSH_AGENT: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -4551,6 +4601,41 @@ mod tests {
             "{events:?}"
         );
     }
+
+    #[tokio::test]
+    async fn dsh_oversize_final_fallback_without_streamed_text_fails_delivery_bounds() {
+        let budget = Arc::new(DeliveryBudget::default());
+        let (content_tx, _content_rx) = mpsc::channel(DSCH_MAX_QUEUED_MESSAGES);
+        let session_id = HostSessionId::new();
+        let op_id = HostOperationId::new();
+        let huge = "x".repeat(DSCH_MAX_EVENT_TEXT_BYTES + 1);
+        let events = vec![
+            HostEvent::MessageDelta(TextDeltaEvent {
+                session_id: session_id.clone(),
+                op_id: op_id.clone(),
+                text: huge,
+            }),
+            HostEvent::OpFinished(OperationFinishedEvent {
+                session_id: session_id.clone(),
+                op_id: op_id.clone(),
+                reason: FinishReason::EndTurn,
+            }),
+        ];
+        let dispatched = dispatch_successful_run_events(
+            events,
+            &content_tx,
+            &budget,
+            &session_id,
+            &op_id,
+        )
+        .expect_err("oversized no-callback fallback must fail delivery bounds");
+        assert_eq!(dispatched.error_category, "provider_error");
+        assert_eq!(
+            dispatched.error_message,
+            "dsh operation exceeded Nexus delivery bounds"
+        );
+    }
+
 
     #[tokio::test]
     async fn dsh_oversize_fixture_fails_delivery_bounds() {
