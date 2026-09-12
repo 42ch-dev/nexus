@@ -6,7 +6,7 @@
 //! lacks the `basic-cli` direct path the driver records degradation and exits
 //! 78 after the HTTP leg completes (full dual-leg proof lands in P1-T3).
 
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -17,7 +17,8 @@ use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 use nexus_knowledge::world_kb::store::KbStore;
 use nexus_local_db::kb_store::SqliteKbStore;
-use nexus_local_db::writer_protocol::{GuardedPoolOptions, init_engine_pool};
+use nexus_local_db::init_pool;
+use nexus_local_db::writer_protocol::release_retained_writer_guards;
 use sqlx::SqlitePool;
 use tempfile::TempDir;
 
@@ -99,6 +100,54 @@ async fn bootstrap_fixture(pool: &SqlitePool) -> (String, String) {
     (world.world_id, entity_id)
 }
 
+
+fn seed_fixture_in_child(user_home: &Path) -> (String, String) {
+    let self_exe = std::env::current_exe().expect("current exe");
+    let output = Command::new(self_exe)
+        .arg("--seed-only")
+        .arg("--home")
+        .arg(user_home)
+        .output()
+        .expect("spawn seed child");
+    if !output.status.success() {
+        eprintln!("seed child stderr: {}", String::from_utf8_lossy(&output.stderr));
+        panic!("seed child failed");
+    }
+    let line = String::from_utf8_lossy(&output.stdout);
+    let mut parts = line.split_whitespace();
+    (
+        parts.next().expect("world_id").to_string(),
+        parts.next().expect("entity_id").to_string(),
+    )
+}
+
+async fn seed_only_main(home: PathBuf) {
+    let nexus_home = home.join(".nexus42");
+    std::fs::create_dir_all(&nexus_home).expect("nexus home");
+    let op = nexus_home_layout::operational_workspace_dir(&home, CREATOR, SLUG);
+    std::fs::create_dir_all(&op).expect("workspace dir");
+    let db_path = nexus_home_layout::workspace_state_db_path(&home, CREATOR, SLUG);
+    let pool = init_pool(&db_path).await.expect("init pool for fixture seed");
+    let (world_id, entity_id) = bootstrap_fixture(&pool).await;
+    pool.close().await;
+    release_retained_writer_guards(&db_path);
+    println!("{world_id} {entity_id}");
+}
+
+fn pre_barrier_init(port: u16, world_id: &str) {
+    let graph_path = format!("/v1/daemon/worlds/{world_id}/kb/graph");
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(30) {
+        if let Some(resp) = http_get("127.0.0.1", port, &graph_path, Duration::from_secs(5)) {
+            if resp.contains("HTTP/1.1 200") {
+                return;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    panic!("pre-barrier graph warmup timed out on port {port}");
+}
+
 async fn prepare_home(port: u16) -> ProofHome {
     let tmp = TempDir::new().expect("temp home");
     let user_home = tmp.path().to_path_buf();
@@ -118,13 +167,7 @@ async fn prepare_home(port: u16) -> ProofHome {
     )
     .expect("config.toml");
 
-    let db_path = nexus_home_layout::workspace_state_db_path(&user_home, CREATOR, SLUG);
-    let guarded = init_engine_pool(&db_path, CREATOR, GuardedPoolOptions::default())
-        .await
-        .expect("engine pool");
-    let pool = guarded.clone_pool();
-    let (world_id, entity_id) = bootstrap_fixture(&pool).await;
-    pool.close().await;
+    let (world_id, entity_id) = seed_fixture_in_child(&user_home);
 
     ProofHome {
         _tmp: tmp,
@@ -150,6 +193,23 @@ fn spawn_daemon(http_bin: &Path, home: &Path, port: u16) -> Child {
         .expect("spawn daemon-run")
 }
 
+
+fn read_http_body(stream: &mut TcpStream) -> std::io::Result<Vec<u8>> {
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 4096];
+    loop {
+        match stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::Interrupted => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(buf)
+}
+
 fn http_get(host: &str, port: u16, path: &str, connect_timeout: Duration) -> Option<String> {
     let mut stream = tcp_connect_with_retry((host, port), connect_timeout)?;
     stream
@@ -160,8 +220,7 @@ fn http_get(host: &str, port: u16, path: &str, connect_timeout: Duration) -> Opt
     stream
         .write_all(request.as_bytes())
         .expect("write GET");
-    let mut buf = Vec::new();
-    stream.read_to_end(&mut buf).expect("read GET response");
+    let buf = read_http_body(&mut stream).expect("read GET response");
     Some(String::from_utf8_lossy(&buf).into_owned())
 }
 
@@ -184,8 +243,7 @@ fn http_post_json(
     stream
         .write_all(request.as_bytes())
         .expect("write POST");
-    let mut buf = Vec::new();
-    stream.read_to_end(&mut buf).expect("read POST response");
+    let buf = read_http_body(&mut stream).expect("read POST response");
     let text = String::from_utf8_lossy(&buf).into_owned();
     let status = text
         .lines()
@@ -360,11 +418,22 @@ fn contender_outcomes(round: &BarrierRound) -> (u32, u32, u32) {
 
 #[tokio::main]
 async fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(pos) = args.iter().position(|a| a == "--seed-only") {
+        let home_arg = args.get(pos + 1).map(String::as_str);
+        let home = if home_arg == Some("--home") {
+            PathBuf::from(args.get(pos + 2).expect("--home path"))
+        } else {
+            PathBuf::from(home_arg.expect("--home path after --seed-only"))
+        };
+        seed_only_main(home).await;
+        return;
+    }
+
     let mut scenario = String::new();
     let mut cli_bin: Option<PathBuf> = None;
     let mut http_bin: Option<PathBuf> = None;
     let mut out_dir: Option<PathBuf> = None;
-    let args: Vec<String> = std::env::args().collect();
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -414,7 +483,6 @@ async fn main() {
     let home = prepare_home(port).await;
     let mut daemon = spawn_daemon(&http_bin, &home.user_home, port);
     wait_healthy(port, Duration::from_secs(30));
-
     let (round, cli_degraded) = run_barrier_round(
         port,
         &home.user_home,
