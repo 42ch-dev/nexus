@@ -4208,6 +4208,131 @@ async fn settlement_restart_reconciles_no_second_child() {
 
 
 
+
+#[derive(Debug, Clone)]
+struct SseFrameParsed {
+    id: String,
+    event: String,
+    data: Value,
+    sequence: u64,
+}
+
+fn parse_sse_frames(body: &str) -> Vec<SseFrameParsed> {
+    let mut out = Vec::new();
+    for block in body.split("\n\n") {
+        let mut id = None;
+        let mut event = None;
+        let mut data = None;
+        for line in block.lines() {
+            if let Some(rest) = line.strip_prefix("id: ") {
+                id = Some(rest.trim().to_string());
+            } else if let Some(rest) = line.strip_prefix("event: ") {
+                event = Some(rest.trim().to_string());
+            } else if let Some(rest) = line.strip_prefix("data: ") {
+                data = Some(rest);
+            }
+        }
+        if let (Some(id), Some(event), Some(data)) = (id, event, data) {
+            let json = serde_json::from_str::<Value>(data).unwrap_or(Value::Null);
+            let sequence = json
+                .get("sequence")
+                .and_then(|v| v.as_u64())
+                .or_else(|| {
+                    id.split(':')
+                        .nth(1)
+                        .and_then(|s| s.parse().ok())
+                })
+                .unwrap_or(0);
+            out.push(SseFrameParsed {
+                id,
+                event,
+                data: json,
+                sequence,
+            });
+        }
+    }
+    out
+}
+
+fn assert_monotonic_sse_frames(frames: &[SseFrameParsed]) {
+    let mut last = 0u64;
+    let mut seen = std::collections::HashSet::new();
+    for frame in frames {
+        assert!(frame.sequence > last, "sequence must increase: {} after {}", frame.sequence, last);
+        assert!(seen.insert(frame.id.clone()), "duplicate id {}", frame.id);
+        last = frame.sequence;
+    }
+}
+
+fn host_event_kind(data: &Value) -> Option<String> {
+    data.get("host_event")
+        .and_then(|v| v.as_object())
+        .and_then(|obj| obj.keys().next().map(|k| k.to_string()))
+}
+
+async fn fetch_session_events(daemon: &LiveDaemon, sid: &str, last_event_id: Option<&str>) -> (reqwest::StatusCode, String) {
+    let client = reqwest::Client::new();
+    let mut req = client.get(format!(
+        "{}/v1/daemon/orchestration/sessions/{}/events",
+        daemon.http_url,
+        sid
+    ));
+    if let Some(cursor) = last_event_id {
+        req = req.header("Last-Event-ID", cursor);
+    }
+    let resp = req.send().await.expect("events");
+    (resp.status(), resp.text().await.expect("events body"))
+}
+
+fn assert_host_lifecycle_before_terminal(frames: &[SseFrameParsed], terminal_status: &str) {
+    assert!(!frames.is_empty(), "expected SSE frames");
+    assert_monotonic_sse_frames(frames);
+    let terminal = frames
+        .iter()
+        .rfind(|f| {
+            f.event == "run_state" && f.data["status"].as_str() == Some(terminal_status)
+        })
+        .expect("terminal run_state");
+    let terminal_seq = terminal.sequence;
+    let host_frames: Vec<_> = frames
+        .iter()
+        .filter(|f| f.event == "host_event" && f.sequence < terminal_seq)
+        .collect();
+    let mut last_started = None;
+    for (idx, frame) in host_frames.iter().enumerate() {
+        if host_event_kind(&frame.data).as_deref() == Some("OpStarted") {
+            last_started = Some(idx);
+        }
+    }
+    let start_idx = last_started.expect("OpStarted before terminal");
+    let tail = &host_frames[start_idx..];
+    let kinds: Vec<String> = tail
+        .iter()
+        .map(|f| host_event_kind(&f.data).expect("host_event kind"))
+        .collect();
+    let started = kinds.iter().position(|k| k == "OpStarted").expect("OpStarted");
+    let content = kinds
+        .iter()
+        .position(|k| k == "MessageDelta")
+        .expect("MessageDelta after OpStarted");
+    let finished = kinds
+        .iter()
+        .position(|k| k == "OpFinished")
+        .expect("OpFinished after content");
+    assert!(
+        tail[started].sequence < tail[content].sequence,
+        "OpStarted -> content ordering"
+    );
+    assert!(
+        tail[content].sequence < tail[finished].sequence,
+        "content -> OpFinished ordering"
+    );
+    assert!(
+        tail[finished].sequence < terminal_seq,
+        "OpFinished -> terminal run_state ordering"
+    );
+}
+
 async fn fetch_session_inspect(daemon: &LiveDaemon, sid: &str) -> Value {
     reqwest::Client::new()
         .get(format!(
@@ -4380,8 +4505,8 @@ async fn p4_late_subscribe_replays_terminal_run_state() {
         .expect("events");
     assert!(events.status().is_success(), "{}", events.text().await.unwrap_or_default());
     let text = events.text().await.expect("events body");
-    let run_states = parse_sse_run_states(&text);
-    assert_monotonic_run_state_frames(&run_states, "completed");
+    let frames = parse_sse_frames(&text);
+    assert_host_lifecycle_before_terminal(&frames, "completed");
 }
 
 /// P4 T4: unconfirmed cleanup stays actionable Interrupted on inspect/DB.
@@ -4444,4 +4569,265 @@ async fn p4_cleanup_failure_recovery_projection() {
             .is_some_and(|r| r.contains("cancel cleanup unconfirmed")),
         "inspect must carry actionable cleanup reason: {inspect}"
     );
+}
+
+/// P4 T4: Last-Event-ID reconnect returns strictly-later frames without duplicates.
+#[tokio::test]
+async fn p4_public_sse_last_event_id_strict_later_dedupe() {
+    let host = MockHost::new();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let (status, body) = add_public(&daemon, "p4-last-event-id").await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id");
+    let _ = wait_for_prompts(&host, 15).await;
+    let row = load_drive_row(&daemon, schedule_id).await;
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("session")
+        .to_string();
+    let (run_status, _) = wait_for_run_status(&daemon, &sid, "completed", 20).await;
+    assert_eq!(run_status, "completed");
+    let (status, full_body) = fetch_session_events(&daemon, &sid, None).await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{full_body}");
+    let all = parse_sse_frames(&full_body);
+    assert_monotonic_sse_frames(&all);
+    let cursor = all
+        .iter()
+        .find(|f| f.event == "host_event")
+        .expect("host_event frame")
+        .id
+        .clone();
+    let cursor_seq = all
+        .iter()
+        .find(|f| f.id == cursor)
+        .expect("cursor frame")
+        .sequence;
+    let (status, tail_body) = fetch_session_events(&daemon, &sid, Some(&cursor)).await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{tail_body}");
+    let tail = parse_sse_frames(&tail_body);
+    assert_monotonic_sse_frames(&tail);
+    for frame in &tail {
+        assert!(
+            frame.sequence > cursor_seq,
+            "Last-Event-ID must replay strictly later than cursor: {} <= {}",
+            frame.sequence,
+            cursor_seq
+        );
+        assert!(
+            !all.iter().any(|f| f.id == frame.id && f.sequence <= cursor_seq),
+            "duplicate or non-later frame id {}",
+            frame.id
+        );
+    }
+}
+
+/// P4 T4: foreign-owned durable run is denied on the public events route.
+#[tokio::test]
+async fn p4_public_sse_foreign_owner_denied() {
+    let host = MockHost::new();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let (status, body) = add_public(&daemon, "p4-foreign-owner").await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id");
+    let _ = wait_for_prompts(&host, 15).await;
+    let row = load_drive_row(&daemon, schedule_id).await;
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("session")
+        .to_string();
+    sqlx::query(
+        "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data)
+         VALUES ('other_creator', 'Other', 'active', datetime('now'), '{}')",
+    )
+    .execute(&daemon.pool)
+    .await
+    .expect("seed foreign creator");
+    sqlx::query("UPDATE orchestration_sessions SET creator_id = 'other_creator' WHERE session_id = ?")
+        .bind(&sid)
+        .execute(&daemon.pool)
+        .await
+        .expect("reassign owner");
+    let (status, body) = fetch_session_events(&daemon, &sid, None).await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::NOT_FOUND,
+        "foreign owner must be denied via session owner path: {body}"
+    );
+}
+
+
+/// Emits OpStarted + many MessageDelta frames + OpFinished in one operation.
+struct EventFloodHost {
+    deltas: usize,
+    prompts: Mutex<Vec<String>>,
+}
+
+impl EventFloodHost {
+    fn with_deltas(deltas: usize) -> Arc<Self> {
+        Arc::new(Self {
+            deltas,
+            prompts: Mutex::new(Vec::new()),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl HostFacade for EventFloodHost {
+    async fn start(&self, _config: HostStartConfig) -> HostResult<()> {
+        Ok(())
+    }
+
+    async fn create_session(
+        &self,
+        request: nexus_agent_host::capability::CreateSessionRequest,
+    ) -> HostResult<HostSession> {
+        Ok(HostSession {
+            id: HostSessionId::new(),
+            provider_id: request.provider_id,
+            state: SessionState::Ready,
+            created_at: chrono::Utc::now(),
+            active_op_id: None,
+            negotiated_capabilities: CapabilityDescriptor::native_cli_limited(),
+            owner: request.owner,
+            process_identity: None,
+        })
+    }
+
+    async fn exec(
+        &self,
+        session_id: HostSessionId,
+        op: HostOperation,
+    ) -> HostResult<HostEventStream> {
+        let op_id = match op {
+            HostOperation::Prompt { op_id, content, .. } => {
+                let text = match content.as_slice() {
+                    [HostContentBlock::Text { text }] => text.clone(),
+                    other => format!("unexpected content {other:?}"),
+                };
+                self.prompts.lock().expect("prompts").push(text);
+                op_id
+            }
+            other => {
+                return Err(HostError::internal(format!(
+                    "unexpected operation {other:?}"
+                )));
+            }
+        };
+        let started = HostEvent::OpStarted(OperationStartedEvent {
+            op_id: op_id.clone(),
+            session_id: session_id.clone(),
+        });
+        let mut events = vec![Ok(started.clone())];
+        for i in 0..self.deltas {
+            events.push(Ok(HostEvent::MessageDelta(TextDeltaEvent {
+                session_id: session_id.clone(),
+                op_id: op_id.clone(),
+                text: format!("delta-{i}"),
+            })));
+        }
+        let finished = HostEvent::OpFinished(OperationFinishedEvent {
+            session_id,
+            op_id,
+            reason: FinishReason::EndTurn,
+        });
+        events.push(Ok(finished.clone()));
+        Ok(Box::pin(futures_util::stream::iter(events)))
+    }
+
+    async fn cancel(&self, _op_id: HostOperationId) -> HostResult<()> {
+        Ok(())
+    }
+
+    async fn health(&self) -> HostResult<HostHealth> {
+        Ok(HostHealth {
+            running: true,
+            active_sessions: 0,
+            active_operations: 0,
+        })
+    }
+
+    async fn shutdown(&self) -> HostResult<()> {
+        Ok(())
+    }
+
+    async fn shutdown_session(&self, _session_id: HostSessionId) -> HostResult<()> {
+        Ok(())
+    }
+
+    async fn list_sessions(&self) -> HostResult<Vec<HostSession>> {
+        Ok(Vec::new())
+    }
+
+    async fn provider_catalog(&self) -> HostResult<ProviderCatalog> {
+        Ok(ProviderCatalog {
+            entries: vec![ProviderCatalogEntry {
+                provider_id: nexus_agent_host::ProviderId::new(MOCK_PROVIDER),
+                display_name: MOCK_PROVIDER.to_string(),
+                protocol_kind: ProtocolKind::NativeCli,
+                launch: LaunchStrategy::NativeCli {
+                    command: "mock".to_string(),
+                    args: vec![],
+                    env: HashMap::new(),
+                },
+                source: DiscoverySource::Config,
+                trust: TrustLevel::Explicit,
+                capabilities: CapabilityDescriptor::native_cli_limited(),
+                health: ProviderHealth {
+                    provider_id: nexus_agent_host::ProviderId::new(MOCK_PROVIDER),
+                    available: true,
+                    latency_ms: None,
+                    message: None,
+                },
+            }],
+        })
+    }
+
+    fn subscribe_events(
+        &self,
+        _session_id: HostSessionId,
+    ) -> tokio::sync::broadcast::Receiver<HostEvent> {
+        let (_, rx) = tokio::sync::broadcast::channel(1);
+        rx
+    }
+}
+
+/// P4 T4: reconnect after ring eviction surfaces explicit gap then retained tail.
+#[tokio::test]
+async fn p4_public_sse_gap_on_evicted_cursor() {
+    let host = EventFloodHost::with_deltas(300);
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let (status, body) = add_public(&daemon, "p4-gap-cursor").await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id");
+    let row = load_drive_row(&daemon, schedule_id).await;
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("session")
+        .to_string();
+    let (run_status, _) = wait_for_run_status(&daemon, &sid, "completed", 30).await;
+    assert_eq!(run_status, "completed");
+    let (status, full_body) = fetch_session_events(&daemon, &sid, None).await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{full_body}");
+    let all = parse_sse_frames(&full_body);
+    assert_monotonic_sse_frames(&all);
+    let epoch = all
+        .first()
+        .expect("frame")
+        .id
+        .split(':')
+        .next()
+        .expect("epoch");
+    let (status, replay_body) =
+        fetch_session_events(&daemon, &sid, Some(&format!("{epoch}:1"))).await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{replay_body}");
+    let replay = parse_sse_frames(&replay_body);
+    assert!(
+        replay.iter().any(|f| f.event == "gap"),
+        "evicted cursor must surface explicit gap: {:?}",
+        replay.iter().map(|f| &f.event).collect::<Vec<_>>()
+    );
+    assert_monotonic_sse_frames(&replay);
 }

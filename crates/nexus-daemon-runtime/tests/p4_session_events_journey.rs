@@ -174,3 +174,81 @@ async fn session_events_restart_yields_history_unavailable_after_ring_eviction()
         Some(inspect_url.as_str())
     );
 }
+
+async fn seed_foreign_terminal_session(pool: &sqlx::SqlitePool, session_id: &str) {
+    sqlx::query(
+        "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data)
+         VALUES ('other_creator', 'Other', 'active', datetime('now'), '{}')",
+    )
+    .execute(pool)
+    .await
+    .expect("seed foreign creator");
+    sqlx::query(
+        "INSERT INTO orchestration_sessions
+            (session_id, creator_id, preset_id, preset_version, status,
+             current_task_id, context_json, created_at, updated_at,
+             execution_version, state_revision, graph_version)
+         VALUES (?, 'other_creator', 'novel-writing', 1, 'completed',
+                 NULL, '{}', 1, 2, 1, 1, 1)",
+    )
+    .bind(session_id)
+    .execute(pool)
+    .await
+    .expect("seed foreign session");
+}
+
+#[tokio::test]
+async fn session_events_foreign_owner_returns_404() {
+    let ctx = new_events_test_ctx().await;
+    let run_id = "p4-foreign-owner";
+    publish_terminal_run_state(&ctx.state.run_event_registry(), run_id, 1);
+    seed_foreign_terminal_session(&ctx.pool, run_id).await;
+    let server = test_server(ctx.state);
+    let resp = server
+        .get(&format!("/v1/daemon/orchestration/sessions/{run_id}/events"))
+        .await;
+    assert_eq!(
+        resp.status_code(),
+        StatusCode::NOT_FOUND,
+        "foreign-owned session must 404 via owner path, not existence-only: {}",
+        resp.text()
+    );
+}
+
+#[tokio::test]
+async fn session_events_replay_exceeds_pending_cap_without_subscriber_error() {
+    let ctx = new_events_test_ctx().await;
+    let run_id = "p4-replay-cap";
+    let _sink = ctx
+        .state
+        .run_event_registry()
+        .try_register_live(run_id)
+        .expect("register");
+    for i in 0..20 {
+        ctx.state.run_event_registry().publish_run_state(
+            run_id,
+            &nexus_orchestration::run_state::RunRecord {
+                session_id: SessionId(run_id.to_string()),
+                status: SessionStatus::Running,
+                state_revision: i as u64 + 1,
+                execution_version: 1,
+                descriptor: None,
+                state: None,
+                graph_version: 1,
+            },
+        );
+    }
+    seed_terminal_session(&ctx.pool, run_id, 20).await;
+    ctx.state.run_event_registry().mark_terminal(run_id);
+    let server = test_server(ctx.state);
+    let resp = server
+        .get(&format!("/v1/daemon/orchestration/sessions/{run_id}/events"))
+        .await;
+    assert_eq!(resp.status_code(), StatusCode::OK, "{}", resp.text());
+    let body = resp.text();
+    let run_state_count = body.matches("event: run_state").count();
+    assert!(
+        run_state_count >= 20,
+        "replay must deliver all retained frames, got {run_state_count}: {body}"
+    );
+}

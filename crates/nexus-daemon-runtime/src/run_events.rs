@@ -151,6 +151,7 @@ impl Drop for SubscriberRelease {
 /// Live SSE subscription: replay is delivered first; subsequent frames arrive
 /// on [`recv`](Self::recv). Dropping releases the subscriber permit.
 pub struct LiveSubscription {
+    replay: VecDeque<SseFrame>,
     rx: mpsc::Receiver<SseFrame>,
     inner: Weak<RunEventRegistryInner>,
     run_id: String,
@@ -160,6 +161,9 @@ pub struct LiveSubscription {
 
 impl LiveSubscription {
     pub async fn recv(&mut self) -> Option<SseFrame> {
+        if let Some(frame) = self.replay.pop_front() {
+            return Some(frame);
+        }
         let frame = self.rx.recv().await?;
         if let Some(inner) = self.inner.upgrade() {
             inner.decrement_subscriber_pending(&self.run_id, self.subscriber_id, frame.data.len());
@@ -311,18 +315,9 @@ impl RunEventRegistry {
             None
         };
         let replay = collect_from(ring, run_id, after_seq);
-        let replay_pending = replay.len();
-        let replay_bytes = replay
-            .iter()
-            .map(|frame| encoded_sse_frame_bytes(frame))
-            .sum();
-        for frame in replay {
-            if tx.try_send(frame).is_err() {
-                return Err(SubscribeError::TooManySubscribers);
-            }
-        }
         if is_terminal {
             return Ok(LiveSubscription {
+                replay: replay.into(),
                 rx,
                 inner: Arc::downgrade(&self.inner),
                 run_id: run_id.to_string(),
@@ -342,11 +337,12 @@ impl RunEventRegistry {
             subscriber_id,
             Subscriber {
                 tx,
-                pending_frames: replay_pending,
-                pending_bytes: replay_bytes,
+                pending_frames: 0,
+                pending_bytes: 0,
             },
         );
         Ok(LiveSubscription {
+            replay: replay.into(),
             rx,
             inner: Arc::downgrade(&self.inner),
             run_id: run_id.to_string(),
@@ -779,6 +775,118 @@ mod tests {
         let only = sub.recv().await.expect("run_state");
         assert_eq!(only.event, "run_state");
         assert!(sub.recv().await.is_none());
+    }
+
+
+    #[tokio::test]
+    async fn subscriber_limit_returns_too_many_subscribers() {
+        let registry = RunEventRegistry::new();
+        let _sink = registry.try_register_live("run-1").expect("register");
+        let mut subs = Vec::new();
+        for _ in 0..MAX_SUBSCRIBERS_PER_RUN {
+            subs.push(
+                registry
+                    .subscribe_live("run-1", None, "/inspect".into())
+                    .expect("subscriber permit"),
+            );
+        }
+        assert!(matches!(
+            registry.subscribe_live("run-1", None, "/inspect".into()),
+            Err(SubscribeError::TooManySubscribers)
+        ));
+    }
+
+    #[tokio::test]
+    async fn replay_exceeds_pending_cap_replays_without_subscriber_error() {
+        let registry = RunEventRegistry::new();
+        let _sink = registry.try_register_live("run-1").expect("register");
+        for i in 0..20 {
+            registry.publish_run_state(
+                "run-1",
+                &mk_record("run-1", SessionStatus::Running, i as u64 + 1),
+            );
+        }
+        let mut sub = registry
+            .subscribe_live("run-1", None, "/inspect".into())
+            .expect("subscribe must not fail when replay exceeds pending cap");
+        let mut frames = Vec::with_capacity(20);
+        for _ in 0..20 {
+            let frame = tokio::time::timeout(std::time::Duration::from_secs(1), sub.recv())
+                .await
+                .expect("replay frame timeout")
+                .expect("replay frame");
+            frames.push(frame);
+        }
+        assert_eq!(frames.len(), 20);
+        assert_monotonic_no_duplicates(&frames);
+    }
+
+    #[tokio::test]
+    async fn replay_after_eviction_emits_explicit_gap_for_skipped_cursor() {
+        let registry = RunEventRegistry::new();
+        let _sink = registry.try_register_live("run-1").expect("register");
+        for i in 0..(MAX_RECORDS_PER_RUN + 5) {
+            registry.inner.append_json(
+                "run-1",
+                "host_event",
+                &serde_json::json!({ "n": i }),
+            );
+        }
+        let state = registry
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let ring = state.live.get("run-1").expect("ring");
+        let first_retained = ring.records.front().expect("retained").sequence;
+        assert!(first_retained > 1, "ring must have evicted early sequences");
+        let cursor_epoch = ring.epoch;
+        drop(state);
+        let cursor = format!("{}:{}", cursor_epoch, first_retained - 1);
+        let mut sub = registry
+            .subscribe_live("run-1", Some(&cursor), "/inspect".into())
+            .expect("reconnect");
+        let gap = tokio::time::timeout(std::time::Duration::from_secs(1), sub.recv())
+            .await
+            .expect("gap frame timeout")
+            .expect("gap frame");
+        assert_eq!(gap.event, "gap");
+        let payload: serde_json::Value = serde_json::from_str(&gap.data).expect("gap json");
+        assert_eq!(payload["from_sequence"].as_u64(), Some(first_retained));
+    }
+
+    #[tokio::test]
+    async fn oversize_skipped_sequence_emits_explicit_gap_on_subscribe() {
+        let registry = RunEventRegistry::new();
+        let _sink = registry.try_register_live("run-1").expect("register");
+        registry.inner.append_json(
+            "run-1",
+            "host_event",
+            &serde_json::json!({ "blob": "x".repeat(MAX_FRAME_BYTES) }),
+        );
+        registry.publish_run_state("run-1", &mk_record("run-1", SessionStatus::Running, 1));
+        let mut sub = registry
+            .subscribe_live("run-1", None, "/inspect".into())
+            .expect("subscribe");
+        let mut frames = Vec::new();
+        for _ in 0..4 {
+            if let Ok(Some(frame)) =
+                tokio::time::timeout(std::time::Duration::from_millis(200), sub.recv()).await
+            {
+                frames.push(frame);
+            }
+        }
+        assert!(
+            frames.iter().any(|f| f.event == "gap"),
+            "oversize skip must surface explicit gap, got: {:?}",
+            frames.iter().map(|f| &f.event).collect::<Vec<_>>()
+        );
+        assert!(
+            frames.iter().any(|f| f.event == "run_state"),
+            "durable run_state must still replay after gap: {:?}",
+            frames.iter().map(|f| &f.event).collect::<Vec<_>>()
+        );
+        assert_monotonic_no_duplicates(&frames);
     }
 
     #[tokio::test]

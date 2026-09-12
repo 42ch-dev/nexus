@@ -8800,7 +8800,21 @@ mod tests {
         .expect("drive finished");
         cancel_task.await.expect("cancel task");
         let record = real_store.load_run(&session_id).await.expect("load").expect("row");
-        assert!(record.status.is_terminal(), "exactly one durable terminal winner");
+        assert_eq!(
+            record.status,
+            SessionStatus::Failed,
+            "driver_failed must win durable settlement over cancel relabelling"
+        );
+        let failure = record
+            .state
+            .as_ref()
+            .and_then(|s| s.failure.as_ref())
+            .expect("authoritative RunFailure");
+        assert_eq!(failure.code, "driver_failed");
+        assert!(
+            record.state.as_ref().is_some_and(|s| s.cancel_requested),
+            "cancel admission must be durable even when failure wins"
+        );
         assert!(
             arrived.load(Ordering::SeqCst) >= 2,
             "both cancel and failure reached settle_run"
@@ -8810,10 +8824,18 @@ mod tests {
             1,
             "no later step launch after settlement race"
         );
-        let public_ok = cancel_fence_loss_accomplished(&record)
-            || record.status == SessionStatus::Cancelled
-            || record.status == SessionStatus::Failed;
-        assert!(public_ok, "public projection must not be generic conflict");
+        assert!(
+            cancel_fence_loss_accomplished(&record),
+            "failed+cancel_requested+driver_failed must count as accomplished cancel outcome"
+        );
+        let second_cancel = coordinator
+            .signal_run(&session_id, RunSignal::Cancel)
+            .await;
+        assert!(
+            second_cancel.is_ok(),
+            "second public cancel must be idempotent, not generic conflict: {:?}",
+            second_cancel.err()
+        );
     }
 
     /// Live SSE handoff: subscriber registered before publish receives host_event.

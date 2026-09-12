@@ -207,7 +207,7 @@ pub async fn get_session(
         .engine()
         .ok_or_else(|| NexusApiError::service_unavailable("engine not available"))?;
 
-    let sid = nexus_orchestration::engine::SessionId(session_id.clone());
+    let sid = nexus_orchestration::engine::SessionId(session_id.to_string());
     // Shared durable execution projection (A2/A7): present for terminal rows
     // with no live runner; a load error projects unreadable, never a
     // fabricated class.
@@ -1198,16 +1198,20 @@ mod tests {
     }
 }
 
-/// `GET /v1/daemon/orchestration/sessions/{session_id}/events` — live SSE replay.
-pub async fn session_events(
-    State(state): State<WorkspaceState>,
-    Path(session_id): Path<String>,
-    headers: HeaderMap,
-) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, NexusApiError> {
+
+/// Resolve a session through the same durable owner lookup as inspect, then
+/// verify the active Creator owns it. Foreign/missing sessions are 404.
+async fn authorize_orchestration_session_read(
+    state: &WorkspaceState,
+    session_id: &str,
+) -> Result<(), NexusApiError> {
+    use crate::api::handlers::works::read_active_creator_id;
+    let active_creator =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
     let engine = state
         .engine()
         .ok_or_else(|| NexusApiError::service_unavailable("engine not available"))?;
-    let sid = nexus_orchestration::engine::SessionId(session_id.clone());
+    let sid = nexus_orchestration::engine::SessionId(session_id.to_string());
     let sessions = engine
         .list_active(nexus_orchestration::engine::SessionFilter::default())
         .await
@@ -1215,22 +1219,34 @@ pub async fn session_events(
             code: "ENGINE_ERROR".into(),
             message: e.to_string(),
         })?;
-    let known = sessions.iter().any(|s| s.session_id == sid)
-        || match state.pool() {
-            Some(pool) => {
-                let storage = SqliteSessionStorage::new(Arc::new(pool.clone()));
-                storage
-                    .get_checkpoint_row(&session_id)
-                    .await
-                    .ok()
-                    .flatten()
-                    .is_some()
-            }
-            None => false,
-        };
-    if !known {
-        return Err(NexusApiError::NotFound(session_id));
+    let owner = if let Some(active) = sessions.iter().find(|s| s.session_id == sid) {
+        active.creator_id.clone()
+    } else {
+        let pool = state.pool_or_uninit()?;
+        let storage = SqliteSessionStorage::new(Arc::new(pool.clone()));
+        let row = storage
+            .get_checkpoint_row(session_id)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "STORAGE_ERROR".into(),
+                message: e.to_string(),
+            })?
+            .ok_or_else(|| NexusApiError::NotFound(format!("session {session_id}")))?;
+        row.creator_id
+    };
+    if owner != active_creator {
+        return Err(NexusApiError::NotFound(format!("session {session_id}")));
     }
+    Ok(())
+}
+
+/// `GET /v1/daemon/orchestration/sessions/{session_id}/events` — live SSE replay.
+pub async fn session_events(
+    State(state): State<WorkspaceState>,
+    Path(session_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, NexusApiError> {
+    authorize_orchestration_session_read(&state, &session_id).await?;
     let inspect_url = format!("/v1/daemon/orchestration/sessions/{session_id}");
     let last_event_id = headers
         .get("last-event-id")
