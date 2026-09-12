@@ -5223,7 +5223,7 @@ END;
 
 
 CREATE TRIGGER IF NOT EXISTS bump_character_memory_fragments_revision
-BEFORE UPDATE ON character_memory_fragments
+AFTER UPDATE ON character_memory_fragments
 FOR EACH ROW
 WHEN NEW.revision = OLD.revision
 BEGIN
@@ -5231,7 +5231,7 @@ BEGIN
 END;
 
 CREATE TRIGGER IF NOT EXISTS bump_kb_key_blocks_revision
-BEFORE UPDATE ON kb_key_blocks
+AFTER UPDATE ON kb_key_blocks
 FOR EACH ROW
 WHEN NEW.revision = OLD.revision
 BEGIN
@@ -5239,7 +5239,7 @@ BEGIN
 END;
 
 CREATE TRIGGER IF NOT EXISTS bump_kb_relationships_revision
-BEFORE UPDATE ON kb_relationships
+AFTER UPDATE ON kb_relationships
 FOR EACH ROW
 WHEN NEW.revision = OLD.revision
 BEGIN
@@ -5269,5 +5269,16 @@ WHEN (
   ), 0) FROM core_changes
 ) > 8388608
 BEGIN
-  DELETE FROM core_changes WHERE sequence = (SELECT MIN(sequence) FROM core_changes);
+  DELETE FROM core_changes
+  WHERE sequence IN (
+    SELECT sequence FROM (
+      SELECT sequence,
+             SUM(
+               length(world_id) + length(resource_kind) + length(resource_id)
+               + COALESCE(length(resource_revision), 0) + length(change_kind) + length(writer_id)
+             ) OVER (ORDER BY sequence DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cum_desc
+      FROM core_changes
+    )
+    WHERE cum_desc > 8388608
+  );
 END;

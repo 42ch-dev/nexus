@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
@@ -24,16 +25,34 @@ pub const BOOTSTRAP_CREATOR_ID: &str = "bootstrap";
 /// connections carry fixed UDF epochs and cannot re-register) while the OS
 /// locks stay held for the process lifetime. Keyed per mode so retaining a
 /// direct guard never releases the engine owner's lock.
+struct RegisteredPool {
+    id: u64,
+    handle: SqlitePool,
+}
+
 struct RetainedGuardEntry {
     guard: Arc<WorkspaceWriterGuard>,
-    pools: Mutex<Vec<SqlitePool>>,
+    pools: Mutex<Vec<RegisteredPool>>,
 }
 
 impl RetainedGuardEntry {
     fn pools_quiesced(&self) -> bool {
         let mut pools = self.pools.lock().expect("pool registry poisoned");
-        pools.retain(|pool| !pool.is_closed());
+        pools.retain(|reg| !reg.handle.is_closed());
         pools.is_empty()
+    }
+}
+
+static POOL_REG_ID: AtomicU64 = AtomicU64::new(1);
+
+struct CooperativePoolRegistration {
+    key: (PathBuf, WriterMode),
+    id: u64,
+}
+
+impl Drop for CooperativePoolRegistration {
+    fn drop(&mut self) {
+        unregister_pool_handle(&self.key, self.id);
     }
 }
 
@@ -111,6 +130,7 @@ impl Default for GuardedPoolOptions {
 pub struct GuardedPool {
     guard: Arc<WorkspaceWriterGuard>,
     pool: SqlitePool,
+    _pool_registration: CooperativePoolRegistration,
 }
 
 impl GuardedPool {
@@ -124,9 +144,12 @@ impl GuardedPool {
         &self.guard
     }
 
+    /// Clone the underlying pool and register the handle for cooperative quiescence.
     #[must_use]
     pub fn clone_pool(&self) -> SqlitePool {
-        self.pool.clone()
+        let pool = self.pool.clone();
+        register_pool_handle(&self.guard, &pool);
+        pool
     }
 }
 
@@ -151,14 +174,34 @@ pub fn retain_writer_guard(guard: Arc<WorkspaceWriterGuard>) {
         .or_insert_with(|| RetainedGuardEntry { guard, pools: Mutex::new(Vec::new()) });
 }
 
-fn register_pool_handle(guard: &Arc<WorkspaceWriterGuard>, pool: &SqlitePool) {
+fn register_pool_handle(guard: &Arc<WorkspaceWriterGuard>, pool: &SqlitePool) -> u64 {
+    let id = POOL_REG_ID.fetch_add(1, Ordering::Relaxed);
     let key = (canonical_db_path(&guard.db_path), guard.mode);
     let mut guards = ACTIVE_GUARDS.lock().expect("writer guard registry poisoned");
     let entry = guards.entry(key).or_insert_with(|| RetainedGuardEntry {
         guard: Arc::clone(guard),
         pools: Mutex::new(Vec::new()),
     });
-    entry.pools.lock().expect("pool registry poisoned").push(pool.clone());
+    entry
+        .pools
+        .lock()
+        .expect("pool registry poisoned")
+        .push(RegisteredPool {
+            id,
+            handle: pool.clone(),
+        });
+    id
+}
+
+fn unregister_pool_handle(key: &(PathBuf, WriterMode), id: u64) {
+    let guards = ACTIVE_GUARDS.lock().expect("writer guard registry poisoned");
+    if let Some(entry) = guards.get(key) {
+        entry
+            .pools
+            .lock()
+            .expect("pool registry poisoned")
+            .retain(|reg| reg.id != id);
+    }
 }
 
 /// This process's live guard for `(db_path, mode)`, if any.
@@ -591,7 +634,13 @@ pub async fn open_guarded_pool_arc_with(
         guard.engine_epoch,
     );
     let pool = pool_with_context(&guard.db_path, context, options).await?;
-    Ok(GuardedPool { guard, pool })
+    let key = (canonical_db_path(&guard.db_path), guard.mode);
+    let reg_id = register_pool_handle(&guard, &pool);
+    Ok(GuardedPool {
+        guard,
+        pool,
+        _pool_registration: CooperativePoolRegistration { key, id: reg_id },
+    })
 }
 
 pub async fn run_guarded_migrations(db_path: &Path) -> Result<(), LocalDbError> {

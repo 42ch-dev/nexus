@@ -3,6 +3,7 @@
 use std::ffi::CString;
 use std::os::raw::{c_char, c_int, c_void};
 use std::panic::catch_unwind;
+use std::sync::Arc;
 
 use libsqlite3_sys::{
     sqlite3, sqlite3_context, sqlite3_create_function_v2, sqlite3_result_int64,
@@ -13,26 +14,28 @@ use sqlx::sqlite::SqliteConnection;
 
 use crate::{WriterConnectionContext, WriterMode};
 
-struct UserData(WriterConnectionContext);
+/// Per-registration userdata: one `Arc` clone per successful `sqlite3_create_function_v2`.
+struct UserData(Arc<WriterConnectionContext>);
 
-/// SQLite calls this exactly once per successful registration that supplied it.
-/// Each scalar function owns its own [`UserData`] allocation so partial registration
-/// failure never leaves earlier callbacks pointing at freed memory, and a failed
-/// registration never double-frees a shared block.
+/// Drop one registration's userdata box.
+///
+/// SQLite invokes this exactly once per registration that supplied it — including
+/// when `sqlite3_create_function_v2` **fails** (bundled `sqlite3.h:5444-5452`). The
+/// error path must therefore never call this manually.
 unsafe extern "C" fn destroy_userdata(ptr: *mut c_void) {
     if !ptr.is_null() {
-        // SAFETY: pointer came from Box::into_raw in register_scalar.
+        // SAFETY: pointer came from `Box::into_raw` in `register_scalar`.
         drop(unsafe { Box::from_raw(ptr.cast::<UserData>()) });
     }
 }
 
-fn context_from(ctx: *mut sqlite3_context) -> Option<&'static WriterConnectionContext> {
+fn context_from(ctx: *mut sqlite3_context) -> Option<Arc<WriterConnectionContext>> {
     let ptr = unsafe { sqlite3_user_data(ctx) };
     if ptr.is_null() {
         return None;
     }
-    // SAFETY: userdata is a valid UserData box until destroy_userdata runs.
-    Some(&unsafe { &*ptr.cast::<UserData>() }.0)
+    // SAFETY: userdata is a valid `UserData` box until `destroy_userdata` runs.
+    Some(Arc::clone(&unsafe { &*ptr.cast::<UserData>() }.0))
 }
 
 extern "C" fn scalar_writer_id(
@@ -133,7 +136,7 @@ fn register_scalar(
     db: *mut sqlite3,
     name: &str,
     func: ScalarFn,
-    context: WriterConnectionContext,
+    context: Arc<WriterConnectionContext>,
 ) -> Result<(), sqlx::Error> {
     let c_name = CString::new(name).map_err(|e| sqlx::Error::Configuration(e.to_string().into()))?;
     let userdata = Box::into_raw(Box::new(UserData(context)));
@@ -153,8 +156,8 @@ fn register_scalar(
     if status == SQLITE_OK {
         Ok(())
     } else {
-        // Registration failed: SQLite did not take ownership, so free locally.
-        unsafe { destroy_userdata(userdata.cast::<c_void>()) };
+        // Registration failed: SQLite already invoked `destroy_userdata` once.
+        // Manual free here would double-free (sqlite3.h:5444-5452).
         Err(sqlx::Error::Configuration(
             format!("sqlite3_create_function_v2({name}) failed: {status}").into(),
         ))
@@ -165,16 +168,21 @@ fn register_scalar(
 ///
 /// # Ownership proof
 ///
-/// Each function receives a **distinct** [`UserData`] allocation and its own
-/// `destroy_userdata` callback. Partial failure therefore cannot leave earlier
-/// registrations pointing at memory freed by a later error path, and a failed
-/// registration cannot invoke SQLite's destructor on memory SQLite never
-/// adopted. Successful paths leak exactly zero blocks: SQLite calls
-/// `destroy_userdata` once per registered function when the connection closes.
+/// One shared [`Arc<WriterConnectionContext>`] is cloned into a distinct
+/// `Box<UserData>` per registration. Each box carries its own `destroy_userdata`
+/// callback. On connection close (or per-function delete) SQLite drops every
+/// successful registration's box, decrementing the `Arc` until the payload is
+/// freed exactly once.
+///
+/// On partial failure of registration *N*, SQLite invokes `destroy_userdata` on
+/// that attempt's box only; earlier successful registrations retain live `Arc`
+/// clones and their userdata pointers stay valid until connection teardown.
+/// The error path never calls `destroy_userdata` manually.
 pub async fn install_writer_functions(
     conn: &mut SqliteConnection,
     context: WriterConnectionContext,
 ) -> Result<(), sqlx::Error> {
+    let shared = Arc::new(context);
     let mut handle = conn.lock_handle().await?;
     let db = handle.as_raw_handle().as_ptr();
     let functions: [(&str, ScalarFn); 5] = [
@@ -185,7 +193,7 @@ pub async fn install_writer_functions(
         ("nexus_engine_epoch", scalar_engine_epoch),
     ];
     for (name, func) in functions {
-        register_scalar(db, name, func, context.clone())?;
+        register_scalar(db, name, func, Arc::clone(&shared))?;
     }
     Ok(())
 }
