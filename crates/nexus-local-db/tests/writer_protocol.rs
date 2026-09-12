@@ -18,10 +18,10 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use nexus_local_db::writer_protocol::{
-    acquire_writer_guard, open_admitted_pool, open_guarded_pool, run_guarded_migrations,
-    BOOTSTRAP_CREATOR_ID, WriterMode,
+    acquire_writer_guard, open_admitted_pool, open_guarded_pool, release_retained_writer_guards,
+    run_guarded_migrations, BOOTSTRAP_CREATOR_ID, WriterMode,
 };
-use nexus_local_db::{init_pool, open_pool_read_only, LocalDbError};
+use nexus_local_db::{init_engine_pool, init_pool, open_pool_read_only, LocalDbError};
 use sqlx::SqlitePool;
 use tempfile::TempDir;
 
@@ -271,44 +271,100 @@ async fn writer_protocol() {
         pool.close().await;
     }
 
-    // ── §12.1 outbox, entirely without an engine owner ──────────────────────
+    // ── direct vs engine authorization (engine-owned table) ───────────────
     {
-        let guard = acquire_writer_guard(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+        let direct = open_admitted_pool(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
             .await
-            .expect("direct guard");
-        let pool = open_guarded_pool(&guard).await.expect("guarded pool");
-        for index in 0..4097 {
-            sqlx::query(
-                "INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id) \
-                 VALUES ('wld_test', 'entity', ?, '1', 'upsert', ?)",
-            )
-            .bind(format!("kb_out_{index}"))
-            .bind(guard.writer_id())
-            .execute(&pool)
+            .expect("direct pool");
+        assert_fenced(
+            &direct,
+            "INSERT INTO kb_extract_jobs (job_id, creator_id, workspace_id, work_entry_id, world_id)              VALUES ('xj_direct_denied', 'ctr_test', 'wrk_test', 'entry_test', 'wld_test')",
+        )
+        .await;
+        direct.close().await;
+
+        let engine = init_engine_pool(&db).await.expect("engine pool");
+        sqlx::query(
+            "INSERT INTO kb_extract_jobs (job_id, creator_id, workspace_id, work_entry_id, world_id)              VALUES ('xj_engine_ok', 'ctr_test', 'wrk_test', 'entry_test', 'wld_test')",
+        )
+        .execute(engine.pool())
+        .await
+        .expect("engine-owned write");
+        engine.pool().close().await;
+        drop(engine);
+        release_retained_writer_guards(&db);
+    }
+
+    // ── §12.1 outbox via real application mutations (no engine owner) ───────
+    {
+        let pool = open_admitted_pool(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
             .await
-            .expect("outbox insert");
-        }
-        let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM core_changes")
+            .expect("direct pool");
+        let (before_count, max_before): (i64, i64) = sqlx::query_as(
+            "SELECT COUNT(*), COALESCE(MAX(sequence), 0) FROM core_changes",
+        )
             .fetch_one(&pool)
             .await
-            .expect("outbox count");
-        assert_eq!(count, 4097, "every direct mutation is durably logged");
+            .expect("baseline outbox");
 
-        // Bounded oldest-row retention: the oldest committed row is trimmed and
-        // the newest is retained.
-        let trimmed = sqlx::query("DELETE FROM core_changes WHERE sequence = 1")
-            .execute(&pool)
+        let mut tx = pool.begin().await.expect("tx");
+        sqlx::query("INSERT INTO workspace_meta (key, value) VALUES ('rollback_probe', 'x')")
+            .execute(&mut *tx)
             .await
-            .expect("oldest-row retention");
-        assert_eq!(trimmed.rows_affected(), 1);
-        let (remaining, min_seq): (i64, i64) =
-            sqlx::query_as("SELECT COUNT(*), MIN(sequence) FROM core_changes")
-                .fetch_one(&pool)
+            .expect("tx insert");
+        tx.rollback().await.expect("rollback");
+        let (mid_count, max_mid): (i64, i64) = sqlx::query_as(
+            "SELECT COUNT(*), COALESCE(MAX(sequence), 0) FROM core_changes",
+        )
+            .fetch_one(&pool)
+            .await
+            .expect("outbox after rollback");
+        assert_eq!(mid_count, before_count, "rolled-back mutation must not emit an outbox row");
+        assert_eq!(max_mid, max_before, "rolled-back mutation must not advance sequence");
+
+        for index in 0..4097 {
+            sqlx::query("INSERT INTO workspace_meta (key, value) VALUES (?, ?)")
+                .bind(format!("outbox_{index}"))
+                .bind("evt")
+                .execute(&pool)
                 .await
-                .expect("retained window");
-        assert_eq!(remaining, 4096);
-        assert_eq!(min_seq, 2);
+                .expect("application mutation");
+        }
+        let (after_count, max_after, min_seq): (i64, i64, i64) = sqlx::query_as(
+            "SELECT COUNT(*), MAX(sequence), MIN(sequence) FROM core_changes",
+        )
+            .fetch_one(&pool)
+            .await
+            .expect("outbox after mutations");
+        assert_eq!(
+            max_after - max_before,
+            4097,
+            "one outbox event per committed mutation (sequence advances even when retention trims rows)"
+        );
+        assert_eq!(
+            after_count,
+            4096,
+            "automatic bounded retention keeps the newest 4096 rows"
+        );
+        assert!(min_seq > 1, "oldest committed events are trimmed automatically");
         pool.close().await;
+    }
+
+    // Protocol newer than this binary is fail-closed (isolated DB; gate is guarded).
+    {
+        let proto_db = dir.path().join("proto_newer.db");
+        let pool = init_pool(&proto_db).await.expect("proto init");
+        pool.close().await;
+        let engine = init_engine_pool(&proto_db).await.expect("engine for gate bump");
+        sqlx::query("UPDATE core_workspace_gate SET protocol_version = 2 WHERE pk = 1")
+            .execute(engine.pool())
+            .await
+            .expect("bump protocol");
+        engine.pool().close().await;
+        drop(engine);
+        release_retained_writer_guards(&proto_db);
+        let err = init_pool(&proto_db).await.expect_err("newer protocol refused");
+        assert!(matches!(err, LocalDbError::SchemaMismatch { .. }), "got {err:?}");
     }
 
     // Raw (unregistered) writer is fenced on the outbox too.
