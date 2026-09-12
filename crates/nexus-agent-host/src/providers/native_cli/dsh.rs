@@ -2512,15 +2512,19 @@ mod tests {
         .expect("empty native args are accepted")
     }
 
+    fn lock_test_env() -> std::sync::MutexGuard<'static, ()> {
+        crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
     /// Launch under the env lock: launch() now initializes the runtime
     /// eagerly, spawning the python fixture whose `#!/usr/bin/env python3`
     /// shebang resolves python3 through PATH at execve time (see lib.rs
     /// test_support).
     #[allow(clippy::future_not_send)]
     async fn launch_hermetic(provider: &DshNativeProvider) -> ManagedSessionHandle {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         provider.launch(launch_spec()).await.expect("launch")
     }
 
@@ -2583,9 +2587,7 @@ mod tests {
         handle: &ManagedSessionHandle,
         text: &str,
     ) -> Vec<HostEvent> {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let stream = provider
             .execute(
                 handle,
@@ -2619,9 +2621,7 @@ mod tests {
         text: &str,
         scope: Option<PromptPermissionScope>,
     ) -> HostResult<Vec<HostEvent>> {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let stream = provider.execute(
             handle,
             HostOperation::Prompt {
@@ -2802,9 +2802,7 @@ mod tests {
 
     #[test]
     fn resolve_explicit_bare_command_uses_path() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let bin = temp_dir.path().join("dsh-custom");
         write_executable(&bin);
@@ -2822,9 +2820,7 @@ mod tests {
 
     #[test]
     fn resolve_invalid_explicit_override_never_falls_back() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let env_bin = temp_dir.path().join("env-dsh");
         write_executable(&env_bin);
@@ -2847,9 +2843,7 @@ mod tests {
 
     #[test]
     fn resolve_env_route_then_path_fallback() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let env_bin = temp_dir.path().join("env-dsh");
         write_executable(&env_bin);
@@ -2896,9 +2890,7 @@ mod tests {
 
     #[test]
     fn resolve_blank_values_count_as_absent() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let env_bin = temp_dir.path().join("env-dsh");
         write_executable(&env_bin);
@@ -3060,9 +3052,7 @@ mod tests {
 
     #[test]
     fn selected_dsh_home_follows_sdk_precedence() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         // Caller env DSH_HOME wins over the parent value.
         let previous = std::env::var("DSH_HOME").ok();
         std::env::set_var("DSH_HOME", "/parent/dsh-home");
@@ -3225,9 +3215,7 @@ mod tests {
         let handle = launch_hermetic(&provider).await;
 
         {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider
                 .shutdown(handle.clone())
                 .await
@@ -3286,9 +3274,7 @@ mod tests {
         let handle = launch_hermetic(&provider).await;
 
         let first = {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider.shutdown(handle.clone()).await
         };
         assert!(
@@ -3308,9 +3294,7 @@ mod tests {
         // completes, then retry: the SAME completion is observed.
         tokio::time::sleep(std::time::Duration::from_millis(800)).await;
         {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider
                 .shutdown(handle.clone())
                 .await
@@ -3459,9 +3443,7 @@ mod tests {
         );
 
         {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider
                 .shutdown(handle)
                 .await
@@ -3502,9 +3484,7 @@ mod tests {
             .expect("execute");
 
         {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider.shutdown(handle).await.expect("shutdown");
         }
 
@@ -3529,9 +3509,7 @@ mod tests {
     /// never fall back.
     #[tokio::test]
     async fn probe_unavailable_for_invalid_explicit_override() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let _bin_guard = DshRuntimeBinGuard::set(Path::new(MOCK_DSH_AGENT));
         let provider = DshNativeProvider::new(
             ProviderId::new("nonexistent-dsh-xyz"),
@@ -3565,9 +3543,7 @@ mod tests {
     /// provider-catalog response (`GET /v1/daemon/agent-host/providers`).
     #[tokio::test]
     async fn probe_initializes_and_closes_both_recipes() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let dsh_home = temp_dir.path().join("dsh-home");
@@ -3734,9 +3710,7 @@ mod tests {
         // shutdown deletes it.
         assert!(sealed_home.exists(), "the sealed lease is retained while live");
         {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider.shutdown(handle).await.expect("confirmed close");
         }
         assert!(
@@ -3870,9 +3844,7 @@ mod tests {
         // Start a turn and drive the stream on a task so the run holds
         // the per-session mutex.
         let stream = {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider
                 .execute(
                     &handle,
@@ -4103,9 +4075,7 @@ mod tests {
         // A later shutdown still completes (nothing left to close) and
         // removes the record.
         {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider.shutdown(handle).await.expect("final close completes");
         }
     }
@@ -4247,9 +4217,7 @@ mod tests {
     /// close still finishes and deletes the sealed lease afterwards.
     #[tokio::test]
     async fn probe_deadline_drop_keeps_sealed_cleanup_owner() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let dsh_home = temp_dir.path().join("dsh-home");
@@ -4294,9 +4262,7 @@ mod tests {
     /// the provisioned lease behind and this test fails.)
     #[tokio::test]
     async fn probe_init_timeout_retains_sealed_owner_and_completes_cleanup() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let dsh_home = temp_dir.path().join("dsh-home");
@@ -4354,9 +4320,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn probe_init_timeout_retains_ordinary_owner_and_reaps_child() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let dsh_home = temp_dir.path().join("dsh-home");
@@ -4439,9 +4403,7 @@ mod tests {
             .expect("chmod 0500");
 
         let first = {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider.shutdown(handle.clone()).await
         };
         assert!(
@@ -4471,9 +4433,7 @@ mod tests {
         std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o755))
             .expect("restore perms");
         {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider
                 .shutdown(handle.clone())
                 .await
@@ -4623,9 +4583,7 @@ mod tests {
         assert_eq!(leaf_mode, 0o555, "the mock made the leaf unwritable for removal");
 
         let first = {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider.shutdown(handle.clone()).await
         };
         assert!(
@@ -4642,9 +4600,7 @@ mod tests {
         std::fs::set_permissions(&blocker, std::fs::Permissions::from_mode(0o755))
             .expect("restore blocker perms");
         {
-            let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-                .lock()
-                .expect("lock env tests");
+            let _env_lock = lock_test_env();
             provider
                 .shutdown(handle.clone())
                 .await
@@ -4745,26 +4701,6 @@ mod tests {
     }
 
 
-
-    /// Consumer-observable flood prefix: ordered `m0`, `m1`, … without gaps
-    /// or duplicates, and no more than the fixture burst count.
-    fn assert_ordered_unique_fixture_prefix(texts: &[String], fixture_count: usize) {
-        assert!(
-            !texts.is_empty(),
-            "must observe at least one streamed message before overflow"
-        );
-        assert!(
-            texts.len() <= fixture_count,
-            "must not exceed fixture message count: {texts:?}"
-        );
-        for (i, text) in texts.iter().enumerate() {
-            assert_eq!(
-                text,
-                &format!("m{i}"),
-                "messages must be an ordered unique m0.. prefix: {texts:?}"
-            );
-        }
-    }
 
     /// Overflow terminal must be delivery-bounds `OpFailed`, not success or
     /// timeout/protocol arms.
@@ -5079,9 +5015,7 @@ mod tests {
         env.insert("FLOOD_HOLD".to_string(), "1".to_string());
         let provider = stub_provider("test-dsh-flood", env);
         let handle = launch_hermetic(&provider).await;
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _env_lock = lock_test_env();
         let stream = provider
             .execute(
                 &handle,
@@ -5096,12 +5030,15 @@ mod tests {
             .await
             .expect("execute");
         // Rendezvous: hold the returned stream idle until the fixture burst
-        // marker; internal producer dequeue scheduling is not pinned here.
-        const FLOOD_FIXTURE_MESSAGE_COUNT: usize = 65;
+        // marker; overflow is latched before the first poll, then turn/end
+        // completes and the producer must surface delivery overflow.
         wait_for_flood_burst_complete(&req_log).await;
         let events = collect_events(stream).await;
-        let texts = message_texts(&events);
-        assert_ordered_unique_fixture_prefix(&texts, FLOOD_FIXTURE_MESSAGE_COUNT);
+        assert_eq!(
+            message_texts(&events),
+            (0..64).map(|i| format!("m{i}")).collect::<Vec<_>>(),
+            "with idle receiver, 64 pending slots fill then the 65th notification overflows"
+        );
         assert_delivery_overflow_terminal(&events);
     }
 
@@ -5190,9 +5127,7 @@ mod tests {
         // This test holds the env lock itself (PATH isolation must cover
         // resolution AND spawn), so it cannot call the locking helpers —
         // execute/collect inline instead.
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let bin_dir = temp_dir.path().join("bin");
         install_fixture_as_dsh(&bin_dir);
@@ -5381,9 +5316,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn wrong_server_identity_fails_closed_and_reaps_child() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let mut env = stub_env(&req_log, &temp_dir.path().join("dsh-home"));
@@ -5416,9 +5349,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn initialize_timeout_fails_launch_and_reaps_child() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let mut env = stub_env(&req_log, &temp_dir.path().join("dsh-home"));
@@ -5455,9 +5386,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn shutdown_rpc_error_is_diagnostic_and_close_is_confirmed() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = lock_test_env();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let mut env = stub_env(&req_log, &temp_dir.path().join("dsh-home"));

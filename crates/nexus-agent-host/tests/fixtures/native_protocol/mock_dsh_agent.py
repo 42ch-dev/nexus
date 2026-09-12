@@ -196,9 +196,8 @@ def handle_request(req):
                 })
             if os.environ.get("FLOOD_HOLD") == "1":
                 # Log after the burst so the host test can hold consumer
-                # backpressure until all notifications are on the wire,
-                # then keep the turn open (no turn/end) while overflow is
-                # signaled.
+                # backpressure until all notifications are on the wire; then
+                # fall through to normal turn/end so Session::run completes.
                 path = os.environ.get("REQ_LOG")
                 if path:
                     with open(path, "a") as f:
@@ -206,7 +205,6 @@ def handle_request(req):
                             "method": "_flood_complete",
                             "count": count,
                         }) + "\n")
-                return
         elif scenario == "partial_then_fail":
             session_event(session_id, {
                 "type": "assistant/message",
