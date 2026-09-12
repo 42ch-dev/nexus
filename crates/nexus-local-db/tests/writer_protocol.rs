@@ -236,7 +236,11 @@ async fn writer_protocol() {
 
     // ── main database ───────────────────────────────────────────────────────
     let db = dir.path().join("state.db");
-    init_pool(&db).await.expect("init_pool");
+    {
+        let bootstrap = init_pool(&db).await.expect("init_pool");
+        bootstrap.close().await;
+    }
+
 
     {
         let pool = open_pool_read_only(&db).await.expect("read-only pool");
@@ -523,6 +527,27 @@ async fn writer_protocol() {
         assert_eq!(cas_rev, 2, "explicit CAS revision must not be doubled by the trigger");
         pool.close().await;
         release_retained_writer_guards(&rev_db);
+    }
+
+    // ── init_pool quiescence: returned pool blocks migration until closed ─────
+    {
+        let init_db = dir.path().join("init_pool_quiescence.db");
+        let pool = init_pool(&init_db).await.expect("init_pool");
+        let migrate_db = init_db.clone();
+        let migrate = tokio::spawn(async move {
+            run_guarded_migrations(&migrate_db).await
+        });
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            !migrate.is_finished(),
+            "migration must wait while an init_pool-returned pool remains open"
+        );
+        pool.close().await;
+        release_retained_writer_guards(&init_db);
+        migrate
+            .await
+            .expect("migrate task")
+            .expect("migration after init_pool pool closed");
     }
 
     // ── cooperative quiescence: surviving clone_pool blocks migration ─────────

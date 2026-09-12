@@ -882,9 +882,10 @@ fn is_transient_migration_error(err: &LocalDbError) -> bool {
 /// Returns `LocalDbError` if any step (pool creation, migration, seeding) fails.
 pub async fn init_pool(db_path: &std::path::Path) -> Result<sqlx::SqlitePool, LocalDbError> {
     let guarded = init_guarded_pool(db_path).await?;
-    // Avoid `clone_pool()` here: that registers a cooperative handle that would
-    // outlive this helper's dropped [`GuardedPool`] and block migration quiescence.
-    Ok(guarded.pool().clone())
+    // `clone_pool()` registers the returned handle for cooperative quiescence.
+    // The dropped [`GuardedPool`] unregisters only its own RAII token; the
+    // surviving clone stays tracked until it is closed.
+    Ok(guarded.clone_pool())
 }
 
 /// Initialize a guarded pool keeping writer locks alive.
