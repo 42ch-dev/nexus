@@ -162,8 +162,8 @@ async fn session_events_restart_yields_history_unavailable_after_ring_eviction()
         .await;
     assert_eq!(
         resp.status_code(),
-        StatusCode::BAD_REQUEST,
-        "durable run without in-memory ring must surface history_unavailable: {}",
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "history_unavailable maps to 422 via NexusApiError semantic coded BadRequest: {}",
         resp.text()
     );
     let json = resp.json::<serde_json::Value>();
