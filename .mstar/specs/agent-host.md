@@ -4,7 +4,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — current route, provider, worker, and ACP boundaries reconciled through V1.183; **V1.186 product lock (Prepare, not shipped)** — orchestration uses HostFacade; config ACP providers are production registrations |
+| **Status** | Normative — shipped through V1.188: Host-mediated orchestration, configured ACP/native registration, dsh SDK runtime/streaming cutover, and verified provider readiness |
 | **Document class** | Master |
 | **Normative scope** | Host boundaries, provider model, capability contract, security/supervision invariants |
 | **Related** | [daemon-runtime.md](./daemon-runtime.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [acp-client-tech-spec.md](./acp-client-tech-spec.md) |
@@ -19,7 +19,7 @@ Define **`nexus-agent-host`**: the orchestration/facade above ACP and native CLI
 
 ## 2. Frozen decisions
 
-1. **Managed-only** — every session and provider process is host-owned, observable, cancellable; no unmanaged attach in v1 scope.
+1. **Managed-only** — every session and provider process is host-owned, observable and cleanup-supervised; cancellation is advertised only when the provider supports it. No unmanaged attach in v1 scope.
 2. **Hybrid providers** — ACP-backed adapters **and** selected native CLI adapters under a narrower capability contract.
 3. **ACP-first preferred** — native CLI is supplementary, not a second control plane.
 4. **Daemon is not an ACP Server** — hosting agents does not make the daemon runtime an ACP Agent advertised on Registry.
@@ -55,15 +55,14 @@ Multica / OpenDesign are **reference architectures only**, not runtime dependenc
 | Native CLI adapter | Managed subprocess (e.g. Claude CLI wave 1) | Narrower capability surface; same HostOperation contract |
 
 
-**Current runtime wiring (V1.183):** the crate contains both the ACP adapter and
-native CLI adapters, but daemon boot currently registers only installed
-`codex-native`, `claude-native`, and `dsh-native` providers in the route-facing
-`HostManager`. Daemon-orchestrated ACP sessions run in per-creator
-`nexus42 acp-worker` children. Registry discovery or the presence of
-`providers::acp` must therefore not be presented as an in-process daemon ACP
-session that boot has registered.
+**Current runtime wiring (V1.188):** daemon boot loads validated provider
+configuration once and constructs supported native and generic ACP launch
+recipes through one factory. A configured or discovered recipe is a candidate,
+not evidence of availability. `HostManager::ProviderEntry` owns the selected
+metadata, optional adapter and live health; catalog and admission use that same
+health. Missing verified Creator/workspace context leaves candidates unavailable.
 
-**V1.186 product/architecture lock (Prepare; not shipped):** orchestration uses
+**Shipped orchestration path (V1.186, retained in V1.188):** orchestration uses
 the in-process `PromptExecutor` → daemon adapter → existing `HostFacade` plane
 specified in [orchestration-engine.md](orchestration-engine.md) §15. All graph
 and capability prompt consumers migrate off worker echo-success together;
@@ -87,11 +86,12 @@ must populate this owner from existing verified scope, not request assertions.
 Use existing `HostFacade::exec(session_id, HostOperation::Prompt { op_id,
 content })`, `cancel(op_id)` and `shutdown_session(session_id)`. Collect only
 MessageDelta output and require OpFinished/EndTurn; OpFailed, refusal, limits
-and unexpected EOF are typed failures. Cancellation reaches ACP session/cancel,
-then bounded owned process-tree termination/reap when needed; dropping a
-future or deleting a session-map entry is not teardown. Cleanup unconfirmed
-must remain visibly interrupted, not successful cancelled. Host owns transport
-handles and process identity; the daemon must not implement a second SDK client.
+and unexpected EOF are typed failures. Cancellation requests the provider's
+supported primitive, then waits boundedly for owned cleanup. Dropping a future
+or deleting a session-map entry is not teardown. Unconfirmed cleanup remains
+visibly interrupted; direct-child exit does not establish a process-tree or
+restart no-leak guarantee. Host owns transport handles and process identity;
+the daemon must not implement a second SDK client.
 Existing non-interactive permission denial remains; no new Ask UI is implied.
 
 Nexus remains ACP Client and the daemon is not an ACP Server. CLI-only
@@ -106,6 +106,8 @@ Nexus remains ACP Client and the daemon is not an ACP Server. CLI-only
 1. Execution flows through normalized **`HostOperation`** / **`HostEvent`** (wire shapes in knowledge SSOT and future contracts).
 2. **Provider-native streaming, unified relay**: providers may use internal transports; daemon exposes a **single host event stream** to HTTP clients (e.g. SSE over Daemon API).
 3. Cancel and health are **control-plane** actions on `HostFacade`, not execution operations.
+4. **dsh message-level real time (V1.188).** Complete root assistant messages become ordered nonempty `MessageDelta` events during the SDK run, after one `OpStarted`. If any root text was emitted, ignore `final_response` entirely; otherwise emit its nonempty text once. Malformed recognized content, empty-only/non-success results, premature exit and overflow produce one terminal failure, including after partial text. No text follows the terminal. This is not token streaming; dsh advertises streaming true and cancellation false.
+5. **Bounds and causality.** Nexus delivery bounds are 64 queued messages, 256 KiB serialized event, 1 MiB pending payload and 4 MiB text per operation. The SDK may accumulate unbounded internal events/frames; no end-to-end RSS bound is claimed. Its observer precedes the private prompt-receipt filter, so root-session callback output is not proof of causal submitted-message identity.
 
 ---
 
@@ -119,6 +121,15 @@ Host discovers providers via:
 
 Admission policy limits sessions, concurrent ops, and risky tool classes (detail in implementation SSOT).
 
+**V1.188 readiness contract:**
+
+- Preserve config → PATH → registry precedence and disabled suppression. Reject malformed enabled recipes, unsupported native IDs/args/protocols and unusable structural config rather than silently serving defaults.
+- The native factory supports `dsh-native`, `codex-native`, `claude-native`; generic ACP uses `AcpProvider::from_config`. Registry discovery is not an installer or availability proof.
+- Probes receive canonical cwd and verified `SessionOwner` from the same admission provenance. They perform bounded executable/initialize handshakes without a model prompt. dsh probes both ordinary and sealed deny-all recipes.
+- Publish ready only after the successful handshake and confirmed temporary direct-child close, and only against the unchanged candidate identity. Failed/unconfirmed cleanup remains unavailable with retained evidence. No verified owner means no ready transition.
+- Later launch/initialize/session failure invalidates that same health; a prompt-content timeout after initialization does not. Public setup followed by daemon/Host restart is the existing re-probe path, not a new retry daemon.
+- Public health diagnostics contain static safe categories, never raw SDK/subprocess/config/env text. `GET /v1/daemon/agent-host/providers` keeps its existing wire fields.
+
 ---
 
 ## 7. Acceptance criteria (architecture level)
@@ -131,6 +142,31 @@ Admission policy limits sessions, concurrent ops, and risky tool classes (detail
 Crate file tree, trait signatures, route list, and test matrix: **Appendix** below.
 
 ---
+
+## 8. dsh SDK runtime and retained cleanup (V1.188)
+
+The workspace dependency pin is authoritative for the SDK version. V1.188
+cuts over to the SDK 0.2 runtime contract: configured command, then nonblank
+`DSH_RUNTIME_BIN`, then PATH `dsh`; a bad explicit override fails without
+fallback. Ordinary argv is `--profile sdk`; the retired helper and SDK 0.1
+compatibility fields are not supported.
+
+The all-false permission scope uses an exclusively owned `DSH_HOME` and a
+closed SDK-profile patch with the tool-producing services omitted, no user
+profile/plugin/MCP overlays, native tools, no subagents and zero provider
+retries. Before the first deny-all prompt, close the ordinary initialized
+harness and initialize this sealed recipe. Retain the recipe and reject later
+policy changes. Runtime proof covers zero advertised tools and unsolicited
+shell/editor/run-code rejection without file/process side effects, including
+a poisoned ordinary profile. This is model-tool denial, not an OS/network
+sandbox; runtime persistence and model networking remain possible.
+
+One cleanup owner retains the session and sealed-home lease through SDK close.
+A caller's wait deadline neither aborts that owner nor proves the child stopped.
+Confirmed direct-child exit permits completion; otherwise retain actionable
+`Interrupted`/`cleanup_unconfirmed`. Restart without birth-verified identity
+must not blindly kill a PID or claim process-tree cleanup.
+
 
 ## Appendix — Implementation detail (consolidated)
 
@@ -266,6 +302,8 @@ pub struct HostStartConfig {
     pub max_sessions: usize,
     pub max_ops_per_session: usize,
     pub timeouts: TimeoutConfig,
+    pub host_config: Option<AgentHostConfig>,
+    pub probe_owner: Option<SessionOwner>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
