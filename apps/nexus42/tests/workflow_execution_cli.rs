@@ -4332,11 +4332,30 @@ fn host_event_kind(data: &Value) -> Option<String> {
 
 /// Shape-validate a session id read from a DB row before it is transmitted.
 ///
-/// The daemon's own handlers parse session ids as UUIDs (`parse_session_id`);
-/// mirroring that here means the value placed into the request URL is a parsed
-/// UUID rendered from its own components, never the raw stored string.
-fn session_id_for_request(stored: &str) -> uuid::Uuid {
-    uuid::Uuid::parse_str(stored).expect("stored session id must be a UUID")
+/// Orchestration session ids are COMPOSITE (`<preset>:<uuid>`, and nested
+/// children `<preset>:<uuid>:child:<uuid>`); the daemon's orchestration routes
+/// accept exactly that shape, while agent-host ids are bare UUIDs. Mirror both:
+/// split on `:`, reject any empty/whitespace/control-bearing segment, parse
+/// every UUID-shaped segment, and REBUILD the value from its validated parts —
+/// so what reaches the request URL is never the raw stored string.
+fn session_id_for_request(stored: &str) -> String {
+    let segments: Vec<String> = stored
+        .split(':')
+        .map(|segment| {
+            assert!(
+                !segment.is_empty()
+                    && !segment.chars().any(|c| c.is_whitespace() || c.is_control()),
+                "session id segment must be non-empty and carry no whitespace/control chars"
+            );
+            // A UUID-shaped segment is canonicalized from its parsed value; a
+            // non-UUID segment is a preset id / `child` role label, validated
+            // above and carried through verbatim.
+            uuid::Uuid::parse_str(segment)
+                .map_or_else(|_| segment.to_string(), |parsed| parsed.to_string())
+        })
+        .collect();
+    assert!(!segments.is_empty(), "session id must not be empty");
+    segments.join(":")
 }
 
 /// Shape-validate an SSE resume cursor (`<epoch-uuid>:<sequence>`) before it is
@@ -4526,7 +4545,7 @@ async fn p4_cancel_inspect_events_db_journey() {
     assert_eq!(inspect["session"]["status"].as_str(), Some("cancelled"));
     assert_eq!(db_status, "cancelled");
     assert_eq!(db_state["cancel_requested"].as_bool(), Some(true));
-    let session_id = session_id_for_request(&sid);
+    let session_id = session_id_for_request(sid);
     let events = reqwest::Client::new()
         .get(format!(
             "{}/v1/daemon/orchestration/sessions/{session_id}/events",
