@@ -599,14 +599,32 @@ mod unix_dir {
         ) -> io::Result<()> {
             if self.exists(target)? {
                 let current = self.hash_file(target)?;
+                // An entry whose preimage is ALREADY in place is a rollback
+                // that has already been applied (or was never applied at all).
+                // A replayed rollback must recognize that, not manufacture a
+                // conflict out of it.
+                let already_restored = pre_hash.is_some_and(|pre| current == pre);
                 match (post_hash, pre_hash) {
-                    (Some(post), _) if current != post => {
+                    // modify: the applied postimage (restore needed) or the
+                    // restored preimage (idempotent no-op) are both valid.
+                    (Some(post), Some(pre)) if current != post && current != pre => {
+                        return Err(third_state(
+                            "rollback",
+                            "target is neither the applied postimage nor the restored preimage",
+                        ));
+                    }
+                    // create rollback (no preimage): only the postimage is ours.
+                    (Some(post), None) if current != post => {
                         return Err(third_state("rollback", "target is not the applied postimage"));
                     }
+                    // delete rollback (no postimage): only the original is ours.
                     (None, Some(pre)) if current != pre => {
                         return Err(third_state("rollback", "target is not the preimage"));
                     }
                     _ => {}
+                }
+                if already_restored {
+                    return Ok(());
                 }
             }
             match backup_basename {

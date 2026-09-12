@@ -1376,3 +1376,63 @@ async fn corrupt_settled_basename_cannot_traverse_outside_scope() {
         "an unvalidated settled basename must never reach unlink"
     );
 }
+
+#[tokio::test]
+#[serial]
+async fn crash_after_modify_rollback_restore_before_finalize_settles_rolled_back() {
+    let (pool, db_dir) = fresh_pool().await;
+    let mgr = recoverable_mgr(pool, &db_dir);
+    let ws = tempfile::tempdir().unwrap();
+    let root = ws.path().to_string_lossy().to_string();
+    std::fs::write(ws.path().join("m.txt"), b"original").unwrap();
+    mgr.startup_recovery().await.expect("startup");
+    let session = mgr.open_session(&root, "", true).await.expect("open");
+
+    // A MODIFY (post_hash present) plus a create, so the rollback of the
+    // modify is replayed with a live preimage and `post_hash` still recorded.
+    let changes = vec![
+        modify_change("m.txt", &hash_bytes(b"original"), b"modified"),
+        create_change("new.txt", b"created-then-rolled-back"),
+    ];
+
+    // Die after the first change applied, so recovery rolls back.
+    set_crash_point(Some("after_file_apply"));
+    let err = mgr
+        .commit_session_durable(&session, &changes, &root)
+        .await
+        .unwrap_err();
+    set_crash_point(None);
+    assert!(matches!(err, SessionError::Internal(_)));
+
+    // Recovery restores the preimage, then dies BEFORE the durable
+    // rolled_back transition — so the next pass replays the modify restore
+    // while the target already holds the preimage.
+    set_crash_point(Some("after_rollback_restore_before_finalize"));
+    let err = mgr.startup_recovery().await.unwrap_err();
+    set_crash_point(None);
+    assert!(matches!(err, SessionError::Internal(_)));
+    assert_eq!(std::fs::read(ws.path().join("m.txt")).unwrap(), b"original");
+
+    // The replayed rollback must settle `rolled_back`, NOT manufacture a
+    // conflict out of an already-restored modify.
+    mgr.startup_recovery()
+        .await
+        .expect("replayed modify rollback must settle");
+    let state: String = sqlx::query_scalar(
+        "SELECT state FROM workspace_commit_intents WHERE session_id = ? ORDER BY revision DESC LIMIT 1",
+    )
+    .bind(session.to_string())
+    .fetch_one(mgr.pool().as_ref())
+    .await
+    .unwrap();
+    assert_eq!(
+        state, "rolled_back",
+        "an already-restored modify must be recognized, not treated as third-state"
+    );
+    assert_eq!(
+        std::fs::read(ws.path().join("m.txt")).unwrap(),
+        b"original",
+        "exact preimage bytes survive"
+    );
+    assert!(!ws.path().join("new.txt").exists());
+}
