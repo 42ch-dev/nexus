@@ -7,13 +7,15 @@
 //!
 //! # Pinned conformance records (PM decision, T2 brief)
 //!
-//! - `map_claude.rs` / `map_dsh.rs` execute streams emit NO `OpStarted` today
-//!   (real adapter behavior, not a fixture gap); `map_codex.rs` does. The
-//!   claude/dsh happy-path tests therefore assert the missing-OpStarted
-//!   finding is the ONLY finding — the adapter gap is a pinned conformance
-//!   record, not a runner weakness.
-//! - dsh `cancel()` is an honest no-op (AR-6: the SDK has no cancel RPC); the
-//!   dsh cancel probe asserts the no-op contract (the turn completes).
+//! - `map_claude.rs` execute streams emit NO `OpStarted` today (real
+//!   adapter behavior, not a fixture gap); `map_codex.rs` does, and the
+//!   dsh execute stream gained exactly one `OpStarted` in v1.188 P0 T2.
+//!   The claude happy-path tests therefore assert the missing-OpStarted
+//!   finding is the ONLY finding — the adapter gap is a pinned
+//!   conformance record, not a runner weakness; the dsh tests assert a
+//!   clean PASS.
+//! - dsh `cancel()` is an honest no-op (AR-6: the SDK has no cancel RPC);
+//!   the dsh cancel probe asserts the no-op contract (the turn completes).
 //!
 //! The fixtures are spawned via `#!/usr/bin/env python3` with absolute paths
 //! passed through the provider constructors — no PATH mutation, so the
@@ -98,11 +100,11 @@ fn invariant_ids(report: &ConformanceReport) -> Vec<InvariantId> {
 }
 
 /// Assert the report's ONLY finding is the missing-OpStarted adapter gap
-/// (claude/dsh pinned conformance record).
+/// (claude pinned conformance record).
 fn assert_only_missing_started(report: &ConformanceReport) {
     assert!(
         !report.passed(),
-        "claude/dsh adapters emit no OpStarted today (pinned record): {report}"
+        "claude adapter emits no OpStarted today (pinned record): {report}"
     );
     assert_eq!(
         invariant_ids(report),
@@ -415,33 +417,95 @@ async fn codex_mutated_frame_turns_runner_red() {
 
 // ── Dsh (deepseek-harness-sdk runtime) ──────────────────────────────────
 
+/// Hermetic dsh provider env (P0 T2): the SDK resolves/creates `DSH_HOME`
+/// at harness start, so every dsh conformance run gets an isolated
+/// caller-env `DSH_HOME` plus a `REQ_LOG` the fixture records its launch
+/// identity (`_spawn`: exact argv + `DSH_HOME`) and requests into.
+fn dsh_env(scenario: &str, label: &str) -> (HashMap<String, String>, PathBuf, PathBuf) {
+    let log = req_log(label);
+    let home = std::env::temp_dir().join(format!(
+        "nexus-provider-conformance-{}-{label}-home",
+        std::process::id()
+    ));
+    let env = HashMap::from([
+        ("SCENARIO".to_string(), scenario.to_string()),
+        ("REQ_LOG".to_string(), log.to_string_lossy().into_owned()),
+        ("DSH_HOME".to_string(), home.to_string_lossy().into_owned()),
+    ]);
+    (env, log, home)
+}
+
+/// Assert the P0 T2 ordinary launch identity from the fixture's request
+/// log: exactly one runtime spawn with argv exactly `--profile sdk`, the
+/// caller-env `DSH_HOME` injected, and `initialize` before the one wire
+/// prompt. The log is fixture-written JSONL (default `json.dumps`
+/// separators), asserted by exact substring rather than a serde dep.
+fn assert_ordinary_launch_identity(log: &Path, home: &Path) {
+    let content = std::fs::read_to_string(log).expect("REQ_LOG written");
+    let spawn_lines: Vec<&str> = content
+        .lines()
+        .filter(|line| line.contains("\"method\": \"_spawn\""))
+        .collect();
+    assert_eq!(spawn_lines.len(), 1, "exactly one runtime spawn: {content}");
+    assert!(
+        spawn_lines[0].contains("\"argv\": [\"--profile\", \"sdk\"]"),
+        "ordinary argv is exactly --profile sdk: {}",
+        spawn_lines[0]
+    );
+    assert!(
+        spawn_lines[0].contains(&format!("\"dsh_home\": \"{}\"", home.display())),
+        "the child env carries the caller-env DSH_HOME: {}",
+        spawn_lines[0]
+    );
+    let initialize = content
+        .find("\"method\": \"initialize\"")
+        .expect("initialize logged");
+    let prompt = content
+        .find("\"method\": \"session/prompt\"")
+        .expect("session/prompt logged");
+    assert!(
+        initialize < prompt,
+        "eager launch initialization precedes the prompt: {content}"
+    );
+}
+
 #[tokio::test]
-async fn dsh_happy_path_conforms_except_missing_started() {
+async fn dsh_happy_path_conforms() {
+    let (env, log, home) = dsh_env("happy", "dsh-happy");
     let provider = DshNativeProvider::new(
         ProviderId::new("conformance-dsh"),
         "Conformance".to_string(),
         Some(DSH_FIXTURE.to_string()),
-        HashMap::from([("SCENARIO".to_string(), "happy".to_string())]),
+        &[],
+        env,
         TimeoutConfig::default(),
-    );
+    )
+    .expect("empty native args");
     let handle = provider.launch(launch_spec()).await.expect("launch");
     let stream = provider
         .execute(&handle, prompt_op())
         .await
         .expect("execute");
     let report = run_conformance(stream, ConformanceConfig::default()).await;
-    assert_only_missing_started(&report);
+    assert!(
+        report.passed(),
+        "the dsh execute stream emits OpStarted since v1.188 P0 T2: {report}"
+    );
+    assert_ordinary_launch_identity(&log, &home);
 }
 
 #[tokio::test]
-async fn dsh_mid_stream_tool_call_conforms_except_missing_started() {
+async fn dsh_mid_stream_tool_call_conforms() {
+    let (env, _log, _home) = dsh_env("tool_call", "dsh-tool-call");
     let provider = DshNativeProvider::new(
         ProviderId::new("conformance-dsh"),
         "Conformance".to_string(),
         Some(DSH_FIXTURE.to_string()),
-        HashMap::from([("SCENARIO".to_string(), "tool_call".to_string())]),
+        &[],
+        env,
         TimeoutConfig::default(),
-    );
+    )
+    .expect("empty native args");
     let handle = provider.launch(launch_spec()).await.expect("launch");
     let stream = provider
         .execute(&handle, prompt_op())
@@ -455,18 +519,21 @@ async fn dsh_mid_stream_tool_call_conforms_except_missing_started() {
         "dsh has no tool surface (AR-6): {events:?}"
     );
     let report = run_conformance(stream_of(events), ConformanceConfig::default()).await;
-    assert_only_missing_started(&report);
+    assert!(report.passed(), "dsh conforms: {report}");
 }
 
 #[tokio::test]
 async fn dsh_malformed_frame_fails_once_with_decode_error() {
+    let (env, _log, _home) = dsh_env("malformed", "dsh-malformed");
     let provider = DshNativeProvider::new(
         ProviderId::new("conformance-dsh"),
         "Conformance".to_string(),
         Some(DSH_FIXTURE.to_string()),
-        HashMap::from([("SCENARIO".to_string(), "malformed".to_string())]),
+        &[],
+        env,
         TimeoutConfig::default(),
-    );
+    )
+    .expect("empty native args");
     let handle = provider.launch(launch_spec()).await.expect("launch");
     let stream = provider
         .execute(&handle, prompt_op())
@@ -481,32 +548,34 @@ async fn dsh_malformed_frame_fails_once_with_decode_error() {
         "a malformed turn/end must fail the run once with decode_error: {events:?}"
     );
     let report = run_conformance(stream_of(events), ConformanceConfig::default()).await;
-    assert_only_missing_started(&report);
+    assert!(
+        report.passed(),
+        "OpStarted + one decode_error terminal conforms: {report}"
+    );
 }
 
 #[tokio::test]
 async fn dsh_cancel_is_honest_noop() {
-    let log = req_log("dsh-cancel");
+    let (env, log, _home) = dsh_env("cancel", "dsh-cancel");
     let provider = DshNativeProvider::new(
         ProviderId::new("conformance-dsh"),
         "Conformance".to_string(),
         Some(DSH_FIXTURE.to_string()),
-        HashMap::from([
-            ("SCENARIO".to_string(), "cancel".to_string()),
-            ("REQ_LOG".to_string(), log.to_string_lossy().into_owned()),
-        ]),
+        &[],
+        env,
         TimeoutConfig::default(),
-    );
+    )
+    .expect("empty native args");
     let handle = provider.launch(launch_spec()).await.expect("launch");
     let mut stream = provider
         .execute(&handle, prompt_op())
         .await
         .expect("execute");
 
-    // The dsh surface is non-streaming (AR-6): the first event is the
-    // MessageDelta of an already-completed run.
+    // Exactly one OpStarted precedes content (P0 T2); P1 maps committed
+    // assistant/message units into MessageDelta before the terminal.
     let first = stream.next().await.expect("first event").expect("ok");
-    assert!(matches!(first, HostEvent::MessageDelta(_)));
+    assert!(matches!(first, HostEvent::OpStarted(_)));
 
     provider
         .cancel(&handle, HostOperationId::new())
@@ -520,13 +589,78 @@ async fn dsh_cancel_is_honest_noop() {
         "the turn must complete normally — dsh cancel is a documented no-op \
          (AR-6), the fixture is NOT terminated: {events:?}"
     );
-    // The fixture never saw a cancellation: its request log shows the normal
-    // initialize + session/prompt sequence (no cancel RPC exists).
+    // The fixture never saw a cancellation: its request log shows the
+    // normal _spawn + initialize + session/prompt sequence (no cancel RPC
+    // exists).
     let log_content = std::fs::read_to_string(&log).unwrap_or_default();
     assert!(
         log_content.contains("session/prompt"),
         "the fixture must have served the prompt: {log_content}"
     );
     let report = run_conformance(stream_of(events), ConformanceConfig::default()).await;
-    assert_only_missing_started(&report);
+    assert!(report.passed(), "the honest-noop turn conforms: {report}");
+}
+
+fn message_texts(events: &[HostEvent]) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            HostEvent::MessageDelta(delta) => Some(delta.text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn dsh_two_messages_conforms() {
+    let (env, log, home) = dsh_env("two_messages", "dsh-two-msgs");
+    let provider = DshNativeProvider::new(
+        ProviderId::new("conformance-dsh"),
+        "Conformance".to_string(),
+        Some(DSH_FIXTURE.to_string()),
+        &[],
+        env,
+        TimeoutConfig::default(),
+    )
+    .expect("empty native args");
+    let handle = provider.launch(launch_spec()).await.expect("launch");
+    let stream = provider
+        .execute(&handle, prompt_op())
+        .await
+        .expect("execute");
+    let events = collect(stream).await;
+    assert_eq!(message_texts(&events), vec!["A", "B"], "{events:?}");
+    let report = run_conformance(stream_of(events), ConformanceConfig::default()).await;
+    assert!(report.passed(), "two committed messages conform: {report}");
+    assert_ordinary_launch_identity(&log, &home);
+}
+
+#[tokio::test]
+async fn dsh_partial_then_fail_conforms_with_one_terminal() {
+    let (env, _log, _home) = dsh_env("partial_then_fail", "dsh-partial-fail");
+    let provider = DshNativeProvider::new(
+        ProviderId::new("conformance-dsh"),
+        "Conformance".to_string(),
+        Some(DSH_FIXTURE.to_string()),
+        &[],
+        env,
+        TimeoutConfig::default(),
+    )
+    .expect("empty native args");
+    let handle = provider.launch(launch_spec()).await.expect("launch");
+    let stream = provider
+        .execute(&handle, prompt_op())
+        .await
+        .expect("execute");
+    let events = collect(stream).await;
+    assert_eq!(message_texts(&events), vec!["partial"], "{events:?}");
+    assert!(
+        matches!(
+            terminal_of(&events),
+            Some(HostEvent::OpFailed(f)) if f.error_category == "max_tokens"
+        ),
+        "{events:?}"
+    );
+    // P1 maps non-success finish reasons to typed OpFailed categories; the
+    // neutral runner's closed error_category set is unchanged in P1.
 }

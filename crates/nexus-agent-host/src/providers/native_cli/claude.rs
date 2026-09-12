@@ -321,6 +321,24 @@ fn kill_child_by_pid(pid: u32) {
     }
 }
 
+/// Kill and reap an owned probe child within a bounded window.
+///
+/// Returns `Err(())` when termination could NOT be confirmed, so the caller can
+/// report `cleanup unconfirmed` instead of claiming a clean close. No claim is
+/// made about reaping descendants beyond this direct child.
+async fn close_probe_child(child: &mut tokio::process::Child) -> Result<(), ()> {
+    let close = async {
+        // Already-exited children return Ok(None) here and are still reaped by
+        // the `wait` below.
+        let _ = child.start_kill();
+        child.wait().await.map(|_| ())
+    };
+    match tokio::time::timeout(std::time::Duration::from_secs(2), close).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(_)) | Err(_) => Err(()),
+    }
+}
+
 #[async_trait]
 impl ProviderAdapter for ClaudeCliProvider {
     fn descriptor(&self) -> ProviderDescriptor {
@@ -334,47 +352,100 @@ impl ProviderAdapter for ClaudeCliProvider {
 
     async fn probe(
         &self,
-        _request: crate::capability::model::ProbeRequest,
+        request: crate::capability::model::ProbeRequest,
     ) -> HostResult<ProviderHealth> {
-        // Cross-platform command lookup: `which` crate handles PATH scanning
-        // and Windows PATHEXT resolution automatically. Wrapped in
-        // spawn_blocking to keep the async runtime responsive, and
-        // enforced with launch_ms timeout.
-        let command = self.command.clone();
         let provider_id = self.provider_id.clone();
-        let launch_dur = self.timeouts.launch_duration();
+        let launch_dur = std::time::Duration::from_millis(request.timeout_ms);
+        let command = self.command.clone();
+        let cwd = request.cwd.clone();
+        // The probe must observe the SAME configured environment the launch
+        // path injects: a PATH/API/runtime variable that makes `launch` work
+        // would otherwise make the probe report the provider unavailable (or
+        // probe a different runtime than the one selected).
+        let env = self.env.clone();
 
-        let result = tokio::time::timeout(
-            launch_dur,
-            tokio::task::spawn_blocking(move || which::which(&command)),
-        )
-        .await
-        .map_err(|_| {
-            HostError::timeout(
-                "probe",
-                format!(
-                    "command lookup timed out after {}ms",
-                    self.timeouts.launch_ms
-                ),
-            )
-            .with_provider(self.provider_id.clone())
-        })?;
-
-        let health = match result {
-            Ok(Ok(resolved_path)) => ProviderHealth {
-                provider_id,
-                available: true,
-                latency_ms: None,
-                message: Some(resolved_path.to_string_lossy().into_owned()),
-            },
-            _ => ProviderHealth {
-                provider_id,
-                available: false,
-                latency_ms: None,
-                message: Some(format!("command '{}' not found on PATH", self.command)),
-            },
+        // Owned child (never `Command::output()`): the probe keeps an explicit
+        // handle so a timeout or error can kill and reap the `--version` child
+        // within the bound instead of dropping the future and leaking it.
+        let mut child = match tokio::process::Command::new(&command)
+            .arg("--version")
+            .current_dir(&cwd)
+            .envs(&env)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(ProviderHealth {
+                    provider_id,
+                    available: false,
+                    latency_ms: None,
+                    message: Some(format!("cli command not found: {command}")),
+                });
+            }
+            Err(_) => {
+                return Ok(ProviderHealth {
+                    provider_id,
+                    available: false,
+                    latency_ms: None,
+                    message: Some("cli handshake failed".to_string()),
+                });
+            }
         };
-        Ok(health)
+
+        // Poll the owned child to completion under the bound, so the deadline
+        // path always has a child handle to close.
+        let wait = async {
+            loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => return Some(status),
+                    Ok(None) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+                    Err(_) => return None,
+                }
+            }
+        };
+
+        let status = match tokio::time::timeout(launch_dur, wait).await {
+            Ok(status) => status,
+            Err(_elapsed) => {
+                // Timeout: bounded kill + wait on the OWNED child. A close that
+                // cannot be confirmed is reported as such — never silently
+                // reported as a clean unavailable.
+                return Ok(match close_probe_child(&mut child).await {
+                    Ok(()) => ProviderHealth {
+                        provider_id,
+                        available: false,
+                        latency_ms: None,
+                        message: Some("cli handshake timed out".to_string()),
+                    },
+                    Err(()) => ProviderHealth {
+                        provider_id,
+                        available: false,
+                        latency_ms: None,
+                        message: Some("probe timeout cleanup unconfirmed".to_string()),
+                    },
+                });
+            }
+        };
+
+        let available = matches!(status, Some(status) if status.success());
+        if !available {
+            // The child already exited; confirm the handle is reaped.
+            let _ = close_probe_child(&mut child).await;
+        }
+        Ok(ProviderHealth {
+            provider_id,
+            available,
+            latency_ms: None,
+            message: Some(if available {
+                "cli handshake succeeded".to_string()
+            } else {
+                "cli handshake failed".to_string()
+            }),
+        })
     }
 
     async fn launch(
@@ -708,6 +779,19 @@ mod tests {
         "/tests/fixtures/native_protocol/mock_claude_cli.py"
     );
 
+    fn test_probe_request(timeout_ms: u64) -> crate::capability::model::ProbeRequest {
+        let cwd = std::path::PathBuf::from("/tmp");
+        crate::capability::model::ProbeRequest {
+            timeout_ms,
+            cwd,
+            owner: crate::capability::model::SessionOwner {
+                creator_id: "ctr_test".to_string(),
+                workspace_root: std::path::PathBuf::from("/tmp"),
+                orchestration_run_id: None,
+            },
+        }
+    }
+
     fn launch_spec() -> LaunchSpec {
         LaunchSpec {
             cwd: std::path::PathBuf::from("/tmp"),
@@ -815,7 +899,7 @@ mod tests {
         );
 
         let health = provider
-            .probe(crate::capability::model::ProbeRequest { timeout_ms: 5000 })
+            .probe(test_probe_request(5000))
             .await
             .expect("probe should succeed");
 

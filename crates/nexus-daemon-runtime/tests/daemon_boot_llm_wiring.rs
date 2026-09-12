@@ -89,6 +89,7 @@ async fn with_runtime_deps_wiring_makes_llm_extract_run() {
         session_cancels: session_cancels_with_test_session(),
         daemon_tool_dispatch: None,
         cdn_config: None,
+        workspace_executor: None,
     };
     let registry = CapabilityRegistry::with_runtime_deps(&deps);
 
@@ -140,6 +141,7 @@ async fn executor_failure_stays_typed_failure() {
         session_cancels: session_cancels_with_test_session(),
         daemon_tool_dispatch: None,
         cdn_config: None,
+        workspace_executor: None,
     };
     let registry = CapabilityRegistry::with_runtime_deps(&deps);
 
@@ -180,6 +182,7 @@ async fn no_executor_returns_unavailable() {
         session_cancels: empty_session_cancels(),
         daemon_tool_dispatch: None,
         cdn_config: None,
+        workspace_executor: None,
     };
     let registry = CapabilityRegistry::with_runtime_deps(&deps);
 
@@ -216,6 +219,7 @@ async fn with_runtime_deps_registers_all_llm_capabilities() {
         session_cancels: empty_session_cancels(),
         daemon_tool_dispatch: None,
         cdn_config: None,
+        workspace_executor: None,
     };
     let registry = CapabilityRegistry::with_runtime_deps(&deps);
 

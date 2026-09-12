@@ -10,9 +10,9 @@
 
 use super::wire_cast;
 use crate::api::errors::NexusApiError;
-use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_slug};
 use crate::api::path_guard::resolve_guarded_path_async;
 use crate::api::runtime_lock::RuntimeLockGuard;
+use crate::config::{read_active_creator_id, read_active_workspace_slug};
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, State};
 use axum::Json;

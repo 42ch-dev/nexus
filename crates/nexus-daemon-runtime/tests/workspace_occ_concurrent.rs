@@ -16,6 +16,7 @@
 //! does not depend on it). This is the correct home for the test.
 
 #![allow(clippy::unwrap_used)]
+use base64::Engine;
 
 use nexus_daemon_runtime::workspace::session::{
     compute_content_hashes, occ_conflict_total, ChangeEntry, ChangeOp, SessionError, SessionId,
@@ -179,7 +180,7 @@ async fn consume_after_commit_is_stale() {
 /// Clone the `Arc<SqlitePool>` out of a manager so each spawned task gets
 /// its own manager handle pointing at the same DB.
 fn clone_mgr(mgr: &WorkspaceSessionManager) -> WorkspaceSessionManager {
-    WorkspaceSessionManager::new(mgr.pool())
+    mgr.clone()
 }
 
 // ── V1.58 P0 T2 (QC2 H-2 regression): symlink rejection in Modify path ────
@@ -236,15 +237,96 @@ async fn validate_changes_manifest_rejects_symlink_in_modify_path() {
     // successful symlink escape).
     let changes = vec![ChangeEntry {
         path: "real.txt".to_string(),
-        content_hash: stored_hash,
         op: ChangeOp::Modify,
+        expected_hash: Some(stored_hash),
+        content_base64: Some(base64::engine::general_purpose::STANDARD.encode(b"placeholder")),
     }];
     let err = mgr
-        .validate_changes_manifest(&session_id, &changes, &ws_root)
+        .validate_contract_manifest(&session_id, &changes)
         .await
         .expect_err("symlink must be rejected");
     assert!(
         matches!(err, SessionError::PathEscape { .. }),
         "expected PathEscape for symlink in Modify path, got {err:?}"
     );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn recoverable_create_modify_delete_and_idempotent_retry() {
+    use base64::Engine;
+    let (pool, db_dir) = fresh_pool().await;
+    let db_path = db_dir.path().join("state.db");
+    let mgr = WorkspaceSessionManager::new_recoverable(pool, db_path).expect("recoverable mgr");
+
+    let ws_dir = tempfile::tempdir().unwrap();
+    let ws_root = ws_dir.path().to_string_lossy().to_string();
+
+    let session_id = mgr.open_session(&ws_root, "", true).await.expect("open");
+    let create_bytes = b"hello durable";
+    let create_b64 = base64::engine::general_purpose::STANDARD.encode(create_bytes);
+    let create_changes = vec![ChangeEntry {
+        path: "note.txt".to_string(),
+        op: ChangeOp::Create,
+        expected_hash: None,
+        content_base64: Some(create_b64.clone()),
+    }];
+    let first = mgr
+        .commit_session_durable(&session_id, &create_changes, &ws_root)
+        .await
+        .expect("create commit");
+    assert!(first.committed);
+    assert!(first.revision.starts_with("rev_"));
+    assert_eq!(
+        std::fs::read(ws_dir.path().join("note.txt")).unwrap(),
+        create_bytes
+    );
+
+    let session2 = mgr.open_session(&ws_root, "", true).await.expect("reopen");
+    let hashes = compute_content_hashes(ws_dir.path()).await.expect("hash");
+    let pre = hashes.hashes.get("note.txt").cloned().expect("tracked");
+    let modify_bytes = b"hello modified";
+    let modify_b64 = base64::engine::general_purpose::STANDARD.encode(modify_bytes);
+    let modify_changes = vec![ChangeEntry {
+        path: "note.txt".to_string(),
+        op: ChangeOp::Modify,
+        expected_hash: Some(pre),
+        content_base64: Some(modify_b64),
+    }];
+    let second = mgr
+        .commit_session_durable(&session2, &modify_changes, &ws_root)
+        .await
+        .expect("modify commit");
+    assert_ne!(second.revision, first.revision);
+
+    let session3 = mgr.open_session(&ws_root, "", true).await.expect("reopen3");
+    let hashes2 = compute_content_hashes(ws_dir.path()).await.expect("hash2");
+    let pre2 = hashes2.hashes.get("note.txt").cloned().expect("tracked2");
+    let delete_changes = vec![ChangeEntry {
+        path: "note.txt".to_string(),
+        op: ChangeOp::Delete,
+        expected_hash: Some(pre2),
+        content_base64: None,
+    }];
+    mgr.commit_session_durable(&session3, &delete_changes, &ws_root)
+        .await
+        .expect("delete commit");
+    assert!(!ws_dir.path().join("note.txt").exists());
+
+    let session4 = mgr.open_session(&ws_root, "", true).await.expect("reopen4");
+    let recreate = vec![ChangeEntry {
+        path: "note.txt".to_string(),
+        op: ChangeOp::Create,
+        expected_hash: None,
+        content_base64: Some(create_b64),
+    }];
+    let a = mgr
+        .commit_session_durable(&session4, &recreate, &ws_root)
+        .await
+        .expect("recreate");
+    let retry = mgr
+        .commit_session_durable(&session4, &recreate, &ws_root)
+        .await
+        .expect("idempotent retry after consumed session");
+    assert_eq!(retry.revision, a.revision);
 }

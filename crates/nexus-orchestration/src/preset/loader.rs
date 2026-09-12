@@ -1371,6 +1371,13 @@ pub fn build_wired_outer_graph(
             .with_output_bindings(loaded.output_bindings.clone())
             .with_registry(caps.clone());
 
+        // v1.188 P3: resolve `_context.workspace.*` from the engine's live
+        // workspace state provider, so preset conditional edges see real
+        // durable workspace state instead of a synthetic default.
+        if let Some(provider) = engine.workspace_state_provider() {
+            task = task.with_workspace_state_provider(provider);
+        }
+
         // Wire daemon tool dispatch for HostTool enter actions (DF-47, V1.42 P3).
         if let Some(ref dispatch) = daemon_tool_dispatch {
             task = task.with_daemon_tool_dispatch(dispatch.clone());
@@ -1510,6 +1517,42 @@ fn build_inner_graphs(
             for node in &ig.nodes {
                 for dep in &node.depends_on {
                     builder = builder.add_edge(dep, &node.id);
+                }
+            }
+
+            // Terminate the inner graph explicitly. graph-flow reports
+            // `ExecutionStatus::Completed` ONLY when a task returns
+            // `NextAction::End`; a node's `NextAction::Continue` with no
+            // outgoing edge instead parks the run at
+            // `Paused { reason: "No outgoing edge found from current task" }`
+            // while leaving `current_task_id` unchanged. `InnerGraphTask`
+            // treats a paused child as "resume and keep stepping", so a sink
+            // node would be re-executed up to its 256-poll bound — re-running
+            // the node's external prompt every time and never letting the
+            // parent step finish. Sink nodes are exactly the nodes that no
+            // `depends_on` edge targets, so an end node plus one edge per sink
+            // makes the child reach `Completed` after its real work.
+            // A graph that already declares a node named `end` owns that id;
+            // registering the terminal task would silently REPLACE that node.
+            // Such a graph keeps its authored topology.
+            let declares_end = ig.nodes.iter().any(|node| node.id == "end");
+            if !declares_end {
+                let depended_upon: std::collections::HashSet<&str> = ig
+                    .nodes
+                    .iter()
+                    .flat_map(|node| node.depends_on.iter().map(std::string::String::as_str))
+                    .collect();
+                let sinks: Vec<&str> = ig
+                    .nodes
+                    .iter()
+                    .map(|node| node.id.as_str())
+                    .filter(|id| !depended_upon.contains(id))
+                    .collect();
+                builder = builder.add_task(std::sync::Arc::new(
+                    crate::system_preset::EndTask::new(format!("inner graph '{name}' completed")),
+                ));
+                for sink in sinks {
+                    builder = builder.add_edge(sink, "end");
                 }
             }
 
@@ -2350,6 +2393,8 @@ states:
     enter:
       - kind: capability
         name: workspace.open
+        args:
+          path: .
     exit_when: { kind: manual }
     next: b
   - id: b

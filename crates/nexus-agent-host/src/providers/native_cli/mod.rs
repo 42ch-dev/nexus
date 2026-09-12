@@ -9,6 +9,8 @@ pub mod dsh;
 pub mod map_claude;
 pub mod map_codex;
 pub mod map_dsh;
+#[cfg(unix)]
+pub(crate) mod sealed_fs;
 
 /// Cap a crate error's `Display` string for `OpFailed::error_message` (N-2).
 ///

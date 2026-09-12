@@ -1,0 +1,122 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT session_id as \"session_id!\", workspace_root, relative_path, existed, file_hashes_json, created_at, expires_at, consumed, claimed_by_revision FROM workspace_sessions WHERE session_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "session_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_sessions",
+            "name": "session_id"
+          }
+        }
+      },
+      {
+        "name": "workspace_root",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_sessions",
+            "name": "workspace_root"
+          }
+        }
+      },
+      {
+        "name": "relative_path",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_sessions",
+            "name": "relative_path"
+          }
+        }
+      },
+      {
+        "name": "existed",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workspace_sessions",
+            "name": "existed"
+          }
+        }
+      },
+      {
+        "name": "file_hashes_json",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_sessions",
+            "name": "file_hashes_json"
+          }
+        }
+      },
+      {
+        "name": "created_at",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_sessions",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "name": "expires_at",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_sessions",
+            "name": "expires_at"
+          }
+        }
+      },
+      {
+        "name": "consumed",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workspace_sessions",
+            "name": "consumed"
+          }
+        }
+      },
+      {
+        "name": "claimed_by_revision",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_sessions",
+            "name": "claimed_by_revision"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "7ba6b349da89715f2b2ba48aa1b8ec4c6e220301ff8e977e0a9fae29177b7551"
+}

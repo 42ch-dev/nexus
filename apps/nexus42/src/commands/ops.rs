@@ -741,6 +741,7 @@ fn ops_capability_registry() -> nexus_orchestration::capability::CapabilityRegis
         )),
         daemon_tool_dispatch: None,
         cdn_config: None,
+        workspace_executor: None,
     };
     CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &user_caps_dir).0
 }

@@ -84,6 +84,11 @@ pub enum LocalDbError {
     ActorNotFound { resource: &'static str, id: String },
     /// Stable actor-contract product conflict (HTTP 409 at the Daemon).
     ActorContractConflict { code: ActorContractConflict },
+    /// Malformed durable workspace commit intent row.
+    CorruptIntent {
+        revision: String,
+        workspace_root: String,
+    },
 }
 
 /// Stable actor-contract conflict codes (wire `error.code` at HTTP 409).
@@ -251,6 +256,9 @@ impl LocalDbError {
 }
 
 impl fmt::Display for LocalDbError {
+    // One flat variant-to-text match: the arm order mirrors the enum, and
+    // splitting it across helpers would scatter a single user-facing mapping.
+    #[allow(clippy::too_many_lines)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MissingWorkspaceMetaTable => {
@@ -344,6 +352,15 @@ impl fmt::Display for LocalDbError {
             }
             Self::ActorContractConflict { code } => {
                 write!(f, "{}", code.message())
+            }
+            Self::CorruptIntent {
+                revision,
+                workspace_root,
+            } => {
+                write!(
+                    f,
+                    "corrupt workspace commit intent {revision} at {workspace_root}"
+                )
             }
         }
     }

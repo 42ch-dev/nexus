@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use nexus_agent_host::capability::model::HostStartConfig;
+use nexus_agent_host::capability::model::{HostStartConfig, SessionOwner};
 use nexus_agent_host::config::{AgentHostConfig, ProviderConfig, TimeoutConfig};
 use nexus_agent_host::core::manager::HostManager;
 use nexus_agent_host::providers::acp::AcpProvider;
@@ -140,11 +140,63 @@ async fn build_host(
             max_sessions: 4,
             max_ops_per_session: 1,
             timeouts: timeouts(),
+            host_config: None,
+            // Verified probe owner bound to the fixture workspace boundary:
+            // the ready-path journeys below admit real sessions, which require
+            // a probed-available provider. Without an owner every entry stays
+            // unavailable by contract (see the no-context case in the manager
+            // tests, which asserts unavailability).
+            probe_owner: Some(SessionOwner {
+                creator_id: "ctr_probe".to_string(),
+                workspace_root: ws.workspace_root.clone(),
+                orchestration_run_id: None,
+            }),
         })
         .await
         .expect("host start");
     let host: Arc<dyn HostFacade> = manager.clone();
     (manager, host)
+}
+
+/// Start events for SESSION launches only (the readiness probe is excluded).
+///
+/// The host runs one bounded ACP probe in the boundary root before any session
+/// exists, so per-session spawn assertions must not count that probe child.
+/// Assert the refusal produced NO session-level external effect.
+///
+/// The readiness probe legitimately spawns once in the boundary root at host
+/// start, so "no external effect" for a refused request means: no SESSION
+/// launch and no prompt ever reached the fixture — a strictly stronger check
+/// than the old "the log file does not exist".
+fn assert_no_session_effect(ws: &TestWorkspace, context: &str) {
+    let log = read_fixture_log(&ws.fixture_log);
+    assert!(
+        session_start_events(&log, ws).is_empty(),
+        "{context}: no session launch may be spawned, log: {log:?}"
+    );
+    assert_eq!(
+        log.iter().filter(|e| e["event"] == "prompt").count(),
+        0,
+        "{context}: no prompt may reach the fixture, log: {log:?}"
+    );
+}
+
+fn session_start_events<'a>(
+    log: &'a [serde_json::Value],
+    ws: &TestWorkspace,
+) -> Vec<&'a serde_json::Value> {
+    let probe_cwd = ws
+        .workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| ws.workspace_root.clone());
+    log.iter()
+        .filter(|e| e["event"] == "start")
+        .filter(|e| {
+            e["cwd"]
+                .as_str()
+                .is_none_or(|cwd| Path::new(cwd) != probe_cwd.as_path())
+        })
+        .collect()
 }
 
 fn read_fixture_log(path: &Path) -> Vec<serde_json::Value> {
@@ -196,6 +248,7 @@ async fn build_stack(
         session_cancels: session_cancels.clone(),
         daemon_tool_dispatch: None,
         cdn_config: None,
+        workspace_executor: None,
     };
     let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
     (
@@ -444,10 +497,7 @@ async fn missing_binding_refuses_before_effect() {
     }
 
     // No fixture process was ever spawned (no external effect).
-    assert!(
-        !ws.fixture_log.exists(),
-        "refusal must not spawn the fixture"
-    );
+    assert_no_session_effect(&ws, "refusal must not spawn the fixture");
 
     host.shutdown().await.expect("host shutdown");
 }
@@ -457,7 +507,9 @@ async fn eof_after_initialize_is_typed_failure() {
     let _lock = env_lock();
     let ws = setup_workspace();
     let provider_cfg =
-        acp_provider_config("mock-acp", &ws.fixture_log).with_env("EOF_AFTER_INIT", "1");
+        // Run 1 is the bounded readiness probe (passes); run 2 is the session
+        // launch that must fail — post-ready launch failure, not a broken recipe.
+        acp_provider_config("mock-acp", &ws.fixture_log).with_env("EOF_AFTER_INIT_FROM_RUN", "2");
     let (host, _storage, workflow_store, executor, _registry, session_cancels) =
         build_stack(&ws, provider_cfg).await;
     let run_id = start_v1_run(&workflow_store, &ws, "mock-acp", &session_cancels).await;
@@ -512,10 +564,7 @@ async fn pre_cancelled_request_is_fenced_before_launch() {
     }
 
     // No fixture process was ever spawned (no external effect at all).
-    assert!(
-        !ws.fixture_log.exists(),
-        "pre-cancelled request must not spawn the fixture"
-    );
+    assert_no_session_effect(&ws, "pre-cancelled request must not spawn the fixture");
 
     host.shutdown().await.expect("host shutdown");
 }
@@ -700,9 +749,9 @@ async fn concurrent_same_key_second_prompt_reuses_session_not_spawn() {
         "single-flight must create exactly one session for one (run, role) key"
     );
     let log = read_fixture_log(&ws.fixture_log);
-    let start_pids: std::collections::HashSet<String> = log
-        .iter()
-        .filter(|e| e["event"] == "start")
+    // Session launches only: the readiness probe child is not a session.
+    let start_pids: std::collections::HashSet<String> = session_start_events(&log, &ws)
+        .into_iter()
         .map(|e| e["pid"].to_string())
         .collect();
     assert_eq!(
@@ -807,9 +856,9 @@ async fn capability_route_cancel_uses_shared_coordinator_token() {
         other => panic!("expected Cancelled through capability route, got: {other:?}"),
     }
 
-    assert!(
-        !ws.fixture_log.exists(),
-        "cancelled capability prompt must never spawn the fixture"
+    assert_no_session_effect(
+        &ws,
+        "cancelled capability prompt must never spawn the fixture",
     );
 
     host.shutdown().await.expect("host shutdown");
@@ -905,10 +954,7 @@ async fn capability_route_fails_closed_when_run_token_missing() {
 
     // No fixture process was ever spawned (the fail-closed refusal happens
     // before any external effect).
-    assert!(
-        !ws.fixture_log.exists(),
-        "missing-token refusals must never spawn the fixture"
-    );
+    assert_no_session_effect(&ws, "missing-token refusals must never spawn the fixture");
 
     host.shutdown().await.expect("host shutdown");
 }

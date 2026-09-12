@@ -195,6 +195,7 @@ mod tests {
             )),
             daemon_tool_dispatch: None,
             cdn_config: None,
+            workspace_executor: None,
         };
         let (registry, outcome) =
             nexus_orchestration::CapabilityRegistry::with_runtime_deps_and_user_caps(

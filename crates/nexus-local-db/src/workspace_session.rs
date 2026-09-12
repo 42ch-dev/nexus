@@ -18,6 +18,8 @@ pub struct WorkspaceSessionRow {
     pub created_at: String,
     pub expires_at: String,
     pub consumed: bool,
+    /// In-flight commit revision holding this session, if any.
+    pub claimed_by_revision: Option<String>,
 }
 
 /// Parameters for creating a new workspace session.
@@ -88,34 +90,25 @@ pub async fn get_session(
     pool: &SqlitePool,
     session_id: &str,
 ) -> Result<Option<WorkspaceSessionRow>, LocalDbError> {
-    // SAFETY: compile-time checked — reads all columns from workspace_sessions table.
     let row = sqlx::query!(
-        "SELECT session_id, workspace_root, relative_path, existed, file_hashes_json, \
-         created_at, expires_at, consumed \
+        "SELECT session_id as \"session_id!\", workspace_root, relative_path, existed, file_hashes_json, \
+         created_at, expires_at, consumed, claimed_by_revision \
          FROM workspace_sessions WHERE session_id = ?",
         session_id
     )
     .fetch_optional(pool)
     .await?;
 
-    Ok(row.map(|r| {
-        // session_id is TEXT PRIMARY KEY NOT NULL — guaranteed non-null by schema.
-        // Explicit unwrap is safe; clippy::missing_panics_doc is waived because
-        // this is a schema invariant, not a runtime condition.
-        #[allow(clippy::missing_panics_doc)]
-        let session_id = r
-            .session_id
-            .unwrap_or_else(|| unreachable!("session_id is PRIMARY KEY NOT NULL"));
-        WorkspaceSessionRow {
-            session_id,
-            workspace_root: r.workspace_root,
-            relative_path: r.relative_path,
-            existed: r.existed != 0,
-            file_hashes_json: r.file_hashes_json,
-            created_at: r.created_at,
-            expires_at: r.expires_at,
-            consumed: r.consumed != 0,
-        }
+    Ok(row.map(|r| WorkspaceSessionRow {
+        session_id: r.session_id,
+        workspace_root: r.workspace_root,
+        relative_path: r.relative_path,
+        existed: r.existed != 0,
+        file_hashes_json: r.file_hashes_json,
+        created_at: r.created_at,
+        expires_at: r.expires_at,
+        consumed: r.consumed != 0,
+        claimed_by_revision: r.claimed_by_revision,
     }))
 }
 
@@ -143,15 +136,7 @@ pub async fn consume_session(
 
     // Check expiry using SQLite datetime comparison with RFC 3339 format.
     // Both expires_at and strftime output are in RFC 3339 format.
-    let active_count = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM workspace_sessions \
-         WHERE session_id = ? AND consumed = 0 AND expires_at > strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
-        session_id
-    )
-    .fetch_one(pool)
-    .await?;
-
-    if active_count == 0 {
+    if !is_session_active(pool, session_id).await? {
         // Re-read to determine the reason
         let Some(session) = get_session(pool, session_id).await? else {
             return Ok(ConsumeResult::NotFound);
@@ -205,6 +190,21 @@ pub async fn cleanup_expired_sessions(pool: &SqlitePool) -> Result<u64, LocalDbE
     .execute(pool)
     .await?;
     Ok(result.rows_affected())
+}
+
+/// Return whether a session is unconsumed and unexpired.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` on database failure.
+pub async fn is_session_active(pool: &SqlitePool, session_id: &str) -> Result<bool, LocalDbError> {
+    let active_count = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM workspace_sessions WHERE session_id = ? AND consumed = 0 AND expires_at > strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
+        session_id
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(active_count > 0)
 }
 
 /// Count active (unconsumed + unexpired) sessions.

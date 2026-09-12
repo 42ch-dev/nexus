@@ -522,161 +522,9 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // --- Section 2.5: Agent Host subsystem (constructed BEFORE the
     // capability registry so the production HostPromptExecutor can be
     // injected into `CapabilityRuntimeDeps::prompt_executor` — A1) ---
-    let agent_host_facade: Arc<dyn nexus_agent_host::HostFacade> = {
-        use nexus_agent_host::providers::native_cli::{
-            claude::ClaudeCliProvider, codex::CodexNativeProvider, dsh::DshNativeProvider,
-        };
-
-        let manager = nexus_agent_host::core::manager::HostManager::new();
-        // Probe CLI presence before registering. Providers whose CLI is
-        // absent from PATH are NOT registered, so `/providers` and the
-        // AgentPicker UI do not surface them — avoiding a false promise
-        // where the UI offers a session path that only fails at
-        // process-spawn time (greptile P1; supersedes the qc1 W-001
-        // deferral R-V1127P1-QC-W-001, now closed).
-        //
-        // `default_config()` is a pure constructor that does not panic;
-        // `which::which()` is a fast PATH lookup (~1ms). Both are safe
-        // to call unconditionally at boot.
-        let mut providers_registered = 0u32;
-
-        if which::which("codex").is_ok() {
-            manager
-                .register_provider(
-                    Arc::new(CodexNativeProvider::default_config()),
-                    nexus_agent_host::LaunchStrategy::NativeCli {
-                        command: "codex".to_string(),
-                        args: vec![],
-                        env: std::collections::HashMap::new(),
-                    },
-                )
-                .await;
-            providers_registered += 1;
-            tracing::info!(
-                provider = "codex-native",
-                "registered native agent provider"
-            );
-        } else {
-            tracing::warn!(
-                provider = "codex-native",
-                "CLI not found on PATH; skipping registration"
-            );
-        }
-
-        if which::which("claude").is_ok() {
-            manager
-                .register_provider(
-                    Arc::new(ClaudeCliProvider::default_config()),
-                    nexus_agent_host::LaunchStrategy::NativeCli {
-                        command: "claude".to_string(),
-                        args: vec![],
-                        env: std::collections::HashMap::new(),
-                    },
-                )
-                .await;
-            providers_registered += 1;
-            tracing::info!(
-                provider = "claude-native",
-                "registered native agent provider"
-            );
-        } else {
-            tracing::warn!(
-                provider = "claude-native",
-                "CLI not found on PATH; skipping registration"
-            );
-        }
-
-        // dsh-native (PD-4): bring-your-own runtime, same skip-if-missing
-        // rule as claude/codex. Discovery: PATH command `dsh-jsonrpc-agent`
-        // OR a non-empty `DSH_RUNTIME_BIN` env var (the SDK treats empty as
-        // absent).
-        //
-        // Runtime handoff (P2 plan T2): PATH-discovered → the resolved
-        // absolute path is handed to the provider as `Config::runtime_bin`;
-        // env-only → `runtime_bin` stays unset so the SDK's own resolution
-        // order 3 (`DSH_RUNTIME_BIN` from the parent environment) picks the
-        // binary (`resolve_runtime`: launch_args_override → runtime_bin →
-        // DSH_RUNTIME_BIN → RuntimeNotFound).
-        if let Ok(dsh_path) = which::which("dsh-jsonrpc-agent") {
-            manager
-                .register_provider(
-                    Arc::new(DshNativeProvider::with_runtime_bin(Some(
-                        dsh_path.to_string_lossy().into_owned(),
-                    ))),
-                    nexus_agent_host::LaunchStrategy::NativeCli {
-                        command: "dsh-jsonrpc-agent".to_string(),
-                        args: vec![],
-                        env: std::collections::HashMap::new(),
-                    },
-                )
-                .await;
-            providers_registered += 1;
-            tracing::info!(provider = "dsh-native", "registered native agent provider");
-        } else if std::env::var_os("DSH_RUNTIME_BIN").is_some_and(|value| !value.is_empty()) {
-            manager
-                .register_provider(
-                    Arc::new(DshNativeProvider::with_runtime_bin(None)),
-                    nexus_agent_host::LaunchStrategy::NativeCli {
-                        command: "dsh-jsonrpc-agent".to_string(),
-                        args: vec![],
-                        env: std::collections::HashMap::new(),
-                    },
-                )
-                .await;
-            providers_registered += 1;
-            tracing::info!(
-                provider = "dsh-native",
-                "registered native agent provider via DSH_RUNTIME_BIN"
-            );
-        } else {
-            tracing::warn!(
-                provider = "dsh-native",
-                "runtime not found on PATH (dsh-jsonrpc-agent) or DSH_RUNTIME_BIN; \
-                 skipping registration"
-            );
-        }
-
-        // Configured generic ACP providers (V1.186): register launch recipes
-        // only — no client/process at boot. The first Host session for a
-        // provider lazily spawns its owned ACP child bound to the verified
-        // Creator workspace cwd. Disabled/missing providers are refused at
-        // construction and never registered.
-        let host_config = state.agent_host_config();
-        for provider_config in &host_config.providers {
-            if provider_config.protocol != "acp" {
-                continue;
-            }
-            match nexus_agent_host::providers::acp::AcpProvider::from_config(
-                provider_config.clone(),
-                host_config.timeouts.clone(),
-                nexus_agent_host::HostPermissionResolver::new_native_only(&host_config.policy),
-            ) {
-                Ok(provider) => {
-                    let launch = nexus_agent_host::LaunchStrategy::Acp {
-                        command: provider_config.command.clone().unwrap_or_default(),
-                        args: provider_config.args.clone(),
-                        env: provider_config.env.clone(),
-                    };
-                    manager.register_provider(Arc::new(provider), launch).await;
-                    providers_registered += 1;
-                    tracing::info!(
-                        provider = %provider_config.id,
-                        "registered configured ACP provider (lazy session-scoped spawn)"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        provider = %provider_config.id,
-                        error = %e,
-                        "skipping configured ACP provider"
-                    );
-                }
-            }
-        }
-
-        tracing::info!(providers_registered, "agent provider registration complete");
-        Arc::new(manager)
-    };
+    // v1.188 P2: discovery/factory/probe run inside HostManager::start().
+    let agent_host_facade: Arc<dyn nexus_agent_host::HostFacade> =
+        Arc::new(nexus_agent_host::core::manager::HostManager::new());
     state.set_agent_host(Arc::clone(&agent_host_facade));
     tracing::info!("Agent host facade wired");
 
@@ -784,11 +632,14 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         let workflow_store: Arc<dyn WorkflowStateStore> = sqlite_storage.clone();
         let host_config = state.agent_host_config();
         let executor: std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor> =
-            std::sync::Arc::new(crate::prompt_executor::HostPromptExecutor::new(
-                agent_host_facade.clone(),
-                workflow_store,
-                host_config.timeouts.clone(),
-            ));
+            std::sync::Arc::new(
+                crate::prompt_executor::HostPromptExecutor::new_with_run_event_sinks(
+                    agent_host_facade.clone(),
+                    workflow_store,
+                    host_config.timeouts.clone(),
+                    Some(state.run_event_sinks()),
+                ),
+            );
         executor
     });
 
@@ -799,12 +650,30 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // normal boot aggregate, never a pool-less placeholder. Tier-0 boot
     // (no creator DB) keeps `pool: None` and defers the pool-backed
     // registry to Profile attach (`publish_lazy_attach_bundle`).
+
+    if let Some(mgr) = state.session_manager() {
+        mgr.startup_recovery()
+            .await
+            .map_err(|e| anyhow::anyhow!("workspace startup recovery failed: {e}"))?;
+    }
+
+    let workspace_executor: Option<
+        std::sync::Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>,
+    > = state.session_manager().and_then(|mgr| {
+        state.workspace_path().map(|root| {
+            std::sync::Arc::new(crate::workspace::executor::DaemonWorkspaceExecutor::new(
+                mgr, root,
+            )) as std::sync::Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>
+        })
+    });
+
     let runtime_deps = CapabilityRuntimeDeps {
         pool: state.pool().cloned(),
         prompt_executor: prompt_executor.clone(),
         session_cancels: session_cancels.clone(),
         daemon_tool_dispatch: None,
         cdn_config,
+        workspace_executor,
     };
     // V1.172 P0 T3 (AR-35): user capabilities live under
     // `~/.nexus42/capabilities/`. nexus-home-layout helpers take the RAW user
@@ -905,6 +774,14 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // A2/A7: the engine resolves directory presets for source identity from
     // the nexus home.
     concrete_engine.set_nexus_home(state.nexus_home().clone());
+    // v1.188 P3: resolve `_context.workspace.*` from the SAME shared
+    // workspace authority the commit executor writes through, so preset
+    // conditional edges observe real durable state.
+    if let (Some(mgr), Some(root)) = (state.session_manager(), state.workspace_path()) {
+        concrete_engine.set_workspace_state_provider(std::sync::Arc::new(
+            crate::workspace::state_provider::DaemonWorkspaceStateProvider::new(mgr, root),
+        ));
+    }
 
     let concrete_engine = Arc::new(concrete_engine);
     let engine: Arc<dyn OrchestrationEngine> = concrete_engine.clone();
@@ -950,6 +827,9 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             {
                 coordinator_builder = coordinator_builder.with_binding_provider(provider_id);
             }
+            coordinator_builder = coordinator_builder
+                .with_run_events(state.run_event_registry())
+                .with_run_event_sinks(state.run_event_sinks());
             let coordinator = Arc::new(coordinator_builder);
             state.set_run_coordinator(coordinator.clone());
             if let Some(executor) = &prompt_executor {
@@ -1871,10 +1751,18 @@ fn create_subsystems(
     let mut subsystems = core_subsystems(state, port);
 
     // Agent Host is an optional subsystem — failure does not block daemon startup
+    let host_config = (*state.agent_host_config()).clone();
+    // A structural config failure rides along so the subsystem refuses to start
+    // rather than serving defaults as if they were configured.
+    let host_config_error = state.agent_host_config_error();
+    let probe_owner = state.verified_probe_owner();
     subsystems.push(Arc::new(AgentHostSubsystem::new(
         agent_host_facade,
+        host_config,
+        host_config_error,
         agent_host_config_path,
         workspace_root,
+        probe_owner,
     )));
 
     subsystems
@@ -2202,6 +2090,7 @@ mod tests {
             )),
             daemon_tool_dispatch: None,
             cdn_config: None,
+            workspace_executor: None,
         }
     }
 

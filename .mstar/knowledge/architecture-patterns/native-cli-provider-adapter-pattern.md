@@ -1,15 +1,72 @@
 ---
 module: nexus-agent-host
 date: 2026-07-14
-last_updated: 2026-08-17
+last_updated: 2026-09-12
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
-tags: [native-cli-provider, agent-host, codex-native, claude-native, dsh-native, acp-registry, bare-command, scan-endpoint, protocol-client, decode-drift]
-applies_when: adding a new native CLI provider to the agent-host, swapping a provider's process/parse internals to an external protocol client, or debugging agent detection false negatives
+tags:
+  - native-cli-provider
+  - agent-host
+  - acp-registry
+  - bare-command
+  - protocol-client
+  - provider-readiness
+  - retained-cleanup
+  - message-level-streaming
+applies_when:
+  - Adding or changing a native provider
+  - Diagnosing candidate-versus-ready drift
+  - Mapping SDK callbacks to Host events
+  - Retaining owned cleanup after caller timeout
 ---
 
 # Native CLI Provider Adapter Pattern + ACP Registry Bare-Command Extraction
+
+## V1.188 update — runtime identity, readiness and retained ownership
+
+The SDK cutover is not sufficient evidence that a provider is ready. Preserve
+these boundaries when changing the adapter, boot path or public catalog:
+
+1. **One recipe and one health owner.** Resolve explicit dsh command →
+   `DSH_RUNTIME_BIN` → PATH `dsh`; an invalid explicit command must not fall
+   back. The SDK 0.2 route is ordinary `--profile sdk`, not a helper alias.
+   Config/PATH/registry selection feeds one factory and one manager entry;
+   selected-and-enabled means candidate. Retain validated boot config instead
+   of parsing a second copy or registering an ambient-only provider.
+2. **Probe with admission provenance.** Use the same verified Creator and
+   canonical workspace cwd as session admission. Missing context, malformed
+   config, unsupported no-model handshake or unconfirmed child close stays
+   unavailable. dsh must probe both ordinary and sealed deny-all recipes.
+   Only a successful handshake plus confirmed direct-child exit can set ready;
+   publishing against an unchanged candidate identity prevents stale revival.
+3. **Classify by lifecycle stage.** Later launch/initialize/session failure
+   invalidates that entry and therefore both catalog and admission. A real
+   prompt-content timeout after initialization does not. Test both transitions,
+   not merely `is_err()` or an arbitrary fraction of a probe budget.
+4. **Sanitize at the public boundary.** A provider-health message must use a
+   static category, not SDK `Display`; truncating it to 512 bytes is not
+   sanitization. The Codex regression injects hostile initialize text, proves
+   initialize was received, then checks the public message excludes it. Its
+   negative control fails when the original interpolation is restored.
+5. **Map message units, not guessed transcripts.** Emit each complete root
+   assistant message while the SDK run is active. Once any text was emitted,
+   ignore final response entirely; only a no-message run uses a nonempty final
+   fallback. Partial text followed by malformed/non-success output still fails.
+   dsh streaming is message-level; cancellation remains false. Nexus delivery
+   caps do not bound the SDK's internal accumulation, and its callback window
+   is not a submitted-message causal receipt.
+6. **A waiter is not the resource owner.** Keep one cleanup task/session/home
+   lease through SDK close even after a caller timeout or dropped consumer.
+   Unconfirmed cleanup remains actionable Interrupted. Normal direct-child
+   exit proof does not justify a process-tree/restart no-leak claim or a blind
+   PID kill. A sealed deny-all profile is model-tool denial, not an OS sandbox.
+
+Durable contracts: [agent-host](../../specs/agent-host.md) §§5–8,
+[workspace OCC/recovery](../../specs/concurrency.md) §9 and
+[run settlement/replay](../../specs/daemon-runtime.md) §20.
+Derived from verified V1.188 P0–P4 runtime, recovery and review evidence;
+the public first-run/Quick Start/live-model composition was explicitly deferred.
 
 ## V1.168 update — external protocol clients replace self-written wire parsers
 
@@ -28,9 +85,9 @@ Hard-won rules from the V1.168 replacement (QC findings B-1..B-3, B-1..B-4):
 3. **Long-lived app-server clients must filter turn-scoped notifications by the active turn id** and interrupt+drain on decode-error/timeout/cancel — otherwise a stale `turn/completed` ends the *next* turn empty-success.
 4. **Decode-drift contract (fixed):** unknown nested variant / unknown method → per-item skip + debug; typed-decode failure / stream abort → exactly one terminal `OpFailed` for the turn (`decode_error` / `stream_closed` / `provider_error` / `timeout` / `io_error` tokens; `error_message` truncated at 512 bytes — crate `Display` embeds raw wire frames).
 5. **No-protocol-RPC runtimes (e.g. dsh, no cancel)**: on execute timeout, rotate the stored session id so a retry starts a fresh session instead of splicing into a zombie turn.
-6. **Honest capability descriptors:** declare only what the client surface supports. dsh uses `CapabilityDescriptor::dsh_limited()` (`streaming: false`, `cancellation: false`, `session_restore: true`, `text_prompt: true`) — do not borrow `native_cli_limited()` when the surface differs.
+6. **Honest capability descriptors:** declare only what the client surface supports. As amended in V1.188, dsh uses `CapabilityDescriptor::dsh_limited()` with message-level `streaming: true`, `cancellation: false`, `session_restore: true`, `text_prompt: true` — do not borrow `native_cli_limited()` when the surface differs.
 7. **Test protocol adapters with spawnable mock protocol stubs** (`mock_claude_cli.py`, `mock_codex_app_server.py`, `mock_dsh_agent.py` under `crates/nexus-agent-host/tests/fixtures/native_protocol/`) — real protocol shapes without the vendor binary. Do not fake protocols with `echo` scripts.
-8. **Discovery can have more than one route.** dsh-native registers from PATH (`dsh-jsonrpc-agent`) **or** `DSH_RUNTIME_BIN`; the scan/catalog surface must show the env-route row too or boot and Setup disagree.
+8. **Discovery can have more than one route.** dsh-native resolves an explicit command, `DSH_RUNTIME_BIN`, or PATH `dsh`; catalog and boot must consume the same selected recipe. The old `dsh-jsonrpc-agent` route is retired.
 9. No `NATIVE_PREFERRED_FAMILIES` row unless an ACP twin exists.
 
 The V1.116 guidance below still applies for ACP bare-command extraction and scan dedup; the session/lifecycle sections there describe the retired self-written adapters and are kept as history.
@@ -61,6 +118,10 @@ want to use them directly, not through a community-provided ACP adapter. The
 second; `dsh-native` (V1.168) is the third and first driven by a crates.io SDK client.
 
 ## Guidance
+
+The following V1.116 adapter-construction/lifecycle notes are historical;
+current native process and protocol ownership follows the SDK rules above.
+ACP bare-command extraction and native/ACP-twin dedup remain applicable.
 
 ### Adding a new native CLI provider
 

@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
-"""Scripted `dsh-jsonrpc-agent` runtime speaker for nexus-provider-conformance (v1.180 P0 T2).
+"""Scripted `dsh` runtime speaker for nexus-provider-conformance (v1.188 P0 T2 cutover).
 
 Speaks the newline-delimited JSON-RPC 2.0 stdio subset that the
 deepseek-harness-sdk uses (client/core.rs `request` / api.rs
 `Session::run`): `initialize` (the result must carry the wire-stable
-server identity `deepseek-harness-sdk-runtime` plus a version),
-`session/prompt` (result carries a durable message id, then the
+server identity `deepseek-harness-sdk-runtime`; the reported protocol
+version is `0.0.1`, NOT the crate version `0.2.0`), `session/prompt`
+(result carries a durable message id, then the
 notifications `Session::run` waits for: the `agent/inbox/spliced` inbox
 receipt, an `assistant/message`, a `turn/end`, and root
 `session.status == "idle"`), and `shutdown` (respond, then exit on stdin
 EOF so the SDK close ladder completes fast).
 
 Behavior knobs (env vars):
-- SCENARIO=happy|tool_call|malformed|cancel  (default: happy)
-  - happy:     assistant/message -> turn/end(stop) -> idle
-  - tool_call: assistant/message -> tool/call event -> turn/end(stop) ->
+- SCENARIO=happy|tool_call|malformed|cancel|hold_turn|lag|nested|two_messages|empty_only|malformed_text|partial_then_fail|oversize|flood_messages  (default: happy)
+  - happy:     assistant/message -> turn/end(completed) -> idle
+  - tool_call: assistant/message -> tool/call event -> turn/end(completed) ->
                idle (the SDK collects the tool event as raw noise; the
                normalized surface never surfaces tool calls — AR-6)
   - malformed: assistant/message -> turn/end WITHOUT data.reason.kind ->
@@ -23,11 +24,13 @@ Behavior knobs (env vars):
   - cancel:    same as happy — the dsh adapter's cancel is an honest no-op
                (AR-6), so the turn runs to completion
 - REQ_LOG=<path>  append one JSON object per received request
-  ({"method": ..., "sessionId": ...}).
+  ({"method": ..., "sessionId": ...}), plus one startup `_spawn` record
+  ({"argv": ..., "dsh_home": ...}) for launch-identity assertions.
 """
 
 import json
 import os
+import time
 import sys
 
 _msg_counter = 0
@@ -49,6 +52,19 @@ def log_request(req):
     with open(path, "a") as f:
         f.write(json.dumps(entry) + "\n")
 
+
+
+def log_spawn():
+    path = os.environ.get("REQ_LOG")
+    if not path:
+        return
+    entry = {
+        "method": "_spawn",
+        "argv": sys.argv[1:],
+        "dsh_home": os.environ.get("DSH_HOME", ""),
+    }
+    with open(path, "a") as f:
+        f.write(json.dumps(entry) + "\n")
 
 def reply(req, result):
     send({"jsonrpc": "2.0", "id": req["id"], "result": result})
@@ -80,7 +96,7 @@ def handle_request(req):
         reply(req, {
             "serverInfo": {
                 "name": "deepseek-harness-sdk-runtime",
-                "version": "0.1.0-mock",
+                "version": "0.0.1",
             }
         })
         return
@@ -95,30 +111,81 @@ def handle_request(req):
             "data": {"inserted": [{"id": message_id}]},
         })
         scenario = os.environ.get("SCENARIO", "happy")
-        session_event(session_id, {
-            "type": "assistant/message",
-            "data": {"message": {"content": [{"type": "text", "text": "mock dsh reply"}]}},
-        })
+        if scenario == "hold_turn" or os.environ.get("HOLD_TURN") == "1":
+            return
+        if scenario == "lag":
+            time.sleep(int(os.environ.get("LAG_MS", "150")) / 1000.0)
+        if scenario == "nested":
+            session_event("child-session", {
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": "nested-only"}]},
+            })
+        if scenario == "two_messages":
+            session_event(session_id, {
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": "A"}]},
+            })
+            session_event(session_id, {
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": "B"}]},
+            })
+        elif scenario == "empty_only":
+            session_event(session_id, {
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": ""}]},
+            })
+        elif scenario == "malformed_text":
+            session_event(session_id, {
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": 1}]},
+            })
+        elif scenario == "oversize":
+            big = "x" * (int(os.environ.get("OVERSIZE_BYTES", str(256 * 1024 + 1))))
+            session_event(session_id, {
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": big}]},
+            })
+        elif scenario == "flood_messages":
+            count = int(os.environ.get("FLOOD_COUNT", "65"))
+            for i in range(count):
+                session_event(session_id, {
+                    "type": "assistant/message",
+                    "data": {"content": [{"type": "text", "text": f"m{i}"}]},
+                })
+        elif scenario == "partial_then_fail":
+            session_event(session_id, {
+                "type": "assistant/message",
+                "data": {"content": [{"type": "text", "text": "partial"}]},
+            })
+        elif scenario == "malformed":
+            pass  # malformed turn/end below; no assistant prose
+        else:
+            session_event(session_id, {
+                "type": "assistant/message",
+                "data": {"message": {"content": [{"type": "text", "text": "mock dsh reply"}]}},
+            })
         if scenario == "tool_call":
-            # A tool-call-shaped event: the SDK collects it as raw noise
-            # (AR-6 — no tool surface on this adapter).
             session_event(session_id, {
                 "type": "tool/call",
                 "data": {"tool": "bash", "input": {"command": "echo hi"}},
             })
+        finish_kind = "completed"
+        if scenario == "partial_then_fail":
+            finish_kind = "max-tokens"
         if scenario == "malformed":
-            # turn/end without a string data.reason.kind -> the SDK fails
-            # the run with SdkProtocol (the dsh decode-error surface).
             session_event(session_id, {
                 "type": "turn/end",
                 "data": {"reason": {}},
             })
+            # Root idle ends the SDK activity interval even when turn/end is
+            # malformed; without idle Session::run waits forever.
+            session_status(session_id, "idle")
         else:
             session_event(session_id, {
                 "type": "turn/end",
-                "data": {"reason": {"kind": "stop"}},
+                "data": {"reason": {"kind": finish_kind}},
             })
-        session_status(session_id, "idle")
+            session_status(session_id, "idle")
         return
 
     if method == "shutdown":
@@ -129,6 +196,7 @@ def handle_request(req):
 
 
 def main():
+    log_spawn()
     for line in sys.stdin:
         line = line.strip()
         if not line:

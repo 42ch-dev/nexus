@@ -6,10 +6,11 @@
 
 use std::collections::HashSet;
 
-use crate::capability::model::{CapabilityDescriptor, ProtocolKind, ProviderHealth};
+use crate::capability::model::{CapabilityDescriptor, ProtocolKind};
 use crate::config::AgentHostConfig;
 use crate::error::HostResult;
 use crate::ids::ProviderId;
+use crate::providers::{candidate_unavailable_health, validate_provider_config};
 use crate::{DiscoverySource, LaunchStrategy, ProviderCatalogEntry, TrustLevel};
 
 /// Builder that merges config, PATH, and ACP registry entries deterministically.
@@ -51,6 +52,11 @@ impl ProviderCatalog {
         for provider_config in &config.providers {
             let pid = ProviderId::new(&provider_config.id);
             if provider_config.enabled {
+                // ONE validation authority: the catalog path runs the same
+                // `validate_provider_config` gate as `entries_from_config`, so
+                // an unsupported native id, a missing/blank command, or
+                // non-empty native args can never become a catalog candidate.
+                validate_provider_config(provider_config)?;
                 let protocol_kind = provider_config.protocol_kind()?;
                 let launch = match protocol_kind {
                     ProtocolKind::Acp => LaunchStrategy::Acp {
@@ -64,9 +70,10 @@ impl ProviderCatalog {
                         env: provider_config.env.clone(),
                     },
                 };
-                let caps = match protocol_kind {
-                    ProtocolKind::Acp => CapabilityDescriptor::acp_full(),
-                    ProtocolKind::NativeCli => CapabilityDescriptor::native_cli_limited(),
+                let caps = match (protocol_kind, provider_config.id.as_str()) {
+                    (ProtocolKind::Acp, _) => CapabilityDescriptor::acp_full(),
+                    (ProtocolKind::NativeCli, "dsh-native") => CapabilityDescriptor::dsh_limited(),
+                    (ProtocolKind::NativeCli, _) => CapabilityDescriptor::native_cli_limited(),
                 };
                 entries.push(ProviderCatalogEntry {
                     provider_id: pid.clone(),
@@ -80,15 +87,10 @@ impl ProviderCatalog {
                     // process has been spawned at catalog load. `available`
                     // means "configured and enabled", never "a launch
                     // succeeded" (agent-host.md §4 V1.186 lock).
-                    health: ProviderHealth {
-                        provider_id: pid.clone(),
-                        available: true,
-                        latency_ms: None,
-                        message: Some(
-                            "launch recipe registered; process spawns lazily per session"
-                                .to_string(),
-                        ),
-                    },
+                    health: candidate_unavailable_health(
+                        &pid,
+                        "configured candidate; bounded probe required",
+                    ),
                 });
                 seen_ids.insert(pid);
             } else {
@@ -145,6 +147,9 @@ impl ProviderCatalog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Test-only: `ProviderHealth` is referenced by the fixture builders below
+    // but not by the non-test catalog path, so it is imported here.
+    use crate::capability::model::ProviderHealth;
     use std::collections::HashMap;
 
     fn default_config() -> AgentHostConfig {

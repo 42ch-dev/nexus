@@ -1143,18 +1143,18 @@ async fn registry_dispatch_returns_same_as_legacy_context_assemble() {
 
 // ─── V1.53 P1: Cross-creator/world isolation tests (R-V153P1QC1-001) ──
 
-/// Helper: overwrite the active creator in config.toml and return a new
-/// `WorkspaceState` (same db) with that identity.
-async fn switch_active_creator(
-    nexus_home: &std::path::Path,
-    db_path: &std::path::Path,
-    new_creator_id: &str,
-) -> WorkspaceState {
+/// Helper: overwrite the active creator in `config.toml`.
+///
+/// A cross-creator test must NOT build a second workspace authority over the
+/// same root: the workspace-authority lease is exclusive per root (v1.188 P3),
+/// so a second `new_for_testing` on the same DB cannot acquire it. Rewriting
+/// the active selection in the EXISTING state exercises the real
+/// creator-scoped isolation instead (same pattern as the Works API helper).
+fn switch_active_creator(nexus_home: &std::path::Path, new_creator_id: &str) {
     let toml_str = format!(
             "active_creator_id = \"{new_creator_id}\"\n[active_workspace_slug_by_creator]\n\"{new_creator_id}\" = \"default\""
         );
     std::fs::write(nexus_home.join("config.toml"), toml_str).expect("write config.toml");
-    WorkspaceState::new_for_testing(nexus_home.to_path_buf(), db_path.to_path_buf(), None).await
 }
 
 #[tokio::test]
@@ -1173,7 +1173,7 @@ async fn world_snapshot_get_cross_creator_denied() {
     .expect("seed other creator");
 
     // Switch to other_creator — should be denied
-    let other_state = switch_active_creator(&nexus_home, &db_path, "other_creator").await;
+    switch_active_creator(&nexus_home, "other_creator");
     let req = ToolExecuteRequest {
         tool_name: "nexus.world.snapshot.get".to_string(),
         parameters: serde_json::json!({"world_id": "wld_test_world"}),
@@ -1181,7 +1181,7 @@ async fn world_snapshot_get_cross_creator_denied() {
         request_id: None,
         caller_kind: None,
     };
-    let result = HostToolExecutor::execute(&req, &other_state).await;
+    let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err(), "cross-creator should be denied");
     assert_eq!(
         result.unwrap_err().error_code(),
@@ -1206,7 +1206,7 @@ async fn timeline_recent_get_cross_creator_denied() {
     .await
     .expect("seed other creator");
 
-    let other_state = switch_active_creator(&nexus_home, &db_path, "other_creator").await;
+    switch_active_creator(&nexus_home, "other_creator");
     let req = ToolExecuteRequest {
         tool_name: "nexus.timeline.recent.get".to_string(),
         parameters: serde_json::json!({"world_id": "wld_test_world"}),
@@ -1214,7 +1214,7 @@ async fn timeline_recent_get_cross_creator_denied() {
         request_id: None,
         caller_kind: None,
     };
-    let result = HostToolExecutor::execute(&req, &other_state).await;
+    let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err(), "cross-creator should be denied");
     assert_eq!(result.unwrap_err().error_code(), "forbidden");
     drop(tmp);
@@ -1234,7 +1234,7 @@ async fn kb_snapshot_read_cross_creator_denied() {
     .await
     .expect("seed other creator");
 
-    let other_state = switch_active_creator(&nexus_home, &db_path, "other_creator").await;
+    switch_active_creator(&nexus_home, "other_creator");
     let req = ToolExecuteRequest {
         tool_name: "nexus.kb_snapshot.read".to_string(),
         parameters: serde_json::json!({"world_id": "wld_test_world"}),
@@ -1242,7 +1242,7 @@ async fn kb_snapshot_read_cross_creator_denied() {
         request_id: None,
         caller_kind: None,
     };
-    let result = HostToolExecutor::execute(&req, &other_state).await;
+    let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err(), "cross-creator should be denied");
     assert_eq!(result.unwrap_err().error_code(), "forbidden");
     drop(tmp);

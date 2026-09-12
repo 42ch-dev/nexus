@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT session_id as \"session_id!\", workspace_root as \"workspace_root!\", entries_json as \"entries_json!\"\n           FROM workspace_commit_intents WHERE state IN ('committed', 'rolled_back')",
+  "describe": {
+    "columns": [
+      {
+        "name": "session_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_commit_intents",
+            "name": "session_id"
+          }
+        }
+      },
+      {
+        "name": "workspace_root!",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_commit_intents",
+            "name": "workspace_root"
+          }
+        }
+      },
+      {
+        "name": "entries_json!",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_commit_intents",
+            "name": "entries_json"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f930155bde131cae0a6218196d5a0b434b87102d88fc1ec4f82dea7c691373f5"
+}

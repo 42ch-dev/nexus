@@ -619,6 +619,10 @@ pub enum ResumeDecision {
     /// tracked-but-not-driven; driving it would fail with `NoGraphLoaded`
     /// and the driver would mark it failed.
     SkippedNoRunner { session_id: SessionId },
+    /// Skipped: the per-run live event-ring quota is exhausted (QC2 F-004).
+    /// The session stays tracked-but-not-driven with its durable record
+    /// untouched; a later boot/retry reserves a freed slot.
+    SkippedRunEventCapacity { session_id: SessionId },
     /// Skipped: the persisted session could not be loaded from storage.
     SkippedUnreadable {
         session_id: SessionId,
@@ -950,6 +954,11 @@ pub enum RunControlError {
     /// The run is in a state that does not accept the requested signal.
     #[error("workflow state conflict for session {0}: {1}")]
     StateConflict(String, String),
+    /// The per-run live event-ring quota is exhausted (QC2 F-004). No drive
+    /// was started and no durable work was touched — the caller may retry
+    /// once a live run closes its ring.
+    #[error("run event capacity exhausted for session {0}")]
+    RunEventCapacity(String),
     /// The run's source preset cannot be reconstructed (missing/changed/
     /// moved source or corrupt child identity — A7 rule 4). The human wait
     /// is preserved, legal actions are cancel-only, and continue returns
@@ -992,23 +1001,61 @@ pub struct RunControlResult {
     pub status: String,
     /// Current durable wait id (null when the run is not waiting).
     pub current_wait_id: Option<String>,
+    /// Typed Cancel projection (QC2 F-002). `None` for non-cancel signals.
+    pub cancel_outcome: Option<CancelOutcome>,
 }
 
-/// Cancel fence-loss idempotence (A5): a `Cancel` signal that exhausts the
-/// engine's revision-fence retry bound and loses the race still has its
-/// goal durably accomplished when the record already settled `cancelled`
-/// (confirmed stop) or `interrupted` (unconfirmed stop) — a concurrent
-/// cancel committed the same intent. The loser reports the persisted
-/// outcome as success instead of a conflict that would contradict the
-/// durable truth. A run that settled `completed`/`failed` (or is still
-/// live) keeps the conflict: the cancel genuinely did not happen.
-const fn cancel_fence_loss_accomplished(status: &SessionStatus, cancel_requested: bool) -> bool {
-    // `Cancelled` is the confirmed A5 outcome. `Interrupted` only counts when
-    // the durable state carries the cancel intent: an `interrupted` produced
-    // by a failed state transition (no `cancel_requested`) is NOT proof that
-    // this cancel succeeded, so it must stay a conflict (Greptile P1).
-    matches!(status, SessionStatus::Cancelled)
-        || (matches!(status, SessionStatus::Interrupted) && cancel_requested)
+/// Typed projection of a Cancel signal's durable outcome (QC2 F-002).
+///
+/// Resolved by the coordinator from the durable record — never derived from
+/// an error string — so every public cancel surface (session signal and
+/// schedule signal) projects exactly the same truth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelOutcome {
+    /// Durable terminal `cancelled`: cleanup confirmed (or an idempotent
+    /// re-cancel of an already-cancelled run).
+    Confirmed,
+    /// Durable `interrupted` with the cancel intent: cleanup unconfirmed.
+    /// The run stays actionable and a retry cancel can still confirm it.
+    Unconfirmed,
+    /// Durable `failed` carrying the cancel intent and a `driver_failed`
+    /// record: the cancel converged on the driver failure the run already
+    /// committed.
+    Failed,
+}
+
+impl CancelOutcome {
+    /// Stable wire label for public responses.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Confirmed => "confirmed",
+            Self::Unconfirmed => "unconfirmed",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// Typed classification of a run's durable cancel outcome (QC2 F-002).
+///
+/// A `Cancel` signal whose goal is durably accomplished must report the
+/// persisted outcome as success instead of a conflict that would contradict
+/// the durable truth (A5 fence-loss idempotence), and an unconfirmed cleanup
+/// must project `interrupted` rather than a 500. A run that settled
+/// `completed`/`failed`-without-cancel-intent (or is still live) has no
+/// cancel outcome: the cancel genuinely did not happen.
+fn classify_cancel_outcome(
+    record: &nexus_orchestration::run_state::RunRecord,
+) -> Option<CancelOutcome> {
+    if !nexus_orchestration::run_state::durable_cancel_outcome_accomplished(record) {
+        return None;
+    }
+    match record.status {
+        SessionStatus::Cancelled => Some(CancelOutcome::Confirmed),
+        SessionStatus::Interrupted => Some(CancelOutcome::Unconfirmed),
+        SessionStatus::Failed => Some(CancelOutcome::Failed),
+        _ => None,
+    }
 }
 
 /// One cancellation/join owner per (Creator DB identity, session) (A3).
@@ -1075,6 +1122,11 @@ pub struct WorkflowRunCoordinator {
             Option<Arc<nexus_orchestration::schedule::supervisor::ScheduleSupervisor>>,
         >,
     >,
+    /// Bounded per-run SSE rings (P4 §6.3).
+    run_events: Option<Arc<crate::run_events::RunEventRegistry>>,
+    /// Active run event sinks registered before drive spawn.
+    run_event_sinks:
+        Arc<tokio::sync::Mutex<std::collections::HashMap<String, crate::run_events::RunEventSink>>>,
 }
 
 /// An in-flight (or completed) drive owner for one session.
@@ -1214,6 +1266,8 @@ impl WorkflowRunCoordinator {
             workflow_store,
             config: PresetRunConfig::default(),
             schedule_supervisor: std::sync::Arc::new(std::sync::RwLock::new(None)),
+            run_events: None,
+            run_event_sinks: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         }
     }
 
@@ -1225,6 +1279,42 @@ impl WorkflowRunCoordinator {
         self.workflow_store = store;
         self
     }
+    /// Attach the bounded run-event registry (P4 §6.3).
+    #[must_use]
+    pub fn with_run_events(mut self, registry: Arc<crate::run_events::RunEventRegistry>) -> Self {
+        self.run_events = Some(registry);
+        self
+    }
+
+    /// Share the coordinator's per-run sink map with the prompt executor.
+    #[must_use]
+    pub fn with_run_event_sinks(mut self, sinks: crate::run_events::RunEventSinkMap) -> Self {
+        self.run_event_sinks = sinks;
+        self
+    }
+
+    /// Publish the durable winner to the run's live SSE ring, then close it
+    /// only for an **authoritative terminal** status (QC2 F-001).
+    ///
+    /// `Interrupted` is NOT authoritative terminal: it is the actionable
+    /// "cleanup unconfirmed" outcome, so its ring stays live — a retry
+    /// cancel can still confirm the run and publish the final `cancelled`
+    /// winner on the SAME ring. Closing it there would strand the retry as
+    /// replay-only history and drop every live subscriber.
+    async fn publish_durable_run_state(&self, session_id: &SessionId) {
+        if let Some(registry) = &self.run_events {
+            if let Ok(Some(record)) = self.workflow_store.load_run(session_id).await {
+                registry.publish_run_state(&session_id.0, &record);
+                if matches!(
+                    record.status,
+                    SessionStatus::Completed | SessionStatus::Failed | SessionStatus::Cancelled
+                ) {
+                    registry.mark_terminal(&session_id.0);
+                }
+            }
+        }
+    }
+
     /// Attach the schedule supervisor for terminal settlement (T3, A3).
     ///
     /// The supervisor is constructed AFTER the coordinator (it needs the
@@ -1665,9 +1755,22 @@ impl WorkflowRunCoordinator {
             drives.remove(&session_id.0);
         }
 
-        // Register (or refresh) the run's cancellation token in the shared
-        // map so the prompt executor and out-of-band cancel resolve the SAME
-        // token the drive loop checks.
+        // QC2 F-004: RESERVE the run's live event-ring quota BEFORE any
+        // drive is spawned. `try_register_live` is the reservation: it
+        // succeeds when a slot is free OR when this run already owns a ring
+        // (reuse). When the quota is exhausted the drive is refused with a
+        // typed capacity error and NO durable work is touched — a driver can
+        // never outlive its ring and silently lose every event.
+        if let Some(registry) = &self.run_events {
+            let Some(sink) = registry.try_register_live(&session_id.0) else {
+                return Err(RunControlError::RunEventCapacity(session_id.0.clone()));
+            };
+            self.run_event_sinks
+                .lock()
+                .await
+                .insert(session_id.0.clone(), sink);
+        }
+
         let cancel = tokio_util::sync::CancellationToken::new();
         self.session_cancels
             .write()
@@ -1706,6 +1809,8 @@ impl WorkflowRunCoordinator {
             // `current_session_id` equals this run is updated; a
             // checkpoint-before-settlement crash is reconciled at boot.
             coordinator.settle_terminal_schedule(&sid, &outcome).await;
+            coordinator.publish_durable_run_state(&sid).await;
+            coordinator.run_event_sinks.lock().await.remove(&sid.0);
             tracing::debug!(
                 session_id = %sid.0,
                 outcome = ?outcome,
@@ -1891,6 +1996,20 @@ impl WorkflowRunCoordinator {
                 }
                 drives.remove(&session_id.0);
             }
+            // QC2 F-004: the recovery re-drive reserves the same live-ring
+            // quota before spawning. A session that cannot reserve is left
+            // tracked-but-not-driven (its durable record is untouched); the
+            // next boot/retry reserves a freed slot.
+            if let Some(registry) = &self.run_events {
+                let Some(sink) = registry.try_register_live(&session_id.0) else {
+                    decisions.push(ResumeDecision::SkippedRunEventCapacity { session_id });
+                    continue;
+                };
+                self.run_event_sinks
+                    .lock()
+                    .await
+                    .insert(session_id.0.clone(), sink);
+            }
             let cancel = parent_cancel.child_token();
             self.session_cancels
                 .write()
@@ -1929,6 +2048,8 @@ impl WorkflowRunCoordinator {
                 // terminal session status (same boundary as
                 // `ensure_driving`).
                 coordinator.settle_terminal_schedule(&sid, &outcome).await;
+                coordinator.publish_durable_run_state(&sid).await;
+                coordinator.run_event_sinks.lock().await.remove(&sid.0);
                 tracing::debug!(
                     session_id = %sid.0,
                     outcome = ?outcome,
@@ -2602,11 +2723,19 @@ impl WorkflowRunCoordinator {
             }
         }
 
+        // QC2 F-002: Cancel has ONE projection owner (`cancel_run`) shared by
+        // the session and schedule public surfaces — no per-handler error
+        // strings, no divergent 500, and the durable `interrupted` outcome is
+        // reported as a typed success instead of an engine error.
+        if matches!(signal, RunSignal::Cancel) {
+            return self.cancel_run(session_id).await;
+        }
+
         let engine_signal = match &signal {
             RunSignal::Continue { wait_id } => EngineSignal::Continue {
                 wait_id: wait_id.clone(),
             },
-            RunSignal::Cancel => EngineSignal::Cancel,
+            RunSignal::Cancel => unreachable!("cancel is projected by `cancel_run`"),
             RunSignal::Pause => EngineSignal::Pause,
             RunSignal::Resume => EngineSignal::Resume,
         };
@@ -2623,49 +2752,34 @@ impl WorkflowRunCoordinator {
             // cancel-requested/terminal/incompatible state is
             // `workflow_state_conflict`.
             Err(nexus_orchestration::engine::EngineError::RevisionMismatch {
-                session_id, ..
-            }) => {
-                let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
-                    self.pool.clone(),
-                );
-                match store.load_run(&SessionId(session_id.clone())).await {
-                    Ok(Some(record)) => {
-                        let state = record.state.as_ref();
-                        let cancel_requested = state.is_some_and(|s| s.cancel_requested);
-                        // A5 idempotence: a Cancel that lost the fence race
-                        // but finds the run durably settled (cancelled /
-                        // interrupted) has its goal accomplished by the
-                        // concurrent winner — project the persisted outcome
-                        // as success, never a conflict.
-                        if matches!(signal, RunSignal::Cancel)
-                            && cancel_fence_loss_accomplished(&record.status, cancel_requested)
-                        {
-                            Ok(())
-                        } else if record.status == SessionStatus::WaitingForInput
-                            && !cancel_requested
-                        {
-                            let current_wait_id = state
-                                .and_then(|s| s.wait.as_ref())
-                                .map(|w| w.wait_id.clone());
-                            Err(RunControlError::WaitConflict {
-                                session_id,
-                                status: record.status.as_db_str().to_string(),
-                                current_wait_id,
-                            })
-                        } else {
-                            Err(RunControlError::StateConflict(
-                                session_id,
-                                format!(
-                                    "revision moved; current status is {}",
-                                    record.status.as_db_str()
-                                ),
-                            ))
-                        }
+                session_id: lost_sid,
+                ..
+            }) => match self.workflow_store.load_run(session_id).await {
+                Ok(Some(record)) => {
+                    let state = record.state.as_ref();
+                    let cancel_requested = state.is_some_and(|s| s.cancel_requested);
+                    if record.status == SessionStatus::WaitingForInput && !cancel_requested {
+                        let current_wait_id = state
+                            .and_then(|s| s.wait.as_ref())
+                            .map(|w| w.wait_id.clone());
+                        Err(RunControlError::WaitConflict {
+                            session_id: lost_sid,
+                            status: record.status.as_db_str().to_string(),
+                            current_wait_id,
+                        })
+                    } else {
+                        Err(RunControlError::StateConflict(
+                            lost_sid,
+                            format!(
+                                "revision moved; current status is {}",
+                                record.status.as_db_str()
+                            ),
+                        ))
                     }
-                    Ok(None) => Err(RunControlError::ScheduleNotFound(session_id)),
-                    Err(e) => Err(RunControlError::Drive(e.to_string())),
                 }
-            }
+                Ok(None) => Err(RunControlError::ScheduleNotFound(lost_sid)),
+                Err(e) => Err(RunControlError::Drive(e.to_string())),
+            },
             Err(e) => Err(match e {
                 nexus_orchestration::engine::EngineError::WaitConflict {
                     session_id,
@@ -2710,10 +2824,122 @@ impl WorkflowRunCoordinator {
             .as_ref()
             .and_then(|s| s.wait.as_ref())
             .map(|w| w.wait_id.clone());
+        if record.status.is_terminal() {
+            self.publish_durable_run_state(session_id).await;
+        }
         Ok(RunControlResult {
             status: record.status.as_db_str().to_string(),
             current_wait_id,
+            cancel_outcome: None,
         })
+    }
+
+    /// Cancel one driven run and project the DURABLE outcome (QC2 F-002).
+    ///
+    /// The single production cancel path for BOTH public surfaces (session
+    /// signal and schedule signal). The engine performs the revision-fenced
+    /// cancel (durable cancel-intent fence → bounded owned-Host teardown →
+    /// terminal `cancelled`, or durable `interrupted` when cleanup cannot be
+    /// confirmed). Whatever the engine returns, the coordinator re-reads the
+    /// durable record and:
+    ///
+    /// - publishes the durable winner to the run's SSE ring and projects it
+    ///   as a TYPED success ([`CancelOutcome`]) whenever the run's cancel
+    ///   goal is durably accomplished — confirmed `cancelled`, unconfirmed
+    ///   `interrupted`, or the `driver_failed` failure the cancel converged
+    ///   on — including a fence loss that lost to a concurrent winner;
+    /// - otherwise maps the failure to the exact typed conflict envelope
+    ///   (wait conflict / state conflict / not-found).
+    ///
+    /// It never inspects an error message and never fabricates success for a
+    /// run that did not actually stop.
+    ///
+    /// # Errors
+    /// Returns [`RunControlError`] for the typed conflict envelopes and for
+    /// storage failures.
+    pub async fn cancel_run(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<RunControlResult, RunControlError> {
+        let engine_result = self.engine.signal(session_id, EngineSignal::Cancel).await;
+
+        let durable = self
+            .workflow_store
+            .load_run(session_id)
+            .await
+            .map_err(|e| RunControlError::Drive(e.to_string()))?;
+
+        if let Some(record) = &durable {
+            if let Some(outcome) = classify_cancel_outcome(record) {
+                self.publish_durable_run_state(session_id).await;
+                return Ok(RunControlResult {
+                    status: record.status.as_db_str().to_string(),
+                    current_wait_id: None,
+                    cancel_outcome: Some(outcome),
+                });
+            }
+        }
+
+        match engine_result {
+            Ok(()) => {
+                let record = durable
+                    .ok_or_else(|| RunControlError::ScheduleNotFound(session_id.0.clone()))?;
+                self.publish_durable_run_state(session_id).await;
+                Ok(RunControlResult {
+                    status: record.status.as_db_str().to_string(),
+                    current_wait_id: None,
+                    cancel_outcome: None,
+                })
+            }
+            Err(nexus_orchestration::engine::EngineError::RevisionMismatch {
+                session_id: lost_sid,
+                ..
+            }) => {
+                let record =
+                    durable.ok_or_else(|| RunControlError::ScheduleNotFound(lost_sid.clone()))?;
+                let state = record.state.as_ref();
+                let cancel_requested = state.is_some_and(|s| s.cancel_requested);
+                if record.status == SessionStatus::WaitingForInput && !cancel_requested {
+                    let current_wait_id = state
+                        .and_then(|s| s.wait.as_ref())
+                        .map(|w| w.wait_id.clone());
+                    Err(RunControlError::WaitConflict {
+                        session_id: lost_sid,
+                        status: record.status.as_db_str().to_string(),
+                        current_wait_id,
+                    })
+                } else {
+                    Err(RunControlError::StateConflict(
+                        lost_sid,
+                        format!(
+                            "revision moved; current status is {}",
+                            record.status.as_db_str()
+                        ),
+                    ))
+                }
+            }
+            Err(e) => Err(match e {
+                nexus_orchestration::engine::EngineError::WaitConflict {
+                    session_id,
+                    status,
+                    current_wait_id,
+                } => RunControlError::WaitConflict {
+                    session_id,
+                    status: status.as_db_str().to_string(),
+                    current_wait_id,
+                },
+                nexus_orchestration::engine::EngineError::TerminalState(sid) => {
+                    RunControlError::StateConflict(
+                        sid,
+                        "run is terminal or not in a signalable state".to_string(),
+                    )
+                }
+                nexus_orchestration::engine::EngineError::SessionNotFound(sid) => {
+                    RunControlError::ScheduleNotFound(sid)
+                }
+                other => RunControlError::Drive(other.to_string()),
+            }),
+        }
     }
 }
 
@@ -2932,25 +3158,68 @@ mod tests {
         ChildSessionParams, Context, EngineError, SessionFilter, SessionKey, SessionSummary,
     };
 
+    /// P4 T1: durable `Failed+cancel_requested+driver_failed` counts as cancel outcome
+    /// (concurrent cancel vs drive-failure race — R-V1186P3-004).
+    #[test]
+    fn cancel_fence_accepts_failed_driver_failed_when_cancel_requested() {
+        use nexus_orchestration::run_state::{RunFailure, RunRecord, RunStateV1};
+        let record = RunRecord {
+            session_id: SessionId("s".into()),
+            status: SessionStatus::Failed,
+            state_revision: 3,
+            execution_version: 1,
+            descriptor: None,
+            state: Some(RunStateV1 {
+                cancel_requested: true,
+                failure: Some(RunFailure {
+                    code: "driver_failed".into(),
+                    message: "drive lost".into(),
+                }),
+                ..RunStateV1::default()
+            }),
+            graph_version: 4,
+        };
+        assert!(classify_cancel_outcome(&record).is_some());
+    }
+
     /// A5 idempotence: a fence-losing Cancel is a success only when the run
     /// durably settled cancelled/interrupted; every other state (still
     /// live, or settled completed/failed) keeps the conflict — the cancel
     /// genuinely did not happen.
     #[test]
-    fn cancel_fence_loss_accomplished_only_for_cancel_outcomes() {
-        assert!(cancel_fence_loss_accomplished(
-            &SessionStatus::Cancelled,
-            false
-        ));
-        // Interrupted only counts with the durable cancel intent (Greptile P1).
-        assert!(cancel_fence_loss_accomplished(
-            &SessionStatus::Interrupted,
-            true
-        ));
-        assert!(!cancel_fence_loss_accomplished(
-            &SessionStatus::Interrupted,
-            false
-        ));
+    fn classify_cancel_outcome_only_for_durable_cancel_outcomes() {
+        use nexus_orchestration::run_state::{RunRecord, RunStateV1};
+        let mk = |status, cancel_requested: bool| -> RunRecord {
+            RunRecord {
+                session_id: SessionId("s".into()),
+                status,
+                state_revision: 1,
+                execution_version: 1,
+                descriptor: None,
+                state: Some(RunStateV1 {
+                    cancel_requested,
+                    ..RunStateV1::default()
+                }),
+                graph_version: 1,
+            }
+        };
+        assert_eq!(
+            classify_cancel_outcome(&mk(SessionStatus::Cancelled, false)),
+            Some(CancelOutcome::Confirmed)
+        );
+        assert_eq!(
+            classify_cancel_outcome(&mk(SessionStatus::Cancelled, true)),
+            Some(CancelOutcome::Confirmed)
+        );
+        assert_eq!(
+            classify_cancel_outcome(&mk(SessionStatus::Interrupted, true)),
+            Some(CancelOutcome::Unconfirmed)
+        );
+        assert_eq!(
+            classify_cancel_outcome(&mk(SessionStatus::Interrupted, false)),
+            None,
+            "an interrupted run without the cancel intent is not a cancel outcome"
+        );
         for status in [
             SessionStatus::Running,
             SessionStatus::Paused,
@@ -2958,11 +3227,34 @@ mod tests {
             SessionStatus::Completed,
             SessionStatus::Failed,
         ] {
-            assert!(
-                !cancel_fence_loss_accomplished(&status, true),
+            assert_eq!(
+                classify_cancel_outcome(&mk(status.clone(), true)),
+                None,
                 "{status:?} must keep the conflict"
             );
         }
+
+        // A failed winner counts only when the cancel intent AND the
+        // `driver_failed` record are both durable.
+        let driver_failed = |code: &str| -> RunRecord {
+            let mut record = mk(SessionStatus::Failed, true);
+            if let Some(state) = record.state.as_mut() {
+                state.failure = Some(nexus_orchestration::run_state::RunFailure {
+                    code: code.to_string(),
+                    message: "drive failed".to_string(),
+                });
+            }
+            record
+        };
+        assert_eq!(
+            classify_cancel_outcome(&driver_failed("driver_failed")),
+            Some(CancelOutcome::Failed)
+        );
+        assert_eq!(
+            classify_cancel_outcome(&driver_failed("failure_cleanup_unconfirmed")),
+            None,
+            "an unrelated failure code is not a cancel outcome"
+        );
     }
     use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
 
@@ -4725,40 +5017,23 @@ mod tests {
             .await
         }
 
-        async fn settle_cancelled(
+        async fn settle_run(
             &self,
             session_id: &SessionId,
             expected_revision: u64,
             expected_graph_version: Option<u64>,
             checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
             next_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            terminal_target: nexus_orchestration::run_state::TerminalSettlementTarget,
+        ) -> Result<nexus_orchestration::run_state::SettlementResult, EngineError> {
             self.inner
-                .settle_cancelled(
+                .settle_run(
                     session_id,
                     expected_revision,
                     expected_graph_version,
                     checkpoint,
                     next_state,
-                )
-                .await
-        }
-
-        async fn settle_failed(
-            &self,
-            session_id: &SessionId,
-            expected_revision: u64,
-            expected_graph_version: Option<u64>,
-            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-            next_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
-            self.inner
-                .settle_failed(
-                    session_id,
-                    expected_revision,
-                    expected_graph_version,
-                    checkpoint,
-                    next_state,
+                    terminal_target,
                 )
                 .await
         }
@@ -4981,8 +5256,9 @@ mod tests {
                 .expect("winner context write");
             let mut winner_state = committed.state.clone().unwrap_or_default();
             winner_state.cancel_requested = true;
-            self.inner
-                .settle_cancelled(
+            let outcome = self
+                .inner
+                .settle_run(
                     session_id,
                     committed.state_revision,
                     None,
@@ -4991,9 +5267,11 @@ mod tests {
                         children: &[],
                     },
                     &winner_state,
+                    nexus_orchestration::run_state::TerminalSettlementTarget::Cancelled,
                 )
                 .await
                 .expect("concurrent owner settles Cancelled after phase 1");
+            assert_eq!(outcome.record().status, SessionStatus::Cancelled);
         }
     }
 
@@ -5150,46 +5428,35 @@ mod tests {
             Ok(committed)
         }
 
-        async fn settle_cancelled(
+        async fn settle_run(
             &self,
             session_id: &SessionId,
             expected_revision: u64,
             expected_graph_version: Option<u64>,
             checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
             next_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
-            if self.fault == BoundaryFault::FailCleanupSettle && self.file_once() {
+            terminal_target: nexus_orchestration::run_state::TerminalSettlementTarget,
+        ) -> Result<nexus_orchestration::run_state::SettlementResult, EngineError> {
+            use nexus_orchestration::run_state::TerminalSettlementTarget;
+            // QC2: P4 §6.2 consolidated the anchored `settle_cancelled` /
+            // `settle_failed` cleanup writes into `settle_run`. The fault must
+            // follow the boundary it proves, or the fixture silently stops
+            // injecting and the boundary test can only ever time out.
+            if matches!(
+                terminal_target,
+                TerminalSettlementTarget::Cancelled | TerminalSettlementTarget::Failed
+            ) && self.file_once()
+            {
                 return Err(Self::injected("injected cleanup-settle storage fault"));
             }
             self.inner
-                .settle_cancelled(
+                .settle_run(
                     session_id,
                     expected_revision,
                     expected_graph_version,
                     checkpoint,
                     next_state,
-                )
-                .await
-        }
-
-        async fn settle_failed(
-            &self,
-            session_id: &SessionId,
-            expected_revision: u64,
-            expected_graph_version: Option<u64>,
-            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
-            next_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
-            if self.fault == BoundaryFault::FailCleanupSettle && self.file_once() {
-                return Err(Self::injected("injected cleanup-settle storage fault"));
-            }
-            self.inner
-                .settle_failed(
-                    session_id,
-                    expected_revision,
-                    expected_graph_version,
-                    checkpoint,
-                    next_state,
+                    terminal_target,
                 )
                 .await
         }
@@ -8006,5 +8273,1150 @@ mod tests {
                 .await,
             "a v0 skip must not fence the session"
         );
+    }
+    /// P4 T1 placement: cancel committed before the step marker (provider start).
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)] // Keep the deterministic race and durable observations together.
+    async fn cancel_drive_race_provider_start_one_winner_no_extra_step() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        struct CountingTask {
+            dispatches: Arc<AtomicUsize>,
+        }
+        #[async_trait]
+        impl graph_flow::Task for CountingTask {
+            fn id(&self) -> &'static str {
+                "count"
+            }
+            async fn run(
+                &self,
+                _context: graph_flow::Context,
+            ) -> Result<graph_flow::TaskResult, graph_flow::GraphError> {
+                self.dispatches.fetch_add(1, Ordering::SeqCst);
+                Ok(graph_flow::TaskResult::new(
+                    Some("done".into()),
+                    graph_flow::NextAction::Continue,
+                ))
+            }
+        }
+        struct ProviderStartBarrierStore {
+            inner: Arc<dyn WorkflowStateStore>,
+            at_barrier: Arc<AtomicBool>,
+            release: Arc<AtomicBool>,
+        }
+        #[async_trait]
+        impl WorkflowStateStore for ProviderStartBarrierStore {
+            async fn load_run(
+                &self,
+                session_id: &SessionId,
+            ) -> Result<Option<nexus_orchestration::run_state::RunRecord>, EngineError>
+            {
+                self.inner.load_run(session_id).await
+            }
+            async fn start_run(
+                &self,
+                session_id: &SessionId,
+                descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .start_run(session_id, descriptor, checkpoint, next_state)
+                    .await
+            }
+            #[allow(clippy::too_many_arguments)]
+            async fn admit_schedule_run(
+                &self,
+                schedule_id: &str,
+                session_id: &SessionId,
+                descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+                core_context_version: u32,
+                expected_core_context_version: u32,
+                admission_gate: Option<&nexus_orchestration::run_state::ScheduleAdmissionGate>,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .admit_schedule_run(
+                        schedule_id,
+                        session_id,
+                        descriptor,
+                        checkpoint,
+                        next_state,
+                        core_context_version,
+                        expected_core_context_version,
+                        admission_gate,
+                    )
+                    .await
+            }
+            async fn commit_transition(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_status: SessionStatus,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .commit_transition(
+                        session_id,
+                        expected_revision,
+                        checkpoint,
+                        next_status,
+                        next_state,
+                    )
+                    .await
+            }
+            async fn commit_transition_with_graph_fence(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_graph_version: Option<u64>,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_status: SessionStatus,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .commit_transition_with_graph_fence(
+                        session_id,
+                        expected_revision,
+                        expected_graph_version,
+                        checkpoint,
+                        next_status,
+                        next_state,
+                    )
+                    .await
+            }
+            async fn settle_run(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_graph_version: Option<u64>,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+                terminal_target: nexus_orchestration::run_state::TerminalSettlementTarget,
+            ) -> Result<nexus_orchestration::run_state::SettlementResult, EngineError> {
+                self.inner
+                    .settle_run(
+                        session_id,
+                        expected_revision,
+                        expected_graph_version,
+                        checkpoint,
+                        next_state,
+                        terminal_target,
+                    )
+                    .await
+            }
+            async fn restore_pre_step(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                pre_step: &graph_flow::Session,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .restore_pre_step(session_id, expected_revision, pre_step)
+                    .await
+            }
+            async fn mark_step_in_flight(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_graph_version: Option<u64>,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                step_state: &nexus_orchestration::run_state::RunStateV1,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.at_barrier.store(true, Ordering::SeqCst);
+                while !self.release.load(Ordering::SeqCst) {
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+                self.inner
+                    .mark_step_in_flight(
+                        session_id,
+                        expected_revision,
+                        expected_graph_version,
+                        checkpoint,
+                        step_state,
+                    )
+                    .await
+            }
+            async fn persist_prompt_attempt(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_step: Option<&str>,
+                expected_attempt_id: Option<&str>,
+                attempt: &nexus_orchestration::run_state::PromptAttempt,
+            ) -> Result<(), EngineError> {
+                self.inner
+                    .persist_prompt_attempt(
+                        session_id,
+                        expected_revision,
+                        expected_step,
+                        expected_attempt_id,
+                        attempt,
+                    )
+                    .await
+            }
+            async fn clear_prompt_attempt(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_step: Option<&str>,
+                attempt_id: &str,
+            ) -> Result<(), EngineError> {
+                self.inner
+                    .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
+                    .await
+            }
+
+            async fn load_children(
+                &self,
+                parent_session_id: &SessionId,
+            ) -> Result<Vec<nexus_orchestration::run_state::RunRecord>, EngineError> {
+                self.inner.load_children(parent_session_id).await
+            }
+        }
+        let (_tmp, _home, db_path) = crate::test_utils::create_test_workspace().await;
+        let pool = Arc::new(nexus_local_db::open_pool(&db_path).await.expect("pool"));
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let real_store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let dispatches = Arc::new(AtomicUsize::new(0));
+        let at_barrier = Arc::new(AtomicBool::new(false));
+        let release = Arc::new(AtomicBool::new(false));
+        let barrier_store: Arc<dyn WorkflowStateStore> = Arc::new(ProviderStartBarrierStore {
+            inner: real_store.clone(),
+            at_barrier: at_barrier.clone(),
+            release: release.clone(),
+        });
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("provider-start-race")
+                .add_task(Arc::new(CountingTask {
+                    dispatches: dispatches.clone(),
+                }))
+                .build()
+                .expect("graph"),
+        );
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = Arc::new(
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+                storage.clone(),
+                barrier_store.clone(),
+                caps,
+            ),
+        );
+        let session_cancels = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let coordinator = WorkflowRunCoordinator::new(
+            engine.clone(),
+            storage.clone(),
+            pool.clone(),
+            session_cancels,
+        )
+        .with_workflow_store(barrier_store.clone());
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start");
+        let cancel_task = tokio::spawn({
+            let coordinator = coordinator.clone();
+            let session_id = session_id.clone();
+            let at_barrier = at_barrier.clone();
+            let release = release.clone();
+            async move {
+                while !at_barrier.load(Ordering::SeqCst) {
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+                let _ = coordinator.signal_run(&session_id, RunSignal::Cancel).await;
+                release.store(true, Ordering::SeqCst);
+            }
+        });
+        coordinator
+            .ensure_driving(&session_id)
+            .await
+            .expect("drive");
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while coordinator
+                .drives
+                .lock()
+                .await
+                .get(&session_id.0)
+                .is_some_and(|o| !o.join.is_finished())
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("drive finished");
+        cancel_task.await.expect("cancel task");
+        let record = real_store
+            .load_run(&session_id)
+            .await
+            .expect("load")
+            .expect("row");
+        assert!(record.status.is_terminal(), "one durable terminal winner");
+        assert!(
+            dispatches.load(Ordering::SeqCst) <= 1,
+            "no later step launch after cancel fence"
+        );
+        let cancel_ok = coordinator
+            .signal_run(&session_id, RunSignal::Cancel)
+            .await
+            .is_ok()
+            || classify_cancel_outcome(&record).is_some();
+        assert!(cancel_ok, "public cancel must not surface generic conflict");
+    }
+
+    /// P4 T1 placement: cancel during an in-flight step (active operation).
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)] // Keep the deterministic race and durable observations together.
+    async fn cancel_drive_race_active_operation_one_winner_no_extra_step() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        struct SlowTask {
+            dispatches: Arc<AtomicUsize>,
+            in_flight: Arc<AtomicBool>,
+            release: Arc<AtomicBool>,
+        }
+        #[async_trait]
+        impl graph_flow::Task for SlowTask {
+            fn id(&self) -> &'static str {
+                "slow"
+            }
+            async fn run(
+                &self,
+                _context: graph_flow::Context,
+            ) -> Result<graph_flow::TaskResult, graph_flow::GraphError> {
+                self.dispatches.fetch_add(1, Ordering::SeqCst);
+                self.in_flight.store(true, Ordering::SeqCst);
+                while !self.release.load(Ordering::SeqCst) {
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+                Ok(graph_flow::TaskResult::new(
+                    Some("done".into()),
+                    graph_flow::NextAction::Continue,
+                ))
+            }
+        }
+        let (_tmp, _home, db_path) = crate::test_utils::create_test_workspace().await;
+        let pool = Arc::new(nexus_local_db::open_pool(&db_path).await.expect("pool"));
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let dispatches = Arc::new(AtomicUsize::new(0));
+        let in_flight = Arc::new(AtomicBool::new(false));
+        let release = Arc::new(AtomicBool::new(false));
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("active-op-race")
+                .add_task(Arc::new(SlowTask {
+                    dispatches: dispatches.clone(),
+                    in_flight: in_flight.clone(),
+                    release: release.clone(),
+                }))
+                .build()
+                .expect("graph"),
+        );
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = Arc::new(
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+                storage.clone(),
+                store.clone(),
+                caps,
+            ),
+        );
+        let session_cancels = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let coordinator = WorkflowRunCoordinator::new(
+            engine.clone(),
+            storage.clone(),
+            pool.clone(),
+            session_cancels,
+        );
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start");
+        coordinator
+            .ensure_driving(&session_id)
+            .await
+            .expect("drive");
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while !in_flight.load(Ordering::SeqCst) {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("step in flight");
+        let cancel = coordinator
+            .signal_run(&session_id, RunSignal::Cancel)
+            .await
+            .expect("cancel during active operation");
+        assert_eq!(cancel.status, "cancelled");
+        release.store(true, Ordering::SeqCst);
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while coordinator
+                .drives
+                .lock()
+                .await
+                .get(&session_id.0)
+                .is_some_and(|o| !o.join.is_finished())
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("drive finished");
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load")
+            .expect("row");
+        assert_eq!(record.status, SessionStatus::Cancelled);
+        assert_eq!(
+            dispatches.load(Ordering::SeqCst),
+            1,
+            "no second step/process launch after cancel wins"
+        );
+    }
+
+    /// P4 T1 placement: cancel wins between failure commit and anchored cleanup.
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn cancel_drive_race_post_op_pre_settlement_one_winner() {
+        struct FailingTask;
+        #[async_trait]
+        impl graph_flow::Task for FailingTask {
+            fn id(&self) -> &'static str {
+                "fail"
+            }
+            async fn run(
+                &self,
+                _context: graph_flow::Context,
+            ) -> Result<graph_flow::TaskResult, graph_flow::GraphError> {
+                Err(graph_flow::GraphError::TaskExecutionFailed(
+                    "post-op pre-settlement race".into(),
+                ))
+            }
+        }
+        let (_tmp, _home, db_path) = crate::test_utils::create_test_workspace().await;
+        let pool = Arc::new(nexus_local_db::open_pool(&db_path).await.expect("pool"));
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let real_store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let fault_store: Arc<dyn WorkflowStateStore> = Arc::new(BoundaryFaultStore::new(
+            real_store.clone(),
+            storage.clone(),
+            pool.clone(),
+            BoundaryFault::WinnerSettlesCancelledAfterPhaseOne,
+        ));
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("post-op-race")
+                .add_task(Arc::new(FailingTask))
+                .build()
+                .expect("graph"),
+        );
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = Arc::new(
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+                storage.clone(),
+                fault_store.clone(),
+                caps,
+            ),
+        );
+        let session_cancels = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let coordinator = WorkflowRunCoordinator::new(
+            engine.clone(),
+            storage.clone(),
+            pool.clone(),
+            session_cancels,
+        )
+        .with_workflow_store(fault_store);
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start");
+        coordinator
+            .ensure_driving(&session_id)
+            .await
+            .expect("drive");
+        wait_until("cancelled winner", || async {
+            let record = real_store.load_run(&session_id).await.expect("load");
+            record
+                .as_ref()
+                .is_some_and(|r| r.status == SessionStatus::Cancelled)
+        })
+        .await;
+        coordinator.abort_all_drives().await;
+        let record = real_store
+            .load_run(&session_id)
+            .await
+            .expect("load")
+            .expect("row");
+        assert_eq!(record.status, SessionStatus::Cancelled);
+        assert!(
+            record.state.as_ref().is_some_and(|s| s.cancel_requested),
+            "cancel intent durable at settlement boundary"
+        );
+    }
+
+    /// P4 T1 placement: cancel CAS races driver-failure settlement at `settle_run`.
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn cancel_drive_race_concurrent_failure_settle_one_winner() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct FailingTask;
+        #[async_trait]
+        impl graph_flow::Task for FailingTask {
+            fn id(&self) -> &'static str {
+                "fail"
+            }
+            async fn run(
+                &self,
+                _context: graph_flow::Context,
+            ) -> Result<graph_flow::TaskResult, graph_flow::GraphError> {
+                Err(graph_flow::GraphError::TaskExecutionFailed(
+                    "concurrent failure race".into(),
+                ))
+            }
+        }
+        struct SettlePairBarrierStore {
+            inner: Arc<dyn WorkflowStateStore>,
+            arrived: Arc<AtomicUsize>,
+            dispatches: Arc<AtomicUsize>,
+        }
+        #[async_trait]
+        impl WorkflowStateStore for SettlePairBarrierStore {
+            async fn load_run(
+                &self,
+                session_id: &SessionId,
+            ) -> Result<Option<nexus_orchestration::run_state::RunRecord>, EngineError>
+            {
+                self.inner.load_run(session_id).await
+            }
+            async fn start_run(
+                &self,
+                session_id: &SessionId,
+                descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .start_run(session_id, descriptor, checkpoint, next_state)
+                    .await
+            }
+            #[allow(clippy::too_many_arguments)]
+            async fn admit_schedule_run(
+                &self,
+                schedule_id: &str,
+                session_id: &SessionId,
+                descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+                core_context_version: u32,
+                expected_core_context_version: u32,
+                admission_gate: Option<&nexus_orchestration::run_state::ScheduleAdmissionGate>,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .admit_schedule_run(
+                        schedule_id,
+                        session_id,
+                        descriptor,
+                        checkpoint,
+                        next_state,
+                        core_context_version,
+                        expected_core_context_version,
+                        admission_gate,
+                    )
+                    .await
+            }
+            async fn commit_transition(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_status: SessionStatus,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .commit_transition(
+                        session_id,
+                        expected_revision,
+                        checkpoint,
+                        next_status,
+                        next_state,
+                    )
+                    .await
+            }
+            async fn commit_transition_with_graph_fence(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_graph_version: Option<u64>,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_status: SessionStatus,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .commit_transition_with_graph_fence(
+                        session_id,
+                        expected_revision,
+                        expected_graph_version,
+                        checkpoint,
+                        next_status,
+                        next_state,
+                    )
+                    .await
+            }
+            async fn settle_run(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_graph_version: Option<u64>,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                next_state: &nexus_orchestration::run_state::RunStateV1,
+                terminal_target: nexus_orchestration::run_state::TerminalSettlementTarget,
+            ) -> Result<nexus_orchestration::run_state::SettlementResult, EngineError> {
+                let n = self.arrived.fetch_add(1, Ordering::SeqCst) + 1;
+                if n == 1 {
+                    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                        while self.arrived.load(Ordering::SeqCst) < 2 {
+                            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+                        }
+                    })
+                    .await
+                    .expect("paired settle race");
+                }
+                self.inner
+                    .settle_run(
+                        session_id,
+                        expected_revision,
+                        expected_graph_version,
+                        checkpoint,
+                        next_state,
+                        terminal_target,
+                    )
+                    .await
+            }
+            async fn restore_pre_step(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                pre_step: &graph_flow::Session,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.inner
+                    .restore_pre_step(session_id, expected_revision, pre_step)
+                    .await
+            }
+            async fn mark_step_in_flight(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_graph_version: Option<u64>,
+                checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+                step_state: &nexus_orchestration::run_state::RunStateV1,
+            ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+                self.dispatches.fetch_add(1, Ordering::SeqCst);
+                self.inner
+                    .mark_step_in_flight(
+                        session_id,
+                        expected_revision,
+                        expected_graph_version,
+                        checkpoint,
+                        step_state,
+                    )
+                    .await
+            }
+            async fn persist_prompt_attempt(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_step: Option<&str>,
+                expected_attempt_id: Option<&str>,
+                attempt: &nexus_orchestration::run_state::PromptAttempt,
+            ) -> Result<(), EngineError> {
+                self.inner
+                    .persist_prompt_attempt(
+                        session_id,
+                        expected_revision,
+                        expected_step,
+                        expected_attempt_id,
+                        attempt,
+                    )
+                    .await
+            }
+
+            async fn clear_prompt_attempt(
+                &self,
+                session_id: &SessionId,
+                expected_revision: u64,
+                expected_step: Option<&str>,
+                attempt_id: &str,
+            ) -> Result<(), EngineError> {
+                self.inner
+                    .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
+                    .await
+            }
+
+            async fn load_children(
+                &self,
+                parent_session_id: &SessionId,
+            ) -> Result<Vec<nexus_orchestration::run_state::RunRecord>, EngineError> {
+                self.inner.load_children(parent_session_id).await
+            }
+        }
+        let (_tmp, _home, db_path) = crate::test_utils::create_test_workspace().await;
+        let pool = Arc::new(nexus_local_db::open_pool(&db_path).await.expect("pool"));
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let real_store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let arrived = Arc::new(AtomicUsize::new(0));
+        let dispatches = Arc::new(AtomicUsize::new(0));
+        let barrier_store: Arc<dyn WorkflowStateStore> = Arc::new(SettlePairBarrierStore {
+            inner: real_store.clone(),
+            arrived: arrived.clone(),
+            dispatches: dispatches.clone(),
+        });
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("concurrent-failure-race")
+                .add_task(Arc::new(FailingTask))
+                .build()
+                .expect("graph"),
+        );
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = Arc::new(
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+                storage.clone(),
+                barrier_store.clone(),
+                caps,
+            ),
+        );
+        let session_cancels = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let coordinator = WorkflowRunCoordinator::new(
+            engine.clone(),
+            storage.clone(),
+            pool.clone(),
+            session_cancels,
+        )
+        .with_workflow_store(barrier_store.clone());
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start");
+        let cancel_task = tokio::spawn({
+            let coordinator = coordinator.clone();
+            let session_id = session_id.clone();
+            let arrived = arrived.clone();
+            async move {
+                while arrived.load(Ordering::SeqCst) == 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+                }
+                let _ = coordinator.signal_run(&session_id, RunSignal::Cancel).await;
+            }
+        });
+        coordinator
+            .ensure_driving(&session_id)
+            .await
+            .expect("drive");
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while coordinator
+                .drives
+                .lock()
+                .await
+                .get(&session_id.0)
+                .is_some_and(|o| !o.join.is_finished())
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("drive finished");
+        cancel_task.await.expect("cancel task");
+        let record = real_store
+            .load_run(&session_id)
+            .await
+            .expect("load")
+            .expect("row");
+        assert_eq!(
+            record.status,
+            SessionStatus::Failed,
+            "driver_failed must win durable settlement over cancel relabelling"
+        );
+        let failure = record
+            .state
+            .as_ref()
+            .and_then(|s| s.failure.as_ref())
+            .expect("authoritative RunFailure");
+        assert_eq!(failure.code, "driver_failed");
+        assert!(
+            record.state.as_ref().is_some_and(|s| s.cancel_requested),
+            "cancel admission must be durable even when failure wins"
+        );
+        assert!(
+            arrived.load(Ordering::SeqCst) >= 2,
+            "both cancel and failure reached settle_run"
+        );
+        assert_eq!(
+            dispatches.load(Ordering::SeqCst),
+            1,
+            "no later step launch after settlement race"
+        );
+        assert!(
+            classify_cancel_outcome(&record).is_some(),
+            "failed+cancel_requested+driver_failed must count as accomplished cancel outcome"
+        );
+        let second_cancel = coordinator.signal_run(&session_id, RunSignal::Cancel).await;
+        assert!(
+            second_cancel.is_ok(),
+            "second public cancel must be idempotent, not generic conflict: {:?}",
+            second_cancel.err()
+        );
+    }
+
+    /// Live SSE handoff: subscriber registered before publish receives `host_event`.
+    #[tokio::test]
+    async fn run_events_live_handoff_receives_published_host_event() {
+        let registry = Arc::new(crate::run_events::RunEventRegistry::new());
+        let _sink = registry.try_register_live("sess-1").expect("register");
+        let mut sub = registry
+            .subscribe_live("sess-1", None, "/inspect".into())
+            .expect("subscribe");
+        let record = nexus_orchestration::run_state::RunRecord {
+            session_id: SessionId("sess-1".into()),
+            status: SessionStatus::Running,
+            state_revision: 1,
+            execution_version: 1,
+            descriptor: None,
+            state: None,
+            graph_version: 1,
+        };
+        registry.publish_run_state("sess-1", &record);
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(2), sub.recv())
+            .await
+            .expect("timeout")
+            .expect("frame");
+        assert_eq!(frame.event, "run_state");
+        let payload: serde_json::Value = serde_json::from_str(&frame.data).expect("json");
+        assert_eq!(payload["sequence"].as_u64(), Some(1));
+    }
+
+    /// QC2 F-001: a durable `interrupted` winner (unconfirmed cleanup) is
+    /// NOT authoritative terminal — its live SSE ring stays OPEN so the same
+    /// run's retry cancel can still publish the confirmed winner, and the
+    /// final SSE frame matches the durable DB status exactly.
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)] // One interrupted-to-confirmed cleanup lifecycle.
+    async fn interrupted_run_keeps_ring_live_until_retry_cancel_confirms() {
+        struct NoopTask;
+        #[async_trait]
+        impl graph_flow::Task for NoopTask {
+            fn id(&self) -> &'static str {
+                "noop"
+            }
+            async fn run(
+                &self,
+                _context: graph_flow::Context,
+            ) -> Result<graph_flow::TaskResult, graph_flow::GraphError> {
+                Ok(graph_flow::TaskResult::new(
+                    Some("done".to_string()),
+                    graph_flow::NextAction::Continue,
+                ))
+            }
+        }
+
+        let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let _ = &tmp;
+        let pool = Arc::new(
+            nexus_local_db::open_pool(&db_path)
+                .await
+                .expect("open pool"),
+        );
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = Arc::new(
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+                storage.clone(),
+                store.clone(),
+                caps,
+            ),
+        );
+        let session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let registry = Arc::new(crate::run_events::RunEventRegistry::new());
+        let coordinator = WorkflowRunCoordinator::new(
+            engine.clone(),
+            storage.clone(),
+            pool.clone(),
+            session_cancels,
+        )
+        .with_run_events(registry.clone());
+
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("p4-f001-interrupted-graph")
+                .add_task(Arc::new(NoopTask))
+                .build()
+                .expect("graph"),
+        );
+        let session_id = engine
+            .start_session_with_graph("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // Durable winner #1 — cleanup unconfirmed: Interrupted + cancel intent.
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load")
+            .expect("row");
+        let root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get")
+            .expect("root");
+        let interrupted_state = nexus_orchestration::run_state::RunStateV1 {
+            cancel_requested: true,
+            failure: Some(nexus_orchestration::run_state::RunFailure {
+                code: "cancel_cleanup_unconfirmed".to_string(),
+                message: "cancel cleanup unconfirmed for run".to_string(),
+            }),
+            ..Default::default()
+        };
+        store
+            .commit_transition(
+                &session_id,
+                record.state_revision,
+                nexus_orchestration::run_state::RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                SessionStatus::Interrupted,
+                &interrupted_state,
+            )
+            .await
+            .expect("commit interrupted winner");
+
+        // The ring is registered BEFORE the publish and must survive BOTH
+        // settles (interrupted is actionable, not terminal).
+        let _sink = registry
+            .try_register_live(&session_id.0)
+            .expect("live ring reserved");
+        let mut sub = registry
+            .subscribe_live(&session_id.0, None, "/inspect".into())
+            .expect("subscribe");
+
+        coordinator.publish_durable_run_state(&session_id).await;
+        let first = tokio::time::timeout(std::time::Duration::from_secs(2), sub.recv())
+            .await
+            .expect("first frame timeout")
+            .expect("first frame");
+        assert_eq!(first.event, "run_state");
+        let payload: serde_json::Value = serde_json::from_str(&first.data).expect("json");
+        assert_eq!(
+            payload["status"].as_str(),
+            Some("interrupted"),
+            "unconfirmed cleanup must be published as interrupted"
+        );
+
+        // ACTIONABLE: the ring is still live (a held subscriber blocks, it is
+        // not closed).
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(200), sub.recv())
+                .await
+                .is_err(),
+            "an interrupted run must keep its live ring open for the retry cancel"
+        );
+
+        // Retry cancel confirms: durable winner #2 = Cancelled.
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load")
+            .expect("row");
+        let root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get")
+            .expect("root");
+        let cancelled_state = record.state.clone().unwrap_or_default();
+        let settled = store
+            .settle_run(
+                &session_id,
+                record.state_revision,
+                None,
+                nexus_orchestration::run_state::RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                &cancelled_state,
+                nexus_orchestration::run_state::TerminalSettlementTarget::Cancelled,
+            )
+            .await
+            .expect("confirmed retry settle");
+        assert!(matches!(
+            settled,
+            nexus_orchestration::run_state::SettlementResult::Applied(_)
+        ));
+
+        coordinator.publish_durable_run_state(&session_id).await;
+        let last = tokio::time::timeout(std::time::Duration::from_secs(2), sub.recv())
+            .await
+            .expect("final frame timeout")
+            .expect("final frame");
+        assert_eq!(last.event, "run_state");
+        let payload: serde_json::Value = serde_json::from_str(&last.data).expect("json");
+        let durable = store
+            .load_run(&session_id)
+            .await
+            .expect("load")
+            .expect("row");
+        assert_eq!(durable.status, SessionStatus::Cancelled);
+        assert_eq!(
+            payload["status"].as_str(),
+            Some(durable.status.as_db_str()),
+            "the final SSE frame must match the durable DB status"
+        );
+
+        // Confirmed winner CLOSES the ring (gap-then-close contract).
+        assert!(
+            matches!(
+                tokio::time::timeout(std::time::Duration::from_secs(1), sub.recv()).await,
+                Ok(None)
+            ),
+            "an authoritative terminal winner must close the live ring"
+        );
+    }
+
+    /// QC2 F-004: the per-run live event-ring quota is RESERVED before any
+    /// drive spawn. The 65th run is refused with a TYPED capacity error, no
+    /// drive owner is registered, and the durable existing work is untouched;
+    /// an existing ring is reused rather than refused.
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)] // One capacity boundary with durable-state observations.
+    async fn ensure_driving_refuses_capacity_without_touching_durable_work() {
+        struct NoopTask;
+        #[async_trait]
+        impl graph_flow::Task for NoopTask {
+            fn id(&self) -> &'static str {
+                "noop"
+            }
+            async fn run(
+                &self,
+                _context: graph_flow::Context,
+            ) -> Result<graph_flow::TaskResult, graph_flow::GraphError> {
+                Ok(graph_flow::TaskResult::new(
+                    Some("done".to_string()),
+                    graph_flow::NextAction::Continue,
+                ))
+            }
+        }
+
+        let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let _ = &tmp;
+        let pool = Arc::new(
+            nexus_local_db::open_pool(&db_path)
+                .await
+                .expect("open pool"),
+        );
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = Arc::new(
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+                storage.clone(),
+                store.clone(),
+                caps,
+            ),
+        );
+        let session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let registry = Arc::new(crate::run_events::RunEventRegistry::new());
+        let coordinator = WorkflowRunCoordinator::new(
+            engine.clone(),
+            storage.clone(),
+            pool.clone(),
+            session_cancels,
+        )
+        .with_run_events(registry.clone());
+
+        let graph = Arc::new(
+            graph_flow::GraphBuilder::new("p4-f004-capacity-graph")
+                .add_task(Arc::new(NoopTask))
+                .build()
+                .expect("graph"),
+        );
+        let session_id = engine
+            .start_session_with_graph("novel-writing", graph)
+            .await
+            .expect("start session");
+        let before = store
+            .load_run(&session_id)
+            .await
+            .expect("load")
+            .expect("row");
+
+        // Exhaust every live-ring slot.
+        let mut held = Vec::new();
+        for i in 0..crate::run_events::MAX_LIVE_RINGS {
+            held.push(
+                registry
+                    .try_register_live(&format!("other-run-{i}"))
+                    .expect("live ring slot"),
+            );
+        }
+
+        let err = coordinator
+            .ensure_driving(&session_id)
+            .await
+            .expect_err("the 65th live ring must be refused");
+        assert!(
+            matches!(&err, RunControlError::RunEventCapacity(sid) if sid == &session_id.0),
+            "capacity refusal must be typed, got {err:?}"
+        );
+
+        // No drive owner and no sink were registered for the refused run.
+        assert!(
+            coordinator.drives.lock().await.is_empty(),
+            "a refused run must not be driven"
+        );
+        assert!(
+            !coordinator
+                .run_event_sinks
+                .lock()
+                .await
+                .contains_key(&session_id.0),
+            "a refused run must not own a sink"
+        );
+
+        // Durable existing work is untouched.
+        let after = store
+            .load_run(&session_id)
+            .await
+            .expect("load")
+            .expect("row");
+        assert_eq!(after.state_revision, before.state_revision);
+        assert_eq!(after.status, before.status);
+
+        // An EXISTING ring is reused rather than refused at quota.
+        assert!(
+            registry.try_register_live("other-run-0").is_some(),
+            "an existing live ring must be reused, not refused"
+        );
+        drop(held);
     }
 }

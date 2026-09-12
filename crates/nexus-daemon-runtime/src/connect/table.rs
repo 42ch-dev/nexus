@@ -786,6 +786,7 @@ mod tests {
             )),
             daemon_tool_dispatch: None,
             cdn_config: None,
+            workspace_executor: None,
         };
         write_capability_dir(&scan_dir, "tools.operator.demo");
         let (registry, outcome) = rebuild_registry_with_merge(&deps, None, None, &scan_dir, &[]);

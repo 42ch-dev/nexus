@@ -493,7 +493,13 @@ async fn admission_production_host_progress_non_echo() {
 /// the winner).
 #[tokio::test]
 async fn admission_concurrent_pending_row_one_session() {
-    let daemon = LiveDaemon::start().await;
+    // Determinism (same reasoning as the distinct-row race below): a hostless
+    // winner fails its first prompt instantly and settles its schedule row
+    // terminal, which would free admission before the loser re-reads. The
+    // blocking host holds the winner's first prompt open, so the race is
+    // between the two claims — the loser then takes the re-entry path
+    // (`current_session_id` is set) and resolves to the SAME owned run.
+    let daemon = LiveDaemon::start_with_agent_host(BlockingHost::non_cooperative()).await;
     let now = chrono::Utc::now().timestamp();
     sqlx::query(
         "INSERT INTO creator_schedules
@@ -556,6 +562,43 @@ async fn admission_concurrent_pending_row_one_session() {
 /// no OVERLAP, and a settled run no longer overlaps). The blocking host
 /// holds the winner's first prompt open so the race is between the two
 /// claims, never between a claim and a settle.
+/// Diagnosis for the serial-admission race: for each schedule id, report the
+/// schedule row (status, session) and that session's durable run record
+/// (status + raw `run_state_json`, which carries the failure field and any
+/// wait marker). Diagnostic only — it runs on the failing path, never on the
+/// happy path.
+async fn serial_race_diag(daemon: &LiveDaemon, ids: &[&str]) -> String {
+    let mut diag = String::new();
+    for id in ids {
+        let row = load_drive_row(daemon, id).await;
+        let record = match row.current_session_id.as_deref() {
+            Some(sid) => {
+                let loaded: (String, Option<Vec<u8>>) = sqlx::query_as(
+                    "SELECT status, run_state_json \
+                     FROM orchestration_sessions WHERE session_id = ?",
+                )
+                .bind(sid)
+                .fetch_one(&daemon.pool)
+                .await
+                .expect("load run record for diagnosis");
+                Some(loaded)
+            }
+            None => None,
+        };
+        let state = record
+            .as_ref()
+            .and_then(|(_, state)| state.as_deref())
+            .map(|bytes| String::from_utf8_lossy(bytes).to_string());
+        diag.push_str(&format!(
+            "\n  {id}: schedule_status={} session={:?} run_status={:?} run_state={state:?}",
+            row.status,
+            row.current_session_id,
+            record.as_ref().map(|(status, _)| status.as_str())
+        ));
+    }
+    diag
+}
+
 #[tokio::test]
 async fn admission_distinct_serial_rows_race_one_owned() {
     let daemon = LiveDaemon::start_with_agent_host(BlockingHost::non_cooperative()).await;
@@ -598,13 +641,19 @@ async fn admission_distinct_serial_rows_race_one_owned() {
     // its row stays pending and unowned (the store's in-transaction matrix
     // recheck linearizes the distinct-row serial race).
     let successes = [a.0.is_success(), b.0.is_success()];
-    assert_eq!(
-        successes.iter().filter(|s| **s).count(),
-        1,
-        "exactly one of the two racing admissions must succeed: {} / {}",
-        a.1,
-        b.1
-    );
+    let success_count = successes.iter().filter(|s| **s).count();
+    if success_count != 1 {
+        // Two successes under `BEGIN IMMEDIATE` mean the first admission's
+        // schedule row had already LEFT `running` (a settled run) before the
+        // second gate read it, so both responses report `running` yet both
+        // rows were admitted. The dump carries the first run's durable
+        // failure field, which names the cause directly.
+        let diag = serial_race_diag(&daemon, &["SCHRACE1", "SCHRACE2"]).await;
+        panic!(
+            "exactly one of the two racing admissions must succeed: {} / {}{diag}",
+            a.1, b.1
+        );
+    }
     let loser_body = if a.0.is_success() { &b.1 } else { &a.1 };
     assert_eq!(
         loser_body["error"]["code"].as_str(),
@@ -622,11 +671,13 @@ async fn admission_distinct_serial_rows_race_one_owned() {
         .current_session_id
         .as_deref()
         .is_some_and(|s| !s.is_empty());
-    assert!(
-        owned1 ^ owned2,
-        "exactly one of the two distinct serial rows must own a run: \
-         SCHRACE1 owned={owned1} SCHRACE2 owned={owned2}"
-    );
+    if !(owned1 ^ owned2) {
+        let diag = serial_race_diag(&daemon, &["SCHRACE1", "SCHRACE2"]).await;
+        panic!(
+            "exactly one of the two distinct serial rows must own a run: \
+             SCHRACE1 owned={owned1} SCHRACE2 owned={owned2}{diag}"
+        );
+    }
     let (winner, loser) = if owned1 {
         ("SCHRACE1", &row2)
     } else {
@@ -3648,9 +3699,10 @@ async fn settlement_completed_inspect_agrees() {
     );
 
     // Session inspect agrees.
+    let session_id = session_id_for_request(&sid);
     let resp = reqwest::Client::new()
         .get(format!(
-            "{}/v1/daemon/orchestration/sessions/{sid}",
+            "{}/v1/daemon/orchestration/sessions/{session_id}",
             daemon.http_url
         ))
         .send()
@@ -3959,8 +4011,18 @@ async fn settlement_duplicate_callback_no_second_child() {
     assert_eq!(run_status, "completed");
 
     // The schedule settled to completed (no child yet — the Work had no
-    // driver pointer at settlement time).
-    let row = load_drive_row(&daemon, &schedule_id).await;
+    // driver pointer at settlement time). The drive task settles the SCHEDULE
+    // row after `drive_preset_run` returns, so observing the session row
+    // `completed` does not order against it: wait for the schedule row rather
+    // than reading it immediately.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
+    let row = loop {
+        let row = load_drive_row(&daemon, &schedule_id).await;
+        if row.status == "completed" || tokio::time::Instant::now() >= deadline {
+            break row;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    };
     assert_eq!(row.status, "completed");
 
     // Attach the driver pointer, then fire the terminal callback again.
@@ -4204,4 +4266,706 @@ async fn settlement_restart_reconciles_no_second_child() {
         session_count, 1,
         "reconcile must not create a second session"
     );
+}
+
+#[derive(Debug, Clone)]
+struct SseFrameParsed {
+    id: String,
+    event: String,
+    data: Value,
+    sequence: u64,
+}
+
+fn parse_sse_frames(body: &str) -> Vec<SseFrameParsed> {
+    let mut out = Vec::new();
+    for block in body.split("\n\n") {
+        let mut id = None;
+        let mut event = None;
+        let mut data = None;
+        for line in block.lines() {
+            if let Some(rest) = line.strip_prefix("id: ") {
+                id = Some(rest.trim().to_string());
+            } else if let Some(rest) = line.strip_prefix("event: ") {
+                event = Some(rest.trim().to_string());
+            } else if let Some(rest) = line.strip_prefix("data: ") {
+                data = Some(rest);
+            }
+        }
+        if let (Some(id), Some(event), Some(data)) = (id, event, data) {
+            let json = serde_json::from_str::<Value>(data).unwrap_or(Value::Null);
+            let sequence = json
+                .get("sequence")
+                .and_then(serde_json::Value::as_u64)
+                .or_else(|| id.split(':').nth(1).and_then(|s| s.parse().ok()))
+                .unwrap_or(0);
+            out.push(SseFrameParsed {
+                id,
+                event,
+                data: json,
+                sequence,
+            });
+        }
+    }
+    out
+}
+
+fn assert_monotonic_sse_frames(frames: &[SseFrameParsed]) {
+    let mut last = 0u64;
+    let mut seen = std::collections::HashSet::new();
+    for frame in frames {
+        assert!(
+            frame.sequence > last,
+            "sequence must increase: {} after {}",
+            frame.sequence,
+            last
+        );
+        assert!(seen.insert(frame.id.clone()), "duplicate id {}", frame.id);
+        last = frame.sequence;
+    }
+}
+
+fn host_event_kind(data: &Value) -> Option<String> {
+    data.get("host_event")
+        .and_then(|v| v.as_object())
+        .and_then(|obj| obj.keys().next().map(std::string::ToString::to_string))
+}
+
+/// Shape-validate a session id read from a DB row before it is transmitted.
+///
+/// Orchestration session ids are COMPOSITE (`<preset>:<uuid>`, and nested
+/// children `<preset>:<uuid>:child:<uuid>`); the daemon's orchestration routes
+/// accept exactly that shape, while agent-host ids are bare UUIDs. Mirror both:
+/// split on `:`, reject any empty/whitespace/control-bearing segment, parse
+/// every UUID-shaped segment, and REBUILD the value from its validated parts —
+/// so what reaches the request URL is never the raw stored string.
+fn session_id_for_request(stored: &str) -> String {
+    let segments: Vec<String> = stored
+        .split(':')
+        .map(|segment| {
+            assert!(
+                !segment.is_empty()
+                    && !segment.chars().any(|c| c.is_whitespace() || c.is_control()),
+                "session id segment must be non-empty and carry no whitespace/control chars"
+            );
+            // A UUID-shaped segment is canonicalized from its parsed value; a
+            // non-UUID segment is a preset id / `child` role label, validated
+            // above and carried through verbatim.
+            uuid::Uuid::parse_str(segment)
+                .map_or_else(|_| segment.to_string(), |parsed| parsed.to_string())
+        })
+        .collect();
+    assert!(!segments.is_empty(), "session id must not be empty");
+    segments.join(":")
+}
+
+/// Shape-validate an SSE resume cursor (`<epoch-uuid>:<sequence>`) before it is
+/// sent as a request header.
+fn resume_cursor_for_request(cursor: &str) -> String {
+    let (epoch, sequence) = cursor
+        .split_once(':')
+        .expect("resume cursor must be '<epoch>:<sequence>'");
+    let epoch = uuid::Uuid::parse_str(epoch).expect("cursor epoch must be a UUID");
+    let sequence: u64 = sequence
+        .parse()
+        .expect("cursor sequence must be an integer");
+    format!("{epoch}:{sequence}")
+}
+
+async fn fetch_session_events(
+    daemon: &LiveDaemon,
+    sid: &str,
+    last_event_id: Option<&str>,
+) -> (reqwest::StatusCode, String) {
+    let session_id = session_id_for_request(sid);
+    let client = reqwest::Client::new();
+    let mut req = client.get(format!(
+        "{}/v1/daemon/orchestration/sessions/{session_id}/events",
+        daemon.http_url
+    ));
+    if let Some(cursor) = last_event_id {
+        req = req.header("Last-Event-ID", resume_cursor_for_request(cursor));
+    }
+    let resp = req.send().await.expect("events");
+    (resp.status(), resp.text().await.expect("events body"))
+}
+
+fn assert_host_lifecycle_before_terminal(frames: &[SseFrameParsed], terminal_status: &str) {
+    assert!(!frames.is_empty(), "expected SSE frames");
+    assert_monotonic_sse_frames(frames);
+    let terminal = frames
+        .iter()
+        .rfind(|f| f.event == "run_state" && f.data["status"].as_str() == Some(terminal_status))
+        .expect("terminal run_state");
+    let terminal_seq = terminal.sequence;
+    let host_frames: Vec<_> = frames
+        .iter()
+        .filter(|f| f.event == "host_event" && f.sequence < terminal_seq)
+        .collect();
+    let mut last_started = None;
+    for (idx, frame) in host_frames.iter().enumerate() {
+        if host_event_kind(&frame.data).as_deref() == Some("OpStarted") {
+            last_started = Some(idx);
+        }
+    }
+    let start_idx = last_started.expect("OpStarted before terminal");
+    let tail = &host_frames[start_idx..];
+    let kinds: Vec<String> = tail
+        .iter()
+        .map(|f| host_event_kind(&f.data).expect("host_event kind"))
+        .collect();
+    let started = kinds
+        .iter()
+        .position(|k| k == "OpStarted")
+        .expect("OpStarted");
+    let content = kinds
+        .iter()
+        .position(|k| k == "MessageDelta")
+        .expect("MessageDelta after OpStarted");
+    let finished = kinds
+        .iter()
+        .position(|k| k == "OpFinished")
+        .expect("OpFinished after content");
+    assert!(
+        tail[started].sequence < tail[content].sequence,
+        "OpStarted -> content ordering"
+    );
+    assert!(
+        tail[content].sequence < tail[finished].sequence,
+        "content -> OpFinished ordering"
+    );
+    assert!(
+        tail[finished].sequence < terminal_seq,
+        "OpFinished -> terminal run_state ordering"
+    );
+}
+
+async fn fetch_session_inspect(daemon: &LiveDaemon, sid: &str) -> Value {
+    let session_id = session_id_for_request(sid);
+    reqwest::Client::new()
+        .get(format!(
+            "{}/v1/daemon/orchestration/sessions/{session_id}",
+            daemon.http_url
+        ))
+        .send()
+        .await
+        .expect("inspect")
+        .json::<Value>()
+        .await
+        .expect("inspect json")
+}
+
+fn parse_sse_run_states(body: &str) -> Vec<Value> {
+    let mut out = Vec::new();
+    for block in body.split("\n\n") {
+        let mut event = None;
+        let mut data = None;
+        for line in block.lines() {
+            if let Some(rest) = line.strip_prefix("event: ") {
+                event = Some(rest.trim());
+            } else if let Some(rest) = line.strip_prefix("data: ") {
+                data = Some(rest);
+            }
+        }
+        if event == Some("run_state") {
+            if let Some(d) = data {
+                if let Ok(v) = serde_json::from_str::<Value>(d) {
+                    out.push(v);
+                }
+            }
+        }
+    }
+    out
+}
+
+fn assert_monotonic_run_state_frames(frames: &[Value], expected_terminal_status: &str) {
+    assert!(
+        !frames.is_empty(),
+        "expected at least one run_state SSE frame"
+    );
+    let mut last_seq = 0u64;
+    let mut seen = std::collections::HashSet::new();
+    for frame in frames {
+        let seq = frame["sequence"]
+            .as_u64()
+            .expect("run_state frame must carry numeric sequence");
+        assert!(
+            seq > last_seq,
+            "sequences must increase: {seq} after {last_seq}"
+        );
+        assert!(seen.insert(seq), "duplicate sequence {seq}");
+        last_seq = seq;
+    }
+    let terminal = frames.last().expect("terminal frame");
+    assert_eq!(
+        terminal["status"].as_str(),
+        Some(expected_terminal_status),
+        "terminal run_state must match durable status: {terminal}"
+    );
+}
+
+/// P4 T4: cancel/inspect/events/DB agreement on the same run through the live daemon.
+#[tokio::test]
+async fn p4_cancel_inspect_events_db_journey() {
+    let host = BlockingHost::new();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": PUBLIC_PRESET,
+            "label": "p4-cancel-journey",
+            "seed": "p4-topic",
+            "input": { "keyword": "p4", "topic": "p4-topic" },
+            "agent_bindings": { "default": { "provider_id": MOCK_PROVIDER } }
+        }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id");
+    tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        while host.streams_started() < 1 {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("stream started");
+    let row = load_drive_row(&daemon, schedule_id).await;
+    let sid = row.current_session_id.as_deref().expect("session");
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "cancel" }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{body}");
+    assert_eq!(body["status"].as_str(), Some("cancelled"));
+    let (db_status, db_state) = wait_for_run_status(&daemon, sid, "cancelled", 15).await;
+    let inspect = fetch_session_inspect(&daemon, sid).await;
+    assert_eq!(inspect["session"]["status"].as_str(), Some("cancelled"));
+    assert_eq!(db_status, "cancelled");
+    assert_eq!(db_state["cancel_requested"].as_bool(), Some(true));
+    let session_id = session_id_for_request(sid);
+    let events = reqwest::Client::new()
+        .get(format!(
+            "{}/v1/daemon/orchestration/sessions/{session_id}/events",
+            daemon.http_url
+        ))
+        .send()
+        .await
+        .expect("events");
+    assert!(events.status().is_success(), "events route must succeed");
+    let text = events.text().await.expect("events body");
+    let run_states = parse_sse_run_states(&text);
+    assert_monotonic_run_state_frames(&run_states, "cancelled");
+}
+
+/// P4 T4: late subscribe after a terminal run replays retained `run_state`.
+#[tokio::test]
+async fn p4_late_subscribe_replays_terminal_run_state() {
+    let host = BlockingHost::new();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": PUBLIC_PRESET,
+            "label": "p4-late-replay",
+            "seed": "p4-topic",
+            "input": { "keyword": "p4", "topic": "p4-topic" },
+            "agent_bindings": { "default": { "provider_id": MOCK_PROVIDER } }
+        }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id");
+    host.release();
+    let row = load_drive_row(&daemon, schedule_id).await;
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("session")
+        .to_string();
+    let (parked_status, state) = wait_for_run_status(&daemon, &sid, "waiting_for_input", 15).await;
+    assert_eq!(parked_status, "waiting_for_input");
+    let wait_id = state["wait"]["wait_id"]
+        .as_str()
+        .expect("durable wait id")
+        .to_string();
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "continue", "wait_id": wait_id }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{body}");
+    let (run_status, _) = wait_for_run_status(&daemon, &sid, "completed", 15).await;
+    assert_eq!(run_status, "completed");
+    let session_id = session_id_for_request(&sid);
+    let events = reqwest::Client::new()
+        .get(format!(
+            "{}/v1/daemon/orchestration/sessions/{session_id}/events",
+            daemon.http_url
+        ))
+        .send()
+        .await
+        .expect("events");
+    assert!(
+        events.status().is_success(),
+        "{}",
+        events.text().await.unwrap_or_default()
+    );
+    let text = events.text().await.expect("events body");
+    let frames = parse_sse_frames(&text);
+    assert_host_lifecycle_before_terminal(&frames, "completed");
+}
+
+/// P4 T4: unconfirmed cleanup stays actionable Interrupted on inspect/DB.
+#[tokio::test]
+async fn p4_cleanup_failure_recovery_projection() {
+    let host = BlockingHost::non_cooperative();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": PUBLIC_PRESET,
+            "label": "p4-interrupted",
+            "seed": "p4-topic",
+            "input": { "keyword": "p4", "topic": "p4-topic" },
+            "agent_bindings": { "default": { "provider_id": MOCK_PROVIDER } }
+        }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id");
+    tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        while host.streams_started() < 1 {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("stream started");
+    let row = load_drive_row(&daemon, schedule_id).await;
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("session")
+        .to_string();
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "cancel" }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{body}");
+    assert_eq!(
+        body["status"].as_str(),
+        Some("interrupted"),
+        "unconfirmed cancel must report interrupted: {body}"
+    );
+    let (run_status, state) = wait_for_run_status(&daemon, &sid, "interrupted", 20).await;
+    assert_eq!(run_status, "interrupted");
+    assert_eq!(
+        state["failure"]["code"].as_str(),
+        Some("cancel_cleanup_unconfirmed"),
+        "actionable cleanup reason must be durable: {state}"
+    );
+    let inspect = fetch_session_inspect(&daemon, &sid).await;
+    assert_eq!(inspect["session"]["status"].as_str(), Some("interrupted"));
+    assert!(
+        inspect["session"]["failureReason"]
+            .as_str()
+            .is_some_and(|r| r.contains("cancel cleanup unconfirmed")),
+        "inspect must carry actionable cleanup reason: {inspect}"
+    );
+}
+
+/// Drive a freshly admitted public run to its durable terminal `completed`.
+///
+/// The `memory-augmented` preset parks at the `persist` state
+/// (`exit_when: kind: manual`), so a terminal — and therefore a retained
+/// terminal SSE ring — is only reachable by consuming the durable wait token
+/// with an authorized `continue`, exactly as a real operator would. Tests that
+/// assert on a TERMINAL ring must go through this; asserting `completed`
+/// straight after admission can only ever observe `waiting_for_input`.
+async fn drive_public_run_to_terminal(daemon: &LiveDaemon, schedule_id: &str, sid: &str) {
+    let (status, state) = wait_for_run_status(daemon, sid, "waiting_for_input", 20).await;
+    assert_eq!(status, "waiting_for_input");
+    let wait_id = state["wait"]["wait_id"]
+        .as_str()
+        .expect("durable wait id")
+        .to_string();
+    let (code, body) = post_json(
+        daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "continue", "wait_id": wait_id }),
+    )
+    .await;
+    assert_eq!(code, reqwest::StatusCode::OK, "{body}");
+    let (run_status, _) = wait_for_run_status(daemon, sid, "completed", 20).await;
+    assert_eq!(run_status, "completed");
+}
+
+/// P4 T4: Last-Event-ID reconnect returns strictly-later frames without duplicates.
+#[tokio::test]
+async fn p4_public_sse_last_event_id_strict_later_dedupe() {
+    let host = MockHost::new();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let (status, body) = add_public(&daemon, "p4-last-event-id").await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id");
+    let _ = wait_for_prompts(&host, 15).await;
+    let row = load_drive_row(&daemon, schedule_id).await;
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("session")
+        .to_string();
+    drive_public_run_to_terminal(&daemon, schedule_id, &sid).await;
+    let (status, full_body) = fetch_session_events(&daemon, &sid, None).await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{full_body}");
+    let all = parse_sse_frames(&full_body);
+    assert_monotonic_sse_frames(&all);
+    let cursor = all
+        .iter()
+        .find(|f| f.event == "host_event")
+        .expect("host_event frame")
+        .id
+        .clone();
+    let cursor_seq = all
+        .iter()
+        .find(|f| f.id == cursor)
+        .expect("cursor frame")
+        .sequence;
+    let (status, tail_body) = fetch_session_events(&daemon, &sid, Some(&cursor)).await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{tail_body}");
+    let tail = parse_sse_frames(&tail_body);
+    assert_monotonic_sse_frames(&tail);
+    for frame in &tail {
+        assert!(
+            frame.sequence > cursor_seq,
+            "Last-Event-ID must replay strictly later than cursor: {} <= {}",
+            frame.sequence,
+            cursor_seq
+        );
+        assert!(
+            !all.iter()
+                .any(|f| f.id == frame.id && f.sequence <= cursor_seq),
+            "duplicate or non-later frame id {}",
+            frame.id
+        );
+    }
+}
+
+/// P4 T4: foreign-owned durable run is denied on the public events route.
+#[tokio::test]
+async fn p4_public_sse_foreign_owner_denied() {
+    let host = MockHost::new();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let (status, body) = add_public(&daemon, "p4-foreign-owner").await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id");
+    let _ = wait_for_prompts(&host, 15).await;
+    let row = load_drive_row(&daemon, schedule_id).await;
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("session")
+        .to_string();
+    sqlx::query(
+        "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data)
+         VALUES ('other_creator', 'Other', 'active', datetime('now'), '{}')",
+    )
+    .execute(&daemon.pool)
+    .await
+    .expect("seed foreign creator");
+    sqlx::query(
+        "UPDATE orchestration_sessions SET creator_id = 'other_creator' WHERE session_id = ?",
+    )
+    .bind(&sid)
+    .execute(&daemon.pool)
+    .await
+    .expect("reassign owner");
+    let (status, body) = fetch_session_events(&daemon, &sid, None).await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::NOT_FOUND,
+        "foreign owner must be denied via session owner path: {body}"
+    );
+}
+
+/// Emits `OpStarted` + many `MessageDelta` frames + `OpFinished` in one operation.
+struct EventFloodHost {
+    deltas: usize,
+    prompts: Mutex<Vec<String>>,
+}
+
+impl EventFloodHost {
+    fn with_deltas(deltas: usize) -> Arc<Self> {
+        Arc::new(Self {
+            deltas,
+            prompts: Mutex::new(Vec::new()),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl HostFacade for EventFloodHost {
+    async fn start(&self, _config: HostStartConfig) -> HostResult<()> {
+        Ok(())
+    }
+
+    async fn create_session(
+        &self,
+        request: nexus_agent_host::capability::CreateSessionRequest,
+    ) -> HostResult<HostSession> {
+        Ok(HostSession {
+            id: HostSessionId::new(),
+            provider_id: request.provider_id,
+            state: SessionState::Ready,
+            created_at: chrono::Utc::now(),
+            active_op_id: None,
+            negotiated_capabilities: CapabilityDescriptor::native_cli_limited(),
+            owner: request.owner,
+            process_identity: None,
+        })
+    }
+
+    async fn exec(
+        &self,
+        session_id: HostSessionId,
+        op: HostOperation,
+    ) -> HostResult<HostEventStream> {
+        let op_id = match op {
+            HostOperation::Prompt { op_id, content, .. } => {
+                let text = match content.as_slice() {
+                    [HostContentBlock::Text { text }] => text.clone(),
+                    other => format!("unexpected content {other:?}"),
+                };
+                self.prompts.lock().expect("prompts").push(text);
+                op_id
+            }
+            other => {
+                return Err(HostError::internal(format!(
+                    "unexpected operation {other:?}"
+                )));
+            }
+        };
+        let started = HostEvent::OpStarted(OperationStartedEvent {
+            op_id: op_id.clone(),
+            session_id: session_id.clone(),
+        });
+        let mut events = vec![Ok(started)];
+        for i in 0..self.deltas {
+            events.push(Ok(HostEvent::MessageDelta(TextDeltaEvent {
+                session_id: session_id.clone(),
+                op_id: op_id.clone(),
+                text: format!("delta-{i}"),
+            })));
+        }
+        let finished = HostEvent::OpFinished(OperationFinishedEvent {
+            session_id,
+            op_id,
+            reason: FinishReason::EndTurn,
+        });
+        events.push(Ok(finished));
+        Ok(Box::pin(futures_util::stream::iter(events)))
+    }
+
+    async fn cancel(&self, _op_id: HostOperationId) -> HostResult<()> {
+        Ok(())
+    }
+
+    async fn health(&self) -> HostResult<HostHealth> {
+        Ok(HostHealth {
+            running: true,
+            active_sessions: 0,
+            active_operations: 0,
+        })
+    }
+
+    async fn shutdown(&self) -> HostResult<()> {
+        Ok(())
+    }
+
+    async fn shutdown_session(&self, _session_id: HostSessionId) -> HostResult<()> {
+        Ok(())
+    }
+
+    async fn list_sessions(&self) -> HostResult<Vec<HostSession>> {
+        Ok(Vec::new())
+    }
+
+    async fn provider_catalog(&self) -> HostResult<ProviderCatalog> {
+        Ok(ProviderCatalog {
+            entries: vec![ProviderCatalogEntry {
+                provider_id: nexus_agent_host::ProviderId::new(MOCK_PROVIDER),
+                display_name: MOCK_PROVIDER.to_string(),
+                protocol_kind: ProtocolKind::NativeCli,
+                launch: LaunchStrategy::NativeCli {
+                    command: "mock".to_string(),
+                    args: vec![],
+                    env: HashMap::new(),
+                },
+                source: DiscoverySource::Config,
+                trust: TrustLevel::Explicit,
+                capabilities: CapabilityDescriptor::native_cli_limited(),
+                health: ProviderHealth {
+                    provider_id: nexus_agent_host::ProviderId::new(MOCK_PROVIDER),
+                    available: true,
+                    latency_ms: None,
+                    message: None,
+                },
+            }],
+        })
+    }
+
+    fn subscribe_events(
+        &self,
+        _session_id: HostSessionId,
+    ) -> tokio::sync::broadcast::Receiver<HostEvent> {
+        let (_, rx) = tokio::sync::broadcast::channel(1);
+        rx
+    }
+}
+
+/// P4 T4: reconnect after ring eviction surfaces explicit gap then retained tail.
+#[tokio::test]
+async fn p4_public_sse_gap_on_evicted_cursor() {
+    let host = EventFloodHost::with_deltas(300);
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let (status, body) = add_public(&daemon, "p4-gap-cursor").await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id");
+    let row = load_drive_row(&daemon, schedule_id).await;
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("session")
+        .to_string();
+    drive_public_run_to_terminal(&daemon, schedule_id, &sid).await;
+    let (status, full_body) = fetch_session_events(&daemon, &sid, None).await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{full_body}");
+    let all = parse_sse_frames(&full_body);
+    assert_monotonic_sse_frames(&all);
+    let epoch = all
+        .first()
+        .expect("frame")
+        .id
+        .split(':')
+        .next()
+        .expect("epoch");
+    let (status, replay_body) =
+        fetch_session_events(&daemon, &sid, Some(&format!("{epoch}:1"))).await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{replay_body}");
+    let replay = parse_sse_frames(&replay_body);
+    assert!(
+        replay.iter().any(|f| f.event == "gap"),
+        "evicted cursor must surface explicit gap: {:?}",
+        replay.iter().map(|f| &f.event).collect::<Vec<_>>()
+    );
+    assert_monotonic_sse_frames(&replay);
 }

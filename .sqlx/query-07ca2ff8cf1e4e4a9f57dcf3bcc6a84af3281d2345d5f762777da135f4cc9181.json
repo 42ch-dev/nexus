@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT request_digest as \"request_digest!\" FROM workspace_commit_intents\n           WHERE session_id = ? AND state = 'committed' LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "request_digest!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_commit_intents",
+            "name": "request_digest"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "07ca2ff8cf1e4e4a9f57dcf3bcc6a84af3281d2345d5f762777da135f4cc9181"
+}

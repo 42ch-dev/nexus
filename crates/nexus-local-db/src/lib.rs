@@ -51,6 +51,16 @@ pub mod soul_narrative;
 pub mod spoke_rules;
 pub mod work_chapters;
 pub mod works;
+pub mod workspace_commit_intent;
+
+pub use workspace_commit_intent::{
+    abort_intent_and_release_claim, claim_session_and_insert_intent, finalize_committed_intent,
+    finalize_rolled_back_intent, get_committed_intent_by_digest, get_committed_request_digest,
+    get_intent_by_revision, latest_committed_intent_for_root, list_all_unsettled_intents,
+    list_settled_intents_for_cleanup, list_unsettled_intents, release_session_claim,
+    update_intent_state, validate_cleanup_entries, workspace_has_recovery_conflict,
+    ClaimSessionResult, CommitIntentRow, IntentEntryJson, IntentState, MAX_ENTRIES_JSON_BYTES,
+};
 pub mod workspace_session;
 pub mod world_findings;
 pub mod world_stories;
@@ -291,7 +301,7 @@ pub use compute_session::{
 // Re-export workspace_session types (V1.56 P0 DF-31)
 pub use workspace_session::{
     cleanup_expired_sessions, consume_session, count_active_sessions, create_session, get_session,
-    ConsumeResult, CreateSessionParams, WorkspaceSessionRow,
+    is_session_active, ConsumeResult, CreateSessionParams, WorkspaceSessionRow,
 };
 
 /// Runtime role for database initialization

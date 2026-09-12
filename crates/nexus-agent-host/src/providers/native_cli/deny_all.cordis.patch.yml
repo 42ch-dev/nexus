@@ -1,0 +1,164 @@
+# Nexus-owned sealed `deny_all` Cordis composition (v1.188 P0, architecture
+# §3.4). Embedded beside `dsh.rs` and copied into the exclusive owner-only
+# child DSH_HOME the provider provisions for an all-false
+# PromptPermissionScope; it is passed to the SDK as the single absolute
+# `--patch` overlay over an empty-bundles `sdk` profile and empty
+# profile/home patch layers, so no user/plugin/MCP layer can enter the tree.
+#
+# Provenance: upstream `sdk-minimal`'s complete service tree at the
+# SDK-recorded runtime commit c389f96bf3a9b6807cb71ed6bdad5849be0df6d8
+# (packages/bundle/sdk-minimal/cordis.patch.yml), with exactly three
+# tool-producing entries omitted — `persistent-bash`, `persistent-pwsh`,
+# `str-replace-editor` (the closed allowlist in architecture §3.4, the same
+# trio the upstream keyless sdk test's exact tool-list assertion
+# identifies). This is a closed allowlist, never a blacklist patch over
+# user/base plugins. Unlike the ordinary sdk profile, this insert is the
+# complete Cordis tree: the Nexus-owned profile carries no bundles.
+#
+# Nexus pins on top of the upstream tree:
+# - sdk-app-startup profile is `sdk` (the recipe boots under `--profile sdk`).
+# - tools mode is `native`: no reserved `run_code` bridge; an unregistered
+#   tool name fails dispatch with ToolNotFound/UNKNOWN_TOOL before any body.
+# - agent-loop keeps `agents: []` (no child-agent producers).
+# - llm-deepseek carries retryPolicy {mode: normal, maxRetries: 0}: a failed
+#   model request never spends a second upstream call.
+# Every other row preserves upstream platform conditions and
+# injection/config dependencies verbatim. This composition keeps runtime
+# support services but exposes zero model-callable tools; it is not an
+# OS/network sandbox and does not forbid SDK persistence or LLM networking.
+
+- insert:
+    - id: sdk-app-startup
+      name: '@deepseek-ai/dsh-sdk-app'
+      config:
+        profile: sdk
+
+    - id: sdk-jsonrpc-server
+      name: '@deepseek-ai/dsh-sdk-jsonrpc-server'
+      inject: [sdkAppStartup, loader]
+      config:
+        maxTokensAsSuccess: false
+
+    - id: deepseek-llm-api-extensions
+      name: '@deepseek-ai/dsh-deepseek-llm-api-extensions'
+
+    - id: session-log-deepseek
+      name: '@deepseek-ai/dsh-session-log-deepseek'
+
+    - id: plugin-package-inventory-deepseek
+      name: '@deepseek-ai/dsh-plugin-package-inventory-deepseek'
+
+    - id: llm-deepseek
+      name: '@deepseek-ai/dsh-llm-deepseek'
+      config:
+        apiKeyEnv: DEEPSEEK_API_KEY
+        defaultContextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW ?? 1000000)
+        streamIdleTimeoutMs: 172800000
+        retryPolicy:
+          mode: normal
+          maxRetries: 0
+
+    - id: sandbox
+      name: '@deepseek-ai/dsh-sandbox-local'
+
+    # Shared projection registry: sandbox-policy and terminal-bash fold
+    # sandbox-mode state through its units and require it as a hard injection.
+    - id: session-projection
+      name: '@deepseek-ai/dsh-session-projection'
+
+    - id: sandbox-policy
+      name: '@deepseek-ai/dsh-sandbox-policy'
+      config:
+        mode: danger-full-access
+        workspaceRoot: !!js process.cwd()
+
+    - id: subprocess
+      name: '@deepseek-ai/dsh-subprocess-local'
+
+    - id: pty
+      name: '@deepseek-ai/dsh-terminal'
+
+    - id: terminal-bash
+      name: '@deepseek-ai/dsh-terminal-bash'
+      disabled: !!js process.platform === 'win32'
+      config:
+        timeoutMs: 300000
+
+    - id: terminal-pwsh
+      name: '@deepseek-ai/dsh-terminal-bash'
+      disabled: !!js process.platform !== 'win32'
+      config:
+        shellDialect: pwsh
+        timeoutMs: 300000
+
+    # The editor uses the bare local filesystem; persistent Bash still consumes
+    # the shared danger-full-access sandbox policy above.
+    - id: fs-local
+      name: '@deepseek-ai/dsh-fs-local'
+      config:
+        cwd: !!js process.cwd()
+
+    # Keep the minimal agent kernel explicit: unlike dsh-base, this profile
+    # owns each service row and omits every optional producer it does not use.
+    - id: timer
+      name: '@deepseek-ai/cordis-plugin-timer'
+
+    - id: llm
+      name: '@deepseek-ai/dsh-llm'
+
+    - id: session
+      name: '@deepseek-ai/dsh-session'
+
+    - id: session-title
+      name: '@deepseek-ai/dsh-session-title'
+      config:
+        fallbackMaxWords: 5
+        fallbackMaxBytes: 40
+        maxTitleBytes: 80
+
+    - id: system-prompt
+      name: '@deepseek-ai/dsh-system-prompt'
+      config:
+        includeHarnessIdentity: false
+        includeRuntimeContext: false
+        personaPrefix: !!js process.env.DSH_SYSTEM_PROMPT ?? 'You are a helpful software engineer assistant.'
+
+    - id: tools
+      name: '@deepseek-ai/dsh-tools'
+      config:
+        mode: native
+
+    - id: agent
+      name: '@deepseek-ai/dsh-agent'
+
+    - id: llm-retry
+      name: '@deepseek-ai/dsh-llm-retry'
+
+    - id: jobs
+      name: '@deepseek-ai/dsh-jobs-local'
+
+    - id: invariants
+      name: '@deepseek-ai/dsh-invariants'
+
+    - id: session-invariant
+      name: '@deepseek-ai/dsh-session/invariant'
+
+    - id: agent-invariant
+      name: '@deepseek-ai/dsh-agent/invariant'
+
+    - id: scope-invariant
+      name: '@deepseek-ai/dsh-scope/invariant'
+
+    - id: agent-loop-invariant
+      name: '@deepseek-ai/dsh-agent-loop/invariant'
+
+    - id: agent-loop
+      name: '@deepseek-ai/dsh-agent-loop'
+      config:
+        agents: []
+
+    - id: sessions
+      name: '@deepseek-ai/dsh-session-persistence-jsonl'
+      config:
+        root: !!js dshHomePath('sessions')
+        compression: none

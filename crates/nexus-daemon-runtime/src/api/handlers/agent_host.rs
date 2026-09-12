@@ -1076,7 +1076,7 @@ pub async fn scan(
 
     let suppress_ids: std::collections::HashSet<&str> = native_entries
         .iter()
-        .filter(|entry| entry.health.available)
+        .filter(|entry| native_entry_installed(entry))
         .filter_map(|entry| {
             NATIVE_PREFERRED_FAMILIES
                 .iter()
@@ -1092,11 +1092,10 @@ pub async fn scan(
             .is_none_or(|id| !suppress_ids.contains(id))
     });
 
-    agents.extend(
-        native_entries
-            .into_iter()
-            .map(|entry| map_native_catalog_entry(entry, &by_binary)),
-    );
+    agents.extend(native_entries.into_iter().map(|entry| {
+        let installed = native_entry_installed(&entry);
+        map_native_catalog_entry(entry, &by_binary, installed)
+    }));
 
     if req.filter == nexus_contracts::ScanRequestFilter::Installed {
         agents.retain(|a| a.installed);
@@ -1150,10 +1149,35 @@ const NATIVE_PREFERRED_FAMILIES: &[(&str, &str)] = &[
     ("codex-acp", "codex-native"),
 ];
 
+/// Whether a discovered native CLI candidate is INSTALLED on this machine.
+///
+/// The wire contract defines `installed` as "the binary referenced by
+/// `launch_command` is found on the system PATH via a which-equivalent lookup" —
+/// PRESENCE, not probe-proven readiness. `ProviderHealth.available` deliberately
+/// means the stronger "a bounded probe proved the provider READY" (v1.188 P2), so
+/// it cannot answer this question: an unprobed candidate is still installed.
+///
+/// A candidate whose command does not resolve stays false, so an invalid
+/// `DSH_RUNTIME_BIN` override keeps reporting the honest not-installed.
+fn native_entry_installed(entry: &nexus_agent_host::ProviderCatalogEntry) -> bool {
+    match &entry.launch {
+        nexus_agent_host::LaunchStrategy::NativeCli { command, .. } => {
+            which::which(command).is_ok()
+        }
+        // ACP candidates are judged by the registry scan, not here.
+        nexus_agent_host::LaunchStrategy::Acp { .. } => false,
+    }
+}
+
 /// Map a native CLI catalog entry to an [`AgentScanEntry`].
+///
+/// `installed` is decided by the caller ([`native_entry_installed`]) because the
+/// catalog entry's `health` reports probe readiness, which is a different — and
+/// strictly stronger — claim than "the binary is present on this machine".
 fn map_native_catalog_entry(
     entry: nexus_agent_host::ProviderCatalogEntry,
     by_binary: &HashMap<String, nexus_acp_host::registry::LocalInstallation>,
+    installed: bool,
 ) -> AgentScanEntry {
     let launch_command = match entry.launch {
         nexus_agent_host::LaunchStrategy::NativeCli { command, .. } => Some(command),
@@ -1170,7 +1194,7 @@ fn map_native_catalog_entry(
         name: entry.display_name,
         registry_agent_id: None,
         launch_command,
-        installed: entry.health.available,
+        installed,
         version,
         description: None,
         icon_url: None,
@@ -1994,7 +2018,7 @@ mod tests {
             },
         );
 
-        let scan_entry = map_native_catalog_entry(entry, &by_binary);
+        let scan_entry = map_native_catalog_entry(entry, &by_binary, true);
         assert!(scan_entry.installed);
         assert_eq!(scan_entry.launch_command.as_deref(), Some("/tmp/bin/codex"));
         assert_eq!(scan_entry.version.as_deref(), Some("codex 1.2.3"));

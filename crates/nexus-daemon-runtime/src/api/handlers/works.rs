@@ -15,6 +15,7 @@ use crate::api::errors::NexusApiError;
 use crate::api::pagination::{decode_offset_cursor, encode_offset_cursor};
 use crate::api::runtime_lock::RuntimeLockGuard;
 use crate::api::sort::parse_sort_terms;
+use crate::config::{read_active_creator_id, read_active_workspace_slug};
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -1645,36 +1646,6 @@ async fn set_pool_active_inner(
         nexus_local_db::novel_pool_entries::promote_to_active(pool, creator_id, work_id).await?;
 
     Ok(PoolEntryDto::from(entry))
-}
-
-/// Read active `creator_id` from CLI config.
-pub fn read_active_creator_id(nexus_home: &std::path::Path) -> Option<String> {
-    let config_path = nexus_home.join("config.toml");
-    let content = std::fs::read_to_string(&config_path).ok()?;
-    let config: toml::Value = toml::from_str(&content).ok()?;
-    config
-        .get("active_creator_id")
-        .and_then(|v| v.as_str())
-        .map(std::string::ToString::to_string)
-}
-
-/// Read active workspace slug from CLI config.
-///
-/// Missing or empty slug entries fall back to `"default"` — the same contract as
-/// [`crate::config::CliConfigSnapshot::workspace_slug_for_creator`] and
-/// `resolve_state_db_path`. Profile switch intentionally clears a stale slug
-/// (`set_active_creator` / desktop `switch_active_creator`) and relies on this
-/// default; returning `None` here surfaces a misleading `Authentication required`.
-#[must_use]
-pub fn read_active_workspace_slug(
-    nexus_home: &std::path::Path,
-    creator_id: &str,
-) -> Option<String> {
-    Some(
-        crate::config::CliConfigSnapshot::load(nexus_home)
-            .unwrap_or_default()
-            .workspace_slug_for_creator(creator_id),
-    )
 }
 
 // ---------------------------------------------------------------------------

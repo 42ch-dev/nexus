@@ -1,6 +1,7 @@
 //! Core host management: session registry, operation registry, lifecycle.
 
 pub mod manager;
+pub mod readiness;
 pub mod session;
 
 pub use manager::HostManager;

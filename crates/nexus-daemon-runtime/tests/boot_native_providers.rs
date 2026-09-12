@@ -1,9 +1,9 @@
 //! V1.127 P1 — daemon boot registers native CLI providers (greploop hardened).
 //!
 //! Regression guard for R-V1116P0QA-001 + greptile P1/P2 (PR #161):
-//! - The daemon probes CLI presence via `which::which()` before calling
-//!   `register_provider`. Providers whose CLI is absent from PATH are NOT
-//!   registered, so the `/providers` endpoint does not surface them.
+//! - v1.188 P2: discovery surfaces PATH candidates at host start; missing
+//!   CLIs are omitted from the catalog. Present CLIs appear as candidates
+//!   (`available: false`) until a bounded probe runs with verified owner context.
 //! - Tests use RAII guards (`PathGuard` + `BootTestGuard`) so env-var
 //!   mutation and daemon task cleanup are panic-safe — a failed assertion
 //!   restores `HOME`/`PATH` and aborts the daemon task automatically.
@@ -136,7 +136,7 @@ async fn http_get(host: &str, port: u16, path: &str) -> String {
 }
 
 /// Write an executable stub binary into `dir` (greptile P1 — the daemon's
-/// `which::which()` probe must find it).
+/// PATH scan must find it).
 fn write_cli_stub(dir: &std::path::Path, name: &str) {
     let path = dir.join(name);
     std::fs::write(&path, "#!/bin/sh\necho hello\n").expect("write stub");
@@ -157,9 +157,9 @@ fn set_executable(_path: &std::path::Path) {
 
 // ── Tests ──────────────────────────────────────────────────────────
 
-/// Positive case: with `codex`, `claude`, and `dsh-jsonrpc-agent` stub
-/// binaries on PATH, the daemon registers all three providers and
-/// `/providers` returns them.
+/// Positive case: with `codex`, `claude`, and `dsh` stub binaries on
+/// PATH, the daemon registers all three providers and `/providers`
+/// returns them.
 #[tokio::test]
 async fn run_daemon_registers_native_providers_when_clis_on_path() {
     let _lock = ENV_TEST_LOCK.lock().await;
@@ -173,9 +173,9 @@ async fn run_daemon_registers_native_providers_when_clis_on_path() {
     std::fs::create_dir_all(&bin_dir).expect("create bin dir");
     write_cli_stub(&bin_dir, "codex");
     write_cli_stub(&bin_dir, "claude");
-    write_cli_stub(&bin_dir, "dsh-jsonrpc-agent");
+    write_cli_stub(&bin_dir, "dsh");
 
-    // Isolate PATH so the daemon's `which::which()` finds only the stubs.
+    // Isolate PATH so discovery finds only the stubs.
     let _path_guard = PathGuard::replace(&bin_dir);
 
     // Set HOME + track daemon task for panic-safe cleanup (greptile P2).
@@ -215,7 +215,7 @@ async fn run_daemon_registers_native_providers_when_clis_on_path() {
 /// Negative case: without the CLIs on PATH, the daemon does NOT register
 /// them and `/providers` returns an empty list. Prevents the false-promise
 /// UX where the UI offers a session that fails at process-spawn time
-/// (greptile P1). Covers `dsh-native` too: absent `dsh-jsonrpc-agent` AND
+/// (greptile P1). Covers `dsh-native` too: absent `dsh` AND
 /// unset `DSH_RUNTIME_BIN` → skipped (PD-4).
 #[tokio::test]
 async fn run_daemon_skips_native_providers_when_clis_absent() {
@@ -226,9 +226,9 @@ async fn run_daemon_skips_native_providers_when_clis_absent() {
     nexus_home_layout::ensure_system_layout(&nexus_home).expect("system layout");
 
     // Isolate PATH to an empty dir so `which::which("codex")` / `"claude"`
-    // / `"dsh-jsonrpc-agent"` do not find real binaries that might be
-    // installed on the host. BootTestGuard removes DSH_RUNTIME_BIN so the
-    // dsh env route cannot register the provider either.
+    // / `"dsh"` do not find real binaries that might be installed on the
+    // host. BootTestGuard removes DSH_RUNTIME_BIN so the dsh env route
+    // cannot register the provider either.
     let empty_bin = tmp.path().join("empty-bin");
     std::fs::create_dir_all(&empty_bin).expect("create empty-bin dir");
     let _path_guard = PathGuard::replace(&empty_bin);
@@ -261,10 +261,10 @@ async fn run_daemon_skips_native_providers_when_clis_absent() {
     );
 }
 
-/// dsh env-route variant (PD-4): with `dsh-jsonrpc-agent` NOT on PATH but
-/// `DSH_RUNTIME_BIN` set, the daemon registers `dsh-native` (`runtime_bin`
-/// left unset — the SDK resolves the env var itself) while codex/claude
-/// stay unregistered.
+/// dsh env-route variant (PD-4, v1.188 P0 T2): with `dsh` NOT on PATH but
+/// `DSH_RUNTIME_BIN` set to a valid executable, the daemon's Nexus-owned
+/// resolution (env route, validated + canonicalized) registers
+/// `dsh-native` while codex/claude stay unregistered.
 #[tokio::test]
 async fn run_daemon_registers_dsh_native_when_dsh_runtime_bin_set() {
     let _lock = ENV_TEST_LOCK.lock().await;
@@ -273,14 +273,15 @@ async fn run_daemon_registers_dsh_native_when_dsh_runtime_bin_set() {
     let nexus_home = tmp.path().join(".nexus42");
     nexus_home_layout::ensure_system_layout(&nexus_home).expect("system layout");
 
-    // Stub runtime the env var points at (registration only requires a
-    // non-empty value; the file keeps the scenario realistic).
+    // Stub runtime the env var points at: the P0 T2 resolution chain
+    // VALIDATES the override (must be an executable file), unlike the
+    // retired non-empty-string gate.
     let bin_dir = tmp.path().join("bin");
     std::fs::create_dir_all(&bin_dir).expect("create bin dir");
-    write_cli_stub(&bin_dir, "dsh-jsonrpc-agent");
+    write_cli_stub(&bin_dir, "dsh");
 
-    // Isolate PATH to an EMPTY dir: codex/claude/dsh-jsonrpc-agent must
-    // not resolve; the dsh env route is the only registration source.
+    // Isolate PATH to an EMPTY dir: codex/claude/dsh must not resolve;
+    // the dsh env route is the only registration source.
     let empty_bin = tmp.path().join("empty-bin");
     std::fs::create_dir_all(&empty_bin).expect("create empty-bin dir");
     let _path_guard = PathGuard::replace(&empty_bin);
@@ -289,7 +290,7 @@ async fn run_daemon_registers_dsh_native_when_dsh_runtime_bin_set() {
     // so the assertion is deterministic; the guard restores the original
     // on drop.
     let mut env_guard = BootTestGuard::new(tmp.path());
-    std::env::set_var("DSH_RUNTIME_BIN", bin_dir.join("dsh-jsonrpc-agent"));
+    std::env::set_var("DSH_RUNTIME_BIN", bin_dir.join("dsh"));
 
     let port = reserve_port();
     let handle = tokio::spawn(run_daemon(test_config(port)));

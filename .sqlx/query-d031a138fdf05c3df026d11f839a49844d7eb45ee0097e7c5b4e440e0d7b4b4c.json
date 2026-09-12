@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) as \"count!: i64\" FROM workspace_commit_intents\n         WHERE session_id = ? AND request_digest = ? AND state = 'committed'",
+  "describe": {
+    "columns": [
+      {
+        "name": "count!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d031a138fdf05c3df026d11f839a49844d7eb45ee0097e7c5b4e440e0d7b4b4c"
+}

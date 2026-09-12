@@ -9,8 +9,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use nexus_contracts::local::orchestration::{WorkspaceChangeEntry, WorkspaceChangeOp};
 use nexus_local_db as db;
 use sqlx::SqlitePool;
+
+use super::authority::WorkspaceAuthorityLease;
 use tracing;
 
 // ── OCC metrics (V1.58 P0 T6 — R-V156P0-M006) ──────────────────────────────
@@ -78,15 +81,29 @@ pub enum SessionError {
         expected_hash: String,
         actual_hash: String,
     },
+    /// Persisted session snapshot JSON is corrupt (v1.188 P3 L2).
+    CorruptSnapshot(String),
+    /// Manifest shape or bounds violation (v1.188 P3).
+    ManifestInvalid(String),
+    /// Unsettled commit intent blocks new writes (v1.188 P3).
+    RecoveryConflict(String),
     /// A database error occurred during session operations.
     Database(String),
     /// An I/O error occurred during file operations.
     Io(String),
+    /// Internal invariant violation.
+    Internal(String),
     /// V1.58 P0 T2 (R-V156P0-M002): the resolved path escapes the canonical
     /// workspace root (symlink traversal or prefix-boundary violation).
     PathEscape {
         path: String,
         workspace_root: String,
+    },
+    /// Session belongs to a different canonical workspace root than the active
+    /// executor or HTTP authority (v1.188 P5 hotfix).
+    ActiveWorkspaceMismatch {
+        session_root: String,
+        active_root: String,
     },
 }
 
@@ -110,8 +127,14 @@ impl fmt::Display for SessionError {
                      expected {expected_hash}, got {actual_hash}"
                 )
             }
+            Self::CorruptSnapshot(msg) => write!(f, "corrupt session snapshot: {msg}"),
+            Self::ManifestInvalid(msg) => write!(f, "manifest invalid: {msg}"),
+            Self::RecoveryConflict(root) => {
+                write!(f, "workspace recovery conflict blocks writes: {root}")
+            }
             Self::Database(msg) => write!(f, "session database error: {msg}"),
             Self::Io(msg) => write!(f, "session I/O error: {msg}"),
+            Self::Internal(msg) => write!(f, "session internal error: {msg}"),
             Self::PathEscape {
                 path,
                 workspace_root,
@@ -121,35 +144,73 @@ impl fmt::Display for SessionError {
                     "path '{path}' escapes canonical workspace root '{workspace_root}'"
                 )
             }
+            Self::ActiveWorkspaceMismatch {
+                session_root,
+                active_root,
+            } => write!(
+                f,
+                "session workspace root '{session_root}' does not match active workspace root '{active_root}'"
+            ),
         }
     }
 }
 
-/// Operation type for a change in the commit manifest.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ChangeOp {
-    Create,
-    Modify,
-    Delete,
+impl SessionError {
+    /// Append `suffix` to this error's message, preserving its variant.
+    ///
+    /// A staging failure must keep its original typed surface — callers and
+    /// tests match the SHAPE ([`SessionError::Io`], [`SessionError::ManifestInvalid`])
+    /// to decide how to react — so recovery notes are folded into the message
+    /// instead of replacing the variant with a generic [`SessionError::Internal`].
+    #[must_use]
+    pub(super) fn with_message_suffix(self, suffix: &str) -> Self {
+        fn join(message: &str, suffix: &str) -> String {
+            format!("{message}; {suffix}")
+        }
+        match self {
+            Self::Io(message) => Self::Io(join(&message, suffix)),
+            Self::Internal(message) => Self::Internal(join(&message, suffix)),
+            Self::ManifestInvalid(message) => Self::ManifestInvalid(join(&message, suffix)),
+            Self::Database(message) => Self::Database(join(&message, suffix)),
+            Self::CorruptSnapshot(message) => Self::CorruptSnapshot(join(&message, suffix)),
+            // Staging cannot produce an identifier- or root-carrying variant,
+            // and none of those fields is a message: leave them untouched
+            // rather than rewriting a field that means something else.
+            other => other,
+        }
+    }
 }
 
-/// A single change entry in the `changes[]` manifest.
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChangeEntry {
-    /// Relative path within the workspace for this change.
-    pub path: String,
-    /// SHA-256 hex digest of the file content *before* the change.
-    pub content_hash: String,
-    /// Operation type.
-    pub op: ChangeOp,
-}
+/// Contract-aligned change manifest types (v1.188 P3).
+pub use nexus_contracts::local::orchestration::{
+    WorkspaceChangeEntry as ChangeEntry, WorkspaceChangeOp as ChangeOp,
+};
 
 /// Snapshot of files at session open time, keyed by relative path → SHA-256 hex.
 #[derive(Debug, Clone, Default)]
 pub struct FileSnapshots {
     pub hashes: std::collections::HashMap<String, String>,
+}
+
+/// Parse persisted snapshot hashes; fail closed on corrupt JSON.
+///
+/// # Errors
+///
+/// Returns [`SessionError::CorruptSnapshot`] when `json` is not a string-keyed
+/// map of hashes.
+pub fn parse_snapshot_hashes(
+    json: &str,
+) -> Result<std::collections::HashMap<String, String>, SessionError> {
+    let value: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| SessionError::CorruptSnapshot(e.to_string()))?;
+    if !value.is_object() {
+        return Err(SessionError::CorruptSnapshot(
+            "snapshot must be object".into(),
+        ));
+    }
+    let map: std::collections::HashMap<String, String> =
+        serde_json::from_value(value).map_err(|e| SessionError::CorruptSnapshot(e.to_string()))?;
+    Ok(map)
 }
 
 // ── Content hashing ─────────────────────────────────────────────────────────
@@ -285,6 +346,15 @@ async fn compute_content_hashes_inner(
 
 // ── Workspace session manager (DB-backed) ───────────────────────────────────
 
+/// Recoverable commit configuration (v1.188 P3).
+pub struct RecoverableCommitConfig {
+    pub db_path: PathBuf,
+    pub mutation_guard: Arc<tokio::sync::Mutex<()>>,
+    pub authority_lease: Arc<WorkspaceAuthorityLease>,
+    /// Retained commit operation owner (survives caller cancellation).
+    pub commit_owner: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
+}
+
 /// DB-backed workspace session manager.
 ///
 /// Replaces the V1.55 in-memory `WorkspaceSessionManager`.
@@ -302,16 +372,79 @@ async fn compute_content_hashes_inner(
 ///   change entries validate. This guarantees single-consumer semantics.
 pub struct WorkspaceSessionManager {
     pool: Arc<SqlitePool>,
+    recoverable: Option<RecoverableCommitConfig>,
+}
+
+impl Clone for WorkspaceSessionManager {
+    fn clone(&self) -> Self {
+        Self {
+            pool: Arc::clone(&self.pool),
+            recoverable: self
+                .recoverable
+                .as_ref()
+                .map(|cfg| RecoverableCommitConfig {
+                    db_path: cfg.db_path.clone(),
+                    mutation_guard: Arc::clone(&cfg.mutation_guard),
+                    authority_lease: Arc::clone(&cfg.authority_lease),
+                    commit_owner: Arc::clone(&cfg.commit_owner),
+                }),
+        }
+    }
 }
 
 impl WorkspaceSessionManager {
     /// Default session TTL (5 minutes).
     pub const DEFAULT_TTL_SECS: i64 = 300;
 
-    /// Create a new session manager backed by the given database pool.
+    /// Create a session manager for tests (validate+consume only).
     #[must_use]
     pub const fn new(pool: Arc<SqlitePool>) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            recoverable: None,
+        }
+    }
+
+    /// Create a session manager with recoverable commit support (v1.188 P3).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError::Io`] when the exclusive workspace-authority
+    /// lease beside `db_path` cannot be acquired (another manager holds it).
+    pub fn new_recoverable(pool: Arc<SqlitePool>, db_path: PathBuf) -> Result<Self, SessionError> {
+        let authority_lease = WorkspaceAuthorityLease::acquire(&db_path)
+            .map_err(|e| SessionError::Io(e.to_string()))?;
+        Ok(Self {
+            pool,
+            recoverable: Some(RecoverableCommitConfig {
+                db_path,
+                mutation_guard: Arc::new(tokio::sync::Mutex::new(())),
+                authority_lease,
+                commit_owner: Arc::new(tokio::sync::Mutex::new(None)),
+            }),
+        })
+    }
+
+    #[must_use]
+    pub const fn recoverable_config(&self) -> Option<&RecoverableCommitConfig> {
+        self.recoverable.as_ref()
+    }
+
+    pub async fn lock_mutation(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        if let Some(cfg) = &self.recoverable {
+            cfg.mutation_guard.lock().await
+        } else {
+            static FALLBACK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+            FALLBACK.lock().await
+        }
+    }
+
+    /// Register the retained commit operation owner spawned for caller cancellation safety.
+    pub async fn register_commit_owner(&self, handle: tokio::task::JoinHandle<()>) {
+        if let Some(cfg) = &self.recoverable {
+            let mut guard = cfg.commit_owner.lock().await;
+            *guard = Some(handle);
+        }
     }
 
     /// Open a new workspace session.
@@ -406,21 +539,123 @@ impl WorkspaceSessionManager {
         // Use `SQLite` datetime comparison to check expiry — avoids timezone
         // format mismatch between chrono::Utc and `SQLite` datetime strings.
         // SAFETY: compile-time checked — simple COUNT query with parameters.
-        let sid = session_id.to_string();
-        let active = sqlx::query_scalar!(
-            "SELECT COUNT(*) FROM workspace_sessions \
-             WHERE session_id = ? AND consumed = 0 AND expires_at > strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
-            sid
-        )
-        .fetch_one(self.pool.as_ref())
-        .await
-        .map_err(|e| SessionError::Database(e.to_string()))?;
-
-        if active == 0 {
+        if !db::is_session_active(self.pool.as_ref(), &session_id.to_string())
+            .await
+            .map_err(|e| SessionError::Database(e.to_string()))?
+        {
             return Err(SessionError::Expired(session_id.clone()));
         }
 
         Ok(row)
+    }
+
+    /// Validate a v1.188 P3 contract manifest against the session snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError::ManifestInvalid`] for a malformed manifest, the
+    /// [`SessionError::NotFound`]/[`SessionError::AlreadyCommitted`]/
+    /// [`SessionError::Expired`] failures from [`Self::validate_session`],
+    /// [`SessionError::CorruptSnapshot`] for unreadable snapshot hashes,
+    /// [`SessionError::HashConflict`] when a declared entry does not match the
+    /// stored snapshot, [`SessionError::PathEscape`] for a symlinked target
+    /// outside the boundary, and [`SessionError::Io`] on filesystem failure.
+    pub async fn validate_contract_manifest(
+        &self,
+        session_id: &SessionId,
+        changes: &[WorkspaceChangeEntry],
+    ) -> Result<(), SessionError> {
+        super::session_commit::validate_manifest(changes)?;
+        let row = self.validate_session(session_id).await?;
+        let stored_hashes = parse_snapshot_hashes(&row.file_hashes_json)?;
+        let canonical_root = Path::new(&row.workspace_root);
+        let scope_dir = super::scope::scope_directory(canonical_root, &row.relative_path)?;
+
+        for change in changes {
+            let file_path = super::scope::resolve_in_scope(&scope_dir, &change.path)?;
+            if file_path.exists() {
+                let meta = tokio::fs::symlink_metadata(&file_path)
+                    .await
+                    .map_err(|e| SessionError::Io(e.to_string()))?;
+                if meta.file_type().is_symlink() {
+                    return Err(SessionError::PathEscape {
+                        path: change.path.clone(),
+                        workspace_root: row.workspace_root.clone(),
+                    });
+                }
+                enforce_path_boundary(&file_path, canonical_root)?;
+            }
+
+            match change.op {
+                WorkspaceChangeOp::Modify => {
+                    let stored_hash = stored_hashes.get(&change.path).ok_or_else(|| {
+                        SessionError::HashConflict {
+                            session_id: session_id.clone(),
+                            path: change.path.clone(),
+                            expected_hash: "present-in-snapshot".to_string(),
+                            actual_hash: "not-in-snapshot".to_string(),
+                        }
+                    })?;
+                    if !file_path.exists() {
+                        return Err(SessionError::HashConflict {
+                            session_id: session_id.clone(),
+                            path: change.path.clone(),
+                            expected_hash: stored_hash.clone(),
+                            actual_hash: "file-not-found".to_string(),
+                        });
+                    }
+                    let current_hash = compute_single_file_hash(&file_path).await?;
+                    let expected = change.expected_hash.as_deref().unwrap_or("");
+                    if current_hash != *stored_hash || expected != *stored_hash {
+                        return Err(SessionError::HashConflict {
+                            session_id: session_id.clone(),
+                            path: change.path.clone(),
+                            expected_hash: stored_hash.clone(),
+                            actual_hash: current_hash,
+                        });
+                    }
+                }
+                WorkspaceChangeOp::Create => {
+                    if stored_hashes.contains_key(&change.path) || file_path.exists() {
+                        return Err(SessionError::HashConflict {
+                            session_id: session_id.clone(),
+                            path: change.path.clone(),
+                            expected_hash: "not-in-snapshot".to_string(),
+                            actual_hash: "already-tracked".to_string(),
+                        });
+                    }
+                }
+                WorkspaceChangeOp::Delete => {
+                    let stored_hash = stored_hashes.get(&change.path).ok_or_else(|| {
+                        SessionError::HashConflict {
+                            session_id: session_id.clone(),
+                            path: change.path.clone(),
+                            expected_hash: "present-in-snapshot".to_string(),
+                            actual_hash: "not-in-snapshot".to_string(),
+                        }
+                    })?;
+                    if !file_path.exists() {
+                        return Err(SessionError::HashConflict {
+                            session_id: session_id.clone(),
+                            path: change.path.clone(),
+                            expected_hash: stored_hash.clone(),
+                            actual_hash: "file-not-found".to_string(),
+                        });
+                    }
+                    let current_hash = compute_single_file_hash(&file_path).await?;
+                    let expected = change.expected_hash.as_deref().unwrap_or("");
+                    if current_hash != *stored_hash || expected != *stored_hash {
+                        return Err(SessionError::HashConflict {
+                            session_id: session_id.clone(),
+                            path: change.path.clone(),
+                            expected_hash: stored_hash.clone(),
+                            actual_hash: current_hash,
+                        });
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Validate a `changes[]` manifest against the session snapshot.
@@ -442,8 +677,7 @@ impl WorkspaceSessionManager {
         let row = self.validate_session(session_id).await?;
 
         // Parse stored file hashes
-        let stored_hashes: std::collections::HashMap<String, String> =
-            serde_json::from_str(&row.file_hashes_json).unwrap_or_default();
+        let stored_hashes = parse_snapshot_hashes(&row.file_hashes_json)?;
 
         // V1.58 P0 T2 (QC3 F-003 fix): canonicalize the workspace root ONCE
         // per `validate_changes_manifest` call. Previously the root was
@@ -467,15 +701,14 @@ impl WorkspaceSessionManager {
                 if meta.file_type().is_symlink() {
                     return Err(SessionError::PathEscape {
                         path: change.path.clone(),
-                        workspace_root: workspace_root.to_string(),
+                        workspace_root: row.workspace_root.clone(),
                     });
                 }
                 // Defense-in-depth: enforce the logical join of the change
                 // path against the canonical root stays within the boundary.
                 // With symlinks rejected above and the root already canonical,
                 // the joined path cannot escape the workspace.
-                let logical_target = canonical_root.join(&change.path);
-                enforce_path_boundary(&logical_target, &canonical_root)?;
+                enforce_path_boundary(&file_path, &canonical_root)?;
             }
 
             match change.op {
@@ -514,7 +747,7 @@ impl WorkspaceSessionManager {
                     if pre_open_meta.file_type().is_symlink() {
                         return Err(SessionError::PathEscape {
                             path: change.path.clone(),
-                            workspace_root: workspace_root.to_string(),
+                            workspace_root: row.workspace_root.clone(),
                         });
                     }
 
@@ -528,13 +761,14 @@ impl WorkspaceSessionManager {
                         });
                     }
 
-                    // Verify the provided content_hash matches
-                    if change.content_hash != *stored_hash {
+                    // Legacy manifest field (pre-P3): expected_hash on contract type
+                    let provided = change.expected_hash.as_deref().unwrap_or("");
+                    if provided != *stored_hash {
                         return Err(SessionError::HashConflict {
                             session_id: session_id.clone(),
                             path: change.path.clone(),
                             expected_hash: stored_hash.clone(),
-                            actual_hash: change.content_hash.clone(),
+                            actual_hash: provided.to_string(),
                         });
                     }
                 }
@@ -651,14 +885,24 @@ impl WorkspaceSessionManager {
         &self,
         session_id: &SessionId,
         changes: &[ChangeEntry],
-        workspace_root: &str,
+        active_workspace_root: &str,
     ) -> Result<db::WorkspaceSessionRow, SessionError> {
-        // Step 1: validate the changes[] manifest against the session snapshot.
-        if !changes.is_empty() {
-            if let Err(err) = self
-                .validate_changes_manifest(session_id, changes, workspace_root)
+        if self.recoverable.is_some() {
+            let _outcome = super::session_commit::commit_recoverable(
+                self,
+                session_id,
+                changes,
+                active_workspace_root,
+            )
+            .await?;
+            return db::get_session(&self.pool, &session_id.to_string())
                 .await
-            {
+                .map_err(|e| SessionError::Database(e.to_string()))?
+                .ok_or_else(|| SessionError::NotFound(session_id.clone()));
+        }
+
+        if !changes.is_empty() {
+            if let Err(err) = self.validate_contract_manifest(session_id, changes).await {
                 if matches!(err, SessionError::HashConflict { .. }) {
                     tracing::warn!(
                         session_id = %session_id,
@@ -671,8 +915,68 @@ impl WorkspaceSessionManager {
             }
         }
 
-        // Step 2: consume the session atomically (CAS on `consumed`).
         self.consume_session(session_id).await
+    }
+
+    /// Durable commit returning revision metadata (v1.188 P3).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError::Internal`] when this manager has no recoverable
+    /// authority, otherwise whatever
+    /// [`session_commit::commit_recoverable`](super::session_commit::commit_recoverable)
+    /// reports for the manifest.
+    pub async fn commit_session_durable(
+        &self,
+        session_id: &SessionId,
+        changes: &[ChangeEntry],
+        active_workspace_root: &str,
+    ) -> Result<super::session_commit::CommitOutcome, SessionError> {
+        if self.recoverable.is_none() {
+            return Err(SessionError::Internal(
+                "recoverable workspace authority required".into(),
+            ));
+        }
+        super::session_commit::commit_recoverable(self, session_id, changes, active_workspace_root)
+            .await
+    }
+
+    /// Durable commit on an `Arc` manager; retains ownership through caller cancellation.
+    ///
+    /// The caller must pass the verified active workspace root from its own
+    /// authority context (for example HTTP [`WorkspaceState::workspace_path`]
+    /// or the executor's canonical root). Foreign-root rejection runs before
+    /// replay, claim, and normal commit work.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever
+    /// [`session_commit::commit_recoverable_owned`](super::session_commit::commit_recoverable_owned)
+    /// reports; caller cancellation does not abandon the owned commit.
+    pub async fn commit_session_durable_owned(
+        self_arc: Arc<Self>,
+        session_id: SessionId,
+        changes: Vec<ChangeEntry>,
+        active_workspace_root: String,
+    ) -> Result<super::session_commit::CommitOutcome, SessionError> {
+        super::session_commit::commit_recoverable_owned(
+            self_arc,
+            session_id,
+            changes,
+            active_workspace_root,
+        )
+        .await
+    }
+
+    /// Run startup recovery for all unsettled intents (call before publishing executor).
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever
+    /// [`session_commit::startup_recovery_all`](super::session_commit::startup_recovery_all)
+    /// reports; a corrupt intent row is surfaced rather than skipped.
+    pub async fn startup_recovery(&self) -> Result<(), SessionError> {
+        super::session_commit::startup_recovery_all(self).await
     }
 
     /// Get the underlying database pool.
@@ -686,7 +990,7 @@ impl WorkspaceSessionManager {
 ///
 /// Uses `tokio::fs` so the function is safe to call from async context
 /// (V1.58 P0 T4 — R-V156P0-M004).
-async fn compute_single_file_hash(path: &Path) -> Result<String, SessionError> {
+pub(crate) async fn compute_single_file_hash(path: &Path) -> Result<String, SessionError> {
     use sha2::{Digest, Sha256};
     use tokio::io::AsyncReadExt;
 
@@ -854,10 +1158,11 @@ mod tests {
 
     #[test]
     fn change_entry_deserialization() {
-        let json = r#"{"path":"test.txt","contentHash":"abc123","op":"modify"}"#;
+        let json =
+            r#"{"path":"test.txt","expectedHash":"abc123","op":"modify","contentBase64":"YQ=="}"#;
         let entry: ChangeEntry = serde_json::from_str(json).expect("deserialize");
         assert_eq!(entry.path, "test.txt");
-        assert_eq!(entry.content_hash, "abc123");
+        assert_eq!(entry.expected_hash.as_deref(), Some("abc123"));
         assert!(matches!(entry.op, ChangeOp::Modify));
     }
 }

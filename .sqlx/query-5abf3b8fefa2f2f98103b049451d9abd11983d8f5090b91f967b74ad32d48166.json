@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO orchestration_sessions (session_id, creator_id, preset_id, preset_version, status, current_task_id, context_json, created_at, updated_at, execution_version, state_revision, graph_version) VALUES (?, 'other_creator', 'novel-writing', 1, 'completed', NULL, '{}', 1, 2, 1, 1, 1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "5abf3b8fefa2f2f98103b049451d9abd11983d8f5090b91f967b74ad32d48166"
+}

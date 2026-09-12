@@ -11,7 +11,7 @@
 //! Individual error variants are documented in the route spec §4.
 
 use crate::api::errors::NexusApiError;
-use crate::api::handlers::works::read_active_creator_id;
+use crate::config::read_active_creator_id;
 use crate::workspace::WorkspaceState;
 use axum::{
     extract::{Path, Query, State},

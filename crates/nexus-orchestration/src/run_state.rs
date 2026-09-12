@@ -245,6 +245,57 @@ pub struct RunCheckpoint<'a> {
     pub children: &'a [ChildCheckpoint],
 }
 
+/// Terminal status written by the single settlement authority (P4 §6.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalSettlementTarget {
+    /// Normal completion.
+    Completed,
+    /// Confirmed cancellation after cleanup.
+    Cancelled,
+    /// Confirmed failure after cleanup.
+    Failed,
+}
+
+/// Result of a revision-fenced terminal settlement (P4 §6.2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SettlementResult {
+    /// This caller won the CAS and wrote the terminal transition.
+    Applied(RunRecord),
+    /// A durable terminal winner already owns the row — not proof this caller
+    /// performed cleanup.
+    Observed(RunRecord),
+}
+
+impl SettlementResult {
+    /// The durable record either written or observed.
+    #[must_use]
+    pub const fn record(&self) -> &RunRecord {
+        match self {
+            Self::Applied(record) | Self::Observed(record) => record,
+        }
+    }
+}
+
+/// Whether a persisted row reflects a cancel request that already reached a
+/// defined public outcome (never a spurious 409).
+#[must_use]
+pub fn durable_cancel_outcome_accomplished(record: &RunRecord) -> bool {
+    if matches!(record.status, SessionStatus::Cancelled) {
+        return true;
+    }
+    let state = record.state.as_ref();
+    let cancel_requested = state.is_some_and(|s| s.cancel_requested);
+    if matches!(record.status, SessionStatus::Interrupted) && cancel_requested {
+        return true;
+    }
+    if matches!(record.status, SessionStatus::Failed) && cancel_requested {
+        return state
+            .and_then(|s| s.failure.as_ref())
+            .is_some_and(|f| f.code == "driver_failed");
+    }
+    false
+}
+
 /// Transactional workflow state store (A2).
 ///
 /// The SQLite adapter commits root+child state atomically under the root
@@ -369,54 +420,25 @@ pub trait WorkflowStateStore: Send + Sync {
         next_state: &RunStateV1,
     ) -> Result<RunRecord, EngineError>;
 
-    /// Atomically settle a run to terminal `Cancelled` (A5).
+    /// Atomically settle a run to a terminal status under the revision/graph
+    /// fences (P4 §6.2).
     ///
-    /// The A5 cancel settlement is the ONLY transition that may move an
-    /// `Interrupted` run (a durable cancel intent whose owned-Host cleanup
-    /// was previously unconfirmed) to `Cancelled` — the bounded, owner-scoped
-    /// cleanup retry. The write is revision-fenced and refuses every other
-    /// terminal status (`completed`/`failed`/`cancelled`), so a retry can
-    /// never overwrite a newer terminal outcome. The run is terminal and
-    /// never re-driven; this method is used only by the cancel path after
-    /// `finalize_run` confirms cleanup.
-    ///
-    /// When `expected_graph_version` is `Some`, the settlement CAS additionally
-    /// requires the persisted `graph_version` to equal it, protecting the
-    /// checkpoint from a graph-only writer. Ordinary user cancellation passes
-    /// the loaded snapshot's version and may reload and retry after a conflict;
-    /// anchored cleanup passes its commit-owned clock and never rebases.
-    /// `None` provides an explicitly revision-only authoritative write.
+    /// Consolidates cancelled/failed/completed terminal writes. On a lost CAS
+    /// where the row already carries a durable terminal winner, returns
+    /// [`SettlementResult::Observed`] instead of a conflict. Still-live
+    /// revision/graph contention returns [`EngineError::RevisionMismatch`].
     ///
     /// # Errors
-    /// Returns [`EngineError`] on storage failure, revision/graph mismatch,
-    /// or a terminal status other than `Interrupted`.
-    async fn settle_cancelled(
+    /// Returns [`EngineError`] on storage failure or still-live fence loss.
+    async fn settle_run(
         &self,
         session_id: &SessionId,
         expected_revision: u64,
         expected_graph_version: Option<u64>,
         checkpoint: RunCheckpoint<'_>,
         next_state: &RunStateV1,
-    ) -> Result<RunRecord, EngineError>;
-
-    /// Atomically settle a run to terminal `Failed` after confirmed cleanup.
-    ///
-    /// Mirrors [`WorkflowStateStore::settle_cancelled`] (same `Interrupted`
-    /// cleanup-retry admission and anchored graph-clock CAS), but the
-    /// confirmed terminal status is `failed` so schedule dependency gates
-    /// remain blocked.
-    ///
-    /// # Errors
-    /// Returns [`EngineError`] on storage failure, revision/graph mismatch,
-    /// or a terminal status other than `Interrupted` (cleanup-retry shape).
-    async fn settle_failed(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        expected_graph_version: Option<u64>,
-        checkpoint: RunCheckpoint<'_>,
-        next_state: &RunStateV1,
-    ) -> Result<RunRecord, EngineError>;
+        terminal_target: TerminalSettlementTarget,
+    ) -> Result<SettlementResult, EngineError>;
 
     /// Atomically restore a pre-step root snapshot via ONE revision-fenced
     /// storage operation (Important 3).

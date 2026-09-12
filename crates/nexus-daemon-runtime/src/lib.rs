@@ -38,6 +38,7 @@ pub mod path_enrichment;
 pub mod preset_run;
 pub mod prompt_executor;
 pub mod refresh_scheduler;
+pub mod run_events;
 pub mod stale_findings_watcher;
 // V1.153 P2 (DF-73): embedded `apps/web` SPA — compiled only when the
 // `web-embed` feature is ON (default). The slim `nexus-runtime` artifact

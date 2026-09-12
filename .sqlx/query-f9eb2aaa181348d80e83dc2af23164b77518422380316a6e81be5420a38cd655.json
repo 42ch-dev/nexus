@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO workspace_commit_intents (session_id, workspace_root, revision, request_digest, state, entries_json) VALUES (?, ?, ?, ?, 'applying', ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "f9eb2aaa181348d80e83dc2af23164b77518422380316a6e81be5420a38cd655"
+}

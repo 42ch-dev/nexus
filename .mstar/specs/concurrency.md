@@ -1,6 +1,6 @@
 # Concurrency — Master Specification
 
-**Status**: Normative — V1.51 Shipped (T-B P0/P1 advisory lock + heartbeat + OCC), V1.56 P0 amendment (§9 workspace session OCC)
+**Status**: Normative — V1.51 advisory lock/heartbeat/OCC; V1.56 workspace sessions; V1.188 recoverable target-content commit (§9)
 **Document class**: Master
 **Created**: 2026-06-18
 **Scope**: Multi-writer concurrency control for the local-first daemon + CLI model — advisory file lock + heartbeat + zombie detection + CLI integration.
@@ -333,27 +333,58 @@ The lock holder is read from the `.lock` file content only — it does not requi
 
 ---
 
-## 9. Workspace Session OCC (V1.56 P0)
+## 9. Workspace Session OCC (V1.56; V1.188 recoverable content commit)
 
-### 9.1 Rationale
+### 9.1 One authority
 
-`workspace.open` and `workspace.commit` implement file-level optimistic concurrency control using content hashes. This prevents lost-update races when multiple actors attempt to write to the same workspace scope through different sessions.
+HTTP workspace routes and orchestration `workspace.open` / `workspace.commit`
+use the same daemon-owned workspace session manager and local-DB authority.
+Contracts own the shared camelCase DTOs; orchestration consumes an injected
+async `WorkspaceExecutor`. An absent executor is an explicit failure, never
+a synthetic path, consumed-only success or fabricated revision.
 
-### 9.2 Algorithm
+`open({path})` resolves a safe scope, scans regular-file SHA-256 pre-images,
+persists the session and returns
+`{sessionId,snapshot:{workspaceRoot,path,existed,fileHashes}}`.
+Snapshot and change paths are relative to that opened scope.
 
-1. **`workspace.open`**: Scans the target directory, computes SHA-256 content hashes for all regular files, stores `{relative_path: sha256_hex}` as JSON in the session snapshot (`workspace_sessions.file_hashes_json`).
-2. **`workspace.commit`**: Accepts a `changes[]` manifest of `(path, content_hash, op)` tuples. For each `Modify` entry, verifies the current file hash matches the stored hash. For `Create`, verifies the file is NOT in the snapshot. For `Delete`, verifies the file IS in the snapshot. On any mismatch, rejects with `SessionError::HashConflict` (HTTP 409).
-3. **Atomic consumption**: The session is atomically marked `consumed = 1` via `UPDATE...WHERE consumed = 0 AND expires_at > ...`. SQLite's row-level locking guarantees single-consumer semantics.
+### 9.2 Target-content commit
 
-### 9.3 Hash Algorithm
+`commit({sessionId,changes:[{path,op,expectedHash,contentBase64}]})` carries
+target bytes for create/modify and opened pre-image hashes for modify/delete.
+Create requires absence; delete forbids content. Only regular files with
+existing parents are supported. Validate the whole manifest before staging:
+at most 128 changes, 1 MiB decoded per file and 8 MiB total; reject malformed,
+duplicate, ancestor-overlapping, unsafe or symlink paths and corrupt snapshots.
 
-SHA-256 over file content. Documented choice: sufficient collision resistance for local workspace use; widely available; no known practical collision attacks against SHA-256.
+The transition is: validate pre-images → exclusively stage sibling target
+files and original backups with fsync → persist intent and stable revision →
+apply atomic per-file replacements plus directory fsync → atomically record
+committed and consume the session → return `{revision,committed:true}`.
+The same committed request after a lost response returns the same revision
+without repeating effects; another request on that session conflicts.
 
-### 9.4 Retry Model
+### 9.3 Retained recovery
 
-Clients receiving a `HASH_CONFLICT` error must re-open the session (getting fresh hashes) and retry the commit with updated change entries. No automatic retry is performed by the daemon.
+Ordinary apply failure durably selects rollback and restores pre-images before
+reporting rolled back. Before admitting new writes, restart recovery finishes
+applying or undoes rolling-back intents idempotently using pre/post hashes.
+The recovery owner survives client/workflow cancellation. Open-session TTL
+gates a new intent only; it does not discard admitted recovery.
 
-### 9.5 Anti-Patterns
+Validation failure before intent leaves the open session usable. A rolled-back
+intent closes it to another attempt; restart between open and commit preserves
+a usable open session. A third-state file, changed ancestor, or missing/corrupt
+recovery material becomes actionable `recovery_conflict`: retain evidence and
+backups, block writes and never overwrite unrelated bytes or publish committed.
 
-- **DO NOT** use the workspace session OCC layer for intra-process concurrency — that is the file lock's responsibility (§2).
-- **DO NOT** mix workspace session hashes with `kb_extract_jobs` version-based OCC (§7) — they are independent concurrency domains.
+### 9.4 Visibility and external-writer boundary
+
+This is recoverable multi-file commit, **not multi-file filesystem atomic
+visibility**: external readers can observe a short inter-file transition.
+Nexus locks/CAS do not prevent unrelated writers racing the final check/rename.
+Guaranteed completion/rollback requires those writers' quiescence. Exceptional
+recovery conflict can leave transitioned bytes until repaired; it must not
+claim “nothing changed.” Clients reopen after pre-image conflict rather than
+receiving an automatic retry. This file-content domain remains separate from
+DB row-version OCC (§7).

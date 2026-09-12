@@ -30,7 +30,8 @@ use serde_json::{json, Value};
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 struct TestCtx {
-    tmp: TestTempRoot,
+    /// Keeps the temp root alive for the test's lifetime; never read.
+    _tmp: TestTempRoot,
     server: TestServer,
 }
 
@@ -41,7 +42,7 @@ async fn test_ctx() -> TestCtx {
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app);
-    TestCtx { tmp, server }
+    TestCtx { _tmp: tmp, server }
 }
 
 async fn test_ctx_no_creator() -> TestCtx {
@@ -60,55 +61,9 @@ async fn test_ctx_no_creator() -> TestCtx {
     let server = TestServer::new(app);
     std::mem::forget(tmp);
     TestCtx {
-        tmp: test_utils::create_test_workspace().await.0,
+        _tmp: test_utils::create_test_workspace().await.0,
         server,
     }
-}
-
-async fn test_ctx_other_creator() -> (TestCtx, std::path::PathBuf) {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let user_home = tmp.path();
-    let nexus_home = user_home.join(".nexus42");
-    std::fs::create_dir_all(&nexus_home).unwrap();
-
-    let other_creator = "ctr_other_creator";
-    let toml_str = format!(
-        "active_creator_id = \"{other_creator}\"\n[active_workspace_slug_by_creator]\n\"{other_creator}\" = \"default\""
-    );
-    std::fs::write(nexus_home.join("config.toml"), toml_str).unwrap();
-
-    let op_dir = nexus_home_layout::operational_workspace_dir(user_home, other_creator, "default");
-    std::fs::create_dir_all(&op_dir).unwrap();
-    let meta = serde_json::json!({
-        "schema_version": 1,
-        "creator_id": other_creator,
-        "workspace_slug": "default",
-        "local_root": user_home.join("creative"),
-        "created_at": "2020-01-01T00:00:00Z"
-    });
-    std::fs::write(
-        op_dir.join("meta.json"),
-        serde_json::to_string(&meta).unwrap(),
-    )
-    .unwrap();
-
-    let db_path = nexus_home_layout::workspace_state_db_path(user_home, other_creator, "default");
-    let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
-    nexus_local_db::run_migrations(&pool).await.unwrap();
-    nexus_local_db::seed_versions(&pool).await.unwrap();
-
-    let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
-    let auth_config = DaemonApiConfig::keyless();
-    let app = api::create_router(state, auth_config);
-    let server = TestServer::new(app);
-    std::mem::forget(tmp);
-    (
-        TestCtx {
-            tmp: test_utils::create_test_workspace().await.0,
-            server,
-        },
-        db_path,
-    )
 }
 
 fn make_create_body() -> Value {
@@ -144,6 +99,24 @@ async fn create_work_with_title(server: &TestServer, title: &str) -> String {
 }
 
 /// Build a fresh `WorkspaceState` for handler-level testing.
+/// Switch the active creator on the SAME real workspace state.
+///
+/// A cross-creator test must not build a second workspace authority for the
+/// same root: the workspace-authority lease is exclusive per root (P3), so a
+/// second `new_for_testing` over the same DB fails with EAGAIN. Rewriting the
+/// active selection in this state's `config.toml` exercises the real
+/// creator-scoped isolation instead (same pattern as the characters API
+/// switch helper).
+fn switch_active_creator(state: &WorkspaceState, creator_id: &str) {
+    std::fs::write(
+        state.nexus_home().join("config.toml"),
+        format!(
+            "active_creator_id = \"{creator_id}\"\n\n[active_workspace_slug_by_creator]\n\"{creator_id}\" = \"default\"\n"
+        ),
+    )
+    .expect("write active-creator selection");
+}
+
 async fn handler_state() -> (WorkspaceState, TestTempRoot) {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
@@ -950,21 +923,27 @@ async fn creator_isolation_get_work_returns_404_for_other_creator() {
         set_pool_active: None,
         work_profile: None,
     };
-    let (_, resp) =
-        nexus_daemon_runtime::api::handlers::works::create_work(State(state_a), axum::Json(req))
-            .await
-            .unwrap();
+    let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
+        State(state_a.clone()),
+        axum::Json(req),
+    )
+    .await
+    .unwrap();
     let work_id = resp.work_id.clone();
 
-    // Try to GET with other creator
-    let (ctx_b, db_b) = test_ctx_other_creator().await;
-    let _result = nexus_daemon_runtime::api::handlers::works::get_work(
-        State(WorkspaceState::new_for_testing(ctx_b.tmp.path().join(".nexus42"), db_b, None).await),
-        Path(work_id.clone()),
-    )
-    .await;
-    // The other creator has a different DB — get_work will return None → 404
-    // This is correct: creators are isolated by database
+    // Switch the active creator on the SAME real state, then try to GET the
+    // other creator's work. The creator-scoped lookup must not find it.
+    switch_active_creator(&state_a, "ctr_other_creator");
+    let result =
+        nexus_daemon_runtime::api::handlers::works::get_work(State(state_a), Path(work_id.clone()))
+            .await;
+
+    let err = result.expect_err("a foreign creator must not read another creator's work");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::NOT_FOUND,
+        "cross-creator read must be a 404, got: {err:?}"
+    );
 }
 
 #[tokio::test]
@@ -983,16 +962,17 @@ async fn creator_isolation_patch_work_returns_404_for_other_creator() {
         set_pool_active: None,
         work_profile: None,
     };
-    let (_, resp) =
-        nexus_daemon_runtime::api::handlers::works::create_work(State(state_a), axum::Json(req))
-            .await
-            .unwrap();
+    let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
+        State(state_a.clone()),
+        axum::Json(req),
+    )
+    .await
+    .unwrap();
     let work_id = resp.work_id.clone();
 
-    // Try to PATCH with other creator's state
-    let (ctx_b, db_b) = test_ctx_other_creator().await;
-    let nh_b = ctx_b.tmp.path().join(".nexus42");
-    // Different DB so the work_id doesn't exist
+    // Switch the active creator on the SAME real state (never a second
+    // authority for the same root), then try to PATCH across creators.
+    switch_active_creator(&state_a, "ctr_other_creator");
     let patch = PatchWorkRequest {
         title: Some("Hacked".into()),
         long_term_goal: None,
@@ -1009,9 +989,8 @@ async fn creator_isolation_patch_work_returns_404_for_other_creator() {
         auto_chain_interrupted: None,
         work_profile: None,
     };
-    let state_b = WorkspaceState::new_for_testing(nh_b, db_b, None).await;
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
-        State(state_b),
+        State(state_a),
         Path(work_id),
         axum::Json(patch),
     )
@@ -1209,7 +1188,7 @@ async fn patch_work_stage_change_is_auditable() {
 /// back-to-back.
 #[tokio::test]
 async fn patch_work_stage_path_releases_runtime_lock() {
-    use nexus_daemon_runtime::api::handlers::works::read_active_creator_id;
+    use nexus_daemon_runtime::config::read_active_creator_id;
 
     let (state, _tmp) = handler_state().await;
     let creator_id =
@@ -1590,8 +1569,7 @@ async fn handler_get_work_lazy_promotes_completed_then_is_idempotent() {
     .unwrap();
     let work_id = resp.work_id.clone();
     let creator_id =
-        nexus_daemon_runtime::api::handlers::works::read_active_creator_id(state.nexus_home())
-            .unwrap();
+        nexus_daemon_runtime::config::read_active_creator_id(state.nexus_home()).unwrap();
 
     // 2. Patch the Work into a novel-profile shape that satisfies §6.1:
     //    work_profile='novel', total_planned_chapters=2, current_chapter=2,
