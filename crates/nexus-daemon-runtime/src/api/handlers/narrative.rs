@@ -14,7 +14,7 @@
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
 use crate::api::errors::NexusApiError;
-use crate::api::handlers::works::read_active_creator_id;
+use crate::config::read_active_creator_id;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;

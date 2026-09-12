@@ -1200,7 +1200,7 @@ impl WorkspaceState {
     pub fn verified_creator_context(&self) -> Option<(String, String)> {
         let creator_id = crate::config::try_active_creator_id(self.nexus_home())?;
         let workspace_slug =
-            crate::api::handlers::works::read_active_workspace_slug(self.nexus_home(), &creator_id)
+            crate::config::read_active_workspace_slug(self.nexus_home(), &creator_id)
                 .filter(|slug| !slug.trim().is_empty())?;
         Some((creator_id, workspace_slug))
     }

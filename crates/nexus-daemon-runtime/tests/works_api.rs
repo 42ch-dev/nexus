@@ -1209,7 +1209,7 @@ async fn patch_work_stage_change_is_auditable() {
 /// back-to-back.
 #[tokio::test]
 async fn patch_work_stage_path_releases_runtime_lock() {
-    use nexus_daemon_runtime::api::handlers::works::read_active_creator_id;
+    use nexus_daemon_runtime::config::read_active_creator_id;
 
     let (state, _tmp) = handler_state().await;
     let creator_id =
@@ -1590,7 +1590,7 @@ async fn handler_get_work_lazy_promotes_completed_then_is_idempotent() {
     .unwrap();
     let work_id = resp.work_id.clone();
     let creator_id =
-        nexus_daemon_runtime::api::handlers::works::read_active_creator_id(state.nexus_home())
+        nexus_daemon_runtime::config::read_active_creator_id(state.nexus_home())
             .unwrap();
 
     // 2. Patch the Work into a novel-profile shape that satisfies §6.1:

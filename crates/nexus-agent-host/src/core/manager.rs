@@ -1284,6 +1284,11 @@ mod tests {
         let cfg = HostStartConfig {
             config_path,
             workspace_root: temp_dir.path().to_path_buf(),
+            // The probe owner must sit at (or under) the host workspace
+            // boundary: `start_config()` defaults to `/tmp`, which is outside
+            // this temp boundary (and on macOS canonicalizes to
+            // `/private/tmp`). Align the fixture's owner with the boundary.
+            probe_owner: Some(test_owner_for(temp_dir.path().to_path_buf())),
             ..start_config()
         };
         let manager = HostManager::new();

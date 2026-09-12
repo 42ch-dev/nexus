@@ -7,7 +7,8 @@
 #![allow(clippy::too_many_lines)]
 
 use crate::api::errors::NexusApiError;
-use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_slug, WorkApiDto};
+use crate::api::handlers::works::WorkApiDto;
+use crate::config::{read_active_creator_id, read_active_workspace_slug};
 use crate::api::path_guard::resolve_guarded_path_async;
 use crate::capability_registry::host_tool_registry;
 use crate::workspace::WorkspaceState;

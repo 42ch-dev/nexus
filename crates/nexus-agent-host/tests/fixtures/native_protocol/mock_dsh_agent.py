@@ -78,6 +78,9 @@ def log_spawn():
         "argv": sys.argv[1:],
         "dsh_home": os.environ.get("DSH_HOME", ""),
         "pid": os.getpid(),
+        # The child's own working directory, so a test can prove the bounded
+        # probe ran in the verified owner workspace (never the ambient cwd).
+        "cwd": os.getcwd(),
     }
     with open(path, "a") as f:
         f.write(json.dumps(entry) + "\n")

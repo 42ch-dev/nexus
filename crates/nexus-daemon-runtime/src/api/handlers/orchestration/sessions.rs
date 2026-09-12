@@ -1224,7 +1224,7 @@ async fn authorize_orchestration_session_read(
     state: &WorkspaceState,
     session_id: &str,
 ) -> Result<(), NexusApiError> {
-    use crate::api::handlers::works::read_active_creator_id;
+    use crate::config::read_active_creator_id;
     let active_creator =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
     let engine = state

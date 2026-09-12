@@ -44,7 +44,7 @@
 //! the same extractor boundary as 422 `JsonDataError` (axum 0.7 default).
 
 use crate::api::errors::NexusApiError;
-use crate::api::handlers::works::read_active_creator_id;
+use crate::config::read_active_creator_id;
 use crate::api::handlers::world_kb_guards::require_world_owner;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, State};
