@@ -493,7 +493,13 @@ async fn admission_production_host_progress_non_echo() {
 /// the winner).
 #[tokio::test]
 async fn admission_concurrent_pending_row_one_session() {
-    let daemon = LiveDaemon::start().await;
+    // Determinism (same reasoning as the distinct-row race below): a hostless
+    // winner fails its first prompt instantly and settles its schedule row
+    // terminal, which would free admission before the loser re-reads. The
+    // blocking host holds the winner's first prompt open, so the race is
+    // between the two claims — the loser then takes the re-entry path
+    // (`current_session_id` is set) and resolves to the SAME owned run.
+    let daemon = LiveDaemon::start_with_agent_host(BlockingHost::non_cooperative()).await;
     let now = chrono::Utc::now().timestamp();
     sqlx::query(
         "INSERT INTO creator_schedules
@@ -622,11 +628,46 @@ async fn admission_distinct_serial_rows_race_one_owned() {
         .current_session_id
         .as_deref()
         .is_some_and(|s| !s.is_empty());
-    assert!(
-        owned1 ^ owned2,
-        "exactly one of the two distinct serial rows must own a run: \
-         SCHRACE1 owned={owned1} SCHRACE2 owned={owned2}"
-    );
+    if !(owned1 ^ owned2) {
+        // Diagnosis, not a guess: dump each row's schedule status AND its
+        // durable run record (status + state + failure + wait). If the row
+        // that was expected to lose actually settled, its run record names
+        // the product cause; if BOTH are still running/parked, then `owned`
+        // merely means "has a session id" (it includes settled rows) and the
+        // real exclusive-admission proof is the serial-gate refusal already
+        // captured in the admission responses above.
+        let mut diag = String::new();
+        for (label, row) in [("SCHRACE1", &row1), ("SCHRACE2", &row2)] {
+            let record = match row.current_session_id.as_deref() {
+                Some(sid) => {
+                    let loaded: (String, Option<Vec<u8>>) = sqlx::query_as(
+                        "SELECT status, run_state_json \
+                         FROM orchestration_sessions WHERE session_id = ?",
+                    )
+                    .bind(sid)
+                    .fetch_one(&daemon.pool)
+                    .await
+                    .expect("load run record for diagnosis");
+                    Some(loaded)
+                }
+                None => None,
+            };
+            let state = record
+                .as_ref()
+                .and_then(|(_, state)| state.as_deref())
+                .map(|bytes| String::from_utf8_lossy(bytes).to_string());
+            diag.push_str(&format!(
+                "\n  {label}: schedule_status={} session={:?} run_status={:?} run_state={state:?}",
+                row.status,
+                row.current_session_id,
+                record.as_ref().map(|(status, _)| status.as_str())
+            ));
+        }
+        panic!(
+            "exactly one of the two distinct serial rows must own a run: \
+             SCHRACE1 owned={owned1} SCHRACE2 owned={owned2}{diag}"
+        );
+    }
     let (winner, loser) = if owned1 {
         ("SCHRACE1", &row2)
     } else {
@@ -3959,8 +4000,18 @@ async fn settlement_duplicate_callback_no_second_child() {
     assert_eq!(run_status, "completed");
 
     // The schedule settled to completed (no child yet — the Work had no
-    // driver pointer at settlement time).
-    let row = load_drive_row(&daemon, &schedule_id).await;
+    // driver pointer at settlement time). The drive task settles the SCHEDULE
+    // row after `drive_preset_run` returns, so observing the session row
+    // `completed` does not order against it: wait for the schedule row rather
+    // than reading it immediately.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
+    let row = loop {
+        let row = load_drive_row(&daemon, &schedule_id).await;
+        if row.status == "completed" || tokio::time::Instant::now() >= deadline {
+            break row;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    };
     assert_eq!(row.status, "completed");
 
     // Attach the driver pointer, then fire the terminal callback again.
