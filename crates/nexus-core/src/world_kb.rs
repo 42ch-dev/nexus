@@ -28,6 +28,7 @@ use sqlx::{Sqlite, SqlitePool};
 use tracing::warn;
 
 use crate::error::{CoreError, CoreResult};
+use crate::CoreAccess;
 
 const GRAPH_ENTITY_CAP: usize = 500;
 const GRAPH_RELATIONSHIP_CAP: usize = 1000;
@@ -160,11 +161,16 @@ pub(crate) mod graph {
 
     pub(crate) async fn get_graph(
         pool: &SqlitePool,
+        access: CoreAccess,
         creator_id: &str,
         world_id: &str,
         include_suggested: bool,
     ) -> CoreResult<WorldKbGraphResponse> {
-        let mut tx = nexus_local_db::begin_immediate(pool).await.map_err(local_db_err)?;
+        let mut tx = if access == CoreAccess::ReadOnly {
+            pool.begin().await.map_err(db_err)?
+        } else {
+            nexus_local_db::begin_immediate(pool).await.map_err(local_db_err)?
+        };
         guards::require_world_owner(&mut *tx, world_id, creator_id).await?;
         let _snapshot_watermark: i64 = sqlx::query_scalar(
             "SELECT COALESCE(MAX(sequence), 0) FROM core_changes",

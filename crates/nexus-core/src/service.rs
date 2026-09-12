@@ -166,6 +166,7 @@ impl CoreService {
         self.verify_principal(principal)?;
         graph::get_graph(
             &self.inner.pool,
+            self.inner.access,
             principal.creator_id(),
             &world_id,
             include_suggested,
