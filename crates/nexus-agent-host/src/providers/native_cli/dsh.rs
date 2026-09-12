@@ -5089,9 +5089,7 @@ mod tests {
 
         let mut queued = Vec::new();
         while let Ok(payload) = content_rx.try_recv() {
-            let event = payload
-                .into_event()
-                .expect("queued callback payload must be a message delta");
+            let event = payload.into_event();
             if let HostEvent::MessageDelta(delta) = event {
                 queued.push(delta.text);
             }
@@ -5103,9 +5101,8 @@ mod tests {
         );
 
         observer.observe(&test_root_message_notification(ROOT, "m65"));
-        assert_eq!(
-            content_rx.try_recv(),
-            Err(mpsc::error::TryRecvError::Empty),
+        assert!(
+            matches!(content_rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)),
             "post-overflow notifications must not enqueue more deltas"
         );
 
