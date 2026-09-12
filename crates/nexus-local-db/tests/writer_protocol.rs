@@ -21,7 +21,7 @@ use nexus_local_db::writer_protocol::{
     acquire_writer_guard, open_admitted_pool, open_guarded_pool, release_retained_writer_guards,
     run_guarded_migrations, BOOTSTRAP_CREATOR_ID, WriterMode,
 };
-use nexus_local_db::{init_engine_pool, init_pool, open_pool_read_only, LocalDbError};
+use nexus_local_db::{ensure_creator_row, init_engine_pool, init_pool, open_pool_read_only, LocalDbError};
 use sqlx::SqlitePool;
 use tempfile::TempDir;
 
@@ -475,6 +475,99 @@ async fn writer_protocol() {
             .expect("outbox rows");
         assert_eq!(events, 4096, "committed events appear exactly once");
         pool.close().await;
+    }
+
+    // ── revision bump: legacy non-OCC write bumps once; explicit CAS is not doubled ─
+    {
+        let rev_db = dir.path().join("revision.db");
+        let pool = init_pool(&rev_db).await.expect("revision init");
+        ensure_creator_row(&pool, "ctr_test", "Test")
+            .await
+            .expect("creator row");
+        sqlx::query(
+            "INSERT INTO narrative_worlds (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json, created_at)              VALUES ('wld_rev', 'ws', 'ctr_test', 'Rev', 'rev', 'active', 'private', 'manual', '{}', datetime('now'))",
+        )
+        .execute(&pool)
+        .await
+        .expect("seed world");
+        sqlx::query(
+            "INSERT INTO kb_key_blocks (key_block_id, world_id, block_type, canonical_name, status, body_json, revision, created_at)              VALUES ('kb_rev_probe', 'wld_rev', 'info_point', 'probe', 'confirmed', '{}', 0, datetime('now'))",
+        )
+        .execute(&pool)
+        .await
+        .expect("seed kb row");
+        sqlx::query("UPDATE kb_key_blocks SET body_json = ?1 WHERE key_block_id = 'kb_rev_probe'")
+            .bind(r#"{"x":1}"#)
+            .execute(&pool)
+            .await
+            .expect("legacy non-OCC update");
+        let (legacy_rev,): (i64,) =
+            sqlx::query_as("SELECT revision FROM kb_key_blocks WHERE key_block_id = 'kb_rev_probe'")
+                .fetch_one(&pool)
+                .await
+                .expect("legacy revision");
+        assert_eq!(legacy_rev, 1, "non-OCC update must bump revision exactly once");
+
+        sqlx::query(
+            "UPDATE kb_key_blocks SET body_json = ?1, revision = 2 WHERE key_block_id = 'kb_rev_probe' AND revision = 1",
+        )
+        .bind(r#"{"x":2}"#)
+        .execute(&pool)
+        .await
+        .expect("explicit CAS bump");
+        let (cas_rev,): (i64,) =
+            sqlx::query_as("SELECT revision FROM kb_key_blocks WHERE key_block_id = 'kb_rev_probe'")
+                .fetch_one(&pool)
+                .await
+                .expect("cas revision");
+        assert_eq!(cas_rev, 2, "explicit CAS revision must not be doubled by the trigger");
+        pool.close().await;
+        release_retained_writer_guards(&rev_db);
+    }
+
+    // ── cooperative quiescence: surviving clone_pool blocks migration ─────────
+    {
+        let quiet_db = dir.path().join("quiescence.db");
+        let guarded = init_engine_pool(&quiet_db).await.expect("engine guarded pool");
+        let survivor = guarded.clone_pool();
+        drop(guarded);
+        let migrate_db = quiet_db.clone();
+        let migrate = tokio::spawn(async move {
+            run_guarded_migrations(&migrate_db).await
+        });
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            !migrate.is_finished(),
+            "migration must wait while a cooperative pool clone remains open"
+        );
+        survivor.close().await;
+        release_retained_writer_guards(&quiet_db);
+        migrate.await.expect("migrate task").expect("migration after quiescence");
+    }
+
+    // ── retention burst: row and byte bounds hold after rapid inserts ───────────
+    {
+        let burst_db = dir.path().join("retention_burst.db");
+        let pool = init_pool(&burst_db).await.expect("burst init");
+        for index in 0..5000 {
+            let payload = "x".repeat(2048);
+            sqlx::query("INSERT INTO workspace_meta (key, value) VALUES (?, ?)")
+                .bind(format!("burst_{index}"))
+                .bind(payload)
+                .execute(&pool)
+                .await
+                .expect("burst insert");
+        }
+        let (count, bytes): (i64, i64) = sqlx::query_as(
+            "SELECT COUNT(*), COALESCE(SUM(length(world_id) + length(resource_kind) + length(resource_id)              + COALESCE(length(resource_revision), 0) + length(change_kind) + length(writer_id)), 0)              FROM core_changes",
+        )
+            .fetch_one(&pool)
+            .await
+            .expect("outbox bounds");
+        assert!(count <= 4096, "row retention bound: got {count}");
+        assert!(bytes <= 8_388_608, "byte retention bound: got {bytes}");
+        pool.close().await;
+        release_retained_writer_guards(&burst_db);
     }
 
     // ── preserved pre-activation state on the fixture database ──────────────
