@@ -706,11 +706,6 @@ impl PromptExecutor for HostPromptExecutor {
             ) => r,
         }
         .map_err(|e| CapabilityError::TransientExternal(format!("host exec failed: {e}")))?;
-        eprintln!(
-            "[gap-diag] host-prompt-handoff returned run={} step={}",
-            request.run_id,
-            expected_step.as_deref().unwrap_or("prompt")
-        );
 
         // 8. Drain the stream, collecting MessageDelta only, while listening
         //    to the coordinator cancellation token concurrently (A5).
@@ -734,20 +729,10 @@ impl PromptExecutor for HostPromptExecutor {
         } else {
             None
         };
-        eprintln!(
-            "[gap-diag] prompt-drain begin run={} step={}",
-            request.run_id,
-            expected_step.as_deref().unwrap_or("prompt")
-        );
         let terminal = loop {
             tokio::select! {
                 biased;
                 () = cancel.cancelled(), if !cancel_triggered => {
-                    eprintln!(
-                        "[gap-diag] arm=prompt-cancel-mid-drain run={} step={}",
-                        request.run_id,
-                        expected_step.as_deref().unwrap_or("prompt")
-                    );
                     cancel_triggered = true;
                     // P1 (rereview-4): the Host cancel request is bounded by
                     // the configured shutdown timeout. A provider that fails
@@ -773,10 +758,6 @@ impl PromptExecutor for HostPromptExecutor {
                                 "host cancel returned an error; abandoning cooperative drain"
                             );
                             cancel_unconfirmed = true;
-                            eprintln!(
-                                "[gap-diag] arm=drain-abandon-cancel-error run={}",
-                                request.run_id
-                            );
                             break Err(CapabilityError::Cancelled);
                         }
                         Err(_) => {
@@ -786,10 +767,6 @@ impl PromptExecutor for HostPromptExecutor {
                                 "host cancel timed out; abandoning cooperative drain"
                             );
                             cancel_unconfirmed = true;
-                            eprintln!(
-                                "[gap-diag] arm=drain-abandon-cancel-timeout run={}",
-                                request.run_id
-                            );
                             break Err(CapabilityError::Cancelled);
                         }
                     }
@@ -883,10 +860,6 @@ impl PromptExecutor for HostPromptExecutor {
         //    `Interrupted` disposition when cleanup cannot be confirmed —
         //    never a false successful cancellation.
         if request.cancellation.is_cancelled() {
-            eprintln!(
-                "[gap-diag] arm=post-cancel-cleanup run={} unconfirmed={cancel_unconfirmed}",
-                request.run_id
-            );
             if !cancel_unconfirmed {
                 let drain_result = tokio::time::timeout(self.timeouts.shutdown_duration(), async {
                     let mut drain = std::pin::pin!(stream);

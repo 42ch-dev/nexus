@@ -17,8 +17,23 @@ use std::sync::Arc;
 // EndTask — terminal node returning NextAction::End
 // ---------------------------------------------------------------------------
 
-/// A terminal task that marks the graph as complete.
-struct EndTask;
+/// A terminal task that marks a graph as complete.
+///
+/// Shared by the system graph and by preset inner graphs (see
+/// [`crate::preset::loader`]): graph-flow only reports `Completed` when a task
+/// returns `NextAction::End`, so every graph needs an explicit terminal node.
+pub(crate) struct EndTask {
+    /// Response text recorded for the terminal step.
+    message: String,
+}
+
+impl EndTask {
+    pub(crate) fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
 
 #[async_trait]
 impl Task for EndTask {
@@ -30,10 +45,7 @@ impl Task for EndTask {
         &self,
         _context: graph_flow::Context,
     ) -> Result<TaskResult, graph_flow::GraphError> {
-        Ok(TaskResult::new(
-            Some("_system.maintenance completed".to_string()),
-            NextAction::End,
-        ))
+        Ok(TaskResult::new(Some(self.message.clone()), NextAction::End))
     }
 }
 
@@ -130,7 +142,7 @@ pub fn build(registry: Arc<CapabilityRegistry>) -> Arc<Graph> {
     let outbox_flush = PresetCapabilityTask::new("outbox.flush", "outbox_flush", registry.clone());
     let registry_refresh =
         PresetCapabilityTask::new("registry.refresh", "registry_refresh", registry);
-    let end: Arc<dyn Task> = Arc::new(EndTask);
+    let end: Arc<dyn Task> = Arc::new(EndTask::new("_system.maintenance completed"));
 
     let graph = graph_flow::GraphBuilder::new("_system.maintenance")
         .add_task(sync_pull)
