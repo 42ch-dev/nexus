@@ -179,7 +179,8 @@ pub fn adapter_from_catalog_entry(
                 let provider = DshNativeProvider::new(
                     entry.provider_id.clone(),
                     entry.display_name.clone(),
-                    dsh_bin, &provider_config.args,
+                    dsh_bin,
+                    &provider_config.args,
                     provider_config.env,
                     timeouts,
                 )?;

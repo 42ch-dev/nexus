@@ -475,7 +475,8 @@ async fn dsh_happy_path_conforms() {
     let provider = DshNativeProvider::new(
         ProviderId::new("conformance-dsh"),
         "Conformance".to_string(),
-        Some(DSH_FIXTURE.to_string()), &[],
+        Some(DSH_FIXTURE.to_string()),
+        &[],
         env,
         TimeoutConfig::default(),
     )
@@ -499,7 +500,8 @@ async fn dsh_mid_stream_tool_call_conforms() {
     let provider = DshNativeProvider::new(
         ProviderId::new("conformance-dsh"),
         "Conformance".to_string(),
-        Some(DSH_FIXTURE.to_string()), &[],
+        Some(DSH_FIXTURE.to_string()),
+        &[],
         env,
         TimeoutConfig::default(),
     )
@@ -526,7 +528,8 @@ async fn dsh_malformed_frame_fails_once_with_decode_error() {
     let provider = DshNativeProvider::new(
         ProviderId::new("conformance-dsh"),
         "Conformance".to_string(),
-        Some(DSH_FIXTURE.to_string()), &[],
+        Some(DSH_FIXTURE.to_string()),
+        &[],
         env,
         TimeoutConfig::default(),
     )
@@ -557,7 +560,8 @@ async fn dsh_cancel_is_honest_noop() {
     let provider = DshNativeProvider::new(
         ProviderId::new("conformance-dsh"),
         "Conformance".to_string(),
-        Some(DSH_FIXTURE.to_string()), &[],
+        Some(DSH_FIXTURE.to_string()),
+        &[],
         env,
         TimeoutConfig::default(),
     )
@@ -613,7 +617,8 @@ async fn dsh_two_messages_conforms() {
     let provider = DshNativeProvider::new(
         ProviderId::new("conformance-dsh"),
         "Conformance".to_string(),
-        Some(DSH_FIXTURE.to_string()), &[],
+        Some(DSH_FIXTURE.to_string()),
+        &[],
         env,
         TimeoutConfig::default(),
     )
@@ -636,7 +641,8 @@ async fn dsh_partial_then_fail_conforms_with_one_terminal() {
     let provider = DshNativeProvider::new(
         ProviderId::new("conformance-dsh"),
         "Conformance".to_string(),
-        Some(DSH_FIXTURE.to_string()), &[],
+        Some(DSH_FIXTURE.to_string()),
+        &[],
         env,
         TimeoutConfig::default(),
     )

@@ -10,6 +10,12 @@ pub struct WorkspaceOpen {
     executor: Option<Arc<dyn WorkspaceExecutor>>,
 }
 
+impl Default for WorkspaceOpen {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WorkspaceOpen {
     #[must_use]
     pub fn new() -> Self {
@@ -53,6 +59,12 @@ impl Capability for WorkspaceOpen {
 
 pub struct WorkspaceCommit {
     executor: Option<Arc<dyn WorkspaceExecutor>>,
+}
+
+impl Default for WorkspaceCommit {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl WorkspaceCommit {
@@ -104,6 +116,7 @@ impl Capability for WorkspaceCommit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
     use crate::capability::WorkspaceExecutor;
     use async_trait::async_trait;
     use nexus_contracts::local::orchestration::{
@@ -124,7 +137,7 @@ mod tests {
                     workspace_root: "/tmp".into(),
                     path: input.path,
                     existed: false,
-                    file_hashes: Default::default(),
+                    file_hashes: HashMap::default(),
                 },
             })
         }

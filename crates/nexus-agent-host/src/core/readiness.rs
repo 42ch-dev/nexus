@@ -96,8 +96,7 @@ impl ProviderEntry {
             capabilities: desc.capabilities,
             health: health.clone(),
         };
-        let identity =
-            CandidateIdentity::from_registration(desc.provider_id, &metadata.launch);
+        let identity = CandidateIdentity::from_registration(desc.provider_id, &metadata.launch);
         Self {
             metadata,
             adapter: Some(adapter),

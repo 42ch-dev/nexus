@@ -351,11 +351,8 @@ impl crate::HostFacade for HostManager {
         // Discovery replaces ambient boot registration unless tests pre-registered.
         let pre_registered = !self.providers.read().await.is_empty();
         if !pre_registered {
-            let discovered = discover_provider_entries(
-                &host_config,
-                &config.timeouts,
-                &permission_resolver,
-            )?;
+            let discovered =
+                discover_provider_entries(&host_config, &config.timeouts, &permission_resolver)?;
             *self.providers.write().await = discovered;
         }
 

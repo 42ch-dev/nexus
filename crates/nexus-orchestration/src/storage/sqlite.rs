@@ -1395,7 +1395,6 @@ async fn run_settle_failed_cas(
 /// Classify a zero-row restore fence: distinguish a revision mismatch from a
 /// non-steppable row, with corrupt clock/status shapes surfaced as hard
 /// storage errors before either (Important 6).
-
 async fn classify_restore_fence_miss(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     session_id: &SessionId,

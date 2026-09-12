@@ -253,7 +253,8 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
     let explicit = DshNativeProvider::new(
         ProviderId::new("dsh-native"),
         "Configured".to_string(),
-        Some(MOCK_DSH.to_string()), &[],
+        Some(MOCK_DSH.to_string()),
+        &[],
         env.clone(),
         timeouts(),
     )
@@ -277,7 +278,8 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
         let via_path = DshNativeProvider::new(
             ProviderId::new("dsh-native"),
             "Path".to_string(),
-            None, &[],
+            None,
+            &[],
             env.clone(),
             timeouts(),
         )
@@ -301,7 +303,8 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
         let via_env = DshNativeProvider::new(
             ProviderId::new("dsh-native"),
             "Env".to_string(),
-            None, &[],
+            None,
+            &[],
             env.clone(),
             timeouts(),
         )
@@ -323,7 +326,8 @@ async fn dsh_routes_configured_path_and_env_all_reach_a_real_handshake() {
         let missing = DshNativeProvider::new(
             ProviderId::new("dsh-native"),
             "Missing".to_string(),
-            None, &[],
+            None,
+            &[],
             env,
             timeouts(),
         )
@@ -360,7 +364,8 @@ async fn dsh_probe_binds_verified_cwd_for_ordinary_and_sealed_recipes() {
     let provider = DshNativeProvider::new(
         ProviderId::new("dsh-native"),
         "Cwd".to_string(),
-        Some(MOCK_DSH.to_string()), &[],
+        Some(MOCK_DSH.to_string()),
+        &[],
         HashMap::from([
             (
                 "REQ_LOG".to_string(),
@@ -423,7 +428,8 @@ async fn dsh_probe_initialize_timeout_is_unavailable_with_no_live_child() {
     let provider = DshNativeProvider::new(
         ProviderId::new("dsh-native"),
         "Timeout".to_string(),
-        Some(MOCK_DSH.to_string()), &[],
+        Some(MOCK_DSH.to_string()),
+        &[],
         HashMap::from([
             (
                 "REQ_LOG".to_string(),

@@ -230,7 +230,10 @@ impl DeliveryBudget {
 
     #[cfg(test)]
     fn test_pending_payload_bytes(&self) -> usize {
-        *self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        *self
+            .pending
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
@@ -250,11 +253,15 @@ fn publish_completed_run_timing(
     run_timing: &StdMutex<DshStreamingRunTiming>,
     snapshots: &RunTimingSnapshots,
 ) {
-    let timing = run_timing.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let timing = run_timing
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let (Some(first_callback), Some(run_completed)) =
         (timing.first_callback, timing.run_completed)
     {
-        let mut map = snapshots.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut map = snapshots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         map.insert(
             op_id.clone(),
             DshStreamingRunTiming {
@@ -328,7 +335,10 @@ impl StreamObserver {
                     return;
                 }
                 {
-                    let mut timing = self.run_timing.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let mut timing = self
+                        .run_timing
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     if timing.first_callback.is_none() {
                         timing.first_callback = Some(Instant::now());
                     }
@@ -1334,7 +1344,7 @@ impl DshNativeProvider {
             ProviderId::new("dsh-native"),
             "DeepSeek Harness (native)".to_string(),
             None,
-            Vec::new(),
+            &[],
             HashMap::new(),
             TimeoutConfig::default(),
         )
@@ -1353,7 +1363,9 @@ impl DshNativeProvider {
                 .get(session_id)
                 .map(|native| Arc::clone(&native.completed_run_timings))
         }?;
-        let mut guard = snapshots.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut guard = snapshots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         guard.remove(op_id)
     }
 
@@ -1371,7 +1383,7 @@ impl DshNativeProvider {
             ProviderId::new("dsh-native"),
             "DeepSeek Harness (native)".to_string(),
             dsh_bin,
-            Vec::new(),
+            &[],
             HashMap::new(),
             TimeoutConfig::default(),
         )
@@ -1811,8 +1823,9 @@ impl DshNativeProvider {
                             )
                         } else {
                             {
-                                let mut timing =
-                                    run_timing.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                                let mut timing = run_timing
+                                    .lock()
+                                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                                 timing.run_completed = Some(Instant::now());
                             }
                             publish_completed_run_timing(
@@ -2542,7 +2555,8 @@ mod tests {
         DshNativeProvider::new(
             ProviderId::new(provider_id),
             "Test".to_string(),
-            Some(MOCK_DSH_AGENT.to_string()), &[],
+            Some(MOCK_DSH_AGENT.to_string()),
+            &[],
             env,
             TimeoutConfig::default(),
         )
@@ -2557,7 +2571,8 @@ mod tests {
         DshNativeProvider::new(
             ProviderId::new(provider_id),
             "Test".to_string(),
-            Some(MOCK_DSH_AGENT.to_string()), &[],
+            Some(MOCK_DSH_AGENT.to_string()),
+            &[],
             env,
             timeouts,
         )
@@ -2815,7 +2830,8 @@ mod tests {
         let result = DshNativeProvider::new(
             ProviderId::new("args-dsh"),
             "Args".to_string(),
-            None, &["--verbose".to_string()],
+            None,
+            &["--verbose".to_string()],
             HashMap::new(),
             TimeoutConfig::default(),
         );
@@ -3584,7 +3600,8 @@ mod tests {
         let provider = DshNativeProvider::new(
             ProviderId::new("nonexistent-dsh-xyz"),
             "Fake".to_string(),
-            Some("nonexistent_dsh_runtime_xyz_12345".to_string()), &[],
+            Some("nonexistent_dsh_runtime_xyz_12345".to_string()),
+            &[],
             HashMap::new(),
             TimeoutConfig::default(),
         )
@@ -4067,7 +4084,9 @@ mod tests {
             reunify.await.expect("reunify task");
             match close.await {
                 Ok(()) => {}
-                Err(error) => panic!("confirmed close must succeed, got: {error:?}"),
+                // `CleanupError` deliberately has no `Debug`; this test only
+                // needs to know the close did not confirm.
+                Err(_error) => panic!("confirmed close must succeed"),
             }
         })
         .await
@@ -5303,7 +5322,6 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-
     #[allow(clippy::too_many_lines)] // one end-to-end fixture journey; splitting would obscure the sequence
     async fn wire_child_named_dsh_full_handshake_and_confirmed_exit() {
         // This test holds the env lock itself (PATH isolation must cover
@@ -5320,7 +5338,8 @@ mod tests {
         let provider = DshNativeProvider::new(
             ProviderId::new("test-dsh-named"),
             "Test".to_string(),
-            None, &[],
+            None,
+            &[],
             stub_env(&req_log, &dsh_home),
             TimeoutConfig::default(),
         )
@@ -5450,7 +5469,8 @@ mod tests {
                     .join("definitely-missing-dsh")
                     .to_string_lossy()
                     .into_owned(),
-            ), &[],
+            ),
+            &[],
             stub_env(&req_log, &temp_dir.path().join("dsh-home")),
             TimeoutConfig::default(),
         )
@@ -5483,7 +5503,8 @@ mod tests {
         let provider = DshNativeProvider::new(
             ProviderId::new("test-dsh-notexec"),
             "Test".to_string(),
-            Some(not_exec.to_string_lossy().into_owned()), &[],
+            Some(not_exec.to_string_lossy().into_owned()),
+            &[],
             stub_env(&req_log, &temp_dir.path().join("dsh-home")),
             TimeoutConfig::default(),
         )

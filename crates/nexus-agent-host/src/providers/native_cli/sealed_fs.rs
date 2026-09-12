@@ -95,16 +95,16 @@ pub fn check_dir_boundary(fd: &OwnedFd, require_owner: bool) -> Result<(), Strin
 /// Inode identity of one pinned descriptor (dev + ino) for swap
 /// revalidation.
 pub fn inode_of(fd: &OwnedFd) -> Result<(u64, u64), String> {
-    let stat = rustix::fs::fstat(fd).map_err(|error| {
-        format!(
-            "could not stat a pinned descriptor ({})",
-            errno_name(error)
-        )
-    })?;
-    // dev/ino are non-negative kernel identifiers; `try_from` keeps the
-    // conversion explicit instead of an unchecked `as`.
-    let dev = u64::try_from(stat.st_dev).map_err(|_| "negative device id".to_string())?;
-    let ino = u64::try_from(stat.st_ino).map_err(|_| "negative inode number".to_string())?;
+    let stat = rustix::fs::fstat(fd)
+        .map_err(|error| format!("could not stat a pinned descriptor ({})", errno_name(error)))?;
+    // `dev_t`/`ino_t` are OPAQUE identity values, not numbers: on Darwin a
+    // high-bit device id can be negative as a signed integer while being a
+    // perfectly valid identity. Widening through `as` preserves the bit
+    // pattern and therefore the identity; rejecting "negative" values would
+    // invent a failure for legitimate IDs, and `try_from` would report them as
+    // errors. The comparison only ever uses these for equality.
+    #[allow(clippy::cast_sign_loss)]
+    let (dev, ino) = (stat.st_dev as u64, stat.st_ino as u64);
     Ok((dev, ino))
 }
 
@@ -125,12 +125,8 @@ pub fn ensure_dir_nofollow_absolute(path: &Path) -> Result<OwnedFd, String> {
 
 fn walk_absolute(path: &Path, create_missing: bool) -> Result<OwnedFd, String> {
     debug_assert!(path.is_absolute());
-    let mut fd = rustix::fs::open("/", DIR_OPEN, Mode::empty()).map_err(|error| {
-        format!(
-            "could not open the filesystem root ({})",
-            errno_name(error)
-        )
-    })?;
+    let mut fd = rustix::fs::open("/", DIR_OPEN, Mode::empty())
+        .map_err(|error| format!("could not open the filesystem root ({})", errno_name(error)))?;
     for component in path.components() {
         let name = match component {
             // Root is where the walk starts; `.` is kernel-resolved relative

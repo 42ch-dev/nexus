@@ -269,7 +269,7 @@ pub enum SettlementResult {
 impl SettlementResult {
     /// The durable record either written or observed.
     #[must_use]
-    pub fn record(&self) -> &RunRecord {
+    pub const fn record(&self) -> &RunRecord {
         match self {
             Self::Applied(record) | Self::Observed(record) => record,
         }

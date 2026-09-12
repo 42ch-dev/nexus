@@ -2093,10 +2093,7 @@ impl EngineSharedState {
                 match commit_result {
                     Ok((owned_commit, durable_status)) => {
                         status = durable_status;
-                        if !owned_commit {
-                            // Observed terminal winner — leave coordinator
-                            // cleanup to the owner that won the CAS.
-                        } else {
+                        if owned_commit {
                             // The parent's `commit_transition` persisted each
                             // child checkpoint with `state_revision + 1` (the
                             // store's ON CONFLICT bump). Synchronize the
@@ -2175,6 +2172,10 @@ impl EngineSharedState {
                                         .remove(&session_id.0);
                                 }
                             }
+                        
+                        } else {
+                            // Observed terminal winner — leave coordinator
+                            // cleanup to the owner that won the CAS.
                         }
                     }
                     Err(commit_err) => {
@@ -3387,7 +3388,9 @@ impl GraphFlowEngine {
         match std::sync::Arc::get_mut(&mut self.state) {
             Some(state) => state.set_workspace_state_provider(provider),
             None => {
-                tracing::warn!("workspace state provider not wired: engine shared state is aliased")
+                tracing::warn!(
+                    "workspace state provider not wired: engine shared state is aliased"
+                );
             }
         }
     }
