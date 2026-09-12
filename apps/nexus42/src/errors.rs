@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+#[cfg(feature = "legacy-cli")]
 use nexus_acp_host::AcpError;
 
 /// Nexus CLI result type
@@ -33,8 +34,10 @@ pub enum CliError {
 
     CreatorNotSelected,
 
+    #[cfg(feature = "legacy-cli")]
     Network(reqwest::Error),
 
+    #[cfg(feature = "legacy-cli")]
     Database(sqlx::Error),
 
     Io(std::io::Error),
@@ -48,6 +51,7 @@ pub enum CliError {
         message: String,
     },
 
+    #[cfg(feature = "legacy-cli")]
     Acp(AcpError),
 
     /// Operation requires platform connectivity but current mode prohibits it.
@@ -199,10 +203,13 @@ pub enum CliError {
 impl std::error::Error for CliError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            #[cfg(feature = "legacy-cli")]
             Self::Network(err) => Some(err),
+            #[cfg(feature = "legacy-cli")]
             Self::Database(err) => Some(err),
             Self::Io(err) | Self::LockIo(err) => Some(err),
             Self::Json(err) => Some(err),
+            #[cfg(feature = "legacy-cli")]
             Self::Acp(err) => Some(err),
             _ => None,
         }
@@ -335,12 +342,15 @@ impl fmt::Display for CliError {
 
             // Use #[error] messages for other variants
             Self::Daemon { message } => write!(f, "Daemon error: {message}"),
+            #[cfg(feature = "legacy-cli")]
             Self::Network(err) => write!(f, "Network error: {err}"),
+            #[cfg(feature = "legacy-cli")]
             Self::Database(err) => write!(f, "Database error: {err}"),
             Self::Io(err) => write!(f, "IO error: {err}"),
             Self::Json(err) => write!(f, "JSON error: {err}"),
             Self::Config(msg) => write!(f, "Configuration error: {msg}"),
             Self::Api { status, message } => write!(f, "API error: {status} — {message}"),
+            #[cfg(feature = "legacy-cli")]
             Self::Acp(err) => write!(f, "ACP error: {err}"),
             Self::PlatformOperationProhibited { mode, operation } => {
                 write!(
@@ -431,6 +441,7 @@ impl From<anyhow::Error> for CliError {
     }
 }
 
+#[cfg(feature = "legacy-cli")]
 impl From<chrono::ParseError> for CliError {
     fn from(err: chrono::ParseError) -> Self {
         Self::Other(format!("Date parse error: {err}"))
@@ -448,12 +459,14 @@ impl From<crate::domain::DomainError> for CliError {
     }
 }
 
+#[cfg(feature = "legacy-cli")]
 impl From<nexus_creator_memory::errors::MemoryError> for CliError {
     fn from(err: nexus_creator_memory::errors::MemoryError) -> Self {
         Self::Other(format!("Memory error: {err}"))
     }
 }
 
+#[cfg(feature = "legacy-cli")]
 impl From<reqwest::Error> for CliError {
     fn from(err: reqwest::Error) -> Self {
         // R-V133P1-06: connection-refused / timeout → DaemonNotRunning
@@ -465,6 +478,7 @@ impl From<reqwest::Error> for CliError {
     }
 }
 
+#[cfg(feature = "legacy-cli")]
 impl From<sqlx::Error> for CliError {
     fn from(err: sqlx::Error) -> Self {
         Self::Database(err)
@@ -483,18 +497,21 @@ impl From<serde_json::Error> for CliError {
     }
 }
 
+#[cfg(feature = "legacy-cli")]
 impl From<AcpError> for CliError {
     fn from(err: AcpError) -> Self {
         Self::Acp(err)
     }
 }
 
+#[cfg(feature = "legacy-cli")]
 impl From<nexus_local_db::LocalDbError> for CliError {
     fn from(err: nexus_local_db::LocalDbError) -> Self {
         Self::Other(format!("local database error: {err}"))
     }
 }
 
+#[cfg(feature = "legacy-cli")]
 impl From<nexus_cloud_sync::errors::SyncError> for CliError {
     fn from(err: nexus_cloud_sync::errors::SyncError) -> Self {
         match err {
@@ -511,6 +528,7 @@ impl From<nexus_cloud_sync::errors::SyncError> for CliError {
     }
 }
 
+#[cfg(feature = "legacy-cli")]
 impl CliError {
     /// Convert a [`SyncError`] into a `CreatorVerificationFailed` error.
     ///
@@ -533,7 +551,7 @@ impl CliError {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy-cli"))]
 mod tests {
     use super::*;
 
