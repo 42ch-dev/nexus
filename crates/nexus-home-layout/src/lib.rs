@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 ///
 /// V1.148 P3 N-C0: moved here from `nexus-cloud-sync` so the path-layout SSOT
 /// also owns the value; `nexus-cloud-sync::device_id` re-exports it.
+pub mod active_context;
 pub mod device_id;
 
 const NEXUS_DIR: &str = ".nexus42";
