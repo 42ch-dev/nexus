@@ -4,8 +4,19 @@ import {
   assertCompatibility,
   expectedPlatformPackage,
   expectedTargetTriple,
+  fenceCompatibilityPair,
   readPackageManifest,
 } from '../dist/loader.js';
+import {
+  CORE_CHANGES_REQUEST_SHAPE,
+  CORE_HOST_QUERY_SHAPE,
+  NATIVE_OPEN_OPTIONS_SHAPE,
+  PROVIDER_CALL_SHAPE,
+  REQUIRED_NAPI_MINIMUM,
+  WORLD_KB_PATCH_ENTITY_SHAPE,
+  encodeWireBuffer,
+  stringifyWire,
+} from '../dist/validate.js';
 
 const expected = {
   target_triple: expectedTargetTriple(),
@@ -95,5 +106,214 @@ describe('loader negative', () => {
     if (target.libc === 'glibc') {
       assert.ok(Array.isArray(manifest.libc) && manifest.libc.includes('gnu'), 'libc is required');
     }
+  });
+
+  test('rejects a manifest whose declared N-API minimum is not the contract value', () => {
+    assert.throws(
+      () => assertCompatibility({ ...valid, napi_minimum: REQUIRED_NAPI_MINIMUM + 1 }, expected),
+      /napi_minimum must be the contract value/,
+    );
+  });
+
+  test('rejects a DB range that disagrees with the adjacent manifest', () => {
+    const adjacent = { ...valid };
+    assert.throws(
+      () =>
+        fenceCompatibilityPair(
+          { ...valid, db_schema_min: 12, db_schema_max: 12 },
+          { ...adjacent, db_schema_min: 11, db_schema_max: 11 },
+          expected,
+        ),
+      /db_schema_min mismatch/,
+    );
+  });
+
+  test('rejects a DB max that disagrees with the adjacent manifest', () => {
+    const adjacent = { ...valid };
+    assert.throws(
+      () =>
+        fenceCompatibilityPair(
+          { ...valid, db_schema_min: 12, db_schema_max: 13 },
+          { ...adjacent, db_schema_min: 12, db_schema_max: 12 },
+          expected,
+        ),
+      /db_schema_max mismatch/,
+    );
+  });
+
+  test('rejects a hash that disagrees with the adjacent manifest', () => {
+    assert.throws(
+      () =>
+        fenceCompatibilityPair(
+          { ...valid, contract_tree_sha256: 'c'.repeat(64) },
+          { ...valid, contract_tree_sha256: 'd'.repeat(64) },
+          expected,
+        ),
+      /contract_tree_sha256 mismatch/,
+    );
+  });
+
+  test('accepts a fully agreeing manifest pair', () => {
+    fenceCompatibilityPair({ ...valid }, { ...valid }, expected);
+  });
+});
+
+describe('facade wire validation', () => {
+  test('rejects empty native open options', () => {
+    assert.throws(() => stringifyWire({}, NATIVE_OPEN_OPTIONS_SHAPE, 'options'), /required/);
+  });
+
+  test('rejects unknown native open option fields', () => {
+    assert.throws(
+      () =>
+        stringifyWire(
+          { user_home: '/tmp/x', access: 'read_only', extra: 1 },
+          NATIVE_OPEN_OPTIONS_SHAPE,
+          'options',
+        ),
+      /unknown field/,
+    );
+  });
+
+  test('rejects a bad access enum value', () => {
+    assert.throws(
+      () =>
+        stringifyWire(
+          { user_home: '/tmp/x', access: 'root' },
+          NATIVE_OPEN_OPTIONS_SHAPE,
+          'options',
+        ),
+      /allowed values/,
+    );
+  });
+
+  test('preserves omission vs explicit null in options', () => {
+    const omitted = JSON.parse(stringifyWire({ user_home: '/tmp/x', access: 'read_only' }, NATIVE_OPEN_OPTIONS_SHAPE, 'options'));
+    assert.ok(!('allow_uninitialized' in omitted));
+    const explicit = JSON.parse(stringifyWire({ user_home: '/tmp/x', access: 'read_only', allow_uninitialized: false }, NATIVE_OPEN_OPTIONS_SHAPE, 'options'));
+    assert.equal(explicit.allow_uninitialized, false);
+  });
+
+  test('rejects a provider call without payload', () => {
+    assert.throws(
+      () =>
+        stringifyWire(
+          { method: 'probe', request_id: 'r', deadline_ms: 1000 },
+          PROVIDER_CALL_SHAPE,
+          'request',
+        ),
+      /payload.*required/,
+    );
+  });
+
+  test('rejects a non-object provider payload', () => {
+    assert.throws(
+      () =>
+        stringifyWire(
+          { method: 'probe', request_id: 'r', deadline_ms: 1000, payload: 'nope' },
+          PROVIDER_CALL_SHAPE,
+          'request',
+        ),
+      /expected an object/,
+    );
+  });
+
+  test('rejects an unknown provider method', () => {
+    assert.throws(
+      () =>
+        stringifyWire(
+          { method: 'delete', request_id: 'r', deadline_ms: 1000, payload: {} },
+          PROVIDER_CALL_SHAPE,
+          'request',
+        ),
+      /allowed values/,
+    );
+  });
+
+  test('rejects a world patch with neither field', () => {
+    assert.throws(
+      () =>
+        stringifyWire(
+          { entity_id: 'kb_abc123', expected_version: 0, patch: {} },
+          WORLD_KB_PATCH_ENTITY_SHAPE,
+          'request',
+        ),
+      /at least 1 property/,
+    );
+  });
+
+  test('rejects an unknown nested patch field', () => {
+    assert.throws(
+      () =>
+        stringifyWire(
+          { entity_id: 'kb_abc123', expected_version: 0, patch: { nope: true } },
+          WORLD_KB_PATCH_ENTITY_SHAPE,
+          'request',
+        ),
+      /unknown field/,
+    );
+  });
+
+  test('rejects an invalid nested block_type', () => {
+    assert.throws(
+      () =>
+        stringifyWire(
+          { entity_id: 'kb_abc123', expected_version: 0, patch: { block_type: 'widget' } },
+          WORLD_KB_PATCH_ENTITY_SHAPE,
+          'request',
+        ),
+      /allowed values/,
+    );
+  });
+
+  test('rejects an out-of-range nested title length', () => {
+    assert.throws(
+      () =>
+        stringifyWire(
+          { entity_id: 'kb_abc123', expected_version: 0, patch: { title: '' } },
+          WORLD_KB_PATCH_ENTITY_SHAPE,
+          'request',
+        ),
+      /minimum length/,
+    );
+  });
+
+  test('rejects unsafe integers nested inside a patch', () => {
+    assert.throws(
+      () =>
+        stringifyWire(
+          { entity_id: 'kb_abc123', expected_version: 0, patch: { body: { revision: 9007199254740993 } } },
+          WORLD_KB_PATCH_ENTITY_SHAPE,
+          'request',
+        ),
+      /exactly representable/,
+    );
+  });
+
+  test('rejects a host query without a discriminator', () => {
+    assert.throws(() => stringifyWire({}, CORE_HOST_QUERY_SHAPE, 'request'), /required/);
+  });
+
+  test('rejects an out-of-range changes limit', () => {
+    assert.throws(
+      () => stringifyWire({ after_sequence: '0', limit: 4096 }, CORE_CHANGES_REQUEST_SHAPE, 'request'),
+      /above the maximum/,
+    );
+  });
+
+  test('rejects a non-numeric-decimal after_sequence', () => {
+    assert.throws(
+      () => stringifyWire({ after_sequence: 'abc' }, CORE_CHANGES_REQUEST_SHAPE, 'request'),
+      /pattern/,
+    );
+  });
+
+  test('accepts and encodes a representative valid payload', () => {
+    const buffer = encodeWireBuffer(
+      { entity_id: 'kb_abc123', expected_version: 0, patch: { title: 'Wire Hero' } },
+      WORLD_KB_PATCH_ENTITY_SHAPE,
+      'request',
+    );
+    assert.ok(buffer instanceof Uint8Array && buffer.length > 0);
   });
 });

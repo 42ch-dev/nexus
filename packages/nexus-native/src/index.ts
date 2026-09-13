@@ -15,8 +15,8 @@ import type {
   WorldKbPatchEntityResponse,
 } from '@42ch/nexus-contracts';
 import {
-  assertCompatibility,
   expectedPlatformPackage,
+  fenceCompatibilityPair,
   loadNativeBinding,
   loadNodePath,
   readBundledCompatibility,
@@ -134,12 +134,10 @@ export function nativeCompatibility(): NativeCompatibility {
   const adjacent = readBundledCompatibility(nodePath);
   const target = expectedPlatformPackage();
   const pkgManifest = readPackageManifest(target.name);
-  const expected = {
+  fenceCompatibilityPair(manifest, adjacent, {
     target_triple: target.targetTriple,
     package_version: pkgManifest.version,
-  };
-  assertCompatibility(manifest, { ...expected, contract_tree_sha256: adjacent.contract_tree_sha256 });
-  assertCompatibility(adjacent, expected);
+  });
   return manifest;
 }
 
@@ -157,12 +155,10 @@ export async function openCore(
   const adjacent = readBundledCompatibility(nodePath);
   const target = expectedPlatformPackage();
   const pkgManifest = readPackageManifest(target.name);
-  const expected = {
+  fenceCompatibilityPair(manifest, adjacent, {
     target_triple: target.targetTriple,
     package_version: pkgManifest.version,
-  };
-  assertCompatibility(manifest, { ...expected, contract_tree_sha256: adjacent.contract_tree_sha256 });
-  assertCompatibility(adjacent, expected);
+  });
 
   const callbacks = providers
     ? {

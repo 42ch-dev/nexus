@@ -1,8 +1,8 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { basename, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -168,26 +168,38 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
     await assert.rejects(() => pending);
   });
 
-  test('failed open retains no host and leaves the environment usable', async () => {
+  test('host start failure after a successful core open leaves no owner', async () => {
     const binding = require(nodePath);
-    const badRoot = mkdtempSync(join(tmpdir(), 'nexus-bad-open-'));
-    const notADirectory = join(badRoot, 'not-a-directory');
-    writeFileSync(notADirectory, 'x');
-    await assert.rejects(async () =>
+    // A `..` component passes the core's home resolution but is rejected by the
+    // host's config/workspace path policy — the core opens, then host.start
+    // fails, which is the branch under test.
+    const home = seedHome();
+    // Built by concatenation: `path.join` would normalize the `..` away.
+    const traversal = `${home}/../${basename(home)}`;
+    let failure = null;
+    try {
       binding.open(
         JSON.stringify({
-          user_home: join(notADirectory, 'home'),
+          user_home: traversal,
           access: 'engine_owner',
           allow_uninitialized: false,
         }),
-      ),
+      );
+    } catch (error) {
+      failure = String(error);
+    }
+    assert.ok(failure, 'host start must fail for a traversal config path');
+    assert.match(failure, /must not contain/i);
+    assert.ok(
+      !failure.includes('interrupted'),
+      `confirmed cleanup must not report Interrupted, got: ${failure}`,
     );
 
-    // The environment survived the failure with no retained owner: a fresh open
-    // succeeds and reports the truth of the newly started host.
-    const home = seedHome();
+    // The environment survived with no retained owner: a fresh open succeeds and
+    // reports the truth of the newly started host.
+    const validHome = seedHome();
     const core = binding.open(
-      JSON.stringify({ user_home: home, access: 'engine_owner', allow_uninitialized: false }),
+      JSON.stringify({ user_home: validHome, access: 'engine_owner', allow_uninitialized: false }),
       {
         call: async () => providerReply('x'),
         next: async () => JSON.stringify({ operation_id: 'x', events: [], has_more: false }),
@@ -195,9 +207,7 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
     );
     const health = JSON.parse(
       new TextDecoder().decode(
-        await core.hostQuery(
-          new TextEncoder().encode(JSON.stringify({ query: 'health' })),
-        ),
+        await core.hostQuery(new TextEncoder().encode(JSON.stringify({ query: 'health' }))),
       ),
     );
     assert.equal(health.health.running, true);

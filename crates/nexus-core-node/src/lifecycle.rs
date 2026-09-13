@@ -11,12 +11,48 @@ use nexus_provider_ports::ProviderPort;
 
 use super::env_state::EnvState;
 
+/// Outcome of tearing down a just-opened core after a failed host start.
+enum FailedOpenCleanup {
+    /// Core closed cleanly: the environment retains no owner.
+    Released,
+    /// Close was interrupted/unconfirmed: the core stays behind the cleanup
+    /// owner and the caller reports `Interrupted`.
+    Retained(CoreCloseReport),
+}
+
+/// A close releases cleanup ownership only when it is closed *and* confirmed.
+#[must_use]
+fn close_released(report: &CoreCloseReport) -> bool {
+    report.state == CoreCloseReportState::Closed && report.cleanup_confirmed
+}
+
+/// Close a core whose open was rolled back. An unconfirmed close is never
+/// silently dropped: the core is retained so the same cleanup ownership
+/// discipline as an explicit close applies.
+async fn cleanup_failed_open(state: &EnvState, core: CoreService) -> FailedOpenCleanup {
+    let report = match core.close().await {
+        Ok(report) => report,
+        Err(_) => CoreCloseReport {
+            state: CoreCloseReportState::Interrupted,
+            cleanup_confirmed: false,
+            pending_operations: vec![],
+            reason: None,
+        },
+    };
+    if close_released(&report) {
+        FailedOpenCleanup::Released
+    } else {
+        state.core.lock().await.replace(Arc::new(core));
+        FailedOpenCleanup::Retained(report)
+    }
+}
+
 /// Open the native core.
 ///
 /// Failure ordering is deliberate: the core opens first, so a failed open has
-/// published no host or provider port. If the host fails to start afterwards,
-/// the freshly opened core is closed before returning, leaving the environment
-/// with no retained owner — the same cleanup ownership close uses.
+/// published no host or provider port. If the host then fails to start, the
+/// freshly opened core is closed; an unconfirmed close keeps the core behind
+/// the cleanup owner and reports `Interrupted` instead of dropping it.
 pub async fn open_core(
     state: Arc<EnvState>,
     options: NativeOpenOptions,
@@ -56,8 +92,16 @@ pub async fn open_core(
         probe_owner: None,
     };
     if let Err(err) = host.start(start_config).await {
-        let _ = core.close().await;
-        return Err(err.to_string());
+        // A partially started host must not linger either; it was never
+        // published to `state`, so best-effort shutdown fully disposes of it.
+        let _ = host.shutdown().await;
+        return Err(match cleanup_failed_open(&state, core).await {
+            FailedOpenCleanup::Released => err.to_string(),
+            FailedOpenCleanup::Retained(report) => format!(
+                "interrupted: host start failed ({err}); core cleanup unconfirmed (state: {:?})",
+                report.state
+            ),
+        });
     }
 
     let provider_port: Arc<dyn ProviderPort> = if let Some(port) = js_port {
@@ -110,4 +154,50 @@ pub async fn close_core(state: &EnvState) -> CoreCloseReport {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
     report
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn report(state: CoreCloseReportState, cleanup_confirmed: bool) -> CoreCloseReport {
+        CoreCloseReport {
+            state,
+            cleanup_confirmed,
+            pending_operations: vec![],
+            reason: None,
+        }
+    }
+
+    #[test]
+    fn confirmed_close_releases_cleanup_ownership() {
+        assert!(close_released(&report(CoreCloseReportState::Closed, true)));
+    }
+
+    #[test]
+    fn unconfirmed_or_interrupted_close_retains_cleanup_ownership() {
+        assert!(!close_released(&report(
+            CoreCloseReportState::Closed,
+            false
+        )));
+        assert!(!close_released(&report(
+            CoreCloseReportState::Interrupted,
+            true
+        )));
+        assert!(!close_released(&report(
+            CoreCloseReportState::Interrupted,
+            false
+        )));
+    }
+
+    #[test]
+    fn unconfirmed_close_reports_interrupted_before_retention() {
+        let retained = report(CoreCloseReportState::Interrupted, false);
+        let message = format!(
+            "interrupted: host start failed (denied); core cleanup unconfirmed (state: {:?})",
+            retained.state
+        );
+        assert!(message.starts_with("interrupted:"));
+        assert!(message.contains("cleanup unconfirmed"));
+    }
 }

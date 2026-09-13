@@ -9,6 +9,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const PLACEHOLDER_HASH = '0'.repeat(64);
 
+/** Fixed N-API contract value declared by `native-compatibility.schema.json`. */
+export const REQUIRED_NAPI_MINIMUM = 8;
+
 export interface ProviderCallbacksNative {
   call(requestJson: string): Promise<string>;
   next(requestJson: string): Promise<string>;
@@ -56,6 +59,9 @@ export interface RuntimeExpectations {
   target_triple: string;
   package_version: string;
   contract_tree_sha256?: string;
+  db_schema_min?: number;
+  db_schema_max?: number;
+  napi_minimum?: number;
 }
 
 export function detectLinuxLibc(): 'glibc' | 'musl' {
@@ -202,6 +208,13 @@ export function assertCompatibility(
   manifest: NativeCompatibility,
   expected?: RuntimeExpectations,
 ): void {
+  // Fixed contract value first: the declared N-API floor is part of the
+  // compatibility contract, not a per-build choice.
+  if (manifest.napi_minimum !== REQUIRED_NAPI_MINIMUM) {
+    throw new Error(
+      `napi_minimum must be the contract value ${REQUIRED_NAPI_MINIMUM}, got ${manifest.napi_minimum}`,
+    );
+  }
   const napiVersion = Number(process.versions.napi ?? '0');
   if (napiVersion < manifest.napi_minimum) {
     throw new Error(`napi version ${napiVersion} < required ${manifest.napi_minimum}`);
@@ -238,5 +251,45 @@ export function assertCompatibility(
     ) {
       throw new Error('contract_tree_sha256 mismatch against the adjacent manifest');
     }
+    if (expected.db_schema_min !== undefined && manifest.db_schema_min !== expected.db_schema_min) {
+      throw new Error(
+        `db_schema_min mismatch: runtime requires ${expected.db_schema_min}, artifact declares ${manifest.db_schema_min}`,
+      );
+    }
+    if (expected.db_schema_max !== undefined && manifest.db_schema_max !== expected.db_schema_max) {
+      throw new Error(
+        `db_schema_max mismatch: runtime requires ${expected.db_schema_max}, artifact declares ${manifest.db_schema_max}`,
+      );
+    }
+    if (expected.napi_minimum !== undefined && manifest.napi_minimum !== expected.napi_minimum) {
+      throw new Error(
+        `napi_minimum mismatch: expected ${expected.napi_minimum}, got ${manifest.napi_minimum}`,
+      );
+    }
   }
+}
+
+/**
+ * Fence the loading pair: the native manifest and the manifest shipped beside
+ * the artifact must each satisfy the host's runtime expectations and must agree
+ * on every compatibility value before the database is opened.
+ */
+export function fenceCompatibilityPair(
+  nativeManifest: NativeCompatibility,
+  adjacentManifest: NativeCompatibility,
+  runtime: { target_triple: string; package_version: string },
+): void {
+  assertCompatibility(nativeManifest, {
+    ...runtime,
+    contract_tree_sha256: adjacentManifest.contract_tree_sha256,
+    db_schema_min: adjacentManifest.db_schema_min,
+    db_schema_max: adjacentManifest.db_schema_max,
+    napi_minimum: adjacentManifest.napi_minimum,
+  });
+  assertCompatibility(adjacentManifest, {
+    ...runtime,
+    db_schema_min: nativeManifest.db_schema_min,
+    db_schema_max: nativeManifest.db_schema_max,
+    napi_minimum: nativeManifest.napi_minimum,
+  });
 }
