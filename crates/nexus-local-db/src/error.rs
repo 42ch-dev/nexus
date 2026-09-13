@@ -394,7 +394,13 @@ impl std::error::Error for LocalDbError {
 
 impl From<sqlx::Error> for LocalDbError {
     fn from(err: sqlx::Error) -> Self {
-        Self::Sqlx(err)
+        if matches!(err, sqlx::Error::PoolTimedOut) {
+            Self::OwnerBusy {
+                resource: "writer pool acquire timeout".to_string(),
+            }
+        } else {
+            Self::Sqlx(err)
+        }
     }
 }
 

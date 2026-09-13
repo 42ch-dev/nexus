@@ -581,6 +581,30 @@ async fn writer_protocol() {
         migrate.await.expect("migrate task").expect("migration after quiescence");
     }
 
+    // ── retention: newest outbox row survives a single >8MiB event (F-9) ────────
+    {
+        let newest_db = dir.path().join("retention_newest_row.db");
+        let pool = open_admitted_pool(&newest_db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+            .await
+            .expect("direct pool for newest-row retention");
+        let giant = "x".repeat(9 * 1024 * 1024);
+        sqlx::query("INSERT INTO workspace_meta (key, value) VALUES ('huge_outbox', ?)")
+            .bind(&giant)
+            .execute(&pool)
+            .await
+            .expect("single large mutation");
+        let (count, max_seq): (i64, i64) = sqlx::query_as(
+            "SELECT COUNT(*), COALESCE(MAX(sequence), 0) FROM core_changes",
+        )
+            .fetch_one(&pool)
+            .await
+            .expect("outbox after huge insert");
+        assert_eq!(count, 1, "newest row must survive byte-budget retention");
+        assert!(max_seq >= 1, "sequence must advance for the inserted row");
+        pool.close().await;
+        release_retained_writer_guards(&newest_db);
+    }
+
     // ── retention burst: row and byte bounds hold after rapid inserts ───────────
     {
         let burst_db = dir.path().join("retention_burst.db");

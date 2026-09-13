@@ -5280,5 +5280,6 @@ BEGIN
       FROM core_changes
     )
     WHERE cum_desc > 8388608
+      AND sequence != NEW.sequence
   );
 END;

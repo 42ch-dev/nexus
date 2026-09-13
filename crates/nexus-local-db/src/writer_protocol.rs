@@ -122,7 +122,7 @@ impl Default for GuardedPoolOptions {
     fn default() -> Self {
         Self {
             max_connections: 8,
-            acquire_timeout: None,
+            acquire_timeout: Some(Duration::from_secs(5)),
         }
     }
 }
@@ -251,6 +251,40 @@ async fn await_cooperative_quiescence(db_path: &Path) -> Result<(), LocalDbError
     }
     Err(LocalDbError::OwnerBusy { resource: format!("{}: cooperative pools still active", target.display()) })
 }
+
+fn cooperative_pools_quiesced(db_path: &Path) -> bool {
+    let target = canonical_db_path(db_path);
+    ACTIVE_GUARDS
+        .lock()
+        .expect("writer guard registry poisoned")
+        .iter()
+        .filter(|((path, _), _)| path == &target)
+        .all(|(_, entry)| entry.pools_quiesced())
+}
+
+async fn close_cooperative_pools(db_path: &Path) {
+    let target = canonical_db_path(db_path);
+    let pools: Vec<SqlitePool> = {
+        let guards = ACTIVE_GUARDS.lock().expect("writer guard registry poisoned");
+        guards
+            .iter()
+            .filter(|((path, _), _)| path == &target)
+            .flat_map(|(_, entry)| {
+                entry
+                    .pools
+                    .lock()
+                    .expect("pool registry poisoned")
+                    .iter()
+                    .map(|reg| reg.handle.clone())
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    };
+    for pool in pools {
+        pool.close().await;
+    }
+}
+
 
 fn migration_lock_path(db_path: &Path) -> PathBuf {
     let canonical = canonical_db_path(db_path);
@@ -733,6 +767,15 @@ pub async fn run_guarded_migrations(db_path: &Path) -> Result<(), LocalDbError> 
         return Ok(());
     }
     await_cooperative_quiescence(db_path).await?;
+    close_cooperative_pools(db_path).await;
+    if !cooperative_pools_quiesced(db_path) {
+        return Err(LocalDbError::OwnerBusy {
+            resource: format!(
+                "{}: cooperative pools still active after close",
+                canonical_db_path(db_path).display()
+            ),
+        });
+    }
     release_retained_guards(db_path);
     let _migration_lock = acquire_exclusive_lock(&migration_lock_path(db_path))?;
     let writer_id = Uuid::new_v4().to_string();
