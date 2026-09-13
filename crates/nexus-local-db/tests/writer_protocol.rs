@@ -529,10 +529,19 @@ async fn writer_protocol() {
         release_retained_writer_guards(&rev_db);
     }
 
-    // ── init_pool quiescence: returned pool blocks migration until closed ─────
+    // ── quiescence: a no-op run must not wait, a pending one must ────────────
     {
         let init_db = dir.path().join("init_pool_quiescence.db");
         let pool = init_pool(&init_db).await.expect("init_pool");
+
+        // Nothing pending: the schema is current, so the guarded path has no
+        // DDL to serialize and must return without waiting for the live pool.
+        run_guarded_migrations(&init_db)
+            .await
+            .expect("a current schema must not wait for cooperative quiescence");
+
+        // A genuinely pending migration still waits for the pool to close.
+        make_migration_pending(&pool).await;
         let migrate_db = init_db.clone();
         let migrate = tokio::spawn(async move {
             run_guarded_migrations(&migrate_db).await
@@ -556,6 +565,8 @@ async fn writer_protocol() {
         let guarded = init_engine_pool(&quiet_db).await.expect("engine guarded pool");
         let survivor = guarded.clone_pool();
         drop(guarded);
+        // Pending work is what makes the wait meaningful; a no-op run fast-paths.
+        make_migration_pending(&survivor).await;
         let migrate_db = quiet_db.clone();
         let migrate = tokio::spawn(async move {
             run_guarded_migrations(&migrate_db).await
@@ -609,6 +620,68 @@ async fn writer_protocol() {
         assert_eq!(row.0, "kept");
         pool.close().await;
     }
+}
+
+/// Force a genuinely pending migration by dropping the newest applied
+/// `_sqlx_migrations` row — the state a binary whose migration set is ahead of
+/// the file would find. The newest migration is idempotent
+/// (`CREATE ... IF NOT EXISTS`), so re-applying it in the same test is safe.
+async fn make_migration_pending(pool: &SqlitePool) {
+    sqlx::query(
+        "DELETE FROM _sqlx_migrations \
+         WHERE version = (SELECT MAX(version) FROM _sqlx_migrations)",
+    )
+    .execute(pool)
+    .await
+    .expect("drop newest applied migration row");
+}
+
+/// v1.189 P1 fix round 1 (proof-matrix DB-1): the guarded-migration fast path.
+///
+/// A workspace whose schema is already current has nothing for the exclusive
+/// migration lock to serialize, so a second in-process opener must not be
+/// forced through cooperative quiescence. That refusal was exactly what broke
+/// the daemon's boot-pool + engine-owner coexistence (World KB handlers 500'd
+/// with `cooperative pools still active`). A genuinely pending migration must
+/// still take the guarded path and refuse while a cooperative pool is live.
+#[tokio::test]
+async fn guarded_migrations_fast_path() {
+    let dir = TempDir::new().expect("tempdir");
+    let db = dir.path().join("fast_path.db");
+
+    // A registered, live cooperative pool — the daemon's boot pool analogue.
+    let live = init_pool(&db).await.expect("init_pool");
+
+    // ── (1) current schema: no-op, and no quiescence wait ───────────────────
+    let started = Instant::now();
+    run_guarded_migrations(&db)
+        .await
+        .expect("current schema must fast-path while a cooperative pool is live");
+    let fast_path_elapsed = started.elapsed();
+    assert!(
+        fast_path_elapsed < Duration::from_secs(1),
+        "fast path must not wait for quiescence; took {fast_path_elapsed:?}"
+    );
+
+    // ── (2) pending migration: still quiescence-gated and bounded ───────────
+    make_migration_pending(&live).await;
+
+    let started = Instant::now();
+    let err = run_guarded_migrations(&db)
+        .await
+        .expect_err("a pending migration must still require cooperative quiescence");
+    let guarded_elapsed = started.elapsed();
+    assert!(
+        matches!(err, LocalDbError::OwnerBusy { .. }),
+        "expected OwnerBusy with a live cooperative pool, got {err:?}"
+    );
+    assert!(
+        guarded_elapsed <= ACQUISITION_BOUND + Duration::from_secs(1),
+        "pending-migration refusal must stay bounded; took {guarded_elapsed:?}"
+    );
+
+    live.close().await;
+    release_retained_writer_guards(&db);
 }
 
 async fn child_main() {

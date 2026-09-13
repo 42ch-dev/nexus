@@ -409,6 +409,77 @@ async fn needs_activation_recovery(db_path: &Path) -> Result<bool, LocalDbError>
     Ok(read_gate_state(db_path).await?.migration_epoch == 0)
 }
 
+/// True only when the workspace is fully provisioned *and* its schema already
+/// matches this binary — i.e. a guarded migration run would be a no-op.
+///
+/// Fail-closed by construction: any unexpected, dirty, unknown, or missing
+/// state returns `false`, which routes the caller through the guarded path
+/// (quiescence + exclusive lock) where the strict checks live.
+async fn migrations_are_current(
+    db_path: &Path,
+    gate: &GateState,
+) -> Result<bool, LocalDbError> {
+    // 1. Protocol initialized and at exactly the version this binary ships.
+    //    `validate_protocol_version` already rejected *newer*; equality (not
+    //    `<=`) also rejects a pre-activation workspace (`protocol_version = 0`).
+    if gate.protocol_version != SUPPORTED_PROTOCOL_VERSION || gate.migration_epoch < 1 {
+        return Ok(false);
+    }
+    if !protocol_tables_present(db_path).await {
+        return Ok(false);
+    }
+    // 2. Schema matches the embedded migrator exactly: not dirty, every source
+    //    migration applied, checksums identical, no extra applied rows.
+    let migrator = sqlx::migrate!("./migrations");
+    let url = sqlite_url(db_path, true);
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .map_err(LocalDbError::from)?;
+    let verdict = current_schema_matches(&pool, &migrator).await;
+    pool.close().await;
+    verdict
+}
+
+async fn current_schema_matches(
+    pool: &SqlitePool,
+    migrator: &sqlx::migrate::Migrator,
+) -> Result<bool, LocalDbError> {
+    use sqlx::migrate::Migrate as _;
+
+    let table_name = migrator.table_name.as_ref();
+    let present: Option<(i64,)> = sqlx::query_as(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?",
+    )
+    .bind(table_name)
+    .fetch_optional(pool)
+    .await?;
+    // Never migrated here: the guarded path owns creating the bookkeeping table.
+    if present.is_none() {
+        return Ok(false);
+    }
+
+    let mut conn = pool.acquire().await.map_err(LocalDbError::from)?;
+    if conn.dirty_version(table_name).await?.is_some() {
+        return Ok(false);
+    }
+    let applied = conn.list_applied_migrations(table_name).await?;
+    drop(conn);
+
+    if applied.len() != migrator.iter().count() {
+        return Ok(false);
+    }
+    for known in migrator.iter() {
+        match applied.iter().find(|row| row.version == known.version) {
+            None => return Ok(false),
+            Some(row) if row.checksum != known.checksum => return Ok(false),
+            Some(_) => {}
+        }
+    }
+    Ok(true)
+}
+
 async fn read_gate_epochs(db_path: &Path) -> Result<(i64, i64), LocalDbError> {
     let gate = read_gate_state(db_path).await?;
     Ok((gate.migration_epoch, gate.engine_epoch))
@@ -646,6 +717,21 @@ pub async fn open_guarded_pool_arc_with(
 pub async fn run_guarded_migrations(db_path: &Path) -> Result<(), LocalDbError> {
     let gate_before = read_gate_state(db_path).await?;
     validate_protocol_version(gate_before.protocol_version)?;
+    // v1.189 P1 fix round 1: no-op fast path.
+    //
+    // The exclusive migration lock exists to serialize *schema changes*; a
+    // caller that finds the schema already current has nothing to serialize
+    // and must not require cooperative quiescence. Without this, an engine
+    // owner opening on a live cooperative pool (daemon boot pool + World KB
+    // handler) is refused with `cooperative pools still active` even though
+    // no migration is pending.
+    //
+    // Fail-closed: every predicate must hold, and each is an equality/absence
+    // check, so an unknown or newer workspace state falls through to the
+    // guarded path rather than being silently accepted.
+    if migrations_are_current(db_path, &gate_before).await? {
+        return Ok(());
+    }
     await_cooperative_quiescence(db_path).await?;
     release_retained_guards(db_path);
     let _migration_lock = acquire_exclusive_lock(&migration_lock_path(db_path))?;

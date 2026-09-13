@@ -216,6 +216,13 @@ tokio-tungstenite = { workspace = true }
 # deps, never compiled.
 [features]
 # v1.189 P1-T3 (RFT-01 §2.1): daemon-free graph/patch cohort — same binary/parser.
+#
+# `chrono` stays in this feature against §2.1's legacy-only listing: the basic
+# cohort compiles `domain::degradation` because the shared `CliConfig` carries
+# `degradation_snapshot: Option<DegradationSnapshot>` (config.rs:3,50,237), and
+# that module is chrono-typed throughout (20 sites). Dropping the direct dep is
+# therefore a contract decision (gate the module / retype the config field),
+# not a bounded cut. Reported for a PM-routed §2.1 amendment.
 basic-cli = ["dep:nexus-core", "dep:chrono"]
 legacy-cli = [
   "dep:nexus-core",
