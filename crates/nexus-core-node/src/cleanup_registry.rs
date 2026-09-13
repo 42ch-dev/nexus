@@ -32,7 +32,16 @@ struct CleanupRegistryInner {
 }
 
 static REGISTRY: OnceLock<Mutex<CleanupRegistryInner>> = OnceLock::new();
-static REAPER_STARTED: OnceLock<()> = OnceLock::new();
+
+const REAPER_IDLE_EXIT: Duration = Duration::from_millis(500);
+const REAPER_POLL: Duration = Duration::from_millis(50);
+
+struct ReaperOwner {
+    handle: Mutex<Option<JoinHandle<()>>>,
+    stop: Arc<AtomicBool>,
+}
+
+static REAPER: OnceLock<ReaperOwner> = OnceLock::new();
 
 fn registry() -> &'static Mutex<CleanupRegistryInner> {
     REGISTRY.get_or_init(|| Mutex::new(CleanupRegistryInner { entries: Vec::new() }))
@@ -101,24 +110,84 @@ pub fn registry_snapshot() -> (usize, usize) {
     (pending, with_owners)
 }
 
-fn ensure_reaper() {
-    REAPER_STARTED.get_or_init(|| {
-        thread::Builder::new()
-            .name("nexus-cleanup-reaper".into())
-            .spawn(|| {
-                loop {
-                    thread::sleep(Duration::from_millis(50));
-                    let reaped = reap_completed();
-                    if reaped == 0 {
-                        let reg = registry().lock().expect("cleanup registry mutex poisoned");
-                        if reg.entries.is_empty() {
-                            thread::sleep(Duration::from_millis(200));
-                        }
-                    }
-                }
-            })
-            .expect("spawn cleanup reaper");
+fn join_finished_reaper_if_any() {
+    let owner = REAPER.get_or_init(|| ReaperOwner {
+        handle: Mutex::new(None),
+        stop: Arc::new(AtomicBool::new(false)),
     });
+    let mut slot = owner.handle.lock().expect("reaper handle mutex poisoned");
+    if let Some(handle) = slot.take() {
+        if handle.is_finished() {
+            let _ = handle.join();
+        } else {
+            *slot = Some(handle);
+        }
+    }
+}
+
+fn ensure_reaper() {
+    join_finished_reaper_if_any();
+    let owner = REAPER.get_or_init(|| ReaperOwner {
+        handle: Mutex::new(None),
+        stop: Arc::new(AtomicBool::new(false)),
+    });
+    let mut slot = owner.handle.lock().expect("reaper handle mutex poisoned");
+    if slot.is_some() {
+        return;
+    }
+    let stop = owner.stop.clone();
+    let handle = thread::Builder::new()
+        .name("nexus-cleanup-reaper".into())
+        .spawn(move || {
+            let mut idle_since: Option<Instant> = None;
+            loop {
+                if stop.load(Ordering::SeqCst) {
+                    break;
+                }
+                thread::sleep(REAPER_POLL);
+                let reaped = reap_completed();
+                let empty = registry()
+                    .lock()
+                    .expect("cleanup registry mutex poisoned")
+                    .entries
+                    .is_empty();
+                if !empty {
+                    idle_since = None;
+                    continue;
+                }
+                if reaped > 0 {
+                    idle_since = None;
+                    continue;
+                }
+                let now = Instant::now();
+                if idle_since.is_none() {
+                    idle_since = Some(now);
+                } else if now.duration_since(idle_since.unwrap()) >= REAPER_IDLE_EXIT {
+                    break;
+                }
+            }
+        })
+        .expect("spawn cleanup reaper");
+    *slot = Some(handle);
+}
+
+/// Join a finished reaper thread (test/diagnostics only).
+#[cfg(test)]
+fn reaper_joined_for_test() -> bool {
+    match REAPER.get() {
+        None => true,
+        Some(owner) => {
+            let mut slot = owner.handle.lock().expect("reaper handle mutex poisoned");
+            match slot.as_ref() {
+                None => true,
+                Some(handle) if handle.is_finished() => {
+                    let finished = slot.take().expect("reaper handle");
+                    finished.join().is_ok()
+                }
+                Some(_) => false,
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -151,5 +220,33 @@ mod tests {
         }
         let (pending, _) = registry_snapshot();
         assert_eq!(pending, 0, "completed entry must be reaped, not permanent");
+    }
+
+    #[test]
+    fn reaper_terminates_after_registry_drains() {
+        let done = Arc::new(AtomicBool::new(false));
+        let flag = done.clone();
+        let handle = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(10));
+            flag.store(true, Ordering::SeqCst);
+        });
+        let state = Arc::new(EnvState::new());
+        register_pending(handle, state, done);
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline {
+            reap_completed();
+            let (pending, _) = registry_snapshot();
+            if pending == 0 && reaper_joined_for_test() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        let (pending, _) = registry_snapshot();
+        assert_eq!(pending, 0, "registry must be empty");
+        assert!(
+            reaper_joined_for_test(),
+            "reaper thread must terminate and be joinable after idle drain"
+        );
     }
 }

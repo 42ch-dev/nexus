@@ -451,7 +451,7 @@ impl crate::HostFacade for HostManager {
         let pre_registered = !self.providers.read().await.is_empty();
         if !pre_registered {
             let discovered =
-                discover_provider_entries(&host_config, &config.timeouts, &permission_resolver, self.localset_bridge())?;
+                discover_provider_entries(&host_config, &host_config.timeouts, &permission_resolver, self.localset_bridge())?;
             *self.providers.write().await = discovered;
         }
 

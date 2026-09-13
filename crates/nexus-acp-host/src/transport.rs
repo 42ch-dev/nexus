@@ -387,6 +387,14 @@ impl ManagedAcpProcess {
         self.birth.as_ref()
     }
 
+    /// Non-blocking check whether the owned child has exited.
+    pub fn poll_exit(&mut self) -> Option<std::process::ExitStatus> {
+        match self.child.as_mut() {
+            Some(child) => child.try_wait().ok().flatten(),
+            None => Some(std::process::ExitStatus::default()),
+        }
+    }
+
     /// Whether the owned child is still running.
     pub fn is_running(&mut self) -> bool {
         self.child
@@ -1271,6 +1279,31 @@ mod tests {
             let mut child = child;
             child.kill().await.expect("failed to kill mock agent");
         }
+    }
+
+
+    #[tokio::test]
+    async fn poll_exit_detects_external_sigkill() {
+        let mut child = tokio::process::Command::new("sleep")
+            .arg("300")
+            .spawn()
+            .expect("spawn sleep");
+        let pid = child.id().expect("pid");
+        let mut proc = ManagedAcpProcess::new(
+            "sleep-fixture".to_string(),
+            child,
+            PathBuf::from("/usr/bin/sleep"),
+        );
+        std::process::Command::new("kill")
+            .arg("-9")
+            .arg(pid.to_string())
+            .status()
+            .expect("kill");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            proc.poll_exit().is_some(),
+            "expected poll_exit after external SIGKILL"
+        );
     }
 
     #[tokio::test]

@@ -8,7 +8,7 @@ const CLOSE_CANCEL_PHASE: Duration = Duration::from_secs(2);
 use std::sync::Arc;
 
 use nexus_agent_host::capability::model::HostStartConfig;
-use nexus_agent_host::config::AgentHostConfig;
+use nexus_agent_host::config::{load_config_from_path, AgentHostConfig};
 use nexus_agent_host::{HostFacade, HostManager};
 use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
 use nexus_contracts::{CoreCloseReport, CoreCloseReportState, NativeOpenOptions};
@@ -328,13 +328,14 @@ pub async fn open_core(
     .map_err(|e| e.to_string())?;
 
     let host = Arc::new(HostManager::new());
-    let host_defaults = AgentHostConfig::default();
+    let config_path = user_home.join("config/agent-host.toml");
+    let host_boot = load_config_from_path(&config_path).unwrap_or_else(|_| AgentHostConfig::default());
     let start_config = HostStartConfig {
-        config_path: user_home.join("config/agent-host.toml"),
+        config_path,
         workspace_root: user_home.clone(),
-        max_sessions: host_defaults.max_sessions,
-        max_ops_per_session: host_defaults.max_ops_per_session,
-        timeouts: host_defaults.timeouts.clone(),
+        max_sessions: host_boot.max_sessions,
+        max_ops_per_session: host_boot.max_ops_per_session,
+        timeouts: host_boot.timeouts.clone(),
         host_config: None,
         probe_owner: None,
     };

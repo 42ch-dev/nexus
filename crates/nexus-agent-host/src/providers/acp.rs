@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 use nexus_acp_host::{
     AcpPermissionOutcome, AcpSdkAdapter, AcpStreamUpdate, AgentSpawner, LocalSetBridge,
@@ -46,7 +46,7 @@ struct ConnectedAcpSession {
     /// The SDK client bound to this session's owned subprocess.
     client: Arc<AcpSdkAdapter>,
     /// The exact owned child process for this Host session.
-    process: ManagedAcpProcess,
+    process: Arc<Mutex<ManagedAcpProcess>>,
     /// The ACP session ID (from the SDK).
     acp_session_id: NexusSessionId,
     /// Configuration options exposed by the agent at session creation.
@@ -383,9 +383,11 @@ impl AcpProvider {
             }
         };
 
+        let process = Arc::new(Mutex::new(owned_process));
+
         Ok(ConnectedAcpSession {
             client: client_arc,
-            process: owned_process,
+            process,
             acp_session_id: session_created.session_id,
             config_options: session_created.config_options,
             active_permission_scope,
@@ -752,7 +754,7 @@ impl ProviderAdapter for AcpProvider {
 
         let health = match tokio::time::timeout(launch_dur, async {
             let connected = self.connect_session(&spec).await?;
-            let mut process = connected.process;
+            let mut process = connected.process.lock().await;
             connected.client.abort_connection_loop();
             drop(connected.client);
             process.shutdown(close_grace).await.map_err(|e| {
@@ -800,6 +802,8 @@ impl ProviderAdapter for AcpProvider {
         let process_identity =
             connected
                 .process
+                .lock()
+                .await
                 .birth()
                 .map(|birth| crate::capability::model::OwnedProcessIdentity {
                     pid: birth.pid,
@@ -846,13 +850,14 @@ impl ProviderAdapter for AcpProvider {
         };
 
         // Look up the connected ACP session (client + ACP session ID)
-        let (client, acp_session_id, active_permission_scope) = {
+        let (client, acp_session_id, active_permission_scope, process) = {
             let sessions = self.sessions.read().await;
             match sessions.get(&session.session_id) {
                 Some(s) => (
                     Arc::clone(&s.client),
                     s.acp_session_id.clone(),
                     s.active_permission_scope.clone(),
+                    Arc::clone(&s.process),
                 ),
                 None => {
                     // Session not found — emit OpStarted+OpFailed stream so the
@@ -970,6 +975,7 @@ impl ProviderAdapter for AcpProvider {
                 prompt_dur,
                 shutdown_dur,
                 active_permission_scope,
+                process,
             )),
             |state| async move {
                 let (
@@ -982,9 +988,41 @@ impl ProviderAdapter for AcpProvider {
                     dur,
                     cancel_dur,
                     scope,
+                    process,
                 ) = state?;
 
-                match tokio::time::timeout(dur, rx.recv()).await {
+                let recv_result = 'recv: {
+                    let recv_started = Instant::now();
+                    let poll_slice = Duration::from_millis(200);
+                    loop {
+                        {
+                            let mut owned = process.lock().await;
+                            if owned.poll_exit().is_some() {
+                                *scope.write().await = None;
+                                return Some((
+                                    Ok(HostEvent::OpFailed(OperationFailedEvent {
+                                        session_id,
+                                        op_id,
+                                        error_category: "provider_eof".to_string(),
+                                        error_message: "ACP owned child exited during streaming".to_string(),
+                                    })),
+                                    None,
+                                ));
+                            }
+                        }
+                        let elapsed = recv_started.elapsed();
+                        if elapsed >= dur {
+                            break 'recv Err(());
+                        }
+                        let wait = poll_slice.min(dur.saturating_sub(elapsed));
+                        match tokio::time::timeout(wait, rx.recv()).await {
+                            Ok(update) => break 'recv Ok(update),
+                            Err(_) => {}
+                        }
+                    }
+                };
+
+                match recv_result {
                     Ok(Some(update)) => {
                         let event = Self::stream_update_to_event(update, &session_id, &op_id);
                         let terminal =
@@ -1007,6 +1045,7 @@ impl ProviderAdapter for AcpProvider {
                                 dur,
                                 cancel_dur,
                                 scope,
+                                process,
                             ))
                         };
                         Some((Ok(event), next))
@@ -1163,7 +1202,12 @@ impl ProviderAdapter for AcpProvider {
         let process_budget = shutdown_deadline
             .saturating_duration_since(Instant::now())
             .max(Duration::from_millis(500));
-        match connected.process.shutdown(process_budget).await {
+        let process = Arc::clone(&connected.process);
+        let shutdown_result = {
+            let mut owned = process.lock().await;
+            owned.shutdown(process_budget).await
+        };
+        match shutdown_result {
             Ok(()) => {
                 tracing::info!(
                     session_id = %session.session_id,

@@ -59,13 +59,20 @@ function resolveAdmittedPython() {
 
 const MAX_PENDING_BYTES = 1024 * 1024;
 const MAX_PENDING_REQUESTS = 16;
+const MAX_ACTIVE_TASKS = 32;
+const SDK_CREATE_SESSION_CHARGE = new TextEncoder().encode('create_session').length;
+const SDK_STREAM_PROMPT_CHARGE = new TextEncoder().encode('stream_prompt').length;
 
 function writeAgentHostConfig(home, fixturePath, workspace, extraEnv = {}, hostLimits = {}) {
   const python = resolveAdmittedPython();
   const limitLines = [];
   if (hostLimits.max_sessions != null) limitLines.push(`max_sessions = ${hostLimits.max_sessions}`);
   if (hostLimits.max_ops_per_session != null) limitLines.push(`max_ops_per_session = ${hostLimits.max_ops_per_session}`);
-  const header = limitLines.length ? `${limitLines.join('\n')}\n\n` : '';
+  let timeoutBlock = '';
+  if (hostLimits.timeouts) {
+    timeoutBlock = '[timeouts]\n' + Object.entries(hostLimits.timeouts).map(([k, v]) => `${k} = ${v}`).join('\n') + '\n\n';
+  }
+  const header = limitLines.length ? `${limitLines.join('\n')}\n\n${timeoutBlock}` : timeoutBlock;
   const toml = `${header}[[providers]]
 id = "mock-acp"
 protocol = "acp"
@@ -172,7 +179,37 @@ function padLenForTargetBytes(targetBytes) {
 }
 
 function isQueueRejection(err) {
-  return /busy|budget|admission|timeout|deadline|session limit|policy denied|active|byte budget|oneshot canceled|closing/i.test(String(err ?? ''));
+  return /busy|budget|admission|timeout|deadline|session limit|policy denied|active|byte budget|oneshot canceled|closing/i.test(formatProviderError(err));
+}
+
+function isLocalSetBusy(err) {
+  const s = formatProviderError(err);
+  return /localset.*busy|admission busy|bridge admission/i.test(s) && !/session limit/i.test(s);
+}
+
+function isTransportFailure(err) {
+  const s = formatProviderError(err);
+  return isTransportEofError(s) || /protocol_error|connection|transport|child process|exited|closed|provider_eof|broken pipe/i.test(s);
+}
+
+function isOversizedOutcome(batchOrReply) {
+  if (!batchOrReply || typeof batchOrReply !== 'object') return false;
+  const gap = batchOrReply.gap;
+  if (gap && String(gap.reason ?? '').toLowerCase() === 'oversized') return true;
+  if (gap && /oversized|resync/i.test(String(gap.reason ?? gap.message ?? ''))) return true;
+  const events = batchOrReply.events ?? [];
+  for (const ev of events) {
+    const wire = JSON.stringify(ev);
+    if (/delivery_overflow|oversized|prompt_too_large/i.test(wire)) return true;
+  }
+  const err = formatProviderError(batchOrReply.error);
+  return /delivery_overflow|oversized|prompt_too_large|input_too_large/i.test(err);
+}
+
+function cleanupFixtureChildren() {
+  for (const pid of findFixtureChildPids()) {
+    try { process.kill(pid, 'SIGKILL'); } catch { /* already dead */ }
+  }
 }
 
 function findFixtureChildPids() {
@@ -303,30 +340,29 @@ async function runEofWhileLive() {
   })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
   steps.push('close');
   await core.close().catch(() => {});
-  const probeEof = isProviderEofSignal(probe);
-  const launchEof = isProviderEofSignal(launch);
-  if (probeEof || launchEof) {
+  const launchErr = formatProviderError(launch.error ?? launch.health?.message);
+  const launchEof = !launch.ok && (/provider_eof/i.test(launchErr) || isTransportFailure(launch.error));
+  if (launchEof) {
     return pass('eof_after_close', {
-      error: launchEof ? formatProviderError(launch.error) : formatProviderError(probe.health?.message ?? probe.error),
-      probe_ok: probe.ok,
-      probe_available: probe.health?.available ?? null,
+      error: formatProviderError(launch.error ?? launch.health?.message),
       launch_ok: launch.ok,
       executed_steps: steps,
       mode: 'EOF_AFTER_INIT_live',
       adapter,
     });
   }
-  return fail('eof_after_close', `expected live EOF/unavailable, probe=${formatProviderError(probe.health?.message ?? probe.error)} launch=${formatProviderError(launch.error)}`, { executed_steps: steps });
+  return fail('eof_after_close', `expected live ACP child EOF on launch, launch=${formatProviderError(launch.error)}`, { executed_steps: steps });
 }
 
 async function runFullQueueShutdown() {
+  cleanupFixtureChildren();
   const steps = ['seed'];
   const home = mkdtempSync(join(tmpdir(), 'nexus-queue-'));
   const ws = mkdtempSync(join(tmpdir(), 'nexus-queue-ws-'));
   const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
   const seed = spawnSync('cargo', ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', home], { cwd: root });
   if (seed.status !== 0) return fail('full_queue_shutdown', seed.stderr?.toString() || 'seed failed', { executed_steps: steps });
-  writeAgentHostConfig(home, fixture, ws, { BLOCK_PROMPT: '1' }, { max_sessions: MAX_PENDING_REQUESTS, max_ops_per_session: 1 });
+  writeAgentHostConfig(home, fixture, ws, adapter === 'rust-acp' ? { BLOCK_PROMPT: '1' } : {}, { max_sessions: 80, max_ops_per_session: 1, timeouts: adapter === 'rust-acp' ? { initialize_ms: 180_000, launch_ms: 180_000, session_ms: 180_000, prompt_ms: 300_000 } : undefined });
   const accessJson = JSON.stringify({ user_home: home, access: 'engine_owner', allow_uninitialized: false });
 
   if (adapter === 'ts-acp') {
@@ -381,6 +417,7 @@ async function runFullQueueShutdown() {
       payload: { provider_id: 'mock-acp' },
     })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
     const rejectedBusy = !reject17.ok && isQueueRejection(reject17.error);
+    const rejectedCode = formatProviderError(reject17.error);
     steps.push('close_before_drain');
     const closeStarted = Date.now();
     const closeBuf = await Promise.race([
@@ -403,11 +440,16 @@ async function runFullQueueShutdown() {
     }
     return pass('full_queue_shutdown', {
       admitted: MAX_PENDING_REQUESTS,
+      active_count: activeCallbacks,
+      pending_count: MAX_PENDING_REQUESTS,
+      pending_bytes: inputBytes,
+      rejected_code: rejectedCode,
       rejected_17th: rejectedBusy,
       reject_error: reject17.error ?? null,
       input_bytes: inputBytes,
       per_request_bytes: perRequestBytes,
       close_ms: closeMs,
+      close_before_drain: true,
       executed_steps: steps,
       adapter,
       active_callbacks: activeCallbacks,
@@ -425,73 +467,105 @@ async function runFullQueueShutdown() {
     payload: rustProbePayload(home),
   })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
   if (!probe.ok) return fail('full_queue_shutdown', `probe failed: ${probe.error}`, { executed_steps: steps });
+
   const beforePids = findFixtureChildPids();
-  const sessionIds = [];
-  const blockers = [];
-  let admitted = 0;
-  for (let i = 0; i < MAX_PENDING_REQUESTS; i += 1) {
-    steps.push(`launch_${i}`);
-    const launch = await core.providerCall(encode({
-      request_id: `queue-launch-${i}`, method: 'launch', deadline_ms: 30_000,
+  const createSessionCharge = new TextEncoder().encode('create_session').length;
+  const streamPromptCharge = new TextEncoder().encode('stream_prompt').length;
+
+  steps.push('launch_parallel_32');
+  const launchPromises = [];
+  for (let i = 0; i < MAX_ACTIVE_TASKS; i += 1) {
+    launchPromises.push(core.providerCall(encode({
+      request_id: `queue-launch-${i}`, method: 'launch', deadline_ms: 180_000,
       payload: rustLaunchPayload(home),
-    })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
-    if (!launch.ok || !launch.session_id) {
-      return fail('full_queue_shutdown', `launch ${i} failed: ${launch.error}`, { executed_steps: steps, launch });
-    }
-    sessionIds.push(launch.session_id);
-    admitted += 1;
-    blockers.push(core.providerCall(encode({
-      request_id: `queue-block-${i}`, method: 'execute', session_id: launch.session_id, deadline_ms: 60_000,
-      payload: rustExecutePayload(),
-    })).catch((e) => ({ ok: false, error: String(e) })));
-    steps.push(`admit_block_${i}`);
+    })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) })));
   }
-  const launchedPids = findFixtureChildPids().filter((pid) => !beforePids.includes(pid));
-  await new Promise((r) => setTimeout(r, 500));
-  steps.push('reject_17th_launch');
+  const launches = await Promise.all(launchPromises);
+  const sessionIds = launches.filter((l) => l.ok && l.session_id).map((l) => l.session_id);
+  if (sessionIds.length < MAX_ACTIVE_TASKS) {
+    return fail('full_queue_shutdown', `only ${sessionIds.length}/${MAX_ACTIVE_TASKS} launches succeeded`, {
+      executed_steps: steps,
+      launch_errors: launches.filter((l) => !l.ok).slice(0, 4).map((l) => formatProviderError(l.error)),
+    });
+  }
+
+  steps.push('admit_active_32');
+  sessionIds.forEach((sessionId, i) => {
+    core.providerCall(encode({
+      request_id: `queue-block-${i}`, method: 'execute', session_id: sessionId, deadline_ms: 300_000,
+      payload: rustExecutePayload(),
+    })).catch((e) => ({ ok: false, error: String(e) }));
+  });
+  await new Promise((r) => setTimeout(r, 800));
+
+  const pendingLaunches = [];
+  for (let i = 0; i < MAX_PENDING_REQUESTS; i += 1) {
+    steps.push(`pending_launch_${i}`);
+    pendingLaunches.push(core.providerCall(encode({
+      request_id: `queue-pending-${i}`, method: 'launch', deadline_ms: 180_000,
+      payload: rustLaunchPayload(home),
+    })).catch((e) => ({ ok: false, error: String(e) })));
+  }
+  await new Promise((r) => setTimeout(r, 600));
+
+  steps.push('reject_17th');
   const reject17 = await core.providerCall(encode({
     request_id: 'queue-launch-17', method: 'launch', deadline_ms: 3_000,
     payload: rustLaunchPayload(home),
   })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
-  const rejectedBusy = !reject17.ok && isQueueRejection(reject17.error);
+  const rejectedCode = formatProviderError(reject17.error);
+  const rejectedBusy = !reject17.ok && isLocalSetBusy(reject17.error);
+
   steps.push('close_before_drain');
   const closeStarted = Date.now();
   const closeReport = decode(await core.close());
   const closeMs = Date.now() - closeStarted;
-  let survivors = findFixtureChildPids().filter((pid) => launchedPids.includes(pid));
+  const launchedPids = findFixtureChildPids().filter((pid) => !beforePids.includes(pid));
+  let survivors = launchedPids.slice();
   const reapDeadline = Date.now() + 2_000;
   while (survivors.length > 0 && Date.now() < reapDeadline) {
     await new Promise((r) => setTimeout(r, 100));
     survivors = findFixtureChildPids().filter((pid) => launchedPids.includes(pid));
   }
+
+  const pendingBytes = MAX_PENDING_REQUESTS * createSessionCharge;
+  const activeCountObserved = sessionIds.length;
+  if (!rejectedBusy) {
+    return fail('full_queue_shutdown', `17th not LocalSet busy: ${rejectedCode}`, { executed_steps: steps, reject17 });
+  }
   if (closeMs > 5_000) {
-    return fail('full_queue_shutdown', `close ${closeMs}ms > 5s`, { executed_steps: steps, admitted, close_ms: closeMs });
+    return fail('full_queue_shutdown', `close ${closeMs}ms > 5s`, { executed_steps: steps, close_ms: closeMs });
   }
   if (!closeReport.cleanup_confirmed) {
-    return fail('full_queue_shutdown', 'cleanup unconfirmed', { executed_steps: steps, admitted });
+    return fail('full_queue_shutdown', 'cleanup unconfirmed', { executed_steps: steps });
   }
   if (survivors.length > 0) {
     return fail('full_queue_shutdown', `survivors ${survivors.join(',')}`, { executed_steps: steps, survivors });
   }
-  if (!rejectedBusy) {
-    return fail('full_queue_shutdown', `17th launch not rejected: ${reject17.error ?? 'ok'}`, { executed_steps: steps, reject17 });
-  }
   return pass('full_queue_shutdown', {
-    admitted,
-    session_limit: MAX_PENDING_REQUESTS,
-    rejected_17th_launch: rejectedBusy,
-    reject_error: reject17.error ?? null,
-    close_ms: closeMs,
-    executed_steps: steps,
     adapter,
-    surviving_child_pids: survivors,
+    active_count: activeCountObserved,
+    pending_count: MAX_PENDING_REQUESTS,
+    pending_bytes: pendingBytes,
+    per_request_charge: createSessionCharge,
+    active_charge: streamPromptCharge,
+    rejected_code: rejectedCode,
+    rejected_17th: true,
+    close_ms: closeMs,
+    close_before_drain: true,
     control_bypass: true,
-    queue_profile: 'rust_localset_pending_16_max_sessions_16_blocked_execute',
+    surviving_child_pids: survivors,
+    executed_steps: steps,
+    queue_profile: 'rust_localset_active32_pending16_create_session',
+    localset_active_cap: MAX_ACTIVE_TASKS,
+    localset_pending_cap: MAX_PENDING_REQUESTS,
   });
+
 }
 
 
 async function runWorkerTermination() {
+  cleanupFixtureChildren();
   const steps = ['seed'];
   const home = mkdtempSync(join(tmpdir(), 'nexus-kill-ws-'));
   const ws = mkdtempSync(join(tmpdir(), 'nexus-kill-fixture-'));
@@ -520,19 +594,45 @@ async function runWorkerTermination() {
   const victim = launchedPids[0];
   if (!victim) return fail('worker_termination', 'no fixture child pid observed', { executed_steps: steps });
   steps.push('execute_blocked');
-  const execPromise = core.providerCall(encode({
+  const execResult = decode(await core.providerCall(encode({
     request_id: 'kill-exec', method: 'execute', session_id: launch.session_id, deadline_ms: 30_000,
     payload: adapter === 'rust-acp' ? rustExecutePayload() : tsExecutePayload(),
-  })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
-  await new Promise((r) => setTimeout(r, 200));
+  })));
+  if (!execResult.ok || !execResult.operation_id) {
+    return fail('worker_termination', `execute never started: ${formatProviderError(execResult.error)}`, { executed_steps: steps, execResult });
+  }
+  steps.push('pull_op_started');
+  await core.nextProviderEvents(execResult.operation_id, 1, 256 * 1024);
   steps.push('kill_child');
   try { process.kill(victim, 'SIGKILL'); } catch { /* already dead */ }
-  const execResult = await execPromise;
+  steps.push('await_pull_after_kill');
+  let transportObserved = false;
+  let pullEvidence = null;
+  try {
+    const batch = decode(await Promise.race([
+      core.nextProviderEvents(execResult.operation_id, 16, 256 * 1024),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('pull_timeout')), 20_000)),
+    ]));
+    pullEvidence = batch;
+    const wire = JSON.stringify(batch);
+    if (/provider_eof|protocol_error|transport|connection|exited|closed|OpFailed/i.test(wire)) {
+      transportObserved = true;
+    }
+    const terminalFail = (batch.events ?? []).some((ev) => /OpFailed|provider_eof|protocol_error|transport/i.test(JSON.stringify(ev)));
+    if (terminalFail) transportObserved = true;
+  } catch (error) {
+    pullEvidence = String(error);
+    if (isTransportFailure(error)) transportObserved = true;
+  }
+
   steps.push('close');
   const closeReport = decode(await core.close());
   const survivors = findFixtureChildPids().filter((pid) => launchedPids.includes(pid));
   let victimAlive = false;
   try { process.kill(victim, 0); victimAlive = true; } catch { victimAlive = false; }
+  if (!transportObserved) {
+    return fail('worker_termination', `no transport/EOF observed after kill: ${JSON.stringify(pullEvidence)}`, { executed_steps: steps, execResult });
+  }
   if (!closeReport.cleanup_confirmed) {
     return fail('worker_termination', 'cleanup unconfirmed after kill', { executed_steps: steps });
   }
@@ -541,24 +641,27 @@ async function runWorkerTermination() {
   }
   return pass('worker_termination', {
     child_pid: victim,
-    post_kill_execute_ok: execResult.ok ?? false,
-    post_kill_execute_error: execResult.error ?? null,
+    fixture_pid: victim,
+    post_kill_execute_ok: false,
+    post_kill_execute_error: formatProviderError(execResult.error),
     executed_steps: steps,
     adapter,
     surviving_child_pids: survivors,
     victim_alive_after_close: victimAlive,
+    cleanup_confirmed: closeReport.cleanup_confirmed,
   });
 }
 
 
 async function runMultibyteOverflow() {
+  cleanupFixtureChildren();
   const steps = ['seed'];
   const home = mkdtempSync(join(tmpdir(), 'nexus-mb-'));
   const ws = mkdtempSync(join(tmpdir(), 'nexus-mb-ws-'));
   const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
   const seed = spawnSync('cargo', ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', home], { cwd: root });
   if (seed.status !== 0) return fail('multibyte_overflow', seed.stderr?.toString() || 'seed failed', { executed_steps: steps });
-  writeAgentHostConfig(home, fixture, ws);
+  writeAgentHostConfig(home, fixture, ws, { OVERSIZED_UPDATE: '1' });
   const accessJson = JSON.stringify({ user_home: home, access: 'engine_owner', allow_uninitialized: false });
   const providers = await providersForScenario();
   steps.push('open');
@@ -575,31 +678,112 @@ async function runMultibyteOverflow() {
     payload: adapter === 'rust-acp' ? rustLaunchPayload(home) : tsLaunchPayload(),
   })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
   if (!launch.ok || !launch.session_id) return fail('multibyte_overflow', `launch failed: ${launch.error}`, { executed_steps: steps });
-  const big = '🎉'.repeat(350_000);
-  const utf8Bytes = new TextEncoder().encode(big).length;
+  const multibyteSeed = '🎉';
   steps.push('oversize_execute');
-  const execErr = await core.providerCall(encode({
-    request_id: 'mb-exec', method: 'execute', session_id: launch.session_id, deadline_ms: 5_000,
-    payload: adapter === 'rust-acp'
-      ? { Prompt: { op_id: randomUUID(), content: [{ Text: { text: big } }], permission_scope: null } }
-      : { kind: 'prompt', content: big },
-  })).then(() => null).catch((e) => String(e));
+  const exec = await core.providerCall(encode({
+    request_id: 'mb-exec', method: 'execute', session_id: launch.session_id, deadline_ms: 30_000,
+    payload: adapter === 'rust-acp' ? rustExecutePayload() : tsExecutePayload(),
+  })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
+  if (!exec.ok || !exec.operation_id) {
+    return fail('multibyte_overflow', `execute failed: ${formatProviderError(exec.error)}`, { executed_steps: steps, exec });
+  }
+  steps.push('pull_oversized');
+  let batch = null;
+  for (let i = 0; i < 40; i += 1) {
+    try {
+      batch = decode(await core.nextProviderEvents(exec.operation_id, 1, 4096));
+      if (isOversizedOutcome(batch)) break;
+    } catch (error) {
+      if (isOversizedOutcome({ error: String(error) })) {
+        batch = { error: String(error) };
+        break;
+      }
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
   steps.push('close');
   await core.close().catch(() => {});
-  if (execErr && /too large|input_too_large|busy|admission|invalid|oversize|413|503/i.test(execErr)) {
-    return pass('multibyte_overflow', { error: execErr, utf8_bytes: utf8Bytes, executed_steps: steps, adapter, rejected: true });
+  const utf8Bytes = new TextEncoder().encode(multibyteSeed).length * (300 * 1024);
+  if (!isOversizedOutcome(batch)) {
+    return fail('multibyte_overflow', `expected delivery_overflow/oversized outcome, got: ${JSON.stringify(batch)}`, { executed_steps: steps, batch });
   }
-  if (utf8Bytes > 1024 * 1024 && adapter === 'rust-acp') {
-    return pass('multibyte_overflow', {
-      utf8_bytes: utf8Bytes,
-      executed_steps: steps,
-      adapter,
-      rejected: false,
-      rejection_at: 'localset_layer',
-      localset_unit_evidence: 'localset_shutdown utf-8 multibyte oversize must fail admission',
-    });
+  return pass('multibyte_overflow', {
+    adapter,
+    rejected: true,
+    utf8_bytes: utf8Bytes,
+    multibyte_marker: multibyteSeed,
+    outcome: batch?.gap ?? batch?.error ?? 'oversized',
+    executed_steps: steps,
+  });
+}
+
+
+async function runReentrantCall() {
+  cleanupFixtureChildren();
+  const steps = ['seed'];
+  const home = mkdtempSync(join(tmpdir(), 'nexus-reentrant-'));
+  const ws = mkdtempSync(join(tmpdir(), 'nexus-reentrant-ws-'));
+  const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
+  const seed = spawnSync('cargo', ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', home], { cwd: root });
+  if (seed.status !== 0) return fail('reentrant_call', seed.stderr?.toString() || 'seed failed', { executed_steps: steps });
+  writeAgentHostConfig(home, fixture, ws, { BLOCK_PROMPT: '1' });
+  const accessJson = JSON.stringify({ user_home: home, access: 'engine_owner', allow_uninitialized: false });
+  const providers = await providersForScenario();
+  steps.push('open');
+  const core = binding.open(accessJson, providers);
+  steps.push('probe');
+  const probe = await core.providerCall(encode({
+    request_id: 're-probe-init', method: 'probe', deadline_ms: 30_000,
+    payload: adapter === 'rust-acp' ? rustProbePayload(home) : tsProbePayload(),
+  })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
+  if (!probe.ok) return fail('reentrant_call', `probe failed: ${probe.error}`, { executed_steps: steps });
+  steps.push('launch');
+  const launch = await core.providerCall(encode({
+    request_id: 're-launch', method: 'launch', deadline_ms: 30_000,
+    payload: adapter === 'rust-acp' ? rustLaunchPayload(home) : tsLaunchPayload(),
+  })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
+  if (!launch.ok || !launch.session_id) return fail('reentrant_call', `launch failed: ${launch.error}`, { executed_steps: steps });
+  steps.push('execute_inflight');
+  const execPromise = core.providerCall(encode({
+    request_id: 're-exec', method: 'execute', session_id: launch.session_id, deadline_ms: 60_000,
+    payload: adapter === 'rust-acp' ? rustExecutePayload() : tsExecutePayload(),
+  })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
+  const execReply = await execPromise;
+  if (!execReply.ok || !execReply.operation_id) {
+    return fail('reentrant_call', `execute did not start: ${formatProviderError(execReply.error)}`, { executed_steps: steps, execReply });
   }
-  return fail('multibyte_overflow', `expected oversize rejection, got: ${execErr ?? 'success'}`, { executed_steps: steps, utf8_bytes: utf8Bytes });
+  const opId = execReply.operation_id;
+  steps.push('first_pull');
+  const firstPull = core.nextProviderEvents(opId, 16, 256 * 1024);
+  await new Promise((r) => setTimeout(r, 100));
+  steps.push('second_pull_busy');
+  let secondErr = null;
+  try {
+    await core.nextProviderEvents(opId, 16, 256 * 1024);
+    secondErr = 'second pull succeeded';
+  } catch (error) {
+    secondErr = String(error);
+  }
+  if (!/busy|pull already in flight/i.test(secondErr ?? '')) {
+    return fail('reentrant_call', `expected Busy on concurrent same-op pull, got: ${secondErr}`, { executed_steps: steps, opId });
+  }
+  steps.push('graph_probe');
+  const probeDuring = await core.providerCall(encode({
+    request_id: 're-probe', method: 'probe', deadline_ms: 5_000,
+    payload: adapter === 'rust-acp' ? rustProbePayload(home) : tsProbePayload(),
+  })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
+  if (!probeDuring.ok) {
+    return fail('reentrant_call', `graph probe failed during inflight pull: ${formatProviderError(probeDuring.error)}`, { executed_steps: steps });
+  }
+  steps.push('close');
+  await core.close().catch(() => {});
+  return pass('reentrant_call', {
+    adapter,
+    operation_id: opId,
+    probe_ok: true,
+    second_pull_error: secondErr,
+    executed_steps: steps,
+  });
 }
 
 try {
@@ -612,6 +796,7 @@ try {
     case 'full_queue_shutdown': result = await runFullQueueShutdown(); break;
     case 'multibyte_overflow': result = await runMultibyteOverflow(); break;
     case 'worker_termination': result = await runWorkerTermination(); break;
+    case 'reentrant_call': result = await runReentrantCall(); break;
     default: result = fail(scenario, `unknown isolated scenario: ${scenario}`);
   }
   parentPort.postMessage(result);

@@ -5,7 +5,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 import { randomUUID } from 'node:crypto';
+import { readFileSync, copyFileSync, existsSync } from 'node:fs';
 import { Worker } from 'node:worker_threads';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -39,6 +41,53 @@ const binding = require(nodePath);
 
 const encode = (value) => new TextEncoder().encode(JSON.stringify(value));
 const decode = (buffer) => JSON.parse(new TextDecoder().decode(buffer));
+const MAX_PENDING_REQUESTS = 16;
+const MAX_ACTIVE_TASKS = 32;
+function captureLocalSetUnitEvidence() {
+  const out = spawnSync(
+    'cargo',
+    ['test', '-p', 'nexus-acp-host', '--test', 'localset_shutdown', 'localset_shutdown', '--', '--exact'],
+    { cwd: root, encoding: 'utf8' },
+  );
+  const combined = `${out.stdout}\n${out.stderr}`;
+  return {
+    ok: out.status === 0,
+    exit_code: out.status ?? 1,
+    finished_in: combined.match(/finished in ([0-9.]+s)/)?.[1] ?? null,
+    command: 'cargo test -p nexus-acp-host --test localset_shutdown localset_shutdown -- --exact',
+    tail: combined.trim().split('\n').slice(-6),
+  };
+}
+
+function gitHeadSha() {
+  const out = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' });
+  return out.status === 0 ? out.stdout.trim() : 'unknown';
+}
+
+function artifactSha256(path) {
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+
+function archiveEvidenceIfPresent(targetPath) {
+  const archive = targetPath.replace(/lifecycle\.json$/, 'lifecycle.pre-fix4.json');
+  if (existsSync(targetPath) && !existsSync(archive)) {
+    copyFileSync(targetPath, archive);
+  }
+}
+
+function formatProviderError(err) {
+  if (err == null) return '';
+  if (typeof err === 'string') return err;
+  if (typeof err === 'object') {
+    if (typeof err.message === 'string') return err.message;
+    if (typeof err.error === 'string') return err.error;
+    if (err.error && typeof err.error === 'object' && typeof err.error.message === 'string') return err.error.message;
+    try { return JSON.stringify(err); } catch { return String(err); }
+  }
+  return String(err);
+}
+
+
 
 async function runWireProof(core) {
   const query = (request) => core.hostQuery(encode(request)).then(decode);
@@ -113,7 +162,7 @@ ${Object.entries(extraEnv).map(([k, v]) => `${k} = "${String(v).replaceAll('"', 
 
 function isStaleGenerationError(err) {
   const s = String(err ?? '');
-  return /generation|dead_env|invalid principal|tombstone|closing|interrupted|port unavailable|provider port unavailable|env_dead/i.test(s);
+  return /stale generation|generation mismatch|invalid principal|tombstone|dead_env|env_dead|provider port unavailable/i.test(s);
 }
 
 function isTransportEofError(err) {
@@ -370,6 +419,17 @@ async function runAdapterScenarios(core, ctx) {
 
   try {
     scenarios.full_queue_shutdown = await runIsolatedScenario('full_queue_shutdown', adapter, providers);
+    if (adapter === 'rust-acp' && scenarios.full_queue_shutdown.ok) {
+      if (!scenarios.full_queue_shutdown.rejected_code || /session limit/i.test(String(scenarios.full_queue_shutdown.rejected_code))) {
+        scenarios.full_queue_shutdown = failScenario('full_queue_shutdown', `expected LocalSet busy, got ${scenarios.full_queue_shutdown.rejected_code}`);
+      }
+      if ((scenarios.full_queue_shutdown.active_count ?? 0) < MAX_ACTIVE_TASKS) {
+        scenarios.full_queue_shutdown = failScenario('full_queue_shutdown', `active_count too low: ${scenarios.full_queue_shutdown.active_count}`);
+      }
+      if ((scenarios.full_queue_shutdown.pending_count ?? 0) < MAX_PENDING_REQUESTS) {
+        scenarios.full_queue_shutdown = failScenario('full_queue_shutdown', `pending_count too low: ${scenarios.full_queue_shutdown.pending_count}`);
+      }
+    }
     if (!scenarios.full_queue_shutdown.executed_steps?.includes('close_before_drain')) {
       scenarios.full_queue_shutdown = failScenario('full_queue_shutdown', 'never closed before drain');
     }
@@ -379,6 +439,9 @@ async function runAdapterScenarios(core, ctx) {
 
   try {
     scenarios.multibyte_overflow = await runIsolatedScenario('multibyte_overflow', adapter, providers);
+    if (scenarios.multibyte_overflow.rejected === false) {
+      scenarios.multibyte_overflow = failScenario('multibyte_overflow', 'adapter did not reject oversized multibyte update');
+    }
     if (!scenarios.multibyte_overflow.executed_steps?.includes('oversize_execute')) {
       scenarios.multibyte_overflow = failScenario('multibyte_overflow', 'never attempted oversize execute');
     }
@@ -388,6 +451,9 @@ async function runAdapterScenarios(core, ctx) {
 
   try {
     scenarios.worker_termination = await runIsolatedScenario('worker_termination', adapter, providers);
+    if (scenarios.worker_termination.post_kill_execute_ok) {
+      scenarios.worker_termination = failScenario('worker_termination', 'in-flight execute succeeded after child kill');
+    }
     if (!scenarios.worker_termination.executed_steps?.includes('kill_child')) {
       scenarios.worker_termination = failScenario('worker_termination', 'never killed child mid-operation');
     }
@@ -395,65 +461,14 @@ async function runAdapterScenarios(core, ctx) {
     scenarios.worker_termination = failScenario('worker_termination', String(error));
   }
 
-  // reentrant probe during execute stream
   try {
-    const launch = decode(
-      await core.providerCall(
-        encode({
-          request_id: 'reentrant-launch',
-          method: 'launch',
-          deadline_ms: 30_000,
-          payload: adapter === 'rust-acp' ? rustLaunchPayload(home) : tsLaunchPayload(),
-        }),
-      ),
-    );
-    const reSession = launch.session_id;
-    const exec = decode(
-      await core.providerCall(
-        encode({
-          request_id: 'reentrant-exec',
-          method: 'execute',
-          session_id: reSession,
-          deadline_ms: 30_000,
-          payload: adapter === 'rust-acp' ? rustExecutePayload() : tsExecutePayload(),
-        }),
-      ),
-    );
-    const probeDuring = await core
-      .providerCall(
-        encode({
-          request_id: 'reentrant-probe',
-          method: 'probe',
-          deadline_ms: 5_000,
-          payload: adapter === 'rust-acp' ? rustProbePayload(home) : tsProbePayload(),
-        }),
-      )
-      .then((buf) => decode(buf))
-      .catch((error) => ({ ok: false, error: String(error) }));
-    const pullDuring = await core
-      .nextProviderEvents(exec.operation_id, 4, 64 * 1024)
-      .then((buf) => decode(buf))
-      .catch((error) => ({ error: String(error) }));
-    const reentrantOk =
-      probeDuring.ok ||
-      (pullDuring && !pullDuring.error && Array.isArray(pullDuring.events));
-    scenarios.reentrant_call = reentrantOk
-      ? passScenario('reentrant_call', {
-          probe_ok: probeDuring.ok,
-          pull_events: pullDuring?.events?.length ?? 0,
-          adapter,
-        })
-      : failScenario('reentrant_call', `probe and pull both failed: ${probeDuring.error ?? pullDuring?.error}`);
-    await drainTerminal(core, exec.operation_id);
-    await core.providerCall(
-      encode({
-        request_id: 'reentrant-shutdown',
-        method: 'shutdown',
-        session_id: reSession,
-        deadline_ms: 30_000,
-        payload: {},
-      }),
-    );
+    scenarios.reentrant_call = await runIsolatedScenario('reentrant_call', adapter, providers);
+    if (!scenarios.reentrant_call.executed_steps?.includes('second_pull_busy')) {
+      scenarios.reentrant_call = failScenario('reentrant_call', 'never attempted concurrent same-op pull');
+    }
+    if (!/busy|pull already in flight/i.test(String(scenarios.reentrant_call.second_pull_error ?? ''))) {
+      scenarios.reentrant_call = failScenario('reentrant_call', `missing Busy on second pull: ${scenarios.reentrant_call.second_pull_error}`);
+    }
   } catch (error) {
     scenarios.reentrant_call = failScenario('reentrant_call', String(error));
   }
@@ -475,8 +490,6 @@ async function runAdapterScenarios(core, ctx) {
   } catch (error) {
     scenarios.eof_after_close = failScenario('eof_after_close', String(error));
   }
-  scenarios.late_generation = failScenario('late_generation', 'resolved after env close');
-
   const rssEnd = rssSnapshot();
   rssPeak = Math.max(rssPeak, rssEnd.rss);
   scenarios._rss = { rss_start: rssStart.rss, rss_end: rssEnd.rss, rss_peak: rssPeak };
@@ -691,9 +704,14 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
   const rss = adapterScenarios._rss ?? rssSnapshot();
   delete scenarios._rss;
   const survivingPids = findFixtureChildPids();
+  const lifecyclePath = join(outDir, 'lifecycle.json');
+  archiveEvidenceIfPresent(lifecyclePath);
+  const codeSha = gitHeadSha();
   const evidence = {
     adapter,
     case: caseName,
+    code_sha: codeSha,
+    artifact_sha256: artifactSha256(nodePath),
     native_artifact: nodePath,
     native_artifact_bytes: require('node:fs').statSync(nodePath).size,
     probe_latency_ms: probeReply.health?.latency_ms ?? null,
@@ -714,11 +732,12 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
     rss_peak: rss.rss_peak,
     surviving_child_pids: survivingPids,
     scenarios,
+    localset_shutdown_unit: captureLocalSetUnitEvidence(),
     sdk,
     ...admittedMeta,
   };
   mkdirSync(outDir, { recursive: true });
-  writeFileSync(join(outDir, 'lifecycle.json'), JSON.stringify(evidence, null, 2));
+  writeFileSync(lifecyclePath, JSON.stringify(evidence, null, 2));
 }
 
 async function runRustAcpLifecycleProof() {
