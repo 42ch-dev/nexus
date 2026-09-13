@@ -27,6 +27,7 @@ use crate::capability::model::{
 use crate::core::session::SessionState;
 use crate::error::HostError;
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
+use crate::core::manager::HostManager;
 use crate::{HostFacade, ProviderAdapter};
 
 const MAX_EVENTS_PER_BATCH: u32 = 16;
@@ -107,6 +108,7 @@ impl Drop for StreamRestore {
 /// Pull-based provider port backed by the existing host facade and adapters.
 pub struct ProviderPortAdapter {
     host: Arc<dyn HostFacade>,
+    manager: Option<Arc<HostManager>>,
     providers: HashMap<ProviderId, Arc<dyn ProviderAdapter>>,
     operations: DashMap<String, Arc<OperationEntry>>,
 }
@@ -116,6 +118,16 @@ impl ProviderPortAdapter {
     pub fn new(host: Arc<dyn HostFacade>) -> Self {
         Self {
             host,
+            manager: None,
+            providers: HashMap::new(),
+            operations: DashMap::new(),
+        }
+    }
+
+    pub fn with_manager(manager: Arc<HostManager>) -> Self {
+        Self {
+            host: manager.clone(),
+            manager: Some(manager),
             providers: HashMap::new(),
             operations: DashMap::new(),
         }
@@ -316,7 +328,14 @@ impl ProviderPort for ProviderPortAdapter {
                 })?;
                 let probe: ProbeRequest = serde_json::from_value(payload_value)
                     .map_err(|e| Self::invalid_input(format!("probe payload: {e}")))?;
+                let started = std::time::Instant::now();
                 let health = adapter.probe(probe).await.map_err(Self::map_host_error)?;
+                let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+                if let Some(manager) = &self.manager {
+                    manager
+                        .record_provider_probe(&provider_id, health.clone(), latency_ms)
+                        .await;
+                }
                 Ok(ProviderReply {
                     request_id: request.request_id,
                     ok: true,

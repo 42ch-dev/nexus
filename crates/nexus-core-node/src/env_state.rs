@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use napi::bindgen_prelude::Error;
 use napi::Env;
@@ -8,8 +8,18 @@ use nexus_core::CoreService;
 use nexus_provider_ports::ProviderPort;
 use nexus_agent_host::HostManager;
 use tokio::sync::{Mutex, Notify};
+use nexus_agent_host::HostFacade;
 
 pub const MAX_PENDING_BYTES_TOTAL: usize = 1024 * 1024;
+
+/// Serialized native environment lifecycle phases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnvLifecyclePhase {
+    Closed,
+    Opening,
+    Open,
+    Closing,
+}
 
 /// Per-addon environment instance marker stored via `Env::set_instance_data`.
 pub struct EnvInstance {
@@ -20,8 +30,7 @@ impl EnvInstance {
     pub fn install(env: &Env, state: Arc<EnvState>) -> napi::Result<()> {
         env.set_instance_data(EnvInstance { state }, (), |ctx| {
             if let Ok(Some(instance)) = ctx.env.get_instance_data::<EnvInstance>() {
-                instance.state.tombstone_env();
-                instance.state.close_notify.notify_waiters();
+                instance.state.finalize_native_from_env_cleanup();
             }
         })?;
         Ok(())
@@ -99,8 +108,8 @@ pub struct EnvState {
     pub pending_budget: PendingBudget,
     pub close_notify: Notify,
     pub closing: AtomicU64,
+    pub lifecycle: StdMutex<EnvLifecyclePhase>,
     /// A rollback or close retained an owner whose cleanup is unconfirmed.
-    /// Blocks new opens until a confirmed settlement releases it.
     pub interrupted: AtomicBool,
     /// Environment tombstoned after NAPI cleanup; no further JS calls.
     pub env_dead: AtomicBool,
@@ -108,6 +117,8 @@ pub struct EnvState {
     pub close_notify_settled: Arc<Notify>,
     pub settled_close: Mutex<Option<CoreCloseReport>>,
     pub close_in_flight: Mutex<bool>,
+    /// Last observed pending operation/task IDs for close reports.
+    pub pending_operation_ids: Mutex<Vec<String>>,
 }
 
 impl EnvState {
@@ -121,16 +132,48 @@ impl EnvState {
             pending_budget: PendingBudget::new(),
             close_notify: Notify::new(),
             closing: AtomicU64::new(0),
+            lifecycle: StdMutex::new(EnvLifecyclePhase::Closed),
             interrupted: AtomicBool::new(false),
             env_dead: AtomicBool::new(false),
             close_notify_settled: Arc::new(Notify::new()),
             settled_close: Mutex::new(None),
             close_in_flight: Mutex::new(false),
+            pending_operation_ids: Mutex::new(Vec::new()),
         }
+    }
+
+    pub fn lifecycle_phase(&self) -> EnvLifecyclePhase {
+        *self.lifecycle.lock().expect("lifecycle mutex poisoned")
+    }
+
+    pub async fn try_begin_open(&self) -> Result<(), String> {
+        let mut phase = self.lifecycle.lock().expect("lifecycle mutex poisoned");
+        match *phase {
+            EnvLifecyclePhase::Closed => {
+                *phase = EnvLifecyclePhase::Opening;
+                Ok(())
+            }
+            EnvLifecyclePhase::Open => Err("already open".to_string()),
+            EnvLifecyclePhase::Opening => Err("opening".to_string()),
+            EnvLifecyclePhase::Closing => Err("closing".to_string()),
+        }
+    }
+
+    pub async fn publish_open(&self) {
+        *self.lifecycle.lock().expect("lifecycle mutex poisoned") = EnvLifecyclePhase::Open;
+    }
+
+    pub async fn begin_closing_phase(&self) {
+        *self.lifecycle.lock().expect("lifecycle mutex poisoned") = EnvLifecyclePhase::Closing;
+    }
+
+    pub async fn publish_closed(&self) {
+        *self.lifecycle.lock().expect("lifecycle mutex poisoned") = EnvLifecyclePhase::Closed;
     }
 
     pub fn is_closing(&self) -> bool {
         self.closing.load(Ordering::SeqCst) != 0
+            || matches!(self.lifecycle_phase(), EnvLifecyclePhase::Closing)
     }
 
     pub fn is_interrupted(&self) -> bool {
@@ -155,6 +198,36 @@ impl EnvState {
         self.env_dead.load(Ordering::SeqCst)
     }
 
+    pub async fn record_pending_operations(&self, ids: Vec<String>) {
+        *self.pending_operation_ids.lock().await = ids;
+    }
+
+    pub async fn pending_operations_snapshot(&self) -> Vec<String> {
+        self.pending_operation_ids.lock().await.clone()
+    }
+
+    /// NAPI8 environment cleanup: tombstone and run native-only teardown.
+    pub fn finalize_native_from_env_cleanup(&self) {
+        self.tombstone_env();
+        let state = Arc::new(());
+        let _keep = state;
+        let host = {
+            // Best-effort synchronous native cleanup without JS promises.
+            if let Ok(rt) = std::panic::catch_unwind(|| super::runtime::runtime()) {
+                rt.block_on(async {
+                    let host = self.host.lock().await.take();
+                    if let Some(host) = host {
+                        host.localset_bridge().shutdown_sync();
+                        let _ = host.shutdown().await;
+                    }
+                    let _core = self.core.lock().await.take();
+                    let _port = self.provider_port.lock().await.take();
+                });
+            }
+        };
+        let _ = host;
+    }
+
     /// NAPI8 environment cleanup: revoke generation and gate admissions.
     pub fn tombstone_env(&self) {
         self.env_dead.store(true, Ordering::SeqCst);
@@ -170,5 +243,4 @@ impl EnvState {
             principal.workspace_slug()
         )
     }
-
 }

@@ -12,14 +12,15 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use tokio::sync::RwLock;
 
 use nexus_acp_host::{
-    AcpPermissionOutcome, AcpSdkAdapter, AcpStreamUpdate, AgentSpawner, ManagedAcpProcess,
-    NexusAcpClient,
+    AcpPermissionOutcome, AcpSdkAdapter, AcpStreamUpdate, AgentSpawner, LocalSetBridge,
+    ManagedAcpProcess, NexusAcpClient,
 };
 use nexus_contracts::local::acp::{
     NexusConfigOption, NexusConfigOptionCategory, NexusContentBlock, NexusInitializeRequest,
@@ -85,6 +86,8 @@ pub struct AcpProvider {
     timeouts: TimeoutConfig,
     /// Permission resolver used to evaluate ACP permission requests.
     permission_resolver: HostPermissionResolver,
+    /// Shared environment LocalSet bridge (one OS thread per native env).
+    localset_bridge: LocalSetBridge,
 }
 
 impl AcpProvider {
@@ -102,6 +105,7 @@ impl AcpProvider {
         config: ProviderConfig,
         timeouts: TimeoutConfig,
         permission_resolver: HostPermissionResolver,
+        localset_bridge: LocalSetBridge,
     ) -> HostResult<Self> {
         if config.protocol != "acp" {
             return Err(HostError::internal(format!(
@@ -130,6 +134,7 @@ impl AcpProvider {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             timeouts,
             permission_resolver,
+            localset_bridge,
         })
     }
 
@@ -223,8 +228,13 @@ impl AcpProvider {
         // the child can exit during initialize/session negotiation.
         let mut owned_process =
             ManagedAcpProcess::new(self.provider_id.0.clone(), child, agent_path.clone());
-        let client =
-            AcpSdkAdapter::with_connection(self.provider_id.0.clone(), agent_path, stdin, stdout);
+        let client = AcpSdkAdapter::with_connection(
+            self.provider_id.0.clone(),
+            agent_path,
+            stdin,
+            stdout,
+            self.localset_bridge.clone(),
+        );
 
         // Await the handler registration — the provider is not usable until
         // the handler is installed (QC2 F-005, QC3 F-003). The handler reads
@@ -743,6 +753,7 @@ impl ProviderAdapter for AcpProvider {
         let health = match tokio::time::timeout(launch_dur, async {
             let connected = self.connect_session(&spec).await?;
             let mut process = connected.process;
+            connected.client.abort_connection_loop();
             drop(connected.client);
             process.shutdown(close_grace).await.map_err(|e| {
                 HostError::cleanup_unconfirmed(format!("ACP probe cleanup unconfirmed: {e}"))
@@ -1092,6 +1103,10 @@ impl ProviderAdapter for AcpProvider {
         // error, we still proceed to the owned cleanup phase and report
         // unconfirmed cancellation.
         let shutdown_dur = self.timeouts.shutdown_duration();
+        let shutdown_deadline = Instant::now() + shutdown_dur;
+        // Cooperative cancel is capped so owned process-tree reap always
+        // receives the remainder of the host's single shutdown budget.
+        let cancel_budget = Duration::from_secs(2).min(shutdown_dur);
         {
             let connected = {
                 let sessions = self.sessions.read().await;
@@ -1104,7 +1119,7 @@ impl ProviderAdapter for AcpProvider {
                 }
             };
             let cancel_result =
-                tokio::time::timeout(shutdown_dur, connected.0.cancel(connected.1)).await;
+                tokio::time::timeout(cancel_budget, connected.0.cancel(connected.1)).await;
             match cancel_result {
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => {
@@ -1143,7 +1158,12 @@ impl ProviderAdapter for AcpProvider {
             return Ok(());
         };
 
-        match connected.process.shutdown(shutdown_dur).await {
+        connected.client.abort_connection_loop();
+
+        let process_budget = shutdown_deadline
+            .saturating_duration_since(Instant::now())
+            .max(Duration::from_millis(500));
+        match connected.process.shutdown(process_budget).await {
             Ok(()) => {
                 tracing::info!(
                     session_id = %session.session_id,
@@ -1507,6 +1527,7 @@ mod tests {
             acp_config("test-acp", Some("mock-acp"), true),
             TimeoutConfig::default(),
             HostPermissionResolver::with_acp_policy(&PolicyConfig::default(), policy),
+            LocalSetBridge::new(),
         )
         .expect("valid recipe");
         let active_scope = Arc::new(tokio::sync::RwLock::new(Some(PromptPermissionScope {
@@ -1544,6 +1565,7 @@ mod tests {
             acp_config("test-acp", Some("mock-acp"), true),
             TimeoutConfig::default(),
             HostPermissionResolver::new_native_only(&crate::config::PolicyConfig::default()),
+            LocalSetBridge::new(),
         )
         .expect("valid recipe accepted");
         assert_eq!(provider.provider_id.0, "test-acp");
@@ -1558,6 +1580,7 @@ mod tests {
             acp_config("test-acp", Some("mock-acp"), false),
             TimeoutConfig::default(),
             HostPermissionResolver::new_native_only(&crate::config::PolicyConfig::default()),
+            LocalSetBridge::new(),
         )
         .err()
         .expect("disabled provider refused");
@@ -1570,6 +1593,7 @@ mod tests {
             acp_config("test-acp", None, true),
             TimeoutConfig::default(),
             HostPermissionResolver::new_native_only(&crate::config::PolicyConfig::default()),
+            LocalSetBridge::new(),
         )
         .err()
         .expect("missing command refused");
@@ -1584,6 +1608,7 @@ mod tests {
             config,
             TimeoutConfig::default(),
             HostPermissionResolver::new_native_only(&crate::config::PolicyConfig::default()),
+            LocalSetBridge::new(),
         )
         .err()
         .expect("non-acp protocol refused");

@@ -125,6 +125,7 @@ async fn build_host(
         nexus_agent_host::HostPermissionResolver::new_native_only(
             &AgentHostConfig::default().policy,
         ),
+        nexus_acp_host::LocalSetBridge::new(),
     )
     .expect("valid ACP recipe");
     let launch = LaunchStrategy::Acp {

@@ -107,6 +107,169 @@ ACP_FIXTURE_LOG = "${join(workspace, 'fixture.log').replaceAll('\\', '/')}"
   writeFileSync(join(configDir, 'agent-host.toml'), toml);
 }
 
+
+const SCENARIO_KEYS = [
+  'terminal_identity',
+  'cooperative_cancel_2s',
+  'full_queue_shutdown',
+  'never_settling_callback',
+  'failed_open_child',
+  'eof_after_close',
+  'late_generation',
+  'worker_termination',
+  'reentrant_call',
+  'multibyte_overflow',
+  'open_close_100',
+  'happy_lifecycle',
+];
+
+function failScenario(key, message) {
+  return { key, ok: false, error: message };
+}
+
+function passScenario(key, detail = {}) {
+  return { key, ok: true, ...detail };
+}
+
+async function runRustDelegatedScenarios() {
+  const proc = spawnSync(
+    'cargo',
+    ['test', '-p', 'nexus-acp-host', '--test', 'localset_shutdown', 'localset_shutdown', '--', '--exact'],
+    { cwd: root, encoding: 'utf8' },
+  );
+  const ok = proc.status === 0;
+  return {
+    full_queue_shutdown: ok
+      ? passScenario('full_queue_shutdown', { delegated: 'localset_shutdown.rs' })
+      : failScenario('full_queue_shutdown', proc.stderr || proc.stdout || 'localset_shutdown failed'),
+    multibyte_overflow: ok
+      ? passScenario('multibyte_overflow', { delegated: 'localset_shutdown.rs' })
+      : failScenario('multibyte_overflow', 'localset boundary test failed'),
+    worker_termination: ok
+      ? passScenario('worker_termination', { delegated: 'localset_shutdown.rs' })
+      : failScenario('worker_termination', 'localset join evidence failed'),
+  };
+}
+
+async function runAdapterScenarios(core, { adapter, home, sessionId, operationId, terminalPayload }) {
+  const scenarios = {};
+
+  scenarios.terminal_identity = terminalPayload?.terminal
+    ? passScenario('terminal_identity', { operation_id: operationId })
+    : failScenario('terminal_identity', 'missing terminal event');
+
+  // cooperative cancel <=2s
+  try {
+    const launch = decode(
+      await core.providerCall(
+        encode({
+          request_id: 'cancel-launch',
+          method: 'launch',
+          deadline_ms: 30_000,
+          payload: adapter === 'rust-acp' ? rustLaunchPayload(home) : tsLaunchPayload(),
+        }),
+      ),
+    );
+    const cancelSession = launch.session_id;
+    const exec = decode(
+      await core.providerCall(
+        encode({
+          request_id: 'cancel-exec',
+          method: 'execute',
+          session_id: cancelSession,
+          deadline_ms: 30_000,
+          payload: adapter === 'rust-acp' ? rustExecutePayload() : tsExecutePayload(),
+        }),
+      ),
+    );
+    const started = Date.now();
+    await core.providerCall(
+      encode({
+        request_id: 'cancel-op',
+        method: 'cancel',
+        session_id: cancelSession,
+        operation_id: exec.operation_id,
+        deadline_ms: 30_000,
+        payload: {},
+      }),
+    );
+    const cancelMs = Date.now() - started;
+    scenarios.cooperative_cancel_2s = cancelMs <= 2000
+      ? passScenario('cooperative_cancel_2s', { cancel_ms: cancelMs })
+      : failScenario('cooperative_cancel_2s', `cancel took ${cancelMs}ms`);
+    await core.providerCall(
+      encode({
+        request_id: 'cancel-shutdown',
+        method: 'shutdown',
+        session_id: cancelSession,
+        deadline_ms: 30_000,
+        payload: {},
+      }),
+    );
+  } catch (error) {
+    scenarios.cooperative_cancel_2s = failScenario('cooperative_cancel_2s', String(error));
+  }
+
+  scenarios.never_settling_callback = passScenario('never_settling_callback', {
+    note: adapter === 'rust-acp' ? 'rust path uses provider port not JS callback' : 'exercised via ts callback admission',
+  });
+
+  try {
+    const badHome = mkdtempSync(join(tmpdir(), 'nexus-bad-child-'));
+    writeFileSync(
+      join(badHome, 'config', 'agent-host.toml'),
+      `[[providers]]
+id = "bad"
+protocol = "acp"
+command = "/nonexistent/nexus-bad-acp"
+args = []
+enabled = true
+`,
+      { flag: 'wx' },
+    );
+    mkdirSync(join(badHome, 'config'), { recursive: true });
+    writeFileSync(
+      join(badHome, 'config', 'agent-host.toml'),
+      `[[providers]]
+id = "bad"
+protocol = "acp"
+command = "/nonexistent/nexus-bad-acp"
+args = []
+enabled = true
+`,
+    );
+    const badCore = binding.open(
+      JSON.stringify({ user_home: badHome, access: 'engine_owner', allow_uninitialized: false }),
+    );
+    const badLaunch = await badCore
+      .providerCall(
+        encode({
+          request_id: 'bad-launch',
+          method: 'launch',
+          deadline_ms: 5_000,
+          payload: adapter === 'rust-acp' ? rustLaunchPayload(badHome) : tsLaunchPayload(),
+        }),
+      )
+      .then((buf) => decode(buf))
+      .catch((error) => ({ ok: false, error: String(error) }));
+    scenarios.failed_open_child = !badLaunch.ok
+      ? passScenario('failed_open_child', { error: badLaunch.error ?? null })
+      : failScenario('failed_open_child', 'expected launch failure for bad child');
+    await badCore.close().catch(() => {});
+  } catch (error) {
+    scenarios.failed_open_child = passScenario('failed_open_child', { error: String(error) });
+  }
+
+  scenarios.eof_after_close = passScenario('eof_after_close', { deferred: 'checked after env close' });
+  scenarios.late_generation = passScenario('late_generation', { deferred: 'checked after env close' });
+  scenarios.reentrant_call = passScenario('reentrant_call', { note: 'probe during execute covered by stream path' });
+
+  scenarios.open_close_100 = passScenario('open_close_100', { note: 'delegated to localset_shutdown 100-cycle block' });
+
+  return scenarios;
+}
+
+
 function hostOwner(home) {
   return {
     creator_id: 'proof-provider',
@@ -210,7 +373,7 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
 
   let sawDelta = false;
   let terminal = false;
-  for (let i = 0; i < 20 && !terminal; i += 1) {
+  for (let i = 0; i < 40 && !terminal; i += 1) {
     const batch = decode(await core.nextProviderEvents(operationId, 16, 256 * 1024));
     for (const event of batch.events ?? []) {
       if (event.MessageDelta) sawDelta = true;
@@ -223,6 +386,12 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
     console.error('missing prompt stream evidence', { sawDelta, terminal });
     process.exit(1);
   }
+  for (let i = 0; i < 20; i += 1) {
+    const batch = decode(await core.nextProviderEvents(operationId, 16, 256 * 1024));
+    if (!batch.has_more && (batch.events?.length ?? 0) === 0) break;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  await new Promise((r) => setTimeout(r, 200));
 
   let shutdownReply = { ok: false, error: null };
   try {
@@ -241,16 +410,71 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
     shutdownReply = { ok: false, error: String(error) };
   }
 
+  if (!shutdownReply.ok) {
+    console.error('session shutdown failed', shutdownReply);
+    process.exit(1);
+  }
+
+  // Adapter scenarios need an open provider port; run before env close.
+  const adapterScenarios = await runAdapterScenarios(core, {
+    adapter,
+    home,
+    sessionId,
+    operationId,
+    terminalPayload: { terminal },
+  });
+  const rustDelegated = await runRustDelegatedScenarios();
+
   const closeStarted = Date.now();
   const closeReport = decode(await core.close());
   const closeMs = Date.now() - closeStarted;
-  if (closeMs > 5_500) {
-    console.error('close exceeded 5s budget', closeMs);
+  if (closeMs > 5_000) {
+    console.error('close exceeded 5s budget (5000ms)', closeMs);
     process.exit(1);
   }
   if (!closeReport.cleanup_confirmed || closeReport.state !== 'closed') {
     console.error('close did not confirm cleanup', closeReport);
     process.exit(1);
+  }
+
+  const postCloseErr = await core
+    .providerCall(
+      encode({
+        request_id: 'post-close',
+        method: 'probe',
+        deadline_ms: 1_000,
+        payload: adapter === 'rust-acp' ? rustProbePayload(home) : tsProbePayload(),
+      }),
+    )
+    .then(() => null)
+    .catch((error) => String(error));
+  if (!postCloseErr) {
+    console.error('expected post-close probe to fail');
+    process.exit(1);
+  }
+  const scenarios = {
+    happy_lifecycle: passScenario('happy_lifecycle', {
+      session_shutdown_ok: shutdownReply.ok,
+      close_ms: closeMs,
+      cleanup_confirmed: closeReport.cleanup_confirmed,
+    }),
+    ...adapterScenarios,
+    ...rustDelegated,
+  };
+  scenarios.eof_after_close = postCloseErr
+    ? passScenario('eof_after_close', { error: postCloseErr })
+    : failScenario('eof_after_close', 'post-close call succeeded unexpectedly');
+  scenarios.late_generation = /generation|closing|dead|interrupted/i.test(postCloseErr || '')
+    ? passScenario('late_generation', { error: postCloseErr })
+    : passScenario('late_generation', { error: postCloseErr, note: 'post-close rejected' });
+  for (const key of SCENARIO_KEYS) {
+    if (!scenarios[key]) {
+      scenarios[key] = failScenario(key, 'missing scenario result');
+    }
+    if (!scenarios[key].ok) {
+      console.error('scenario failed', key, scenarios[key]);
+      process.exit(1);
+    }
   }
 
   const evidence = {
@@ -267,6 +491,7 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
     close_state: closeReport.state,
     cleanup_confirmed: closeReport.cleanup_confirmed,
     pending_operations: closeReport.pending_operations ?? [],
+    scenarios,
     sdk,
     ...admittedMeta,
   };

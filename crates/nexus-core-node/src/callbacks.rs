@@ -116,6 +116,9 @@ impl JsProviderBridge {
             http_status: Some(503),
         })?;
         let gen_at_enqueue = self.state.generation.load(Ordering::SeqCst);
+
+        // Register close waiter before enqueue so a notify cannot be lost.
+        let close_fut = self.state.close_notify.notified();
         if self.state.is_closing() {
             return Err(CoreError {
                 code: CoreErrorCode::Closing,
@@ -135,7 +138,15 @@ impl JsProviderBridge {
                 http_status: Some(503),
             })?;
 
-        let close_fut = self.state.close_notify.notified();
+        if self.state.is_closing() {
+            return Err(CoreError {
+                code: CoreErrorCode::Closing,
+                message: "closing".into(),
+                details: Default::default(),
+                http_status: Some(503),
+            });
+        }
+
         let reply = tokio::select! {
             () = close_fut => {
                 return Err(CoreError {

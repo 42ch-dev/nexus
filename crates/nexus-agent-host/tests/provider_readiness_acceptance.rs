@@ -643,6 +643,7 @@ async fn acp_probe_runs_in_the_verified_owner_workspace() {
         },
         timeouts(),
         HostPermissionResolver::new_native_only(&AgentHostConfig::default().policy),
+        nexus_acp_host::LocalSetBridge::new(),
     )
     .expect("valid ACP recipe");
 

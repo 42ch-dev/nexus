@@ -145,6 +145,7 @@ pub fn discover_provider_entries(
     host_config: &crate::config::AgentHostConfig,
     timeouts: &TimeoutConfig,
     permission_resolver: &HostPermissionResolver,
+    localset_bridge: nexus_acp_host::LocalSetBridge,
 ) -> HostResult<std::collections::HashMap<ProviderId, ProviderEntry>> {
     use crate::discovery::{catalog::ProviderCatalog, config, path_scan};
 
@@ -160,6 +161,7 @@ pub fn discover_provider_entries(
             &metadata,
             timeouts.clone(),
             permission_resolver.clone(),
+            localset_bridge.clone(),
         ) {
             Ok(adapter) => Some(adapter),
             Err(error) => {

@@ -5,7 +5,7 @@
 //! Shutdown uses a dedicated control channel that bypasses the bounded work queue.
 
 use std::any::Any;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -27,9 +27,7 @@ pub const ADMISSION_WAIT: Duration = Duration::from_secs(2);
 /// Total shutdown join budget.
 pub const SHUTDOWN_JOIN_BUDGET: Duration = Duration::from_secs(5);
 
-type ErasedFuture =
-    Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + 'static>>;
-
+type ErasedFuture = Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + 'static>>;
 type FutureFactory = Box<dyn FnOnce() -> ErasedFuture + Send + 'static>;
 
 struct ExecuteRequest {
@@ -41,7 +39,6 @@ struct ExecuteRequest {
 
 enum WorkMessage {
     Execute(ExecuteRequest),
-    ReleasePending { bytes: usize },
 }
 
 enum ControlMessage {
@@ -69,57 +66,65 @@ pub struct LocalSetBridgeStats {
     pub shutting_down: bool,
 }
 
+#[derive(Debug, Default)]
+struct PendingAdmission {
+    requests: usize,
+    bytes: usize,
+}
+
 struct AdmissionCounters {
-    pending_requests: AtomicUsize,
-    pending_bytes: AtomicUsize,
+    pending: Mutex<PendingAdmission>,
     active_tasks: AtomicUsize,
     shutting_down: AtomicBool,
     next_task_id: AtomicU64,
+    thread_joined: AtomicBool,
 }
 
 impl AdmissionCounters {
     fn new() -> Self {
         Self {
-            pending_requests: AtomicUsize::new(0),
-            pending_bytes: AtomicUsize::new(0),
+            pending: Mutex::new(PendingAdmission::default()),
             active_tasks: AtomicUsize::new(0),
             shutting_down: AtomicBool::new(false),
             next_task_id: AtomicU64::new(1),
+            thread_joined: AtomicBool::new(false),
         }
     }
 
     fn stats(&self) -> LocalSetBridgeStats {
+        let pending = self.pending.lock().expect("admission mutex poisoned");
         LocalSetBridgeStats {
-            pending_requests: self.pending_requests.load(Ordering::Relaxed),
-            pending_bytes: self.pending_bytes.load(Ordering::Relaxed),
-            active_tasks: self.active_tasks.load(Ordering::Relaxed),
-            shutting_down: self.shutting_down.load(Ordering::Relaxed),
+            pending_requests: pending.requests,
+            pending_bytes: pending.bytes,
+            active_tasks: self.active_tasks.load(Ordering::Acquire),
+            shutting_down: self.shutting_down.load(Ordering::Acquire),
         }
     }
 
+    /// Atomically reserve pending count + bytes under one lock.
     fn try_reserve_pending(&self, bytes: usize) -> bool {
         if self.shutting_down.load(Ordering::Acquire) {
             return false;
         }
-        let cur_count = self.pending_requests.load(Ordering::Acquire);
-        let cur_bytes = self.pending_bytes.load(Ordering::Acquire);
-        if cur_count >= MAX_PENDING_REQUESTS {
+        let mut pending = self.pending.lock().expect("admission mutex poisoned");
+        if pending.requests >= MAX_PENDING_REQUESTS {
             return false;
         }
-        if cur_bytes + bytes > MAX_PENDING_BYTES {
+        if pending.bytes.saturating_add(bytes) > MAX_PENDING_BYTES {
             return false;
         }
         if self.active_tasks.load(Ordering::Acquire) >= MAX_ACTIVE_TASKS {
             return false;
         }
-        self.pending_requests.fetch_add(1, Ordering::AcqRel);
-        self.pending_bytes.fetch_add(bytes, Ordering::AcqRel);
+        pending.requests += 1;
+        pending.bytes += bytes;
         true
     }
 
     fn release_pending(&self, bytes: usize) {
-        self.pending_requests.fetch_sub(1, Ordering::AcqRel);
-        self.pending_bytes.fetch_sub(bytes, Ordering::AcqRel);
+        let mut pending = self.pending.lock().expect("admission mutex poisoned");
+        pending.requests = pending.requests.saturating_sub(1);
+        pending.bytes = pending.bytes.saturating_sub(bytes);
     }
 
     fn task_started(&self) {
@@ -128,6 +133,14 @@ impl AdmissionCounters {
 
     fn task_finished(&self) {
         self.active_tasks.fetch_sub(1, Ordering::AcqRel);
+    }
+
+    fn mark_thread_joined(&self) {
+        self.thread_joined.store(true, Ordering::SeqCst);
+    }
+
+    fn thread_joined(&self) -> bool {
+        self.thread_joined.load(Ordering::SeqCst)
     }
 }
 
@@ -160,7 +173,9 @@ impl LocalSetBridge {
         self.counters.stats()
     }
 
-    fn ensure_runtime(&self) -> Result<(mpsc::Sender<WorkMessage>, mpsc::Sender<ControlMessage>), crate::AcpError> {
+    fn ensure_runtime(
+        &self,
+    ) -> Result<(mpsc::Sender<WorkMessage>, mpsc::Sender<ControlMessage>), crate::AcpError> {
         let mut guard = self
             .runtime
             .lock()
@@ -174,7 +189,7 @@ impl LocalSetBridge {
 
         let counters = self.counters.clone();
         let (work_tx, work_rx) = mpsc::channel::<WorkMessage>(MAX_PENDING_REQUESTS);
-        let (control_tx, control_rx) = mpsc::channel::<ControlMessage>(4);
+        let (control_tx, control_rx) = mpsc::channel::<ControlMessage>(64);
 
         let thread_handle = thread::Builder::new()
             .name("nexus-localset-bridge".to_string())
@@ -207,19 +222,18 @@ impl LocalSetBridge {
     }
 
     /// Execute a `!Send` future on the `LocalSet` thread.
-    pub async fn execute<F, T>(&self, f: F) -> crate::AcpResult<T>
+    ///
+    /// `byte_charge` is the UTF-8 byte size of the logical request payload charged
+    /// against the pending-byte budget before admission.
+    pub async fn execute<F, T>(&self, byte_charge: usize, f: F) -> crate::AcpResult<T>
     where
         F: FnOnce() -> Pin<Box<dyn Future<Output = T> + 'static>> + Send + 'static,
         T: Send + 'static,
     {
-        const BYTE_CHARGE: usize = 0;
-        self.wait_admission(BYTE_CHARGE).await?;
+        self.wait_admission(byte_charge).await?;
         let (work_tx, control_tx) = self.ensure_runtime()?;
 
-        let task_id = self
-            .counters
-            .next_task_id
-            .fetch_add(1, Ordering::AcqRel);
+        let task_id = self.counters.next_task_id.fetch_add(1, Ordering::AcqRel);
         let (result_tx, result_rx) = oneshot::channel();
 
         let factory: FutureFactory = Box::new(move || {
@@ -233,23 +247,20 @@ impl LocalSetBridge {
         if work_tx
             .send(WorkMessage::Execute(ExecuteRequest {
                 task_id,
-                byte_charge: BYTE_CHARGE,
+                byte_charge,
                 factory,
                 result_tx: Some(result_tx),
             }))
             .await
             .is_err()
         {
-            self.counters.release_pending(BYTE_CHARGE);
+            self.counters.release_pending(byte_charge);
             return Err(crate::AcpError::connection_failed("LocalSet work channel closed"));
         }
 
         let cancel_on_drop = CancelGuard {
             control_tx,
             task_id,
-            work_tx,
-            byte_charge: BYTE_CHARGE,
-            counters: self.counters.clone(),
             cancelled: Arc::new(AtomicBool::new(false)),
         };
 
@@ -272,6 +283,7 @@ impl LocalSetBridge {
     /// Execute with timeout; dropped/expired waiter cancels the owned LocalSet task.
     pub async fn execute_with_timeout<F, T>(
         &self,
+        byte_charge: usize,
         f: F,
         timeout_duration: Duration,
         operation_name: &str,
@@ -280,66 +292,115 @@ impl LocalSetBridge {
         F: FnOnce() -> Pin<Box<dyn Future<Output = T> + 'static>> + Send + 'static,
         T: Send + 'static,
     {
-        tokio::time::timeout(timeout_duration, self.execute(f))
+        tokio::time::timeout(timeout_duration, self.execute(byte_charge, f))
             .await
             .map_err(|_| crate::AcpError::timeout(operation_name, timeout_duration))?
     }
 
     /// Explicit shutdown with join evidence. Idempotent.
     pub async fn shutdown(&self) -> ShutdownEvidence {
+        self.shutdown_inner(true).await
+    }
+
+    async fn shutdown_inner(&self, join_thread: bool) -> ShutdownEvidence {
         if self
             .shutdown_claimed
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
             .is_err()
         {
-            return self.join_evidence_only();
+            let mut evidence = self.evidence_from_state();
+            if join_thread {
+                evidence = self.join_runtime_thread(evidence).await;
+            }
+            return evidence;
         }
         self.counters.shutting_down.store(true, Ordering::SeqCst);
-        let control_tx = {
-            let guard = self
-                .runtime
-                .lock()
-                .map_err(|_| crate::AcpError::connection_failed("LocalSet bridge mutex poisoned"));
-            match guard {
-                Ok(g) => g.as_ref().map(|rt| rt.control_tx.clone()),
-                Err(_) => None,
-            }
-        };
 
-        if let Some(control_tx) = control_tx {
-            let (ack_tx, ack_rx) = oneshot::channel();
-            if control_tx
-                .try_send(ControlMessage::Shutdown { ack: ack_tx })
-                .is_ok()
-            {
-                match tokio::time::timeout(SHUTDOWN_JOIN_BUDGET, ack_rx).await {
-                    Ok(Ok(evidence)) => {
-                        self.join_runtime_thread().await;
-                        return evidence;
-                    }
-                    Ok(Err(_)) => {
-                        warn!("LocalSet shutdown ack channel closed before evidence");
-                    }
-                    Err(_) => {
-                        warn!("LocalSet shutdown ack timed out after {:?}", SHUTDOWN_JOIN_BUDGET);
-                    }
-                }
-            }
+        if self
+            .runtime
+            .lock()
+            .ok()
+            .is_some_and(|guard| guard.is_none())
+        {
+            return ShutdownEvidence {
+                joined_cleanly: true,
+                thread_alive: false,
+                pending_requests: 0,
+                pending_bytes: 0,
+                active_tasks: 0,
+                aborted_task_ids: vec![],
+            };
         }
 
-        let mut evidence = self.counters.stats().into_evidence(vec![]);
-        self.join_runtime_thread().await;
-        evidence.joined_cleanly = !evidence.thread_alive;
+        let control_tx = {
+            let guard = self.runtime.lock().ok();
+            guard.and_then(|g| g.as_ref().map(|rt| rt.control_tx.clone()))
+        };
+
+        let mut evidence = if let Some(control_tx) = control_tx {
+            let (ack_tx, ack_rx) = oneshot::channel();
+            let sent = control_tx
+                .send(ControlMessage::Shutdown { ack: ack_tx })
+                .await
+                .is_ok();
+            if sent {
+                match tokio::time::timeout(SHUTDOWN_JOIN_BUDGET, ack_rx).await {
+                    Ok(Ok(ev)) => ev,
+                    Ok(Err(_)) => {
+                        warn!("LocalSet shutdown ack channel closed before evidence");
+                        self.evidence_from_state()
+                    }
+                    Err(_) => {
+                        warn!(
+                            "LocalSet shutdown ack timed out after {:?}",
+                            SHUTDOWN_JOIN_BUDGET
+                        );
+                        self.evidence_from_state()
+                    }
+                }
+            } else {
+                self.evidence_from_state()
+            }
+        } else {
+            self.evidence_from_state()
+        };
+
+        if join_thread {
+            evidence = self.join_runtime_thread(evidence).await;
+        }
         evidence
     }
 
-    fn join_evidence_only(&self) -> ShutdownEvidence {
-        let mut evidence = self.counters.stats().into_evidence(vec![]);
-        evidence.joined_cleanly = !evidence.thread_alive;
-        evidence
+    fn evidence_from_state(&self) -> ShutdownEvidence {
+        let stats = self.counters.stats();
+        let thread_alive = self.runtime_thread_alive();
+        let never_started = self
+            .runtime
+            .lock()
+            .ok()
+            .is_some_and(|guard| guard.is_none());
+        ShutdownEvidence {
+            joined_cleanly: never_started || (self.counters.thread_joined() && !thread_alive),
+            thread_alive,
+            pending_requests: stats.pending_requests,
+            pending_bytes: stats.pending_bytes,
+            active_tasks: stats.active_tasks,
+            aborted_task_ids: vec![],
+        }
     }
 
-    async fn join_runtime_thread(&self) {
+    fn runtime_thread_alive(&self) -> bool {
+        let guard = self.runtime.lock().ok();
+        match guard {
+            Some(g) => g
+                .as_ref()
+                .map(|rt| !rt.thread_handle.is_finished())
+                .unwrap_or(false),
+            None => false,
+        }
+    }
+
+    async fn join_runtime_thread(&self, mut evidence: ShutdownEvidence) -> ShutdownEvidence {
         let handle = {
             let mut guard = self
                 .runtime
@@ -348,26 +409,92 @@ impl LocalSetBridge {
             guard.take().map(|rt| rt.thread_handle)
         };
         if let Some(handle) = handle {
-            let join_result = tokio::task::spawn_blocking(move || handle.join()).await;
+            let join_result = tokio::time::timeout(
+                SHUTDOWN_JOIN_BUDGET,
+                tokio::task::spawn_blocking(move || handle.join()),
+            )
+            .await;
             match join_result {
-                Ok(Ok(())) => debug!("LocalSet bridge thread joined"),
-                Ok(Err(panic)) => error!("LocalSet bridge thread panicked: {:?}", panic),
-                Err(e) => warn!("LocalSet join helper failed: {:?}", e),
+                Ok(Ok(Ok(()))) => {
+                    self.counters.mark_thread_joined();
+                    evidence.joined_cleanly = true;
+                    evidence.thread_alive = false;
+                    debug!("LocalSet bridge thread joined");
+                }
+                Ok(Ok(Err(panic))) => {
+                    error!("LocalSet bridge thread panicked: {:?}", panic);
+                    evidence.joined_cleanly = false;
+                    evidence.thread_alive = false;
+                }
+                Ok(Err(e)) => {
+                    warn!("LocalSet join helper failed: {:?}", e);
+                    evidence.thread_alive = true;
+                }
+                Err(_) => {
+                    warn!(
+                        "LocalSet join timed out after {:?}",
+                        SHUTDOWN_JOIN_BUDGET
+                    );
+                    evidence.thread_alive = true;
+                }
+            }
+        } else {
+            evidence.thread_alive = false;
+            evidence.joined_cleanly =
+                evidence.joined_cleanly || self.counters.thread_joined();
+        }
+        let stats = self.counters.stats();
+        evidence.pending_requests = stats.pending_requests;
+        evidence.pending_bytes = stats.pending_bytes;
+        evidence.active_tasks = stats.active_tasks;
+        evidence
+    }
+
+    /// Synchronous shutdown for `Drop` / finalizer paths (bounded join).
+    pub fn shutdown_sync(&self) {
+        if self
+            .shutdown_claimed
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
+            .is_err()
+        {
+            return;
+        }
+        self.counters.shutting_down.store(true, Ordering::SeqCst);
+        let handle = {
+            let guard = self.runtime.lock().ok();
+            let control_tx = guard
+                .as_ref()
+                .and_then(|g| g.as_ref().map(|rt| rt.control_tx.clone()));
+            if let Some(control_tx) = control_tx {
+                let (ack_tx, ack_rx) = oneshot::channel();
+                send_control_reliable(control_tx, ControlMessage::Shutdown { ack: ack_tx });
+                let _ = ack_rx.blocking_recv();
+            }
+            guard.and_then(|mut g| g.take().map(|rt| rt.thread_handle))
+        };
+        if let Some(handle) = handle {
+            let join_started = Instant::now();
+            while !handle.is_finished() && join_started.elapsed() < SHUTDOWN_JOIN_BUDGET {
+                thread::sleep(Duration::from_millis(10));
+            }
+            if handle.is_finished() {
+                let _ = handle.join();
+                self.counters.mark_thread_joined();
             }
         }
     }
 }
 
-impl LocalSetBridgeStats {
-    fn into_evidence(self, aborted_task_ids: Vec<u64>) -> ShutdownEvidence {
-        ShutdownEvidence {
-            joined_cleanly: false,
-            thread_alive: false,
-            pending_requests: self.pending_requests,
-            pending_bytes: self.pending_bytes,
-            active_tasks: self.active_tasks,
-            aborted_task_ids,
-        }
+fn send_control_reliable(control_tx: mpsc::Sender<ControlMessage>, msg: ControlMessage) {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        std::thread::Builder::new()
+            .name("nexus-localset-control".into())
+            .spawn(move || {
+                let _ = control_tx.blocking_send(msg);
+            })
+            .expect("spawn control relay thread");
+    } else {
+        let _ = control_tx.blocking_send(msg);
     }
 }
 
@@ -375,9 +502,6 @@ impl LocalSetBridgeStats {
 struct CancelGuard {
     control_tx: mpsc::Sender<ControlMessage>,
     task_id: u64,
-    work_tx: mpsc::Sender<WorkMessage>,
-    byte_charge: usize,
-    counters: Arc<AdmissionCounters>,
     cancelled: Arc<AtomicBool>,
 }
 
@@ -392,21 +516,116 @@ impl Drop for CancelGuard {
         if self.cancelled.load(Ordering::Acquire) {
             return;
         }
-        let _ = self
-            .control_tx
-            .try_send(ControlMessage::Cancel { task_id: self.task_id });
-        let _ = self.work_tx.try_send(WorkMessage::ReleasePending {
-            bytes: self.byte_charge,
-        });
-        self.counters.release_pending(self.byte_charge);
+        send_control_reliable(
+            self.control_tx.clone(),
+            ControlMessage::Cancel {
+                task_id: self.task_id,
+            },
+        );
     }
 }
 
-struct ActiveGuard(Arc<AdmissionCounters>);
+struct BridgeThreadState {
+    tasks: HashMap<u64, tokio::task::AbortHandle>,
+    deferred: VecDeque<ExecuteRequest>,
+    cancelled_before_start: HashSet<u64>,
+}
+
+type ThreadStateRef = Arc<Mutex<BridgeThreadState>>;
+
+struct ActiveGuard {
+    counters: Arc<AdmissionCounters>,
+    state: ThreadStateRef,
+}
 
 impl Drop for ActiveGuard {
     fn drop(&mut self) {
-        self.0.task_finished();
+        self.counters.task_finished();
+        if let Ok(mut bridge_state) = self.state.lock() {
+            bridge_state.drain_deferred(&self.counters, &self.state);
+        }
+    }
+}
+
+impl BridgeThreadState {
+    fn process_cancel(
+        &mut self,
+        task_id: u64,
+        counters: &AdmissionCounters,
+        aborted_ids: &mut Vec<u64>,
+    ) {
+        if let Some(handle) = self.tasks.remove(&task_id) {
+            handle.abort();
+            aborted_ids.push(task_id);
+            return;
+        }
+        if let Some(pos) = self.deferred.iter().position(|req| req.task_id == task_id) {
+            let req = self.deferred.remove(pos).expect("deferred position");
+            counters.release_pending(req.byte_charge);
+            aborted_ids.push(task_id);
+            return;
+        }
+        self.cancelled_before_start.insert(task_id);
+    }
+
+    fn enqueue_execute(
+        &mut self,
+        req: ExecuteRequest,
+        counters: &Arc<AdmissionCounters>,
+        state_ref: &ThreadStateRef,
+    ) {
+        let task_id = req.task_id;
+        if self.cancelled_before_start.remove(&task_id) {
+            counters.release_pending(req.byte_charge);
+            return;
+        }
+        if counters.active_tasks.load(Ordering::Acquire) >= MAX_ACTIVE_TASKS {
+            self.deferred.push_back(req);
+            return;
+        }
+        self.begin_task(req, counters, state_ref);
+    }
+
+    fn begin_task(
+        &mut self,
+        req: ExecuteRequest,
+        counters: &Arc<AdmissionCounters>,
+        state_ref: &ThreadStateRef,
+    ) {
+        let task_id = req.task_id;
+        counters.release_pending(req.byte_charge);
+        let factory = req.factory;
+        let result_tx = req.result_tx;
+        let task_counters = counters.clone();
+        let shared_state = state_ref.clone();
+        let handle = tokio::task::spawn_local(async move {
+            task_counters.task_started();
+            let _active = ActiveGuard {
+                counters: task_counters.clone(),
+                state: shared_state,
+            };
+            let future = factory();
+            let output = future.await;
+            if let Some(tx) = result_tx {
+                let _ = tx.send(output);
+            }
+        });
+        self.tasks.insert(task_id, handle.abort_handle());
+        self.drain_deferred(counters, state_ref);
+    }
+
+    fn drain_deferred(&mut self, counters: &Arc<AdmissionCounters>, state_ref: &ThreadStateRef) {
+        while counters.active_tasks.load(Ordering::Acquire) < MAX_ACTIVE_TASKS {
+            let Some(req) = self.deferred.pop_front() else {
+                break;
+            };
+            let task_id = req.task_id;
+            if self.cancelled_before_start.remove(&task_id) {
+                counters.release_pending(req.byte_charge);
+                continue;
+            }
+            self.begin_task(req, counters, state_ref);
+        }
     }
 }
 
@@ -422,7 +641,11 @@ fn run_localset_thread(
     runtime.block_on(async move {
         let local = tokio::task::LocalSet::new();
         local.run_until(async move {
-            let mut tasks: HashMap<u64, tokio::task::AbortHandle> = HashMap::new();
+            let state_ref: ThreadStateRef = Arc::new(Mutex::new(BridgeThreadState {
+                tasks: HashMap::new(),
+                deferred: VecDeque::new(),
+                cancelled_before_start: HashSet::new(),
+            }));
             let mut aborted_ids: Vec<u64> = Vec::new();
 
             loop {
@@ -431,19 +654,29 @@ fn run_localset_thread(
                     msg = control_rx.recv() => {
                         match msg {
                             Some(ControlMessage::Cancel { task_id }) => {
-                                if let Some(handle) = tasks.remove(&task_id) {
-                                    handle.abort();
-                                    aborted_ids.push(task_id);
+                                if let Ok(mut state) = state_ref.lock() {
+                                    state.process_cancel(task_id, &counters, &mut aborted_ids);
                                 }
                             }
                             Some(ControlMessage::Shutdown { ack }) => {
-                                for (task_id, handle) in tasks.drain() {
-                                    handle.abort();
-                                    aborted_ids.push(task_id);
+                                if let Ok(mut state) = state_ref.lock() {
+                                    for (_, handle) in state.tasks.drain() {
+                                        handle.abort();
+                                    }
+                                    for req in state.deferred.drain(..) {
+                                        counters.release_pending(req.byte_charge);
+                                    }
                                 }
-                                counters.active_tasks.store(0, Ordering::SeqCst);
                                 counters.shutting_down.store(true, Ordering::SeqCst);
-                                let evidence = counters.stats().into_evidence(aborted_ids);
+                                let stats = counters.stats();
+                                let evidence = ShutdownEvidence {
+                                    joined_cleanly: false,
+                                    thread_alive: true,
+                                    pending_requests: stats.pending_requests,
+                                    pending_bytes: stats.pending_bytes,
+                                    active_tasks: stats.active_tasks,
+                                    aborted_task_ids: aborted_ids,
+                                };
                                 let _ = ack.send(evidence);
                                 break;
                             }
@@ -453,31 +686,17 @@ fn run_localset_thread(
                     msg = work_rx.recv() => {
                         match msg {
                             Some(WorkMessage::Execute(req)) => {
-                                let task_id = req.task_id;
-                                let byte_charge = req.byte_charge;
-                                let factory = req.factory;
-                                let result_tx = req.result_tx;
-                                let task_counters = counters.clone();
-                                let handle = tokio::task::spawn_local(async move {
-                                    task_counters.task_started();
-                                    let _active = ActiveGuard(task_counters.clone());
-                                    let future = factory();
-                                    let output = future.await;
-                                    if let Some(tx) = result_tx {
-                                        let _ = tx.send(output);
-                                    }
-                                });
-                                tasks.insert(task_id, handle.abort_handle());
-                            }
-                            Some(WorkMessage::ReleasePending { bytes }) => {
-                                counters.release_pending(bytes);
+                                if let Ok(mut state) = state_ref.lock() {
+                                    state.enqueue_execute(req, &counters, &state_ref);
+                                }
                             }
                             None => break,
                         }
                     }
                 }
             }
-        }).await;
+        })
+        .await;
     });
 }
 
@@ -489,22 +708,12 @@ impl Default for LocalSetBridge {
 
 impl Drop for LocalSetBridge {
     fn drop(&mut self) {
-        if Arc::strong_count(&self.runtime) == 1
-            && self
-                .shutdown_claimed
-                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
-                .is_ok()
-        {
-            self.counters.shutting_down.store(true, Ordering::SeqCst);
-            if let Ok(guard) = self.runtime.lock() {
-                if let Some(rt) = guard.as_ref() {
-                    let (ack_tx, _ack_rx) = oneshot::channel();
-                    let _ = rt
-                        .control_tx
-                        .try_send(ControlMessage::Shutdown { ack: ack_tx });
-                }
-            } }
+        if Arc::strong_count(&self.runtime) != 1 {
+            return;
+        }
+        if tokio::runtime::Handle::try_current().is_ok() {
+            return;
+        }
+        self.shutdown_sync();
     }
 }
-
-
