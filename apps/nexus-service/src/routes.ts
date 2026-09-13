@@ -204,17 +204,15 @@ async function tryHostQuery(service: ServiceCore, request: Parameters<typeof hos
 }
 
 /** Truthful runtime mode: uninitialized is reported as such, never as ready. */
-/** Native host-query absent-resource message shapes (typed `invalid_input`). */
-const HOST_LOOKUP_MISSING = /^session .+ not found$|^operation .+ is not active$/;
-
 /**
  * The frozen native host-query boundary reports an absent session/operation as
- * typed `invalid_input`; the daemon route contract for these two lookups is 404.
+ * typed `not_found`; this adapter names the missing resource on the wire, and
+ * propagates every other native rejection unchanged.
  */
 function hostLookupError(error: unknown, resource: string): HttpError {
   const mapped = mapNativeError(error);
-  if (mapped.code === 'invalid_input' && HOST_LOOKUP_MISSING.test(mapped.message)) {
-    return new HttpError(404, 'not_found', mapped.message, { resource });
+  if (mapped.code === 'not_found') {
+    return new HttpError(404, 'not_found', mapped.message, { ...mapped.details, resource });
   }
   return mapped;
 }

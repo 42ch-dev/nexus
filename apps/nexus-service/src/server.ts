@@ -3,6 +3,7 @@ import { createServer as createHttpsServer } from 'node:https';
 import { randomUUID } from 'node:crypto';
 import {
   formatHttpAuthority,
+  HEADER_DEADLINE_CHECK_MS,
   HEADER_READ_TIMEOUT_MS,
   MAX_REQUEST_BYTES,
   REQUEST_READ_TIMEOUT_MS,
@@ -33,13 +34,15 @@ function writeCors(res: ServerResponse, origin: string | undefined, allowed: rea
   res.setHeader('Access-Control-Allow-Headers', corsAllowHeaders());
 }
 
+/**
+ * Body/read deadline only. The header deadline is owned by the server's
+ * `headersTimeout` (parsed before this handler runs), never by a timer that
+ * can only start once the headers already arrived.
+ */
 async function readBody(req: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let total = 0;
   return await new Promise((resolve, reject) => {
-    const headerTimer = setTimeout(() => {
-      reject(new HttpError(408, 'invalid_input', 'request headers timed out'));
-    }, HEADER_READ_TIMEOUT_MS);
     const bodyTimer = setTimeout(() => {
       reject(new HttpError(408, 'invalid_input', 'request body timed out'));
     }, REQUEST_READ_TIMEOUT_MS);
@@ -53,12 +56,10 @@ async function readBody(req: IncomingMessage): Promise<Buffer> {
       chunks.push(chunk);
     });
     req.on('end', () => {
-      clearTimeout(headerTimer);
       clearTimeout(bodyTimer);
       resolve(Buffer.concat(chunks));
     });
     req.on('error', (error) => {
-      clearTimeout(headerTimer);
       clearTimeout(bodyTimer);
       reject(error);
     });
@@ -165,6 +166,17 @@ export function createServiceServer(
     config.tlsCert && config.tlsKey
       ? createHttpsServer({ cert: config.tlsCert, key: config.tlsKey }, handler)
       : createHttpServer(handler);
+
+  // Frozen ordinary HTTP bounds: headers 5s (parser-owned, before the handler)
+  // and request read 10s (`requestTimeout` >= `headersTimeout`).
+  server.headersTimeout = HEADER_READ_TIMEOUT_MS;
+  server.requestTimeout = REQUEST_READ_TIMEOUT_MS;
+  // Node only *checks* those deadlines on this interval; without it the frozen
+  // 5s header bound would not be enforced until the 30s default sweep.
+  // `connectionsCheckingInterval` is a runtime server property (Node >= 18.7);
+  // the bundled @types/node does not declare it on `Server`.
+  (server as Server & { connectionsCheckingInterval: number }).connectionsCheckingInterval =
+    HEADER_DEADLINE_CHECK_MS;
 
   const running: RunningService = {
     url,

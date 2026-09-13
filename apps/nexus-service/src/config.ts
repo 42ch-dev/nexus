@@ -21,6 +21,8 @@ export interface ResolvedServiceConfig extends ServiceOptions {
 
 export const MAX_REQUEST_BYTES = 1024 * 1024;
 export const HEADER_READ_TIMEOUT_MS = 5_000;
+/** Sweep interval that makes the frozen 5s header deadline observable on time. */
+export const HEADER_DEADLINE_CHECK_MS = 500;
 export const REQUEST_READ_TIMEOUT_MS = 10_000;
 export const CLOSE_BUDGET_MS = 5_000;
 

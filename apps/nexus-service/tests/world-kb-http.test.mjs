@@ -1,14 +1,19 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { createHash, X509Certificate } from 'node:crypto';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import https from 'node:https';
+import net from 'node:net';
 import { describe, test, before, after } from 'node:test';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..', '..', '..');
 const serviceRoot = join(__dirname, '..');
+const require = createRequire(import.meta.url);
 const OWNED_WORLD = 'wld_owned';
 const FOREIGN_WORLD = 'wld_foreign';
 
@@ -43,6 +48,62 @@ async function startDomainService(home, port) {
     allowRemote: false,
     domainOnly: true,
   });
+}
+
+async function startService(options) {
+  const mod = await import(join(serviceRoot, 'dist/index.js'));
+  return mod.startService(options);
+}
+
+/** DER SHA-256 fingerprint in the frozen `SHA256:<colon-hex>` wire format. */
+function expectedDerFingerprint(pem) {
+  const cert = new X509Certificate(pem);
+  const digest = createHash('sha256').update(cert.raw).digest();
+  return `SHA256:${[...digest].map((byte) => byte.toString(16).padStart(2, '0')).join(':')}`;
+}
+
+function httpsGet(url) {
+  return new Promise((resolve, reject) => {
+    https
+      .get(url, { rejectUnauthorized: false }, (res) => {
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => {
+          body += chunk;
+        });
+        res.on('end', () => resolve({ status: res.statusCode, body }));
+      })
+      .on('error', reject);
+  });
+}
+
+function seedTlsMaterial() {
+  const dir = mkdtempSync(join(tmpdir(), 'nexus-service-tls-'));
+  const keyPath = join(dir, 'key.pem');
+  const certPath = join(dir, 'cert.pem');
+  const gen = spawnSync(
+    'openssl',
+    [
+      'req',
+      '-x509',
+      '-newkey',
+      'rsa:2048',
+      '-nodes',
+      '-keyout',
+      keyPath,
+      '-out',
+      certPath,
+      '-days',
+      '1',
+      '-subj',
+      '/CN=127.0.0.1',
+      '-addext',
+      'subjectAltName=IP:127.0.0.1',
+    ],
+    { stdio: 'ignore' },
+  );
+  assert.equal(gen.status, 0, 'openssl must generate the local test certificate');
+  return { keyPath, certPath, pem: readFileSync(certPath, 'utf8') };
 }
 
 describe('world-kb-http (P4-T1)', () => {
@@ -277,6 +338,54 @@ describe('world-kb-http (P4-T1)', () => {
   });
 });
 
+describe('world-kb-http provider readiness (P4-T1)', () => {
+  let home;
+  let service;
+
+  before(async () => {
+    home = seedHome();
+    // Provider-enabled (EngineOwner): the native environment admits one core at
+    // a time, so this runs after the domain-only fixture service has closed.
+    service = await startService({
+      home,
+      host: '127.0.0.1',
+      port: 18_425,
+      allowRemote: false,
+    });
+  });
+
+  after(async () => {
+    if (service) {
+      await service.close();
+    }
+  });
+
+  test('reports degraded readiness when no provider is available', async () => {
+    const status = await jsonFetch(`${service.url}/v1/daemon/runtime/status`);
+    assert.equal(status.status, 200);
+    assert.equal(status.payload.workspace_initialized, true);
+    // Host liveness is not readiness: the fixture has no provider whose bounded
+    // availability probe succeeded, so the profile is degraded.
+    assert.equal(status.payload.runtime_mode, 'provider_degraded');
+    assert.equal(status.payload.acp.tool_execution_enabled, false);
+
+    const daemon = await jsonFetch(`${service.url}/v1/daemon/daemon/status`);
+    assert.equal(daemon.payload.subsystems.engine.status, 'down');
+    assert.ok(daemon.payload.degraded.subsystems.includes('engine'));
+
+    const health = await jsonFetch(`${service.url}/v1/daemon/agent-host/health`);
+    assert.equal(health.status, 200);
+    assert.equal(health.payload.running, true);
+  });
+
+  test('close confirms provider-enabled cleanup', async () => {
+    const report = await service.close();
+    service = undefined;
+    assert.equal(report.state, 'closed');
+    assert.equal(report.cleanup_confirmed, true);
+  });
+});
+
 describe('world-kb-http uninitialized profile (P4-T1)', () => {
   let home;
   let service;
@@ -371,5 +480,239 @@ describe('world-kb-http uninitialized profile (P4-T1)', () => {
       assert.equal(report.state, 'closed');
       assert.equal(report.cleanup_confirmed, true);
     }
+  });
+});
+
+describe('world-kb-http transport bounds (P4-T1)', () => {
+  let home;
+  let service;
+
+  before(async () => {
+    home = seedHome();
+    service = await startDomainService(home, 18_440);
+  });
+
+  after(async () => {
+    if (service) {
+      await service.close();
+    }
+  });
+
+  test('slow headers hit the configured 5s server deadline without native effects', async () => {
+    const [, port] = service.url.replace('http://', '').split(':');
+    const socket = net.connect({ host: '127.0.0.1', port: Number(port) });
+    const started = Date.now();
+    let response = '';
+
+    await new Promise((resolve, reject) => {
+      socket.setTimeout(20_000, () => {
+        socket.destroy();
+        reject(new Error('slow-header socket never settled'));
+      });
+      socket.on('connect', () => {
+        // Partial request line + headers, then stall: the handler is never entered.
+        socket.write('GET /v1/daemon/runtime/health HTTP/1.1\r\nHost: 127.0.0.1\r\n');
+      });
+      socket.on('data', (chunk) => {
+        response += chunk.toString('utf8');
+        if (response.includes('408')) {
+          socket.destroy();
+          resolve();
+        }
+      });
+      socket.on('close', () => resolve());
+      socket.on('error', () => resolve());
+    });
+
+    const elapsed = Date.now() - started;
+    assert.match(response, /408/, `expected a 408 from headersTimeout, got: ${response}`);
+    assert.ok(elapsed >= 4_000, `expected the 5s header deadline, closed after ${elapsed}ms`);
+    assert.ok(elapsed < 10_000, `header deadline must be bounded, took ${elapsed}ms`);
+
+    // The listener is still serving after one timed-out slow client.
+    const healthy = await jsonFetch(`${service.url}/v1/daemon/runtime/health`);
+    assert.equal(healthy.status, 200);
+  });
+
+  test('error envelopes carry a request id and no home path', async () => {
+    const res = await jsonFetch(`${service.url}/v1/daemon/worlds/wld_does_not_exist/kb/graph`, {
+      headers: { 'X-Request-Id': 'req-sanitize-1' },
+    });
+    assert.equal(res.status, 404);
+    assert.equal(res.payload.error.request_id, 'req-sanitize-1');
+    assert.equal(res.text.includes(home), false);
+    assert.equal(res.text.includes('.nexus42'), false);
+  });
+});
+
+describe('world-kb-http error policy (P4-T1)', () => {
+  test('finite fractions survive serialization while unsafe integers are rejected', async () => {
+    const { stringifyJsonSafe, mapNativeError, toErrorBody } = await import(
+      join(serviceRoot, 'dist/errors.js')
+    );
+
+    assert.equal(stringifyJsonSafe({ ratio: 1.5, nested: [{ value: 0.25 }] }), '{"ratio":1.5,"nested":[{"value":0.25}]}');
+
+    assert.throws(
+      () => stringifyJsonSafe({ revision: Number.MAX_SAFE_INTEGER + 1 }),
+      (error) => error.code === 'invalid_input' && /safe integer/.test(error.message),
+    );
+    assert.throws(
+      () => stringifyJsonSafe({ revision: Number.POSITIVE_INFINITY }),
+      (error) => error.code === 'invalid_input' && /not finite/.test(error.message),
+    );
+
+    const privateHome = '/Users/private-operator/.nexus42';
+    const internal = new Error(
+      JSON.stringify({
+        code: 'internal',
+        message: `database_error: unable to open ${privateHome}/state.db`,
+        details: { home: privateHome },
+        http_status: 500,
+      }),
+    );
+    const mapped = mapNativeError(internal);
+    assert.equal(mapped.code, 'internal');
+    assert.equal(mapped.status, 500);
+    assert.equal(mapped.message, 'Internal server error');
+    const body = JSON.stringify(toErrorBody(mapped, 'req-int-1'));
+    assert.equal(body.includes(privateHome), false);
+    assert.equal(body.includes('state.db'), false);
+    assert.match(body, /"request_id":"req-int-1"/);
+  });
+});
+
+describe('world-kb-http tls (P4-T1)', () => {
+  let home;
+  let service;
+  let certPath;
+  let keyPath;
+  let pem;
+
+  before(async () => {
+    home = seedHome();
+    const material = seedTlsMaterial();
+    certPath = material.certPath;
+    keyPath = material.keyPath;
+    pem = material.pem;
+    service = await startService({
+      home,
+      host: '127.0.0.1',
+      port: 18_441,
+      allowRemote: false,
+      domainOnly: true,
+      tlsCert: certPath,
+      tlsKey: keyPath,
+    });
+  });
+
+  after(async () => {
+    if (service) {
+      await service.close();
+    }
+  });
+
+  test('serves HTTPS and reports the DER certificate fingerprint', async () => {
+    assert.match(service.url, /^https:\/\/127\.0\.0\.1:18441$/);
+
+    const health = await httpsGet(`${service.url}/v1/daemon/runtime/health`);
+    assert.equal(health.status, 200);
+    assert.match(health.body, /"status":"ok"/);
+
+    const fingerprint = await httpsGet(`${service.url}/v1/daemon/runtime/cert-fingerprint`);
+    assert.equal(fingerprint.status, 200);
+    const payload = JSON.parse(fingerprint.body);
+    assert.equal(payload.algorithm, 'sha256');
+    assert.equal(payload.fingerprint, expectedDerFingerprint(pem));
+    assert.match(payload.fingerprint, /^SHA256:[0-9a-f]{2}(:[0-9a-f]{2}){31}$/);
+    assert.equal(typeof payload.created_at, 'string');
+  });
+
+  test('remote admission fails closed before listen', async () => {
+    const noRemote = await startService({
+      home,
+      host: '10.0.0.5',
+      port: 18_442,
+      allowRemote: false,
+      domainOnly: true,
+      tlsCert: certPath,
+      tlsKey: keyPath,
+    }).then(
+      () => null,
+      (error) => error,
+    );
+    assert.ok(noRemote, 'non-loopback bind without --allow-remote must be rejected');
+    assert.match(String(noRemote.message), /non-loopback|allow-remote/i);
+
+    const noKey = await startService({
+      home,
+      host: '10.0.0.5',
+      port: 18_443,
+      allowRemote: true,
+      domainOnly: true,
+      tlsCert: certPath,
+      tlsKey: keyPath,
+    }).then(
+      () => null,
+      (error) => error,
+    );
+    assert.ok(noKey, 'remote bind without a configured key must be rejected');
+    assert.match(String(noKey.message), /API_KEY|api key|auth_required/i);
+  });
+});
+
+describe('world-kb-http lifecycle (P4-T1)', () => {
+  let home;
+  let binding;
+
+  before(async () => {
+    home = seedHome();
+    const { loadNodePath } = await import(join(root, 'packages', 'nexus-native', 'dist', 'loader.js'));
+    binding = require(loadNodePath());
+  });
+
+  test('close settles within the deadline while a request is still in flight', async () => {
+    const local = await startDomainService(home, 18_451);
+    const port = Number(local.url.split(':')[2]);
+    // Admitted request with a declared body that never arrives: the handler is
+    // parked in the body read, so the socket is genuinely active.
+    const socket = net.connect({ host: '127.0.0.1', port });
+    socket.on('error', () => undefined);
+    await new Promise((resolve) => socket.on('connect', resolve));
+    socket.write(
+      'POST /v1/daemon/worlds/wld_owned/kb/patch-entity HTTP/1.1\r\n' +
+        'Host: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: 4096\r\n\r\n' +
+        '{"entity_id":',
+    );
+
+    const started = Date.now();
+    const report = await local.close();
+    const elapsed = Date.now() - started;
+    socket.destroy();
+
+    assert.ok(elapsed < 7_000, `close must stay within the deadline, took ${elapsed}ms`);
+    assert.ok(['closed', 'interrupted'].includes(report.state));
+    assert.equal(typeof report.cleanup_confirmed, 'boolean');
+  });
+
+  test('an interrupted close stays retryable until the retained owner settles', async () => {
+    const local = await startDomainService(home, 18_450);
+    binding.forceUnconfirmedCleanup(true);
+    let first;
+    try {
+      first = await local.close();
+    } finally {
+      binding.forceUnconfirmedCleanup(false);
+    }
+    assert.equal(first.state, 'interrupted');
+    assert.equal(first.cleanup_confirmed, false);
+
+    const second = await local.close();
+    assert.equal(second.state, 'closed');
+    assert.equal(second.cleanup_confirmed, true);
+
+    const third = await local.close();
+    assert.equal(third.state, 'closed');
+    assert.equal(third.cleanup_confirmed, true);
   });
 });

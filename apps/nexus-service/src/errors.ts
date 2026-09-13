@@ -73,12 +73,21 @@ export function mapNativeError(error: unknown): HttpError {
 
   const wire = parseNativeCoreError(error);
   if (wire) {
+    // `internal` is the sanitization boundary: the native detail (and any
+    // path/SQL/config it carries in `details`) never reaches the client.
+    if (wire.code === 'internal') {
+      return new HttpError(500, 'internal', PUBLIC_INTERNAL_MESSAGE);
+    }
     const details =
       wire.details && typeof wire.details === 'object'
         ? (wire.details as Record<string, unknown>)
         : undefined;
-    const message = wire.code === 'internal' ? PUBLIC_INTERNAL_MESSAGE : wire.message;
-    return new HttpError(wire.http_status ?? statusForCode(wire.code), wire.code, message, details);
+    return new HttpError(
+      wire.http_status ?? statusForCode(wire.code),
+      wire.code,
+      wire.message,
+      details,
+    );
   }
 
   const message = error instanceof Error ? error.message : String(error);

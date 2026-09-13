@@ -78,16 +78,7 @@ export async function openServiceCore(
 
   let providerReady = false;
   if (workspaceInitialized) {
-    if (config.domainOnly) {
-      providerReady = true;
-    } else {
-      try {
-        await core.hostQuery({ query: 'health' });
-        providerReady = true;
-      } catch {
-        providerReady = false;
-      }
-    }
+    providerReady = config.domainOnly ? true : await confirmProviderReadiness(core);
   }
 
   return {
@@ -98,6 +89,29 @@ export async function openServiceCore(
     workspaceInitialized,
     providerReady,
   };
+}
+
+/**
+ * Confirm provider readiness before publication.
+ *
+ * Host-manager liveness alone is not readiness: a running host with no admitted
+ * provider still reports `running: true`. Readiness requires at least one
+ * admitted provider in the catalog **and** at least one provider whose bounded
+ * no-model availability probe succeeded. When either is unavailable the
+ * provider-enabled profile is published as degraded/not-ready — a failed or
+ * unperformed probe is never reported as ready.
+ */
+async function confirmProviderReadiness(core: NativeCore): Promise<boolean> {
+  try {
+    const catalog = await core.hostQuery({ query: 'catalog', format: 'catalog' });
+    if ((catalog.catalog?.providers.length ?? 0) === 0) {
+      return false;
+    }
+    const scan = await core.hostQuery({ query: 'catalog', format: 'scan' });
+    return (scan.scan?.entries ?? []).some((entry) => entry.installed === true);
+  } catch {
+    return false;
+  }
 }
 
 export async function closeServiceCore(core: NativeCore): Promise<CoreCloseReport> {
