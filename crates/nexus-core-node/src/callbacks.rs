@@ -71,6 +71,14 @@ impl JsProviderBridge {
     }
 
     fn check_admission(&self, payload_len: usize) -> ProviderResult<()> {
+        if self.state.is_env_dead() {
+            return Err(CoreError {
+                code: CoreErrorCode::Closing,
+                message: "environment dead".into(),
+                details: Default::default(),
+                http_status: Some(503),
+            });
+        }
         if self.state.is_closing() {
             return Err(CoreError {
                 code: CoreErrorCode::Closing,

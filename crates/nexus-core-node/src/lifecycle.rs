@@ -1,7 +1,14 @@
 use std::path::PathBuf;
+
+use std::time::{Duration, Instant};
+
+const CLOSE_BUDGET: Duration = Duration::from_secs(5);
+const CLOSE_CANCEL_PHASE: Duration = Duration::from_secs(2);
+const CLOSE_ABORT_PHASE: Duration = Duration::from_secs(4);
+
 use std::sync::Arc;
 
-use nexus_agent_host::capability::model::HostStartConfig;
+use nexus_agent_host::capability::model::{HostStartConfig, SessionOwner};
 use nexus_agent_host::config::AgentHostConfig;
 use nexus_agent_host::{HostFacade, HostManager};
 use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
@@ -158,7 +165,13 @@ pub async fn open_core(
             );
         }
     }
-    if state.is_closing() {
+    if state.settled_close.lock().await.is_some() && !state.is_interrupted() {
+        state.settled_close.lock().await.take();
+        *state.close_in_flight.lock().await = false;
+        state.closing.store(0, std::sync::atomic::Ordering::SeqCst);
+        state.env_dead.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+    if state.is_closing() && state.settled_close.lock().await.is_none() {
         return Err("closing".to_string());
     }
     if options.allow_uninitialized {
@@ -184,13 +197,17 @@ pub async fn open_core(
     let host_defaults = AgentHostConfig::default();
     let start_config = HostStartConfig {
         config_path: user_home.join("config/agent-host.toml"),
-        workspace_root: user_home,
+        workspace_root: user_home.clone(),
         max_sessions: host_defaults.max_sessions,
         max_ops_per_session: host_defaults.max_ops_per_session,
         timeouts: host_defaults.timeouts.clone(),
         // Load catalog providers from agent-host.toml when present (Rust admission).
         host_config: None,
-        probe_owner: None,
+        probe_owner: Some(SessionOwner {
+            creator_id: "nexus-native".to_string(),
+            workspace_root: user_home,
+            orchestration_run_id: None,
+        }),
     };
     if let Err(err) = host.start(start_config).await {
         let (released, _) = cleanup_owners(&state, Some(Arc::new(core)), Some(host), js_port).await;
@@ -214,14 +231,62 @@ pub async fn open_core(
     Ok(core)
 }
 
-/// Close the environment. Runs the same confirmed-cleanup path as a rollback, so
-/// an unconfirmed owner keeps the environment marked interrupted and fenced.
+/// Close the environment with a 5s phased budget and one concurrent settlement.
 pub async fn close_core(state: &EnvState) -> CoreCloseReport {
+    if let Some(report) = state.settled_close.lock().await.clone() {
+        return report;
+    }
+    {
+        let mut in_flight = state.close_in_flight.lock().await;
+        if *in_flight {
+            let notify = state.close_notify_settled.clone();
+            drop(in_flight);
+            notify.notified().await;
+            return state
+                .settled_close
+                .lock()
+                .await
+                .clone()
+                .unwrap_or_else(interrupted_report);
+        }
+        *in_flight = true;
+    }
+
     state.begin_close();
-    let core = state.core.lock().await.take();
-    let host = state.host.lock().await.take();
-    let provider_port = state.provider_port.lock().await.take();
-    let (_, report) = cleanup_owners(state, core, host, provider_port).await;
+    let started = Instant::now();
+    let report = tokio::time::timeout(CLOSE_BUDGET, async {
+        // Phase 0–2s: cooperative cancel/drain window for in-flight callbacks.
+        let drain_budget = CLOSE_CANCEL_PHASE.min(CLOSE_BUDGET.saturating_sub(started.elapsed()));
+        if !drain_budget.is_zero() {
+            tokio::time::sleep(Duration::from_millis(25).min(drain_budget)).await;
+        }
+        let core = state.core.lock().await.take();
+        let host = state.host.lock().await.take();
+        let provider_port = state.provider_port.lock().await.take();
+        let (_, report) = cleanup_owners(state, core, host, provider_port).await;
+        if report.cleanup_confirmed {
+            return report;
+        }
+        // Unconfirmed cleanup: hold until abort phase, then spend remaining budget.
+        let elapsed = started.elapsed();
+        if elapsed < CLOSE_ABORT_PHASE {
+            tokio::time::sleep(CLOSE_ABORT_PHASE - elapsed).await;
+        }
+        let remaining = CLOSE_BUDGET.saturating_sub(started.elapsed());
+        if !remaining.is_zero() {
+            tokio::time::sleep(remaining).await;
+        }
+        report
+    })
+    .await
+    .unwrap_or_else(|_| interrupted_report());
+
+    *state.settled_close.lock().await = Some(report.clone());
+    *state.close_in_flight.lock().await = false;
+    if report.cleanup_confirmed {
+        state.closing.store(0, std::sync::atomic::Ordering::SeqCst);
+    }
+    state.close_notify_settled.notify_waiters();
     report
 }
 

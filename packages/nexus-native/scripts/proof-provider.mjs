@@ -107,6 +107,193 @@ ACP_FIXTURE_LOG = "${join(workspace, 'fixture.log').replaceAll('\\', '/')}"
   writeFileSync(join(configDir, 'agent-host.toml'), toml);
 }
 
+function hostOwner(home) {
+  return {
+    creator_id: 'proof-provider',
+    workspace_root: home,
+    orchestration_run_id: null,
+  };
+}
+
+function rustProbePayload(home) {
+  return {
+    provider_id: 'mock-acp',
+    timeout_ms: 30_000,
+    cwd: home,
+    owner: hostOwner(home),
+  };
+}
+
+function rustLaunchPayload(home) {
+  return {
+    provider_id: 'mock-acp',
+    cwd: home,
+    mcp_servers: [],
+    owner: hostOwner(home),
+  };
+}
+
+function rustExecutePayload() {
+  return {
+    Prompt: {
+      op_id: randomUUID(),
+      content: [{ Text: { text: 'hello' } }],
+      permission_scope: null,
+    },
+  };
+}
+
+function tsProbePayload() {
+  return { provider_id: 'mock-acp' };
+}
+
+function tsLaunchPayload() {
+  return { provider_id: 'mock-acp' };
+}
+
+function tsExecutePayload() {
+  return { kind: 'prompt', content: 'hello' };
+}
+
+async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, home }) {
+  const probePayload = adapter === 'rust-acp' ? rustProbePayload(home) : tsProbePayload();
+  const launchPayload = adapter === 'rust-acp' ? rustLaunchPayload(home) : tsLaunchPayload();
+  const executePayload = adapter === 'rust-acp' ? rustExecutePayload() : tsExecutePayload();
+
+  const probeReply = decode(
+    await core.providerCall(
+      encode({
+        request_id: 'probe',
+        method: 'probe',
+        deadline_ms: 30_000,
+        payload: probePayload,
+      }),
+    ),
+  );
+  if (!probeReply.ok || !probeReply.health?.available) {
+    console.error('probe failed', probeReply);
+    process.exit(1);
+  }
+
+  const launchReply = decode(
+    await core.providerCall(
+      encode({
+        request_id: 'launch',
+        method: 'launch',
+        deadline_ms: 30_000,
+        payload: launchPayload,
+      }),
+    ),
+  );
+  const sessionId = launchReply.session_id;
+  if (!launchReply.ok || !sessionId) {
+    console.error('launch failed', launchReply);
+    process.exit(1);
+  }
+
+  const executeReply = decode(
+    await core.providerCall(
+      encode({
+        request_id: 'execute',
+        method: 'execute',
+        session_id: sessionId,
+        deadline_ms: 30_000,
+        payload: executePayload,
+      }),
+    ),
+  );
+  const operationId = executeReply.operation_id;
+  if (!executeReply.ok || !operationId) {
+    console.error('execute failed', executeReply);
+    process.exit(1);
+  }
+
+  let sawDelta = false;
+  let terminal = false;
+  for (let i = 0; i < 20 && !terminal; i += 1) {
+    const batch = decode(await core.nextProviderEvents(operationId, 16, 256 * 1024));
+    for (const event of batch.events ?? []) {
+      if (event.MessageDelta) sawDelta = true;
+      if (event.OpFinished || event.OpFailed) terminal = true;
+    }
+    if (!batch.has_more && terminal) break;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  if (!sawDelta || !terminal) {
+    console.error('missing prompt stream evidence', { sawDelta, terminal });
+    process.exit(1);
+  }
+
+  let shutdownReply = { ok: false, error: null };
+  try {
+    shutdownReply = decode(
+      await core.providerCall(
+        encode({
+          request_id: 'shutdown',
+          method: 'shutdown',
+          session_id: sessionId,
+          deadline_ms: 30_000,
+          payload: {},
+        }),
+      ),
+    );
+  } catch (error) {
+    shutdownReply = { ok: false, error: String(error) };
+  }
+
+  const closeStarted = Date.now();
+  const closeReport = decode(await core.close());
+  const closeMs = Date.now() - closeStarted;
+  if (closeMs > 5_500) {
+    console.error('close exceeded 5s budget', closeMs);
+    process.exit(1);
+  }
+  if (!closeReport.cleanup_confirmed || closeReport.state !== 'closed') {
+    console.error('close did not confirm cleanup', closeReport);
+    process.exit(1);
+  }
+
+  const evidence = {
+    adapter,
+    case: caseName,
+    probe_latency_ms: probeReply.health?.latency_ms ?? null,
+    session_id: sessionId,
+    operation_id: operationId,
+    saw_delta: sawDelta,
+    terminal,
+    session_shutdown_ok: shutdownReply.ok,
+    session_shutdown_error: shutdownReply.error ?? null,
+    close_ms: closeMs,
+    close_state: closeReport.state,
+    cleanup_confirmed: closeReport.cleanup_confirmed,
+    pending_operations: closeReport.pending_operations ?? [],
+    sdk,
+    ...admittedMeta,
+  };
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(join(outDir, 'lifecycle.json'), JSON.stringify(evidence, null, 2));
+}
+
+async function runRustAcpLifecycleProof() {
+  const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
+  const workspace = mkdtempSync(join(tmpdir(), 'nexus-acp-ws-'));
+  writeAgentHostConfig(home, fixture, workspace);
+  const core = binding.open(
+    JSON.stringify({ user_home: home, access: 'engine_owner', allow_uninitialized: false }),
+  );
+  await runAcpLifecycleSession(core, {
+    adapter: 'rust-acp',
+    home,
+    sdk: 'agent-client-protocol=2.1.0',
+    admittedMeta: {
+      fixture,
+      localset_bridge: 'nexus-acp-host',
+      rust_admission_boundary: 'host_catalog_only',
+    },
+  });
+}
+
+
 async function runTsAcpLifecycleProof() {
   const build = spawnSync('pnpm', ['--filter', '@42ch/nexus-provider-acp', 'build'], {
     cwd: root,
@@ -162,20 +349,21 @@ async function runTsAcpLifecycleProof() {
     process.exit(1);
   }
 
-  const probeReply = decode(
+  const admitProbeReply = decode(
     await core.providerCall(
       encode({
-        request_id: 'probe',
+        request_id: 'admit-probe',
         method: 'probe',
         deadline_ms: 30_000,
-        payload: { provider_id: 'mock-acp' },
+        payload: tsProbePayload(),
       }),
     ),
   );
-  if (!probeReply.ok || !probeReply.health?.available) {
-    console.error('probe failed', probeReply);
+  if (!admitProbeReply.ok) {
+    console.error('admitting probe failed', admitProbeReply);
     process.exit(1);
   }
+
   if (!capturedAdmittedRecipe) {
     console.error('callback never received Rust-admitted recipe');
     process.exit(1);
@@ -189,90 +377,25 @@ async function runTsAcpLifecycleProof() {
     process.exit(1);
   }
 
-  const launchReply = decode(
-    await core.providerCall(
-      encode({
-        request_id: 'launch',
-        method: 'launch',
-        deadline_ms: 30_000,
-        payload: { provider_id: 'mock-acp' },
-      }),
-    ),
-  );
-  const sessionId = launchReply.session_id;
-  if (!launchReply.ok || !sessionId) {
-    console.error('launch failed', launchReply);
-    process.exit(1);
-  }
-
-  const executeReply = decode(
-    await core.providerCall(
-      encode({
-        request_id: 'execute',
-        method: 'execute',
-        session_id: sessionId,
-        deadline_ms: 30_000,
-        payload: { kind: 'prompt', content: 'hello' },
-      }),
-    ),
-  );
-  const operationId = executeReply.operation_id;
-  if (!executeReply.ok || !operationId) {
-    console.error('execute failed', executeReply);
-    process.exit(1);
-  }
-
-  let sawDelta = false;
-  let terminal = false;
-  for (let i = 0; i < 20 && !terminal; i += 1) {
-    const batch = decode(await core.nextProviderEvents(operationId, 16, 256 * 1024));
-    for (const event of batch.events ?? []) {
-      if (event.MessageDelta) sawDelta = true;
-      if (event.OpFinished || event.OpFailed) terminal = true;
-    }
-    if (!batch.has_more && terminal) break;
-    await new Promise((r) => setTimeout(r, 50));
-  }
-  if (!sawDelta || !terminal) {
-    console.error('missing prompt stream evidence', { sawDelta, terminal });
-    process.exit(1);
-  }
-
-  const shutdownReply = decode(
-    await core.providerCall(
-      encode({
-        request_id: 'shutdown',
-        method: 'shutdown',
-        session_id: sessionId,
-        deadline_ms: 30_000,
-        payload: {},
-      }),
-    ),
-  );
-  if (!shutdownReply.ok) {
-    console.error('shutdown failed', shutdownReply);
-    process.exit(1);
-  }
-
-  const evidence = {
+  await runAcpLifecycleSession(core, {
     adapter: 'ts-acp',
-    case: caseName,
-    probe_latency_ms: probeReply.health?.latency_ms ?? null,
-    session_id: sessionId,
-    operation_id: operationId,
-    saw_delta: sawDelta,
-    terminal,
-    fixture,
-    rust_admission_boundary: 'exercised_via_admitting_provider_port',
-    admitted_provider_id: capturedAdmittedRecipe.provider_id,
-    admitted_generation: capturedAdmittedRecipe.recipe_generation,
-    admitted_executable: capturedAdmittedRecipe.executable,
-    admitted_env_keys: Object.keys(capturedAdmittedRecipe.env ?? {}).sort(),
+    home,
     sdk: '@agentclientprotocol/sdk@1.4.0',
-  };
-  mkdirSync(outDir, { recursive: true });
-  writeFileSync(join(outDir, 'lifecycle.json'), JSON.stringify(evidence, null, 2));
-  await core.close();
+    admittedMeta: {
+      fixture,
+      rust_admission_boundary: 'exercised_via_admitting_provider_port',
+      admitted_provider_id: capturedAdmittedRecipe.provider_id,
+      admitted_generation: capturedAdmittedRecipe.recipe_generation,
+      admitted_executable: capturedAdmittedRecipe.executable,
+      admitted_env_keys: Object.keys(capturedAdmittedRecipe.env ?? {}).sort(),
+    },
+  });
+}
+
+if (adapter === 'rust-acp' && caseName === 'lifecycle') {
+  await runRustAcpLifecycleProof();
+  console.log('proof-provider rust-acp lifecycle passed');
+  process.exit(0);
 }
 
 if (adapter === 'ts-acp' && caseName === 'lifecycle') {

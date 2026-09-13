@@ -44,6 +44,17 @@ function providerReply(requestId) {
   });
 }
 
+function effectCallBuffer(requestId, method = 'cancel', payload = { operation_id: '00000000-0000-4000-8000-000000000099' }) {
+  return new TextEncoder().encode(
+    JSON.stringify({
+      request_id: requestId,
+      method,
+      deadline_ms: 30_000,
+      payload,
+    }),
+  );
+}
+
 function providerCallBuffer(requestId, extra = {}) {
   return new TextEncoder().encode(
     JSON.stringify({
@@ -110,8 +121,8 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
       },
       next: async () => JSON.stringify({ operation_id: 'x', events: [], has_more: false }),
     });
-    await core.providerCall(providerCallBuffer('5'));
-    await core.providerCall(providerCallBuffer('r'));
+    await core.providerCall(effectCallBuffer('5'));
+    await core.providerCall(effectCallBuffer('r'));
     await core.close();
   });
 
@@ -145,7 +156,10 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
       next: async () => JSON.stringify({ operation_id: 'x', events: [], has_more: false }),
     });
     const principal = await core.activePrincipal();
-    await core.close();
+    const parts = principal.split(':');
+    const stalePrincipal = `p:${Math.max(0, Number(parts[1] ?? 0) - 1)}:${parts.slice(2).join(':')}`;
+    const closeReport = JSON.parse(new TextDecoder().decode(await core.close()));
+    assert.equal(closeReport.cleanup_confirmed, true);
     const home = seedHome();
     const binding = require(nodePath);
     const core2 = binding.open(
@@ -155,7 +169,7 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
         next: async () => JSON.stringify({ operation_id: 'x', events: [], has_more: false }),
       },
     );
-    await assert.rejects(() => core2.worldKbGraph(principal, 'wld_owned', false));
+    await assert.rejects(() => core2.worldKbGraph(stalePrincipal, 'wld_owned', false));
     await core2.close();
   });
 
@@ -164,7 +178,7 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
       call: async () => new Promise(() => {}),
       next: async () => JSON.stringify({ operation_id: 'x', events: [], has_more: false }),
     });
-    const pending = core.providerCall(providerCallBuffer('hang'));
+    const pending = core.providerCall(effectCallBuffer('hang'));
     await Promise.race([
       pending.then(() => assert.fail('should not resolve')),
       new Promise((r) => setTimeout(r, 50)),
@@ -310,6 +324,19 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
       (err) => /not.?found|operation_not_found/i.test(String(err)),
     );
     await core.close();
+  });
+
+
+  test('concurrent close settles once', async () => {
+    const { core } = openWithProviders({
+      call: async () => providerReply('cc'),
+      next: async () => JSON.stringify({ operation_id: 'x', events: [], has_more: false }),
+    });
+    const [a, b] = await Promise.all([core.close(), core.close()]);
+    const ra = JSON.parse(new TextDecoder().decode(a));
+    const rb = JSON.parse(new TextDecoder().decode(b));
+    assert.equal(ra.state, rb.state);
+    assert.equal(ra.cleanup_confirmed, rb.cleanup_confirmed);
   });
 
   test('worker termination does not abort process on require', async () => {

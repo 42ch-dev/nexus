@@ -21,8 +21,8 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::capability::model::{
-    HostEvent, HostEventStream, HostOperation, LaunchSpec, ProbeRequest, ProtocolKind,
-    ProviderHealth,
+    CreateSessionRequest, HostEvent, HostEventStream, HostOperation, LaunchSpec, ProbeRequest,
+    ProtocolKind, ProviderHealth,
 };
 use crate::core::session::SessionState;
 use crate::error::HostError;
@@ -333,7 +333,7 @@ impl ProviderPort for ProviderPortAdapter {
                         .and_then(|v| v.as_str())
                         .ok_or_else(|| Self::invalid_input("launch requires provider_id"))?,
                 );
-                let adapter = self.providers.get(&provider_id).ok_or_else(|| CoreError {
+                let _adapter = self.providers.get(&provider_id).ok_or_else(|| CoreError {
                     code: CoreErrorCode::NotFound,
                     message: format!("provider {provider_id} not registered"),
                     details: Default::default(),
@@ -341,12 +341,24 @@ impl ProviderPort for ProviderPortAdapter {
                 })?;
                 let spec: LaunchSpec = serde_json::from_value(payload_value)
                     .map_err(|e| Self::invalid_input(format!("launch payload: {e}")))?;
-                let handle = adapter.launch(spec).await.map_err(Self::map_host_error)?;
+                let session = self
+                    .host
+                    .create_session(CreateSessionRequest {
+                        provider_id,
+                        cwd: spec.cwd,
+                        model: spec.model,
+                        mode: spec.mode,
+                        mcp_servers: spec.mcp_servers,
+                        metadata: serde_json::Value::Object(Default::default()),
+                        owner: spec.owner,
+                    })
+                    .await
+                    .map_err(Self::map_host_error)?;
                 Ok(ProviderReply {
                     request_id: request.request_id,
                     ok: true,
                     operation_id: None,
-                    session_id: Some(handle.session_id.to_string()),
+                    session_id: Some(session.id.to_string()),
                     health: None,
                     error: None,
                 })

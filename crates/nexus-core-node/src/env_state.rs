@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use napi::bindgen_prelude::Error;
 use napi::Env;
-use nexus_contracts::{CoreError, CoreErrorCode};
+use nexus_contracts::{CoreCloseReport, CoreError, CoreErrorCode};
 use nexus_core::CoreService;
 use nexus_provider_ports::ProviderPort;
 use nexus_agent_host::HostManager;
@@ -18,7 +18,12 @@ pub struct EnvInstance {
 
 impl EnvInstance {
     pub fn install(env: &Env, state: Arc<EnvState>) -> napi::Result<()> {
-        env.set_instance_data(EnvInstance { state }, (), |_ctx| {})?;
+        env.set_instance_data(EnvInstance { state }, (), |ctx| {
+            if let Ok(Some(instance)) = ctx.env.get_instance_data::<EnvInstance>() {
+                instance.state.tombstone_env();
+                instance.state.close_notify.notify_waiters();
+            }
+        })?;
         Ok(())
     }
 
@@ -97,6 +102,12 @@ pub struct EnvState {
     /// A rollback or close retained an owner whose cleanup is unconfirmed.
     /// Blocks new opens until a confirmed settlement releases it.
     pub interrupted: AtomicBool,
+    /// Environment tombstoned after NAPI cleanup; no further JS calls.
+    pub env_dead: AtomicBool,
+    /// Concurrent close callers await one settlement.
+    pub close_notify_settled: Arc<Notify>,
+    pub settled_close: Mutex<Option<CoreCloseReport>>,
+    pub close_in_flight: Mutex<bool>,
 }
 
 impl EnvState {
@@ -111,6 +122,10 @@ impl EnvState {
             close_notify: Notify::new(),
             closing: AtomicU64::new(0),
             interrupted: AtomicBool::new(false),
+            env_dead: AtomicBool::new(false),
+            close_notify_settled: Arc::new(Notify::new()),
+            settled_close: Mutex::new(None),
+            close_in_flight: Mutex::new(false),
         }
     }
 
@@ -134,6 +149,17 @@ impl EnvState {
         self.closing
             .store(self.generation.load(Ordering::SeqCst), Ordering::SeqCst);
         self.close_notify.notify_waiters();
+    }
+
+    pub fn is_env_dead(&self) -> bool {
+        self.env_dead.load(Ordering::SeqCst)
+    }
+
+    /// NAPI8 environment cleanup: revoke generation and gate admissions.
+    pub fn tombstone_env(&self) {
+        self.env_dead.store(true, Ordering::SeqCst);
+        self.generation.fetch_add(1, Ordering::SeqCst);
+        self.begin_close();
     }
 
     pub fn encode_principal(principal: &nexus_core::Principal, generation: u64) -> String {
