@@ -661,6 +661,125 @@ describe('world-kb-http tls (P4-T1)', () => {
   });
 });
 
+describe('world-kb-http close owner (P4-T1)', () => {
+  const closedReport = () => ({
+    state: 'closed',
+    cleanup_confirmed: true,
+    pending_operations: [],
+  });
+
+  test('native close starts in the same turn as listener teardown, not after it', async () => {
+    const { createCloseOwner } = await import(join(serviceRoot, 'dist/index.js'));
+    const started = Date.now();
+    let teardownStart = null;
+    let coreStart = null;
+
+    const close = createCloseOwner({
+      getServer: () => ({ listening: true }),
+      budgetMs: 600,
+      teardownListener: async () => {
+        teardownStart = Date.now() - started;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      },
+      closeCore: async () => {
+        coreStart = Date.now() - started;
+        return closedReport();
+      },
+    });
+
+    const report = await close();
+    assert.equal(report.state, 'closed');
+    // A sequential implementation would invoke the native close only after the
+    // 250ms listener teardown; concurrency puts both in the first turn.
+    assert.ok(coreStart !== null, 'native close must be invoked');
+    assert.ok(coreStart < 100, `native close started ${coreStart}ms in, not immediately`);
+    assert.ok(teardownStart < 100, `listener teardown started ${teardownStart}ms in`);
+  });
+
+  test('a hung listener close still settles inside the single budget', async () => {
+    const { createCloseOwner, stopListening } = await import(join(serviceRoot, 'dist/index.js'));
+    const fakeServer = {
+      listening: true,
+      close() {
+        // Never calls back: models a listener whose close event never fires.
+      },
+      closeIdleConnections() {},
+      closeAllConnections() {},
+    };
+
+    const started = Date.now();
+    await stopListening(fakeServer, Date.now() + 250);
+    const teardownElapsed = Date.now() - started;
+    assert.ok(teardownElapsed >= 200, `backstop fired at ${teardownElapsed}ms`);
+    assert.ok(teardownElapsed < 900, `backstop must be bounded, took ${teardownElapsed}ms`);
+
+    const close = createCloseOwner({
+      getServer: () => fakeServer,
+      budgetMs: 300,
+      closeCore: async () => closedReport(),
+    });
+    const closeStarted = Date.now();
+    const report = await close();
+    const total = Date.now() - closeStarted;
+    assert.equal(report.state, 'closed');
+    assert.ok(total < 900, `one budget must cover the hung listener, took ${total}ms`);
+  });
+
+  test('interrupted attempts stay retryable while a confirmed close is idempotent', async () => {
+    const { createCloseOwner } = await import(join(serviceRoot, 'dist/index.js'));
+    let calls = 0;
+    const close = createCloseOwner({
+      getServer: () => undefined,
+      budgetMs: 200,
+      closeCore: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return {
+            state: 'interrupted',
+            cleanup_confirmed: false,
+            pending_operations: ['op:retained'],
+            reason: 'user_requested',
+          };
+        }
+        return closedReport();
+      },
+    });
+
+    const first = await close();
+    assert.equal(first.state, 'interrupted');
+    assert.equal(first.cleanup_confirmed, false);
+    assert.deepEqual(first.pending_operations, ['op:retained']);
+
+    const second = await close();
+    assert.equal(second.state, 'closed');
+    assert.equal(calls, 2, 'an unconfirmed report must trigger a real retry');
+
+    const third = await close();
+    assert.equal(third.state, 'closed');
+    assert.equal(calls, 2, 'a confirmed close is cached, not re-attempted');
+  });
+
+  test('concurrent callers share one close attempt', async () => {
+    const { createCloseOwner } = await import(join(serviceRoot, 'dist/index.js'));
+    let calls = 0;
+    const close = createCloseOwner({
+      getServer: () => undefined,
+      budgetMs: 200,
+      closeCore: async () => {
+        calls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        return closedReport();
+      },
+    });
+
+    const [a, b, c] = await Promise.all([close(), close(), close()]);
+    assert.equal(calls, 1);
+    assert.equal(a.state, 'closed');
+    assert.equal(b.state, 'closed');
+    assert.equal(c.state, 'closed');
+  });
+});
+
 describe('world-kb-http lifecycle (P4-T1)', () => {
   let home;
   let binding;
