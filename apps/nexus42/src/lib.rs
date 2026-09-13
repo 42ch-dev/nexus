@@ -23,7 +23,11 @@ pub mod creator_identity;
 #[cfg(feature = "legacy-cli")]
 pub mod db;
 
-#[cfg(all(test, feature = "legacy-cli"))]
+// Test-only helper: `tempfile` is a dev-dependency, so it is available in
+// every test build regardless of feature cohort. Gating this on `legacy-cli`
+// alone broke `cargo test -p nexus42 --no-default-features --features
+// basic-cli --lib` (shared `config` tests call it → E0433).
+#[cfg(test)]
 mod testutil;
 
 // Re-export commonly used types for convenience
