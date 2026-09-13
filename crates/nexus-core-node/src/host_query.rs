@@ -1,18 +1,18 @@
 //! Real `hostQuery` dispatch over the embedded [`HostFacade`] registry.
 
-use nexus_agent_host::discovery::path_scan;
-use nexus_agent_host::{HostFacade, HostManager, LaunchStrategy};
 use nexus_agent_host::core::session::HostSession as RegistryHostSession;
+use nexus_agent_host::discovery::path_scan;
+use nexus_agent_host::ids::{HostOperationId, HostSessionId};
+use nexus_agent_host::providers::port::{operation_status_wire, protocol_kind_wire};
+use nexus_agent_host::{HostFacade, HostManager, LaunchStrategy};
 use nexus_contracts::core_host_query::{CoreHostQueryFormat, CoreHostQueryQuery};
 use nexus_contracts::core_host_query_response::{
-    CoreHostQueryResponse, CoreHostQueryResponseCatalog,
-    CoreHostQueryResponseCatalogProvidersItem, CoreHostQueryResponseHealth,
-    CoreHostQueryResponseScan, NexusAgentHostOperationResponse,
+    CoreHostQueryResponse, CoreHostQueryResponseCatalog, CoreHostQueryResponseCatalogProvidersItem,
+    CoreHostQueryResponseHealth, CoreHostQueryResponseScan, NexusAgentHostOperationResponse,
     NexusAgentHostSessionListResponse, NexusAgentHostSessionResponse, NexusAgentScanEntry,
     NexusPaginationInfo,
 };
 use nexus_contracts::CoreHostQuery;
-use nexus_agent_host::ids::{HostOperationId, HostSessionId};
 use uuid::Uuid;
 
 use super::env_state::EnvState;
@@ -39,19 +39,20 @@ fn parse_operation_id(raw: &str) -> Result<HostOperationId, String> {
     Ok(HostOperationId(uuid))
 }
 
-fn session_for_operation<'a>(
-    sessions: &'a [RegistryHostSession],
-    op_id: &HostOperationId,
-) -> Option<&'a RegistryHostSession> {
-    sessions
-        .iter()
-        .find(|s| s.active_op_id.as_ref() == Some(op_id) || s.state.active_op_id() == Some(op_id))
-}
-
 fn path_probe_dirs() -> Vec<std::path::PathBuf> {
     std::env::var_os("PATH")
         .map(|path| std::env::split_paths(&path).collect())
         .unwrap_or_default()
+}
+
+/// Stable registry snapshot: sorted by session id so cursor/limit boundaries are
+/// deterministic even though the registry is map-backed.
+async fn sorted_sessions(
+    host: &std::sync::Arc<HostManager>,
+) -> Result<Vec<RegistryHostSession>, String> {
+    let mut sessions = host.list_sessions().await.map_err(|e| e.to_string())?;
+    sessions.sort_by(|a, b| a.id.to_string().cmp(&b.id.to_string()));
+    Ok(sessions)
 }
 
 pub async fn dispatch_host_query(
@@ -86,7 +87,10 @@ pub async fn dispatch_host_query(
             let format = request.format.unwrap_or(CoreHostQueryFormat::Catalog);
             match format {
                 CoreHostQueryFormat::Catalog => {
-                    let catalog = host.provider_catalog().await.map_err(|e| e.to_string())?;
+                    let mut catalog = host.provider_catalog().await.map_err(|e| e.to_string())?;
+                    catalog
+                        .entries
+                        .sort_by(|a, b| a.provider_id.to_string().cmp(&b.provider_id.to_string()));
                     Ok(CoreHostQueryResponse {
                         catalog: Some(CoreHostQueryResponseCatalog {
                             providers: catalog
@@ -95,7 +99,7 @@ pub async fn dispatch_host_query(
                                 .map(|entry| CoreHostQueryResponseCatalogProvidersItem {
                                     provider_id: entry.provider_id.to_string(),
                                     display_name: entry.display_name,
-                                    protocol_kind: format!("{:?}", entry.protocol_kind),
+                                    protocol_kind: protocol_kind_wire(entry.protocol_kind),
                                 })
                                 .collect(),
                         }),
@@ -143,7 +147,7 @@ pub async fn dispatch_host_query(
             }
         }
         CoreHostQueryQuery::ListSessions => {
-            let sessions = host.list_sessions().await.map_err(|e| e.to_string())?;
+            let sessions = sorted_sessions(&host).await?;
             let limit = request
                 .limit
                 .map(|n| n.get())
@@ -188,7 +192,7 @@ pub async fn dispatch_host_query(
                 .as_deref()
                 .ok_or_else(|| "get_session requires session_id".to_string())?;
             let sid = parse_session_id(session_id)?;
-            let sessions = host.list_sessions().await.map_err(|e| e.to_string())?;
+            let sessions = sorted_sessions(&host).await?;
             let session = sessions
                 .iter()
                 .find(|s| s.id == sid)
@@ -208,14 +212,19 @@ pub async fn dispatch_host_query(
                 .as_deref()
                 .ok_or_else(|| "get_operation requires operation_id".to_string())?;
             let op_id = parse_operation_id(operation_id)?;
-            let sessions = host.list_sessions().await.map_err(|e| e.to_string())?;
-            let session = session_for_operation(&sessions, &op_id)
-                .ok_or_else(|| format!("operation {operation_id} not found"))?;
+            let sessions = sorted_sessions(&host).await?;
+            // Status comes from the owning session's live state; an operation the
+            // registry no longer tracks is reported as not found, never as a
+            // fabricated constant.
+            let session = sessions
+                .iter()
+                .find(|s| s.state.active_op_id() == Some(&op_id))
+                .ok_or_else(|| format!("operation {operation_id} is not active"))?;
             Ok(CoreHostQueryResponse {
                 operation: Some(NexusAgentHostOperationResponse {
                     operation_id: op_id.to_string(),
                     session_id: session.id.to_string(),
-                    status: "started".to_string(),
+                    status: operation_status_wire(&session.state, &op_id).to_string(),
                     capture: None,
                 }),
                 health: None,

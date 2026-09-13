@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -168,6 +168,43 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
     await assert.rejects(() => pending);
   });
 
+  test('failed open retains no host and leaves the environment usable', async () => {
+    const binding = require(nodePath);
+    const badRoot = mkdtempSync(join(tmpdir(), 'nexus-bad-open-'));
+    const notADirectory = join(badRoot, 'not-a-directory');
+    writeFileSync(notADirectory, 'x');
+    await assert.rejects(async () =>
+      binding.open(
+        JSON.stringify({
+          user_home: join(notADirectory, 'home'),
+          access: 'engine_owner',
+          allow_uninitialized: false,
+        }),
+      ),
+    );
+
+    // The environment survived the failure with no retained owner: a fresh open
+    // succeeds and reports the truth of the newly started host.
+    const home = seedHome();
+    const core = binding.open(
+      JSON.stringify({ user_home: home, access: 'engine_owner', allow_uninitialized: false }),
+      {
+        call: async () => providerReply('x'),
+        next: async () => JSON.stringify({ operation_id: 'x', events: [], has_more: false }),
+      },
+    );
+    const health = JSON.parse(
+      new TextDecoder().decode(
+        await core.hostQuery(
+          new TextEncoder().encode(JSON.stringify({ query: 'health' })),
+        ),
+      ),
+    );
+    assert.equal(health.health.running, true);
+    assert.equal(health.health.active_sessions, 0);
+    await core.close();
+  });
+
   test('worker termination does not abort process on require', async () => {
     const script = `
       const { workerData, parentPort } = require('node:worker_threads');
@@ -177,7 +214,15 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
         next: async () => JSON.stringify({ operation_id: 'x', events: [], has_more: false }),
       });
       parentPort.postMessage('ready');
-      setTimeout(() => core.providerCall(Buffer.from(providerCallBuffer('w'))), 10);
+      setTimeout(
+        () =>
+          core.providerCall(
+            Buffer.from(
+              JSON.stringify({ request_id: 'w', method: 'probe', deadline_ms: 30000, payload: {} }),
+            ),
+          ),
+        10,
+      );
     `;
     const home = seedHome();
     const worker = new Worker(script, {

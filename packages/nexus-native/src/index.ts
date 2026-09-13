@@ -24,9 +24,17 @@ import {
   readPackageManifest,
   type NativeCoreBinding,
 } from './loader.js';
-import { parseJsonBuffer, stringifyToBuffer } from './json.js';
-import { assertSafeInteger } from './validate.js';
-
+import { parseJsonBuffer } from './json.js';
+import {
+  CORE_CHANGES_REQUEST_SHAPE,
+  CORE_HOST_QUERY_SHAPE,
+  NATIVE_OPEN_OPTIONS_SHAPE,
+  PROVIDER_CALL_SHAPE,
+  WORLD_KB_PATCH_ENTITY_SHAPE,
+  assertSafeInteger,
+  encodeWireBuffer,
+  stringifyWire,
+} from './validate.js';
 
 export interface ProviderCallbacks {
   call(request: ProviderCall): Promise<ProviderReply>;
@@ -74,22 +82,40 @@ function wrapCore(inner: NativeCoreBinding): NativeCore {
     },
     async patchWorldKbEntity(principal, worldId, request) {
       return parseJsonBuffer(
-        await inner.patchWorldKbEntity(principal, worldId, stringifyToBuffer(request)),
+        await inner.patchWorldKbEntity(
+          principal,
+          worldId,
+          encodeWireBuffer(request, WORLD_KB_PATCH_ENTITY_SHAPE, 'request'),
+        ),
       );
     },
     async worldKbCandidates(principal, worldId, limit, cursor) {
       return parseJsonBuffer(
-        await inner.worldKbCandidates(principal, worldId, assertSafeInteger(limit ?? null, "limit"), cursor ?? null),
+        await inner.worldKbCandidates(
+          principal,
+          worldId,
+          assertSafeInteger(limit ?? null, 'limit'),
+          cursor ?? null,
+        ),
       );
     },
     async hostQuery(request) {
-      return parseJsonBuffer(await inner.hostQuery(stringifyToBuffer(request)));
+      return parseJsonBuffer(
+        await inner.hostQuery(encodeWireBuffer(request, CORE_HOST_QUERY_SHAPE, 'request')),
+      );
     },
     async changes(principal, request) {
-      return parseJsonBuffer(await inner.changes(principal, stringifyToBuffer(request)));
+      return parseJsonBuffer(
+        await inner.changes(
+          principal,
+          encodeWireBuffer(request, CORE_CHANGES_REQUEST_SHAPE, 'request'),
+        ),
+      );
     },
     async providerCall(request) {
-      return parseJsonBuffer(await inner.providerCall(stringifyToBuffer(request)));
+      return parseJsonBuffer(
+        await inner.providerCall(encodeWireBuffer(request, PROVIDER_CALL_SHAPE, 'request')),
+      );
     },
     async nextProviderEvents(operationId, maxEvents, maxBytes) {
       return parseJsonBuffer(await inner.nextProviderEvents(operationId, maxEvents, maxBytes));
@@ -100,40 +126,66 @@ function wrapCore(inner: NativeCoreBinding): NativeCore {
   };
 }
 
+/** Compatibility manifest for this platform, before any DB open. */
 export function nativeCompatibility(): NativeCompatibility {
   const nodePath = loadNodePath();
   const binding = loadNativeBinding();
   const manifest = readCompatibilityManifest(binding);
-  const bundled = readBundledCompatibility(nodePath);
-  const pkg = expectedPlatformPackage();
-  const pkgManifest = readPackageManifest(pkg.name);
-  assertCompatibility(manifest, bundled, pkgManifest.version);
+  const adjacent = readBundledCompatibility(nodePath);
+  const target = expectedPlatformPackage();
+  const pkgManifest = readPackageManifest(target.name);
+  const expected = {
+    target_triple: target.targetTriple,
+    package_version: pkgManifest.version,
+  };
+  assertCompatibility(manifest, { ...expected, contract_tree_sha256: adjacent.contract_tree_sha256 });
+  assertCompatibility(adjacent, expected);
   return manifest;
 }
 
-export function openCore(options: NativeOpenOptions, providers?: ProviderCallbacks): NativeCore {
+/**
+ * Open the native core. Always awaited: the frozen facade returns a Promise so
+ * callers can await the open boundary.
+ */
+export async function openCore(
+  options: NativeOpenOptions,
+  providers?: ProviderCallbacks,
+): Promise<NativeCore> {
   const nodePath = loadNodePath();
   const binding = loadNativeBinding();
   const manifest = readCompatibilityManifest(binding);
-  const bundled = readBundledCompatibility(nodePath);
-  const pkg = expectedPlatformPackage();
-  const pkgManifest = readPackageManifest(pkg.name);
-  assertCompatibility(manifest, bundled, pkgManifest.version);
+  const adjacent = readBundledCompatibility(nodePath);
+  const target = expectedPlatformPackage();
+  const pkgManifest = readPackageManifest(target.name);
+  const expected = {
+    target_triple: target.targetTriple,
+    package_version: pkgManifest.version,
+  };
+  assertCompatibility(manifest, { ...expected, contract_tree_sha256: adjacent.contract_tree_sha256 });
+  assertCompatibility(adjacent, expected);
+
   const callbacks = providers
     ? {
         call: async (requestJson: string) =>
-          JSON.stringify(await providers.call(JSON.parse(requestJson))),
+          stringifyWire(await providers.call(JSON.parse(requestJson)), undefined, 'provider_reply'),
         next: async (requestJson: string) => {
           const { operation_id, max_events, max_bytes } = JSON.parse(requestJson) as {
             operation_id: string;
             max_events: number;
             max_bytes: number;
           };
-          return JSON.stringify(await providers.next(operation_id, max_events, max_bytes));
+          return stringifyWire(
+            await providers.next(operation_id, max_events, max_bytes),
+            undefined,
+            'provider_events',
+          );
         },
       }
     : undefined;
-  const core = binding.open(JSON.stringify(options), callbacks);
+
+  const core = binding.open(
+    stringifyWire(options, NATIVE_OPEN_OPTIONS_SHAPE, 'options'),
+    callbacks,
+  );
   return wrapCore(core);
 }
-

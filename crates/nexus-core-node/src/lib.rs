@@ -42,13 +42,8 @@ pub fn compatibility() -> Result<String> {
     let compat = NativeCompatibility {
         native_api_version: 1,
         writer_protocol: 1,
-        target_triple: std::env::var("NEXUS_BUILD_TARGET").unwrap_or_else(|_| {
-            format!(
-                "{}-unknown-{}",
-                std::env::consts::ARCH,
-                std::env::consts::OS
-            )
-        }),
+        // Build-time target from `build.rs` (`TARGET`); never a runtime-env read.
+        target_triple: env!("NEXUS_BUILD_TARGET").to_string(),
         package_version: env!("CARGO_PKG_VERSION").to_string(),
         contract_tree_sha256: contract_tree_sha256(),
         db_schema_min: db_schema_min(),
