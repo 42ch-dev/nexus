@@ -1305,6 +1305,7 @@ async fn promote_merge(
         Some(&body_json_str),
         i64::try_from(target_version).unwrap_or(0),
         world_id,
+        None,
     )
     .await
     .map_err(|e| map_cas_err(e, target_id, "merge_target"))?;

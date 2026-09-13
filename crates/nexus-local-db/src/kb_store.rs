@@ -1674,6 +1674,20 @@ impl SqliteKbStore {
 ///   world (R3: cross-process writers; wire code `world_conflict`).
 /// - `Err(LocalDbError::Sqlx)` — database failure.
 ///
+
+/// Non-CAS columns written atomically with [`cas_update_key_block_fields`].
+///
+/// Folding these into the CAS `UPDATE` avoids a second statement that would
+/// leave `revision` unchanged and re-fire the T1 bump trigger.
+#[derive(Debug, Clone)]
+pub struct CasKeyBlockAuxiliaryFields {
+    pub status: String,
+    pub source_anchor_json: Option<String>,
+    pub extensions_nexus_json: String,
+    pub modules_json: Option<String>,
+    pub source_provenance_kind: Option<String>,
+}
+
 /// # Errors
 ///
 /// See above.
@@ -1685,6 +1699,7 @@ pub async fn cas_update_key_block_fields(
     body_json: Option<&str>,
     expected_revision: i64,
     world_id: &str,
+    auxiliary: Option<&CasKeyBlockAuxiliaryFields>,
 ) -> Result<u64, LocalDbError> {
     // Build a dynamic SET clause from the supplied fields. revision is always
     // bumped; updated_at always set. SAFETY: dynamic SET built from a fixed
@@ -1698,6 +1713,15 @@ pub async fn cas_update_key_block_fields(
     }
     if body_json.is_some() {
         sets.push("body_json = ?".to_string());
+    }
+    if auxiliary.is_some() {
+        sets.push("status = ?".to_string());
+        sets.push("source_anchor_json = ?".to_string());
+        sets.push("extensions_nexus_json = ?".to_string());
+        sets.push("modules_json = ?".to_string());
+        sets.push(
+            "source_provenance_kind = COALESCE(?, source_provenance_kind)".to_string(),
+        );
     }
     let set_clause = sets.join(", ");
     let now = chrono::Utc::now().to_rfc3339();
@@ -1728,6 +1752,14 @@ pub async fn cas_update_key_block_fields(
     }
     if let Some(v) = body_json {
         q = q.bind(v);
+    }
+    if let Some(aux) = auxiliary {
+        q = q
+            .bind(aux.status.as_str())
+            .bind(aux.source_anchor_json.as_deref())
+            .bind(aux.extensions_nexus_json.as_str())
+            .bind(aux.modules_json.as_deref())
+            .bind(aux.source_provenance_kind.as_deref());
     }
     q = q.bind(key_block_id).bind(expected_revision).bind(world_id);
     let result = q.execute(&mut **tx).await?;
@@ -3156,6 +3188,7 @@ mod tests {
             None,
             0,
             "wld_1",
+            None,
         )
         .await
         .unwrap();
@@ -3189,7 +3222,7 @@ mod tests {
 
         let mut tx = pool.begin().await.unwrap();
         let err =
-            cas_update_key_block_fields(&mut tx, &id, Some("CasForeign"), None, None, 0, "wld_1")
+            cas_update_key_block_fields(&mut tx, &id, Some("CasForeign"), None, None, 0, "wld_1", None)
                 .await
                 .unwrap_err();
         match err {
@@ -3302,7 +3335,7 @@ mod tests {
 
         let mut tx = pool.begin().await.unwrap();
         let err =
-            cas_update_key_block_fields(&mut tx, &id, Some("CasStale"), None, None, 5, "wld_1")
+            cas_update_key_block_fields(&mut tx, &id, Some("CasStale"), None, None, 5, "wld_1", None)
                 .await
                 .unwrap_err();
         assert!(

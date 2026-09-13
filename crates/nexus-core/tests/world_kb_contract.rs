@@ -421,3 +421,58 @@ async fn world_kb_contract_legacy_json_open() {
         .await
         .unwrap_err();
 }
+
+#[tokio::test]
+async fn world_kb_contract_stored_revision_exactness() {
+    let fx = setup().await;
+    let pool = read_only_pool(fx._tmp.path()).await;
+
+    let create_req: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
+        "entity_id": "kb_aabbccdd",
+        "expected_version": 0,
+        "patch": {"title": "Fresh", "block_type": "character"}
+    }))
+    .unwrap();
+    let created = fx
+        .core
+        .patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), create_req)
+        .await
+        .unwrap();
+    assert_eq!(created.version, 1);
+    let stored_after_create: i64 = sqlx::query_scalar(
+        "SELECT revision FROM kb_key_blocks WHERE key_block_id = 'kb_aabbccdd'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        stored_after_create,
+        1,
+        "create-on-absent must persist revision exactly 1"
+    );
+
+    let patch_req: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
+        "entity_id": "kb_aabbccdd",
+        "expected_version": 1,
+        "patch": {"title": "Fresh v2"}
+    }))
+    .unwrap();
+    let patched = fx
+        .core
+        .patch_world_kb_entity(&fx.principal, OWNED_WORLD.to_string(), patch_req)
+        .await
+        .unwrap();
+    assert_eq!(patched.version, 2);
+    let stored_after_patch: i64 = sqlx::query_scalar(
+        "SELECT revision FROM kb_key_blocks WHERE key_block_id = 'kb_aabbccdd'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        stored_after_patch,
+        2,
+        "second accepted patch must persist revision exactly 2"
+    );
+}
+

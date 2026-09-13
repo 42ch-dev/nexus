@@ -32,7 +32,7 @@ use async_trait::async_trait;
 use nexus_knowledge::world_kb::store::{KbStore, KbStoreError};
 use nexus_knowledge::world_kb::KnowledgeEntryRecord;
 use nexus_local_db::kb_store::{
-    cas_update_key_block_fields, update_key_block_auxiliary_fields_in_tx, SqliteKbStore,
+    cas_update_key_block_fields, CasKeyBlockAuxiliaryFields, SqliteKbStore,
 };
 use nexus_local_db::LocalDbError;
 use serde_json::{json, Map};
@@ -599,6 +599,13 @@ async fn run_cas_update_in_tx(
             json!({ "entry_id": entry_id }),
         );
     };
+    let auxiliary = CasKeyBlockAuxiliaryFields {
+        status: world_entry.status.clone(),
+        source_anchor_json: source_anchor_json.clone(),
+        extensions_nexus_json: extensions_nexus_json.clone(),
+        modules_json: modules_json.clone(),
+        source_provenance_kind: world_entry.source_provenance_kind.clone(),
+    };
     let new_rev = match cas_update_key_block_fields(
         tx,
         entry_id,
@@ -613,33 +620,13 @@ async fn run_cas_update_in_tx(
         // gate check and this CAS, the predicate misses and the storage
         // layer classifies it as WorldConflict.
         world_id,
+        Some(&auxiliary),
     )
     .await
     {
         Ok(new_rev) => new_rev,
         Err(e) => return NexusAdapter::map_cas_err(e, entry_id, expected),
     };
-
-    if let Err(e) = update_key_block_auxiliary_fields_in_tx(
-        tx,
-        entry_id,
-        &world_entry.status,
-        source_anchor_json.as_deref(),
-        &extensions_nexus_json,
-        modules_json.as_deref(),
-        // V1.155 P2 T3 (R-V1152P0-001): stamp the dedicated provenance
-        // column atomically with the CAS body replace — the pack-import
-        // overwrite no longer needs a separate post-upsert UPDATE.
-        world_entry.source_provenance_kind.as_deref(),
-    )
-    .await
-    {
-        return reject(
-            SpokeRejectCode::InternalError,
-            format!("storage error on post-CAS field update: {e}"),
-            json!({ "entry_id": entry_id }),
-        );
-    }
 
     SpokeResult::Ok(new_rev)
 }
