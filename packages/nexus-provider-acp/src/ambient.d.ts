@@ -72,6 +72,19 @@ declare module 'node:fs' {
   export function readFileSync(path: string, encoding: string): string;
 }
 
+/**
+ * Node 22 provides `Promise.withResolvers`, but this package compiles against an
+ * older `lib`. Declaring the runtime surface here keeps the implementation free
+ * of the executor anti-pattern without widening the compile target.
+ */
+interface PromiseConstructor {
+  withResolvers<T>(): {
+    promise: Promise<T>;
+    resolve: (value: T | PromiseLike<T>) => void;
+    reject: (reason?: unknown) => void;
+  };
+}
+
 declare function setTimeout(handler: () => void, timeout?: number): unknown;
 declare function clearTimeout(handle: unknown): void;
 

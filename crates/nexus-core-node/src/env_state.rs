@@ -112,7 +112,14 @@ pub struct EnvState {
     pub host: StdMutex<Option<Arc<HostManager>>>,
     pub provider_port: StdMutex<Option<Arc<dyn ProviderPort>>>,
     pub pending_budget: PendingBudget,
+    /// One-shot close signal used by cancellation paths that can afford to miss
+    /// a wake (they re-check `is_closing`).
     pub close_notify: Notify,
+    /// Race-free close signal. A `watch` receiver carries a version, so a close
+    /// that lands between a subscriber's check and its await can never be lost —
+    /// unlike `Notify::notify_waiters`, which fires only at already-registered
+    /// waiters.
+    pub close_watch: tokio::sync::watch::Sender<bool>,
     pub closing: AtomicU64,
     pub lifecycle: StdMutex<EnvLifecyclePhase>,
     /// A rollback or close retained an owner whose cleanup is unconfirmed.
@@ -145,6 +152,7 @@ impl EnvState {
             provider_port: StdMutex::new(None),
             pending_budget: PendingBudget::new(),
             close_notify: Notify::new(),
+            close_watch: tokio::sync::watch::channel(false).0,
             closing: AtomicU64::new(0),
             lifecycle: StdMutex::new(EnvLifecyclePhase::Closed),
             interrupted: AtomicBool::new(false),
@@ -227,6 +235,10 @@ impl EnvState {
 
     pub async fn publish_open(&self) {
         *self.lifecycle.lock().expect("lifecycle mutex poisoned") = EnvLifecyclePhase::Open;
+        // The close signal is a level, not a pulse: reopening must clear it or
+        // every later callback would observe "closing" and be rejected. Only the
+        // `false` transition is broadcast on open; the next close sets it again.
+        self.close_watch.send_replace(false);
     }
 
     pub async fn begin_closing_phase(&self) {
@@ -235,6 +247,16 @@ impl EnvState {
 
     pub async fn publish_closed(&self) {
         *self.lifecycle.lock().expect("lifecycle mutex poisoned") = EnvLifecyclePhase::Closed;
+    }
+
+    /// Subscribe to the race-free close signal.
+    ///
+    /// `wait_for` returns immediately when the value already satisfies the
+    /// predicate, so a close that happened before the subscription is observed
+    /// rather than lost.
+    #[must_use]
+    pub fn close_watch(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.close_watch.subscribe()
     }
 
     pub fn is_closing(&self) -> bool {
@@ -258,6 +280,9 @@ impl EnvState {
         self.closing
             .store(self.generation.load(Ordering::SeqCst), Ordering::SeqCst);
         self.close_notify.notify_waiters();
+        // `send_replace` always updates the stored value, so a receiver created
+        // after this point still observes the closed state.
+        self.close_watch.send_replace(true);
     }
 
     pub fn is_env_dead(&self) -> bool {
@@ -372,8 +397,25 @@ impl EnvState {
                                     bridge_evidence.is_settled(),
                                     host_confirmed,
                                 ) {
-                                    // Owned sessions confirmed clean; the host is
-                                    // released together with the finalize worker.
+                                    // Owned sessions confirmed clean: the host is
+                                    // released with the worker, and the process
+                                    // reaper is stopped inside the remaining
+                                    // budget so it cannot outlive this finalize.
+                                    let stop = super::cleanup_registry::stop_reaper(deadline);
+                                    if !stop.joined || stop.pending_entries > 0 {
+                                        let mut pending =
+                                            work_state.pending_operations_snapshot().await;
+                                        if !stop.joined {
+                                            pending.push("cleanup-reaper-unjoined".to_string());
+                                        }
+                                        if stop.pending_entries > 0 {
+                                            pending.push(format!(
+                                                "cleanup-registry-pending:{}",
+                                                stop.pending_entries
+                                            ));
+                                        }
+                                        work_state.record_pending_operations(pending).await;
+                                    }
                                 } else {
                                     let mut pending =
                                         work_state.pending_operations_snapshot().await;
@@ -467,5 +509,115 @@ impl EnvState {
             principal.creator_id(),
             principal.workspace_slug()
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// Wait for the race-free close signal, bounded.
+    async fn wait_closed(mut rx: tokio::sync::watch::Receiver<bool>) -> bool {
+        // Bind the result before returning: a tail expression's temporaries are
+        // dropped after the locals they borrow.
+        let waited = tokio::time::timeout(Duration::from_secs(5), rx.wait_for(|closed| *closed)).await;
+        waited.is_ok()
+    }
+
+    /// Q3-W3: the lost-wake shape. A close fires while no waiter is registered;
+    /// `Notify::notified()` created afterwards would never resolve, so the
+    /// versioned close signal must report the closed state to a late subscriber.
+    #[tokio::test]
+    async fn close_signal_is_observed_by_a_late_subscriber() {
+        let state = EnvState::new();
+        state.begin_close();
+
+        let rx = state.close_watch();
+        let late = tokio::time::timeout(Duration::from_millis(250), wait_closed(rx)).await;
+        assert!(
+            late.is_ok_and(|closed| closed),
+            "a close that already happened must be observed, not lost"
+        );
+
+        // Contrast: a `Notify` waiter registered after the notify never fires.
+        // This is the exact lost-wake the versioned signal replaces, and it shows
+        // the assertion above is meaningful rather than trivially true.
+        let notify_waiter = tokio::time::timeout(
+            Duration::from_millis(250),
+            state.close_notify.notified(),
+        )
+        .await;
+        assert!(
+            notify_waiter.is_err(),
+            "the Notify-based waiter would be lost here — that is the bug being fixed"
+        );
+    }
+
+    /// Q3-W3: admission racing close under contention. Subscribers register while
+    /// the close fires; not one may miss it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn close_signal_races_subscribers_without_lost_wakes() {
+        let state = Arc::new(EnvState::new());
+        let mut handles = Vec::new();
+        for _ in 0..64 {
+            let state = state.clone();
+            handles.push(tokio::spawn(async move {
+                wait_closed(state.close_watch()).await
+            }));
+        }
+        tokio::task::yield_now().await;
+        state.begin_close();
+
+        for handle in handles {
+            assert!(
+                handle.await.expect("join"),
+                "no subscriber may miss the close signal"
+            );
+        }
+    }
+
+    /// The close signal is a LEVEL, not a pulse: reopening must clear it or every
+    /// later callback would observe "closing" and be rejected (which is exactly
+    /// what the callback-lifecycle suite caught).
+    #[tokio::test]
+    async fn reopen_clears_the_close_signal() {
+        let state = EnvState::new();
+        state.begin_close();
+        state.publish_open().await;
+
+        let rx = state.close_watch();
+        assert!(
+            rx.borrow().eq(&false),
+            "a reopened environment must report open, not closing"
+        );
+        let observed = tokio::time::timeout(Duration::from_millis(150), wait_closed(rx)).await;
+        assert!(
+            observed.is_err(),
+            "a reopened environment must not keep signalling closed"
+        );
+
+        // And a later close is still observed.
+        state.begin_close();
+        let rx_after = state.close_watch();
+        let closed = tokio::time::timeout(Duration::from_secs(2), wait_closed(rx_after)).await;
+        assert!(
+            closed.is_ok_and(|closed| closed),
+            "a close after reopen must still be observed"
+        );
+    }
+
+    /// A pre-close subscriber observes the transition, not the initial value.
+    #[tokio::test]
+    async fn close_signal_wakes_a_pre_registered_subscriber() {
+        let state = Arc::new(EnvState::new());
+        let rx_owner = state.clone();
+        let waiter = tokio::spawn(async move { wait_closed(rx_owner.close_watch()).await });
+        tokio::task::yield_now().await;
+        state.begin_close();
+        assert!(
+            waiter.await.expect("join"),
+            "close must wake a registered waiter"
+        );
     }
 }

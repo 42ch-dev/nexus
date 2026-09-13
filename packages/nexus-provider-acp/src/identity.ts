@@ -1,6 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import {
+  WIN32_POWERSHELL,
+  platformOf,
+  runSync,
+  win32IdentityCommand,
+} from './platform-exec.js';
 
 /** Observed or Rust-admitted resulting process identity (schema-owned shape). */
 export type ProcessIdentity = {
@@ -77,11 +83,59 @@ function queryDarwinIdentity(pid: number): ProcessIdentity | null {
   }
 }
 
+/**
+ * Normalize a WMI `CreationDate` into a stable birth string.
+ *
+ * `ConvertTo-Json` renders a WMI datetime as `/Date(<epoch-ms>)/`; a raw ISO/date
+ * string is also accepted. A value that carries no time information yields
+ * `null`, and callers then treat the identity as unavailable — never as a match.
+ */
+function normalizeWmiCreationDate(value: unknown): string | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (typeof value !== 'string') return null;
+  const epoch = value.match(/\/Date\((\d+)\)\//);
+  if (epoch) return epoch[1];
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? String(parsed) : null;
+}
+
+/**
+ * Windows identity: PID + process creation time + parent PID.
+ *
+ * Creation time is the reuse-safe birth token. The parent PID is recorded as the
+ * owned-group analogue (Windows has no process group): comparing it can only make
+ * the check stricter, and a mismatch refuses to signal rather than signalling the
+ * wrong process.
+ */
+function queryWin32Identity(pid: number): ProcessIdentity | null {
+  try {
+    const out = runSync(WIN32_POWERSHELL, win32IdentityCommand(pid));
+    const trimmed = out.trim();
+    if (!trimmed || trimmed === 'null') return null;
+    const parsed = JSON.parse(trimmed) as {
+      CreationDate?: unknown;
+      ParentProcessId?: unknown;
+    } | null;
+    if (!parsed) return null;
+    const birth = normalizeWmiCreationDate(parsed.CreationDate);
+    if (!birth) return null;
+    const parent =
+      typeof parsed.ParentProcessId === 'number'
+        ? String(parsed.ParentProcessId)
+        : null;
+    return { pid, process_birth: birth, group_id: parent };
+  } catch {
+    return null;
+  }
+}
+
 /** Query canonical OS-derived identity for a live pid. */
 export function queryOsProcessIdentity(pid: number): ProcessIdentity | null {
   if (pid <= 0) return null;
-  if (process.platform === 'linux') return queryLinuxIdentity(pid);
-  if (process.platform === 'darwin') return queryDarwinIdentity(pid);
+  const platform = platformOf();
+  if (platform === 'linux') return queryLinuxIdentity(pid);
+  if (platform === 'darwin') return queryDarwinIdentity(pid);
+  if (platform === 'win32') return queryWin32Identity(pid);
   return null;
 }
 

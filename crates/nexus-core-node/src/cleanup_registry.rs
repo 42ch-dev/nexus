@@ -77,6 +77,70 @@ pub fn reap_completed() -> usize {
 }
 
 
+/// Outcome of an explicit reaper stop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReaperStop {
+    /// The reaper thread exited and was joined inside the deadline.
+    pub joined: bool,
+    /// Entries still registered when the stop completed. Never discarded.
+    pub pending_entries: usize,
+}
+
+/// Stop and join the process reaper within `deadline`.
+///
+/// A confirmed finalize/process cleanup calls this so the reaper does not
+/// outlive the finalizer's bounded budget. Registered entries are never
+/// discarded: anything still tracked stays in the registry, is reported as
+/// `pending_entries`, and a later `ensure_reaper` starts a fresh reaper for it.
+#[must_use]
+pub fn stop_reaper(deadline: Instant) -> ReaperStop {
+    let Some(owner) = REAPER.get() else {
+        return ReaperStop {
+            joined: true,
+            pending_entries: entry_count(),
+        };
+    };
+    owner.stop.store(true, Ordering::SeqCst);
+
+    let handle = owner
+        .handle
+        .lock()
+        .ok()
+        .and_then(|mut slot| slot.take());
+    let mut joined = true;
+    if let Some(handle) = handle {
+        while !handle.is_finished() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        if handle.is_finished() {
+            let _ = handle.join();
+            // Only this now-joined reaper consumed the stop flag; reset it so a
+            // future reaper for the remaining entries is not born stopped.
+            owner.stop.store(false, Ordering::SeqCst);
+        } else {
+            // Still running: keep the handle (never strand it) and leave the
+            // stop flag set so it exits as soon as it next polls.
+            if let Ok(mut slot) = owner.handle.lock() {
+                *slot = Some(handle);
+            }
+            joined = false;
+        }
+    }
+    // Collect anything already finished so a stopped reaper cannot strand a
+    // worker that has completed.
+    reap_completed();
+    ReaperStop {
+        joined,
+        pending_entries: entry_count(),
+    }
+}
+
+fn entry_count() -> usize {
+    registry()
+        .lock()
+        .map_or(0, |reg| reg.entries.len())
+}
+
 /// Register a timed-out LocalSet runtime thread. The handle is retained until reaped.
 pub fn register_localset_thread(handle: JoinHandle<()>, state: Arc<EnvState>) {
     register_pending(handle, state, Arc::new(AtomicBool::new(false)));
@@ -273,6 +337,78 @@ mod tests {
         }
         let (pending, _) = registry_snapshot();
         assert_eq!(pending, 0, "completed entry must be reaped, not permanent");
+    }
+
+    /// Q3-W5: the reaper stops and joins on demand inside a bounded deadline,
+    /// and stopping it never strands a registered entry.
+    #[test]
+    fn reaper_stops_and_joins_without_stranding_entries() {
+        let _lock = crate::cleanup_registry::registry_test_lock();
+        drain_registry();
+
+        // A worker that outlives the stop request.
+        let done = Arc::new(AtomicBool::new(false));
+        let handle = thread::spawn(|| {
+            thread::sleep(Duration::from_millis(300));
+        });
+        let state = Arc::new(EnvState::new());
+        register_pending(handle, state, done);
+        assert!(ensure_reaper_running(), "the reaper must be running");
+
+        // An already-expired deadline cannot join a live reaper; the handle must
+        // be retained rather than dropped/lost.
+        let stop = stop_reaper(Instant::now());
+        if !stop.joined {
+            assert!(
+                ensure_reaper_running() || reaper_handle_present(),
+                "an unjoined reaper handle must be retained, never stranded"
+            );
+        }
+        assert_eq!(
+            stop.pending_entries, 1,
+            "an unfinished worker must remain tracked, never discarded"
+        );
+
+        // A later stop with a real budget joins the reaper, and the worker is
+        // reaped once it finishes.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let stop = stop_reaper(deadline);
+            if stop.joined && registry_snapshot().0 == 0 {
+                break;
+            }
+            if Instant::now() >= deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            registry_snapshot().0,
+            0,
+            "the finished worker must be reaped, not stranded"
+        );
+    }
+
+    /// Whether the reaper owner still holds a `JoinHandle` (running or joinable).
+    fn reaper_handle_present() -> bool {
+        REAPER.get().is_some_and(|owner| {
+            owner
+                .handle
+                .lock()
+                .map(|slot| slot.is_some())
+                .unwrap_or(false)
+        })
+    }
+
+    fn ensure_reaper_running() -> bool {
+        match REAPER.get() {
+            None => false,
+            Some(owner) => owner
+                .handle
+                .lock()
+                .map(|slot| slot.as_ref().is_some_and(|h| !h.is_finished()))
+                .unwrap_or(false),
+        }
     }
 
     #[test]

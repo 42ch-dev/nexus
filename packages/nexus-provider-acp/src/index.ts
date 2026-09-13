@@ -14,9 +14,16 @@ export {
   parseProcessIdentity,
   queryOsProcessIdentity,
   identitiesEqual,
+  identityStillMatches,
   type ProcessIdentity,
 } from './identity.js';
 export { reapChild, spawnOwnedConnection } from './process-owner.js';
+export {
+  setCommandRunners,
+  setPlatformOverride,
+  platformOf,
+  isWindows,
+} from './platform-exec.js';
 export {
   MAX_EVENT_BYTES,
   MAX_PENDING_MESSAGES,

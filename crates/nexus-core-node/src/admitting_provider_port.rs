@@ -9,13 +9,12 @@ use nexus_contracts::provider_call::ProviderCallMethod;
 use nexus_contracts::{CoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply};
 use nexus_provider_ports::{ProviderPort, ProviderResult};
 
+/// Reuse the effect-path taxonomy so a native caller sees one category per
+/// condition at both the admission boundary and the effect path. Mapping every
+/// host error to `invalid_input` reported policy denials and busy providers as
+/// malformed input.
 fn map_host_error(err: nexus_agent_host::error::HostError) -> CoreError {
-    CoreError {
-        code: CoreErrorCode::InvalidInput,
-        message: err.to_string(),
-        details: Default::default(),
-        http_status: Some(400),
-    }
+    nexus_agent_host::providers::port::host_error_to_core_error(&err)
 }
 
 fn provider_id_from_payload(

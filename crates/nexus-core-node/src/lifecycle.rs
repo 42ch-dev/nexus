@@ -398,8 +398,19 @@ async fn cleanup_owners(
 }
 
 /// Settlement of whatever a previous failed rollback or interrupted close retained.
+///
+/// This RETRIES rather than replaying the retained verdict: a JS-provider session
+/// whose owned child was never released gets a fresh bounded release attempt, and
+/// then the retained owners are re-run to settlement. Claiming a confirmed close
+/// still requires every JS session to report released, so a retry that fails
+/// keeps the environment interrupted instead of upgrading an unconfirmed result.
 async fn settle_retained(state: Arc<EnvState>) -> (bool, CoreCloseReport) {
-    cleanup_owners(state, None, None, None, Instant::now() + CLOSE_BUDGET).await
+    let started = Instant::now();
+    let deadline = started + CLOSE_BUDGET;
+    if !state.js_session_ids().is_empty() {
+        release_js_provider_sessions(&state, started + CLOSE_CANCEL_PHASE).await;
+    }
+    cleanup_owners(state, None, None, None, deadline).await
 }
 
 /// Open the native core.
@@ -503,7 +514,21 @@ pub async fn open_core(
 
 /// Close the environment with a 5s phased budget and one concurrent settlement.
 pub async fn close_core(state: Arc<EnvState>) -> CoreCloseReport {
-    if let Some(report) = state.settled_close.lock().await.clone() {
+    // Clone into a local first: `if let` on a temporary would hold the async
+    // mutex guard across the retry below and deadlock against it.
+    let cached = state.settled_close.lock().await.clone();
+    if let Some(report) = cached {
+        if report.cleanup_confirmed {
+            // A confirmed close is idempotent: nothing is left to retry.
+            return report;
+        }
+        // A previously interrupted close retained owners and possibly live JS
+        // sessions. Retry the retained cleanup on this later close instead of
+        // replaying the cached Interrupted verdict forever.
+        let (released, retried) = settle_retained(state.clone()).await;
+        let report = if released { retried } else { report };
+        *state.settled_close.lock().await = Some(report.clone());
+        state.close_notify_settled.notify_waiters();
         return report;
     }
     {
@@ -680,6 +705,130 @@ mod tests {
         let final_report = close_core(state.clone()).await;
         assert_eq!(final_report.state, CoreCloseReportState::Closed);
         assert!(final_report.cleanup_confirmed);
+    }
+
+    /// Q1-C2: a JS session whose owned child was never released must be RETRIED
+    /// by a later close, instead of the cached Interrupted verdict being replayed
+    /// forever. The port here releases only on a request that carries a live
+    /// deadline, which is what the retry path supplies.
+    #[tokio::test]
+    async fn later_close_retries_retained_js_session_release() {
+        use crate::wire_fixture::seed_wire_home;
+        use async_trait::async_trait;
+        use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
+        use nexus_contracts::{
+            CoreError, CoreErrorCode, NativeOpenOptions, ProviderCall, ProviderEventBatch,
+            ProviderReply,
+        };
+        use nexus_provider_ports::{ProviderPort, ProviderResult};
+        use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+        use tempfile::tempdir;
+
+        struct DeferredReleasePort {
+            attempts: AtomicUsize,
+            released: std::sync::atomic::AtomicBool,
+            /// Fail the first `release_attempts_before_success` shutdowns, as an
+            /// adapter that hangs/errors on its first release attempt would.
+            release_attempts_before_success: usize,
+        }
+
+        #[async_trait]
+        impl ProviderPort for DeferredReleasePort {
+            async fn call(&self, request: ProviderCall) -> ProviderResult<ProviderReply> {
+                match request.method {
+                    nexus_contracts::provider_call::ProviderCallMethod::Shutdown => {
+                        let attempt = self.attempts.fetch_add(1, AtomicOrdering::SeqCst);
+                        if attempt < self.release_attempts_before_success {
+                            return Err(CoreError {
+                                code: CoreErrorCode::Busy,
+                                message: "release_unconfirmed".into(),
+                                details: Default::default(),
+                                http_status: Some(503),
+                            });
+                        }
+                        self.released.store(true, AtomicOrdering::SeqCst);
+                        Ok(ProviderReply {
+                            request_id: request.request_id.clone(),
+                            ok: true,
+                            session_id: request.session_id.clone(),
+                            operation_id: None,
+                            health: None,
+                            error: None,
+                        })
+                    }
+                    _ => Err(CoreError {
+                        code: CoreErrorCode::Internal,
+                        message: "not used".into(),
+                        details: Default::default(),
+                        http_status: Some(500),
+                    }),
+                }
+            }
+
+            async fn next(
+                &self,
+                _operation_id: String,
+                _max_events: u32,
+                _max_bytes: u32,
+            ) -> ProviderResult<ProviderEventBatch> {
+                Err(CoreError {
+                    code: CoreErrorCode::Internal,
+                    message: "not used".into(),
+                    details: Default::default(),
+                    http_status: Some(500),
+                })
+            }
+        }
+
+        let dir = tempdir().expect("tempdir");
+        seed_wire_home(dir.path()).await;
+        let state = Arc::new(EnvState::new());
+        let port = Arc::new(DeferredReleasePort {
+            attempts: AtomicUsize::new(0),
+            released: std::sync::atomic::AtomicBool::new(false),
+            release_attempts_before_success: 1,
+        });
+        open_core(
+            state.clone(),
+            NativeOpenOptions {
+                user_home: dir.path().to_string_lossy().to_string(),
+                access: NativeOpenOptionsAccess::EngineOwner,
+                allow_uninitialized: false,
+            },
+            Some(port.clone()),
+        )
+        .await
+        .expect("open");
+
+        // A live JS session whose operation is still in flight.
+        state.record_js_session("sess-retained".to_string());
+        state.record_js_session_operation("sess-retained", "op-live".to_string());
+
+        // First close: the release attempt fails, so cleanup cannot be confirmed.
+        let first = close_core(state.clone()).await;
+        assert!(
+            !first.cleanup_confirmed,
+            "a failed release must not confirm cleanup: {first:?}"
+        );
+
+        // Later close: the retained session is retried and this time released.
+        let second = close_core(state.clone()).await;
+        assert!(
+            second.cleanup_confirmed,
+            "a later close must retry the retained JS session, not replay Interrupted: {second:?}"
+        );
+        assert!(
+            state.js_session_ids().is_empty(),
+            "the released session must be forgotten, not retained forever"
+        );
+        assert!(
+            port.released.load(AtomicOrdering::SeqCst),
+            "the retry must actually drive the adapter release"
+        );
+        assert!(
+            port.attempts.load(AtomicOrdering::SeqCst) >= 2,
+            "the retry must be a second, real release attempt"
+        );
     }
 
     #[test]

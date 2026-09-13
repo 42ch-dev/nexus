@@ -52,6 +52,13 @@ type ExitRace = {
   promise: Promise<never>;
 };
 
+import {
+  WIN32_TASKKILL,
+  isWindows,
+  runAsync,
+  win32TreeKillCommand,
+} from './platform-exec.js';
+
 function reapTimeoutMs(): number {
   const raw = process.env.NEXUS_ACP_TEST_REAP_MS;
   if (!raw) return 5_000;
@@ -174,8 +181,13 @@ async function signalBoundProcessTree(
     throw new Error('process_identity_mismatch');
   }
   const pid = owned.boundIdentity.pid;
-  if (process.platform === 'win32') {
-    throw new Error('process_identity_unsupported');
+  if (isWindows()) {
+    // Windows has no process groups: the owned tree is terminated by the OS
+    // parent/child relation via `taskkill /T /F`. The identity re-check above
+    // gates it, so a recycled PID is never signalled. `signal` is not applicable
+    // — `taskkill /F` is the forceful path both callers converge on.
+    await runAsync(WIN32_TASKKILL, win32TreeKillCommand(pid));
+    return;
   }
   const pkillSignal = signal === 'SIGKILL' ? 'KILL' : 'TERM';
   await execFileAsync('pkill', [`-${pkillSignal}`, '-P', String(pid)]).catch(() => undefined);

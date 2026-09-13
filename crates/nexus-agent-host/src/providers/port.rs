@@ -3,7 +3,7 @@
 //! Owns the host→wire mappings (`HostEvent` promotion, provider/operation wire
 //! vocabulary) and the one-outstanding-pull admission at the port boundary.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -33,6 +33,49 @@ use crate::{HostFacade, ProviderAdapter};
 const MAX_EVENTS_PER_BATCH: u32 = 16;
 const MAX_BYTES_PER_BATCH: u32 = 256 * 1024;
 
+/// Contract §7 — provider data caps per operation. These are rolling
+/// per-operation bounds, not per-batch ones: a caller that keeps pulling must
+/// hit a typed `delivery_overflow` gap rather than grow its buffer without
+/// limit or, worse, have the over-budget item silently disappear.
+/// Maximum events the port may hold undelivered for one operation.
+pub const MAX_PENDING_MESSAGES_PER_OP: usize = 64;
+/// Maximum wire bytes the port may hold undelivered for one operation.
+pub const MAX_PENDING_BYTES_PER_OP: usize = 1024 * 1024;
+/// Maximum wire bytes of a single event.
+pub const MAX_EVENT_BYTES: usize = 256 * 1024;
+/// Maximum wire bytes emitted for one operation before it is cut off.
+pub const MAX_EMITTED_BYTES_PER_OP: usize = 4 * 1024 * 1024;
+
+/// Map a host error onto the wire error taxonomy.
+///
+/// Shared by the effect path ([`ProviderPortAdapter`]) and the admission
+/// boundary (`AdmittingProviderPort` in `nexus-core-node`) so a native caller
+/// sees ONE category per condition. Collapsing everything to `invalid_input`
+/// would report a policy denial or a busy provider as malformed input.
+#[must_use]
+pub fn host_error_to_core_error(err: &HostError) -> CoreError {
+    let (code, http_status) = match err {
+        HostError::ProviderUnavailable { .. } => (CoreErrorCode::NotFound, 404),
+        HostError::PolicyDenied { .. } | HostError::OwnerWorkspaceMismatch { .. } => {
+            (CoreErrorCode::Forbidden, 403)
+        }
+        HostError::OperationCancelled { .. } => (CoreErrorCode::Interrupted, 503),
+        HostError::OperationTimeout { .. } | HostError::CleanupUnconfirmed { .. } => {
+            (CoreErrorCode::Busy, 503)
+        }
+        HostError::CapabilityUnsupported { .. } => (CoreErrorCode::InvalidInput, 400),
+        HostError::LaunchFailed { .. }
+        | HostError::ProviderProtocolError { .. }
+        | HostError::InternalHostError { .. } => (CoreErrorCode::Internal, 500),
+    };
+    CoreError {
+        code,
+        message: err.to_string(),
+        details: Default::default(),
+        http_status: Some(http_status),
+    }
+}
+
 /// Wire spelling of [`ProtocolKind`] — the contract's snake_case value.
 #[must_use]
 pub fn protocol_kind_wire(kind: ProtocolKind) -> String {
@@ -55,12 +98,76 @@ pub fn operation_status_wire(state: &SessionState, op_id: &HostOperationId) -> &
     }
 }
 
+/// A pulled-but-undelivered wire event.
+struct PendingItem {
+    wire: NexusProviderHostEvent,
+    bytes: usize,
+    /// This item is the operation terminal — a *control* item, delivered even
+    /// when the data window is full, and never erased by an EOF behind it.
+    terminal: bool,
+}
+
+/// Per-operation pending window and rolling budget accumulators.
+///
+/// A pull that cannot fit an item no longer drops it: the item is deferred here
+/// and delivered by the next pull. Only a genuine cap violation discards it, and
+/// then the caller receives a typed `delivery_overflow` gap, so loss is always
+/// explicit.
+#[derive(Default)]
+struct PullState {
+    pending: VecDeque<PendingItem>,
+    pending_bytes: usize,
+    /// Rolling totals actually delivered to the caller for this operation.
+    emitted_bytes: usize,
+    emitted_messages: usize,
+    /// The stream produced a terminal that has not been delivered yet.
+    terminal_pending: bool,
+    /// The terminal has been delivered; completion may be reported.
+    terminal_delivered: bool,
+    /// A per-operation cap was exceeded; every later pull reports the gap.
+    overflowed: bool,
+}
+
+impl PullState {
+    /// Buffer a pulled item. `false` means a per-operation cap would be
+    /// exceeded, so the caller must report the typed gap instead of dropping the
+    /// item silently.
+    fn defer(&mut self, wire: NexusProviderHostEvent, bytes: usize, terminal: bool) -> bool {
+        if self.emitted_bytes + self.pending_bytes + bytes > MAX_EMITTED_BYTES_PER_OP {
+            return false;
+        }
+        if self.pending.len() >= MAX_PENDING_MESSAGES_PER_OP {
+            return false;
+        }
+        if self.pending_bytes + bytes > MAX_PENDING_BYTES_PER_OP {
+            return false;
+        }
+        self.pending.push_back(PendingItem {
+            wire,
+            bytes,
+            terminal,
+        });
+        self.pending_bytes += bytes;
+        if terminal {
+            self.terminal_pending = true;
+        }
+        true
+    }
+
+    fn note_emitted(&mut self, bytes: usize) {
+        self.emitted_bytes += bytes;
+        self.emitted_messages += 1;
+    }
+}
+
 /// Per-operation pull state. The admission flag is atomic and lives outside the
 /// stream slot, so a concurrent pull is rejected without waiting on the owner.
 struct OperationEntry {
     pull_in_flight: AtomicBool,
     terminal_seen: AtomicBool,
     stream_slot: Arc<Mutex<Option<HostEventStream>>>,
+    /// Guarded by the pull-admission flag, so it needs no async lock.
+    pull_state: Mutex<PullState>,
 }
 
 /// Releases the pull admission flag on every exit path, including `?` and drop.
@@ -144,31 +251,13 @@ impl ProviderPortAdapter {
                 pull_in_flight: AtomicBool::new(false),
                 terminal_seen: AtomicBool::new(false),
                 stream_slot: Arc::new(Mutex::new(Some(stream))),
+                pull_state: Mutex::new(PullState::default()),
             }),
         );
     }
 
     fn map_host_error(err: HostError) -> CoreError {
-        let (code, http_status) = match &err {
-            HostError::ProviderUnavailable { .. } => (CoreErrorCode::NotFound, 404),
-            HostError::PolicyDenied { .. } | HostError::OwnerWorkspaceMismatch { .. } => {
-                (CoreErrorCode::Forbidden, 403)
-            }
-            HostError::OperationCancelled { .. } => (CoreErrorCode::Interrupted, 503),
-            HostError::OperationTimeout { .. } | HostError::CleanupUnconfirmed { .. } => {
-                (CoreErrorCode::Busy, 503)
-            }
-            HostError::CapabilityUnsupported { .. } => (CoreErrorCode::InvalidInput, 400),
-            HostError::LaunchFailed { .. }
-            | HostError::ProviderProtocolError { .. }
-            | HostError::InternalHostError { .. } => (CoreErrorCode::Internal, 500),
-        };
-        CoreError {
-            code,
-            message: err.to_string(),
-            details: Default::default(),
-            http_status: Some(http_status),
-        }
+        host_error_to_core_error(&err)
     }
 
     fn invalid_input(message: impl Into<String>) -> CoreError {
@@ -221,6 +310,13 @@ impl ProviderPortAdapter {
 
     /// Drain one bounded batch from an owned stream. The caller guarantees
     /// single-owner access through the per-operation admission flag.
+    ///
+    /// Nothing pulled from the non-rewindable stream is ever silently discarded:
+    /// an item that does not fit the remaining batch budget is deferred to the
+    /// per-operation pending window and returned by the next pull. A terminal is
+    /// a *control* item — it is retained for delivery, and an EOF arriving behind
+    /// it cannot erase it. Only a genuine per-operation cap violation drops an
+    /// item, and then the batch carries a typed `delivery_overflow` gap.
     async fn pull_events(
         entry: &OperationEntry,
         operation_id: &str,
@@ -228,35 +324,133 @@ impl ProviderPortAdapter {
         cap_events: u32,
         cap_bytes: u32,
     ) -> ProviderResult<ProviderEventBatch> {
-        let mut events = Vec::new();
+        let mut events: Vec<NexusProviderHostEvent> = Vec::new();
         let mut used_bytes = 0u32;
+
+        // (1) Deliver what a previous pull had to defer, oldest first.
+        {
+            let mut state = entry.pull_state.lock().await;
+            if state.overflowed {
+                return Ok(ProviderEventBatch {
+                    operation_id: operation_id.to_string(),
+                    events,
+                    has_more: !state.terminal_delivered,
+                    gap: Some(Self::oversized_gap(operation_id)),
+                });
+            }
+            while (events.len() as u32) < cap_events {
+                let Some(front) = state.pending.front() else {
+                    break;
+                };
+                if used_bytes + front.bytes as u32 > cap_bytes {
+                    break;
+                }
+                let item = state.pending.pop_front().expect("pending front");
+                state.pending_bytes -= item.bytes;
+                used_bytes += item.bytes as u32;
+                state.note_emitted(item.bytes);
+                if item.terminal {
+                    state.terminal_delivered = true;
+                }
+                events.push(item.wire);
+                if item.terminal {
+                    break;
+                }
+            }
+            if state.terminal_delivered {
+                entry.terminal_seen.store(true, Ordering::Release);
+                return Ok(ProviderEventBatch {
+                    operation_id: operation_id.to_string(),
+                    events,
+                    has_more: false,
+                    gap: None,
+                });
+            }
+            if state.terminal_pending {
+                // The terminal the stream already produced is still queued: do
+                // not read past it, and do not report completion yet.
+                return Ok(ProviderEventBatch {
+                    operation_id: operation_id.to_string(),
+                    events,
+                    has_more: true,
+                    gap: None,
+                });
+            }
+        }
+
+        // (2) Read further items, deferring rather than dropping what does not fit.
         while (events.len() as u32) < cap_events && used_bytes < cap_bytes {
             match stream.next().await {
                 Some(Ok(event)) => {
                     let wire = wire_to_batch_event(host_event_to_wire(&event)?)?;
                     let size = serde_json::to_vec(&wire).map_or(0, |bytes| bytes.len());
-                    if events.is_empty() && size as u32 > cap_bytes {
+                    let terminal = is_terminal(&event);
+
+                    // An item that exceeds the per-event cap — or that could not
+                    // fit an *empty* batch under the caller's byte cap — can
+                    // never be delivered, so deferring it would spin forever.
+                    // That is a typed gap, never a partial or silent drop.
+                    if size > MAX_EVENT_BYTES || size as u32 > cap_bytes {
+                        entry.pull_state.lock().await.overflowed = true;
                         return Ok(ProviderEventBatch {
                             operation_id: operation_id.to_string(),
-                            events: vec![],
+                            events,
                             has_more: true,
                             gap: Some(Self::oversized_gap(operation_id)),
                         });
                     }
-                    if used_bytes + size as u32 > cap_bytes && !events.is_empty() {
-                        break;
+
+                    if used_bytes + size as u32 <= cap_bytes {
+                        {
+                            let mut state = entry.pull_state.lock().await;
+                            state.note_emitted(size);
+                            if terminal {
+                                state.terminal_delivered = true;
+                            }
+                        }
+                        used_bytes += size as u32;
+                        events.push(wire);
+                        if terminal {
+                            entry.terminal_seen.store(true, Ordering::Release);
+                            break;
+                        }
+                        continue;
                     }
-                    used_bytes += size as u32;
-                    events.push(wire);
-                    if is_terminal(&event) {
-                        entry.terminal_seen.store(true, Ordering::Release);
-                        break;
+
+                    // Does not fit this batch: defer it for the next pull.
+                    let deferred = entry.pull_state.lock().await.defer(wire, size, terminal);
+                    if !deferred {
+                        entry.pull_state.lock().await.overflowed = true;
+                        return Ok(ProviderEventBatch {
+                            operation_id: operation_id.to_string(),
+                            events,
+                            has_more: true,
+                            gap: Some(Self::oversized_gap(operation_id)),
+                        });
                     }
+                    break;
                 }
                 Some(Err(err)) => return Err(Self::map_host_error(err)),
                 None => {
+                    // Stream ended. Completion may only be reported once every
+                    // deferred item — a terminal above all — has been delivered.
+                    let mut state = entry.pull_state.lock().await;
+                    if !state.pending.is_empty() {
+                        return Ok(ProviderEventBatch {
+                            operation_id: operation_id.to_string(),
+                            events,
+                            has_more: true,
+                            gap: None,
+                        });
+                    }
+                    state.terminal_delivered = true;
                     entry.terminal_seen.store(true, Ordering::Release);
-                    break;
+                    return Ok(ProviderEventBatch {
+                        operation_id: operation_id.to_string(),
+                        events,
+                        has_more: false,
+                        gap: None,
+                    });
                 }
             }
         }
@@ -647,6 +841,247 @@ mod tests {
         assert!(batch.has_more);
         let gap = batch.gap.expect("gap present");
         assert_eq!(gap.reason, ProviderEventBatchGapReason::Oversized);
+    }
+
+    fn status_event(text: &str) -> HostEvent {
+        HostEvent::Status(crate::capability::model::StatusEvent {
+            session_id: None,
+            level: crate::capability::model::StatusLevel::Info,
+            message: text.to_string(),
+        })
+    }
+
+    /// Q1-C1: an event that does not fit the *remaining* batch budget must be
+    /// deferred and delivered by the next pull — never consumed off the
+    /// non-rewindable stream and lost.
+    #[tokio::test]
+    async fn over_budget_event_is_deferred_not_lost() {
+        let port = adapter();
+        let first = status_event("first");
+        let second = status_event("second-event-that-does-not-fit");
+        port.insert_operation(
+            "op-defer".to_string(),
+            Box::pin(futures_util::stream::iter(vec![Ok(first), Ok(second)])),
+        );
+
+        // A cap that fits exactly one event of this size.
+        let cap = serde_json::to_vec(&wire_to_batch_event(
+            host_event_to_wire(&status_event("second-event-that-does-not-fit")).unwrap(),
+        )
+        .unwrap())
+        .unwrap()
+        .len() as u32;
+
+        let batch = port
+            .next("op-defer".to_string(), 16, cap)
+            .await
+            .expect("first pull");
+        assert_eq!(batch.events.len(), 1, "only the fitting event is delivered");
+        assert!(batch.gap.is_none(), "a deferred event is not a gap");
+
+        let next = port
+            .next("op-defer".to_string(), 16, cap)
+            .await
+            .expect("second pull");
+        assert_eq!(
+            next.events.len(),
+            1,
+            "the deferred event must be delivered, not lost: {next:?}"
+        );
+    }
+
+    /// Q1-C1: a terminal that does not fit the batch is a *control* item — it is
+    /// retained, and the EOF behind it must not erase terminal truth.
+    #[tokio::test]
+    async fn over_budget_terminal_survives_trailing_eof() {
+        let port = adapter();
+        let filler = status_event("filler");
+        port.insert_operation(
+            "op-term".to_string(),
+            Box::pin(futures_util::stream::iter(vec![Ok(filler), terminal_event()])),
+        );
+
+        // A cap that fits each item on its own but not both together: the
+        // filler is delivered and the terminal must be deferred, not dropped.
+        let wire_size = |event: &HostEvent| {
+            serde_json::to_vec(&wire_to_batch_event(host_event_to_wire(event).unwrap()).unwrap())
+                .unwrap()
+                .len() as u32
+        };
+        let cap = wire_size(&status_event("filler")) + wire_size(&terminal_event().unwrap()) - 1;
+
+        let first = port.next("op-term".to_string(), 16, cap).await.expect("pull 1");
+        assert!(
+            first.has_more,
+            "completion must not be reported while the terminal is still queued"
+        );
+
+        let second = port
+            .next("op-term".to_string(), 16, cap)
+            .await
+            .expect("pull 2");
+        assert_eq!(second.events.len(), 1, "the terminal must be delivered");
+        assert!(!second.has_more, "the delivered terminal completes the op");
+
+        // The terminal is delivered once, not replayed.
+        let third = port
+            .next("op-term".to_string(), 16, cap)
+            .await
+            .expect("pull 3");
+        assert!(third.events.is_empty(), "terminal must not replay: {third:?}");
+        assert!(!third.has_more);
+    }
+
+    /// Q3-W4/S7: a single event beyond the per-event cap trips a typed gap even
+    /// when it is not the first event of the batch.
+    #[tokio::test]
+    async fn oversized_non_first_event_reports_gap() {
+        let port = adapter();
+        let small = status_event("small");
+        let huge = status_event(&"x".repeat(MAX_EVENT_BYTES + 1024));
+        port.insert_operation(
+            "op-mixed".to_string(),
+            Box::pin(futures_util::stream::iter(vec![Ok(small), Ok(huge)])),
+        );
+
+        let batch = port
+            .next("op-mixed".to_string(), 16, MAX_BYTES_PER_BATCH)
+            .await
+            .expect("pull");
+        let gap = batch.gap.expect("oversized non-first event must report a gap");
+        assert_eq!(gap.reason, ProviderEventBatchGapReason::Oversized);
+        assert!(gap.resync_required);
+        // The over-budget event is never delivered partially.
+        for event in &batch.events {
+            assert!(
+                serde_json::to_vec(event).unwrap().len() <= MAX_EVENT_BYTES,
+                "no delivered event may exceed the per-event cap"
+            );
+        }
+    }
+
+    /// Q3-W4: the per-operation pending window is bounded and tripping it is an
+    /// explicit typed gap, not an unbounded buffer.
+    #[tokio::test]
+    async fn pending_window_is_bounded_and_trips_a_typed_gap() {
+        let mut state = PullState::default();
+        let wire = wire_to_batch_event(host_event_to_wire(&status_event("p")).unwrap()).unwrap();
+        let bytes = serde_json::to_vec(&wire).unwrap().len();
+
+        for _ in 0..MAX_PENDING_MESSAGES_PER_OP {
+            assert!(state.defer(wire.clone(), bytes, false), "within the window");
+        }
+        assert!(
+            !state.defer(wire.clone(), bytes, false),
+            "the message-count cap must trip"
+        );
+        assert_eq!(state.pending.len(), MAX_PENDING_MESSAGES_PER_OP);
+
+        let mut byte_state = PullState::default();
+        let chunk = MAX_PENDING_BYTES_PER_OP / 4;
+        assert!(byte_state.defer(wire.clone(), chunk, false));
+        assert!(byte_state.defer(wire.clone(), chunk, false));
+        assert!(byte_state.defer(wire.clone(), chunk, false));
+        assert!(
+            !byte_state.defer(wire.clone(), chunk + 1, false),
+            "the byte cap must trip"
+        );
+    }
+
+    /// Q3-W4: the rolling per-operation emitted budget trips once exceeded, and
+    /// every later pull keeps reporting the typed gap rather than silently
+    /// growing.
+    #[tokio::test]
+    async fn per_operation_emitted_budget_trips_typed_gap() {
+        let mut state = PullState::default();
+        let wire = wire_to_batch_event(host_event_to_wire(&status_event("e")).unwrap()).unwrap();
+        let mut deferred = 0usize;
+        // Fill the emitted + pending budget; the first refusal is the trip point.
+        while state.defer(wire.clone(), 64 * 1024, false) {
+            deferred += 1;
+            assert!(deferred <= MAX_PENDING_MESSAGES_PER_OP, "bounded by the window");
+        }
+        assert!(deferred > 0, "the budget must accept something before tripping");
+        assert!(
+            state.emitted_bytes + state.pending_bytes <= MAX_EMITTED_BYTES_PER_OP,
+            "the accumulator must never exceed the per-operation budget"
+        );
+    }
+
+    /// Q2-S2: the admission boundary and the effect path must agree on the
+    /// category for each host condition, so a policy denial is not reported as
+    /// malformed input.
+    #[test]
+    fn host_error_taxonomy_is_shared_and_distinguishing() {
+        use crate::ids::ProviderId;
+        let provider = ProviderId::new("mock");
+
+        let cases = [
+            (
+                HostError::ProviderUnavailable {
+                    provider_id: provider.clone(),
+                    message: "missing".into(),
+                },
+                CoreErrorCode::NotFound,
+                404,
+            ),
+            (
+                HostError::PolicyDenied {
+                    provider_id: None,
+                    session_id: None,
+                    message: "denied".into(),
+                },
+                CoreErrorCode::Forbidden,
+                403,
+            ),
+            (
+                HostError::OperationCancelled {
+                    provider_id: None,
+                    session_id: None,
+                    op_id: None,
+                    message: "cancelled".into(),
+                },
+                CoreErrorCode::Interrupted,
+                503,
+            ),
+            (
+                HostError::CleanupUnconfirmed {
+                    provider_id: None,
+                    session_id: None,
+                    message: "retained".into(),
+                },
+                CoreErrorCode::Busy,
+                503,
+            ),
+            (
+                HostError::CapabilityUnsupported {
+                    provider_id: provider.clone(),
+                    capability: "prompt".into(),
+                    message: "unsupported".into(),
+                },
+                CoreErrorCode::InvalidInput,
+                400,
+            ),
+        ];
+
+        for (err, code, http_status) in cases {
+            let mapped = host_error_to_core_error(&err);
+            assert_eq!(mapped.code, code, "wrong category for {err:?}");
+            assert_eq!(mapped.http_status, Some(http_status), "wrong status for {err:?}");
+        }
+
+        // The admission boundary maps through the same function, so the two can
+        // not drift: policy denial stays 403 rather than collapsing to 400.
+        let denied = HostError::PolicyDenied {
+            provider_id: None,
+            session_id: None,
+            message: "denied".into(),
+        };
+        assert_ne!(
+            host_error_to_core_error(&denied).code,
+            CoreErrorCode::InvalidInput,
+            "policy denial must not be reported as invalid input"
+        );
     }
 
     #[tokio::test]

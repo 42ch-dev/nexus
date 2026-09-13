@@ -117,8 +117,15 @@ impl JsProviderBridge {
         })?;
         let gen_at_enqueue = self.state.generation.load(Ordering::SeqCst);
 
-        // Register close waiter before enqueue so a notify cannot be lost.
-        let close_fut = self.state.close_notify.notified();
+        // Subscribe to the versioned close signal BEFORE the enqueue. `wait_for`
+        // re-reads the stored value, so a close landing at any later point is
+        // observed even though no waiter was registered when it fired — the
+        // `Notify`-based form could lose that wake entirely.
+        let mut close_rx = self.state.close_watch();
+        let close_fut = async move {
+            // `Err` means the sender was dropped, which is also "no longer open".
+            let _ = close_rx.wait_for(|closed| *closed).await;
+        };
         if self.state.is_closing() {
             return Err(CoreError {
                 code: CoreErrorCode::Closing,

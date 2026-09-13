@@ -84,6 +84,34 @@ function mapSessionUpdate(
   return null;
 }
 
+/** Default ceiling when a caller supplies no deadline. */
+const DEFAULT_DEADLINE_MS = 5_000;
+
+/**
+ * Bound `work` by the request deadline.
+ *
+ * The caller's `deadline_ms` is authoritative: whatever happens, a cancel or
+ * shutdown must reach the owned-process reap inside it rather than awaiting a
+ * prompt that never settles. Returns `false` when the work did not finish in
+ * time — the caller then proceeds to cleanup rather than hanging.
+ */
+async function boundedByDeadline(
+  deadlineMs: number | null | undefined,
+  work: Promise<unknown>,
+): Promise<boolean> {
+  const budget = typeof deadlineMs === 'number' && deadlineMs > 0 ? deadlineMs : DEFAULT_DEADLINE_MS;
+  let timer: unknown;
+  try {
+    const timeout = new Promise<'timeout'>((resolve) => {
+      timer = setTimeout(() => resolve('timeout'), budget);
+    });
+    const settled = await Promise.race([work.then(() => 'done' as const), timeout]);
+    return settled === 'done';
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 export class AcpProviderEngine {
   private sessions = new Map<string, SessionState>();
   private operations = new Map<string, ActiveOperation>();
@@ -499,12 +527,28 @@ export class AcpProviderEngine {
     if (!op.delivery?.trySetTerminal({ kind: 'finished', reason: 'cancelled' })) {
       return okReply(request.request_id, { operation_id: operationId, session_id: op.sessionId });
     }
-    try {
-      await session.owned.connection.cancel({ sessionId: session.owned.acpSessionId });
-    } catch {
-      // best effort
+    // The request deadline bounds BOTH the protocol cancel and the prompt join.
+    // A prompt the peer never settles must not keep the child alive: once the
+    // budget is spent we go straight to the owned-process reap below.
+    const cancelMs = request.deadline_ms;
+    // Narrowing does not survive the closure boundary, so capture it here.
+    const acpSessionId = session.owned.acpSessionId;
+    const cancelled = await boundedByDeadline(
+      cancelMs,
+      (async () => {
+        try {
+          await session.owned.connection.cancel({ sessionId: acpSessionId });
+        } catch {
+          // best effort; the reap below is what must be confirmed
+        }
+        if (op.promptTask) await op.promptTask.catch(() => undefined);
+      })(),
+    );
+    if (!cancelled) {
+      // Deadline spent: force the owned connection teardown rather than waiting
+      // for a prompt task that may never settle.
+      await cleanupOwnedConnection(session.owned).catch(() => undefined);
     }
-    if (op.promptTask) await op.promptTask.catch(() => undefined);
     if (session.activeOperationId === operationId) session.activeOperationId = null;
     const ownerKey = `${session.recipeGeneration}:${session.sessionId}`;
     try {
@@ -536,14 +580,22 @@ export class AcpProviderEngine {
         active.cancelled = true;
         active.delivery?.trySetTerminal({ kind: 'finished', reason: 'cancelled' });
         const acpSessionId = session.owned.acpSessionId;
-        if (acpSessionId) {
-          try {
-            await session.owned.connection.cancel({ sessionId: acpSessionId });
-          } catch {
-            // best effort; the owned reap below is what must be confirmed
-          }
+        const cancelled = await boundedByDeadline(
+          request.deadline_ms,
+          (async () => {
+            if (acpSessionId) {
+              try {
+                await session.owned.connection.cancel({ sessionId: acpSessionId });
+              } catch {
+                // best effort; the owned reap below is what must be confirmed
+              }
+            }
+            if (active.promptTask) await active.promptTask.catch(() => undefined);
+          })(),
+        );
+        if (!cancelled) {
+          await cleanupOwnedConnection(session.owned).catch(() => undefined);
         }
-        if (active.promptTask) await active.promptTask.catch(() => undefined);
       }
       session.activeOperationId = null;
     }
@@ -612,6 +664,45 @@ export class AcpProviderEngine {
       this.retainCleanupFence(fenceKey, error.owner);
     }
     return interruptedReply(requestId, error.message);
+  }
+
+  /** @internal tests: adopt a session with an owned connection. */
+  adoptSession(
+    sessionId: string,
+    owned: OwnedConnection,
+    generation = 'gen-test',
+  ): void {
+    this.sessions.set(sessionId, {
+      sessionId,
+      providerId: 'mock-acp',
+      recipeGeneration: generation,
+      // The ambient process shim has no `cwd`; the test hook only needs a
+      // placeholder since no launch path reads it here.
+      cwd: '',
+      owned,
+      activeOperationId: null,
+    });
+    this.recipeOwners.set(`${generation}:${sessionId}`, owned);
+  }
+
+  /** @internal tests: register an in-flight operation for a session. */
+  adoptOperation(
+    sessionId: string,
+    opId: string,
+    promptTask: Promise<void> | null,
+    delivery: OperationDelivery | null = null,
+  ): void {
+    this.operations.set(opId, {
+      sessionId,
+      opId,
+      delivery,
+      promptTask,
+      cancelled: false,
+      terminalDelivered: false,
+      inspectUrl: inspectUrlFor(opId),
+    });
+    const session = this.sessions.get(sessionId);
+    if (session) session.activeOperationId = opId;
   }
 
   /** @internal test hook: attempt confirmed settlement of all cleanup fences. */

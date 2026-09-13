@@ -211,6 +211,22 @@ function validateScenarioEvidence(key, scenario) {
   if ((scenario.surviving_pids ?? []).length > 0) {
     return `${key}: surviving_pids ${scenario.surviving_pids.join(',')}`;
   }
+  if (key === 'open_close_100') {
+    // Q3-S8: the per-cycle growth bound must be present and satisfied in the
+    // evidence itself, not only in the worker's own verdict.
+    if (typeof scenario.rss_growth_bytes !== 'number') {
+      return `${key}: missing per-cycle RSS growth measurement`;
+    }
+    if (
+      typeof scenario.rss_growth_limit_bytes !== 'number' ||
+      scenario.rss_growth_bytes > scenario.rss_growth_limit_bytes
+    ) {
+      return `${key}: RSS grew ${scenario.rss_growth_bytes} bytes past the bound`;
+    }
+    if (scenario.rss_measured_in !== 'isolated_worker') {
+      return `${key}: RSS must be measured inside the isolated worker`;
+    }
+  }
   if (key === 'worker_termination' || key === 'full_queue_shutdown') {
     // Either the scenario observed an owned child — and then it must carry that
     // child's real OS identity as observed *before* the action — or it must say
@@ -534,7 +550,33 @@ async function runAdapterScenarios(core, ctx) {
   }
   const rssEnd = rssSnapshot();
   rssPeak = Math.max(rssPeak, rssEnd.rss);
-  scenarios._rss = { rss_start: rssStart.rss, rss_end: rssEnd.rss, rss_peak: rssPeak };
+  // Q3-W6: the isolated workers own the native workload, so their RSS is the
+  // measurement that matters. Aggregate what they reported and keep the
+  // wrapper's own numbers as a separate, clearly-labelled figure.
+  const workerRss = Object.entries(scenarios)
+    .filter(([key]) => !key.startsWith('_'))
+    .map(([key, scenario]) => ({
+      scenario: key,
+      rss_start: scenario.rss_start ?? null,
+      rss_end: scenario.rss_end ?? null,
+      rss_peak: scenario.rss_peak ?? null,
+      rss_growth_bytes: scenario.rss_growth_bytes ?? null,
+      measured_in: scenario.rss_measured_in ?? null,
+    }))
+    .filter((entry) => entry.rss_peak !== null || entry.rss_start !== null);
+  const workerPeak = workerRss.reduce(
+    (peak, entry) => Math.max(peak, entry.rss_peak ?? 0, entry.rss_end ?? 0, entry.rss_start ?? 0),
+    0,
+  );
+  scenarios._rss = {
+    wrapper_rss_start: rssStart.rss,
+    wrapper_rss_end: rssEnd.rss,
+    wrapper_rss_peak: rssPeak,
+    // Aggregated from the isolated workers that ran the native environments.
+    worker_rss_peak: workerPeak,
+    worker_rss_samples: workerRss,
+    rss_source: workerPeak > 0 ? 'isolated_workers' : 'wrapper_only',
+  };
   return scenarios;
 }
 
@@ -760,7 +802,14 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
     }
   }
 
-  const rss = adapterScenarios._rss ?? rssSnapshot();
+  const rss = adapterScenarios._rss ?? {
+    wrapper_rss_start: rssSnapshot().rss,
+    wrapper_rss_end: rssSnapshot().rss,
+    wrapper_rss_peak: rssSnapshot().rss,
+    worker_rss_peak: 0,
+    worker_rss_samples: [],
+    rss_source: 'wrapper_only',
+  };
   delete scenarios._rss;
   const survivingPids = findFixtureChildPids();
   if (survivingPids.length > 0) {
@@ -800,9 +849,15 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
     close_state: closeReport.state,
     cleanup_confirmed: closeReport.cleanup_confirmed,
     pending_operations: closeReport.pending_operations ?? [],
-    rss_start: rss.rss_start,
-    rss_end: rss.rss_end,
-    rss_peak: rss.rss_peak,
+    rss_start: rss.wrapper_rss_start,
+    rss_end: rss.wrapper_rss_end,
+    rss_peak: rss.rss_peak ?? rss.wrapper_rss_peak,
+    wrapper_rss_start: rss.wrapper_rss_start,
+    wrapper_rss_end: rss.wrapper_rss_end,
+    wrapper_rss_peak: rss.wrapper_rss_peak,
+    worker_rss_peak: rss.worker_rss_peak,
+    worker_rss_samples: rss.worker_rss_samples,
+    rss_source: rss.rss_source,
     surviving_child_pids: survivingPids,
     scenarios,
     localset_shutdown_unit: captureLocalSetUnitEvidence(),

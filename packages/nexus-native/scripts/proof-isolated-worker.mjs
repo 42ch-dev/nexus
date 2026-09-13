@@ -199,6 +199,24 @@ function seedHome() {
   return home;
 }
 
+/**
+ * Q3-W6: RSS must be measured where the native workload actually lives. A worker
+ * thread has its own OS RSS that the wrapper process cannot see, so each scenario
+ * reports its own numbers and the wrapper aggregates them.
+ */
+function rssSnapshot() {
+  const mem = process.memoryUsage();
+  return { rss: mem.rss, heap_used: mem.heapUsed, external: mem.external };
+}
+
+/**
+ * Q3-S8: bounded growth across 100 open/close cycles. A leak of even 1 MiB per
+ * cycle would show up here long before it matters in production. The threshold is
+ * deliberately generous relative to noise but far below a per-cycle leak:
+ * 50 MiB total growth over 100 cycles (about 512 KiB per cycle).
+ */
+const OPEN_CLOSE_RSS_GROWTH_LIMIT_BYTES = 50 * 1024 * 1024;
+
 function pass(key, detail = {}) {
   return { key, ok: true, executed_steps: detail.executed_steps ?? [], ...detail };
 }
@@ -350,6 +368,11 @@ async function runOpenClose100() {
   const home = seedHome();
   const accessJson = JSON.stringify({ user_home: home, access: 'engine_owner', allow_uninitialized: false });
   const providers = await providersForScenario();
+
+  // RSS is sampled inside the worker that owns the native environment.
+  const rssStart = rssSnapshot();
+  let rssPeak = rssStart.rss;
+  const perCycleRss = [];
   for (let cycle = 0; cycle < 100; cycle += 1) {
     steps.push(`open:${cycle}`);
     const core = binding.open(accessJson, providers);
@@ -360,7 +383,22 @@ async function runOpenClose100() {
     if (!report.cleanup_confirmed || report.state !== 'closed') {
       return fail('open_close_100', `cycle ${cycle} unconfirmed`, { executed_steps: steps, cycle });
     }
+    const sample = rssSnapshot();
+    rssPeak = Math.max(rssPeak, sample.rss);
+    perCycleRss.push(sample.rss);
   }
+  const rssEnd = rssSnapshot();
+  const growth = rssEnd.rss - rssStart.rss;
+
+  // Q3-S8: bounded growth. A leak must fail the proof, not merely be reported.
+  if (growth > OPEN_CLOSE_RSS_GROWTH_LIMIT_BYTES) {
+    return fail(
+      'open_close_100',
+      `RSS grew ${growth} bytes over 100 cycles (> ${OPEN_CLOSE_RSS_GROWTH_LIMIT_BYTES} limit)`,
+      { executed_steps: steps, rss_growth_bytes: growth, rss_start: rssStart.rss, rss_end: rssEnd.rss },
+    );
+  }
+
   return pass('open_close_100', {
     cycles: 100,
     executed_steps: steps,
@@ -374,6 +412,13 @@ async function runOpenClose100() {
     surviving_pids: findFixtureChildPids(),
     terminal_session_id: null,
     terminal_operation_id: null,
+    rss_start: rssStart.rss,
+    rss_end: rssEnd.rss,
+    rss_peak: rssPeak,
+    rss_growth_bytes: growth,
+    rss_growth_limit_bytes: OPEN_CLOSE_RSS_GROWTH_LIMIT_BYTES,
+    rss_per_cycle: perCycleRss,
+    rss_measured_in: 'isolated_worker',
   });
 }
 

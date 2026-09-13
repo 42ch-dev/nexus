@@ -1,8 +1,13 @@
 # @42ch/nexus-provider-acp
 
-Real `@agentclientprotocol/sdk` stable-v1 provider adapter. **Implementation is
-owned by P2-T2**; this directory currently carries the dependency/tsconfig
-reservation only.
+Real `@agentclientprotocol/sdk` stable-v1 provider adapter. **Implemented** by
+P2-T2 and shipped here: `src/acp.ts` (session/probe/execute/cancel), `src/delivery.ts`
+(bounded per-operation delivery accumulator), `src/process-owner.ts` (owned child
+spawn + identity-checked reap), `src/identity.ts` (OS process identity), `src/recipe.ts`
+(recipe admission), `src/errors.ts` (sanitized wire errors).
+
+The module is loaded at runtime by the native host (it is not a compile-time
+dependency of the daemon), so the pins below are the compatibility contract.
 
 ## Contract (P2-T2)
 
