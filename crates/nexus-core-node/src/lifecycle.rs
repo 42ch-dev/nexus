@@ -8,8 +8,10 @@ const CLOSE_CANCEL_PHASE: Duration = Duration::from_secs(2);
 use std::sync::Arc;
 
 use nexus_agent_host::capability::model::HostStartConfig;
-use nexus_agent_host::config::{load_config_from_path, AgentHostConfig};
-use nexus_agent_host::{HostFacade, HostManager};
+use nexus_agent_host::config::{agent_host_config_path, load_config_from_path, validate_workspace_path, AgentHostConfig};
+use nexus_agent_host::core::readiness::discover_provider_entries;
+use nexus_agent_host::policy::HostPermissionResolver;
+use nexus_agent_host::{HostError, HostFacade, HostManager};
 use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
 use nexus_contracts::{CoreCloseReport, CoreCloseReportState, NativeOpenOptions};
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
@@ -23,8 +25,7 @@ use super::core_error;
 use super::env_state::EnvState;
 
 fn open_err(err: CoreError) -> String {
-    serde_json::to_string(&core_error::wire_core_error_from_domain(err.clone()))
-        .unwrap_or_else(|_| err.to_string())
+    core_error::open_reason_from_domain(err)
 }
 
 fn validate_initialized_prerequisites(
@@ -55,12 +56,59 @@ fn is_genuinely_uninitialized(user_home: &PathBuf, access: CoreAccess) -> bool {
     }
 }
 
-fn validate_host_config(user_home: &PathBuf) -> Result<(), String> {
-    let config_path = user_home.join("config/agent-host.toml");
-    if config_path.exists() {
-        load_config_from_path(&config_path).map_err(|e| e.to_string())?;
+struct ValidatedHostAdmission {
+    config_path: PathBuf,
+    host_config: AgentHostConfig,
+}
+
+fn host_err(err: HostError) -> nexus_contracts::CoreError {
+    core_error::wire_core_error_from_host(err)
+}
+
+fn validate_host_admission(
+    user_home: &PathBuf,
+) -> Result<ValidatedHostAdmission, nexus_contracts::CoreError> {
+    validate_workspace_path(user_home).map_err(host_err)?;
+    let config_path = agent_host_config_path(user_home);
+    let host_config = load_config_from_path(&config_path).map_err(host_err)?;
+    let permission_resolver = HostPermissionResolver::new_native_only(&host_config.policy);
+    let bridge = HostManager::new().localset_bridge();
+    discover_provider_entries(
+        &host_config,
+        &host_config.timeouts,
+        &permission_resolver,
+        bridge,
+    )
+    .map_err(host_err)?;
+    Ok(ValidatedHostAdmission {
+        config_path,
+        host_config,
+    })
+}
+
+async fn abort_opening(
+    state: Arc<EnvState>,
+    core: Option<Arc<CoreService>>,
+    host: Option<Arc<HostManager>>,
+    js_port: Option<Arc<dyn ProviderPort>>,
+) {
+    if core.is_some() || host.is_some() || js_port.is_some() {
+        let (released, _) = cleanup_owners(
+            state.clone(),
+            core,
+            host,
+            js_port,
+            Instant::now() + CLOSE_BUDGET,
+        )
+        .await;
+        if released {
+            state.publish_closed().await;
+        } else {
+            state.mark_interrupted();
+        }
+    } else {
+        state.publish_closed().await;
     }
-    Ok(())
 }
 
 /// Test-only forcing of an unconfirmed cleanup.
@@ -501,48 +549,60 @@ pub async fn open_core(
     }
 
     if let Err(err) = validate_initialized_prerequisites(&user_home, access) {
-        return Err(open_err(err));
+        let reason = open_err(err);
+        abort_opening(state.clone(), None, None, js_port.clone()).await;
+        return Err(reason);
     }
-    validate_host_config(&user_home)?;
 
-    let core = CoreService::open(CoreOpenOptions {
+    let admission = match validate_host_admission(&user_home) {
+        Ok(admission) => admission,
+        Err(err) => {
+            let reason = core_error::open_reason_from_wire(err);
+            abort_opening(state.clone(), None, None, js_port.clone()).await;
+            return Err(reason);
+        }
+    };
+
+    let core = match CoreService::open(CoreOpenOptions {
         user_home: user_home.clone(),
         access,
     })
     .await
-    .map_err(open_err)?;
+    {
+        Ok(core) => core,
+        Err(err) => {
+            let reason = open_err(err);
+            abort_opening(state.clone(), None, None, js_port.clone()).await;
+            return Err(reason);
+        }
+    };
+
+    if let Err(err) = core.active_principal().await {
+        let reason = open_err(err);
+        abort_opening(state.clone(), Some(Arc::new(core)), None, js_port.clone()).await;
+        return Err(reason);
+    }
 
     let host = Arc::new(HostManager::new());
-    let config_path = user_home.join("config/agent-host.toml");
-    let host_boot = load_config_from_path(&config_path).unwrap_or_else(|_| AgentHostConfig::default());
     let start_config = HostStartConfig {
-        config_path,
+        config_path: admission.config_path,
         workspace_root: user_home.clone(),
-        max_sessions: host_boot.max_sessions,
-        max_ops_per_session: host_boot.max_ops_per_session,
-        timeouts: host_boot.timeouts.clone(),
-        host_config: None,
+        max_sessions: admission.host_config.max_sessions,
+        max_ops_per_session: admission.host_config.max_ops_per_session,
+        timeouts: admission.host_config.timeouts.clone(),
+        host_config: Some(admission.host_config),
         probe_owner: None,
     };
     if let Err(err) = host.start(start_config).await {
-        let (released, _) = cleanup_owners(
+        let reason = core_error::open_reason_from_host(err);
+        abort_opening(
             state.clone(),
             Some(Arc::new(core)),
             Some(host),
-            js_port,
-            Instant::now() + CLOSE_BUDGET,
+            js_port.clone(),
         )
         .await;
-        if released {
-            state.publish_closed().await;
-        } else {
-            state.mark_interrupted();
-        }
-        return Err(if released {
-            err.to_string()
-        } else {
-            format!("interrupted: host start failed ({err}); cleanup unconfirmed")
-        });
+        return Err(reason);
     }
 
     let provider_port: Arc<dyn ProviderPort> = if let Some(port) = js_port {
@@ -708,6 +768,51 @@ mod tests {
         assert!(!forced_unconfirmed());
     }
 
+
+    #[tokio::test]
+    async fn failed_host_config_open_resets_and_reopens() {
+        use crate::env_state::EnvLifecyclePhase;
+        use crate::wire_fixture::seed_wire_home;
+        use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
+        use nexus_contracts::NativeOpenOptions;
+        use tempfile::tempdir;
+
+        let dir = tempdir().expect("tempdir");
+        seed_wire_home(dir.path()).await;
+        let agent_host_dir = dir.path().join(".nexus42/agent-host");
+        std::fs::create_dir_all(&agent_host_dir).expect("agent-host dir");
+        let bad_config = agent_host_dir.join("config.toml");
+        std::fs::write(&bad_config, "not = [valid").expect("bad config");
+
+        let state = Arc::new(EnvState::new());
+        let failed = open_core(
+            state.clone(),
+            NativeOpenOptions {
+                user_home: dir.path().to_string_lossy().to_string(),
+                access: NativeOpenOptionsAccess::EngineOwner,
+                allow_uninitialized: false,
+            },
+            None,
+        )
+        .await;
+        assert!(failed.is_err(), "invalid host config must fail open");
+        assert_eq!(state.lifecycle_phase(), EnvLifecyclePhase::Closed);
+
+        std::fs::remove_file(&bad_config).expect("remove bad config");
+        open_core(
+            state.clone(),
+            NativeOpenOptions {
+                user_home: dir.path().to_string_lossy().to_string(),
+                access: NativeOpenOptionsAccess::EngineOwner,
+                allow_uninitialized: false,
+            },
+            None,
+        )
+        .await
+        .expect("reopen after corrected host config");
+        assert!(state.owner_slots_present());
+        let _ = close_core(state).await;
+    }
 
     #[tokio::test]
     async fn service_only_uninitialized_open_denies_effects_and_closes() {

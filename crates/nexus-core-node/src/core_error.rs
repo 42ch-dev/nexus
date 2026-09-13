@@ -1,6 +1,8 @@
 //! Map domain errors to generated wire [`CoreError`] JSON for N-API consumers.
 
 use napi::bindgen_prelude::Error;
+use nexus_agent_host::core::readiness::safe_provider_message;
+use nexus_agent_host::HostError;
 use nexus_contracts::{CoreError, CoreErrorCode};
 use nexus_core::CoreError as DomainError;
 use serde_json::Value;
@@ -22,6 +24,97 @@ pub fn napi_error_from_wire(err: CoreError) -> Error {
 /// Map a native-core domain error to wire JSON for TS `JSON.parse(message)`.
 pub fn napi_error_from_domain(err: DomainError) -> Error {
     napi_error_from_wire(wire_core_error_from_domain(err))
+}
+
+/// Parse an `open_core` rejection reason into a typed N-API error.
+pub fn napi_error_from_open_reason(reason: String) -> Error {
+    if let Ok(wire) = serde_json::from_str::<CoreError>(&reason) {
+        return napi_error_from_wire(wire);
+    }
+    napi_error_from_wire(CoreError {
+        code: CoreErrorCode::Internal,
+        message: "open failed".into(),
+        details: serde_json::Map::from_iter([(
+            "category".into(),
+            Value::String("open_failed".into()),
+        )]),
+        http_status: Some(500),
+    })
+}
+
+/// Serialize a wire [`CoreError`] for `open_core` rejection reasons.
+pub fn open_reason_from_wire(err: CoreError) -> String {
+    serde_json::to_string(&err).unwrap_or_else(|_| "open failed".to_string())
+}
+
+/// Serialize a domain error for `open_core` rejection reasons.
+pub fn open_reason_from_domain(err: DomainError) -> String {
+    open_reason_from_wire(wire_core_error_from_domain(err))
+}
+
+/// Serialize a host error for `open_core` rejection reasons.
+pub fn open_reason_from_host(err: HostError) -> String {
+    open_reason_from_wire(wire_core_error_from_host(err))
+}
+
+/// Serialize an invalid-input wire error for host-query style rejections.
+pub fn open_reason_invalid_input(message: impl Into<String>) -> String {
+    open_reason_from_wire(CoreError {
+        code: CoreErrorCode::InvalidInput,
+        message: message.into(),
+        details: Default::default(),
+        http_status: Some(400),
+    })
+}
+
+fn internal_error_bucket(category: &str) -> &'static str {
+    if category.starts_with("config_load:") || category.starts_with("database_error:") {
+        "configuration_or_database"
+    } else if category.starts_with("spoke") || category.contains("kb_store") {
+        "storage"
+    } else {
+        "internal"
+    }
+}
+
+/// Map a host error to the generated wire envelope without leaking raw diagnostics.
+pub fn wire_core_error_from_host(err: HostError) -> CoreError {
+    let category = err.category();
+    let message = safe_provider_message(&err);
+    let code = match category {
+        "policy_denied" | "owner_workspace_mismatch" => CoreErrorCode::Forbidden,
+        "operation_cancelled" => CoreErrorCode::Interrupted,
+        "operation_timeout" | "cleanup_unconfirmed" | "provider_unavailable" => CoreErrorCode::Busy,
+        "launch_failed" | "capability_unsupported" | "provider_protocol_error" => {
+            CoreErrorCode::InvalidInput
+        }
+        _ => CoreErrorCode::Internal,
+    };
+    let http_status = match code {
+        CoreErrorCode::Forbidden => 403,
+        CoreErrorCode::Interrupted | CoreErrorCode::Busy => 503,
+        CoreErrorCode::InvalidInput => 400,
+        _ => 500,
+    };
+    CoreError {
+        code,
+        message,
+        details: serde_json::Map::from_iter([(
+            "category".into(),
+            Value::String(category.into()),
+        )]),
+        http_status: Some(http_status),
+    }
+}
+
+/// Typed uninitialized denial shared by service-only entrypoints.
+pub fn service_only_uninitialized_wire() -> CoreError {
+    CoreError {
+        code: CoreErrorCode::Uninitialized,
+        message: "workspace not initialized".into(),
+        details: Default::default(),
+        http_status: Some(409),
+    }
 }
 
 pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
@@ -127,14 +220,11 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
         },
         DomainError::Internal { category } => CoreError {
             code: CoreErrorCode::Internal,
-            message: if category.starts_with("config_load:")
-                || category.starts_with("database_error:")
-            {
-                "internal: configuration or database error".into()
-            } else {
-                format!("internal: {category}")
-            },
-            details: Default::default(),
+            message: "internal error".into(),
+            details: serde_json::Map::from_iter([(
+                "category".into(),
+                Value::String(internal_error_bucket(&category).into()),
+            )]),
             http_status: Some(500),
         },
     }
@@ -144,6 +234,19 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
 mod tests {
     use super::*;
     use nexus_contracts::WorldKbConflictError;
+
+    #[test]
+    fn internal_error_is_sanitized() {
+        let wire = wire_core_error_from_domain(DomainError::Internal {
+            category: "spoke decode: secret".into(),
+        });
+        assert_eq!(wire.code, CoreErrorCode::Internal);
+        assert_eq!(wire.message, "internal error");
+        assert_eq!(
+            wire.details.get("category").and_then(|v| v.as_str()),
+            Some("storage")
+        );
+    }
 
     #[test]
     fn world_kb_conflict_serializes_structured_details() {
