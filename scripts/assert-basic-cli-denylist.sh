@@ -5,15 +5,15 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "${REPO_ROOT}"
 
-TARGET_DIR="${CARGO_TARGET_DIR:-target/rft-basic}"
 TREE_FILE="${1:-}"
 
 if [[ -z "${TREE_FILE}" ]]; then
   TREE_FILE="$(mktemp)"
-  cargo tree -p nexus42 --bin nexus42 \
+  # `cargo tree` takes a package spec only — no --bin/--target-dir
+  # (CARGO_TARGET_DIR is honored via the environment).
+  cargo tree -p nexus42 \
     --no-default-features --features basic-cli \
-    --edges normal,build \
-    --target-dir "${TARGET_DIR}" >"${TREE_FILE}"
+    --edges normal,build >"${TREE_FILE}"
 fi
 
 DENYLIST=(
@@ -33,7 +33,7 @@ DENYLIST=(
 
 violations=()
 for crate in "${DENYLIST[@]}"; do
-  if rg -q "${crate}" "${TREE_FILE}"; then
+  if grep -q "${crate}" "${TREE_FILE}"; then
     violations+=("${crate}")
   fi
 done
