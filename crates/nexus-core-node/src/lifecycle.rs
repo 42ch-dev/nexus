@@ -12,12 +12,56 @@ use nexus_agent_host::config::{load_config_from_path, AgentHostConfig};
 use nexus_agent_host::{HostFacade, HostManager};
 use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
 use nexus_contracts::{CoreCloseReport, CoreCloseReportState, NativeOpenOptions};
-use nexus_core::{CoreAccess, CoreOpenOptions, CoreService};
+use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
+use nexus_home_layout::active_context::{CliConfigSnapshot, try_resolve_state_db_path};
+use nexus_home_layout::nexus_root_from_home;
 use nexus_provider_ports::ProviderPort;
 
 use super::admitting_provider_port::AdmittingProviderPort;
+use super::core_error;
 
 use super::env_state::EnvState;
+
+fn open_err(err: CoreError) -> String {
+    serde_json::to_string(&core_error::wire_core_error_from_domain(err.clone()))
+        .unwrap_or_else(|_| err.to_string())
+}
+
+fn validate_initialized_prerequisites(
+    user_home: &PathBuf,
+    access: CoreAccess,
+) -> Result<(), CoreError> {
+    let nexus_home = nexus_root_from_home(user_home);
+    let cfg = CliConfigSnapshot::load(&nexus_home).map_err(|e| CoreError::Internal {
+        category: format!("config_load: {e}"),
+    })?;
+    let creator_id = cfg.active_creator_id.clone().ok_or(CoreError::AuthRequired)?;
+    let workspace_slug = cfg.workspace_slug_for_creator(&creator_id);
+    if workspace_slug.trim().is_empty() {
+        return Err(CoreError::AuthRequired);
+    }
+    let db_path = try_resolve_state_db_path(user_home, &nexus_home).ok_or(CoreError::Uninitialized)?;
+    if !db_path.exists() && access == CoreAccess::ReadOnly {
+        return Err(CoreError::Uninitialized);
+    }
+    Ok(())
+}
+
+fn is_genuinely_uninitialized(user_home: &PathBuf, access: CoreAccess) -> bool {
+    match validate_initialized_prerequisites(user_home, access) {
+        Ok(()) => false,
+        Err(CoreError::Uninitialized) | Err(CoreError::AuthRequired) => true,
+        Err(_) => false,
+    }
+}
+
+fn validate_host_config(user_home: &PathBuf) -> Result<(), String> {
+    let config_path = user_home.join("config/agent-host.toml");
+    if config_path.exists() {
+        load_config_from_path(&config_path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
 
 /// Test-only forcing of an unconfirmed cleanup.
 mod forcing {
@@ -418,7 +462,7 @@ pub async fn open_core(
     state: Arc<EnvState>,
     options: NativeOpenOptions,
     js_port: Option<Arc<dyn ProviderPort>>,
-) -> Result<Arc<CoreService>, String> {
+) -> Result<(), String> {
     if state.is_env_dead() {
         return Err("dead_env".to_string());
     }
@@ -442,11 +486,6 @@ pub async fn open_core(
         return Err("already open".to_string());
     }
     state.try_begin_open().await?;
-    if options.allow_uninitialized {
-        return Err(
-            "allow_uninitialized is service-only and denies effects in native core".to_string(),
-        );
-    }
     let access = match options.access {
         NativeOpenOptionsAccess::ReadOnly => CoreAccess::ReadOnly,
         NativeOpenOptionsAccess::DirectWriter => CoreAccess::DirectWriter,
@@ -454,12 +493,24 @@ pub async fn open_core(
     };
     let user_home = PathBuf::from(options.user_home);
 
+    if options.allow_uninitialized && is_genuinely_uninitialized(&user_home, access) {
+        state.clear_service_only_uninitialized();
+        state.mark_service_only_uninitialized();
+        state.publish_open().await;
+        return Ok(());
+    }
+
+    if let Err(err) = validate_initialized_prerequisites(&user_home, access) {
+        return Err(open_err(err));
+    }
+    validate_host_config(&user_home)?;
+
     let core = CoreService::open(CoreOpenOptions {
         user_home: user_home.clone(),
         access,
     })
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(open_err)?;
 
     let host = Arc::new(HostManager::new());
     let config_path = user_home.join("config/agent-host.toml");
@@ -505,11 +556,12 @@ pub async fn open_core(
     };
 
     let core = Arc::new(core);
+    state.clear_service_only_uninitialized();
     state.host.lock().expect("host mutex poisoned").replace(host);
     state.provider_port.lock().expect("port mutex poisoned").replace(provider_port);
-    state.core.lock().expect("core mutex poisoned").replace(core.clone());
+    state.core.lock().expect("core mutex poisoned").replace(core);
     state.publish_open().await;
-    Ok(core)
+    Ok(())
 }
 
 /// Close the environment with a 5s phased budget and one concurrent settlement.
@@ -654,6 +706,36 @@ mod tests {
     #[test]
     fn forced_unconfirmed_is_off_in_a_fresh_process() {
         assert!(!forced_unconfirmed());
+    }
+
+
+    #[tokio::test]
+    async fn service_only_uninitialized_open_denies_effects_and_closes() {
+        use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
+        use nexus_contracts::NativeOpenOptions;
+        use tempfile::tempdir;
+
+        let dir = tempdir().expect("tempdir");
+        let state = Arc::new(EnvState::new());
+        open_core(
+            state.clone(),
+            NativeOpenOptions {
+                user_home: dir.path().to_string_lossy().to_string(),
+                access: NativeOpenOptionsAccess::DirectWriter,
+                allow_uninitialized: true,
+            },
+            None,
+        )
+        .await
+        .expect("service-only open");
+
+        assert!(state.is_service_only_uninitialized());
+        assert!(!state.owner_slots_present());
+
+        let report = close_core(state.clone()).await;
+        assert_eq!(report.state, CoreCloseReportState::Closed);
+        assert!(report.cleanup_confirmed);
+        assert!(!state.is_service_only_uninitialized());
     }
 
     #[tokio::test]
