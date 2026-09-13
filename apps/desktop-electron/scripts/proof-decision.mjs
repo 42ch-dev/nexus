@@ -19,7 +19,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   NATIVE_LOAD_CHECK_ID,
@@ -480,6 +480,38 @@ for (const arch of GUI_ARCHES) {
  * these must independently hold inside the cited document, and the nested
  * runtime evidence must describe the artifact that is on disk right now.
  */
+/**
+ * Canonicalise a path for identity comparison.
+ *
+ * Path identity is decided by resolved real paths only — never by a substring
+ * such as an architecture marker, which a forged document can trivially copy
+ * into an arbitrary path (C8). Returns null for anything unusable, so callers
+ * fail closed.
+ */
+function canonicalPath(value) {
+  if (typeof value !== 'string' || value.length === 0) return null;
+  try {
+    return realpathSync(resolve(value));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when `candidate` resolves to `root` or to a path inside it.
+ *
+ * Used for the native payload path: a recorded relative path must resolve
+ * inside the app bundle currently under review, so neither `..` traversal nor a
+ * symlink pointing elsewhere can smuggle in a different file.
+ */
+function resolvesInside(root, candidate) {
+  const canonicalRoot = canonicalPath(root);
+  const canonicalCandidate = canonicalPath(candidate);
+  if (!canonicalRoot || !canonicalCandidate) return false;
+  if (canonicalCandidate === canonicalRoot) return true;
+  return canonicalCandidate.startsWith(`${canonicalRoot}${sep}`);
+}
+
 function validateGateDocument(gate, arch, sourceNow, artifact) {
   const problems = [];
   const add = (condition, message) => {
@@ -490,11 +522,21 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
   add(gate.schema === 'rft-p3-t3-package-gate/v2', `schema ${gate.schema ?? 'absent'} != rft-p3-t3-package-gate/v2`);
   add(gate.bundle_id === 'com.nexus42.rft-electron-proof', `bundle_id ${gate.bundle_id ?? 'absent'} != com.nexus42.rft-electron-proof`);
   add(gate.arch === arch.key, `arch ${gate.arch ?? 'absent'} != ${arch.key}`);
+  // Path identity is exact and canonical. An architecture marker inside the
+  // string proves nothing: a forged gate can point at another bundle that
+  // happens to live under a `darwin-${arch}` path and copy the real hashes.
+  const expectedAppPath = artifact.present ? artifact.app_path : null;
+  if (!expectedAppPath) {
+    problems.push(`cannot establish the canonical ${arch.key} app path: ${artifact.reason}`);
+  }
   add(
-    typeof gate.app_realpath === 'string' && gate.app_realpath.includes(`darwin-${arch.key}`),
-    `app_realpath ${gate.app_realpath ?? 'absent'} is not the ${arch.key} package`,
+    canonicalPath(gate.app_realpath) !== null && canonicalPath(gate.app_realpath) === expectedAppPath,
+    `app_realpath ${gate.app_realpath ?? 'absent'} != canonical app path ${expectedAppPath ?? 'unavailable'}`,
   );
-  add(gate.app_path === gate.app_realpath, `app_path ${gate.app_path ?? 'absent'} != app_realpath ${gate.app_realpath ?? 'absent'}`);
+  add(
+    canonicalPath(gate.app_path) === expectedAppPath,
+    `app_path ${gate.app_path ?? 'absent'} != canonical app path ${expectedAppPath ?? 'unavailable'}`,
+  );
 
   const checks = gate.checks ?? {};
   const inputs = gate.decision_inputs ?? {};
@@ -605,7 +647,10 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
   add(inputs.native_load_check_id === NATIVE_LOAD_CHECK_ID, `decision_inputs.native_load_check_id ${inputs.native_load_check_id ?? 'absent'} != ${NATIVE_LOAD_CHECK_ID}`);
 
   // --- nested runtime: provenance bound to the current artifact ---------------
-  add(runtimeProvenance.app_path === gate.app_realpath, 'nested runtime provenance measured a different app bundle than the gate signed');
+  add(
+    canonicalPath(runtimeProvenance.app_path) === expectedAppPath,
+    `nested runtime provenance app_path ${runtimeProvenance.app_path ?? 'absent'} != canonical app path ${expectedAppPath ?? 'unavailable'}`,
+  );
   add(runtimeProvenance.app_bundle_id === gate.bundle_id, 'nested runtime provenance bundle id disagrees with the gate');
   add(runtimeProvenance.arch === arch.key, `nested runtime provenance arch ${runtimeProvenance.arch ?? 'absent'} != ${arch.key}`);
   add(runtimeProvenance.source_sha === sourceNow.source_sha, `nested runtime provenance source_sha ${runtimeProvenance.source_sha ?? 'absent'} != head ${sourceNow.source_sha}`);
@@ -613,7 +658,10 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
   add(runtimeProvenance.tree_dirty === sourceNow.tree_dirty, `nested runtime provenance tree_dirty ${runtimeProvenance.tree_dirty ?? 'absent'} != head ${sourceNow.tree_dirty}`);
 
   // The gate's own binding record must agree with the document it bound.
-  add(boundTo.app_path === runtimeProvenance.app_path, 'checks.runtime_lifecycle.bound_to.app_path disagrees with the nested provenance');
+  add(
+    canonicalPath(boundTo.app_path) === expectedAppPath,
+    `checks.runtime_lifecycle.bound_to.app_path ${boundTo.app_path ?? 'absent'} != canonical app path ${expectedAppPath ?? 'unavailable'}`,
+  );
   add(boundTo.app_bundle_id === runtimeProvenance.app_bundle_id, 'checks.runtime_lifecycle.bound_to.app_bundle_id disagrees with the nested provenance');
   add(boundTo.arch === runtimeProvenance.arch, 'checks.runtime_lifecycle.bound_to.arch disagrees with the nested provenance');
   add(boundTo.source_sha === sourceNow.source_sha, `checks.runtime_lifecycle.bound_to.source_sha ${boundTo.source_sha ?? 'absent'} != head ${sourceNow.source_sha}`);
@@ -641,17 +689,36 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
       runtimeProvenance.app_bundle_sha256 === artifact.bundle_sha256,
       `nested runtime app_bundle_sha256 ${runtimeProvenance.app_bundle_sha256 ?? 'absent'} != current bundle ${artifact.bundle_sha256}`,
     );
-    if (typeof runtimeProvenance.native_node_path_relative === 'string') {
+    const recordedRelative = runtimeProvenance.native_node_path_relative;
+    if (typeof recordedRelative !== 'string' || recordedRelative.length === 0) {
+      problems.push('nested runtime provenance native_node_path_relative is absent');
+    } else {
+      // The recorded relative path must name the same payload the bundle
+      // actually contains, and it must resolve inside that bundle: a copied
+      // hash with a rewritten or traversing path is a substitution, not proof.
+      add(
+        recordedRelative === artifact.native_node_path_relative,
+        `nested runtime native_node_path_relative ${recordedRelative} != current ${artifact.native_node_path_relative ?? 'absent'}`,
+      );
+      const resolved = resolve(artifact.app_path, recordedRelative.replace(/^[/\\]+/, ''));
+      add(
+        resolvesInside(artifact.app_path, resolved),
+        `nested runtime native_node_path_relative ${recordedRelative} does not resolve inside the app bundle`,
+      );
+      add(
+        artifact.native_node_path_relative !== null &&
+          resolvesInside(artifact.app_path, resolve(artifact.app_path, artifact.native_node_path_relative.replace(/^[/\\]+/, ''))) &&
+          canonicalPath(resolved) === canonicalPath(resolve(artifact.app_path, artifact.native_node_path_relative.replace(/^[/\\]+/, ''))),
+        `nested runtime native_node_path_relative ${recordedRelative} resolves to a different file than the bundle payload`,
+      );
       add(
         artifact.native_node_sha256 !== null,
-        `no native payload found at ${runtimeProvenance.native_node_path_relative} in the current bundle`,
+        `no native payload found at ${recordedRelative} in the current bundle`,
       );
       add(
         runtimeProvenance.native_node_sha256 === artifact.native_node_sha256,
         `nested runtime native_node_sha256 ${runtimeProvenance.native_node_sha256 ?? 'absent'} != current ${artifact.native_node_sha256 ?? 'absent'}`,
       );
-    } else {
-      problems.push('nested runtime provenance does not record a native node path');
     }
   }
 
@@ -723,15 +790,23 @@ function currentArtifact(arch) {
   if (!existsSync(bundlePath)) {
     return { present: false, reason: `app bundle absent: ${bundlePath}` };
   }
-  const digest = digestAppBundle(bundlePath);
-  const nativeNode = walkFiles(bundlePath).files.find((path) => path.endsWith('.node')) ?? null;
+  // One canonical root drives every derived field, so the digest, the relative
+  // native path and the recorded app path can never disagree about which bundle
+  // is under review (a `/tmp` -> `/private/tmp` alias would otherwise produce a
+  // native path that is not relative to the canonical root).
+  const canonicalRoot = canonicalPath(bundlePath);
+  if (!canonicalRoot) {
+    return { present: false, reason: `app bundle path is not resolvable: ${bundlePath}` };
+  }
+  const digest = digestAppBundle(canonicalRoot);
+  const nativeNode = walkFiles(canonicalRoot).files.find((path) => path.endsWith('.node')) ?? null;
   return {
     present: true,
-    app_path: realpathSync(bundlePath),
+    app_path: canonicalRoot,
     bundle_sha256: digest.sha256,
     file_count: digest.file_count,
     symlink_count: digest.symlink_count,
-    native_node_path_relative: nativeNode ? nativeNode.replace(bundlePath, '') : null,
+    native_node_path_relative: nativeNode ? nativeNode.replace(canonicalRoot, '') : null,
     native_node_sha256: nativeNode ? sha256File(nativeNode) : null,
   };
 }

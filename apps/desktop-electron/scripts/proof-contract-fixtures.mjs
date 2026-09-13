@@ -12,7 +12,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -1203,6 +1203,102 @@ for (const [label, mutate] of BUNDLE_MUTATIONS) {
   check(`C7 on-disk artifact (${label}) does not pass the SEC row`, row?.verdict !== 'PASS', true);
   check(`C7 on-disk artifact (${label}) blocks`, decision.status, 'blocked');
 }
+
+// --- C8: path identity, not path markers ------------------------------------
+// Every case here keeps the recorded hashes green (they are copied from the real
+// bundle) and moves the paths, so only real path identity can reject it.
+
+const PATH_SUBSTITUTION_CASES = [
+  ['gate-app-path-other-dir-same-arch-marker', (docs, ctx) => {
+    // A different bundle whose path still contains `darwin-arm64`.
+    const decoy = join(ctx.evidence, 'decoy', 'darwin-arm64', 'Nexus RFT Feasibility.app');
+    cpSync(ctx.apps.arm64.dir, decoy, { recursive: true });
+    const decoyReal = realpathSync(decoy);
+    const gate = docs['electron-arm64/proof-package.json'];
+    gate.app_path = decoyReal;
+    gate.app_realpath = decoyReal;
+  }],
+  ['runtime-provenance-app-path-elsewhere', (docs, ctx) => {
+    docs['electron-arm64/proof-package.json'].checks.runtime_lifecycle.provenance.app_path = '/tmp/elsewhere/darwin-arm64/Nexus RFT Feasibility.app';
+  }],
+  ['bound-to-app-path-elsewhere', (docs, ctx) => {
+    docs['electron-arm64/proof-package.json'].checks.runtime_lifecycle.bound_to.app_path = '/tmp/elsewhere/darwin-arm64/Nexus RFT Feasibility.app';
+  }],
+  ['gate-app-path-traversal', (docs, ctx) => {
+    const gate = docs['electron-arm64/proof-package.json'];
+    const traversing = join(ctx.apps.arm64.dir, '..', '..', 'darwin-arm64', 'Nexus RFT Feasibility.app');
+    gate.app_path = traversing;
+    gate.app_realpath = traversing;
+  }],
+  ['native-relative-path-altered', (docs) => {
+    docs['electron-arm64/proof-package.json'].checks.runtime_lifecycle.provenance.native_node_path_relative =
+      '/Contents/Resources/app.asar.unpacked/node_modules/@42ch/nexus-native-darwin-arm64/native/other.node';
+  }],
+  ['native-relative-path-traversal', (docs) => {
+    docs['electron-arm64/proof-package.json'].checks.runtime_lifecycle.provenance.native_node_path_relative =
+      '/../../../../etc/hosts';
+  }],
+  ['native-relative-path-absolute-elsewhere', (docs) => {
+    docs['electron-arm64/proof-package.json'].checks.runtime_lifecycle.provenance.native_node_path_relative =
+      '/tmp/elsewhere/nexus_core_node.node';
+  }],
+  ['native-relative-path-empty', (docs) => {
+    docs['electron-arm64/proof-package.json'].checks.runtime_lifecycle.provenance.native_node_path_relative = '';
+  }],
+  ['native-relative-path-absent', (docs) => {
+    delete docs['electron-arm64/proof-package.json'].checks.runtime_lifecycle.provenance.native_node_path_relative;
+  }],
+];
+
+for (const [label, mutate] of PATH_SUBSTITUTION_CASES) {
+  const root = buildMatrix(`path-${label}`, mutate);
+  const decision = runDecisionWithRoot(root);
+  const row = (decision.doc?.observed_rows ?? []).find((r) => r.id === 'SEC1-signed-arm64');
+  check(`C8 substitution (${label}) does not pass the SEC row`, row?.verdict !== 'PASS', true);
+  check(`C8 substitution (${label}) blocks`, decision.status, 'blocked');
+  check(`C8 substitution (${label}) names a path predicate`, (row?.verification?.problems ?? []).some((p) => /app_path|app_realpath|native_node_path_relative/.test(p)), true);
+}
+
+// A symlinked app path must canonicalize to the same bundle, not a different one.
+const SYMLINK_CASE = buildMatrix('path-symlink-alias', (docs, ctx) => {
+  const aliasRoot = join(ctx.evidence, 'alias');
+  mkdirSync(aliasRoot, { recursive: true });
+  const alias = join(aliasRoot, 'Nexus RFT Feasibility.app');
+  rmSync(alias, { recursive: true, force: true });
+  symlinkSync(ctx.apps.arm64.dir, alias);
+  const gate = docs['electron-arm64/proof-package.json'];
+  gate.app_path = alias;
+  gate.app_realpath = alias;
+  gate.checks.runtime_lifecycle.provenance.app_path = alias;
+  gate.checks.runtime_lifecycle.bound_to.app_path = alias;
+});
+const symlinkDecision = runDecisionWithRoot(SYMLINK_CASE);
+const symlinkRow = (symlinkDecision.doc?.observed_rows ?? []).find((r) => r.id === 'SEC1-signed-arm64');
+check(
+  'C8 symlink alias is accepted by canonicalization and not rejected as a mismatch',
+  (symlinkRow?.verification?.problems ?? []).every((p) => !/app_path|app_realpath/.test(p)),
+  true,
+);
+check(
+  'C8 symlink alias to a copied sibling is rejected',
+  (() => {
+    const root = buildMatrix('path-symlink-sibling', (docs, ctx) => {
+      const decoy = join(ctx.evidence, 'sibling', 'darwin-arm64', 'Nexus RFT Feasibility.app');
+      cpSync(ctx.apps.arm64.dir, decoy, { recursive: true });
+      const alias = join(ctx.evidence, 'sibling-alias.app');
+      rmSync(alias, { recursive: true, force: true });
+      symlinkSync(decoy, alias);
+      const gate = docs['electron-arm64/proof-package.json'];
+      gate.app_path = alias;
+      gate.app_realpath = alias;
+      gate.checks.runtime_lifecycle.provenance.app_path = alias;
+      gate.checks.runtime_lifecycle.bound_to.app_path = alias;
+    });
+    const decision = runDecisionWithRoot(root);
+    return decision.status === 'blocked';
+  })(),
+  true,
+);
 
 // --- strengthened predicate coverage: a green status cannot carry a bad body --
 
