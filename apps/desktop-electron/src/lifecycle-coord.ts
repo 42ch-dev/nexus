@@ -35,6 +35,42 @@ export function resolveOpenProofPolicy(input: {
   return 'open_utility';
 }
 
+/** Preserve replacement marker across replacement createWindow; clear only on initial bootstrap. */
+export function rendererDetachedAfterCreateWindow(input: {
+  initialBootstrap: boolean;
+  rendererDetached: boolean;
+}): boolean {
+  return input.initialBootstrap ? false : input.rendererDetached;
+}
+
+/** Main-state sequence: renderer crash → replacement createWindow → open policy. */
+export function mainStateOpenPolicyAfterRendererCrash(input: {
+  phase: LifecyclePhase;
+  ownerAlive: boolean;
+  initialBootstrap: boolean;
+}): {
+  rendererDetachedAfterCrash: boolean;
+  rendererDetachedAfterCreateWindow: boolean;
+  openPolicy: OpenProofPolicy;
+} {
+  const rendererDetachedAfterCrash = true;
+  const markerAfterCreateWindow = rendererDetachedAfterCreateWindow({
+    initialBootstrap: input.initialBootstrap,
+    rendererDetached: rendererDetachedAfterCrash,
+  });
+  const openPolicy = resolveOpenProofPolicy({
+    reopenRequired: false,
+    rendererDetached: markerAfterCreateWindow,
+    phase: input.phase,
+    ownerAlive: input.ownerAlive,
+  });
+  return {
+    rendererDetachedAfterCrash,
+    rendererDetachedAfterCreateWindow: markerAfterCreateWindow,
+    openPolicy,
+  };
+}
+
 /** Readiness returned to a replacement window attaching to an existing owner. */
 export function attachExistingReadiness(phase: LifecyclePhase): 'open' | 'starting' {
   return phase === 'open' ? 'open' : 'starting';

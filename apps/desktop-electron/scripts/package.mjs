@@ -7,10 +7,12 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
+  copyFileSync,
   cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -18,6 +20,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // @electron/packager 20.x is ESM with a named `packager` export (no default).
@@ -136,21 +139,26 @@ function packDependency(name, packDir) {
   if (!existsSync(join(pkgDir, 'package.json'))) {
     throw new Error(`missing package directory for ${name}: ${pkgDir}`);
   }
-  const result = spawnSync('pnpm', ['pack', '--pack-destination', packDir], {
+  // Pack into a fresh directory. Packing several packages into one directory
+  // and then picking "the newest/last tarball" silently returns the wrong
+  // archive (`42ch-nexus-provider-acp` sorts after `42ch-nexus-native`),
+  // which is exactly the mis-binding this assert exists to prevent.
+  const staging = mkdtempSync(join(tmpdir(), 'nexus-electron-pack-'));
+  const result = spawnSync('pnpm', ['pack', '--pack-destination', staging], {
     cwd: pkgDir,
     encoding: 'utf8',
   });
   if (result.status !== 0) {
     throw new Error(`pnpm pack failed for ${name}: ${result.stderr || result.stdout}`);
   }
-  const tarball = readdirSync(packDir)
-    .filter((entry) => entry.endsWith('.tgz'))
-    .sort()
-    .at(-1);
-  if (!tarball) {
-    throw new Error(`pnpm pack for ${name} produced no tarball`);
+  const produced = readdirSync(staging).filter((entry) => entry.endsWith('.tgz'));
+  if (produced.length !== 1) {
+    throw new Error(`pnpm pack for ${name} produced ${produced.length} tarballs`);
   }
-  return join(packDir, tarball);
+  const tarball = join(packDir, produced[0]);
+  copyFileSync(join(staging, produced[0]), tarball);
+  rmSync(staging, { recursive: true, force: true });
+  return tarball;
 }
 
 function assertSelfContainedNodeModules(nodeModulesDir, stagingDir) {
@@ -182,28 +190,37 @@ function stageApp(stagingDir, arch) {
   const nativeLoaderTar = packDependency('@42ch/nexus-native', packDir);
   const platformTar = packDependency(platformPackageForArch(arch), packDir);
 
+  // The packed internal manifests carry concrete versions (`workspace:*` is
+  // rewritten to the real version by `pnpm pack`), so their transitive edges
+  // must be bound to the local tarballs. npm reuses an already-declared
+  // top-level `file:` package by name+version, which pnpm 11 refuses to do
+  // without `overrides` in pnpm-workspace.yaml (and `pnpm.overrides` in
+  // package.json is no longer read). It also produces a real (unsymlinked)
+  // node_modules tree, which is what asar packaging and `prune` expect.
+  const internalTarballs = {
+    '@42ch/nexus-contracts': contractsTar,
+    '@42ch/nexus-native': nativeLoaderTar,
+    '@42ch/nexus-provider-acp': providerTar,
+    [platformPackageForArch(arch)]: platformTar,
+  };
   const stagedPkg = {
     name: 'nexus-desktop-electron-proof-staged',
     version: '0.1.0',
     private: true,
     type: 'module',
     main: 'dist/main.js',
-    dependencies: {
-      '@42ch/nexus-contracts': `file:${contractsTar}`,
-      '@42ch/nexus-native': `file:${nativeLoaderTar}`,
-      '@42ch/nexus-provider-acp': `file:${providerTar}`,
-      [platformPackageForArch(arch)]: `file:${platformTar}`,
-    },
+    dependencies: Object.fromEntries(
+      Object.entries(internalTarballs).map(([name, tarball]) => [name, `file:${tarball}`]),
+    ),
   };
   writeFileSync(join(stagingDir, 'package.json'), `${JSON.stringify(stagedPkg, null, 2)}\n`);
-  writeFileSync(join(stagingDir, 'pnpm-lock.yaml'), 'lockfileVersion: 9.0\n');
 
   cpSync(join(appRoot, 'dist'), join(stagingDir, 'dist'), { recursive: true });
   cpSync(webDist, join(stagingDir, 'web-dist'), { recursive: true });
 
   const install = spawnSync(
-    'pnpm',
-    ['install', '--prod', '--ignore-scripts', '--ignore-workspace', '--no-frozen-lockfile'],
+    'npm',
+    ['install', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock'],
     {
       cwd: stagingDir,
       stdio: 'inherit',

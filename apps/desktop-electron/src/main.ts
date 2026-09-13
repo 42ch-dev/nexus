@@ -42,6 +42,7 @@ import {
   attachExistingReadiness,
   mergeUtilityReadyLifecycle,
   remainingCloseBudget,
+  rendererDetachedAfterCreateWindow,
   resolveCloseLifecycleAfterJoin,
   resolveOpenProofPolicy,
   shouldTreatUtilityExitAsUnexpected,
@@ -92,6 +93,7 @@ let lifecycle: LifecycleStatus = {
 let closeInitiatedForGeneration: number | null = null;
 let reopenRequired = false;
 let rendererDetached = false;
+let initialWindowBootstrap = true;
 let closeInFlight: Promise<void> | null = null;
 const pendingRequests = new Map<string, PendingEntry>();
 
@@ -137,6 +139,7 @@ function settleAllPending(generation: number, code: string, message: string): vo
 function applyResponseLifecycle(requestOperation: string | null, response: IpcResponse): void {
   if (response.ok && requestOperation === 'open') {
     setLifecycle({ phase: 'open', owner_alive: true, reason: null });
+    rendererDetached = false;
   }
   if (response.ok && requestOperation === 'close') {
     lifecycle.last_close_report = response.result;
@@ -462,7 +465,11 @@ function createMainWindow(): BrowserWindow {
     },
   });
   hardenWindow(win);
-  rendererDetached = false;
+  rendererDetached = rendererDetachedAfterCreateWindow({
+    initialBootstrap: initialWindowBootstrap,
+    rendererDetached,
+  });
+  initialWindowBootstrap = false;
   win.on('close', () => {
     initiateOwnerClose().catch(() => undefined);
   });

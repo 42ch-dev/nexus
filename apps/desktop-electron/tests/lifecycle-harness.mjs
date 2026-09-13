@@ -4,8 +4,10 @@ import test from 'node:test';
 import {
   attachExistingReadiness,
   joinExitConfirmed,
+  mainStateOpenPolicyAfterRendererCrash,
   mergeUtilityReadyLifecycle,
   remainingCloseBudget,
+  rendererDetachedAfterCreateWindow,
   resolveCloseLifecycleAfterJoin,
   resolveOpenProofPolicy,
   shouldTreatUtilityExitAsUnexpected,
@@ -65,6 +67,42 @@ test('normal flow: compatibility spawn then open dispatches utility open', () =>
     resolveOpenProofPolicy({ ...base, phase: 'starting' }),
     'attach_existing_owner',
   );
+});
+
+
+test('initial bootstrap createWindow clears replacement marker', () => {
+  assert.equal(
+    rendererDetachedAfterCreateWindow({ initialBootstrap: true, rendererDetached: true }),
+    false,
+  );
+});
+
+test('replacement createWindow preserves crash marker until attach/open settlement', () => {
+  assert.equal(
+    rendererDetachedAfterCreateWindow({ initialBootstrap: false, rendererDetached: true }),
+    true,
+  );
+});
+
+test('main-state: crash → replacement createWindow → open uses attach policy', () => {
+  const outcome = mainStateOpenPolicyAfterRendererCrash({
+    phase: 'starting',
+    ownerAlive: true,
+    initialBootstrap: false,
+  });
+  assert.equal(outcome.rendererDetachedAfterCrash, true);
+  assert.equal(outcome.rendererDetachedAfterCreateWindow, true);
+  assert.equal(outcome.openPolicy, 'attach_existing_owner');
+});
+
+test('main-state: initial window never inherits stale detached marker', () => {
+  const outcome = mainStateOpenPolicyAfterRendererCrash({
+    phase: 'idle',
+    ownerAlive: false,
+    initialBootstrap: true,
+  });
+  assert.equal(outcome.rendererDetachedAfterCreateWindow, false);
+  assert.equal(outcome.openPolicy, 'open_utility');
 });
 
 test('detached replacement after starting crash attaches existing owner', () => {
