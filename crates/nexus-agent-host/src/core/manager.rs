@@ -1391,8 +1391,36 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    /// RAII guard replacing `PATH` with a single directory and restoring on drop.
+    struct PathGuard {
+        previous: Option<String>,
+    }
+
+    impl PathGuard {
+        fn isolate(dir: &std::path::Path) -> Self {
+            let previous = std::env::var("PATH").ok();
+            let new_path = std::env::join_paths([dir.to_path_buf()]).expect("valid PATH");
+            std::env::set_var("PATH", new_path);
+            Self { previous }
+        }
+    }
+
+    impl Drop for PathGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+
+    // The held `PROCESS_ENV_LOCK` guard makes the future !Send; test-only.
+    #[allow(clippy::future_not_send)]
+    #[tokio::test(flavor = "current_thread")]
     async fn start_uses_admitted_catalog_without_path_rescan() {
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
+            .lock()
+            .expect("lock env tests");
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let host_config = crate::config::AgentHostConfig::default();
         let catalog = crate::core::readiness::discover_provider_catalog(&host_config)
@@ -1406,7 +1434,8 @@ mod tests {
                 mock_launch(),
             )
             .await;
-        std::env::set_var("PATH", "");
+        let empty_path = temp_dir.path().join("no-such-dir");
+        let _path_guard = PathGuard::isolate(&empty_path);
         manager
             .start(HostStartConfig {
                 config_path: temp_dir.path().join("absent-config.toml"),
