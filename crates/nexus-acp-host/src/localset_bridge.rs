@@ -27,14 +27,30 @@ pub const ADMISSION_WAIT: Duration = Duration::from_secs(2);
 /// Total shutdown join budget.
 pub const SHUTDOWN_JOIN_BUDGET: Duration = Duration::from_secs(5);
 
-type ErasedFuture = Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + 'static>>;
+type TaskResult = Result<Box<dyn Any + Send>, String>;
+type ErasedFuture = Pin<Box<dyn Future<Output = TaskResult> + 'static>>;
 type FutureFactory = Box<dyn FnOnce() -> ErasedFuture + Send + 'static>;
+type OwnedFactory =
+    Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = ()> + 'static>> + Send + 'static>;
 
 struct ExecuteRequest {
     task_id: u64,
     byte_charge: usize,
+    class: TaskClass,
     factory: FutureFactory,
-    result_tx: Option<oneshot::Sender<Box<dyn Any + Send>>>,
+    result_tx: Option<oneshot::Sender<TaskResult>>,
+}
+
+/// A tracked long-lived session-ownership future (e.g. the SDK connection loop).
+///
+/// Owner tasks are created on the LocalSet thread and are tracked by task id and
+/// abort handle like every other task, but they are not work *requests*: they do
+/// not consume the pending/active request budget, whose caps bound concurrent
+/// work (`Concurrent native calls` in the lifecycle contract). Their count is
+/// bounded by host session admission (at most one per connected session).
+struct OwnedRequest {
+    task_id: u64,
+    factory: OwnedFactory,
 }
 
 enum WorkMessage {
@@ -42,11 +58,21 @@ enum WorkMessage {
 }
 
 enum ControlMessage {
-    Cancel { task_id: u64 },
-    Shutdown { ack: oneshot::Sender<ShutdownEvidence> },
+    Cancel {
+        task_id: u64,
+    },
+    SpawnOwned(OwnedRequest),
+    RunControl(ExecuteRequest),
+    Shutdown {
+        ack: oneshot::Sender<ShutdownEvidence>,
+    },
 }
 
 /// Evidence returned after shutdown for proof/reporting.
+///
+/// The `*_at_shutdown` fields are the queue snapshot taken when shutdown was
+/// requested; the plain counters are the final values after the drain, so a
+/// settled shutdown reports zero live work alongside what it actually drained.
 #[derive(Debug, Clone, Default)]
 pub struct ShutdownEvidence {
     pub joined_cleanly: bool,
@@ -54,6 +80,18 @@ pub struct ShutdownEvidence {
     pub pending_requests: usize,
     pub pending_bytes: usize,
     pub active_tasks: usize,
+    pub owned_tasks: usize,
+    pub control_tasks: usize,
+    /// Requests queued (admitted, not yet started) when shutdown was requested.
+    pub queued_at_shutdown: usize,
+    /// Charged bytes of those queued requests.
+    pub queued_bytes_at_shutdown: usize,
+    /// Work tasks running when shutdown was requested.
+    pub active_at_shutdown: usize,
+    /// Session-ownership tasks running when shutdown was requested.
+    pub owned_at_shutdown: usize,
+    /// Cancellation/teardown tasks running when shutdown was requested.
+    pub control_at_shutdown: usize,
     pub aborted_task_ids: Vec<u64>,
 }
 
@@ -63,7 +101,69 @@ pub struct LocalSetBridgeStats {
     pub pending_requests: usize,
     pub pending_bytes: usize,
     pub active_tasks: usize,
+    pub owned_tasks: usize,
+    pub control_tasks: usize,
+    /// Set once the environment begins closing: new work is refused.
+    pub draining: bool,
     pub shutting_down: bool,
+}
+
+impl LocalSetBridge {
+    /// Refuse new work and freeze the queue: the environment is closing.
+    ///
+    /// Active work keeps running so the close can cancel/drain it cooperatively;
+    /// queued requests are not started, and cancellation/teardown work still runs.
+    pub fn begin_drain(&self) {
+        self.counters.draining.store(true, Ordering::SeqCst);
+    }
+
+    /// Render `CoreCloseReport.pending_operations` entries for this close.
+    ///
+    /// `at_close` is the queue snapshot taken when the close began; `evidence` is
+    /// the settled shutdown result. A confirmed close reports what it drained:
+    /// queued request count/bytes and running work/ownership/teardown task counts,
+    /// plus every tracked task id the control channel aborted. An idle bridge
+    /// contributes nothing.
+    #[must_use]
+    pub fn close_entries(
+        &self,
+        at_close: &LocalSetBridgeStats,
+        evidence: &ShutdownEvidence,
+    ) -> Vec<String> {
+        let mut entries = Vec::new();
+        if at_close.pending_requests > 0 || at_close.pending_bytes > 0 {
+            entries.push(format!(
+                "localset-queued-at-close:{}",
+                at_close.pending_requests
+            ));
+            entries.push(format!(
+                "localset-queued-bytes-at-close:{}",
+                at_close.pending_bytes
+            ));
+        }
+        if at_close.active_tasks > 0 {
+            entries.push(format!(
+                "localset-active-at-close:{}",
+                at_close.active_tasks
+            ));
+        }
+        if at_close.owned_tasks > 0 {
+            entries.push(format!("localset-owned-at-close:{}", at_close.owned_tasks));
+        }
+        if at_close.control_tasks > 0 {
+            entries.push(format!(
+                "localset-control-at-close:{}",
+                at_close.control_tasks
+            ));
+        }
+        entries.extend(
+            evidence
+                .aborted_task_ids
+                .iter()
+                .map(|task_id| format!("localset-aborted-task:{task_id}")),
+        );
+        entries
+    }
 }
 
 #[derive(Debug, Default)]
@@ -75,6 +175,9 @@ struct PendingAdmission {
 struct AdmissionCounters {
     pending: Mutex<PendingAdmission>,
     active_tasks: AtomicUsize,
+    owned_tasks: AtomicUsize,
+    control_tasks: AtomicUsize,
+    draining: AtomicBool,
     shutting_down: AtomicBool,
     next_task_id: AtomicU64,
     thread_joined: AtomicBool,
@@ -87,6 +190,9 @@ impl AdmissionCounters {
         Self {
             pending: Mutex::new(PendingAdmission::default()),
             active_tasks: AtomicUsize::new(0),
+            owned_tasks: AtomicUsize::new(0),
+            control_tasks: AtomicUsize::new(0),
+            draining: AtomicBool::new(false),
             shutting_down: AtomicBool::new(false),
             next_task_id: AtomicU64::new(1),
             thread_joined: AtomicBool::new(false),
@@ -100,6 +206,9 @@ impl AdmissionCounters {
             pending_requests: pending.requests,
             pending_bytes: pending.bytes,
             active_tasks: self.active_tasks.load(Ordering::Acquire),
+            owned_tasks: self.owned_tasks.load(Ordering::Acquire),
+            control_tasks: self.control_tasks.load(Ordering::Acquire),
+            draining: self.draining.load(Ordering::Acquire),
             shutting_down: self.shutting_down.load(Ordering::Acquire),
         }
     }
@@ -146,6 +255,28 @@ impl AdmissionCounters {
 
     fn task_finished(&self) {
         self.active_tasks.fetch_sub(1, Ordering::AcqRel);
+    }
+
+    fn owned_task_finished(&self) {
+        self.owned_tasks.fetch_sub(1, Ordering::AcqRel);
+    }
+
+    /// Charge a cancellation/teardown task (not part of the request budget).
+    fn track_control(&self) {
+        self.control_tasks.fetch_add(1, Ordering::AcqRel);
+    }
+
+    fn control_task_finished(&self) {
+        self.control_tasks.fetch_sub(1, Ordering::AcqRel);
+    }
+
+    fn is_draining(&self) -> bool {
+        self.draining.load(Ordering::Acquire)
+    }
+
+    /// Charge a session-ownership task (not part of the request budget).
+    fn track_owned(&self) {
+        self.owned_tasks.fetch_add(1, Ordering::AcqRel);
     }
 
     fn mark_thread_joined(&self) {
@@ -197,7 +328,9 @@ impl LocalSetBridge {
             return Ok((rt.work_tx.clone(), rt.control_tx.clone()));
         }
         if self.counters.shutting_down.load(Ordering::Acquire) {
-            return Err(crate::AcpError::connection_failed("LocalSet bridge shutting down"));
+            return Err(crate::AcpError::connection_failed(
+                "LocalSet bridge shutting down",
+            ));
         }
 
         let counters = self.counters.clone();
@@ -207,7 +340,9 @@ impl LocalSetBridge {
         let thread_handle = thread::Builder::new()
             .name("nexus-localset-bridge".to_string())
             .spawn(move || run_localset_thread(work_rx, control_rx, counters))
-            .map_err(|e| crate::AcpError::connection_failed(format!("spawn LocalSet thread: {e}")))?;
+            .map_err(|e| {
+                crate::AcpError::connection_failed(format!("spawn LocalSet thread: {e}"))
+            })?;
 
         let runtime = BridgeRuntime {
             work_tx: work_tx.clone(),
@@ -222,7 +357,14 @@ impl LocalSetBridge {
         let deadline = Instant::now() + ADMISSION_WAIT;
         while Instant::now() < deadline {
             if self.counters.shutting_down.load(Ordering::Acquire) {
-                return Err(crate::AcpError::connection_failed("LocalSet bridge shutting down"));
+                return Err(crate::AcpError::connection_failed(
+                    "LocalSet bridge shutting down",
+                ));
+            }
+            if self.counters.is_draining() {
+                return Err(crate::AcpError::connection_failed(
+                    "LocalSet bridge closing",
+                ));
             }
             if self.counters.try_reserve_pending(bytes) {
                 return Ok(());
@@ -244,6 +386,32 @@ impl LocalSetBridge {
         T: Send + 'static,
     {
         self.wait_admission(byte_charge).await?;
+        self.dispatch(TaskClass::Work, byte_charge, f).await
+    }
+
+    /// Execute cancellation/teardown work on the `LocalSet` thread.
+    ///
+    /// Control work is tracked and aborted by shutdown like every other task, but
+    /// it is never queued and is not charged against the pending/active request
+    /// budget: a full work queue must not block the cancellation that ends it.
+    pub async fn execute_control<F, T>(&self, byte_charge: usize, f: F) -> crate::AcpResult<T>
+    where
+        F: FnOnce() -> Pin<Box<dyn Future<Output = T> + 'static>> + Send + 'static,
+        T: Send + 'static,
+    {
+        self.dispatch(TaskClass::Control, byte_charge, f).await
+    }
+
+    async fn dispatch<F, T>(
+        &self,
+        class: TaskClass,
+        byte_charge: usize,
+        f: F,
+    ) -> crate::AcpResult<T>
+    where
+        F: FnOnce() -> Pin<Box<dyn Future<Output = T> + 'static>> + Send + 'static,
+        T: Send + 'static,
+    {
         let (work_tx, control_tx) = self.ensure_runtime()?;
 
         let task_id = self.counters.next_task_id.fetch_add(1, Ordering::AcqRel);
@@ -253,40 +421,65 @@ impl LocalSetBridge {
             let future = f();
             Box::pin(async move {
                 let value = future.await;
-                Box::new(value) as Box<dyn Any + Send>
+                Ok(Box::new(value) as Box<dyn Any + Send>)
             })
         });
 
-        if work_tx
-            .send(WorkMessage::Execute(ExecuteRequest {
+        let message = match class {
+            TaskClass::Control => ControlMessage::RunControl(ExecuteRequest {
                 task_id,
                 byte_charge,
+                class,
                 factory,
                 result_tx: Some(result_tx),
+            }),
+            TaskClass::Work | TaskClass::Owned => {
+                if work_tx
+                    .send(WorkMessage::Execute(ExecuteRequest {
+                        task_id,
+                        byte_charge,
+                        class,
+                        factory,
+                        result_tx: Some(result_tx),
             }))
             .await
             .is_err()
         {
+                    if class == TaskClass::Work {
             self.counters.release_pending(byte_charge);
-            return Err(crate::AcpError::connection_failed("LocalSet work channel closed"));
         }
-
+                    return Err(crate::AcpError::connection_failed(
+                        "LocalSet work channel closed",
+                    ));
+                }
         let cancel_on_drop = CancelGuard {
             control_tx,
             task_id,
             cancelled: Arc::new(AtomicBool::new(false)),
+                };
+                let recv = result_rx.await;
+                cancel_on_drop.disarm();
+                return Self::task_result(recv);
+            }
         };
+        send_control(control_tx, message);
 
         let recv = result_rx.await;
-        cancel_on_drop.disarm();
+        Self::task_result(recv)
+    }
 
+    fn task_result<T>(recv: Result<TaskResult, oneshot::error::RecvError>) -> crate::AcpResult<T>
+    where
+        T: Send + 'static,
+    {
         match recv {
-            Ok(boxed) => {
-                let value = *boxed
-                    .downcast::<T>()
-                    .map_err(|_| crate::AcpError::connection_failed("LocalSet result type mismatch"))?;
+            Ok(Ok(boxed)) => {
+                let value = *boxed.downcast::<T>().map_err(|_| {
+                    crate::AcpError::connection_failed("LocalSet result type mismatch")
+                })?;
                 Ok(value)
             }
+            Ok(Err(message)) => Err(crate::AcpError::connection_failed(message)),
             Err(_) => Err(crate::AcpError::connection_failed(
                 "LocalSet bridge response channel closed",
             )),
@@ -313,6 +506,33 @@ impl LocalSetBridge {
     /// Wait until a `TaskSlot` is installed on the LocalSet thread (before first poll).
     pub async fn wait_task_slot_installed(&self) {
         self.counters.task_slot_notify.notified().await;
+    }
+
+    /// Spawn a tracked session-ownership future on the `LocalSet` thread.
+    ///
+    /// Ownership futures (the SDK connection loop that keeps an owned ACP child's
+    /// transport alive) are long lived by construction. They are registered in
+    /// the same task map as work requests — so shutdown aborts them by task id
+    /// and reports them — but they do not consume the pending/active *request*
+    /// budget. Charging them would starve the bounded work queue permanently,
+    /// because a queued request can only start when an active task finishes.
+    ///
+    /// Returns a handle that aborts exactly this tracked task.
+    pub fn spawn_owned<F>(&self, f: F) -> crate::AcpResult<OwnedTaskHandle>
+    where
+        F: FnOnce() -> Pin<Box<dyn Future<Output = ()> + 'static>> + Send + 'static,
+    {
+        let (_, control_tx) = self.ensure_runtime()?;
+        let task_id = self.counters.next_task_id.fetch_add(1, Ordering::AcqRel);
+        let msg = ControlMessage::SpawnOwned(OwnedRequest {
+            task_id,
+            factory: Box::new(f),
+        });
+        send_control(control_tx.clone(), msg);
+        Ok(OwnedTaskHandle {
+            control_tx,
+            task_id,
+        })
     }
 
     /// Cancel an owned task by id via the control channel.
@@ -362,6 +582,13 @@ impl LocalSetBridge {
                 pending_requests: 0,
                 pending_bytes: 0,
                 active_tasks: 0,
+                owned_tasks: 0,
+                control_tasks: 0,
+                queued_at_shutdown: 0,
+                queued_bytes_at_shutdown: 0,
+                active_at_shutdown: 0,
+                owned_at_shutdown: 0,
+                control_at_shutdown: 0,
                 aborted_task_ids: vec![],
             };
         }
@@ -420,6 +647,15 @@ impl LocalSetBridge {
             pending_requests: stats.pending_requests,
             pending_bytes: stats.pending_bytes,
             active_tasks: stats.active_tasks,
+            owned_tasks: stats.owned_tasks,
+            control_tasks: stats.control_tasks,
+            // No shutdown request was processed on the owning thread, so the
+            // live counters *are* the observable snapshot.
+            queued_at_shutdown: stats.pending_requests,
+            queued_bytes_at_shutdown: stats.pending_bytes,
+            active_at_shutdown: stats.active_tasks,
+            owned_at_shutdown: stats.owned_tasks,
+            control_at_shutdown: stats.control_tasks,
             aborted_task_ids: vec![],
         }
     }
@@ -492,6 +728,8 @@ impl LocalSetBridge {
         evidence.pending_requests = stats.pending_requests;
         evidence.pending_bytes = stats.pending_bytes;
         evidence.active_tasks = stats.active_tasks;
+        evidence.owned_tasks = stats.owned_tasks;
+        evidence.control_tasks = stats.control_tasks;
         evidence
     }
 
@@ -556,6 +794,44 @@ fn send_control_reliable(control_tx: mpsc::Sender<ControlMessage>, msg: ControlM
     }
 }
 
+/// Enqueue a control message without blocking the caller's thread.
+///
+/// The control channel has its own capacity and is drained ahead of the bounded
+/// work queue, so `try_send` succeeds on the ownership/cancel paths in practice;
+/// a full channel falls back to the reliable relay so a task is never left
+/// without its cancellation.
+fn send_control(control_tx: mpsc::Sender<ControlMessage>, msg: ControlMessage) {
+    match control_tx.try_send(msg) {
+        Ok(()) | Err(mpsc::error::TrySendError::Closed(_)) => {}
+        Err(mpsc::error::TrySendError::Full(msg)) => send_control_reliable(control_tx, msg),
+    }
+}
+
+/// Abort handle for a tracked session-ownership task.
+#[derive(Debug)]
+pub struct OwnedTaskHandle {
+    control_tx: mpsc::Sender<ControlMessage>,
+    task_id: u64,
+}
+
+impl OwnedTaskHandle {
+    /// Task id used in shutdown evidence.
+    #[must_use]
+    pub fn task_id(&self) -> u64 {
+        self.task_id
+    }
+
+    /// Abort exactly this owned task on the LocalSet thread. Idempotent.
+    pub fn abort(&self) {
+        send_control(
+            self.control_tx.clone(),
+            ControlMessage::Cancel {
+                task_id: self.task_id,
+            },
+        );
+    }
+}
+
 /// Cancels the owned LocalSet task when the awaiting future is dropped or times out.
 struct CancelGuard {
     control_tx: mpsc::Sender<ControlMessage>,
@@ -583,10 +859,26 @@ impl Drop for CancelGuard {
     }
 }
 
+/// Which admission budget a tracked task belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TaskClass {
+    /// A bounded work request: charged against the pending/active request budget.
+    Work,
+    /// A long-lived session-ownership task: tracked, not charged.
+    Owned,
+    /// Cancellation/teardown work: tracked, not charged, never queued.
+    ///
+    /// Cooperative cancel must reach the peer while the bounded work queue is
+    /// full, exactly like the shutdown control channel: charging it would let a
+    /// saturated queue block the very teardown meant to drain it.
+    Control,
+}
+
 struct TaskSlot {
     handle: tokio::task::AbortHandle,
-    /// Set when the spawned future is first polled; until then the tracking entry owns the active reservation.
+    /// Set when the spawned future is first polled; until then the tracking entry owns the reservation.
     polled: Arc<AtomicBool>,
+    class: TaskClass,
 }
 
 struct BridgeThreadState {
@@ -601,14 +893,32 @@ struct ActiveGuard {
     counters: Arc<AdmissionCounters>,
     state: ThreadStateRef,
     task_id: u64,
+    class: TaskClass,
 }
 
 impl Drop for ActiveGuard {
     fn drop(&mut self) {
+        match self.class {
+            TaskClass::Work => {
         self.counters.task_finished();
         if let Ok(mut bridge_state) = self.state.lock() {
             bridge_state.tasks.remove(&self.task_id);
             bridge_state.drain_deferred(&self.counters, &self.state);
+                }
+            }
+            TaskClass::Owned => {
+                self.counters.owned_task_finished();
+                if let Ok(mut bridge_state) = self.state.lock() {
+                    bridge_state.tasks.remove(&self.task_id);
+                }
+            }
+            TaskClass::Control => {
+                self.counters.control_task_finished();
+                if let Ok(mut bridge_state) = self.state.lock() {
+                    bridge_state.tasks.remove(&self.task_id);
+                    bridge_state.drain_deferred(&self.counters, &self.state);
+                }
+            }
         }
     }
 }
@@ -622,7 +932,11 @@ impl BridgeThreadState {
     ) {
         if let Some(slot) = self.tasks.remove(&task_id) {
             if !slot.polled.load(Ordering::Acquire) {
-                counters.task_finished();
+                match slot.class {
+                    TaskClass::Work => counters.task_finished(),
+                    TaskClass::Owned => counters.owned_task_finished(),
+                    TaskClass::Control => counters.control_task_finished(),
+                }
             }
             slot.handle.abort();
             aborted_ids.push(task_id);
@@ -637,6 +951,45 @@ impl BridgeThreadState {
         self.cancelled_before_start.insert(task_id);
     }
 
+    /// Track and start a session-ownership future. Never queued.
+    fn spawn_owned_task(
+        &mut self,
+        req: OwnedRequest,
+        counters: &Arc<AdmissionCounters>,
+        state_ref: &ThreadStateRef,
+    ) {
+        let task_id = req.task_id;
+        if self.cancelled_before_start.remove(&task_id) {
+            return;
+        }
+        let factory = req.factory;
+        let task_counters = counters.clone();
+        let shared_state = state_ref.clone();
+        let polled = Arc::new(AtomicBool::new(false));
+        let polled_watch = polled.clone();
+        task_counters.track_owned();
+        let handle = tokio::task::spawn_local(async move {
+            polled_watch.store(true, Ordering::SeqCst);
+            let _active = ActiveGuard {
+                counters: task_counters.clone(),
+                state: shared_state.clone(),
+                task_id,
+                class: TaskClass::Owned,
+            };
+            let future = factory();
+            future.await;
+        });
+        self.tasks.insert(
+            task_id,
+            TaskSlot {
+                handle: handle.abort_handle(),
+                polled,
+                class: TaskClass::Owned,
+            },
+        );
+        counters.task_slot_notify.notify_waiters();
+    }
+
     fn enqueue_execute(
         &mut self,
         req: ExecuteRequest,
@@ -644,6 +997,13 @@ impl BridgeThreadState {
         state_ref: &ThreadStateRef,
     ) {
         let task_id = req.task_id;
+        if req.class == TaskClass::Control {
+            if self.cancelled_before_start.remove(&task_id) {
+                return;
+            }
+            self.begin_task(req, counters, state_ref);
+            return;
+        }
         if self.cancelled_before_start.remove(&task_id) {
             counters.release_pending(req.byte_charge);
             return;
@@ -662,7 +1022,12 @@ impl BridgeThreadState {
         state_ref: &ThreadStateRef,
     ) {
         let task_id = req.task_id;
-        counters.release_pending(req.byte_charge);
+        let class = req.class;
+        match class {
+            TaskClass::Work => counters.release_pending(req.byte_charge),
+            TaskClass::Control => counters.track_control(),
+            TaskClass::Owned => {}
+        }
         let factory = req.factory;
         let result_tx = req.result_tx;
         let task_counters = counters.clone();
@@ -675,6 +1040,7 @@ impl BridgeThreadState {
                 counters: task_counters.clone(),
                 state: shared_state.clone(),
                 task_id,
+                class,
             };
             let future = factory();
             let output = future.await;
@@ -687,12 +1053,16 @@ impl BridgeThreadState {
             TaskSlot {
                 handle: handle.abort_handle(),
                 polled,
+                class,
             },
         );
         counters.task_slot_notify.notify_waiters();
     }
 
     fn drain_deferred(&mut self, counters: &Arc<AdmissionCounters>, state_ref: &ThreadStateRef) {
+        if counters.is_draining() {
+            return;
+        }
         while let Some(req) = self.deferred.pop_front() {
             if !counters.try_reserve_active() {
                 self.deferred.push_front(req);
@@ -738,17 +1108,38 @@ fn run_localset_thread(
                                     state.process_cancel(task_id, &counters, &mut aborted_ids);
                                 }
                             }
+                            Some(ControlMessage::SpawnOwned(req)) => {
+                                if let Ok(mut state) = state_ref.lock() {
+                                    state.spawn_owned_task(req, &counters, &state_ref);
+                                }
+                            }
+                            Some(ControlMessage::RunControl(req)) => {
+                                if let Ok(mut state) = state_ref.lock() {
+                                    state.enqueue_execute(req, &counters, &state_ref);
+                                }
+                            }
                             Some(ControlMessage::Shutdown { ack }) => {
+                                let snapshot = counters.stats();
                                 if let Ok(mut state) = state_ref.lock() {
                                     for (task_id, slot) in state.tasks.drain() {
                                         if !slot.polled.load(Ordering::Acquire) {
-                                            counters.task_finished();
+                                            match slot.class {
+                                                TaskClass::Work => counters.task_finished(),
+                                                TaskClass::Owned => counters.owned_task_finished(),
+                                                TaskClass::Control => counters.control_task_finished(),
+                                            }
                                         }
                                         aborted_ids.push(task_id);
                                         slot.handle.abort();
                                     }
                                     for req in state.deferred.drain(..) {
                                         counters.release_pending(req.byte_charge);
+                                        if let Some(tx) = req.result_tx {
+                                            let _ = tx.send(Err(
+                                                "LocalSet bridge shutdown before this request started"
+                                                    .to_string(),
+                                            ));
+                                        }
                                     }
                                 }
                                 counters.shutting_down.store(true, Ordering::SeqCst);
@@ -759,6 +1150,13 @@ fn run_localset_thread(
                                     pending_requests: stats.pending_requests,
                                     pending_bytes: stats.pending_bytes,
                                     active_tasks: stats.active_tasks,
+                                    owned_tasks: stats.owned_tasks,
+                                    control_tasks: stats.control_tasks,
+                                    queued_at_shutdown: snapshot.pending_requests,
+                                    queued_bytes_at_shutdown: snapshot.pending_bytes,
+                                    active_at_shutdown: snapshot.active_tasks,
+                                    owned_at_shutdown: snapshot.owned_tasks,
+                                    control_at_shutdown: snapshot.control_tasks,
                                     aborted_task_ids: aborted_ids,
                                 };
                                 let _ = ack.send(evidence);

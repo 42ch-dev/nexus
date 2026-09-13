@@ -1,14 +1,15 @@
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use napi::bindgen_prelude::Error;
 use napi::Env;
+use nexus_agent_host::HostFacade;
+use nexus_agent_host::HostManager;
 use nexus_contracts::{CoreCloseReport, CoreError, CoreErrorCode};
 use nexus_core::CoreService;
 use nexus_provider_ports::ProviderPort;
-use nexus_agent_host::HostManager;
 use tokio::sync::{Mutex, Notify};
-use nexus_agent_host::HostFacade;
 
 pub const MAX_PENDING_BYTES_TOTAL: usize = 1024 * 1024;
 pub const FINALIZE_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
@@ -77,7 +78,12 @@ impl PendingBudget {
             }
             if self
                 .used
-                .compare_exchange_weak(current, current + bytes, Ordering::AcqRel, Ordering::Acquire)
+                .compare_exchange_weak(
+                    current,
+                    current + bytes,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
                 .is_ok()
             {
                 return Ok(PendingBudgetGuard {
@@ -119,6 +125,14 @@ pub struct EnvState {
     pub close_in_flight: Mutex<bool>,
     /// Last observed pending operation/task IDs for close reports.
     pub pending_operation_ids: Mutex<Vec<String>>,
+    /// Sessions the JS provider reported as live, mapped to their in-flight
+    /// operation id (if any).
+    ///
+    /// The JS adapter owns its ACP child processes; native close must drive
+    /// their cancellation and release through the live callback bridge before
+    /// the admission fence rises, or an owned child leaks. Empty for
+    /// Rust-owned providers.
+    pub js_sessions: StdMutex<BTreeMap<String, Option<String>>>,
 }
 
 impl EnvState {
@@ -139,7 +153,59 @@ impl EnvState {
             settled_close: Mutex::new(None),
             close_in_flight: Mutex::new(false),
             pending_operation_ids: Mutex::new(Vec::new()),
+            js_sessions: StdMutex::new(BTreeMap::new()),
         }
+    }
+
+    /// Remember a JS-provider session so close can drive its owned release.
+    pub fn record_js_session(&self, session_id: String) {
+        if let Ok(mut sessions) = self.js_sessions.lock() {
+            sessions.entry(session_id).or_insert(None);
+        }
+    }
+
+    /// Track the session's in-flight operation so close can cancel it first.
+    pub fn record_js_session_operation(&self, session_id: &str, operation_id: String) {
+        if let Ok(mut sessions) = self.js_sessions.lock() {
+            sessions.insert(session_id.to_string(), Some(operation_id));
+        }
+    }
+
+    /// The session's operation reached a terminal: nothing left to cancel.
+    pub fn clear_js_session_operation(&self, session_id: &str) {
+        if let Ok(mut sessions) = self.js_sessions.lock() {
+            if let Some(entry) = sessions.get_mut(session_id) {
+                *entry = None;
+            }
+        }
+    }
+
+    /// Forget a JS-provider session whose owned cleanup was confirmed.
+    pub fn forget_js_session(&self, session_id: &str) {
+        if let Ok(mut sessions) = self.js_sessions.lock() {
+            sessions.remove(session_id);
+        }
+    }
+
+    /// Live JS-provider sessions awaiting an owned release.
+    pub fn js_sessions_snapshot(&self) -> Vec<(String, Option<String>)> {
+        self.js_sessions
+            .lock()
+            .map(|sessions| {
+                sessions
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Session ids still awaiting release, for close reports.
+    pub fn js_session_ids(&self) -> Vec<String> {
+        self.js_sessions_snapshot()
+            .into_iter()
+            .map(|(session_id, _)| session_id)
+            .collect()
     }
 
     pub fn lifecycle_phase(&self) -> EnvLifecyclePhase {
@@ -219,9 +285,8 @@ impl EnvState {
             .spawn(move || {
                 if let Ok(rt) = std::panic::catch_unwind(super::runtime::runtime) {
                     rt.block_on(async move {
-                        let budget = || {
-                            deadline.saturating_duration_since(std::time::Instant::now())
-                        };
+                        let budget =
+                            || deadline.saturating_duration_since(std::time::Instant::now());
 
                         let core = work_state.take_core();
                         if let Some(service) = core {

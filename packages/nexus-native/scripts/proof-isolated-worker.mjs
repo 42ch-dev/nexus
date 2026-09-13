@@ -323,7 +323,10 @@ async function runEofWhileLive() {
   const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
   const seed = spawnSync('cargo', ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', eofHome], { cwd: root });
   if (seed.status !== 0) return fail('eof_after_close', seed.stderr?.toString() || 'seed failed', { executed_steps: steps });
-  writeAgentHostConfig(eofHome, fixture, eofWs, { EOF_AFTER_INIT: '1' });
+  // Run 1 (the bounded readiness probe) must succeed; run 2 (the real session
+  // launch) exits after initialize, so a live child EOF — not a timeout — must
+  // be surfaced to the caller.
+  writeAgentHostConfig(eofHome, fixture, eofWs, { EOF_AFTER_INIT_FROM_RUN: '2' });
   const accessJson = JSON.stringify({ user_home: eofHome, access: 'engine_owner', allow_uninitialized: false });
   steps.push('open');
   const providers = await providersForScenario();
@@ -362,7 +365,19 @@ async function runFullQueueShutdown() {
   const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
   const seed = spawnSync('cargo', ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', home], { cwd: root });
   if (seed.status !== 0) return fail('full_queue_shutdown', seed.stderr?.toString() || 'seed failed', { executed_steps: steps });
-  writeAgentHostConfig(home, fixture, ws, adapter === 'rust-acp' ? { BLOCK_PROMPT: '1' } : {}, { max_sessions: 80, max_ops_per_session: 1, timeouts: adapter === 'rust-acp' ? { initialize_ms: 180_000, launch_ms: 180_000, session_ms: 180_000, prompt_ms: 300_000 } : undefined });
+  writeAgentHostConfig(
+    home,
+    fixture,
+    ws,
+    adapter === 'rust-acp' ? { BLOCK_PROMPT: '1' } : {},
+    {
+      max_sessions: 80,
+      max_ops_per_session: 1,
+      timeouts: adapter === 'rust-acp'
+        ? { initialize_ms: 180_000, launch_ms: 180_000, session_ms: 180_000, prompt_ms: 300_000 }
+        : undefined,
+    },
+  );
   const accessJson = JSON.stringify({ user_home: home, access: 'engine_owner', allow_uninitialized: false });
 
   if (adapter === 'ts-acp') {
@@ -458,6 +473,9 @@ async function runFullQueueShutdown() {
     });
   }
 
+  // rust-acp: fill the bridge's bounded *request* queue against a full active
+  // budget, reject the 17th request at the LocalSet bridge (never at host
+  // session admission), then close while the queue is still full.
   const providers = await providersForScenario();
   steps.push('open');
   const core = binding.open(accessJson, providers);
@@ -469,18 +487,13 @@ async function runFullQueueShutdown() {
   if (!probe.ok) return fail('full_queue_shutdown', `probe failed: ${probe.error}`, { executed_steps: steps });
 
   const beforePids = findFixtureChildPids();
-  const createSessionCharge = new TextEncoder().encode('create_session').length;
-  const streamPromptCharge = new TextEncoder().encode('stream_prompt').length;
 
-  steps.push('launch_parallel_32');
-  const launchPromises = [];
-  for (let i = 0; i < MAX_ACTIVE_TASKS; i += 1) {
-    launchPromises.push(core.providerCall(encode({
-      request_id: `queue-launch-${i}`, method: 'launch', deadline_ms: 180_000,
+  steps.push('launch_parallel_sessions');
+  const launches = await Promise.all(Array.from({ length: MAX_ACTIVE_TASKS }, (_, i) =>
+    core.providerCall(encode({
+      request_id: `queue-launch-${i}`, method: 'launch', deadline_ms: 60_000,
       payload: rustLaunchPayload(home),
-    })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) })));
-  }
-  const launches = await Promise.all(launchPromises);
+    })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }))));
   const sessionIds = launches.filter((l) => l.ok && l.session_id).map((l) => l.session_id);
   if (sessionIds.length < MAX_ACTIVE_TASKS) {
     return fail('full_queue_shutdown', `only ${sessionIds.length}/${MAX_ACTIVE_TASKS} launches succeeded`, {
@@ -489,15 +502,16 @@ async function runFullQueueShutdown() {
     });
   }
 
-  steps.push('admit_active_32');
+  steps.push('block_active_32');
   sessionIds.forEach((sessionId, i) => {
     core.providerCall(encode({
       request_id: `queue-block-${i}`, method: 'execute', session_id: sessionId, deadline_ms: 300_000,
       payload: rustExecutePayload(),
-    })).catch((e) => ({ ok: false, error: String(e) }));
+    })).then((buf) => decode(buf)).catch(() => ({ ok: false }));
   });
-  await new Promise((r) => setTimeout(r, 800));
+  await new Promise((r) => setTimeout(r, 1_000));
 
+  steps.push('fill_pending_16');
   const pendingLaunches = [];
   for (let i = 0; i < MAX_PENDING_REQUESTS; i += 1) {
     steps.push(`pending_launch_${i}`);
@@ -506,13 +520,16 @@ async function runFullQueueShutdown() {
       payload: rustLaunchPayload(home),
     })).catch((e) => ({ ok: false, error: String(e) })));
   }
-  await new Promise((r) => setTimeout(r, 600));
+  await new Promise((r) => setTimeout(r, 500));
 
   steps.push('reject_17th');
-  const reject17 = await core.providerCall(encode({
-    request_id: 'queue-launch-17', method: 'launch', deadline_ms: 3_000,
-    payload: rustLaunchPayload(home),
-  })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
+  const reject17 = await Promise.race([
+    core.providerCall(encode({
+      request_id: 'queue-launch-17', method: 'launch', deadline_ms: 15_000,
+      payload: rustLaunchPayload(home),
+    })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) })),
+    new Promise((r) => setTimeout(() => r({ ok: false, error: 'probe deadline expired' }), 12_000)),
+  ]);
   const rejectedCode = formatProviderError(reject17.error);
   const rejectedBusy = !reject17.ok && isLocalSetBusy(reject17.error);
 
@@ -520,35 +537,58 @@ async function runFullQueueShutdown() {
   const closeStarted = Date.now();
   const closeReport = decode(await core.close());
   const closeMs = Date.now() - closeStarted;
-  const launchedPids = findFixtureChildPids().filter((pid) => !beforePids.includes(pid));
-  let survivors = launchedPids.slice();
+  const launchedPids = findFixtureChildPids();
+  let survivors = launchedPids.filter((pid) => !beforePids.includes(pid));
   const reapDeadline = Date.now() + 2_000;
   while (survivors.length > 0 && Date.now() < reapDeadline) {
     await new Promise((r) => setTimeout(r, 100));
-    survivors = findFixtureChildPids().filter((pid) => launchedPids.includes(pid));
+    survivors = findFixtureChildPids().filter((pid) => launchedPids.includes(pid) && !beforePids.includes(pid));
   }
 
-  const pendingBytes = MAX_PENDING_REQUESTS * createSessionCharge;
-  const activeCountObserved = sessionIds.length;
+  const drained = (closeReport.pending_operations ?? []).map(String);
+  const readEntry = (name) => {
+    const hit = drained.find((e) => e.startsWith(`${name}:`));
+    return hit ? Number(hit.split(':')[1]) : null;
+  };
+  const queueEvidence = {
+    queued_at_close: readEntry('localset-queued-at-close'),
+    queued_bytes_at_close: readEntry('localset-queued-bytes-at-close'),
+    active_at_close: readEntry('localset-active-at-close'),
+    owned_at_close: readEntry('localset-owned-at-close'),
+    aborted_task_ids: drained.filter((e) => e.startsWith('localset-aborted-task:')).map((e) => Number(e.split(':')[1])),
+  };
+
   if (!rejectedBusy) {
     return fail('full_queue_shutdown', `17th not LocalSet busy: ${rejectedCode}`, { executed_steps: steps, reject17 });
+  }
+  if (/session limit/i.test(rejectedCode)) {
+    return fail('full_queue_shutdown', `17th rejected by host session admission, not the LocalSet queue: ${rejectedCode}`, { executed_steps: steps });
   }
   if (closeMs > 5_000) {
     return fail('full_queue_shutdown', `close ${closeMs}ms > 5s`, { executed_steps: steps, close_ms: closeMs });
   }
   if (!closeReport.cleanup_confirmed) {
-    return fail('full_queue_shutdown', 'cleanup unconfirmed', { executed_steps: steps });
+    return fail('full_queue_shutdown', 'cleanup unconfirmed', { executed_steps: steps, closeReport });
+  }
+  if (queueEvidence.queued_at_close !== MAX_PENDING_REQUESTS || queueEvidence.active_at_close !== MAX_ACTIVE_TASKS) {
+    return fail('full_queue_shutdown', `queue snapshot at close wrong: ${JSON.stringify(queueEvidence)}`, { executed_steps: steps, closeReport });
+  }
+  if (!(queueEvidence.queued_bytes_at_close > 0)) {
+    return fail('full_queue_shutdown', `queued bytes not charged: ${JSON.stringify(queueEvidence)}`, { executed_steps: steps });
+  }
+  if (queueEvidence.aborted_task_ids.length === 0) {
+    return fail('full_queue_shutdown', 'shutdown recorded no aborted task ids', { executed_steps: steps, closeReport });
   }
   if (survivors.length > 0) {
     return fail('full_queue_shutdown', `survivors ${survivors.join(',')}`, { executed_steps: steps, survivors });
   }
   return pass('full_queue_shutdown', {
     adapter,
-    active_count: activeCountObserved,
-    pending_count: MAX_PENDING_REQUESTS,
-    pending_bytes: pendingBytes,
-    per_request_charge: createSessionCharge,
-    active_charge: streamPromptCharge,
+    active_count: queueEvidence.active_at_close,
+    pending_count: queueEvidence.queued_at_close,
+    pending_bytes: queueEvidence.queued_bytes_at_close,
+    owned_count: queueEvidence.owned_at_close,
+    aborted_task_ids: queueEvidence.aborted_task_ids,
     rejected_code: rejectedCode,
     rejected_17th: true,
     close_ms: closeMs,
@@ -556,13 +596,13 @@ async function runFullQueueShutdown() {
     control_bypass: true,
     surviving_child_pids: survivors,
     executed_steps: steps,
-    queue_profile: 'rust_localset_active32_pending16_create_session',
+    queue_profile: 'rust_localset_active32_queued16',
     localset_active_cap: MAX_ACTIVE_TASKS,
     localset_pending_cap: MAX_PENDING_REQUESTS,
+    pending_launch_count: pendingLaunches.length,
+    close_pending_operations: drained,
   });
-
 }
-
 
 async function runWorkerTermination() {
   cleanupFixtureChildren();
@@ -606,23 +646,45 @@ async function runWorkerTermination() {
   steps.push('kill_child');
   try { process.kill(victim, 'SIGKILL'); } catch { /* already dead */ }
   steps.push('await_pull_after_kill');
+  // Keep pulling until the in-flight operation reports a terminal: an empty
+  // batch with has_more is neither success nor failure.
   let transportObserved = false;
+  let inFlightTerminalFailed = false;
+  let inFlightTerminalOk = false;
   let pullEvidence = null;
-  try {
-    const batch = decode(await Promise.race([
-      core.nextProviderEvents(execResult.operation_id, 16, 256 * 1024),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('pull_timeout')), 20_000)),
-    ]));
-    pullEvidence = batch;
-    const wire = JSON.stringify(batch);
-    if (/provider_eof|protocol_error|transport|connection|exited|closed|OpFailed/i.test(wire)) {
-      transportObserved = true;
+  const pullDeadline = Date.now() + 20_000;
+  let pullIndex = 0;
+  while (Date.now() < pullDeadline) {
+    pullIndex += 1;
+    steps.push(`pull_after_kill_${pullIndex}`);
+    let batch;
+    try {
+      batch = decode(await Promise.race([
+        core.nextProviderEvents(execResult.operation_id, 16, 256 * 1024),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('pull_timeout')), 5_000)),
+      ]));
+    } catch (error) {
+      pullEvidence = String(error);
+      if (isTransportFailure(error)) {
+        transportObserved = true;
+        inFlightTerminalFailed = true;
+      }
+      break;
     }
-    const terminalFail = (batch.events ?? []).some((ev) => /OpFailed|provider_eof|protocol_error|transport/i.test(JSON.stringify(ev)));
-    if (terminalFail) transportObserved = true;
-  } catch (error) {
-    pullEvidence = String(error);
-    if (isTransportFailure(error)) transportObserved = true;
+    pullEvidence = batch;
+    for (const ev of batch.events ?? []) {
+      const wire = JSON.stringify(ev);
+      if (/OpFailed|provider_eof|protocol_error|transport|exited|closed/i.test(wire)) {
+        inFlightTerminalFailed = true;
+      }
+      if (ev.OpFinished) inFlightTerminalOk = true;
+    }
+    if (inFlightTerminalFailed) {
+      transportObserved = true;
+      break;
+    }
+    if (inFlightTerminalOk) break;
+    await new Promise((r) => setTimeout(r, 100));
   }
 
   steps.push('close');
@@ -631,7 +693,10 @@ async function runWorkerTermination() {
   let victimAlive = false;
   try { process.kill(victim, 0); victimAlive = true; } catch { victimAlive = false; }
   if (!transportObserved) {
-    return fail('worker_termination', `no transport/EOF observed after kill: ${JSON.stringify(pullEvidence)}`, { executed_steps: steps, execResult });
+    return fail('worker_termination', `no transport/EOF terminal after child kill: ${JSON.stringify(pullEvidence)}`, { executed_steps: steps, execResult });
+  }
+  if (inFlightTerminalOk) {
+    return fail('worker_termination', 'in-flight operation reported a clean terminal after the child was killed', { executed_steps: steps, pullEvidence });
   }
   if (!closeReport.cleanup_confirmed) {
     return fail('worker_termination', 'cleanup unconfirmed after kill', { executed_steps: steps });
@@ -642,8 +707,11 @@ async function runWorkerTermination() {
   return pass('worker_termination', {
     child_pid: victim,
     fixture_pid: victim,
-    post_kill_execute_ok: false,
+    in_flight_terminal_failed: inFlightTerminalFailed,
+    in_flight_terminal_ok: inFlightTerminalOk,
+    post_kill_execute_ok: inFlightTerminalOk,
     post_kill_execute_error: formatProviderError(execResult.error),
+    pull_after_kill: pullEvidence,
     executed_steps: steps,
     adapter,
     surviving_child_pids: survivors,
@@ -679,6 +747,7 @@ async function runMultibyteOverflow() {
   })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
   if (!launch.ok || !launch.session_id) return fail('multibyte_overflow', `launch failed: ${launch.error}`, { executed_steps: steps });
   const multibyteSeed = '🎉';
+  const multibyteRepeat = 96 * 1024;
   steps.push('oversize_execute');
   const exec = await core.providerCall(encode({
     request_id: 'mb-exec', method: 'execute', session_id: launch.session_id, deadline_ms: 30_000,
@@ -703,16 +772,24 @@ async function runMultibyteOverflow() {
   }
   steps.push('close');
   await core.close().catch(() => {});
-  const utf8Bytes = new TextEncoder().encode(multibyteSeed).length * (300 * 1024);
+  const seedBytes = new TextEncoder().encode(multibyteSeed).length;
+  const utf8Bytes = seedBytes * multibyteRepeat;
   if (!isOversizedOutcome(batch)) {
     return fail('multibyte_overflow', `expected delivery_overflow/oversized outcome, got: ${JSON.stringify(batch)}`, { executed_steps: steps, batch });
+  }
+  if (utf8Bytes <= 256 * 1024 || multibyteRepeat >= utf8Bytes) {
+    return fail('multibyte_overflow', `probe is not a multibyte byte-boundary case: ${utf8Bytes} bytes over ${multibyteRepeat} code points`, { executed_steps: steps });
   }
   return pass('multibyte_overflow', {
     adapter,
     rejected: true,
+    rejected_by: 'adapter_delivery_overflow',
     utf8_bytes: utf8Bytes,
+    code_points: multibyteRepeat,
+    utf8_bytes_per_code_point: seedBytes,
     multibyte_marker: multibyteSeed,
     outcome: batch?.gap ?? batch?.error ?? 'oversized',
+    batch,
     executed_steps: steps,
   });
 }
@@ -728,7 +805,36 @@ async function runReentrantCall() {
   if (seed.status !== 0) return fail('reentrant_call', seed.stderr?.toString() || 'seed failed', { executed_steps: steps });
   writeAgentHostConfig(home, fixture, ws, { BLOCK_PROMPT: '1' });
   const accessJson = JSON.stringify({ user_home: home, access: 'engine_owner', allow_uninitialized: false });
-  const providers = await providersForScenario();
+
+  // The ts-acp provider answers a pull as soon as it has nothing pending, so
+  // hold its first same-operation pull open to make the outstanding-pull window
+  // observable; the real SDK provider still serves every other call.
+  let baseProviders = null;
+  let heldOpId = null;
+  let holdNext = false;
+  let releaseNext = null;
+  let nextHeldCount = 0;
+  let providers;
+  if (adapter === 'ts-acp') {
+    baseProviders = await providersForScenario();
+    providers = {
+      call: (...args) => baseProviders.call(...args),
+      next: async (...args) => {
+        const req = unpackCallbackPayload(...args);
+        if (holdNext && req.operation_id === heldOpId) {
+          holdNext = false;
+          nextHeldCount += 1;
+          await new Promise((resolve) => {
+            releaseNext = resolve;
+          });
+        }
+        return baseProviders.next(...args);
+      },
+    };
+  } else {
+    providers = await providersForScenario();
+  }
+
   steps.push('open');
   const core = binding.open(accessJson, providers);
   steps.push('probe');
@@ -744,44 +850,75 @@ async function runReentrantCall() {
   })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
   if (!launch.ok || !launch.session_id) return fail('reentrant_call', `launch failed: ${launch.error}`, { executed_steps: steps });
   steps.push('execute_inflight');
-  const execPromise = core.providerCall(encode({
+  const execReply = await core.providerCall(encode({
     request_id: 're-exec', method: 'execute', session_id: launch.session_id, deadline_ms: 60_000,
     payload: adapter === 'rust-acp' ? rustExecutePayload() : tsExecutePayload(),
   })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
-  const execReply = await execPromise;
   if (!execReply.ok || !execReply.operation_id) {
     return fail('reentrant_call', `execute did not start: ${formatProviderError(execReply.error)}`, { executed_steps: steps, execReply });
   }
   const opId = execReply.operation_id;
+
   steps.push('first_pull');
-  const firstPull = core.nextProviderEvents(opId, 16, 256 * 1024);
-  await new Promise((r) => setTimeout(r, 100));
-  steps.push('second_pull_busy');
-  let secondErr = null;
-  try {
-    await core.nextProviderEvents(opId, 16, 256 * 1024);
-    secondErr = 'second pull succeeded';
-  } catch (error) {
-    secondErr = String(error);
+  heldOpId = opId;
+  holdNext = adapter === 'ts-acp';
+  const firstPull = core.nextProviderEvents(opId, 16, 256 * 1024).then(
+    (buf) => ({ ok: true, batch: decode(buf) }),
+    (error) => ({ ok: false, error: String(error) }),
+  );
+  const holdDeadline = Date.now() + 5_000;
+  while (adapter === 'ts-acp' && nextHeldCount === 0 && Date.now() < holdDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
   }
+  if (adapter === 'ts-acp' && nextHeldCount === 0) {
+    return fail('reentrant_call', 'held pull never reached the JS provider', { executed_steps: steps });
+  }
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  steps.push('second_pull_busy');
+  const secondErr = await core
+    .nextProviderEvents(opId, 16, 256 * 1024)
+    .then(() => null, (error) => String(error));
   if (!/busy|pull already in flight/i.test(secondErr ?? '')) {
     return fail('reentrant_call', `expected Busy on concurrent same-op pull, got: ${secondErr}`, { executed_steps: steps, opId });
   }
+
   steps.push('graph_probe');
-  const probeDuring = await core.providerCall(encode({
-    request_id: 're-probe', method: 'probe', deadline_ms: 5_000,
-    payload: adapter === 'rust-acp' ? rustProbePayload(home) : tsProbePayload(),
-  })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
-  if (!probeDuring.ok) {
-    return fail('reentrant_call', `graph probe failed during inflight pull: ${formatProviderError(probeDuring.error)}`, { executed_steps: steps });
+  const graph = await core
+    .hostQuery(encode({ query: 'health' }))
+    .then((buf) => decode(buf), (error) => ({ health: null, error: String(error) }));
+  if (graph.health?.running !== true) {
+    return fail('reentrant_call', `graph query blocked while a pull was outstanding: ${JSON.stringify(graph)}`, { executed_steps: steps });
   }
+
+  steps.push('release_first_pull');
+  if (releaseNext) releaseNext();
+  const firstResult = await firstPull;
+  if (adapter === 'ts-acp' && !firstResult.ok) {
+    return fail('reentrant_call', `released pull failed: ${firstResult.error}`, { executed_steps: steps });
+  }
+
+  steps.push('third_pull_after_release');
+  const thirdErr = await core
+    .nextProviderEvents(opId, 16, 256 * 1024)
+    .then(() => null, (error) => String(error));
+  if (thirdErr) {
+    return fail('reentrant_call', `pull after settle must be admitted, got: ${thirdErr}`, { executed_steps: steps });
+  }
+
   steps.push('close');
-  await core.close().catch(() => {});
+  const closeReport = decode(await core.close());
+  if (!closeReport.cleanup_confirmed) {
+    return fail('reentrant_call', `close did not confirm cleanup: ${JSON.stringify(closeReport)}`, { executed_steps: steps });
+  }
   return pass('reentrant_call', {
     adapter,
     operation_id: opId,
-    probe_ok: true,
     second_pull_error: secondErr,
+    graph_query_ok: true,
+    pull_settled_then_reused: true,
+    held_js_pull: nextHeldCount,
+    cleanup_confirmed: closeReport.cleanup_confirmed,
     executed_steps: steps,
   });
 }

@@ -5,10 +5,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use nexus_agent_host::providers::recipe_admission::reject_caller_recipe_payload;
 use nexus_agent_host::HostManager;
-use nexus_contracts::{
-    CoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply,
-};
 use nexus_contracts::provider_call::ProviderCallMethod;
+use nexus_contracts::{CoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply};
 use nexus_provider_ports::{ProviderPort, ProviderResult};
 
 fn map_host_error(err: nexus_agent_host::error::HostError) -> CoreError {
@@ -20,7 +18,9 @@ fn map_host_error(err: nexus_agent_host::error::HostError) -> CoreError {
     }
 }
 
-fn provider_id_from_payload(payload: &serde_json::Map<String, serde_json::Value>) -> ProviderResult<String> {
+fn provider_id_from_payload(
+    payload: &serde_json::Map<String, serde_json::Value>,
+) -> ProviderResult<String> {
     payload
         .get("provider_id")
         .and_then(|v| v.as_str())
@@ -36,11 +36,16 @@ fn provider_id_from_payload(payload: &serde_json::Map<String, serde_json::Value>
 pub struct AdmittingProviderPort {
     host: Arc<HostManager>,
     inner: Arc<dyn ProviderPort>,
+    state: Arc<super::env_state::EnvState>,
 }
 
 impl AdmittingProviderPort {
-    pub fn new(host: Arc<HostManager>, inner: Arc<dyn ProviderPort>) -> Self {
-        Self { host, inner }
+    pub fn new(
+        host: Arc<HostManager>,
+        inner: Arc<dyn ProviderPort>,
+        state: Arc<super::env_state::EnvState>,
+    ) -> Self {
+        Self { host, inner, state }
     }
 
     async fn admit_probe_or_launch(&self, request: &mut ProviderCall) -> ProviderResult<()> {
@@ -71,7 +76,39 @@ impl ProviderPort for AdmittingProviderPort {
         ) {
             self.admit_probe_or_launch(&mut request).await?;
         }
-        self.inner.call(request).await
+        let method = request.method;
+        let session_id = request.session_id.clone();
+        let reply = self.inner.call(request).await?;
+        // The JS adapter owns its ACP children; native close must be able to
+        // cancel and release them, so track live JS sessions at the one place
+        // that observes every launch/execute/shutdown reply.
+        match method {
+            ProviderCallMethod::Launch if reply.ok => {
+                if let Some(session_id) = reply.session_id.clone().or(session_id) {
+                    self.state.record_js_session(session_id);
+                }
+            }
+            ProviderCallMethod::Execute if reply.ok => {
+                if let (Some(session_id), Some(operation_id)) =
+                    (session_id.as_deref(), reply.operation_id.clone())
+                {
+                    self.state
+                        .record_js_session_operation(session_id, operation_id);
+                }
+            }
+            ProviderCallMethod::Cancel if reply.ok => {
+                if let Some(session_id) = session_id.as_deref() {
+                    self.state.clear_js_session_operation(session_id);
+                }
+            }
+            ProviderCallMethod::Shutdown if reply.ok => {
+                if let Some(session_id) = session_id.as_deref() {
+                    self.state.forget_js_session(session_id);
+                }
+            }
+            _ => {}
+        }
+        Ok(reply)
     }
 
     async fn next(

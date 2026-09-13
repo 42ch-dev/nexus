@@ -20,7 +20,10 @@ Modes (env vars, all optional):
                      post-ready launch failure is distinguished from a broken
                      recipe.
   - DELAYED_CANCEL_ACK=1  wait 2s after session/cancel before exiting (cooperative cancel evidence).
-  - OVERSIZED_UPDATE=1    emit a single >256KiB agent_message_chunk update.
+  - OVERSIZED_UPDATE=1    emit a single agent_message_chunk whose UTF-8 byte
+                     length exceeds 256KiB while its code-point count does not,
+                     so byte-boundary (not character-boundary) overflow is
+                     exercised.
   - STALL_AFTER_INIT=1    respond to initialize then stall without further input.
   - DESCENDANT=1     spawn a child process that outlives the fixture; the
                      host's owned process-tree shutdown must reap the exact
@@ -175,7 +178,9 @@ def main():
             # Deterministic non-echo transformation.
             chunk_text = "transformed:" + prompt
             if OVERSIZED_UPDATE:
-                chunk_text = "x" * (300 * 1024)
+                # 96Ki code points x 4 UTF-8 bytes = 384KiB > 256KiB byte budget,
+                # while the character count stays below the byte limit.
+                chunk_text = "\U0001f389" * (96 * 1024)
             notify("session/update", {
                 "sessionId": params.get("sessionId"),
                 "update": {

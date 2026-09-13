@@ -21,10 +21,9 @@ use super::env_state::EnvState;
 
 /// Test-only forcing of an unconfirmed cleanup.
 mod forcing {
-    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     static FORCE_UNCONFIRMED: AtomicBool = AtomicBool::new(false);
-    static CLEANUP_DELAY_MS: AtomicU64 = AtomicU64::new(0);
 
     pub fn set(enable: bool) {
         FORCE_UNCONFIRMED.store(enable, Ordering::SeqCst);
@@ -34,12 +33,20 @@ mod forcing {
         FORCE_UNCONFIRMED.load(Ordering::SeqCst)
     }
 
-    pub fn set_cleanup_delay_ms(ms: u64) {
+    /// Injected cleanup latency, test builds only.
+    #[cfg(test)]
+    pub mod delay {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static CLEANUP_DELAY_MS: AtomicU64 = AtomicU64::new(0);
+
+        pub fn set(ms: u64) {
         CLEANUP_DELAY_MS.store(ms, Ordering::SeqCst);
     }
 
-    pub fn cleanup_delay_ms() -> u64 {
+        pub fn get() -> u64 {
         CLEANUP_DELAY_MS.load(Ordering::SeqCst)
+        }
     }
 }
 
@@ -49,14 +56,14 @@ pub fn set_force_unconfirmed(enable: bool) {
 }
 
 /// Test-only: inject async delay at the start of `cleanup_owners`.
+#[cfg(test)]
 pub fn set_force_cleanup_delay_ms(ms: u64) {
-    forcing::set_cleanup_delay_ms(ms);
+    forcing::delay::set(ms);
 }
 
 fn forced_unconfirmed() -> bool {
     forcing::get()
 }
-
 
 struct RestoreCore {
     value: Option<Arc<CoreService>>,
@@ -163,6 +170,93 @@ fn close_released(report: &CoreCloseReport) -> bool {
     report.state == CoreCloseReportState::Closed && report.cleanup_confirmed
 }
 
+/// True when a provider reply proves the session's owned process is gone.
+///
+/// The TS adapter's `cancel` is a full release for a session with a live
+/// operation: it cancels the prompt, reaps the owned child and drops the
+/// session. Its early-return path (the operation already had a terminal) only
+/// reports the cancel, so an ok cancel alone is not proof — the follow-up
+/// shutdown is. `session_not_found` from that shutdown is the adapter telling us
+/// the session was already released.
+fn js_session_released(reply: &nexus_contracts::ProviderReply) -> bool {
+    if reply.ok {
+        return true;
+    }
+    reply
+        .error
+        .as_ref()
+        .is_some_and(|error| error.message == "session_not_found")
+}
+
+/// Release the JS provider's owned sessions while its callback bridge is alive.
+///
+/// The TS adapter owns the ACP child it spawns, so native close must ask it to
+/// release: there is no native handle to terminate. This runs inside the close's
+/// cancel/drain window, before the admission fence rises, because a release call
+/// the fence rejects leaks a child. Each session gets a bounded cancel followed
+/// by a bounded shutdown, and only an observable release reply counts. Anything
+/// unconfirmed stays registered and forces an Interrupted close, so a leaked
+/// child can never be reported as a confirmed cleanup.
+async fn release_js_provider_sessions(state: &Arc<EnvState>, deadline: Instant) -> Vec<String> {
+    let port = state
+        .provider_port
+        .lock()
+        .expect("port mutex poisoned")
+        .clone();
+    let Some(port) = port else {
+        return state.js_session_ids();
+    };
+
+    let sessions = state.js_sessions_snapshot();
+    let mut unconfirmed = Vec::new();
+    let total = sessions.len();
+    for (index, (session_id, operation_id)) in sessions.iter().enumerate() {
+        // Share the remaining drain budget across the sessions still to release.
+        let outstanding = u32::try_from(total - index).unwrap_or(1);
+        let slice = deadline.saturating_duration_since(Instant::now()) / outstanding;
+        if slice.is_zero() {
+            unconfirmed.push(session_id.clone());
+            continue;
+        }
+
+        // 1. Ask the adapter to cancel a live operation. For a busy session this
+        //    is what makes the blocked prompt settle so the reap can proceed; a
+        //    failure is not fatal because the shutdown below is the authority.
+        if let Some(operation_id) = operation_id {
+            let request = nexus_contracts::ProviderCall {
+                request_id: format!("close-cancel-{session_id}"),
+                method: nexus_contracts::provider_call::ProviderCallMethod::Cancel,
+                session_id: Some(session_id.clone()),
+                operation_id: Some(operation_id.clone()),
+                deadline_ms: u64::try_from((slice / 2).as_millis()).unwrap_or(u64::MAX),
+                payload: serde_json::Map::new(),
+            };
+            let _ = tokio::time::timeout(slice / 2, port.call(request)).await;
+        }
+
+        // 2. Release the session and require the adapter to confirm the owned
+        //    child is gone.
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            unconfirmed.push(session_id.clone());
+            continue;
+        }
+        let request = nexus_contracts::ProviderCall {
+            request_id: format!("close-release-{session_id}"),
+            method: nexus_contracts::provider_call::ProviderCallMethod::Shutdown,
+            session_id: Some(session_id.clone()),
+            operation_id: None,
+            deadline_ms: u64::try_from(remaining.as_millis()).unwrap_or(u64::MAX),
+            payload: serde_json::Map::new(),
+        };
+        match tokio::time::timeout(remaining, port.call(request)).await {
+            Ok(Ok(reply)) if js_session_released(&reply) => state.forget_js_session(session_id),
+            _ => unconfirmed.push(session_id.clone()),
+        }
+    }
+    unconfirmed
+}
+
 /// Attempt cleanup over the retained owners, using the same ownership discipline
 /// for a rollback, an explicit close, and an admission-fence settlement.
 async fn cleanup_owners(
@@ -174,8 +268,9 @@ async fn cleanup_owners(
 ) -> (bool, CoreCloseReport) {
     let forced = forced_unconfirmed();
 
+    #[cfg(test)]
     {
-        let delay_ms = forcing::cleanup_delay_ms();
+        let delay_ms = forcing::delay::get();
         if delay_ms > 0 {
             tokio::time::sleep(Duration::from_millis(delay_ms)).await;
         }
@@ -215,27 +310,29 @@ async fn cleanup_owners(
 
     let host_released = match host_guard.value.take() {
         Some(manager) => {
+            // Closing stops new work and freezes the queue immediately: the
+            // queue snapshot below is the state the close actually drains.
+            manager.localset_bridge().begin_drain();
+            let at_close = manager.localset_bridge().stats();
             let pending = manager.pending_lifecycle_snapshot().await;
             state.record_pending_operations(pending).await;
             let shutdown_ok = manager.shutdown().await.is_ok();
             let bridge_evidence = manager.localset_bridge().shutdown_before(deadline).await;
             let bridge_settled = bridge_evidence.joined_cleanly
                 && bridge_evidence.active_tasks == 0
-                && bridge_evidence.pending_requests == 0;
+                && bridge_evidence.pending_requests == 0
+                && bridge_evidence.owned_tasks == 0
+                && bridge_evidence.control_tasks == 0;
+            let bridge_entries = manager
+                .localset_bridge()
+                .close_entries(&at_close, &bridge_evidence);
             if !forced && shutdown_ok && bridge_settled {
+                state.record_pending_operations(bridge_entries).await;
                 host_guard.disarm();
                 true
             } else {
                 let mut pending = state.pending_operations_snapshot().await;
-                for task_id in bridge_evidence.aborted_task_ids {
-                    pending.push(format!("localset-task:{task_id}"));
-                }
-                if bridge_evidence.active_tasks > 0 {
-                    pending.push(format!("localset-active:{}", bridge_evidence.active_tasks));
-                }
-                if bridge_evidence.pending_requests > 0 {
-                    pending.push(format!("localset-pending-req:{}", bridge_evidence.pending_requests));
-                }
+                pending.extend(bridge_entries);
                 if !shutdown_ok {
                     pending.push("host-shutdown-unconfirmed".to_string());
                 }
@@ -257,7 +354,8 @@ async fn cleanup_owners(
         disarmed: false,
     };
 
-    let released = core_released && host_released;
+    let unreleased_js = state.js_session_ids();
+    let released = core_released && host_released && unreleased_js.is_empty();
     if released {
         port_guard.disarm();
         state.clear_interrupted();
@@ -266,10 +364,23 @@ async fn cleanup_owners(
             .generation
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         state.publish_closed().await;
-        (true, core_report)
+        let drained = state.pending_operations_snapshot().await;
+        let report = CoreCloseReport {
+            state: CoreCloseReportState::Closed,
+            cleanup_confirmed: true,
+            pending_operations: drained,
+            reason: None,
+        };
+        (true, report)
     } else {
         state.mark_interrupted();
-        let pending = state.pending_operations_snapshot().await;
+        let mut pending = state.pending_operations_snapshot().await;
+        pending.extend(
+            unreleased_js
+                .iter()
+                .map(|session_id| format!("js-provider-session:{session_id}")),
+        );
+        state.record_pending_operations(pending.clone()).await;
         (false, interrupted_report(pending))
     }
 }
@@ -340,7 +451,14 @@ pub async fn open_core(
         probe_owner: None,
     };
     if let Err(err) = host.start(start_config).await {
-        let (released, _) = cleanup_owners(state.clone(), Some(Arc::new(core)), Some(host), js_port, Instant::now() + CLOSE_BUDGET).await;
+        let (released, _) = cleanup_owners(
+            state.clone(),
+            Some(Arc::new(core)),
+            Some(host),
+            js_port,
+            Instant::now() + CLOSE_BUDGET,
+        )
+        .await;
         if released {
             state.publish_closed().await;
         } else {
@@ -354,7 +472,11 @@ pub async fn open_core(
     }
 
     let provider_port: Arc<dyn ProviderPort> = if let Some(port) = js_port {
-        Arc::new(AdmittingProviderPort::new(host.clone(), port))
+        Arc::new(AdmittingProviderPort::new(
+            host.clone(),
+            port,
+            state.clone(),
+        ))
     } else {
         Arc::new(host.build_provider_port().await)
     };
@@ -388,10 +510,28 @@ pub async fn close_core(state: Arc<EnvState>) -> CoreCloseReport {
         *in_flight = true;
     }
 
-    state.begin_close();
-    state.begin_closing_phase().await;
     let started = Instant::now();
     let deadline = started + CLOSE_BUDGET;
+
+    // 0-2s: cancel/drain while the JS environment still lives. The JS adapter
+    // owns its ACP children, so their release must run before the admission
+    // fence rises: a release call the fence rejects leaks a child, exactly like
+    // a shutdown a full LocalSet data queue would otherwise block. The registry
+    // stays authoritative, so anything admitted during the drain still blocks a
+    // confirmed close.
+    let unreleased_js = release_js_provider_sessions(&state, started + CLOSE_CANCEL_PHASE).await;
+    if !unreleased_js.is_empty() {
+        let mut pending = state.pending_operations_snapshot().await;
+        pending.extend(
+            unreleased_js
+                .iter()
+                .map(|session_id| format!("js-provider-session:{session_id}")),
+        );
+        state.record_pending_operations(pending).await;
+    }
+
+    state.begin_close();
+    state.begin_closing_phase().await;
 
     let host_snapshot = state.host.lock().expect("host mutex poisoned").clone();
     if let Some(host) = host_snapshot {
@@ -409,8 +549,7 @@ pub async fn close_core(state: Arc<EnvState>) -> CoreCloseReport {
             }
             let (_, report) = cleanup_owners(state.clone(), None, None, None, deadline).await;
             report
-        },
-    )
+    })
     .await
     {
         Ok(report) => report,
@@ -482,10 +621,10 @@ mod tests {
 
     #[tokio::test]
     async fn close_timeout_retains_owners_settle_then_reopen() {
+        use crate::wire_fixture::seed_wire_home;
         use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
         use nexus_contracts::NativeOpenOptions;
         use tempfile::tempdir;
-        use crate::wire_fixture::seed_wire_home;
 
         let dir = tempdir().expect("tempdir");
         seed_wire_home(dir.path()).await;
@@ -533,8 +672,8 @@ mod tests {
 
     #[test]
     fn bounded_native_finalize_completes_within_absolute_budget() {
-        use std::time::Instant;
         use crate::env_state::FINALIZE_BUDGET;
+        use std::time::Instant;
 
         let state = Arc::new(EnvState::new());
         let started = Instant::now();
@@ -547,5 +686,4 @@ mod tests {
             elapsed
         );
     }
-
 }

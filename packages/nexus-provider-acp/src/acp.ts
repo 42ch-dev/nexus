@@ -525,11 +525,24 @@ export class AcpProviderEngine {
     if (!sessionId) throw new Error('shutdown_requires_session');
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error('session_not_found');
+    // A session may be shutting down while a prompt is still in flight (a
+    // native close reaps sessions that are mid-operation). Cooperate with the
+    // owned child first: without the ACP cancel notification a blocked prompt
+    // never settles, so awaiting the prompt task would hang forever instead of
+    // reaching the owned process reap.
     if (session.activeOperationId) {
       const active = this.operations.get(session.activeOperationId);
       if (active) {
         active.cancelled = true;
         active.delivery?.trySetTerminal({ kind: 'finished', reason: 'cancelled' });
+        const acpSessionId = session.owned.acpSessionId;
+        if (acpSessionId) {
+          try {
+            await session.owned.connection.cancel({ sessionId: acpSessionId });
+          } catch {
+            // best effort; the owned reap below is what must be confirmed
+          }
+        }
         if (active.promptTask) await active.promptTask.catch(() => undefined);
       }
       session.activeOperationId = null;

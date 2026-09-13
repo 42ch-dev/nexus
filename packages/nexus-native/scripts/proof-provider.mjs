@@ -704,6 +704,21 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
   const rss = adapterScenarios._rss ?? rssSnapshot();
   delete scenarios._rss;
   const survivingPids = findFixtureChildPids();
+  if (survivingPids.length > 0) {
+    // An owned child that outlives the proof is a leak, never a success: report
+    // it in the evidence and fail the run.
+    const report = {
+      adapter,
+      cleanup_confirmed: closeReport.cleanup_confirmed,
+      surviving_child_pids: survivingPids,
+    };
+    writeFileSync(
+      join(outDir, 'lifecycle.json'),
+      JSON.stringify({ ...report, scenarios, failed: 'surviving_owned_child' }, null, 2),
+    );
+    console.error('owned child survived the {} lifecycle proof', adapter, report);
+    process.exit(1);
+  }
   const lifecyclePath = join(outDir, 'lifecycle.json');
   archiveEvidenceIfPresent(lifecyclePath);
   const codeSha = gitHeadSha();

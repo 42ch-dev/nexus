@@ -799,16 +799,12 @@ impl ProviderAdapter for AcpProvider {
         // birth token + owned group id. The birth token is re-validated
         // before every signal; a missing token means cleanup must be
         // reported unconfirmed. No transport handle crosses this boundary.
-        let process_identity =
-            connected
-                .process
-                .lock()
-                .await
-                .birth()
-                .map(|birth| crate::capability::model::OwnedProcessIdentity {
+        let process_identity = connected.process.lock().await.birth().map(|birth| {
+            crate::capability::model::OwnedProcessIdentity {
                     pid: birth.pid,
                     process_birth: Some(birth.start_tick.to_string()),
                     group_id: Some(birth.pid.to_string()),
+            }
                 });
 
         let host_session_id = HostSessionId::new();
@@ -1188,7 +1184,7 @@ impl ProviderAdapter for AcpProvider {
             let mut sessions = self.sessions.write().await;
             sessions.remove(&session.session_id)
         };
-        let Some(mut connected) = connected else {
+        let Some(connected) = connected else {
             tracing::warn!(
                 session_id = %session.session_id,
                 provider_id = %self.provider_id,

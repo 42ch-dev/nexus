@@ -12,19 +12,13 @@ use std::time::{Duration, Instant};
 
 use super::env_state::EnvState;
 
-/// Lifecycle phase of a registered cleanup entry (observable for tests).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CleanupEntryPhase {
-    Pending,
-    Reaped,
-}
-
 struct CleanupEntry {
     handle: Option<JoinHandle<()>>,
+    /// Ownership retention: the environment stays alive while its registered
+    /// cleanup worker is still running. Read by the registry diagnostic.
+    #[allow(dead_code)]
     state: Arc<EnvState>,
-    registered_at: Instant,
     completed: Arc<AtomicBool>,
-    phase: CleanupEntryPhase,
 }
 
 struct CleanupRegistryInner {
@@ -44,7 +38,11 @@ struct ReaperOwner {
 static REAPER: OnceLock<ReaperOwner> = OnceLock::new();
 
 fn registry() -> &'static Mutex<CleanupRegistryInner> {
-    REGISTRY.get_or_init(|| Mutex::new(CleanupRegistryInner { entries: Vec::new() }))
+    REGISTRY.get_or_init(|| {
+        Mutex::new(CleanupRegistryInner {
+            entries: Vec::new(),
+        })
+    })
 }
 
 /// Join and remove every completed worker. Returns the number reaped.
@@ -58,7 +56,6 @@ pub fn reap_completed() -> usize {
             if let Some(handle) = entry.handle.take() {
                 let _ = handle.join();
             }
-            entry.phase = CleanupEntryPhase::Reaped;
             reg.entries.swap_remove(i);
             reaped += 1;
         } else if entry
@@ -70,7 +67,6 @@ pub fn reap_completed() -> usize {
                 let _ = handle.join();
             }
             entry.completed.store(true, Ordering::SeqCst);
-            entry.phase = CleanupEntryPhase::Reaped;
             reg.entries.swap_remove(i);
             reaped += 1;
         } else {
@@ -81,23 +77,18 @@ pub fn reap_completed() -> usize {
 }
 
 /// Register a timed-out finalize worker. The handle is retained until reaped.
-pub fn register_pending(
-    handle: JoinHandle<()>,
-    state: Arc<EnvState>,
-    completed: Arc<AtomicBool>,
-) {
+pub fn register_pending(handle: JoinHandle<()>, state: Arc<EnvState>, completed: Arc<AtomicBool>) {
     ensure_reaper();
     let mut reg = registry().lock().expect("cleanup registry mutex poisoned");
     reg.entries.push(CleanupEntry {
         handle: Some(handle),
         state,
-        registered_at: Instant::now(),
         completed,
-        phase: CleanupEntryPhase::Pending,
     });
 }
 
-/// Snapshot registry for tests and diagnostics.
+/// Snapshot registry for tests.
+#[cfg(test)]
 pub fn registry_snapshot() -> (usize, usize) {
     reap_completed();
     let reg = registry().lock().expect("cleanup registry mutex poisoned");
