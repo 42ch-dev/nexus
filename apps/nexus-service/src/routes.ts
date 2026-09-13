@@ -6,8 +6,9 @@ import {
   getWorldKbCandidates,
   getWorldKbGraph,
   hostQuery,
+  parseBoundedLimit,
+  parseClampedLimit,
   parseIncludeSuggested,
-  parsePositiveInt,
   patchWorldKbEntity,
 } from './world-kb.js';
 
@@ -134,21 +135,23 @@ function handleUnguarded(service: ServiceCore, pathname: string): unknown {
     return {
       version: '0.1.0',
       uptime_seconds: Math.floor((Date.now() - Date.parse(service.startedAt)) / 1000),
-      workspace_initialized: true,
+      workspace_initialized: service.workspaceInitialized,
       acp: {
-        tool_execution_enabled: !service.domainOnly,
+        tool_execution_enabled: !service.domainOnly && service.providerReady,
         active_sessions: 0,
         total_tool_executions: 0,
       },
-      runtime_mode: service.domainOnly ? 'domain_only' : 'provider_enabled',
+      runtime_mode: service.domainOnly ? 'domain_only' : service.providerReady ? 'provider_enabled' : 'provider_degraded',
     };
   }
   if (pathname === '/v1/daemon/runtime/cert-fingerprint') {
-    return {
-      fingerprint: service.tlsFingerprint ?? '',
-      algorithm: 'sha256',
-      created_at: service.tlsFingerprint ? service.startedAt : null,
-    };
+    if (!service.tlsFingerprint) {
+      return {
+        fingerprint: '',
+        algorithm: 'sha256',
+      };
+    }
+    return service.tlsFingerprint;
   }
   if (pathname === '/v1/daemon/daemon/status') {
     return {
@@ -159,11 +162,13 @@ function handleUnguarded(service: ServiceCore, pathname: string): unknown {
       uptime_ms: Date.now() - Date.parse(service.startedAt),
       started_at: service.startedAt,
       pid: process.pid,
-      degraded: { subsystems: [], reasons: [] },
+      degraded: service.domainOnly || service.providerReady
+        ? { subsystems: [], reasons: [] }
+        : { subsystems: ['engine'], reasons: ['provider host not ready'] },
       subsystems: {
         http: { status: 'up', last_check_ms: 0 },
-        db: { status: 'up', last_check_ms: 0 },
-        engine: { status: service.domainOnly ? 'down' : 'up', last_check_ms: 0 },
+        db: { status: service.workspaceInitialized ? 'up' : 'down', last_check_ms: 0 },
+        engine: { status: service.domainOnly ? 'down' : service.providerReady ? 'up' : 'down', last_check_ms: 0 },
       },
       exit_code: null,
       last_error: null,
@@ -220,7 +225,7 @@ async function handleTier2(
     return patchWorldKbEntity(service, route.worldId, body as WorldKbPatchEntityRequest);
   }
   if (method === 'GET' && route.worldId && pathname.endsWith('/kb/candidates')) {
-    const limit = parsePositiveInt(searchParams.get('limit'), 'limit');
+    const limit = parseClampedLimit(searchParams.get('limit'), 'limit');
     const cursor = searchParams.get('cursor') ?? undefined;
     return getWorldKbCandidates(service, route.worldId, limit, cursor);
   }
@@ -229,7 +234,7 @@ async function handleTier2(
     if (!afterSequence) {
       throw new HttpError(400, 'invalid_input', 'after_sequence is required');
     }
-    const limit = parsePositiveInt(searchParams.get('limit'), 'limit');
+    const limit = parseBoundedLimit(searchParams.get('limit'), 'limit', { max: 256 });
     return getCoreChanges(service, {
       after_sequence: afterSequence,
       ...(limit !== undefined ? { limit } : {}),
@@ -238,7 +243,7 @@ async function handleTier2(
   if (method === 'GET' && pathname === '/v1/daemon/agent-host/sessions') {
     const response = await hostQuery(service, {
       query: 'list_sessions',
-      limit: parsePositiveInt(searchParams.get('limit'), 'limit'),
+      limit: parseClampedLimit(searchParams.get('limit'), 'limit'),
       cursor: searchParams.get('cursor') ?? undefined,
     });
     return response.sessions ?? { items: [], pagination: { limit: 50, has_more: false, next_cursor: null } };

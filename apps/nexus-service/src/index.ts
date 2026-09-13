@@ -1,7 +1,8 @@
 import type { Server } from 'node:http';
 import { createAcpProvider } from '@42ch/nexus-provider-acp';
 import type { CoreCloseReport } from '@42ch/nexus-contracts';
-import { CLOSE_BUDGET_MS, loadTlsMaterial, resolveServiceConfig, type ServiceOptions } from './config.js';
+import { validateStartupBind } from './bind.js';
+import { loadTlsMaterial, resolveServiceConfig, type ServiceOptions } from './config.js';
 import { closeServiceCore, openServiceCore } from './lifecycle.js';
 import { createServiceServer, listenServer, type RunningService } from './server.js';
 
@@ -13,7 +14,10 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
     const material = loadTlsMaterial(config.tlsCert, config.tlsKey);
     config.tlsCert = material.cert;
     config.tlsKey = material.key;
+    config.tlsCertMtimeMs = material.certMtimeMs;
   }
+
+  validateStartupBind(config);
 
   const providers = config.domainOnly ? undefined : createAcpProvider();
   const serviceCore = await openServiceCore(config, providers);
@@ -23,36 +27,24 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
   const close = async (): Promise<CoreCloseReport> => {
     if (!closing) {
       closing = (async () => {
-        const deadline = Date.now() + CLOSE_BUDGET_MS;
         if (server?.listening) {
-          await closeListener(server, Math.max(0, deadline - Date.now()));
+          await new Promise<void>((resolve) => {
+            server!.close(() => resolve());
+          });
         }
-        return closeServiceCore(serviceCore.core, Math.max(0, deadline - Date.now()));
+        return closeServiceCore(serviceCore.core);
       })();
     }
     return closing;
   };
 
-  const created = createServiceServer(config, serviceCore, close);
-  server = created.server;
   try {
+    const created = createServiceServer(config, serviceCore, close);
+    server = created.server;
     await listenServer(server, config.host, config.port);
     return created.running;
   } catch (error) {
     await close();
     throw error;
   }
-}
-
-function closeListener(server: Server, budgetMs: number): Promise<void> {
-  const { promise, resolve } = Promise.withResolvers<void>();
-  const timer = setTimeout(() => {
-    server.closeAllConnections();
-    resolve();
-  }, budgetMs);
-  server.close(() => {
-    clearTimeout(timer);
-    resolve();
-  });
-  return promise;
 }

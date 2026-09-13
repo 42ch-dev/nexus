@@ -42,6 +42,8 @@ const STATUS_BY_CODE: Record<string, number> = {
   input_too_large: 413,
 };
 
+const PUBLIC_INTERNAL_MESSAGE = 'Internal server error';
+
 export function statusForCode(code: string): number {
   return STATUS_BY_CODE[code] ?? 500;
 }
@@ -79,12 +81,26 @@ function mapDisplayMessage(message: string): HttpError {
   if (message.startsWith('not found: ')) {
     return new HttpError(404, 'not_found', message, { resource: message.slice('not found: '.length) });
   }
+  const sessionNotFound = /^session (.+) not found$/.exec(message);
+  if (sessionNotFound) {
+    return new HttpError(404, 'not_found', message, { resource: `session:${sessionNotFound[1]}` });
+  }
+  const operationInactive = /^operation (.+) is not active$/.exec(message);
+  if (operationInactive) {
+    return new HttpError(404, 'not_found', message, { resource: `operation:${operationInactive[1]}` });
+  }
   const invalid = /^invalid input: ([^—]+) — (.+)$/.exec(message);
   if (invalid) {
     return new HttpError(400, 'invalid_input', message, {
       field: invalid[1].trim(),
       reason: invalid[2].trim(),
     });
+  }
+  if (message.startsWith('session_id:') || message.startsWith('operation_id:')) {
+    return new HttpError(400, 'invalid_input', message);
+  }
+  if (message.startsWith('invalid ')) {
+    return new HttpError(400, 'invalid_input', message);
   }
   if (message === 'world kb conflict') {
     return new HttpError(409, 'world_kb_conflict', 'World KB conflict');
@@ -113,10 +129,10 @@ function mapDisplayMessage(message: string): HttpError {
   if (message === 'provider port unavailable') {
     return new HttpError(503, 'busy', 'Provider port unavailable');
   }
-  if (message.startsWith('internal: ')) {
-    return new HttpError(500, 'internal', message);
+  if (message.startsWith('internal: ') || message.startsWith('config_load:') || message.startsWith('database_error:')) {
+    return new HttpError(500, 'internal', PUBLIC_INTERNAL_MESSAGE);
   }
-  return new HttpError(500, 'internal', message);
+  return new HttpError(500, 'internal', PUBLIC_INTERNAL_MESSAGE);
 }
 
 export function mapNativeError(error: unknown): HttpError {
@@ -129,17 +145,19 @@ export function mapNativeError(error: unknown): HttpError {
       wire.details && typeof wire.details === 'object'
         ? (wire.details as Record<string, unknown>)
         : undefined;
-    return new HttpError(status, wire.code, wire.message, details);
+    const publicMessage = wire.code === 'internal' ? PUBLIC_INTERNAL_MESSAGE : wire.message;
+    return new HttpError(status, wire.code, publicMessage, details);
   }
   return mapDisplayMessage(message);
 }
 
 export function toErrorBody(error: HttpError, requestId: string): ApiErrorBody {
+  const message = error.code === 'internal' ? PUBLIC_INTERNAL_MESSAGE : error.message;
   return {
     success: false,
     error: {
       code: error.code,
-      message: error.message,
+      message,
       ...(error.details ? { details: error.details } : {}),
       request_id: requestId,
     },
@@ -149,7 +167,10 @@ export function toErrorBody(error: HttpError, requestId: string): ApiErrorBody {
 export function walkJsonSafeIntegers(value: unknown, path = 'body'): void {
   if (value === null || value === undefined) return;
   if (typeof value === 'number') {
-    if (!Number.isSafeInteger(value)) {
+    if (!Number.isFinite(value)) {
+      throw new HttpError(400, 'invalid_input', `numeric_range: ${path} is not finite`);
+    }
+    if (Number.isInteger(value) && !Number.isSafeInteger(value)) {
       throw new HttpError(400, 'invalid_input', `numeric_range: ${path} is not a safe integer`);
     }
     return;

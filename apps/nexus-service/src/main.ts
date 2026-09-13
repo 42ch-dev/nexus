@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { CLOSE_BUDGET_MS, parseCliArgs } from './config.js';
+import { parseCliArgs } from './config.js';
 import { startService } from './index.js';
 
 async function main(): Promise<void> {
@@ -18,21 +18,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    const report = await Promise.race([
-      running.close(),
-      new Promise<import('@42ch/nexus-contracts').CoreCloseReport>((resolve) => {
-        setTimeout(
-          () =>
-            resolve({
-              state: 'interrupted',
-              cleanup_confirmed: false,
-              pending_operations: [],
-              reason: 'user_requested',
-            }),
-          CLOSE_BUDGET_MS,
-        );
-      }),
-    ]);
+    const report = await running.close();
     const code = report.cleanup_confirmed ? 0 : 1;
     console.error(`[nexus-service] ${signal} close state=${report.state} confirmed=${report.cleanup_confirmed}`);
     process.exit(code);

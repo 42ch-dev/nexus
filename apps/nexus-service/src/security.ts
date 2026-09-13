@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
+import { isLoopbackBindHost } from './bind.js';
 import type { ResolvedServiceConfig } from './config.js';
 
 export type AuthMode = 'keyed_all' | 'keyless_localhost';
@@ -33,7 +34,7 @@ export function constantTimeEqual(a: string, b: string): boolean {
 export function isLoopbackAddress(remoteAddress: string | undefined): boolean {
   if (!remoteAddress) return true;
   const normalized = remoteAddress.replace(/^::ffff:/, '');
-  return normalized === '127.0.0.1' || normalized === '::1' || normalized === 'localhost';
+  return isLoopbackBindHost(normalized);
 }
 
 export function validateBindPolicy(

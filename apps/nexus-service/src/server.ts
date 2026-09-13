@@ -2,6 +2,7 @@ import { createServer as createHttpServer, type IncomingMessage, type Server, ty
 import { createServer as createHttpsServer } from 'node:https';
 import { randomUUID } from 'node:crypto';
 import {
+  formatHttpAuthority,
   HEADER_READ_TIMEOUT_MS,
   MAX_REQUEST_BYTES,
   REQUEST_READ_TIMEOUT_MS,
@@ -47,7 +48,6 @@ async function readBody(req: IncomingMessage): Promise<Buffer> {
       total += chunk.length;
       if (total > MAX_REQUEST_BYTES) {
         reject(new HttpError(413, 'input_too_large', 'request body exceeds 1 MiB'));
-        req.destroy();
         return;
       }
       chunks.push(chunk);
@@ -107,7 +107,7 @@ export function createServiceServer(
   closeFn: () => Promise<import('@42ch/nexus-contracts').CoreCloseReport>,
 ): { server: Server; running: RunningService } {
   const protocol = config.tlsCert && config.tlsKey ? 'https' : 'http';
-  const url = `${protocol}://${config.host}:${config.port}`;
+  const url = `${protocol}://${formatHttpAuthority(config.host, config.port)}`;
 
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     const id = requestId(req);

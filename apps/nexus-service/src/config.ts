@@ -1,5 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { isLoopbackBindHost } from './bind.js';
 
 export interface ServiceOptions {
   home: string;
@@ -15,6 +16,7 @@ export interface ResolvedServiceConfig extends ServiceOptions {
   home: string;
   apiKey: string | null;
   allowedOrigins: string[];
+  tlsCertMtimeMs?: number;
 }
 
 export const MAX_REQUEST_BYTES = 1024 * 1024;
@@ -25,6 +27,28 @@ export const CLOSE_BUDGET_MS = 5_000;
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 8421;
 
+function isValidOriginHeaderValue(origin: string): boolean {
+  try {
+    const parsed = new URL(origin);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/** Bracket IPv6 authorities for URL/origin construction. */
+export function formatHttpAuthority(host: string, port: number): string {
+  const trimmed = host.trim();
+  if (trimmed.startsWith('[') || !trimmed.includes(':')) {
+    return `${trimmed}:${port}`;
+  }
+  return `[${trimmed}]:${port}`;
+}
+
+export function httpOriginForBindHost(host: string, port: number): string {
+  return `http://${formatHttpAuthority(host, port)}`;
+}
+
 export function resolveAllowedOrigins(port: number, host: string): string[] {
   const origins = new Set<string>([
     `http://127.0.0.1:${port}`,
@@ -34,18 +58,29 @@ export function resolveAllowedOrigins(port: number, host: string): string[] {
     'http://localhost:5173',
     'http://127.0.0.1:5173',
   ]);
-  const trimmed = host.trim();
-  if (trimmed === 'localhost' || trimmed === '127.0.0.1' || trimmed === '::1') {
-    origins.add(`http://${trimmed}:${port}`);
+
+  if (isLoopbackBindHost(host)) {
+    origins.add(httpOriginForBindHost(host, port));
   }
+
   const envOrigins = process.env.NEXUS_DAEMON_ALLOWED_ORIGINS;
   if (envOrigins) {
     for (const raw of envOrigins.split(',')) {
       const origin = raw.trim();
-      if (origin) origins.add(origin);
+      if (!origin) continue;
+      if (isValidOriginHeaderValue(origin)) {
+        origins.add(origin);
+      }
     }
   }
+
   return [...origins];
+}
+
+export function validateServiceHome(home: string): void {
+  if (!existsSync(home)) {
+    throw new Error(`home directory does not exist: ${home}`);
+  }
 }
 
 export function resolveServiceConfig(options: ServiceOptions): ResolvedServiceConfig {
@@ -126,9 +161,14 @@ export function parseCliArgs(argv: string[]): CliArgs {
   return { home, host, port, domainOnly, allowRemote, tlsCert, tlsKey };
 }
 
-export function loadTlsMaterial(certPath: string, keyPath: string): { cert: string; key: string } {
+export function loadTlsMaterial(
+  certPath: string,
+  keyPath: string,
+): { cert: string; key: string; certPath: string; certMtimeMs: number } {
   return {
     cert: readFileSync(certPath, 'utf8'),
     key: readFileSync(keyPath, 'utf8'),
+    certPath,
+    certMtimeMs: statSync(certPath).mtimeMs,
   };
 }

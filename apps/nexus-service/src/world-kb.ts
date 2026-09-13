@@ -69,14 +69,37 @@ export function parseIncludeSuggested(searchParams: URLSearchParams): boolean {
   throw new HttpError(400, 'invalid_input', 'include_suggested must be a boolean');
 }
 
-export function parsePositiveInt(
+function parseStrictIntegerToken(value: string, field: string): number {
+  if (!/^-?\d+$/.test(value)) {
+    throw new HttpError(400, 'invalid_input', `${field} must be a decimal integer`);
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new HttpError(400, 'invalid_input', `${field} must be a safe integer`);
+  }
+  return parsed;
+}
+
+/** Candidate/session pagination: absent -> default, then clamp to 1..max. */
+export function parseClampedLimit(
   value: string | null,
   field: string,
-  { min = 1, max = 250 }: { min?: number; max?: number } = {},
+  { defaultLimit = 50, max = 250 }: { defaultLimit?: number; max?: number } = {},
+): number {
+  if (value === null) return defaultLimit;
+  const parsed = parseStrictIntegerToken(value, field);
+  return Math.min(Math.max(parsed, 1), max);
+}
+
+/** Core changes limit: absent -> undefined (native default), otherwise strict 1..max. */
+export function parseBoundedLimit(
+  value: string | null,
+  field: string,
+  { min = 1, max = 256 }: { min?: number; max?: number } = {},
 ): number | undefined {
   if (value === null) return undefined;
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
+  const parsed = parseStrictIntegerToken(value, field);
+  if (parsed < min || parsed > max) {
     throw new HttpError(400, 'invalid_input', `${field} must be an integer between ${min} and ${max}`);
   }
   return parsed;

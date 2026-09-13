@@ -1,23 +1,26 @@
-import { createHash } from 'node:crypto';
 import { nativeCompatibility, openCore, type NativeCore, type ProviderCallbacks } from '@42ch/nexus-native';
-import type { CoreCloseReport } from '@42ch/nexus-contracts';
-import { CLOSE_BUDGET_MS, type ResolvedServiceConfig } from './config.js';
+import type { CertFingerprintResponse, CoreCloseReport } from '@42ch/nexus-contracts';
+import type { ResolvedServiceConfig } from './config.js';
+import { validateServiceHome } from './config.js';
 import { HttpError } from './errors.js';
+import { certCreatedAtFromMtime, fingerprintFromPem } from './tls.js';
 
 export interface ServiceCore {
   core: NativeCore;
   domainOnly: boolean;
-  tlsFingerprint: string | null;
+  tlsFingerprint: CertFingerprintResponse | null;
   startedAt: string;
+  workspaceInitialized: boolean;
+  principalId: string;
+  providerReady: boolean;
 }
-
-let closingPromise: Promise<CoreCloseReport> | null = null;
 
 export async function openServiceCore(
   config: ResolvedServiceConfig,
   providers?: ProviderCallbacks,
 ): Promise<ServiceCore> {
   nativeCompatibility();
+  validateServiceHome(config.home);
 
   const access = config.domainOnly ? 'direct_writer' : 'engine_owner';
   if (!config.domainOnly && !providers) {
@@ -37,9 +40,34 @@ export async function openServiceCore(
     config.domainOnly ? undefined : providers,
   );
 
-  let tlsFingerprint: string | null = null;
+  let principalId = '';
+  try {
+    principalId = await core.activePrincipal();
+  } catch (error) {
+    await core.close().catch(() => undefined);
+    throw error;
+  }
+
+  let tlsFingerprint: CertFingerprintResponse | null = null;
   if (config.tlsCert) {
-    tlsFingerprint = createHash('sha256').update(config.tlsCert).digest('hex');
+    const { fingerprint, algorithm } = fingerprintFromPem(config.tlsCert);
+    tlsFingerprint = {
+      fingerprint,
+      algorithm,
+      ...(config.tlsCertMtimeMs !== undefined
+        ? { created_at: certCreatedAtFromMtime(config.tlsCertMtimeMs) }
+        : {}),
+    };
+  }
+
+  let providerReady = Boolean(config.domainOnly);
+  if (!config.domainOnly) {
+    try {
+      await core.hostQuery({ query: 'health' });
+      providerReady = true;
+    } catch {
+      providerReady = false;
+    }
   }
 
   return {
@@ -47,32 +75,12 @@ export async function openServiceCore(
     domainOnly: Boolean(config.domainOnly),
     tlsFingerprint,
     startedAt: new Date().toISOString(),
+    workspaceInitialized: true,
+    principalId,
+    providerReady,
   };
 }
 
-export async function closeServiceCore(
-  core: NativeCore,
-  budgetMs = CLOSE_BUDGET_MS,
-): Promise<CoreCloseReport> {
-  if (closingPromise) return closingPromise;
-
-  closingPromise = (async () => {
-    const { promise: timeout, resolve: resolveTimeout } = Promise.withResolvers<CoreCloseReport>();
-    const timer = setTimeout(() => {
-      resolveTimeout({
-        state: 'interrupted',
-        cleanup_confirmed: false,
-        pending_operations: [],
-        reason: 'user_requested',
-      });
-    }, budgetMs);
-    try {
-      return await Promise.race([core.close(), timeout]);
-    } finally {
-      clearTimeout(timer);
-      closingPromise = null;
-    }
-  })();
-
-  return closingPromise;
+export async function closeServiceCore(core: NativeCore): Promise<CoreCloseReport> {
+  return core.close();
 }
