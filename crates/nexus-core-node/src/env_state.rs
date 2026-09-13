@@ -284,6 +284,17 @@ impl EnvState {
         matches!(result, Ok(Ok(())))
     }
 
+    /// Whether a bounded native finalize may release the host owner.
+    ///
+    /// Release requires BOTH halves: the LocalSet bridge *settled* (a clean join
+    /// with no live work — `!thread_alive` alone is not settlement, because a
+    /// thread that panicked also reports `thread_alive == false`) *and* the host
+    /// reported a confirmed shutdown.
+    #[must_use]
+    pub const fn finalize_owner_released(bridge_settled: bool, host_confirmed: bool) -> bool {
+        bridge_settled && host_confirmed
+    }
+
 /// NAPI8 environment cleanup: tombstone and run bounded native-only teardown.
     pub fn run_bounded_native_finalize(state: Arc<EnvState>) {
         state.tombstone_env();
@@ -324,11 +335,13 @@ impl EnvState {
                                 work_state.restore_host(host);
                             } else {
                                 host.localset_bridge().begin_drain();
-                                // The bounded inner join either settles the
-                                // LocalSet thread or hands its `JoinHandle` back
-                                // for tracked cleanup. It is never detached.
                                 let bridge_evidence =
                                     host.localset_bridge().shutdown_sync_with_deadline(deadline);
+                                // A join that could not settle inside the budget
+                                // hands its `JoinHandle` to tracked cleanup
+                                // straight away, so the owner stays retained even
+                                // if the host shutdown below consumes the rest of
+                                // the deadline. Never detached.
                                 if bridge_evidence.thread_alive {
                                     if let Some(handle) =
                                         host.localset_bridge().take_retained_runtime_thread()
@@ -338,27 +351,39 @@ impl EnvState {
                                             work_state.clone(),
                                         );
                                     }
-                                    work_state.mark_interrupted();
-                                    work_state.restore_host(host);
-                                } else if budget().is_zero() {
-                                    work_state.mark_interrupted();
-                                    work_state.restore_host(host);
-                                } else {
-                                    // The typed `HostResult` inside the timeout
-                                    // is authoritative: only a confirmed
-                                    // `Ok(())` releases the owner.
+                                }
+                                // The typed `HostResult` inside the timeout is
+                                // authoritative, and it only counts once the
+                                // bridge itself settled: a panicked or still-live
+                                // LocalSet thread is never a clean cleanup.
+                                let host_confirmed = if bridge_evidence.is_settled()
+                                    && !budget().is_zero()
+                                {
                                     let result = tokio::time::timeout_at(
                                         tokio::time::Instant::from_std(deadline),
                                         host.shutdown(),
                                     )
                                     .await;
-                                    if Self::host_shutdown_confirmed(&result) {
-                                        // Owned sessions confirmed clean; the
-                                        // host is released with the worker.
-                                    } else {
-                                        work_state.mark_interrupted();
-                                        work_state.restore_host(host);
+                                    Self::host_shutdown_confirmed(&result)
+                                } else {
+                                    false
+                                };
+                                if Self::finalize_owner_released(
+                                    bridge_evidence.is_settled(),
+                                    host_confirmed,
+                                ) {
+                                    // Owned sessions confirmed clean; the host is
+                                    // released together with the finalize worker.
+                                } else {
+                                    let mut pending =
+                                        work_state.pending_operations_snapshot().await;
+                                    pending.extend(bridge_evidence.unsettled_pending());
+                                    if !host_confirmed {
+                                        pending.push("host-shutdown-unconfirmed".to_string());
                                     }
+                                    work_state.record_pending_operations(pending).await;
+                                    work_state.mark_interrupted();
+                                    work_state.restore_host(host);
                                 }
                             }
                         }

@@ -95,6 +95,54 @@ pub struct ShutdownEvidence {
     pub aborted_task_ids: Vec<u64>,
 }
 
+impl ShutdownEvidence {
+    /// Whether the bridge actually settled.
+    ///
+    /// Settlement requires a **clean join** of the owning thread — not merely a
+    /// dead one. A thread that panicked reports `thread_alive == false` *and*
+    /// `joined_cleanly == false`, so `!thread_alive` on its own must never be
+    /// read as success. Live work counters must also be drained.
+    #[must_use]
+    pub fn is_settled(&self) -> bool {
+        self.joined_cleanly
+            && !self.thread_alive
+            && self.active_tasks == 0
+            && self.pending_requests == 0
+            && self.owned_tasks == 0
+            && self.control_tasks == 0
+    }
+
+    /// Actionable detail describing why this bridge is not settled.
+    ///
+    /// Rendered into `CoreCloseReport.pending_operations` so a retained owner
+    /// is diagnosable instead of silent.
+    #[must_use]
+    pub fn unsettled_pending(&self) -> Vec<String> {
+        let mut entries = Vec::new();
+        if self.thread_alive {
+            entries.push("localset-thread-alive".to_string());
+        } else if !self.joined_cleanly {
+            entries.push("localset-thread-join-failed".to_string());
+        }
+        if self.active_tasks > 0 {
+            entries.push(format!("localset-active-tasks:{}", self.active_tasks));
+        }
+        if self.pending_requests > 0 {
+            entries.push(format!(
+                "localset-pending-requests:{}",
+                self.pending_requests
+            ));
+        }
+        if self.owned_tasks > 0 {
+            entries.push(format!("localset-owned-tasks:{}", self.owned_tasks));
+        }
+        if self.control_tasks > 0 {
+            entries.push(format!("localset-control-tasks:{}", self.control_tasks));
+        }
+        entries
+    }
+}
+
 /// Live bridge counters (for tests and lifecycle proofs).
 #[derive(Debug, Clone, Default)]
 pub struct LocalSetBridgeStats {
@@ -180,6 +228,9 @@ struct AdmissionCounters {
     draining: AtomicBool,
     shutting_down: AtomicBool,
     next_task_id: AtomicU64,
+    /// Set when the owning thread is spawned. A taken `JoinHandle` is not
+    /// evidence that no thread ever existed.
+    thread_started: AtomicBool,
     thread_joined: AtomicBool,
     /// Fires when a `TaskSlot` is installed (before first poll). Used by tests.
     task_slot_notify: Notify,
@@ -195,6 +246,7 @@ impl AdmissionCounters {
             draining: AtomicBool::new(false),
             shutting_down: AtomicBool::new(false),
             next_task_id: AtomicU64::new(1),
+            thread_started: AtomicBool::new(false),
             thread_joined: AtomicBool::new(false),
             task_slot_notify: Notify::new(),
         }
@@ -279,6 +331,14 @@ impl AdmissionCounters {
         self.owned_tasks.fetch_add(1, Ordering::AcqRel);
     }
 
+    fn mark_thread_started(&self) {
+        self.thread_started.store(true, Ordering::SeqCst);
+    }
+
+    fn thread_started(&self) -> bool {
+        self.thread_started.load(Ordering::SeqCst)
+    }
+
     fn mark_thread_joined(&self) {
         self.thread_joined.store(true, Ordering::SeqCst);
     }
@@ -302,6 +362,9 @@ pub struct LocalSetBridge {
     shutdown_claimed: Arc<AtomicBool>,
     /// Retained when a bounded join times out — never detached.
     retained_thread: Arc<Mutex<Option<JoinHandle<()>>>>,
+    /// The one settled shutdown result, shared with concurrent callers so a
+    /// loser observes the real settlement instead of inventing a snapshot.
+    settled: Arc<Mutex<Option<ShutdownEvidence>>>,
 }
 
 impl LocalSetBridge {
@@ -312,6 +375,7 @@ impl LocalSetBridge {
             counters: Arc::new(AdmissionCounters::new()),
             shutdown_claimed: Arc::new(AtomicBool::new(false)),
             retained_thread: Arc::new(Mutex::new(None)),
+            settled: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -327,6 +391,44 @@ impl LocalSetBridge {
     /// Take a retained runtime thread handle for tracked cleanup registration.
     pub fn take_retained_runtime_thread(&self) -> Option<JoinHandle<()>> {
         self.retained_thread.lock().ok()?.take()
+    }
+
+    /// The settled shutdown result, if the owning shutdown has finished.
+    fn settled_evidence(&self) -> Option<ShutdownEvidence> {
+        self.settled.lock().ok().and_then(|slot| slot.clone())
+    }
+
+    fn publish_settled(&self, evidence: &ShutdownEvidence) {
+        if let Ok(mut slot) = self.settled.lock() {
+            *slot = Some(evidence.clone());
+        }
+    }
+
+    /// Wait for the owning shutdown to publish its settlement. `None` means the
+    /// deadline passed without one.
+    async fn await_settlement(&self, deadline: Instant) -> Option<ShutdownEvidence> {
+        loop {
+            if let Some(evidence) = self.settled_evidence() {
+                return Some(evidence);
+            }
+            if Instant::now() >= deadline {
+                return None;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
+    /// Synchronous counterpart of [`Self::await_settlement`].
+    fn await_settlement_sync(&self, deadline: Instant) -> Option<ShutdownEvidence> {
+        loop {
+            if let Some(evidence) = self.settled_evidence() {
+                return Some(evidence);
+            }
+            if Instant::now() >= deadline {
+                return None;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
     }
 
     fn retain_runtime_thread(&self, handle: JoinHandle<()>) {
@@ -369,13 +471,15 @@ impl LocalSetBridge {
         let (work_tx, work_rx) = mpsc::channel::<WorkMessage>(MAX_PENDING_REQUESTS);
         let (control_tx, control_rx) = mpsc::channel::<ControlMessage>(64);
 
+        let thread_counters = self.counters.clone();
         let thread_handle = thread::Builder::new()
             .name("nexus-localset-bridge".to_string())
-            .spawn(move || run_localset_thread(work_rx, control_rx, counters))
+            .spawn(move || run_localset_thread(work_rx, control_rx, thread_counters))
             .map_err(|e| {
                 crate::AcpError::connection_failed(format!("spawn LocalSet thread: {e}"))
             })?;
 
+        counters.mark_thread_started();
         let runtime = BridgeRuntime {
             work_tx: work_tx.clone(),
             control_tx: control_tx.clone(),
@@ -594,6 +698,11 @@ impl LocalSetBridge {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
             .is_err()
         {
+            // One settlement: a concurrent caller observes the owner's result
+            // rather than manufacturing a snapshot of its own.
+            if let Some(evidence) = self.await_settlement(deadline).await {
+                return evidence;
+            }
             let mut evidence = self.evidence_from_state();
             if join_thread {
                 evidence = self.join_runtime_thread(evidence, deadline).await;
@@ -662,19 +771,19 @@ impl LocalSetBridge {
         if join_thread {
             evidence = self.join_runtime_thread(evidence, deadline).await;
         }
+        self.publish_settled(&evidence);
         evidence
     }
 
     fn evidence_from_state(&self) -> ShutdownEvidence {
         let stats = self.counters.stats();
         let thread_alive = self.runtime_thread_alive();
-        let never_started = self
-            .runtime
-            .lock()
-            .ok()
-            .is_some_and(|guard| guard.is_none());
         ShutdownEvidence {
-            joined_cleanly: never_started || (self.counters.thread_joined() && !thread_alive),
+            // A missing `JoinHandle` is NOT evidence that the thread never
+            // existed: it may have been taken by an earlier bounded join and
+            // retained. Only an unspawned thread counts as trivially joined.
+            joined_cleanly: !self.counters.thread_started()
+                || (self.counters.thread_joined() && !thread_alive),
             thread_alive,
             pending_requests: stats.pending_requests,
             pending_bytes: stats.pending_bytes,
@@ -693,6 +802,13 @@ impl LocalSetBridge {
     }
 
     fn runtime_thread_alive(&self) -> bool {
+        // A retained handle means the thread outlived a bounded join: it is
+        // still (or may still be) running even though the runtime slot is empty.
+        if let Ok(slot) = self.retained_thread.lock() {
+            if let Some(handle) = slot.as_ref() {
+                return !handle.is_finished();
+            }
+        }
         let guard = self.runtime.lock().ok();
         match guard {
             Some(g) => g
@@ -775,6 +891,10 @@ impl LocalSetBridge {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
             .is_err()
         {
+            // One settlement: observe the owner's result, never a fabricated one.
+            if let Some(evidence) = self.await_settlement_sync(deadline) {
+                return evidence;
+            }
             let mut evidence = self.evidence_from_state();
             let join_budget = deadline.saturating_duration_since(Instant::now());
             if !join_budget.is_zero() {
@@ -821,6 +941,7 @@ impl LocalSetBridge {
         evidence.active_tasks = stats.active_tasks;
         evidence.owned_tasks = stats.owned_tasks;
         evidence.control_tasks = stats.control_tasks;
+        self.publish_settled(&evidence);
         evidence
     }
 
@@ -1294,5 +1415,93 @@ impl Drop for LocalSetBridge {
             return;
         }
         self.shutdown_sync();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Install a runtime whose owning thread panics, so `JoinHandle::join()`
+    /// returns `Err` — the join-failure shape this contract is about. (A panic
+    /// inside a `spawn_local` task is caught by the task harness and never
+    /// reaches the thread, so the failure has to be injected here.)
+    fn install_panicked_thread(bridge: &LocalSetBridge) {
+        let (work_tx, _work_rx) = mpsc::channel(MAX_PENDING_REQUESTS);
+        let (control_tx, _control_rx) = mpsc::channel(1);
+        let handle = thread::spawn(|| panic!("injected LocalSet thread panic"));
+        bridge.counters.mark_thread_started();
+        *bridge.runtime.lock().unwrap() = Some(BridgeRuntime {
+            work_tx,
+            control_tx,
+            thread_handle: handle,
+        });
+    }
+
+    #[tokio::test]
+    async fn panicked_runtime_thread_is_never_settled() {
+        let bridge = LocalSetBridge::new();
+        install_panicked_thread(&bridge);
+
+        let evidence = bridge.shutdown().await;
+        assert!(
+            !evidence.joined_cleanly,
+            "a join failure must not report a clean join: {evidence:?}"
+        );
+        assert!(
+            !evidence.thread_alive,
+            "the panicked thread is gone: {evidence:?}"
+        );
+        assert!(
+            !evidence.is_settled(),
+            "a panicked thread is not settlement, even though thread_alive is false: {evidence:?}"
+        );
+        assert!(
+            evidence
+                .unsettled_pending()
+                .iter()
+                .any(|entry| entry == "localset-thread-join-failed"),
+            "the failure must be actionable: {:?}",
+            evidence.unsettled_pending()
+        );
+
+        // A later read must not claim settlement just because the runtime slot
+        // is now empty — taking the handle is not joining it.
+        let again = bridge.shutdown().await;
+        assert!(
+            !again.is_settled(),
+            "a second read must not turn a broken join into success: {again:?}"
+        );
+        assert!(
+            again
+                .unsettled_pending()
+                .iter()
+                .any(|entry| entry == "localset-thread-join-failed"),
+            "{:?}",
+            again.unsettled_pending()
+        );
+    }
+
+    #[tokio::test]
+    async fn clean_join_settles() {
+        let bridge = LocalSetBridge::new();
+        let value: i32 = bridge
+            .execute(4, || Box::pin(async { 7 }))
+            .await
+            .expect("execute");
+        assert_eq!(value, 7);
+        let evidence = bridge.shutdown().await;
+        assert!(evidence.is_settled(), "{evidence:?}");
+        assert!(evidence.unsettled_pending().is_empty());
+    }
+
+    #[tokio::test]
+    async fn unstarted_bridge_is_settled() {
+        let bridge = LocalSetBridge::new();
+        let evidence = bridge.shutdown().await;
+        assert!(
+            evidence.is_settled(),
+            "a bridge that never spawned a thread has nothing to settle: {evidence:?}"
+        );
     }
 }

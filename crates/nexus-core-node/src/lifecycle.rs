@@ -318,12 +318,9 @@ async fn cleanup_owners(
             state.record_pending_operations(pending).await;
             let shutdown_ok = manager.shutdown().await.is_ok();
             let bridge_evidence = manager.localset_bridge().shutdown_before(deadline).await;
-            let bridge_settled = bridge_evidence.joined_cleanly
-                && !bridge_evidence.thread_alive
-                && bridge_evidence.active_tasks == 0
-                && bridge_evidence.pending_requests == 0
-                && bridge_evidence.owned_tasks == 0
-                && bridge_evidence.control_tasks == 0;
+            // Settlement is a clean join with no live work — never `!thread_alive`
+            // alone, which a panicked thread also satisfies.
+            let bridge_settled = bridge_evidence.is_settled();
             let bridge_entries = manager
                 .localset_bridge()
                 .close_entries(&at_close, &bridge_evidence);
@@ -332,8 +329,9 @@ async fn cleanup_owners(
                 host_guard.disarm();
                 true
             } else {
-                let mut pending = state.pending_operations_snapshot().await;
-                pending.extend(bridge_entries);
+                // A join that could not settle inside the budget hands its
+                // handle to tracked cleanup; a failed join has none to retain
+                // but is still never released.
                 if bridge_evidence.thread_alive {
                     if let Some(handle) =
                         manager.localset_bridge().take_retained_runtime_thread()
@@ -343,8 +341,10 @@ async fn cleanup_owners(
                             state.clone(),
                         );
                     }
-                    pending.push("localset-thread-alive".to_string());
                 }
+                let mut pending = state.pending_operations_snapshot().await;
+                pending.extend(bridge_entries);
+                pending.extend(bridge_evidence.unsettled_pending());
                 if !shutdown_ok {
                     pending.push("host-shutdown-unconfirmed".to_string());
                 }
@@ -683,6 +683,23 @@ mod tests {
     }
 
     #[test]
+    fn finalize_release_requires_a_settled_bridge_and_a_confirmed_host() {
+        // Release is a conjunction. In particular a LocalSet thread that
+        // panicked reports thread_alive == false, so a decision keyed off
+        // `!thread_alive` would release an owner whose join actually failed.
+        assert!(EnvState::finalize_owner_released(true, true));
+        assert!(
+            !EnvState::finalize_owner_released(false, true),
+            "an unsettled bridge (live OR join-failed) must never release the owner"
+        );
+        assert!(
+            !EnvState::finalize_owner_released(true, false),
+            "a confirmed host cannot stand in for a settled bridge alone"
+        );
+        assert!(!EnvState::finalize_owner_released(false, false));
+    }
+
+    #[test]
     fn host_shutdown_error_never_counts_as_finalize_success() {
         use nexus_agent_host::HostError;
 
@@ -755,6 +772,17 @@ mod tests {
         assert!(
             tracked >= 1,
             "the retained LocalSet thread must be tracked by the cleanup registry"
+        );
+        // No false Closed: the interrupted environment publishes no confirmed
+        // close report, and the actionable reason is retained for the report.
+        assert!(
+            state.settled_close.lock().await.is_none(),
+            "an unsettled finalize must not publish a settled close report"
+        );
+        let pending = state.pending_operations_snapshot().await;
+        assert!(
+            pending.iter().any(|entry| entry == "localset-thread-alive"),
+            "the report must carry the actionable unsettled reason: {pending:?}"
         );
 
         blocker.abort();

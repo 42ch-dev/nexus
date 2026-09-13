@@ -21,8 +21,8 @@ async fn localset_shutdown() {
         assert_eq!(n, cycle);
         let evidence = bridge.shutdown().await;
         assert!(
-            evidence.joined_cleanly || !evidence.thread_alive,
-            "cycle {cycle}: thread must join, evidence={evidence:?}"
+            evidence.is_settled(),
+            "cycle {cycle}: thread must settle cleanly, evidence={evidence:?}"
         );
         assert_eq!(evidence.active_tasks, 0, "cycle {cycle}");
         assert_eq!(evidence.pending_requests, 0, "cycle {cycle}");
@@ -66,7 +66,7 @@ async fn localset_shutdown() {
         );
         assert_eq!(bridge.stats().active_tasks, 0);
         let evidence = bridge.shutdown().await;
-        assert!(evidence.joined_cleanly || !evidence.thread_alive);
+        assert!(evidence.is_settled(), "{evidence:?}");
     }
 
     {
@@ -109,8 +109,11 @@ async fn localset_shutdown() {
         let b1 = bridge.clone();
         let b2 = bridge.clone();
         let (e1, e2) = tokio::join!(b1.shutdown(), b2.shutdown());
-        assert!(e1.joined_cleanly || !e1.thread_alive);
-        assert!(e2.joined_cleanly || !e2.thread_alive);
+        assert!(e1.is_settled(), "{e1:?}");
+        assert!(e2.is_settled(), "{e2:?}");
+        // Concurrent shutdown has one settlement: the loser must not invent a
+        // confirmed one either.
+        assert_eq!(e1.is_settled(), e2.is_settled());
     }
 
     {
@@ -125,7 +128,7 @@ async fn localset_shutdown() {
         let evidence = bridge.shutdown().await;
         hang.abort();
         assert_eq!(evidence.active_tasks, 0);
-        assert!(evidence.joined_cleanly || !evidence.thread_alive);
+        assert!(evidence.is_settled(), "{evidence:?}");
     }
 
     {
@@ -365,7 +368,7 @@ async fn localset_shutdown() {
             !evidence.aborted_task_ids.is_empty(),
             "aborted work and ownership tasks must be reported: {evidence:?}"
         );
-        assert!(evidence.joined_cleanly || !evidence.thread_alive);
+        assert!(evidence.is_settled(), "{evidence:?}");
         for h in blockers {
             h.abort();
         }
@@ -465,6 +468,20 @@ async fn localset_shutdown() {
         assert!(
             bridge.has_retained_runtime_thread(),
             "the runtime thread handle must be retained, never detached"
+        );
+        // A later read must not mistake "the handle was taken" for "the thread
+        // was joined": the retained handle keeps the bridge unsettled.
+        assert!(
+            !evidence.is_settled(),
+            "a timed-out join is not settlement: {evidence:?}"
+        );
+        assert!(
+            evidence
+                .unsettled_pending()
+                .iter()
+                .any(|entry| entry == "localset-thread-alive"),
+            "{:?}",
+            evidence.unsettled_pending()
         );
         let handle = bridge
             .take_retained_runtime_thread()
