@@ -332,11 +332,23 @@ export async function waitForChildExit(
   });
 }
 
+/**
+ * Terminate and confirm the owned child, spending only `timeoutMs`.
+ *
+ * `timeoutMs` is the WHOLE budget for this reap: the SIGTERM wait and the
+ * SIGKILL wait are slices of it, never additive. A budget of `0` cannot confirm
+ * anything, so it fences (unconfirmed, no blind signal) rather than firing a
+ * kill it has no time to verify. Callers inside a deadline-bounded handler pass
+ * their REMAINING budget; only standalone settlement attempts use the default.
+ */
 export async function reapChild(
   child: ChildProcessWithoutNullStreams,
   boundIdentity: ProcessIdentity,
   timeoutMs = reapTimeoutMs(),
 ): Promise<ReapResult> {
+  if (timeoutMs <= 0) {
+    return { confirmed: false, exitCode: null, signal: 'deadline_exhausted' };
+  }
   if (child.pid !== boundIdentity.pid) {
     return { confirmed: false, exitCode: null, signal: 'identity_mismatch' };
   }
@@ -385,13 +397,23 @@ export async function reapChild(
   };
 }
 
-export async function cleanupOwnedConnection(owned: OwnedConnection): Promise<ReapResult> {
+/**
+ * Close the owned connection's stdin and reap the child within `budgetMs`.
+ *
+ * `budgetMs` is passed straight through to [`reapChild`]; omitting it is only
+ * correct for a standalone settlement attempt, never for a phase of a
+ * deadline-bounded handler.
+ */
+export async function cleanupOwnedConnection(
+  owned: OwnedConnection,
+  budgetMs?: number,
+): Promise<ReapResult> {
   try {
     owned.stdinWritable.end();
   } catch {
     // already closed
   }
-  return await reapChild(owned.child, owned.boundIdentity);
+  return await reapChild(owned.child, owned.boundIdentity, budgetMs);
 }
 
 export async function closeOwnedConnection(owned: OwnedConnection): Promise<ReapResult> {

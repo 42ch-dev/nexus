@@ -77,27 +77,27 @@ describe('cancel honours the request deadline', () => {
       `cancel must respect deadline_ms, took ${elapsed}ms`,
     );
 
-    // The owned child must be reaped even though the prompt never settled: that
-    // is the whole point of bounding the join.
+    // A never-settling prompt consumes the whole deadline, so nothing is left to
+    // confirm a reap. The verdict must be an honest `interrupted` with the owner
+    // RETAINED — never a silent success, and never a kill it cannot verify.
+    assert.equal(reply.ok, false, `must not claim success: ${JSON.stringify(reply)}`);
+    assert.equal(reply.error?.code, 'interrupted');
+    assert.equal(
+      reply.error?.details?.cleanup_unconfirmed,
+      true,
+      'an unconfirmed reap must be fenced as interrupted',
+    );
+    assert.equal(engine.cleanupFenceCount(), 1, 'the owner must be retained for retry');
+
+    // The retained owner settles on a later attempt, and only then is the child
+    // confirmed gone.
+    const settled = await engine.trySettleCleanupFences();
+    assert.equal(settled.pending.length, 0, `retry must confirm: ${JSON.stringify(settled)}`);
+    assert.equal(engine.cleanupFenceCount(), 0);
     assert.ok(
       await waitForDeath(child),
-      'the owned child must be terminated despite the never-settling prompt',
+      'the retained owner must be reaped by the later settlement',
     );
-
-    // And the verdict must be honest: either the reap confirmed, or the reply
-    // reports interrupted — never a silent success with a live child.
-    const interrupted = reply.ok === false && reply.error?.code === 'interrupted';
-    assert.ok(
-      reply.ok === true || interrupted,
-      `reply must be ok or interrupted: ${JSON.stringify(reply)}`,
-    );
-    if (reply.ok !== true) {
-      assert.equal(
-        reply.error?.details?.cleanup_unconfirmed,
-        true,
-        'an unconfirmed reap must be fenced as interrupted',
-      );
-    }
   });
 
   test('shutdown honours the deadline for a busy session', async () => {
@@ -126,9 +126,158 @@ describe('cancel honours the request deadline', () => {
       elapsed < 2000,
       `shutdown must respect deadline_ms, took ${elapsed}ms`,
     );
+    // Same contract as cancel: no budget left means fence, retain, retry.
+    assert.equal(engine.cleanupFenceCount(), 1, 'the owner must be retained for retry');
+    const settled = await engine.trySettleCleanupFences();
+    assert.equal(settled.pending.length, 0, `retry must confirm: ${JSON.stringify(settled)}`);
     assert.ok(
       await waitForDeath(child),
-      'shutdown must reap the owned child even with a never-settling prompt',
+      'shutdown must reap the owned child once a settlement attempt has budget',
     );
+  });
+});
+
+describe('one absolute deadline per handler', () => {
+  /**
+   * A child that IGNORES SIGTERM. The handler can only confirm the reap by
+   * escalating to SIGKILL, which costs far more than the supplied deadline — so
+   * a handler that grants itself a fresh default reap budget is instantly
+   * visible here, both in wall time and in whether it claims a confirmed reap.
+   */
+  function spawnTermResistantChild() {
+    return spawn(
+      resolveNode(),
+      ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);"],
+      { stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+  }
+
+  /** Total handler time is the deadline plus scheduling/timer tolerance. */
+  const DEADLINE_TOLERANCE_MS = 600;
+
+  test('cancel spends only the supplied deadline, then fences a live owner', async () => {
+    const child = spawnTermResistantChild();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    const engine = createTestEngine();
+    const owner = makeOwner(child, 'gen-term');
+    engine.adoptSession('sess-term', owner, 'gen-term');
+    owner.connection = { cancel: async () => undefined };
+    engine.adoptOperation(
+      'sess-term',
+      'op-term',
+      new Promise(() => {}),
+      new OperationDelivery('op-term'),
+    );
+
+    const deadlineMs = 400;
+    const started = Date.now();
+    const reply = await engine.call({
+      request_id: 'term-cancel',
+      method: 'cancel',
+      session_id: 'sess-term',
+      operation_id: 'op-term',
+      deadline_ms: deadlineMs,
+      payload: {},
+    });
+    const elapsed = Date.now() - started;
+
+    // The whole handler is bounded by the ONE supplied deadline — the cancel
+    // phase plus the reap, not each with its own budget.
+    assert.ok(
+      elapsed <= deadlineMs + DEADLINE_TOLERANCE_MS,
+      `handler must finish within its deadline (${deadlineMs}ms), took ${elapsed}ms`,
+    );
+
+    // With the budget spent it must NOT claim a confirmed reap.
+    assert.equal(reply.ok, false, `must not claim success: ${JSON.stringify(reply)}`);
+    assert.equal(reply.error?.code, 'interrupted');
+    assert.equal(reply.error?.details?.cleanup_unconfirmed, true);
+
+    // The owner is RETAINED for a later settlement, and the child is untouched —
+    // a kill we cannot confirm is not issued.
+    assert.equal(
+      engine.cleanupFenceCount(),
+      1,
+      'the unconfirmed owner must be fenced for retry',
+    );
+    assert.equal(childAlive(child), true, 'no unconfirmable kill may be issued');
+
+    // A later settlement retries and, with a budget it can actually use,
+    // confirms the reap (SIGKILL escalation) and clears the fence.
+    const settled = await engine.trySettleCleanupFences();
+    assert.equal(settled.pending.length, 0, `settlement must confirm: ${JSON.stringify(settled)}`);
+    assert.equal(settled.settled.length, 1, 'the retained owner must settle on retry');
+    assert.equal(engine.cleanupFenceCount(), 0, 'a confirmed retry clears the fence');
+    assert.equal(await waitForDeath(child), true, 'the retry must actually reap the child');
+  });
+
+  test('shutdown spends only the supplied deadline, then fences a live owner', async () => {
+    const child = spawnTermResistantChild();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    const engine = createTestEngine();
+    const owner = makeOwner(child, 'gen-term-sd');
+    engine.adoptSession('sess-term-sd', owner, 'gen-term-sd');
+    owner.connection = { cancel: async () => undefined };
+    engine.adoptOperation(
+      'sess-term-sd',
+      'op-term-sd',
+      new Promise(() => {}),
+      new OperationDelivery('op-term-sd'),
+    );
+
+    const deadlineMs = 400;
+    const started = Date.now();
+    const reply = await engine.call({
+      request_id: 'term-shutdown',
+      method: 'shutdown',
+      session_id: 'sess-term-sd',
+      deadline_ms: deadlineMs,
+      payload: {},
+    });
+    const elapsed = Date.now() - started;
+
+    assert.ok(
+      elapsed <= deadlineMs + DEADLINE_TOLERANCE_MS,
+      `handler must finish within its deadline (${deadlineMs}ms), took ${elapsed}ms`,
+    );
+    assert.equal(reply.ok, false, `must not claim success: ${JSON.stringify(reply)}`);
+    assert.equal(reply.error?.details?.cleanup_unconfirmed, true);
+    assert.equal(engine.cleanupFenceCount(), 1, 'the owner must be retained');
+    assert.equal(childAlive(child), true, 'no unconfirmable kill may be issued');
+
+    const settled = await engine.trySettleCleanupFences();
+    assert.equal(settled.pending.length, 0, `settlement must confirm: ${JSON.stringify(settled)}`);
+    assert.equal(engine.cleanupFenceCount(), 0);
+    assert.equal(await waitForDeath(child), true);
+  });
+
+  test('a generous deadline still confirms the reap in one call', async () => {
+    // Contrast case: with enough budget the same child is reaped inside the
+    // handler, so the deadline bounds the work rather than always fencing.
+    const child = spawnTermResistantChild();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    const engine = createTestEngine();
+    const owner = makeOwner(child, 'gen-generous');
+    engine.adoptSession('sess-generous', owner, 'gen-generous');
+    engine.adoptOperation(
+      'sess-generous',
+      'op-generous',
+      Promise.resolve(),
+      new OperationDelivery('op-generous'),
+    );
+
+    const reply = await engine.call({
+      request_id: 'generous-shutdown',
+      method: 'shutdown',
+      session_id: 'sess-generous',
+      deadline_ms: 12_000,
+      payload: {},
+    });
+    assert.equal(reply.ok, true, `expected a confirmed reap: ${JSON.stringify(reply)}`);
+    assert.equal(engine.cleanupFenceCount(), 0);
+    assert.equal(await waitForDeath(child), true);
   });
 });

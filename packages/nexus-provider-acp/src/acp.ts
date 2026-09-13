@@ -88,7 +88,30 @@ function mapSessionUpdate(
 const DEFAULT_DEADLINE_MS = 5_000;
 
 /**
- * Bound `work` by the request deadline.
+ * The ONE absolute deadline for a cancel/shutdown handler, derived from the
+ * caller's `deadline_ms`.
+ *
+ * Every phase of the handler — protocol cancel, prompt settlement, forced
+ * teardown, TERM/KILL reap — draws from this single instant. No phase may grant
+ * itself a fresh default, or the handler would outlive the deadline it was given.
+ */
+function handlerDeadlineMs(deadlineMs: number | null | undefined): number {
+  const budget = typeof deadlineMs === 'number' && deadlineMs > 0 ? deadlineMs : DEFAULT_DEADLINE_MS;
+  return Date.now() + budget;
+}
+
+/**
+ * Budget left before `deadline`.
+ *
+ * Never negative and never a fresh default: a spent deadline yields `0`, which
+ * the reap reads as "cannot confirm" and fences rather than signalling blind.
+ */
+function remainingBudgetMs(deadline: number): number {
+  return Math.max(0, deadline - Date.now());
+}
+
+/**
+ * Bound `work` by the remaining budget.
  *
  * The caller's `deadline_ms` is authoritative: whatever happens, a cancel or
  * shutdown must reach the owned-process reap inside it rather than awaiting a
@@ -96,14 +119,13 @@ const DEFAULT_DEADLINE_MS = 5_000;
  * time — the caller then proceeds to cleanup rather than hanging.
  */
 async function boundedByDeadline(
-  deadlineMs: number | null | undefined,
+  budgetMs: number,
   work: Promise<unknown>,
 ): Promise<boolean> {
-  const budget = typeof deadlineMs === 'number' && deadlineMs > 0 ? deadlineMs : DEFAULT_DEADLINE_MS;
   let timer: unknown;
   try {
     const timeout = new Promise<'timeout'>((resolve) => {
-      timer = setTimeout(() => resolve('timeout'), budget);
+      timer = setTimeout(() => resolve('timeout'), budgetMs);
     });
     const settled = await Promise.race([work.then(() => 'done' as const), timeout]);
     return settled === 'done';
@@ -246,17 +268,27 @@ export class AcpProviderEngine {
     }
   }
 
+  /**
+   * Confirm the owned child is gone, spending only `budgetMs`.
+   *
+   * `budgetMs` is the caller's REMAINING handler budget — passing `undefined`
+   * means "this is a standalone settlement attempt" (a later retry or an eviction),
+   * which is the only case allowed to use the default reap budget.
+   */
   private async requireConfirmedCleanup(
     owned: OwnedConnection,
     fenceKey: string,
     failureMessage: string,
+    budgetMs?: number,
   ): Promise<ReapResult> {
-    const reap = await cleanupOwnedConnection(owned);
+    const reap = await cleanupOwnedConnection(owned, budgetMs);
     if (!reap.confirmed) {
       this.retainCleanupFence(fenceKey, owned);
       throw new CleanupUnconfirmedError(failureMessage);
     }
-    this.cleanupFences.delete(fenceKey);
+    // The child is gone, so every fence for this owner is settled — leaving a
+    // stale one behind would block a later reopen for no reason.
+    this.clearFencesForOwner(owned);
     return reap;
   }
 
@@ -523,18 +555,18 @@ export class AcpProviderEngine {
     if (!op) throw new Error('operation_not_found');
     const session = this.sessions.get(op.sessionId);
     if (!session?.owned.acpSessionId) throw new Error('session_not_found');
+    // ONE absolute deadline for this entire handler: the protocol cancel, the
+    // prompt join, and the TERM/KILL reap all draw from it. No phase may take a
+    // fresh default, or the handler would outlive the deadline it was given.
+    const deadline = handlerDeadlineMs(request.deadline_ms);
     op.cancelled = true;
     if (!op.delivery?.trySetTerminal({ kind: 'finished', reason: 'cancelled' })) {
       return okReply(request.request_id, { operation_id: operationId, session_id: op.sessionId });
     }
-    // The request deadline bounds BOTH the protocol cancel and the prompt join.
-    // A prompt the peer never settles must not keep the child alive: once the
-    // budget is spent we go straight to the owned-process reap below.
-    const cancelMs = request.deadline_ms;
     // Narrowing does not survive the closure boundary, so capture it here.
     const acpSessionId = session.owned.acpSessionId;
-    const cancelled = await boundedByDeadline(
-      cancelMs,
+    await boundedByDeadline(
+      remainingBudgetMs(deadline),
       (async () => {
         try {
           await session.owned.connection.cancel({ sessionId: acpSessionId });
@@ -544,15 +576,16 @@ export class AcpProviderEngine {
         if (op.promptTask) await op.promptTask.catch(() => undefined);
       })(),
     );
-    if (!cancelled) {
-      // Deadline spent: force the owned connection teardown rather than waiting
-      // for a prompt task that may never settle.
-      await cleanupOwnedConnection(session.owned).catch(() => undefined);
-    }
     if (session.activeOperationId === operationId) session.activeOperationId = null;
     const ownerKey = `${session.recipeGeneration}:${session.sessionId}`;
     try {
-      await this.requireConfirmedCleanup(session.owned, ownerKey, 'cancel_child_not_reaped');
+      // Whatever the cancel phase left is the ONLY budget the reap may spend.
+      await this.requireConfirmedCleanup(
+        session.owned,
+        ownerKey,
+        'cancel_child_not_reaped',
+        remainingBudgetMs(deadline),
+      );
     } catch (error) {
       if (error instanceof CleanupUnconfirmedError) {
         return interruptedReply(request.request_id, error.message);
@@ -574,14 +607,16 @@ export class AcpProviderEngine {
     // owned child first: without the ACP cancel notification a blocked prompt
     // never settles, so awaiting the prompt task would hang forever instead of
     // reaching the owned process reap.
+    // ONE absolute deadline for the whole handler (see `handleCancel`).
+    const deadline = handlerDeadlineMs(request.deadline_ms);
     if (session.activeOperationId) {
       const active = this.operations.get(session.activeOperationId);
       if (active) {
         active.cancelled = true;
         active.delivery?.trySetTerminal({ kind: 'finished', reason: 'cancelled' });
         const acpSessionId = session.owned.acpSessionId;
-        const cancelled = await boundedByDeadline(
-          request.deadline_ms,
+        await boundedByDeadline(
+          remainingBudgetMs(deadline),
           (async () => {
             if (acpSessionId) {
               try {
@@ -593,15 +628,17 @@ export class AcpProviderEngine {
             if (active.promptTask) await active.promptTask.catch(() => undefined);
           })(),
         );
-        if (!cancelled) {
-          await cleanupOwnedConnection(session.owned).catch(() => undefined);
-        }
       }
       session.activeOperationId = null;
     }
     const ownerKey = `${session.recipeGeneration}:${sessionId}`;
     try {
-      await this.requireConfirmedCleanup(session.owned, ownerKey, 'shutdown_child_not_reaped');
+      await this.requireConfirmedCleanup(
+        session.owned,
+        ownerKey,
+        'shutdown_child_not_reaped',
+        remainingBudgetMs(deadline),
+      );
     } catch (error) {
       if (error instanceof CleanupUnconfirmedError) {
         return interruptedReply(request.request_id, error.message);
