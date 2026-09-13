@@ -10,7 +10,7 @@
   "properties": {
     "query": {
       "type": "string",
-      "enum": ["health", "catalog", "list_sessions", "get_session", "get_operation", "scan"]
+      "enum": ["health", "catalog", "list_sessions", "get_session", "get_operation"]
     },
     "session_id": { "type": "string" },
     "operation_id": { "type": "string" },

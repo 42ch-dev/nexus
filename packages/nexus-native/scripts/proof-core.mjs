@@ -22,20 +22,22 @@ if (caseName !== 'wire') {
 mkdirSync(outDir, { recursive: true });
 
 const home = mkdtempSync(join(tmpdir(), 'nexus-native-wire-'));
-const seed = spawnSync('cargo', ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', home], {
-  cwd: root,
-  encoding: 'utf8',
-});
+const seed = spawnSync(
+  'cargo',
+  ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', home],
+  { cwd: root },
+);
 if (seed.status !== 0) {
-  writeFileSync(join(outDir, 'proof-failed.json'), JSON.stringify({ error: 'seed failed', stderr: seed.stderr }, null, 2));
+  console.error(seed.stderr?.toString());
   process.exit(seed.status ?? 1);
 }
 
-const nodePath = join(__dirname, '..', 'native', 'nexus_core_node.node');
 const require = createRequire(import.meta.url);
+const { loadNodePath } = await import('../dist/loader.js');
+const nodePath = loadNodePath();
 const binding = require(nodePath);
 const compat = JSON.parse(binding.compatibility());
-const core = await binding.open(
+const core = binding.open(
   JSON.stringify({ user_home: home, access: 'engine_owner', allow_uninitialized: false }),
 );
 const principal = await core.activePrincipal();
@@ -43,7 +45,7 @@ const results = { case: caseName, home, principal, compat, checks: [] };
 
 function record(name, ok, detail) {
   results.checks.push({ name, ok, detail });
-  if (!ok) throw new Error(`${name}: ${detail}`);
+  if (!ok) results.pass = false;
 }
 
 const graph = JSON.parse(
@@ -74,13 +76,27 @@ const staleReq = {
   expected_version: 1,
   patch: { title: 'Stale' },
 };
+const beforeStale = JSON.parse(
+  new TextDecoder().decode(await core.worldKbGraph(principal, 'wld_owned', false)),
+);
+const casEntity = beforeStale.entities?.find((e) => e.entity_id === 'kb_cas');
+const casVersionBefore = casEntity?.version;
 const conflict = await core
   .patchWorldKbEntity(principal, 'wld_owned', new TextEncoder().encode(JSON.stringify(staleReq)))
   .then(() => null)
   .catch((e) => String(e));
+const afterStale = JSON.parse(
+  new TextDecoder().decode(await core.worldKbGraph(principal, 'wld_owned', false)),
+);
+const casEntityAfter = afterStale.entities?.find((e) => e.entity_id === 'kb_cas');
 record('stale_conflict', Boolean(conflict), conflict ?? 'no error');
+record(
+  'stale_no_mutation',
+  casEntityAfter?.version === casVersionBefore,
+  `before=${casVersionBefore} after=${casEntityAfter?.version}`,
+);
 
-const bigVersion = Number.MAX_SAFE_INTEGER;
+const maxSafe = 9007199254740991;
 const precisionReq = {
   entity_id: 'kb_def456',
   expected_version: 0,
@@ -92,7 +108,18 @@ const precCreated = JSON.parse(
   ),
 );
 record('precision_create', precCreated.version === 1, `version=${precCreated.version}`);
-record('max_safe_integer', bigVersion === 9007199254740991, `value=${bigVersion}`);
+record('max_safe_integer', maxSafe === Number.MAX_SAFE_INTEGER, `value=${maxSafe}`);
+
+const overflowLimit = await core
+  .worldKbCandidates(principal, 'wld_owned', maxSafe + 1, null)
+  .then(() => null)
+  .catch((e) => String(e));
+record('limit_overflow_rejected', Boolean(overflowLimit), overflowLimit ?? 'no error');
+
+const atLimit = JSON.parse(
+  new TextDecoder().decode(await core.worldKbCandidates(principal, 'wld_owned', maxSafe, null)),
+);
+record('limit_max_safe_ok', Array.isArray(atLimit.items), `items=${atLimit.items?.length ?? 0}`);
 
 const candidates = JSON.parse(
   new TextDecoder().decode(await core.worldKbCandidates(principal, 'wld_owned', 10, null)),
@@ -100,6 +127,7 @@ const candidates = JSON.parse(
 record('candidates_nonempty', (candidates.items?.length ?? 0) > 0, `items=${candidates.items?.length ?? 0}`);
 
 await core.close();
-results.pass = true;
+results.pass = results.pass ?? true;
 writeFileSync(join(outDir, 'proof-wire.json'), JSON.stringify(results, null, 2));
 console.log('proof passed', outDir);
+if (!results.pass) process.exit(1);

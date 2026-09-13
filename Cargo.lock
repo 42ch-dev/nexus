@@ -3910,6 +3910,7 @@ dependencies = [
  "chrono",
  "claude-codes",
  "codex-codes",
+ "dashmap",
  "deepseek-harness-sdk",
  "futures-util",
  "nexus-acp-host",
@@ -4002,6 +4003,8 @@ name = "nexus-core-node"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "dashmap",
+ "futures-util",
  "napi",
  "napi-build",
  "napi-derive",
@@ -4011,11 +4014,12 @@ dependencies = [
  "nexus-home-layout",
  "nexus-local-db",
  "nexus-provider-ports",
- "once_cell",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "sqlx",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

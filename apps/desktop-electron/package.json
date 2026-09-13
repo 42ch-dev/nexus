@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "package": "node -e \"console.error('reserved for P3'); process.exit(2)\""
+    "package": "node src/native-smoke.mjs"
   },
   "dependencies": {
     "@42ch/nexus-native": "workspace:*"

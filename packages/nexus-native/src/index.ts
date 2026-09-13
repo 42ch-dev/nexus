@@ -16,12 +16,16 @@ import type {
 } from '@42ch/nexus-contracts';
 import {
   assertCompatibility,
+  expectedPlatformPackage,
   loadNativeBinding,
+  loadNodePath,
   readBundledCompatibility,
   readCompatibilityManifest,
+  readPackageManifest,
   type NativeCoreBinding,
 } from './loader.js';
 import { parseJsonBuffer, stringifyToBuffer } from './json.js';
+import { assertSafeInteger } from './validate.js';
 
 
 export interface ProviderCallbacks {
@@ -75,7 +79,7 @@ function wrapCore(inner: NativeCoreBinding): NativeCore {
     },
     async worldKbCandidates(principal, worldId, limit, cursor) {
       return parseJsonBuffer(
-        await inner.worldKbCandidates(principal, worldId, limit ?? null, cursor ?? null),
+        await inner.worldKbCandidates(principal, worldId, assertSafeInteger(limit ?? null, "limit"), cursor ?? null),
       );
     },
     async hostQuery(request) {
@@ -97,37 +101,39 @@ function wrapCore(inner: NativeCoreBinding): NativeCore {
 }
 
 export function nativeCompatibility(): NativeCompatibility {
+  const nodePath = loadNodePath();
   const binding = loadNativeBinding();
   const manifest = readCompatibilityManifest(binding);
-  const bundled = readBundledCompatibility();
-  assertCompatibility(manifest, bundled?.contract_tree_sha256);
+  const bundled = readBundledCompatibility(nodePath);
+  const pkg = expectedPlatformPackage();
+  const pkgManifest = readPackageManifest(pkg.name);
+  assertCompatibility(manifest, bundled, pkgManifest.version);
   return manifest;
 }
 
-export async function openCore(
-  options: NativeOpenOptions,
-  providers?: ProviderCallbacks,
-): Promise<NativeCore> {
+export function openCore(options: NativeOpenOptions, providers?: ProviderCallbacks): NativeCore {
+  const nodePath = loadNodePath();
   const binding = loadNativeBinding();
   const manifest = readCompatibilityManifest(binding);
-  const bundled = readBundledCompatibility();
-  assertCompatibility(manifest, bundled?.contract_tree_sha256);
-  if (providers) {
-    binding.registerProviderCallbacks({
-      call: async (requestJson) => JSON.stringify(await providers.call(JSON.parse(requestJson))),
-      next: async (requestJson) => {
-        const { operation_id, max_events, max_bytes } = JSON.parse(requestJson) as {
-          operation_id: string;
-          max_events: number;
-          max_bytes: number;
-        };
-        return JSON.stringify(
-          await providers.next(operation_id, max_events, max_bytes),
-        );
-      },
-    });
-  }
-  const core = await binding.open(JSON.stringify(options));
+  const bundled = readBundledCompatibility(nodePath);
+  const pkg = expectedPlatformPackage();
+  const pkgManifest = readPackageManifest(pkg.name);
+  assertCompatibility(manifest, bundled, pkgManifest.version);
+  const callbacks = providers
+    ? {
+        call: async (requestJson: string) =>
+          JSON.stringify(await providers.call(JSON.parse(requestJson))),
+        next: async (requestJson: string) => {
+          const { operation_id, max_events, max_bytes } = JSON.parse(requestJson) as {
+            operation_id: string;
+            max_events: number;
+            max_bytes: number;
+          };
+          return JSON.stringify(await providers.next(operation_id, max_events, max_bytes));
+        },
+      }
+    : undefined;
+  const core = binding.open(JSON.stringify(options), callbacks);
   return wrapCore(core);
 }
 

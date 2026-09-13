@@ -1,0 +1,10 @@
+{
+  "contract_tree_sha256": "a36f909f94a4842bcbe96ee4e83e355eb14d01a2758b202af364023ceb08b734",
+  "db_schema_max": 23,
+  "db_schema_min": 23,
+  "napi_minimum": 8,
+  "native_api_version": 1,
+  "package_version": "0.1.0",
+  "target_triple": "aarch64-unknown-macos",
+  "writer_protocol": 1
+}

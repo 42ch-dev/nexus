@@ -4,7 +4,8 @@
  * Generator: tooling/codegen/src/client-gen.ts
  */
 
-import type { WorldKbGraphResponse, WorldKbPatchEntityRequest, WorldKbPatchEntityResponse, WorldKbCandidatesResponse, CoreChangesRequest, CoreChangesResponse, CreateSessionRequest, AgentHostListSessionsQuery, SessionListResponse, SessionResponse, ShutdownSessionResponse, ExecuteOperationRequest, OperationResponse, CancelOperationResponse, ProviderHostEvent, CoreStreamGap } from '../index';
+import type { WorldKbGraphResponse, WorldKbPatchEntityRequest, WorldKbPatchEntityResponse, WorldKbCandidatesResponse, CoreChangesRequest, CoreChangesResponse, CreateSessionRequest, AgentHostListSessionsQuery, SessionListResponse, SessionResponse, ShutdownSessionResponse, ExecuteOperationRequest, OperationResponse, CancelOperationResponse, ProviderHostEvent } from '../index';
+import type { CoreStreamGap } from './provider-event-batch';
 
 export interface CoreSliceClient {
   getWorldKbGraph(worldId: string, query?: { includeSuggested?: boolean }): Promise<WorldKbGraphResponse>;

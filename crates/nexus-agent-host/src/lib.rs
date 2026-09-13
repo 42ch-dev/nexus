@@ -51,7 +51,7 @@ pub use error::{HostError, HostResult};
 pub use ids::{HostOperationId, HostSessionId, ProviderId};
 
 // Re-export key public types from submodules.
-pub use core::{HostSession, SessionRegistry, SessionState, TransitionResult};
+pub use core::{HostManager, HostSession, SessionRegistry, SessionState, TransitionResult};
 pub use discovery::ProviderCatalog;
 pub use policy::{AdmissionPolicy, HostPermissionResolver, PermissionOutcome};
 pub use telemetry::TelemetryContext;

@@ -44,7 +44,6 @@ const IMPORT_TYPES = [
   'OperationResponse',
   'CancelOperationResponse',
   'ProviderHostEvent',
-  'CoreStreamGap',
 ];
 
 function formatArgs(args: OperationArg[] | undefined): string {
@@ -54,88 +53,17 @@ function formatArgs(args: OperationArg[] | undefined): string {
     .join(', ');
 }
 
-/** Locked operation table — must match schemas/core/core-service-operations.schema.json default. */
-const OPERATIONS: Operation[] = [
-  {
-    name: 'getWorldKbGraph',
-    args: [
-      { name: 'worldId', type: 'string' },
-      { name: 'query', type: '{ includeSuggested?: boolean }', optional: true },
-    ],
-    returns: 'WorldKbGraphResponse',
-  },
-  {
-    name: 'worldKbPatchEntity',
-    args: [
-      { name: 'worldId', type: 'string' },
-      { name: 'request', type: 'WorldKbPatchEntityRequest' },
-    ],
-    returns: 'WorldKbPatchEntityResponse',
-  },
-  {
-    name: 'getWorldKbCandidates',
-    args: [
-      { name: 'worldId', type: 'string' },
-      { name: 'query', type: '{ limit?: number; cursor?: string }', optional: true },
-    ],
-    returns: 'WorldKbCandidatesResponse',
-  },
-  {
-    name: 'getCoreChanges',
-    args: [{ name: 'request', type: 'CoreChangesRequest' }],
-    returns: 'CoreChangesResponse',
-  },
-  {
-    name: 'createAgentHostSession',
-    args: [{ name: 'request', type: 'CreateSessionRequest' }],
-    returns: 'SessionResponse',
-  },
-  {
-    name: 'listAgentHostSessions',
-    args: [{ name: 'query', type: 'AgentHostListSessionsQuery', optional: true }],
-    returns: 'SessionListResponse',
-  },
-  {
-    name: 'getAgentHostSession',
-    args: [{ name: 'sessionId', type: 'string' }],
-    returns: 'SessionResponse',
-  },
-  {
-    name: 'shutdownAgentHostSession',
-    args: [{ name: 'sessionId', type: 'string' }],
-    returns: 'ShutdownSessionResponse',
-  },
-  {
-    name: 'executeAgentHostOperation',
-    args: [
-      { name: 'sessionId', type: 'string' },
-      { name: 'request', type: 'ExecuteOperationRequest' },
-    ],
-    returns: 'OperationResponse',
-  },
-  {
-    name: 'getAgentHostOperation',
-    args: [{ name: 'operationId', type: 'string' }],
-    returns: 'OperationResponse',
-  },
-  {
-    name: 'cancelAgentHostOperation',
-    args: [{ name: 'operationId', type: 'string' }],
-    returns: 'CancelOperationResponse',
-  },
-  {
-    name: 'subscribeAgentHostEvents',
-    args: [
-      { name: 'sessionId', type: 'string' },
-      { name: 'signal', type: 'AbortSignal' },
-    ],
-    returns: 'ProviderHostEvent | CoreStreamGap',
-    async_iterable: true,
-  },
-];
+type OperationsSchema = OperationsDoc & {
+  properties?: { operations?: { default?: Operation[] } };
+};
 
 export function generateCoreSliceClient(): void {
-  const operations = OPERATIONS;
+  const schemaPath = resolveFromRoot('schemas', 'core', 'core-service-operations.schema.json');
+  const doc = readJSON(schemaPath) as OperationsSchema;
+  const operations = doc.operations ?? doc.properties?.operations?.default;
+  if (!operations?.length) {
+    throw new Error(`no operations metadata in ${schemaPath}`);
+  }
   const outPath = resolveFromRoot(
     'packages',
     'nexus-contracts',
@@ -146,7 +74,13 @@ export function generateCoreSliceClient(): void {
   );
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
 
-  const lines: string[] = [BANNER, '', `import type { ${IMPORT_TYPES.join(', ')} } from '../index';`, ''];
+  const lines: string[] = [
+    BANNER,
+    '',
+    `import type { ${IMPORT_TYPES.join(', ')} } from '../index';`,
+    "import type { CoreStreamGap } from './provider-event-batch';",
+    '',
+  ];
   lines.push('export interface CoreSliceClient {');
   for (const op of operations) {
     const args = formatArgs(op.args);

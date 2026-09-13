@@ -1,33 +1,34 @@
 //! JS provider callback bridge with bounded TSFN admission (architecture §7).
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use napi::bindgen_prelude::{PromiseRaw, *};
-use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
+use dashmap::DashMap;
+use napi::bindgen_prelude::{Promise, *};
+use napi::threadsafe_function::ThreadsafeFunction;
 use nexus_contracts::{CoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply};
 use nexus_provider_ports::{ProviderPort, ProviderResult};
-use tokio::sync::{oneshot, Semaphore};
+use tokio::sync::Semaphore;
 
 use super::env_state::EnvState;
 
 const MAX_ACTIVE_PROMISES: usize = 32;
-const MAX_PENDING_BYTES: usize = 1024 * 1024;
 
-type JsPromiseString<'a> = PromiseRaw<'a, String>;
+type JsPromiseString = Promise<String>;
 
 pub struct JsProviderBridge {
     state: Arc<EnvState>,
-    call_tsfn: ThreadsafeFunction<String, JsPromiseString<'static>, String, Status, true, false, 16>,
-    next_tsfn: ThreadsafeFunction<String, JsPromiseString<'static>, String, Status, true, false, 16>,
+    call_tsfn: ThreadsafeFunction<String, JsPromiseString, String, Status, true, false, 16>,
+    next_tsfn: ThreadsafeFunction<String, JsPromiseString, String, Status, true, false, 16>,
     active: Arc<Semaphore>,
+    pull_in_flight: DashMap<String, Arc<AtomicBool>>,
 }
 
 impl JsProviderBridge {
-    pub fn from_callbacks(env: &Env, state: Arc<EnvState>, callbacks: Object) -> Result<Self> {
-        let call_fn: Function<String, JsPromiseString<'_>> = callbacks.get_named_property("call")?;
-        let next_fn: Function<String, JsPromiseString<'_>> = callbacks.get_named_property("next")?;
+    pub fn from_callbacks(_env: &Env, state: Arc<EnvState>, callbacks: Object) -> Result<Self> {
+        let call_fn: Function<String, JsPromiseString> = callbacks.get_named_property("call")?;
+        let next_fn: Function<String, JsPromiseString> = callbacks.get_named_property("next")?;
         let call_tsfn = call_fn
             .build_threadsafe_function()
             .callee_handled::<true>()
@@ -43,6 +44,7 @@ impl JsProviderBridge {
             call_tsfn,
             next_tsfn,
             active: Arc::new(Semaphore::new(MAX_ACTIVE_PROMISES)),
+            pull_in_flight: DashMap::new(),
         })
     }
 
@@ -55,7 +57,7 @@ impl JsProviderBridge {
                 http_status: Some(503),
             });
         }
-        if payload_len > MAX_PENDING_BYTES {
+        if payload_len > super::env_state::MAX_PENDING_BYTES_TOTAL {
             return Err(CoreError {
                 code: CoreErrorCode::InvalidInput,
                 message: "input_too_large".into(),
@@ -68,21 +70,21 @@ impl JsProviderBridge {
 
     async fn invoke_tsfn(
         &self,
-        tsfn: &ThreadsafeFunction<String, JsPromiseString<'static>, String, Status, true, false, 16>,
+        tsfn: &ThreadsafeFunction<String, JsPromiseString, String, Status, true, false, 16>,
         payload: String,
     ) -> ProviderResult<String> {
         self.check_admission(payload.len())?;
-        let permit = self
-            .active
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| CoreError {
-                code: CoreErrorCode::Busy,
-                message: "callback admission busy".into(),
-                details: Default::default(),
-                http_status: Some(503),
-            })?;
+        let _budget = self
+            .state
+            .pending_budget
+            .try_charge(payload.len())
+            .map_err(|e| e)?;
+        let permit = self.active.clone().try_acquire_owned().map_err(|_| CoreError {
+            code: CoreErrorCode::Busy,
+            message: "callback admission busy".into(),
+            details: Default::default(),
+            http_status: Some(503),
+        })?;
         let gen_at_enqueue = self.state.generation.load(Ordering::SeqCst);
         if self.state.is_closing() {
             return Err(CoreError {
@@ -92,31 +94,35 @@ impl JsProviderBridge {
                 http_status: Some(503),
             });
         }
-        let (tx, rx) = oneshot::channel();
-        tsfn.call_with_return_value(
-            Ok(payload),
-            ThreadsafeFunctionCallMode::NonBlocking,
-            move |result: Result<JsPromiseString<'_>>, _env: Env| {
-                match result {
-                    Ok(promise) => {
-                        let _ = promise.then(move |ctx| {
-                            let _ = tx.send(Ok(ctx.value));
-                            Ok(())
-                        });
-                    }
-                    Err(status) => {
-                        let _ = tx.send(Err(format!("callback rejected: {status}")));
-                    }
-                }
-                Ok(())
-            },
-        );
-        let reply = rx.await.map_err(|_| CoreError {
-            code: CoreErrorCode::Internal,
-            message: "callback channel closed".into(),
-            details: Default::default(),
-            http_status: Some(500),
-        })?;
+
+        let promise = tsfn
+            .call_async_catch(Ok(payload))
+            .await
+            .map_err(|e| CoreError {
+                code: CoreErrorCode::Internal,
+                message: format!("callback enqueue failed: {e}"),
+                details: Default::default(),
+                http_status: Some(503),
+            })?;
+
+        let close_fut = self.state.close_notify.notified();
+        let reply = tokio::select! {
+            () = close_fut => {
+                return Err(CoreError {
+                    code: CoreErrorCode::Closing,
+                    message: "closing".into(),
+                    details: Default::default(),
+                    http_status: Some(503),
+                });
+            }
+            result = promise => result.map_err(|e| CoreError {
+                code: CoreErrorCode::Internal,
+                message: format!("callback rejected: {e}"),
+                details: Default::default(),
+                http_status: Some(500),
+            })?,
+        };
+
         drop(permit);
         if self.state.generation.load(Ordering::SeqCst) != gen_at_enqueue {
             return Err(CoreError {
@@ -126,12 +132,7 @@ impl JsProviderBridge {
                 http_status: Some(503),
             });
         }
-        reply.map_err(|message| CoreError {
-            code: CoreErrorCode::Internal,
-            message,
-            details: Default::default(),
-            http_status: Some(500),
-        })
+        Ok(reply)
     }
 }
 
@@ -159,6 +160,22 @@ impl ProviderPort for JsProviderBridge {
         max_events: u32,
         max_bytes: u32,
     ) -> ProviderResult<ProviderEventBatch> {
+        let pull_flag = self
+            .pull_in_flight
+            .entry(operation_id.clone())
+            .or_insert_with(|| Arc::new(AtomicBool::new(false)))
+            .clone();
+        if pull_flag
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Err(CoreError {
+                code: CoreErrorCode::Busy,
+                message: format!("pull already in flight for operation {operation_id}"),
+                details: Default::default(),
+                http_status: Some(503),
+            });
+        }
         let payload = serde_json::json!({
             "operation_id": operation_id,
             "max_events": max_events,
@@ -166,7 +183,9 @@ impl ProviderPort for JsProviderBridge {
         });
         let raw = self
             .invoke_tsfn(&self.next_tsfn, payload.to_string())
-            .await?;
+            .await;
+        pull_flag.store(false, Ordering::Release);
+        let raw = raw?;
         serde_json::from_str(&raw).map_err(|e| CoreError {
             code: CoreErrorCode::SchemaMismatch,
             message: format!("provider_next_reply: {e}"),
@@ -180,6 +199,6 @@ pub fn install_js_provider(
     env: &Env,
     state: Arc<EnvState>,
     callbacks: Object,
-) -> Result<Arc<JsProviderBridge>> {
+) -> Result<Arc<dyn ProviderPort>> {
     Ok(Arc::new(JsProviderBridge::from_callbacks(env, state, callbacks)?))
 }

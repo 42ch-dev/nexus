@@ -8,7 +8,7 @@ repository.workspace = true
 description = "Node-API cdylib for nexus core + provider port (v1.189 P2-T1)"
 
 [lints.rust]
-unsafe_code = "allow"
+unsafe_code = "deny"
 
 [lib]
 crate-type = ["cdylib"]
@@ -23,8 +23,10 @@ nexus-provider-ports = { path = "../nexus-provider-ports" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-once_cell = "1"
 async-trait = { workspace = true }
+futures-util = { workspace = true }
+dashmap = "6"
+uuid = { workspace = true }
 
 sqlx = { workspace = true }
 nexus-home-layout = { path = "../nexus-home-layout" }
@@ -32,6 +34,8 @@ nexus-local-db = { path = "../nexus-local-db" }
 
 [build-dependencies]
 napi-build = { workspace = true }
+sha2 = { workspace = true }
+nexus-local-db = { path = "../nexus-local-db" }
 
 [[bin]]
 name = "native-wire-fixture-seed"

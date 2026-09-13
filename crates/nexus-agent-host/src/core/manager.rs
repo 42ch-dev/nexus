@@ -112,6 +112,23 @@ impl HostManager {
     /// Must be called before `start()`. The adapter is stored behind `Arc<dyn ProviderAdapter>`.
     /// `launch` is the configured launch recipe reported truthfully by the
     /// catalog (never a fabricated empty recipe).
+    /// Snapshot of the loaded agent-host configuration (defaults when absent).
+    pub async fn agent_config(&self) -> AgentHostConfig {
+        self.config.read().await.clone().unwrap_or_default()
+    }
+
+    /// Build a [`ProviderPortAdapter`] wired to this host and registered providers.
+    pub async fn build_provider_port(self: &Arc<Self>) -> crate::providers::port::ProviderPortAdapter {
+        let mut port = crate::providers::port::ProviderPortAdapter::new(self.clone());
+        let providers = self.providers.read().await;
+        for (id, entry) in providers.iter() {
+            if let Some(adapter) = entry.adapter.clone() {
+                port.register_provider(id.clone(), adapter);
+            }
+        }
+        port
+    }
+
     pub async fn register_provider(
         &self,
         adapter: Arc<dyn ProviderAdapter>,

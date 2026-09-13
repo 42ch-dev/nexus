@@ -1,12 +1,15 @@
 //! ProviderPort adapter over existing ProviderAdapter / HostFacade.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use dashmap::DashMap;
 use futures_util::StreamExt;
 use nexus_contracts::{
-    CoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderHostEvent, ProviderReply,
+    CoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderEventBatchGap,
+    ProviderEventBatchGapReason, ProviderHostEvent, ProviderReply,
     generated::core::provider_event_batch::NexusProviderHostEvent,
     provider_call::ProviderCallMethod, provider_reply::ProviderReplyHealth,
 };
@@ -27,13 +30,14 @@ const MAX_BYTES_PER_BATCH: u32 = 256 * 1024;
 struct ActiveOperation {
     stream: HostEventStream,
     terminal_seen: bool,
+    pull_in_flight: AtomicBool,
 }
 
 /// Pull-based provider port backed by the existing host facade and adapters.
 pub struct ProviderPortAdapter {
     host: Arc<dyn HostFacade>,
     providers: HashMap<ProviderId, Arc<dyn ProviderAdapter>>,
-    operations: Mutex<HashMap<String, ActiveOperation>>,
+    operations: DashMap<String, Arc<Mutex<ActiveOperation>>>,
 }
 
 impl ProviderPortAdapter {
@@ -42,7 +46,7 @@ impl ProviderPortAdapter {
         Self {
             host,
             providers: HashMap::new(),
-            operations: Mutex::new(HashMap::new()),
+            operations: DashMap::new(),
         }
     }
 
@@ -51,11 +55,25 @@ impl ProviderPortAdapter {
     }
 
     fn map_host_error(err: HostError) -> CoreError {
+        let (code, http_status) = match &err {
+            HostError::ProviderUnavailable { .. } => (CoreErrorCode::NotFound, 404),
+            HostError::PolicyDenied { .. } | HostError::OwnerWorkspaceMismatch { .. } => {
+                (CoreErrorCode::Forbidden, 403)
+            }
+            HostError::OperationCancelled { .. } => (CoreErrorCode::Interrupted, 503),
+            HostError::OperationTimeout { .. } | HostError::CleanupUnconfirmed { .. } => {
+                (CoreErrorCode::Busy, 503)
+            }
+            HostError::CapabilityUnsupported { .. } => (CoreErrorCode::InvalidInput, 400),
+            HostError::LaunchFailed { .. }
+            | HostError::ProviderProtocolError { .. }
+            | HostError::InternalHostError { .. } => (CoreErrorCode::Internal, 500),
+        };
         CoreError {
-            code: CoreErrorCode::Internal,
+            code,
             message: err.to_string(),
             details: Default::default(),
-            http_status: Some(500),
+            http_status: Some(http_status),
         }
     }
 
@@ -84,6 +102,15 @@ impl ProviderPortAdapter {
             available: health.available,
             latency_ms: health.latency_ms,
             message: health.message,
+        }
+    }
+
+    fn oversized_gap(operation_id: &str) -> ProviderEventBatchGap {
+        ProviderEventBatchGap {
+            reason: ProviderEventBatchGapReason::Oversized,
+            operation_id: Some(operation_id.to_string()),
+            resync_required: true,
+            inspect_url: format!("native://provider/events/{operation_id}"),
         }
     }
 }
@@ -200,12 +227,13 @@ impl ProviderPort for ProviderPortAdapter {
                     .exec(session_id.clone(), op)
                     .await
                     .map_err(Self::map_host_error)?;
-                self.operations.lock().await.insert(
+                self.operations.insert(
                     op_id.to_string(),
-                    ActiveOperation {
+                    Arc::new(Mutex::new(ActiveOperation {
                         stream,
                         terminal_seen: false,
-                    },
+                        pull_in_flight: AtomicBool::new(false),
+                    })),
                 );
                 Ok(ProviderReply {
                     request_id: request.request_id,
@@ -263,14 +291,16 @@ impl ProviderPort for ProviderPortAdapter {
     ) -> ProviderResult<ProviderEventBatch> {
         let cap_events = max_events.min(MAX_EVENTS_PER_BATCH);
         let cap_bytes = max_bytes.min(MAX_BYTES_PER_BATCH);
-        let mut ops = self.operations.lock().await;
-        let active = ops.get_mut(&operation_id).ok_or_else(|| CoreError {
+        let active_entry = self.operations.get(&operation_id).ok_or_else(|| CoreError {
             code: CoreErrorCode::NotFound,
             message: format!("operation {operation_id} not found"),
             details: Default::default(),
             http_status: Some(404),
         })?;
-        if active.terminal_seen {
+        let active = active_entry.clone();
+        let mut guard = active.lock().await;
+
+        if guard.terminal_seen {
             return Ok(ProviderEventBatch {
                 operation_id,
                 events: vec![],
@@ -279,36 +309,59 @@ impl ProviderPort for ProviderPortAdapter {
             });
         }
 
+        if guard
+            .pull_in_flight
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Err(CoreError {
+                code: CoreErrorCode::Busy,
+                message: format!("pull already in flight for operation {operation_id}"),
+                details: Default::default(),
+                http_status: Some(503),
+            });
+        }
+
         let mut events = Vec::new();
         let mut used_bytes = 0u32;
         while (events.len() as u32) < cap_events && used_bytes < cap_bytes {
-            match active.stream.next().await {
+            match guard.stream.next().await {
                 Some(Ok(event)) => {
                     let wire = wire_to_batch_event(host_event_to_wire(&event)?)?;
                     let size = serde_json::to_vec(&wire).map(|v| v.len()).unwrap_or(0);
+                    if events.is_empty() && size as u32 > cap_bytes {
+                        guard.pull_in_flight.store(false, Ordering::Release);
+                        let gap = Self::oversized_gap(&operation_id);
+                        return Ok(ProviderEventBatch {
+                            operation_id,
+                            events: vec![],
+                            has_more: true,
+                            gap: Some(gap),
+                        });
+                    }
                     if used_bytes + size as u32 > cap_bytes && !events.is_empty() {
                         break;
                     }
                     used_bytes += size as u32;
                     events.push(wire);
                     if is_terminal(&event) {
-                        active.terminal_seen = true;
+                        guard.terminal_seen = true;
                         break;
                     }
                 }
-                Some(Err(err)) => return Err(Self::map_host_error(err)),
+                Some(Err(err)) => {
+                    guard.pull_in_flight.store(false, Ordering::Release);
+                    return Err(Self::map_host_error(err));
+                }
                 None => {
-                    active.terminal_seen = true;
+                    guard.terminal_seen = true;
                     break;
                 }
             }
         }
 
-        let has_more = !active.terminal_seen;
-        if active.terminal_seen {
-            ops.remove(&operation_id);
-        }
-
+        let has_more = !guard.terminal_seen;
+        guard.pull_in_flight.store(false, Ordering::Release);
         Ok(ProviderEventBatch {
             operation_id,
             events,

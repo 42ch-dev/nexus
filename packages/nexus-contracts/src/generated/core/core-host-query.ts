@@ -8,7 +8,7 @@
  * Native hostQuery discriminator over existing HostFacade registry.
  */
 export interface CoreHostQuery {
-  query: "health" | "catalog" | "list_sessions" | "get_session" | "get_operation" | "scan";
+  query: "health" | "catalog" | "list_sessions" | "get_session" | "get_operation";
   session_id?: string;
   operation_id?: string;
   limit?: number;

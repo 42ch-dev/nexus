@@ -1,57 +1,67 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use nexus_agent_host::capability::model::HostStartConfig;
+use nexus_agent_host::config::AgentHostConfig;
+use nexus_agent_host::{HostFacade, HostManager};
 use nexus_contracts::{CoreCloseReport, CoreCloseReportState, NativeOpenOptions};
 use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService};
 use nexus_provider_ports::ProviderPort;
 
 use super::env_state::EnvState;
-use super::provider_stub::StubProviderPort;
 
 pub async fn open_core(
-    state: &EnvState,
+    state: Arc<EnvState>,
     options: NativeOpenOptions,
+    js_port: Option<Arc<dyn ProviderPort>>,
 ) -> Result<Arc<CoreService>, String> {
-    if state.core.lock().await.is_none() {
-        state
-            .closing
-            .store(0, std::sync::atomic::Ordering::SeqCst);
-    }
     if state.is_closing() {
         return Err("closing".to_string());
     }
     if options.allow_uninitialized {
-        return Err("allow_uninitialized is service-only and denies effects in native core".to_string());
+        return Err(
+            "allow_uninitialized is service-only and denies effects in native core".to_string(),
+        );
     }
     let access = match options.access {
         NativeOpenOptionsAccess::ReadOnly => CoreAccess::ReadOnly,
         NativeOpenOptionsAccess::DirectWriter => CoreAccess::DirectWriter,
         NativeOpenOptionsAccess::EngineOwner => CoreAccess::EngineOwner,
     };
+    let user_home = PathBuf::from(options.user_home);
+    let host = Arc::new(HostManager::new());
+    let host_config = AgentHostConfig::default();
+    host
+        .start(HostStartConfig {
+            config_path: user_home.join("config/agent-host.toml"),
+            workspace_root: user_home.clone(),
+            max_sessions: host_config.max_sessions,
+            max_ops_per_session: host_config.max_ops_per_session,
+            timeouts: host_config.timeouts.clone(),
+            host_config: Some(host_config),
+            probe_owner: None,
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    state.host.lock().await.replace(host.clone());
+
+    let provider_port: Arc<dyn ProviderPort> = if let Some(port) = js_port {
+        port
+    } else {
+        Arc::new(host.build_provider_port().await)
+    };
+    state.provider_port.lock().await.replace(provider_port);
+
     let core = CoreService::open(CoreOpenOptions {
-        user_home: PathBuf::from(options.user_home),
+        user_home,
         access,
     })
     .await
     .map_err(|e| e.to_string())?;
     let arc = Arc::new(core);
     state.core.lock().await.replace(arc.clone());
-    let pending_port = state.pending_provider.lock().unwrap().take();
-    if let Some(port) = pending_port {
-        state.provider_port.lock().await.replace(port);
-    } else if state.provider_port.lock().await.is_none() {
-        state
-            .provider_port
-            .lock()
-            .await
-            .replace(Arc::new(StubProviderPort) as Arc<dyn ProviderPort>);
-    }
     Ok(arc)
-}
-
-pub async fn install_provider_port(state: &EnvState, port: Arc<dyn ProviderPort>) {
-    state.provider_port.lock().await.replace(port);
 }
 
 pub async fn close_core(state: &EnvState) -> CoreCloseReport {
@@ -75,13 +85,18 @@ pub async fn close_core(state: &EnvState) -> CoreCloseReport {
             reason: None,
         }
     };
-    state.provider_port.lock().await.take();
-    state.pending_provider.lock().unwrap().take();
-    state
-        .closing
-        .store(0, std::sync::atomic::Ordering::SeqCst);
-    state
-        .generation
-        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+    if report.state == CoreCloseReportState::Closed && report.cleanup_confirmed {
+        if let Some(host) = state.host.lock().await.take() {
+            let _ = host.shutdown().await;
+        }
+        state.provider_port.lock().await.take();
+        state
+            .closing
+            .store(0, std::sync::atomic::Ordering::SeqCst);
+        state
+            .generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
     report
 }
