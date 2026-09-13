@@ -241,23 +241,39 @@ async fn localset_shutdown() {
 
 
     {
-        // Abort before first poll: active slot must be released without sleeping.
+        // Cancel after TaskSlot install but before first poll: active slot released once.
         let bridge = LocalSetBridge::new();
         let b = bridge.clone();
-        let waiter = tokio::spawn(async move {
+        let exec = tokio::spawn(async move {
             let _ = b
                 .execute(8, || Box::pin(async { std::future::pending::<()>().await }))
                 .await;
         });
-        waiter.abort();
-        let _ = waiter.await;
-        let evidence = bridge.shutdown().await;
+        bridge.wait_task_slot_installed().await;
+        assert_eq!(bridge.stats().active_tasks, 1, "TaskSlot must reserve active slot");
+        bridge.cancel_task(1).await.expect("cancel task 1");
+        let _ = exec.await;
         assert_eq!(
             bridge.stats().active_tasks,
             0,
-            "pre-poll cancel must release active reservation"
+            "pre-poll cancel must release active reservation exactly once"
         );
+        let evidence = bridge.shutdown().await;
         assert_eq!(evidence.active_tasks, 0, "shutdown evidence: {evidence:?}");
+        // 32 admissions must succeed after the slot is released.
+        let mut handles = Vec::new();
+        for _ in 0..MAX_ACTIVE_TASKS {
+            let br = bridge.clone();
+            handles.push(tokio::spawn(async move {
+                let _ = br
+                    .execute(1, || Box::pin(async { 1 }))
+                    .await;
+            }));
+        }
+        for h in handles {
+            let _ = h.await;
+        }
+        assert_eq!(bridge.stats().active_tasks, 0);
     }
 
     {

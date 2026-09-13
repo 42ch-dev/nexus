@@ -19,6 +19,22 @@ function platformPackageName() {
   throw new Error(`unsupported platform ${platform}/${arch}`);
 }
 
+function signDarwinArtifact(path) {
+  if (process.platform !== 'darwin') return;
+  const before = spawnSync('codesign', ['--verify', '--verbose=4', path], { encoding: 'utf8' });
+  const sign = spawnSync('codesign', ['--force', '--sign', '-', path], { stdio: 'inherit' });
+  if (sign.status !== 0) {
+    console.error('codesign failed for', path);
+    process.exit(sign.status ?? 1);
+  }
+  const after = spawnSync('codesign', ['--verify', '--verbose=4', path], { encoding: 'utf8' });
+  if (after.status !== 0) {
+    console.error('post-sign verify failed for', path, after.stderr);
+    process.exit(after.status ?? 1);
+  }
+  console.log('codesign ok', path, before.stderr?.includes('invalid') ? '(was invalid)' : '');
+}
+
 const release = process.argv.includes('--release');
 const build = spawnSync('cargo', ['build', '-p', 'nexus-core-node', ...(release ? ['--release'] : [])], {
   cwd: root,
@@ -32,6 +48,7 @@ const profile = release ? 'release' : 'debug';
 const src = join(root, 'target', profile, `${prefix}nexus_core_node${ext}`);
 const dest = join(nativeDir, 'nexus_core_node.node');
 copyFileSync(src, dest);
+signDarwinArtifact(dest);
 
 const require = createRequire(import.meta.url);
 let compat;
@@ -57,9 +74,11 @@ if (!existsSync(join(pkgRoot, 'package.json'))) {
 }
 const platformNativeDir = join(pkgRoot, 'native');
 mkdirSync(platformNativeDir, { recursive: true });
-copyFileSync(src, join(platformNativeDir, 'nexus_core_node.node'));
+const platformDest = join(platformNativeDir, 'nexus_core_node.node');
+copyFileSync(src, platformDest);
+signDarwinArtifact(platformDest);
 writeFileSync(join(platformNativeDir, 'compatibility.json'), compatJson);
 
 console.log('built', dest);
-console.log('installed', join(platformNativeDir, 'nexus_core_node.node'));
+console.log('installed', platformDest);
 console.log('compatibility', compat.contract_tree_sha256);

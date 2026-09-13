@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Notify};
 use tracing::{debug, error, warn};
 
 /// Maximum queued execute requests (count).
@@ -78,6 +78,8 @@ struct AdmissionCounters {
     shutting_down: AtomicBool,
     next_task_id: AtomicU64,
     thread_joined: AtomicBool,
+    /// Fires when a `TaskSlot` is installed (before first poll). Used by tests.
+    task_slot_notify: Notify,
 }
 
 impl AdmissionCounters {
@@ -88,6 +90,7 @@ impl AdmissionCounters {
             shutting_down: AtomicBool::new(false),
             next_task_id: AtomicU64::new(1),
             thread_joined: AtomicBool::new(false),
+            task_slot_notify: Notify::new(),
         }
     }
 
@@ -305,6 +308,21 @@ impl LocalSetBridge {
         tokio::time::timeout(timeout_duration, self.execute(byte_charge, f))
             .await
             .map_err(|_| crate::AcpError::timeout(operation_name, timeout_duration))?
+    }
+
+    /// Wait until a `TaskSlot` is installed on the LocalSet thread (before first poll).
+    pub async fn wait_task_slot_installed(&self) {
+        self.counters.task_slot_notify.notified().await;
+    }
+
+    /// Cancel an owned task by id via the control channel.
+    pub async fn cancel_task(&self, task_id: u64) -> Result<(), crate::AcpError> {
+        let (_, control_tx) = self.ensure_runtime()?;
+        control_tx
+            .send(ControlMessage::Cancel { task_id })
+            .await
+            .map_err(|_| crate::AcpError::connection_failed("LocalSet control channel closed"))?;
+        Ok(())
     }
 
     /// Explicit shutdown with join evidence. Idempotent.
@@ -671,6 +689,7 @@ impl BridgeThreadState {
                 polled,
             },
         );
+        counters.task_slot_notify.notify_waiters();
     }
 
     fn drain_deferred(&mut self, counters: &Arc<AdmissionCounters>, state_ref: &ThreadStateRef) {

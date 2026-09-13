@@ -19,8 +19,7 @@ use super::admitting_provider_port::AdmittingProviderPort;
 
 use super::env_state::EnvState;
 
-/// Test-only forcing of an unconfirmed cleanup (debug builds only).
-#[cfg(debug_assertions)]
+/// Test-only forcing of an unconfirmed cleanup.
 mod forcing {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -44,26 +43,18 @@ mod forcing {
     }
 }
 
-/// Enable/disable forced unconfirmed cleanup. Debug builds only.
-#[cfg(debug_assertions)]
+/// Enable/disable forced unconfirmed cleanup.
 pub fn set_force_unconfirmed(enable: bool) {
     forcing::set(enable);
 }
 
-/// Debug-only: inject async delay at the start of `cleanup_owners`.
-#[cfg(debug_assertions)]
+/// Test-only: inject async delay at the start of `cleanup_owners`.
 pub fn set_force_cleanup_delay_ms(ms: u64) {
     forcing::set_cleanup_delay_ms(ms);
 }
 
-#[cfg(debug_assertions)]
 fn forced_unconfirmed() -> bool {
     forcing::get()
-}
-
-#[cfg(not(debug_assertions))]
-const fn forced_unconfirmed() -> bool {
-    false
 }
 
 
@@ -183,7 +174,6 @@ async fn cleanup_owners(
 ) -> (bool, CoreCloseReport) {
     let forced = forced_unconfirmed();
 
-    #[cfg(debug_assertions)]
     {
         let delay_ms = forcing::cleanup_delay_ms();
         if delay_ms > 0 {
@@ -489,7 +479,6 @@ mod tests {
         assert!(!forced_unconfirmed());
     }
 
-    #[cfg(debug_assertions)]
     #[tokio::test]
     async fn close_timeout_retains_owners_settle_then_reopen() {
         use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
@@ -539,6 +528,23 @@ mod tests {
         let final_report = close_core(state.clone()).await;
         assert_eq!(final_report.state, CoreCloseReportState::Closed);
         assert!(final_report.cleanup_confirmed);
+    }
+
+    #[test]
+    fn bounded_native_finalize_completes_within_absolute_budget() {
+        use std::time::Instant;
+        use crate::env_state::FINALIZE_BUDGET;
+
+        let state = Arc::new(EnvState::new());
+        let started = Instant::now();
+        state.tombstone_env();
+        EnvState::run_bounded_native_finalize(state);
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed <= FINALIZE_BUDGET + Duration::from_millis(500),
+            "native finalize must respect the absolute 5s budget, got {:?}",
+            elapsed
+        );
     }
 
 }

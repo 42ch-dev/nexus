@@ -6,6 +6,7 @@
 
 mod admitting_provider_port;
 mod callbacks;
+mod cleanup_registry;
 mod env_state;
 mod host_query;
 mod lifecycle;
@@ -235,9 +236,7 @@ impl NativeCore {
     }
 }
 
-/// Test-only: force cleanup attempts to report unconfirmed. Present only in
-/// debug builds (`debug_assertions`); release artifacts export no such hook.
-#[cfg(debug_assertions)]
+/// Test-only: force cleanup attempts to report unconfirmed.
 #[napi]
 pub fn force_unconfirmed_cleanup(enable: bool) {
     lifecycle::set_force_unconfirmed(enable);

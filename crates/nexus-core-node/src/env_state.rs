@@ -13,13 +13,6 @@ use nexus_agent_host::HostFacade;
 pub const MAX_PENDING_BYTES_TOTAL: usize = 1024 * 1024;
 pub const FINALIZE_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// Process-scoped retained owners when bounded finalize cannot complete.
-static CLEANUP_REGISTRY: std::sync::OnceLock<StdMutex<Vec<Arc<EnvState>>>> = std::sync::OnceLock::new();
-
-fn cleanup_registry() -> &'static StdMutex<Vec<Arc<EnvState>>> {
-    CLEANUP_REGISTRY.get_or_init(|| StdMutex::new(Vec::new()))
-}
-
 /// Serialized native environment lifecycle phases.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EnvLifecyclePhase {
@@ -221,21 +214,26 @@ impl EnvState {
         let completed_flag = completed.clone();
         let work_state = state.clone();
 
-        // Single worker thread; caller bounds wait — no detached join threads.
         let worker = std::thread::Builder::new()
             .name("nexus-native-finalize".into())
             .spawn(move || {
                 if let Ok(rt) = std::panic::catch_unwind(super::runtime::runtime) {
                     rt.block_on(async move {
-                        let budget = || deadline.saturating_duration_since(std::time::Instant::now());
+                        let budget = || {
+                            deadline.saturating_duration_since(std::time::Instant::now())
+                        };
 
                         let core = work_state.take_core();
                         if let Some(service) = core {
-                            let b = budget();
-                            if b.is_zero() {
+                            if budget().is_zero() {
                                 work_state.restore_core(service);
                             } else {
-                                match tokio::time::timeout(b, service.close()).await {
+                                match tokio::time::timeout_at(
+                                    tokio::time::Instant::from_std(deadline),
+                                    service.close(),
+                                )
+                                .await
+                                {
                                     Ok(_) => {}
                                     Err(_) => work_state.restore_core(service),
                                 }
@@ -244,15 +242,23 @@ impl EnvState {
 
                         let host = work_state.take_host();
                         if let Some(host) = host {
-                            let b = budget();
-                            if !b.is_zero() {
-                                host.localset_bridge().shutdown_sync_with_deadline(deadline);
-                                match tokio::time::timeout(b, host.shutdown()).await {
-                                    Ok(_) => {}
-                                    Err(_) => work_state.restore_host(host),
-                                }
-                            } else {
+                            if budget().is_zero() {
                                 work_state.restore_host(host);
+                            } else {
+                                host.localset_bridge().shutdown_sync_with_deadline(deadline);
+                                if budget().is_zero() {
+                                    work_state.restore_host(host);
+                                } else {
+                                    match tokio::time::timeout_at(
+                                        tokio::time::Instant::from_std(deadline),
+                                        host.shutdown(),
+                                    )
+                                    .await
+                                    {
+                                        Ok(_) => {}
+                                        Err(_) => work_state.restore_host(host),
+                                    }
+                                }
                             }
                         }
 
@@ -275,12 +281,7 @@ impl EnvState {
         if completed.load(std::sync::atomic::Ordering::SeqCst) {
             let _ = worker.join();
         } else {
-            // Retain owners in process registry; worker may still be running but
-            // finalizer returns after the absolute budget (no detached success).
-            if let Ok(mut reg) = cleanup_registry().lock() {
-                reg.push(state.clone());
-            }
-            // Do not detach: let worker continue on this named thread only.
+            super::cleanup_registry::register_pending(worker, state, completed);
         }
     }
 

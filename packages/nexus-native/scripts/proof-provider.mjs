@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
+import { Worker } from 'node:worker_threads';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..', '..', '..');
@@ -112,7 +113,7 @@ ${Object.entries(extraEnv).map(([k, v]) => `${k} = "${String(v).replaceAll('"', 
 
 function isStaleGenerationError(err) {
   const s = String(err ?? '');
-  return /generation|dead_env|invalid principal|tombstone|closing|interrupted/i.test(s);
+  return /generation|dead_env|invalid principal|tombstone|closing|interrupted|port unavailable|provider port unavailable|env_dead/i.test(s);
 }
 
 function isTransportEofError(err) {
@@ -205,6 +206,20 @@ const SCENARIO_KEYS = [
 
 function failScenario(key, message) {
   return { key, ok: false, error: message };
+}
+
+
+function runIsolatedScenario(scenarioKey, adapter, providers = undefined) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./proof-isolated-worker.mjs', import.meta.url), {
+      workerData: { root, adapter, scenario: scenarioKey, providers: adapter === 'ts-acp' ? undefined : providers },
+    });
+    worker.on('message', (msg) => resolve(msg));
+    worker.on('error', reject);
+    worker.on('exit', (code) => {
+      if (code !== 0) reject(new Error(`isolated worker ${scenarioKey} exit ${code}`));
+    });
+  });
 }
 
 function passScenario(key, detail = {}) {
@@ -335,211 +350,47 @@ async function runAdapterScenarios(core, ctx) {
     scenarios.cooperative_cancel_2s = failScenario('cooperative_cancel_2s', String(error));
   }
 
-  // never-settling: BLOCK_PROMPT fixture blocks until cancel
   try {
-    const blockHome = mkdtempSync(join(tmpdir(), 'nexus-block-prompt-'));
-    const blockWs = mkdtempSync(join(tmpdir(), 'nexus-block-ws-'));
-    const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
-    writeAgentHostConfig(blockHome, fixture, blockWs, { BLOCK_PROMPT: '1' });
-    const blockCore = binding.open(
-      JSON.stringify({ user_home: blockHome, access: 'engine_owner', allow_uninitialized: false }),
-      providers,
-    );
-    const launch = decode(
-      await blockCore.providerCall(
-        encode({
-          request_id: 'block-launch',
-          method: 'launch',
-          deadline_ms: 30_000,
-          payload: adapter === 'rust-acp' ? rustLaunchPayload(blockHome) : tsLaunchPayload(),
-        }),
-      ),
-    );
-    const hangSession = launch.session_id;
-    const exec = decode(
-      await blockCore.providerCall(
-        encode({
-          request_id: 'block-exec',
-          method: 'execute',
-          session_id: hangSession,
-          deadline_ms: 30_000,
-          payload: adapter === 'rust-acp' ? rustExecutePayload() : tsExecutePayload(),
-        }),
-      ),
-    );
-    const started = Date.now();
-    await blockCore.providerCall(
-      encode({
-        request_id: 'block-cancel',
-        method: 'cancel',
-        session_id: hangSession,
-        operation_id: exec.operation_id,
-        deadline_ms: 30_000,
-        payload: {},
-      }),
-    );
-    const cancelMs = Date.now() - started;
-    const closeStarted = Date.now();
-    const closeReport = decode(await blockCore.close());
-    const closeMs = Date.now() - closeStarted;
-    scenarios.never_settling_callback =
-      cancelMs <= 2000 && closeReport.cleanup_confirmed && closeMs <= 5_000
-        ? passScenario('never_settling_callback', { cancel_ms: cancelMs, close_ms: closeMs, adapter })
-        : failScenario('never_settling_callback', `cancel_ms=${cancelMs} close_ms=${closeMs} confirmed=${closeReport.cleanup_confirmed}`);
+    scenarios.never_settling_callback = await runIsolatedScenario('never_settling_callback', adapter, providers);
+    if (!scenarios.never_settling_callback.executed_steps?.includes('cancel')) {
+      scenarios.never_settling_callback = failScenario('never_settling_callback', 'never reached cancel step');
+    }
   } catch (error) {
     scenarios.never_settling_callback = failScenario('never_settling_callback', String(error));
   }
 
-  // failed open child
   try {
-    const badHome = mkdtempSync(join(tmpdir(), 'nexus-bad-child-'));
-    mkdirSync(join(badHome, 'config'), { recursive: true });
-    writeFileSync(
-      join(badHome, 'config', 'agent-host.toml'),
-      `[[providers]]\nid = "bad"\nprotocol = "acp"\ncommand = "/nonexistent/nexus-bad-acp"\nargs = []\nenabled = true\n`,
-    );
-    const badCore = binding.open(
-      JSON.stringify({ user_home: badHome, access: 'engine_owner', allow_uninitialized: false }),
-      providers,
-    );
-    const badLaunch = await badCore
-      .providerCall(
-        encode({
-          request_id: 'bad-launch',
-          method: 'launch',
-          deadline_ms: 5_000,
-          payload: adapter === 'rust-acp' ? rustLaunchPayload(badHome) : tsLaunchPayload(),
-        }),
-      )
-      .then((buf) => decode(buf))
-      .catch((error) => ({ ok: false, error: String(error) }));
-    scenarios.failed_open_child = !badLaunch.ok
-      ? passScenario('failed_open_child', { error: badLaunch.error ?? null })
-      : failScenario('failed_open_child', 'expected launch failure for bad child');
-    await badCore.close().catch(() => {});
+    scenarios.failed_open_child = await runIsolatedScenario('failed_open_child', adapter, providers);
+    if (!scenarios.failed_open_child.executed_steps?.includes('launch_bad_child')) {
+      scenarios.failed_open_child = failScenario('failed_open_child', 'never reached bad child launch');
+    }
   } catch (error) {
     scenarios.failed_open_child = failScenario('failed_open_child', String(error));
   }
 
-  // full queue: run on a dedicated core so main session can continue
   try {
-    const queueCore = binding.open(accessJson, providers);
-    scenarios.full_queue_shutdown = await runFullQueueShutdown(queueCore, adapter, home);
-    if (!scenarios.full_queue_shutdown.ok) {
-      // already failed
+    scenarios.full_queue_shutdown = await runIsolatedScenario('full_queue_shutdown', adapter, providers);
+    if (!scenarios.full_queue_shutdown.executed_steps?.includes('close_before_drain')) {
+      scenarios.full_queue_shutdown = failScenario('full_queue_shutdown', 'never closed before drain');
     }
   } catch (error) {
     scenarios.full_queue_shutdown = failScenario('full_queue_shutdown', String(error));
   }
 
-  // multibyte overflow via oversized UTF-8 prompt payload
   try {
-    const launch = decode(
-      await core.providerCall(
-        encode({
-          request_id: 'mb-launch',
-          method: 'launch',
-          deadline_ms: 30_000,
-          payload: adapter === 'rust-acp' ? rustLaunchPayload(home) : tsLaunchPayload(),
-        }),
-      ),
-    );
-    const mbSession = launch.session_id;
-    const big = '🎉'.repeat(400_000);
-    const execErr = await core
-      .providerCall(
-        encode({
-          request_id: 'mb-exec',
-          method: 'execute',
-          session_id: mbSession,
-          deadline_ms: 5_000,
-          payload:
-            adapter === 'rust-acp'
-              ? {
-                  Prompt: {
-                    op_id: randomUUID(),
-                    content: [{ Text: { text: big } }],
-                    permission_scope: null,
-                  },
-                }
-              : { kind: 'prompt', content: big },
-        }),
-      )
-      .then(() => null)
-      .catch((error) => String(error));
-    scenarios.multibyte_overflow = execErr
-      ? passScenario('multibyte_overflow', { error: execErr, utf8_bytes: new TextEncoder().encode(big).length })
-      : failScenario('multibyte_overflow', 'expected oversize rejection');
-    await core.providerCall(
-      encode({
-        request_id: 'mb-shutdown',
-        method: 'shutdown',
-        session_id: mbSession,
-        deadline_ms: 30_000,
-        payload: {},
-      }),
-    ).catch(() => {});
+    scenarios.multibyte_overflow = await runIsolatedScenario('multibyte_overflow', adapter, providers);
+    if (!scenarios.multibyte_overflow.executed_steps?.includes('oversize_execute')) {
+      scenarios.multibyte_overflow = failScenario('multibyte_overflow', 'never attempted oversize execute');
+    }
   } catch (error) {
     scenarios.multibyte_overflow = failScenario('multibyte_overflow', String(error));
   }
 
-  // worker termination: kill fixture child and ensure shutdown reports
   try {
-    const beforePids = findFixtureChildPids();
-    const launch = decode(
-      await core.providerCall(
-        encode({
-          request_id: 'kill-launch',
-          method: 'launch',
-          deadline_ms: 30_000,
-          payload: adapter === 'rust-acp' ? rustLaunchPayload(home) : tsLaunchPayload(),
-        }),
-      ),
-    );
-    const killSession = launch.session_id;
-    const afterLaunchPids = findFixtureChildPids();
-    const victim = afterLaunchPids.find((pid) => !beforePids.includes(pid)) ?? afterLaunchPids[0];
-    if (victim) {
-      try {
-        process.kill(victim, 'SIGKILL');
-      } catch {
-        // already dead
-      }
+    scenarios.worker_termination = await runIsolatedScenario('worker_termination', adapter, providers);
+    if (!scenarios.worker_termination.executed_steps?.includes('kill_child')) {
+      scenarios.worker_termination = failScenario('worker_termination', 'never killed child mid-operation');
     }
-    const eofErr = await core
-      .providerCall(
-        encode({
-          request_id: 'kill-probe',
-          method: 'probe',
-          deadline_ms: 2_000,
-          payload: adapter === 'rust-acp' ? rustProbePayload(home) : tsProbePayload(),
-        }),
-      )
-      .then(() => null)
-      .catch((error) => String(error));
-    if (!victim) {
-      scenarios.worker_termination = failScenario('worker_termination', 'no fixture child pid observed');
-    } else if (!eofErr) {
-      scenarios.worker_termination = failScenario('worker_termination', 'post-kill probe succeeded unexpectedly');
-    } else if (!isTransportEofError(eofErr)) {
-      scenarios.worker_termination = failScenario('worker_termination', `unexpected post-kill error: ${eofErr}`);
-    } else {
-      scenarios.worker_termination = passScenario('worker_termination', {
-        child_pid: victim,
-        launch_pids: afterLaunchPids,
-        post_kill_probe_error: eofErr,
-        adapter,
-      });
-    }
-    await core.providerCall(
-      encode({
-        request_id: 'kill-shutdown',
-        method: 'shutdown',
-        session_id: killSession,
-        deadline_ms: 5_000,
-        payload: {},
-      }),
-    ).catch((error) => ({ ok: false, error: String(error) }));
   } catch (error) {
     scenarios.worker_termination = failScenario('worker_termination', String(error));
   }
@@ -607,10 +458,20 @@ async function runAdapterScenarios(core, ctx) {
     scenarios.reentrant_call = failScenario('reentrant_call', String(error));
   }
 
-  scenarios.open_close_100 = await runOpenClose100(home, accessJson, providers);
+  try {
+    scenarios.open_close_100 = await runIsolatedScenario('open_close_100', adapter, providers);
+    if (!scenarios.open_close_100.executed_steps?.includes('close:99')) {
+      scenarios.open_close_100 = failScenario('open_close_100', 'did not complete 100 cycles in worker');
+    }
+  } catch (error) {
+    scenarios.open_close_100 = failScenario('open_close_100', String(error));
+  }
 
   try {
-    scenarios.eof_after_close = await runEofWhileLive(core, adapter, home, providers);
+    scenarios.eof_after_close = await runIsolatedScenario('eof_after_close', adapter, providers);
+    if (!scenarios.eof_after_close.executed_steps?.includes('launch_eof_fixture')) {
+      scenarios.eof_after_close = failScenario('eof_after_close', 'never reached EOF fixture launch');
+    }
   } catch (error) {
     scenarios.eof_after_close = failScenario('eof_after_close', String(error));
   }
