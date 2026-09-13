@@ -1,0 +1,360 @@
+name: RFT Native Package Proof
+
+# V1.189 P3-T1 (RFT-03): four-platform native package/install/inspection proof.
+#
+# Architecture-contracts §9 pins are asserted per row and recorded per run:
+#   Node   22.22.0 (service floor) and 24.20.0 (test cohort)
+#   Rust   1.98.1
+#   macOS  Xcode 16.4, MACOSX_DEPLOYMENT_TARGET=11.0 (native addon ABI floor)
+#   Win    VS 2022 17.14 / MSVC v143 / Windows SDK 10.0.26100
+#   Linux  glibc 2.28 sysroot + GCC >= 10.1 (manylinux_2_28 image)
+#
+# Honesty rules encoded here:
+#   - every row executes its own binaries natively; there is no emulation,
+#     cross-loading, install-only or unsigned-substitute pass;
+#   - a missing runner, missing image or mismatched toolchain fails the row
+#     with the measured value recorded in the evidence — never a green pass;
+#   - `native-package-matrix.json` reports `unavailable` for a row whose
+#     evidence file is absent, and the job fails: a missing row blocks P3
+#     (plan: "Missing row blocks P3; missing input = blocked").
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, iteration/v1.189]
+    paths: &proof-paths
+      - 'packages/nexus-native/**'
+      - 'packages/nexus-native-*/**'
+      - 'crates/nexus-core-node/**'
+      - 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py'
+      - '.github/workflows/rft-native-proof.yml'
+  pull_request:
+    branches: [main, iteration/v1.189]
+    paths: *proof-paths
+
+concurrency:
+  group: rft-native-proof-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  # Cargo needs the committed sqlx metadata (same convention as ci.yml).
+  SQLX_OFFLINE: "true"
+  CARGO_INCREMENTAL: "0"
+  RUST_TOOLCHAIN: "1.98.1"
+  PNPM_VERSION: "11"
+  NODE_FLOOR: "22.22.0"
+  NODE_COHORT: "24.20.0"
+  EVIDENCE: .mstar/iterations/v1.189/guides/evidence
+
+jobs:
+  native-package-proof:
+    name: ${{ matrix.slug }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - slug: win32-x64-msvc
+            os: windows-2022
+            short: win
+            target: x86_64-pc-windows-msvc
+          - slug: darwin-arm64
+            os: macos-14
+            short: macarm
+            target: aarch64-apple-darwin
+          # The x64 macOS row needs an Intel runner: the artifact must be
+          # executed by the architecture it ships, and Rosetta would be a
+          # translated run, not a native one.
+          - slug: darwin-x64
+            os: macos-15-intel
+            short: macx64
+            target: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - uses: ./.github/actions/setup-monorepo
+        with:
+          node-version: ${{ env.NODE_FLOOR }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          rust-toolchain: ${{ env.RUST_TOOLCHAIN }}
+          # wasm32-unknown-unknown: nexus-core-node's graph pulls
+          # nexus-wasm-host, whose build.rs compiles the embedded modules.
+          rust-targets: ${{ matrix.target }},wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
+        with:
+          shared-key: nexus-rust-rft-native-${{ matrix.slug }}
+          workspaces: .
+          cache-all-crates: false
+          cache-on-failure: false
+
+      - name: Assert macOS toolchain contract (Xcode 16.4, deployment target 11.0)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -d /Applications/Xcode_16.4.app ]; then
+            sudo xcode-select -s /Applications/Xcode_16.4.app
+          fi
+          xcodebuild -version
+          xcodebuild -version | grep -q 'Xcode 16\.4' || {
+            echo "::error::expected Xcode 16.4 (architecture-contracts §9); runner image provides the version above"
+            exit 1
+          }
+          echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+          echo "MACOSX_DEPLOYMENT_TARGET=11.0 (native addon ABI floor)"
+
+      - name: Assert Windows toolchain contract (VS 2022 17.14, SDK 10.0.26100)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path $vswhere)) { Write-Error "vswhere not found at $vswhere"; exit 1 }
+          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationVersion
+          Write-Output "Visual Studio $vs"
+          if (-not $vs.StartsWith('17.14')) {
+            Write-Error "expected VS 2022 17.14 (architecture-contracts §9); runner image provides $vs"
+            exit 1
+          }
+          $sdkRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Include'
+          $sdks = @(Get-ChildItem $sdkRoot -Directory | Select-Object -ExpandProperty Name)
+          Write-Output "Windows SDKs: $($sdks -join ', ')"
+          if ($sdks -notcontains '10.0.26100.0') {
+            Write-Error "expected Windows SDK 10.0.26100 (architecture-contracts §9); runner image provides $($sdks -join ', ')"
+            exit 1
+          }
+
+      - name: Build loader facade
+        run: pnpm --filter @42ch/nexus-native run build
+
+      - name: Package target tarballs
+        run: node packages/nexus-native/scripts/package.mjs --target ${{ matrix.target }} --out ${{ env.EVIDENCE }}/native-packages/${{ matrix.slug }}
+
+      - name: Inspect the real artifact
+        run: node packages/nexus-native/scripts/inspect-binary.mjs --target ${{ matrix.target }} --artifact packages/nexus-native-${{ matrix.slug }}/native/nexus_core_node.node --out ${{ env.EVIDENCE }}/native-binary-${{ matrix.slug }}
+
+      - name: Install proof under Node ${{ env.NODE_FLOOR }}
+        run: node packages/nexus-native/scripts/proof-install.mjs --target ${{ matrix.target }} --node-version ${{ env.NODE_FLOOR }} --pack-dir ${{ env.EVIDENCE }}/native-packages/${{ matrix.slug }} --out ${{ env.EVIDENCE }}/install-${{ matrix.short }}22
+
+      # Second Node cohort: swap the runtime only. Dependencies are already
+      # installed and the Rust toolchain is not re-fetched.
+      - uses: ./.github/actions/setup-monorepo
+        with:
+          node-version: ${{ env.NODE_COHORT }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          rust-toolchain: ""
+          install-deps: "false"
+
+      - name: Install proof under Node ${{ env.NODE_COHORT }}
+        run: node packages/nexus-native/scripts/proof-install.mjs --target ${{ matrix.target }} --node-version ${{ env.NODE_COHORT }} --pack-dir ${{ env.EVIDENCE }}/native-packages/${{ matrix.slug }} --out ${{ env.EVIDENCE }}/install-${{ matrix.short }}24
+
+      - name: Upload row evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: rft-native-evidence-${{ matrix.slug }}
+          # Tarballs stay on the runner (large and reproducible); the evidence
+          # JSONs are what the matrix summary consumes.
+          path: |
+            ${{ env.EVIDENCE }}/native-packages/${{ matrix.slug }}/package-receipt.json
+            ${{ env.EVIDENCE }}/native-binary-${{ matrix.slug }}/binary-inspection.json
+            ${{ env.EVIDENCE }}/install-${{ matrix.short }}22/install-proof.json
+            ${{ env.EVIDENCE }}/install-${{ matrix.short }}24/install-proof.json
+          if-no-files-found: warn
+
+  # The glibc 2.28 floor cannot be produced by a modern host toolchain: the
+  # artifact must be linked against the declared sysroot, so this row builds and
+  # runs inside the manylinux_2_28 image (glibc 2.28 + gcc-toolset) and its
+  # install proof executes inside that same runtime.
+  linux-gnu-proof:
+    name: linux-x64-gnu
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    container:
+      image: quay.io/pypa/manylinux_2_28_x86_64
+    env:
+      TARGET: x86_64-unknown-linux-gnu
+      SHORT: linux
+      RUSTUP_HOME: /root/.rustup
+      CARGO_HOME: /root/.cargo
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Assert glibc 2.28 sysroot and GCC >= 10.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          head -2 /etc/os-release
+          ldd --version | head -1
+          cc --version | head -1
+          ldd --version | head -1 | grep -qE ' 2\.28(\.|$)' || {
+            echo "::error::expected a glibc 2.28 sysroot (architecture-contracts §9)"
+            exit 1
+          }
+          gcc_major="$(cc -dumpversion | cut -d. -f1)"
+          [ "${gcc_major}" -ge 10 ] || {
+            echo "::error::expected GCC >= 10.1 (found ${gcc_major})"
+            exit 1
+          }
+
+      # rustup is the one tool this image does not ship. The official installer
+      # is fetched over TLS from the documented endpoint and pinned to
+      # RUST_TOOLCHAIN; dtolnay/rust-toolchain is not usable on a bare image.
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh
+          sh /tmp/rustup-init.sh -y --no-modify-path --profile minimal \
+            --default-toolchain "${RUST_TOOLCHAIN}" \
+            --target x86_64-unknown-linux-gnu --target wasm32-unknown-unknown
+          echo "${CARGO_HOME}/bin" >> "$GITHUB_PATH"
+          "${CARGO_HOME}/bin/rustc" -Vv
+
+      - uses: ./.github/actions/setup-monorepo
+        with:
+          node-version: ${{ env.NODE_FLOOR }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          rust-toolchain: ""
+
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
+        with:
+          shared-key: nexus-rust-rft-native-linux-x64-gnu
+          workspaces: .
+          cache-all-crates: false
+          cache-on-failure: false
+
+      - name: Build loader facade
+        run: pnpm --filter @42ch/nexus-native run build
+
+      - name: Package target tarballs
+        run: node packages/nexus-native/scripts/package.mjs --target ${TARGET} --out ${EVIDENCE}/native-packages/linux-x64-gnu
+
+      - name: Inspect the real artifact
+        run: node packages/nexus-native/scripts/inspect-binary.mjs --target ${TARGET} --artifact packages/nexus-native-linux-x64-gnu/native/nexus_core_node.node --out ${EVIDENCE}/native-binary-linux-x64-gnu
+
+      - name: Install proof under Node ${{ env.NODE_FLOOR }}
+        run: node packages/nexus-native/scripts/proof-install.mjs --target ${TARGET} --node-version ${NODE_FLOOR} --pack-dir ${EVIDENCE}/native-packages/linux-x64-gnu --out ${EVIDENCE}/install-${SHORT}22
+
+      - uses: ./.github/actions/setup-monorepo
+        with:
+          node-version: ${{ env.NODE_COHORT }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          rust-toolchain: ""
+          install-deps: "false"
+
+      - name: Install proof under Node ${{ env.NODE_COHORT }}
+        run: node packages/nexus-native/scripts/proof-install.mjs --target ${TARGET} --node-version ${NODE_COHORT} --pack-dir ${EVIDENCE}/native-packages/linux-x64-gnu --out ${EVIDENCE}/install-${SHORT}24
+
+      - name: Upload row evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: rft-native-evidence-linux-x64-gnu
+          path: |
+            ${{ env.EVIDENCE }}/native-packages/linux-x64-gnu/package-receipt.json
+            ${{ env.EVIDENCE }}/native-binary-linux-x64-gnu/binary-inspection.json
+            ${{ env.EVIDENCE }}/install-linux22/install-proof.json
+            ${{ env.EVIDENCE }}/install-linux24/install-proof.json
+          if-no-files-found: warn
+
+  native-package-matrix-summary:
+    name: Matrix summary (all four rows)
+    runs-on: ubuntu-latest
+    needs: [native-package-proof, linux-gnu-proof]
+    if: always()
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: rft-native-evidence-*
+          merge-multiple: true
+          path: rft-native-evidence
+
+      - name: Consolidate matrix evidence
+        shell: bash
+        env:
+          MATRIX_JOB_RESULT: ${{ needs.native-package-proof.result }}
+          LINUX_JOB_RESULT: ${{ needs.linux-gnu-proof.result }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${EVIDENCE}"
+          node --input-type=module -e "$(cat <<'JS'
+          import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          const root = 'rft-native-evidence';
+          const rows = [
+            { suffix: 'linux-x64-gnu', short: 'linux', job_result: process.env.LINUX_JOB_RESULT },
+            { suffix: 'win32-x64-msvc', short: 'win', job_result: process.env.MATRIX_JOB_RESULT },
+            { suffix: 'darwin-arm64', short: 'macarm', job_result: process.env.MATRIX_JOB_RESULT },
+            { suffix: 'darwin-x64', short: 'macx64', job_result: process.env.MATRIX_JOB_RESULT },
+          ];
+          const out = [];
+          for (const row of rows) {
+            const files = {
+              package_receipt: join(root, 'native-packages', row.suffix, 'package-receipt.json'),
+              binary_inspection: join(root, 'native-binary-' + row.suffix, 'binary-inspection.json'),
+              install_node_floor: join(root, 'install-' + row.short + '22', 'install-proof.json'),
+              install_node_cohort: join(root, 'install-' + row.short + '24', 'install-proof.json'),
+            };
+            const states = {};
+            const missing = [];
+            for (const [key, path] of Object.entries(files)) {
+              if (existsSync(path)) {
+                states[key] = JSON.parse(readFileSync(path, 'utf8')).status;
+              } else {
+                states[key] = 'unavailable';
+                missing.push(path);
+              }
+            }
+            const values = Object.values(states);
+            const status = values.includes('fail')
+              ? 'fail'
+              : values.every((value) => value === 'pass')
+                ? 'pass'
+                : 'unavailable';
+            out.push({ suffix: row.suffix, job_result: row.job_result, states, missing_evidence: missing, status });
+          }
+          const jobFailure = [process.env.MATRIX_JOB_RESULT, process.env.LINUX_JOB_RESULT].some(
+            (result) => result !== 'success',
+          );
+          const decision = jobFailure
+            ? 'fail'
+            : out.every((row) => row.status === 'pass')
+              ? 'pass'
+              : out.some((row) => row.status === 'fail')
+                ? 'fail'
+                : 'unavailable';
+          const payload = {
+            schema: 'rft-p3-t1-native-package-matrix/v1',
+            source_sha: process.env.GITHUB_SHA ?? null,
+            run_id: process.env.GITHUB_RUN_ID ?? null,
+            utc: new Date().toISOString(),
+            jobs: { native_package_proof: process.env.MATRIX_JOB_RESULT, linux_gnu_proof: process.env.LINUX_JOB_RESULT },
+            rows: out,
+            decision,
+            note: 'unavailable means the evidence file was never produced (runner, image or toolchain contract missing) — it blocks P3 and is never a pass',
+          };
+          mkdirSync(process.env.EVIDENCE, { recursive: true });
+          writeFileSync(join(process.env.EVIDENCE, 'native-package-matrix.json'), JSON.stringify(payload, null, 2) + '\n');
+          console.log(JSON.stringify(out, null, 2));
+          if (decision !== 'pass') {
+            console.error('::error::P3-T1 native package matrix is ' + decision + ' — a missing row blocks P3');
+            process.exit(1);
+          }
+          JS
+          )"
+
+      - name: Upload matrix evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: rft-native-package-matrix
+          path: .mstar/iterations/v1.189/guides/evidence/native-package-matrix.json
+          if-no-files-found: warn
