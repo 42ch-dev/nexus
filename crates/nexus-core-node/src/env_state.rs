@@ -140,6 +140,8 @@ pub struct EnvState {
     /// the admission fence rises, or an owned child leaks. Empty for
     /// Rust-owned providers.
     pub js_sessions: StdMutex<BTreeMap<String, Option<String>>>,
+    /// Service-only shell: compatibility/status without DB, host, or principal.
+    pub service_only_uninitialized: AtomicBool,
 }
 
 impl EnvState {
@@ -162,6 +164,7 @@ impl EnvState {
             close_in_flight: Mutex::new(false),
             pending_operation_ids: Mutex::new(Vec::new()),
             js_sessions: StdMutex::new(BTreeMap::new()),
+            service_only_uninitialized: AtomicBool::new(false),
         }
     }
 
@@ -247,6 +250,7 @@ impl EnvState {
 
     pub async fn publish_closed(&self) {
         *self.lifecycle.lock().expect("lifecycle mutex poisoned") = EnvLifecyclePhase::Closed;
+        self.clear_service_only_uninitialized();
     }
 
     /// Subscribe to the race-free close signal.
@@ -297,7 +301,19 @@ impl EnvState {
         self.pending_operation_ids.lock().await.clone()
     }
 
-        /// A host cleanup is only ever confirmed by a successful `HostResult`.
+    pub fn is_service_only_uninitialized(&self) -> bool {
+        self.service_only_uninitialized.load(Ordering::SeqCst)
+    }
+
+    pub fn mark_service_only_uninitialized(&self) {
+        self.service_only_uninitialized.store(true, Ordering::SeqCst);
+    }
+
+    pub fn clear_service_only_uninitialized(&self) {
+        self.service_only_uninitialized.store(false, Ordering::SeqCst);
+    }
+
+    /// A host cleanup is only ever confirmed by a successful `HostResult`.
     ///
     /// `Err` (including `cleanup_unconfirmed`) and an outer deadline timeout
     /// both mean the owned sessions were not proven clean, so the environment

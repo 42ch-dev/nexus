@@ -25,6 +25,7 @@ import {
   type NativeCoreBinding,
 } from './loader.js';
 import { parseJsonBuffer } from './json.js';
+export { isNativeCoreErrorCode, parseNativeCoreError } from './errors.js';
 import {
   CORE_CHANGES_REQUEST_SHAPE,
   CORE_HOST_QUERY_SHAPE,
