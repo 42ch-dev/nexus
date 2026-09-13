@@ -43,6 +43,42 @@ test('starting phase renderer crash uses attach-existing policy', () => {
   assert.equal(attachExistingReadiness('starting'), 'starting');
 });
 
+test('normal flow: compatibility spawn then open dispatches utility open', () => {
+  const base = {
+    reopenRequired: false,
+    rendererDetached: false,
+    ownerAlive: true,
+  };
+
+  // compatibility spawns utility; utility-ready leaves owner alive in starting/idle
+  assert.equal(
+    resolveOpenProofPolicy({ ...base, phase: 'starting' }),
+    'open_utility',
+  );
+  assert.equal(
+    resolveOpenProofPolicy({ ...base, phase: 'idle' }),
+    'open_utility',
+  );
+
+  // same owner alive+starting without detached renderer must not attach
+  assert.notEqual(
+    resolveOpenProofPolicy({ ...base, phase: 'starting' }),
+    'attach_existing_owner',
+  );
+});
+
+test('detached replacement after starting crash attaches existing owner', () => {
+  assert.equal(
+    resolveOpenProofPolicy({
+      reopenRequired: false,
+      rendererDetached: true,
+      phase: 'starting',
+      ownerAlive: true,
+    }),
+    'attach_existing_owner',
+  );
+});
+
 test('mergeUtilityReadyLifecycle keeps starting until utility reports open', () => {
   assert.deepEqual(
     mergeUtilityReadyLifecycle({ phase: 'starting', owner_alive: true }, { phase: 'starting', owner_alive: true }),

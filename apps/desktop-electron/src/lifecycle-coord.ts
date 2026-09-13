@@ -24,10 +24,11 @@ export function resolveOpenProofPolicy(input: {
   if (input.reopenRequired) {
     return 'reopen_after_fence';
   }
+  // Only a renderer replacement window may attach; normal compatibility→open must dispatch utility open.
   if (
+    input.rendererDetached &&
     input.ownerAlive &&
-    (input.phase === 'open' || input.phase === 'starting') &&
-    (input.rendererDetached || input.phase === 'open' || input.phase === 'starting')
+    (input.phase === 'open' || input.phase === 'starting')
   ) {
     return 'attach_existing_owner';
   }

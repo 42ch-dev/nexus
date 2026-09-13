@@ -20,7 +20,8 @@ import {
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import packager from '@electron/packager';
+// @electron/packager 20.x is ESM with a named `packager` export (no default).
+import { packager } from '@electron/packager';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const appRoot = join(__dirname, '..');
