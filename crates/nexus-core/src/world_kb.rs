@@ -161,23 +161,13 @@ pub(crate) mod graph {
 
     pub(crate) async fn get_graph(
         pool: &SqlitePool,
-        access: CoreAccess,
+        _access: CoreAccess,
         creator_id: &str,
         world_id: &str,
         include_suggested: bool,
     ) -> CoreResult<WorldKbGraphResponse> {
-        let mut tx = if access == CoreAccess::ReadOnly {
-            pool.begin().await.map_err(db_err)?
-        } else {
-            nexus_local_db::begin_immediate(pool).await.map_err(local_db_err)?
-        };
+        let mut tx = pool.begin().await.map_err(db_err)?;
         guards::require_world_owner(&mut *tx, world_id, creator_id).await?;
-        let _snapshot_watermark: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(MAX(sequence), 0) FROM core_changes",
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(db_err)?;
 
         let blocks = list_by_world_in_tx(&mut tx, world_id, GRAPH_ENTITY_CAP)
             .await
@@ -316,7 +306,8 @@ pub(crate) mod candidates {
         limit: Option<i64>,
         cursor: Option<String>,
     ) -> CoreResult<WorldKbCandidatesResponse> {
-        guards::require_world_owner(pool, world_id, creator_id).await?;
+        let mut tx = pool.begin().await.map_err(db_err)?;
+        guards::require_world_owner(&mut *tx, world_id, creator_id).await?;
 
         let limit = limit
             .unwrap_or(DEFAULT_CANDIDATE_LIMIT)
@@ -325,7 +316,7 @@ pub(crate) mod candidates {
         let (cursor_created_at, cursor_job_id) = decode_candidate_cursor(cursor.as_ref())?;
 
         let pending = list_pending_for_world_after(
-            pool,
+            &mut *tx,
             world_id,
             cursor_created_at.as_deref(),
             cursor_job_id.as_deref(),
@@ -348,6 +339,7 @@ pub(crate) mod candidates {
             .map(project_candidate)
             .collect();
 
+        tx.commit().await.map_err(db_err)?;
         Ok(WorldKbCandidatesResponse {
             items: wire_cast(items),
             pagination: wire_cast(PaginationInfo {
@@ -801,6 +793,8 @@ fn is_sqlite_busy(err: &sqlx::Error) -> bool {
 fn db_err(e: sqlx::Error) -> CoreError {
     if is_sqlite_busy(&e) {
         CoreError::Busy
+    } else if matches!(e, sqlx::Error::PoolTimedOut) {
+        CoreError::OwnerBusy
     } else {
         CoreError::Internal {
             category: format!("database_error: {e}"),
@@ -810,7 +804,11 @@ fn db_err(e: sqlx::Error) -> CoreError {
 
 fn local_db_err(e: nexus_local_db::LocalDbError) -> CoreError {
     match e {
+        nexus_local_db::LocalDbError::OwnerBusy { .. } => CoreError::OwnerBusy,
+        nexus_local_db::LocalDbError::WriterFenced { .. } => CoreError::WriterFenced,
+        nexus_local_db::LocalDbError::SchemaMismatch { .. } => CoreError::SchemaMismatch,
         nexus_local_db::LocalDbError::Sqlx(err) if is_sqlite_busy(&err) => CoreError::Busy,
+        nexus_local_db::LocalDbError::Sqlx(sqlx::Error::PoolTimedOut) => CoreError::OwnerBusy,
         other => CoreError::Internal {
             category: format!("database_error: {other}"),
         },

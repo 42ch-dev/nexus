@@ -476,3 +476,53 @@ async fn world_kb_contract_stored_revision_exactness() {
     );
 }
 
+#[tokio::test]
+async fn direct_writer_close_allows_reopen() {
+    let tmp = TempDir::new().unwrap();
+    let user_home = tmp.path().to_path_buf();
+    let nexus_home = user_home.join(".nexus42");
+    std::fs::create_dir_all(&nexus_home).unwrap();
+    let op = nexus_home_layout::operational_workspace_dir(&user_home, CREATOR, SLUG);
+    std::fs::create_dir_all(&op).unwrap();
+    std::fs::write(
+        nexus_home.join("config.toml"),
+        format!(
+            "active_creator_id = \"{CREATOR}\"
+[active_workspace_slug_by_creator]
+\"{CREATOR}\" = \"{SLUG}\""
+        ),
+    )
+    .unwrap();
+    let db_path = nexus_home_layout::workspace_state_db_path(&user_home, CREATOR, SLUG);
+    {
+        let guarded = init_engine_pool(&db_path, CREATOR, GuardedPoolOptions::default())
+            .await
+            .unwrap();
+        let pool = guarded.clone_pool();
+        seed_world(&pool, OWNED_WORLD, CREATOR).await;
+        pool.close().await;
+    }
+
+    let core = CoreService::open(CoreOpenOptions {
+        user_home: user_home.clone(),
+        access: CoreAccess::DirectWriter,
+    })
+    .await
+    .unwrap();
+    let principal = core.active_principal().await.unwrap();
+    core.close().await.expect("first close must succeed");
+    drop(core);
+
+    let core2 = CoreService::open(CoreOpenOptions {
+        user_home,
+        access: CoreAccess::DirectWriter,
+    })
+    .await
+    .expect("second DirectWriter open after close must succeed");
+    let _ = core2
+        .world_kb_graph(&principal, OWNED_WORLD.to_string(), false)
+        .await
+        .expect("graph after reopen");
+    core2.close().await.expect("second close must succeed");
+}
+

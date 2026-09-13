@@ -881,6 +881,35 @@ async fn main() {
     // result for the CLI would be vacuous.
     let (sampler_ok, sampler_lines) = sampler_positive_control(port);
 
+    if !sampler_ok {
+        let evidence = serde_json::json!({
+            "scenario": scenario,
+            "http_bin": http_bin.display().to_string(),
+            "cli_bin": cli_bin.display().to_string(),
+            "transport_sampler_failed": true,
+            "barrier_round_skipped": true,
+            "cli_transport_trace": {
+                "sampler_positive_control_ok": false,
+                "sampler_positive_control_lines": sampler_lines,
+            },
+            "barrier_round": {
+                "barrier_ok": false,
+                "skipped_reason": "transport_sampler_positive_control_failed",
+            },
+        });
+        std::fs::write(
+            out.join("world_kb_proof.json"),
+            serde_json::to_string_pretty(&evidence).expect("serialize evidence"),
+        )
+        .expect("write evidence");
+        let _ = daemon.kill();
+        let _ = daemon.wait();
+        eprintln!(
+            "transport sampler positive control failed; barrier round skipped (sampler_ok=false)"
+        );
+        std::process::exit(1);
+    }
+
     let (round, cli_degraded) = run_barrier_round(
         port,
         &home.user_home,

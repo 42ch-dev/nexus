@@ -14,7 +14,8 @@ use nexus_home_layout::active_context::{
 };
 use nexus_local_db::open_pool_read_only;
 use nexus_local_db::writer_protocol::{
-    init_engine_pool, init_guarded_pool, GuardedPool, GuardedPoolOptions,
+    init_engine_pool, init_guarded_pool, release_retained_writer_guards, GuardedPool,
+    GuardedPoolOptions,
 };
 use sqlx::SqlitePool;
 
@@ -38,6 +39,7 @@ pub struct CoreOpenOptions {
 
 struct CoreInner {
     pool: SqlitePool,
+    db_path: PathBuf,
     _guarded: Option<GuardedPool>,
     nexus_home: PathBuf,
     creator_id: String,
@@ -102,6 +104,7 @@ impl CoreService {
         Ok(Self {
             inner: Arc::new(CoreInner {
                 pool,
+                db_path,
                 _guarded: guarded,
                 nexus_home,
                 creator_id,
@@ -237,6 +240,9 @@ impl CoreService {
             });
         }
         self.inner.pool.close().await;
+        if self.inner.access == CoreAccess::DirectWriter {
+            release_retained_writer_guards(&self.inner.db_path);
+        }
         Ok(CoreCloseReport {
             state: nexus_contracts::CoreCloseReportState::Closed,
             cleanup_confirmed: true,
@@ -263,6 +269,7 @@ fn map_db(e: nexus_local_db::LocalDbError) -> CoreError {
         nexus_local_db::LocalDbError::WriterFenced { .. } => CoreError::WriterFenced,
         nexus_local_db::LocalDbError::SchemaMismatch { .. } => CoreError::SchemaMismatch,
         nexus_local_db::LocalDbError::Sqlx(err) if is_sqlite_busy(&err) => CoreError::Busy,
+        nexus_local_db::LocalDbError::Sqlx(sqlx::Error::PoolTimedOut) => CoreError::OwnerBusy,
         other => CoreError::Internal {
             category: format!("database_error: {other}"),
         },
