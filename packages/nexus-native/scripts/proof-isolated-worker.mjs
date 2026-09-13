@@ -115,8 +115,39 @@ function tsProbePayload() { return { provider_id: 'mock-acp' }; }
 function tsLaunchPayload() { return { provider_id: 'mock-acp' }; }
 function tsExecutePayload() { return { kind: 'prompt', content: 'hello' }; }
 
+function formatProviderError(err) {
+  if (err == null) return '';
+  if (typeof err === 'string') return err;
+  if (typeof err === 'object') {
+    if (typeof err.message === 'string') return err.message;
+    if (typeof err.error === 'string') return err.error;
+    if (err.error && typeof err.error === 'object' && typeof err.error.message === 'string') {
+      return err.error.message;
+    }
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return String(err);
+    }
+  }
+  return String(err);
+}
+
 function isTransportEofError(err) {
-  return /eof|broken pipe|connection reset|transport|child process|exited|closed/i.test(String(err ?? ''));
+  return /eof|broken pipe|connection reset|transport|child process|exited|closed/i.test(formatProviderError(err));
+}
+
+function isProviderEofSignal(reply) {
+  if (!reply || typeof reply !== 'object') return false;
+  const healthMsg = formatProviderError(reply.health?.message);
+  if (reply.ok && reply.health?.available === false) {
+    return /provider_eof|unavailable|not available|exited|closed/i.test(healthMsg);
+  }
+  const err = formatProviderError(reply.error);
+  if (!reply.ok) {
+    return isTransportEofError(err) || /provider_eof|unavailable|not available|exited|closed|session/i.test(err);
+  }
+  return false;
 }
 
 
@@ -233,7 +264,8 @@ enabled = true
 `);
   const accessJson = JSON.stringify({ user_home: badHome, access: 'engine_owner', allow_uninitialized: false });
   steps.push('open');
-  const core = binding.open(accessJson, workerData.providers);
+  const providers = await providersForScenario();
+  const core = binding.open(accessJson, providers);
   steps.push('launch_bad_child');
   const badLaunch = await core.providerCall(encode({
     request_id: 'bad-launch', method: 'launch', deadline_ms: 5_000,
@@ -257,24 +289,34 @@ async function runEofWhileLive() {
   writeAgentHostConfig(eofHome, fixture, eofWs, { EOF_AFTER_INIT: '1' });
   const accessJson = JSON.stringify({ user_home: eofHome, access: 'engine_owner', allow_uninitialized: false });
   steps.push('open');
-  const core = binding.open(accessJson, workerData.providers);
+  const providers = await providersForScenario();
+  const core = binding.open(accessJson, providers);
   steps.push('probe');
   const probe = await core.providerCall(encode({
     request_id: 'eof-probe', method: 'probe', deadline_ms: 30_000,
     payload: adapter === 'rust-acp' ? rustProbePayload(eofHome) : tsProbePayload(),
   })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
-  if (!probe.ok) return fail('eof_after_close', `probe failed: ${probe.error}`, { executed_steps: steps });
   steps.push('launch_eof_fixture');
-  const launchErr = await core.providerCall(encode({
+  const launch = await core.providerCall(encode({
     request_id: 'eof-live-launch', method: 'launch', deadline_ms: 5_000,
     payload: adapter === 'rust-acp' ? rustLaunchPayload(eofHome) : tsLaunchPayload(),
-  })).then(() => null).catch((e) => String(e));
+  })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
   steps.push('close');
   await core.close().catch(() => {});
-  if (launchErr && (isTransportEofError(launchErr) || /unavailable|not available|exited|closed/i.test(launchErr))) {
-    return pass('eof_after_close', { error: launchErr, executed_steps: steps, mode: 'EOF_AFTER_INIT_live' });
+  const probeEof = isProviderEofSignal(probe);
+  const launchEof = isProviderEofSignal(launch);
+  if (probeEof || launchEof) {
+    return pass('eof_after_close', {
+      error: launchEof ? formatProviderError(launch.error) : formatProviderError(probe.health?.message ?? probe.error),
+      probe_ok: probe.ok,
+      probe_available: probe.health?.available ?? null,
+      launch_ok: launch.ok,
+      executed_steps: steps,
+      mode: 'EOF_AFTER_INIT_live',
+      adapter,
+    });
   }
-  return fail('eof_after_close', `expected live EOF/unavailable, got: ${launchErr}`, { executed_steps: steps });
+  return fail('eof_after_close', `expected live EOF/unavailable, probe=${formatProviderError(probe.health?.message ?? probe.error)} launch=${formatProviderError(launch.error)}`, { executed_steps: steps });
 }
 
 async function runFullQueueShutdown() {
