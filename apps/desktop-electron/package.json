@@ -2,16 +2,24 @@
   "name": "nexus-desktop-electron-proof",
   "version": "0.1.0",
   "private": true,
-  "description": "Electron feasibility shell (reserved: implementation owned by the downstream desktop task)",
+  "description": "Private Electron feasibility shell — serves unchanged apps/web/dist via nexus-proof:",
+  "type": "module",
+  "main": "dist/main.js",
   "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "proof:dev": "electron dist/main.js",
     "package": "node scripts/package.mjs",
+    "proof:package": "node scripts/proof-package.mjs",
     "proof:native-smoke": "node src/native-smoke.mjs"
   },
   "dependencies": {
-    "@42ch/nexus-native": "workspace:*"
+    "@42ch/nexus-contracts": "workspace:*",
+    "@42ch/nexus-native": "workspace:*",
+    "@42ch/nexus-provider-acp": "workspace:*"
   },
   "devDependencies": {
-    "electron": "44.3.0",
-    "@electron/packager": "20.3.0"
+    "@electron/packager": "20.3.0",
+    "@types/node": "^22.15.3",
+    "electron": "44.3.0"
   }
 }
