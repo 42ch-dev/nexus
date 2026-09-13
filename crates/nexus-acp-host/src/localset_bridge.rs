@@ -73,7 +73,7 @@ enum ControlMessage {
 /// The `*_at_shutdown` fields are the queue snapshot taken when shutdown was
 /// requested; the plain counters are the final values after the drain, so a
 /// settled shutdown reports zero live work alongside what it actually drained.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ShutdownEvidence {
     pub joined_cleanly: bool,
     pub thread_alive: bool,
@@ -398,10 +398,17 @@ impl LocalSetBridge {
         self.settled.lock().ok().and_then(|slot| slot.clone())
     }
 
-    fn publish_settled(&self, evidence: &ShutdownEvidence) {
+    /// Publish the bridge's single settlement. First writer wins, so a bridge
+    /// can never settle twice; returns whether this call was the one that
+    /// published.
+    fn publish_settled(&self, evidence: &ShutdownEvidence) -> bool {
         if let Ok(mut slot) = self.settled.lock() {
-            *slot = Some(evidence.clone());
+            if slot.is_none() {
+                *slot = Some(evidence.clone());
+                return true;
+            }
         }
+        false
     }
 
     /// Wait for the owning shutdown to publish its settlement. `None` means the
@@ -699,41 +706,23 @@ impl LocalSetBridge {
             .is_err()
         {
             // One settlement: a concurrent caller observes the owner's result
-            // rather than manufacturing a snapshot of its own.
+            // rather than manufacturing a snapshot of its own. The owner
+            // publishes on every exit path, so this returns as soon as it does.
             if let Some(evidence) = self.await_settlement(deadline).await {
                 return evidence;
             }
-            let mut evidence = self.evidence_from_state();
-            if join_thread {
-                evidence = self.join_runtime_thread(evidence, deadline).await;
-            }
-            return evidence;
+            // Last resort only (the owner never published): report the honest
+            // observed state — never claim a settlement the owner did not make,
+            // and never join a thread the owner still owns.
+            warn!("LocalSet shutdown settlement not published before deadline");
+            return self.evidence_from_state();
         }
         self.counters.shutting_down.store(true, Ordering::SeqCst);
 
-        if self
-            .runtime
-            .lock()
-            .ok()
-            .is_some_and(|guard| guard.is_none())
-        {
-            return ShutdownEvidence {
-                joined_cleanly: true,
-                thread_alive: false,
-                pending_requests: 0,
-                pending_bytes: 0,
-                active_tasks: 0,
-                owned_tasks: 0,
-                control_tasks: 0,
-                queued_at_shutdown: 0,
-                queued_bytes_at_shutdown: 0,
-                active_at_shutdown: 0,
-                owned_at_shutdown: 0,
-                control_at_shutdown: 0,
-                aborted_task_ids: vec![],
-            };
-        }
-
+        // One exit path for every winner case — an unstarted bridge, a
+        // failed-open bridge, and a started bridge all reach the single
+        // `publish_settled` below, so concurrent losers always observe the same
+        // settlement instead of waiting out their deadline.
         let control_tx = {
             let guard = self.runtime.lock().ok();
             guard.and_then(|g| g.as_ref().map(|rt| rt.control_tx.clone()))
@@ -765,6 +754,8 @@ impl LocalSetBridge {
                 self.evidence_from_state()
             }
         } else {
+            // No runtime thread was ever spawned (or one already failed to
+            // open): trivially settled.
             self.evidence_from_state()
         };
 
@@ -891,16 +882,15 @@ impl LocalSetBridge {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
             .is_err()
         {
-            // One settlement: observe the owner's result, never a fabricated one.
+            // One settlement: observe the owner's result, never a fabricated
+            // one. Symmetric with the async path.
             if let Some(evidence) = self.await_settlement_sync(deadline) {
                 return evidence;
             }
-            let mut evidence = self.evidence_from_state();
-            let join_budget = deadline.saturating_duration_since(Instant::now());
-            if !join_budget.is_zero() {
-                evidence = self.join_runtime_thread_sync(evidence, deadline);
-            }
-            return evidence;
+            warn!("LocalSet sync shutdown settlement not published before deadline");
+            // Last resort only: honest observed state, and never join a thread
+            // the owning caller still owns.
+            return self.evidence_from_state();
         }
         self.counters.shutting_down.store(true, Ordering::SeqCst);
 
@@ -1480,6 +1470,68 @@ mod tests {
             "{:?}",
             again.unsettled_pending()
         );
+    }
+
+    /// Two callers starting together on an unstarted bridge must BOTH return the
+    /// one published settlement promptly. The `runtime == None` winner used to
+    /// return before publishing, so the loser waited out its whole deadline and
+    /// then reported a snapshot of its own.
+    #[tokio::test]
+    async fn concurrent_shutdown_on_unstarted_bridge_shares_one_settlement() {
+        let bridge = LocalSetBridge::new();
+        let started = tokio::time::Instant::now();
+        let (a, b) = tokio::join!(bridge.shutdown(), {
+            let bridge = bridge.clone();
+            async move { bridge.shutdown().await }
+        });
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "both callers must return promptly, not wait out the budget: {elapsed:?}"
+        );
+        assert_eq!(a, b, "concurrent callers must observe identical evidence");
+        assert!(
+            a.is_settled(),
+            "an unstarted bridge settles trivially: {a:?}"
+        );
+        assert_eq!(
+            bridge.settled_evidence().as_ref(),
+            Some(&a),
+            "the returned evidence must be the published settlement"
+        );
+        // Exactly one settlement: a later publisher is refused, so the first
+        // published result can never be overwritten.
+        let mut usurper = a.clone();
+        usurper.pending_requests = 99;
+        assert!(
+            !bridge.publish_settled(&usurper),
+            "a bridge must not settle twice"
+        );
+        assert_eq!(
+            bridge.settled_evidence().as_ref(),
+            Some(&a),
+            "the first settlement stands"
+        );
+    }
+
+    /// The sync path already had a single publish site; assert the symmetry so a
+    /// future edit cannot reintroduce the async-only bug.
+    #[test]
+    fn concurrent_sync_shutdown_on_unstarted_bridge_shares_one_settlement() {
+        let bridge = LocalSetBridge::new();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let started = Instant::now();
+        let first = bridge.shutdown_sync_with_deadline(deadline);
+        // A second (loser) caller observes the published settlement.
+        let second = bridge.shutdown_sync_with_deadline(deadline);
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "sync shutdown must not wait out the budget"
+        );
+        assert_eq!(first, second, "sync callers must observe identical evidence");
+        assert!(first.is_settled(), "{first:?}");
+        assert_eq!(bridge.settled_evidence().as_ref(), Some(&first));
     }
 
     #[tokio::test]
