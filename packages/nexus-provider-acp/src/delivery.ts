@@ -27,6 +27,7 @@ export class OperationDelivery {
   private pendingBytes = 0;
   private emittedBytes = 0;
   private terminal: DeliveryTerminal | null = null;
+  private terminalReturned = false;
   private gap: CoreStreamGap | null = null;
   private pullInFlight = false;
   private overflow = false;
@@ -44,6 +45,10 @@ export class OperationDelivery {
     return this.terminal !== null || this.overflow;
   }
 
+  get hasPendingTerminal(): boolean {
+    return this.terminal !== null && !this.terminalReturned;
+  }
+
   tryBeginPull(): boolean {
     if (this.pullInFlight) return false;
     this.pullInFlight = true;
@@ -55,7 +60,7 @@ export class OperationDelivery {
   }
 
   enqueue(event: ProviderHostEvent): boolean {
-    if (this.closed || this.overflow) return false;
+    if (this.closed || this.overflow || this.terminal) return false;
     const bytes = eventBytes(event);
     if (bytes > MAX_EVENT_BYTES) {
       this.markOverflow();
@@ -76,14 +81,16 @@ export class OperationDelivery {
     return true;
   }
 
-  setTerminal(terminal: DeliveryTerminal): void {
-    if (this.closed || this.overflow) return;
+  /** First terminal wins; later attempts are ignored. */
+  trySetTerminal(terminal: DeliveryTerminal): boolean {
+    if (this.closed || this.overflow || this.terminal !== null) return false;
     const controlBytes = new TextEncoder().encode(JSON.stringify(terminal)).length;
     if (controlBytes > MAX_CONTROL_BYTES) {
       this.markOverflow();
-      return;
+      return false;
     }
     this.terminal = terminal;
+    return true;
   }
 
   setGap(gap: CoreStreamGap): void {
@@ -105,6 +112,7 @@ export class OperationDelivery {
     this.pendingBytes = 0;
   }
 
+  /** Pull data events only; terminal uses a separate control slot on a later pull. */
   pull(maxEvents: number, maxBytes: number): ProviderEventBatch {
     const capEvents = Math.min(maxEvents, MAX_BATCH_EVENTS);
     const capBytes = Math.min(maxBytes, MAX_BATCH_BYTES);
@@ -120,16 +128,29 @@ export class OperationDelivery {
       events.push(head.event);
       usedBytes += head.bytes;
     }
-    const hasMore = this.queue.length > 0;
+    const hasMoreData = this.queue.length > 0;
     return {
       operation_id: this.operationId,
       events,
-      has_more: hasMore,
-      gap: hasMore ? undefined : this.gap ?? undefined,
+      has_more: hasMoreData || this.hasPendingTerminal,
+      gap: hasMoreData ? undefined : this.gap ?? undefined,
     };
   }
 
-  drainTerminalEvents(sessionId: string, opId: string): ProviderHostEvent[] {
+  /** Consume the pending terminal control slot exactly once after data is drained. */
+  consumeTerminal(sessionId: string, opId: string): ProviderHostEvent[] | null {
+    if (!this.hasPendingTerminal || !this.terminal) return null;
+    const events = this.materializeTerminal(sessionId, opId);
+    const controlBytes = new TextEncoder().encode(JSON.stringify(events)).length;
+    if (controlBytes > MAX_CONTROL_BYTES) {
+      this.markOverflow();
+      return this.materializeTerminal(sessionId, opId);
+    }
+    this.terminalReturned = true;
+    return events;
+  }
+
+  private materializeTerminal(sessionId: string, opId: string): ProviderHostEvent[] {
     if (!this.terminal) return [];
     if (this.terminal.kind === 'finished') {
       return [{ OpFinished: { session_id: sessionId, op_id: opId, reason: this.terminal.reason } }];

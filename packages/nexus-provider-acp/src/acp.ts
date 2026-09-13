@@ -6,15 +6,19 @@ import type {
   ValidatedProviderRecipe,
 } from '@42ch/nexus-contracts';
 import type { ProviderError, ProviderHostEvent } from './contracts.js';
-import { MAX_BATCH_EVENTS, OperationDelivery } from './delivery.js';
+import { OperationDelivery } from './delivery.js';
+import { ProviderNextError } from './errors.js';
 import {
+  cleanupOwnedConnection,
   closeOwnedConnection,
   createAcpSession,
-  reapChild,
+  MAX_PROMPT_INPUT_BYTES,
   spawnOwnedConnection,
-  waitForChildExit,
   type OwnedConnection,
 } from './process-owner.js';
+import { parseAdmittedRecipe } from './recipe.js';
+
+const MAX_TERMINAL_OPERATIONS = 64;
 
 type SessionState = {
   sessionId: string;
@@ -22,29 +26,23 @@ type SessionState = {
   recipeGeneration: string;
   cwd: string;
   owned: OwnedConnection;
+  activeOperationId: string | null;
 };
 
 type ActiveOperation = {
   sessionId: string;
   opId: string;
   delivery: OperationDelivery;
-  terminalEnqueued: boolean;
+  promptTask: Promise<void> | null;
+  cancelled: boolean;
 };
 
 function okReply(requestId: string, extra: Partial<ProviderReply> = {}): ProviderReply {
-  return {
-    request_id: requestId,
-    ok: true,
-    ...extra,
-  };
+  return { request_id: requestId, ok: true, ...extra };
 }
 
 function errReply(requestId: string, error: ProviderError): ProviderReply {
-  return {
-    request_id: requestId,
-    ok: false,
-    error,
-  };
+  return { request_id: requestId, ok: false, error };
 }
 
 function sanitizeError(message: string): ProviderError {
@@ -54,14 +52,6 @@ function sanitizeError(message: string): ProviderError {
     details: {},
     http_status: 500,
   };
-}
-
-function parseRecipe(payload: Record<string, unknown>): ValidatedProviderRecipe {
-  const recipe = (payload.recipe ?? payload) as ValidatedProviderRecipe;
-  if (!recipe?.executable || !recipe.cwd || !recipe.recipe_generation || !recipe.provider_id) {
-    throw new Error('invalid_recipe');
-  }
-  return recipe;
 }
 
 function mapSessionUpdate(
@@ -81,6 +71,7 @@ export class AcpProviderEngine {
   private sessions = new Map<string, SessionState>();
   private operations = new Map<string, ActiveOperation>();
   private recipeOwners = new Map<string, OwnedConnection>();
+  private terminalOperationOrder: string[] = [];
 
   async call(request: ProviderCall): Promise<ProviderReply> {
     try {
@@ -105,31 +96,49 @@ export class AcpProviderEngine {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'provider_failed';
+      if (message === 'invalid_recipe') {
+        return errReply(request.request_id, {
+          code: 'invalid_input',
+          message: 'invalid_recipe',
+          details: {},
+          http_status: 400,
+        });
+      }
+      if (message === 'session_busy') {
+        return errReply(request.request_id, {
+          code: 'busy',
+          message: 'session_busy',
+          details: {},
+          http_status: 503,
+        });
+      }
       return errReply(request.request_id, sanitizeError(message));
     }
   }
 
   async next(operationId: string, maxEvents: number, maxBytes: number): Promise<ProviderEventBatch> {
     const op = this.operations.get(operationId);
-    if (!op) {
-      return { operation_id: operationId, events: [], has_more: false };
-    }
-    if (!op.delivery.tryBeginPull()) {
-      throw new Error('pull already in flight');
-    }
+    if (!op) throw new ProviderNextError(operationId);
+    if (!op.delivery.tryBeginPull()) throw new Error('pull already in flight');
     try {
       const batch = op.delivery.pull(maxEvents, maxBytes);
-      if (!batch.has_more && op.delivery.isTerminal && !op.terminalEnqueued) {
-        op.terminalEnqueued = true;
-        const terminalEvents = op.delivery.drainTerminalEvents(op.sessionId, op.opId);
-        const merged = [...batch.events, ...terminalEvents];
-        const capEvents = Math.min(maxEvents, MAX_BATCH_EVENTS);
-        return {
-          operation_id: operationId,
-          events: merged.slice(0, capEvents),
-          has_more: merged.length > capEvents,
-          gap: batch.gap,
-        };
+      if (batch.events.length === 0 && op.delivery.hasPendingTerminal) {
+        const terminalEvents = op.delivery.consumeTerminal(op.sessionId, op.opId);
+        if (terminalEvents) {
+          this.markTerminalInspectability(op.opId);
+          return {
+            operation_id: operationId,
+            events: terminalEvents,
+            has_more: false,
+            gap: batch.gap,
+          };
+        }
+      }
+      if (batch.events.length > 0 && op.delivery.hasPendingTerminal) {
+        return { ...batch, has_more: true };
+      }
+      if (!batch.has_more && !op.delivery.hasPendingTerminal) {
+        this.markTerminalInspectability(op.opId);
       }
       return batch;
     } finally {
@@ -137,23 +146,51 @@ export class AcpProviderEngine {
     }
   }
 
+  private markTerminalInspectability(opId: string): void {
+    if (this.terminalOperationOrder.includes(opId)) return;
+    this.terminalOperationOrder.push(opId);
+    while (this.terminalOperationOrder.length > MAX_TERMINAL_OPERATIONS) {
+      const evict = this.terminalOperationOrder.shift();
+      if (evict) this.operations.delete(evict);
+    }
+  }
+
   private routeSessionUpdate(acpSessionId: string, update: unknown): void {
     for (const session of this.sessions.values()) {
       if (session.owned.acpSessionId !== acpSessionId) continue;
-      for (const op of this.operations.values()) {
-        if (op.sessionId !== session.sessionId) continue;
-        const mapped = mapSessionUpdate(session.sessionId, op.opId, update);
-        if (mapped) op.delivery.enqueue(mapped);
-      }
+      const opId = session.activeOperationId;
+      if (!opId) continue;
+      const op = this.operations.get(opId);
+      if (!op) continue;
+      const mapped = mapSessionUpdate(session.sessionId, opId, update);
+      if (mapped) op.delivery.enqueue(mapped);
     }
   }
 
   private async handleProbe(request: ProviderCall): Promise<ProviderReply> {
-    const recipe = parseRecipe(request.payload);
-    const owned = await spawnOwnedConnection(recipe, () => undefined);
-    await closeOwnedConnection(owned);
-    const reaped = await waitForChildExit(owned.child, 4_000);
-    if (!reaped) {
+    const started = Date.now();
+    const recipe = parseAdmittedRecipe(request.payload);
+    let owned: OwnedConnection | null = null;
+    try {
+      owned = await spawnOwnedConnection(recipe, () => undefined);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'probe_failed';
+      if (message === 'provider_eof' || message === 'stderr_overflow') {
+        return {
+          request_id: request.request_id,
+          ok: true,
+          health: {
+            provider_id: recipe.provider_id,
+            available: false,
+            latency_ms: Date.now() - started,
+            message,
+          },
+        };
+      }
+      throw error;
+    }
+    const reap = await cleanupOwnedConnection(owned);
+    if (!reap.confirmed) {
       return errReply(request.request_id, {
         code: 'interrupted',
         message: 'probe_child_not_reaped',
@@ -161,34 +198,40 @@ export class AcpProviderEngine {
         http_status: 503,
       });
     }
-    const start = Date.now();
     return okReply(request.request_id, {
       health: {
         provider_id: recipe.provider_id,
         available: true,
-        latency_ms: Date.now() - start,
+        latency_ms: Date.now() - started,
         message: null,
       },
     });
   }
 
   private async handleLaunch(request: ProviderCall): Promise<ProviderReply> {
-    const recipe = parseRecipe(request.payload);
-    const cwd = String(request.payload.cwd ?? recipe.cwd);
+    const recipe = parseAdmittedRecipe(request.payload);
     await this.evictStaleGeneration(recipe.recipe_generation);
     const sessionId = request.session_id ?? randomUUID();
-    const owned = await this.connectForRecipe(recipe, sessionId);
-    await createAcpSession(owned, cwd);
-    this.sessions.set(sessionId, {
-      sessionId,
-      providerId: recipe.provider_id,
-      recipeGeneration: recipe.recipe_generation,
-      cwd,
-      owned,
-    });
-    return okReply(request.request_id, {
-      session_id: sessionId,
-    });
+    let owned: OwnedConnection | null = null;
+    try {
+      owned = await this.connectForRecipe(recipe, sessionId);
+      await createAcpSession(owned, recipe.cwd);
+      this.sessions.set(sessionId, {
+        sessionId,
+        providerId: recipe.provider_id,
+        recipeGeneration: recipe.recipe_generation,
+        cwd: recipe.cwd,
+        owned,
+        activeOperationId: null,
+      });
+      return okReply(request.request_id, { session_id: sessionId });
+    } catch (error) {
+      if (owned) {
+        await cleanupOwnedConnection(owned);
+        this.recipeOwners.delete(`${recipe.recipe_generation}:${sessionId}`);
+      }
+      throw error;
+    }
   }
 
   private async handleExecute(request: ProviderCall): Promise<ProviderReply> {
@@ -196,27 +239,50 @@ export class AcpProviderEngine {
     if (!sessionId) throw new Error('execute_requires_session');
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error('session_not_found');
+    if (session.activeOperationId) throw new Error('session_busy');
     const payload = request.payload as { kind?: string; content?: string };
     if (payload.kind !== 'prompt') throw new Error('unsupported_operation');
+    const content = payload.content ?? '';
+    if (new TextEncoder().encode(content).length > MAX_PROMPT_INPUT_BYTES) {
+      return errReply(request.request_id, {
+        code: 'invalid_input',
+        message: 'prompt_too_large',
+        details: {},
+        http_status: 400,
+      });
+    }
     const opId = randomUUID();
     const delivery = new OperationDelivery(opId);
-    const active: ActiveOperation = { sessionId, opId, delivery, terminalEnqueued: false };
+    const active: ActiveOperation = {
+      sessionId,
+      opId,
+      delivery,
+      promptTask: null,
+      cancelled: false,
+    };
     this.operations.set(opId, active);
+    session.activeOperationId = opId;
     delivery.enqueue({ OpStarted: { session_id: sessionId, op_id: opId } });
-
-    void this.runPrompt(session, opId, payload.content ?? '', delivery);
+    const task = this.runPrompt(session, active, content);
+    active.promptTask = task;
+    void task.finally(() => {
+      if (session.activeOperationId === opId) session.activeOperationId = null;
+    });
     return okReply(request.request_id, { operation_id: opId, session_id: sessionId });
   }
 
   private async runPrompt(
     session: SessionState,
-    opId: string,
+    op: ActiveOperation,
     content: string,
-    delivery: OperationDelivery,
   ): Promise<void> {
     const acpSessionId = session.owned.acpSessionId;
     if (!acpSessionId) {
-      delivery.setTerminal({ kind: 'failed', category: 'provider_error', message: 'missing_acp_session' });
+      op.delivery.trySetTerminal({
+        kind: 'failed',
+        category: 'provider_error',
+        message: 'missing_acp_session',
+      });
       return;
     }
     try {
@@ -224,21 +290,39 @@ export class AcpProviderEngine {
         sessionId: acpSessionId,
         prompt: [{ type: 'text', text: content }],
       });
+      if (op.cancelled) return;
       const reason = String(response.stopReason ?? 'end_turn') as
         | 'end_turn'
         | 'cancelled'
         | 'max_tokens'
         | 'max_turn_requests'
         | 'refusal';
-      delivery.setTerminal({ kind: 'finished', reason });
+      op.delivery.trySetTerminal({ kind: 'finished', reason });
     } catch (error) {
+      if (op.cancelled) return;
       const message = error instanceof Error ? error.message : 'prompt_failed';
       if (message.includes('frame_too_large')) {
-        delivery.setTerminal({ kind: 'failed', category: 'provider_error', message: 'delivery_overflow' });
-      } else if (message.toLowerCase().includes('eof') || message.includes('closed')) {
-        delivery.setTerminal({ kind: 'failed', category: 'provider_error', message: 'provider_eof' });
+        op.delivery.trySetTerminal({
+          kind: 'failed',
+          category: 'provider_error',
+          message: 'delivery_overflow',
+        });
+      } else if (
+        message === 'provider_eof' ||
+        message.toLowerCase().includes('eof') ||
+        message.includes('closed')
+      ) {
+        op.delivery.trySetTerminal({
+          kind: 'failed',
+          category: 'provider_error',
+          message: 'provider_eof',
+        });
       } else {
-        delivery.setTerminal({ kind: 'failed', category: 'provider_error', message: 'prompt_failed' });
+        op.delivery.trySetTerminal({
+          kind: 'failed',
+          category: 'provider_error',
+          message: 'prompt_failed',
+        });
       }
     }
   }
@@ -250,8 +334,28 @@ export class AcpProviderEngine {
     if (!op) throw new Error('operation_not_found');
     const session = this.sessions.get(op.sessionId);
     if (!session?.owned.acpSessionId) throw new Error('session_not_found');
-    await session.owned.connection.cancel({ sessionId: session.owned.acpSessionId });
-    op.delivery.setTerminal({ kind: 'finished', reason: 'cancelled' });
+    op.cancelled = true;
+    if (!op.delivery.trySetTerminal({ kind: 'finished', reason: 'cancelled' })) {
+      return okReply(request.request_id, { operation_id: operationId, session_id: op.sessionId });
+    }
+    try {
+      await session.owned.connection.cancel({ sessionId: session.owned.acpSessionId });
+    } catch {
+      // best effort
+    }
+    if (op.promptTask) await op.promptTask.catch(() => undefined);
+    if (session.activeOperationId === operationId) session.activeOperationId = null;
+    const reap = await cleanupOwnedConnection(session.owned);
+    if (!reap.confirmed) {
+      return errReply(request.request_id, {
+        code: 'interrupted',
+        message: 'cancel_child_not_reaped',
+        details: {},
+        http_status: 503,
+      });
+    }
+    this.sessions.delete(op.sessionId);
+    this.recipeOwners.delete(`${session.recipeGeneration}:${session.sessionId}`);
     return okReply(request.request_id, { operation_id: operationId, session_id: op.sessionId });
   }
 
@@ -260,8 +364,24 @@ export class AcpProviderEngine {
     if (!sessionId) throw new Error('shutdown_requires_session');
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error('session_not_found');
-    await closeOwnedConnection(session.owned);
-    await reapChild(session.owned.child);
+    if (session.activeOperationId) {
+      const active = this.operations.get(session.activeOperationId);
+      if (active) {
+        active.cancelled = true;
+        active.delivery.trySetTerminal({ kind: 'finished', reason: 'cancelled' });
+        if (active.promptTask) await active.promptTask.catch(() => undefined);
+      }
+      session.activeOperationId = null;
+    }
+    const reap = await closeOwnedConnection(session.owned);
+    if (!reap.confirmed) {
+      return errReply(request.request_id, {
+        code: 'interrupted',
+        message: 'shutdown_child_not_reaped',
+        details: {},
+        http_status: 503,
+      });
+    }
     this.sessions.delete(sessionId);
     this.recipeOwners.delete(`${session.recipeGeneration}:${sessionId}`);
     return okReply(request.request_id, { session_id: sessionId });
@@ -278,19 +398,31 @@ export class AcpProviderEngine {
     return owned;
   }
 
+  private terminalizeSessionOperations(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    for (const op of this.operations.values()) {
+      if (op.sessionId !== sessionId) continue;
+      op.cancelled = true;
+      op.delivery.trySetTerminal({
+        kind: 'failed',
+        category: 'provider_error',
+        message: 'generation_replaced',
+      });
+    }
+    if (session) session.activeOperationId = null;
+  }
+
   private async evictStaleGeneration(currentGeneration: string): Promise<void> {
     for (const [key, owned] of this.recipeOwners.entries()) {
       if (key.startsWith(`${currentGeneration}:`)) continue;
-      await closeOwnedConnection(owned);
-      await reapChild(owned.child);
+      await cleanupOwnedConnection(owned);
       this.recipeOwners.delete(key);
     }
-    for (const [sessionId, session] of this.sessions.entries()) {
-      if (session.recipeGeneration !== currentGeneration) {
-        await closeOwnedConnection(session.owned);
-        await reapChild(session.owned.child);
-        this.sessions.delete(sessionId);
-      }
+    for (const [sessionId, session] of [...this.sessions.entries()]) {
+      if (session.recipeGeneration === currentGeneration) continue;
+      this.terminalizeSessionOperations(sessionId);
+      await cleanupOwnedConnection(session.owned);
+      this.sessions.delete(sessionId);
     }
   }
 }

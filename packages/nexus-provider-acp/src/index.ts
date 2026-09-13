@@ -11,6 +11,8 @@ export {
   MAX_EVENT_BYTES,
   MAX_PENDING_MESSAGES,
 } from './delivery.js';
+export { ProviderNextError } from './errors.js';
+export { parseAdmittedRecipe } from './recipe.js';
 
 export function createAcpProvider(): ProviderCallbacks {
   return createEngine();

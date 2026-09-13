@@ -8,6 +8,7 @@ declare module 'node:child_process' {
   import type { Readable, Writable } from 'node:stream';
 
   export interface ChildProcessWithoutNullStreams {
+    pid: number | undefined;
     stdin: Writable | null;
     stdout: Readable | null;
     stderr: Readable | null;
@@ -16,6 +17,12 @@ declare module 'node:child_process' {
     kill(signal?: string): boolean;
     once(event: 'exit', listener: () => void): void;
   }
+
+  export function execFile(
+    command: string,
+    args: readonly string[],
+    callback: (error: Error | null, stdout: string, stderr: string) => void,
+  ): void;
 
   export function spawn(
     command: string,
@@ -40,8 +47,14 @@ declare module 'node:stream' {
   }
 }
 
+declare namespace NodeJS {
+  type Signals = 'SIGTERM' | 'SIGKILL';
+}
+
 declare const process: {
   env: Record<string, string | undefined>;
+  platform: string;
+  kill(pid: number, signal?: string): void;
 };
 
 declare function setTimeout(handler: () => void, timeout?: number): unknown;
@@ -49,4 +62,12 @@ declare function clearTimeout(handle: unknown): void;
 
 declare module 'node:buffer' {
   export class Buffer extends Uint8Array {}
+}
+
+declare module 'node:path' {
+  export function isAbsolute(path: string): boolean;
+}
+
+declare module 'node:util' {
+  export function promisify<T>(fn: (...args: unknown[]) => void): (...args: unknown[]) => Promise<T>;
 }

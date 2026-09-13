@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { Readable, Writable } from 'node:stream';
 import type { ValidatedProviderRecipe } from '@42ch/nexus-contracts';
@@ -9,7 +9,18 @@ import {
   type Stream,
 } from '@agentclientprotocol/sdk';
 
+function execFileAsync(command: string, args: readonly string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+
 export const MAX_FRAME_BYTES = 1024 * 1024;
+export const MAX_STDERR_BYTES = 256 * 1024;
+export const MAX_PROMPT_INPUT_BYTES = 1024 * 1024;
 
 export type SessionUpdateHandler = (params: { sessionId: string; update: unknown }) => void;
 
@@ -21,12 +32,56 @@ export type OwnedConnection = {
   stdinWritable: Writable;
 };
 
-function sanitizeEnv(env: Record<string, string | undefined>): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(env)) {
-    if (value !== undefined) out[key] = value;
-  }
-  return out;
+export type ReapResult = {
+  confirmed: boolean;
+  exitCode: number | null;
+  signal: string | null;
+};
+
+type ExitRace = {
+  exited: boolean;
+  promise: Promise<never>;
+};
+
+function buildChildEnv(env: Record<string, string>): Record<string, string> {
+  return { ...env };
+}
+
+function attachExitRace(child: ChildProcessWithoutNullStreams): ExitRace {
+  let exited = false;
+  const promise = new Promise<never>((_, reject) => {
+    child.once('exit', () => {
+      exited = true;
+      reject(new Error('provider_eof'));
+    });
+  });
+  return {
+    get exited() {
+      return exited || child.exitCode !== null || child.signalCode !== null;
+    },
+    promise,
+  };
+}
+
+function attachStderrGuard(
+  child: ChildProcessWithoutNullStreams,
+  onOverflow: () => void,
+): { overflowed: () => boolean } {
+  let bytes = 0;
+  let overflow = false;
+  child.stderr?.on('data', (chunk: Uint8Array) => {
+    bytes += chunk.length;
+    if (bytes > MAX_STDERR_BYTES) {
+      overflow = true;
+      onOverflow();
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        // already dead
+      }
+    }
+  });
+  return { overflowed: () => overflow };
 }
 
 function createFrameGuardTransform(maxFrameBytes: number): TransformStream<Uint8Array, Uint8Array> {
@@ -77,20 +132,39 @@ function nodeToWebWritable(nodeStream: Writable): WritableStream<Uint8Array> {
   return Writable.toWeb(nodeStream) as WritableStream<Uint8Array>;
 }
 
+async function signalProcessTree(pid: number, signal: NodeJS.Signals): Promise<void> {
+  if (process.platform === 'win32') {
+    const flag = signal === 'SIGKILL' ? '/F' : '';
+    await execFileAsync('taskkill', ['/pid', String(pid), '/T', flag].filter(Boolean) as string[]).catch(
+      () => undefined,
+    );
+    return;
+  }
+  const pkillSignal = signal === 'SIGKILL' ? 'KILL' : 'TERM';
+  await execFileAsync('pkill', [`-${pkillSignal}`, '-P', String(pid)]).catch(() => undefined);
+  try {
+    process.kill(pid, signal);
+  } catch {
+    // already dead
+  }
+}
+
 export async function spawnOwnedConnection(
   recipe: ValidatedProviderRecipe,
   onSessionUpdate: SessionUpdateHandler,
 ): Promise<OwnedConnection> {
   const child = spawn(recipe.executable, recipe.args, {
     cwd: recipe.cwd,
-    env: { ...process.env, ...sanitizeEnv(recipe.env) },
+    env: buildChildEnv(recipe.env as Record<string, string>),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   if (!child.stdin || !child.stdout || !child.stderr) {
     child.kill();
     throw new Error('provider_spawn_failed');
   }
-  child.stderr.on('data', () => undefined);
+
+  const exitRace = attachExitRace(child);
+  const stderrGuard = attachStderrGuard(child, () => undefined);
 
   const guardedStdout = nodeToWebReadable(child.stdout).pipeThrough(
     createFrameGuardTransform(MAX_FRAME_BYTES),
@@ -105,10 +179,33 @@ export async function spawnOwnedConnection(
   };
 
   const connection = new ClientSideConnection(() => client, stream);
-  await connection.initialize({
-    protocolVersion: 1,
-    clientInfo: { name: 'nexus-provider-acp', version: '0.1.0' },
-  });
+  try {
+    await Promise.race([
+      connection.initialize({
+        protocolVersion: 1,
+        clientInfo: { name: 'nexus-provider-acp', version: '0.1.0' },
+      }),
+      exitRace.promise,
+    ]);
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    if (
+      exitRace.exited ||
+      stderrGuard.overflowed() ||
+      child.exitCode !== null ||
+      child.signalCode !== null
+    ) {
+      throw new Error(stderrGuard.overflowed() ? 'stderr_overflow' : 'provider_eof');
+    }
+  } catch (error) {
+    await cleanupOwnedConnection({
+      recipeGeneration: recipe.recipe_generation,
+      child,
+      connection,
+      acpSessionId: null,
+      stdinWritable: child.stdin,
+    });
+    throw error;
+  }
 
   return {
     recipeGeneration: recipe.recipe_generation,
@@ -120,34 +217,19 @@ export async function spawnOwnedConnection(
 }
 
 export async function createAcpSession(owned: OwnedConnection, cwd: string): Promise<string> {
-  const response = await owned.connection.newSession({ cwd, mcpServers: [] });
-  const sessionId = String(response.sessionId);
-  owned.acpSessionId = sessionId;
-  return sessionId;
-}
-
-export async function reapChild(child: ChildProcessWithoutNullStreams): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  child.kill('SIGTERM');
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      resolve();
-    }, 2_000);
-    child.once('exit', () => {
-      clearTimeout(timer);
-      resolve();
-    });
-  });
-}
-
-export async function closeOwnedConnection(owned: OwnedConnection): Promise<void> {
+  const exitRace = attachExitRace(owned.child);
   try {
-    owned.stdinWritable.end();
-  } catch {
-    // already closed
+    const response = await Promise.race([
+      owned.connection.newSession({ cwd, mcpServers: [] }),
+      exitRace.promise,
+    ]);
+    const sessionId = String(response.sessionId);
+    owned.acpSessionId = sessionId;
+    return sessionId;
+  } catch (error) {
+    await cleanupOwnedConnection(owned);
+    throw error;
   }
-  await reapChild(owned.child);
 }
 
 export async function waitForChildExit(
@@ -162,4 +244,45 @@ export async function waitForChildExit(
       resolve(true);
     });
   });
+}
+
+export async function reapChild(
+  child: ChildProcessWithoutNullStreams,
+  timeoutMs = 5_000,
+): Promise<ReapResult> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return { confirmed: true, exitCode: child.exitCode, signal: child.signalCode };
+  }
+  const pid = child.pid;
+  if (pid) await signalProcessTree(pid, 'SIGTERM');
+  else child.kill('SIGTERM');
+
+  const termWait = Math.min(2_000, timeoutMs);
+  const termReaped = await waitForChildExit(child, termWait);
+  if (termReaped) {
+    return { confirmed: true, exitCode: child.exitCode, signal: child.signalCode };
+  }
+
+  if (pid) await signalProcessTree(pid, 'SIGKILL');
+  else child.kill('SIGKILL');
+
+  const killReaped = await waitForChildExit(child, Math.max(0, timeoutMs - termWait));
+  return {
+    confirmed: killReaped,
+    exitCode: child.exitCode,
+    signal: child.signalCode,
+  };
+}
+
+export async function cleanupOwnedConnection(owned: OwnedConnection): Promise<ReapResult> {
+  try {
+    owned.stdinWritable.end();
+  } catch {
+    // already closed
+  }
+  return await reapChild(owned.child);
+}
+
+export async function closeOwnedConnection(owned: OwnedConnection): Promise<ReapResult> {
+  return await cleanupOwnedConnection(owned);
 }

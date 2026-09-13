@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -75,6 +75,32 @@ function unpackCallbackPayload(...args) {
   return typeof payload === 'string' ? JSON.parse(payload) : payload;
 }
 
+function resolveAdmittedPython() {
+  const candidates = [process.env.PYTHON, process.env.PYTHON3, 'python3'].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      const resolved = execFileSync('which', [candidate], { encoding: 'utf8' }).trim();
+      if (resolved.startsWith('/')) {
+        return realpathSync(resolved);
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+  throw new Error('no_absolute_python_executable');
+}
+
+function buildAdmittedRecipe(fixturePath, workspace) {
+  return {
+    provider_id: 'mock-acp',
+    recipe_generation: '1',
+    executable: resolveAdmittedPython(),
+    args: [fixturePath],
+    env: { ACP_FIXTURE_LOG: join(workspace, 'fixture.log') },
+    cwd: workspace,
+  };
+}
+
 async function runTsAcpLifecycleProof() {
   const build = spawnSync('pnpm', ['--filter', '@42ch/nexus-provider-acp', 'build'], {
     cwd: root,
@@ -82,7 +108,7 @@ async function runTsAcpLifecycleProof() {
   });
   if (build.status !== 0) process.exit(build.status ?? 1);
 
-  const { createAcpProvider } = await import('../../nexus-provider-acp/dist/index.js');
+  const { createAcpProvider, parseAdmittedRecipe } = await import('../../nexus-provider-acp/dist/index.js');
   const providers = createAcpProvider();
   const core = binding.open(
     JSON.stringify({ user_home: home, access: 'engine_owner', allow_uninitialized: false }),
@@ -98,14 +124,20 @@ async function runTsAcpLifecycleProof() {
 
   const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
   const workspace = mkdtempSync(join(tmpdir(), 'nexus-acp-ws-'));
-  const recipe = {
-    provider_id: 'mock-acp',
-    recipe_generation: '1',
-    executable: process.env.PYTHON ?? 'python3',
-    args: [fixture],
-    env: {},
-    cwd: workspace,
-  };
+  const recipe = buildAdmittedRecipe(fixture, workspace);
+  parseAdmittedRecipe({ recipe });
+  try {
+    parseAdmittedRecipe({
+      recipe: { ...recipe, executable: 'python3' },
+    });
+    console.error('expected invalid_recipe for non-absolute executable');
+    process.exit(1);
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes('invalid_recipe')) {
+      console.error('unexpected recipe rejection', error);
+      process.exit(1);
+    }
+  }
 
   const probeReply = decode(
     await core.providerCall(
@@ -128,7 +160,7 @@ async function runTsAcpLifecycleProof() {
         request_id: 'launch',
         method: 'launch',
         deadline_ms: 30_000,
-        payload: { provider_id: 'mock-acp', cwd: workspace, recipe },
+        payload: { provider_id: 'mock-acp', recipe },
       }),
     ),
   );
@@ -190,6 +222,10 @@ async function runTsAcpLifecycleProof() {
     saw_delta: sawDelta,
     terminal,
     fixture,
+    executable: recipe.executable,
+    recipe_admission: 'absolute_executable_validated_by_parseAdmittedRecipe',
+    rust_admission_boundary:
+      'proof constructs admitted shape only; Rust-side admission is not exercised in this script',
     sdk: '@agentclientprotocol/sdk@1.4.0',
   };
   mkdirSync(outDir, { recursive: true });

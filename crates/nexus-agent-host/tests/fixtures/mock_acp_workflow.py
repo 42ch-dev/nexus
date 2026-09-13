@@ -34,6 +34,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 LOG_PATH = os.environ.get("ACP_FIXTURE_LOG")
 BLOCK_PROMPT = os.environ.get("BLOCK_PROMPT") == "1"
