@@ -8,7 +8,7 @@ mod legacy_impl;
 #[cfg(feature = "legacy-cli")]
 pub use legacy_impl::{active_creator_id, open_workspace_pool, *};
 
-#[cfg(not(feature = "legacy-cli"))]
+#[cfg(all(feature = "basic-cli", not(feature = "legacy-cli")))]
 mod slim;
-#[cfg(not(feature = "legacy-cli"))]
+#[cfg(all(feature = "basic-cli", not(feature = "legacy-cli")))]
 pub use slim::*;

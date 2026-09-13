@@ -189,7 +189,7 @@ pub async fn run_entity_patch(
         .patch_world_kb_entity(&principal, world_id.clone(), req)
         .await
         .map_err(|e| map_patch_error(e, expected_version))?;
-    let _ = core.close().await;
+    core.close().await.map_err(map_core_error)?;
 
     render_patch_response(&world_id, &entity_id, &resp, json)
 }
@@ -207,7 +207,7 @@ pub async fn run_graph(
         .world_kb_graph(&principal, world_id.clone(), include_suggested)
         .await
         .map_err(map_core_error)?;
-    let _ = core.close().await;
+    core.close().await.map_err(map_core_error)?;
 
     render_graph_response(&world_id, &resp, json)
 }
