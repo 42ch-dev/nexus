@@ -2,7 +2,7 @@ import type { Server } from 'node:http';
 import { createAcpProvider } from '@42ch/nexus-provider-acp';
 import type { CoreCloseReport } from '@42ch/nexus-contracts';
 import { validateStartupBind } from './bind.js';
-import { CLOSE_BUDGET_MS, loadTlsMaterial, resolveServiceConfig, type ServiceOptions } from './config.js';
+import { CLOSE_BUDGET_MS, formatHttpAuthority, loadTlsMaterial, resolveServiceConfig, type ServiceOptions } from './config.js';
 import { closeServiceCore, openServiceCore } from './lifecycle.js';
 import { createServiceServer, listenServer, type RunningService } from './server.js';
 
@@ -91,6 +91,14 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
     const created = createServiceServer(config, serviceCore, close);
     server = created.server;
     await listenServer(server, config.host, config.port);
+    const bound = server.address();
+    if (bound && typeof bound === 'object') {
+      const protocol = config.tlsCert && config.tlsKey ? 'https' : 'http';
+      return {
+        url: `${protocol}://${formatHttpAuthority(config.host, bound.port)}`,
+        close: created.running.close,
+      };
+    }
     return created.running;
   } catch (error) {
     await close();

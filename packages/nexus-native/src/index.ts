@@ -37,6 +37,14 @@ import {
   stringifyWire,
 } from './validate.js';
 
+function unpackTsfnJson(...args: unknown[]): string {
+  const payload = args.length > 1 ? args[1] : args[0];
+  if (typeof payload !== 'string') {
+    throw new Error('provider callback payload must be a JSON string');
+  }
+  return payload;
+}
+
 export interface ProviderCallbacks {
   call(request: ProviderCall): Promise<ProviderReply>;
   next(operationId: string, maxEvents: number, maxBytes: number): Promise<ProviderEventBatch>;
@@ -163,10 +171,14 @@ export async function openCore(
 
   const callbacks = providers
     ? {
-        call: async (requestJson: string) =>
-          stringifyWire(await providers.call(JSON.parse(requestJson)), undefined, 'provider_reply'),
-        next: async (requestJson: string) => {
-          const { operation_id, max_events, max_bytes } = JSON.parse(requestJson) as {
+        call: async (...args: unknown[]) =>
+          stringifyWire(
+            await providers.call(JSON.parse(unpackTsfnJson(...args))),
+            undefined,
+            'provider_reply',
+          ),
+        next: async (...args: unknown[]) => {
+          const { operation_id, max_events, max_bytes } = JSON.parse(unpackTsfnJson(...args)) as {
             operation_id: string;
             max_events: number;
             max_bytes: number;

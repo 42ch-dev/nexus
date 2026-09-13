@@ -13,6 +13,7 @@ import { HttpError, mapNativeError, stringifyJsonSafe, toErrorBody } from './err
 import type { ServiceCore } from './lifecycle.js';
 import { checkApiKey, checkOrigin, corsAllowHeaders, corsAllowMethods } from './security.js';
 import { handleRoute, matchRoute } from './routes.js';
+import { releaseSessionSubscriber, reserveSessionSubscriber } from './sse.js';
 
 export interface RunningService {
   readonly url: string;
@@ -154,11 +155,32 @@ export function createServiceServer(
 
       const bodyBuffer = method === 'GET' || method === 'HEAD' ? Buffer.alloc(0) : await readBody(req);
       const body = parseJsonBody(bodyBuffer, method);
-      const payload = await handleRoute(service, method, urlObj.pathname, urlObj.searchParams, body);
-      sendJson(res, 200, payload, id, origin, config.allowedOrigins);
+      const result = await handleRoute(service, method, urlObj.pathname, urlObj.searchParams, body);
+      if (result.kind === 'sse') {
+        if (route.sessionId && method === 'GET' && urlObj.pathname.endsWith('/events')) {
+          reserveSessionSubscriber(route.sessionId);
+          const sessionId = route.sessionId;
+          let released = false;
+          const release = () => {
+            if (released) return;
+            released = true;
+            releaseSessionSubscriber(sessionId);
+          };
+          req.socket?.once('close', release);
+        }
+        res.setHeader('X-Request-Id', id);
+        writeCors(res, origin, config.allowedOrigins);
+        await result.run(res);
+        return;
+      }
+      sendJson(res, 200, result.body, id, origin, config.allowedOrigins);
     } catch (error) {
       const mapped = mapNativeError(error);
-      sendError(res, mapped, id, origin, config.allowedOrigins);
+      if (!res.headersSent) {
+        sendError(res, mapped, id, origin, config.allowedOrigins);
+      } else if (!res.writableEnded) {
+        res.end();
+      }
     }
   };
 

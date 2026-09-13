@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   isNativeCoreErrorCode,
   nativeCompatibility,
@@ -7,9 +8,10 @@ import {
 } from '@42ch/nexus-native';
 import type { CertFingerprintResponse, CoreCloseReport } from '@42ch/nexus-contracts';
 import type { ResolvedServiceConfig } from './config.js';
-import { validateServiceHome } from './config.js';
+import { PROVIDER_DEFAULT_DEADLINE_MS, validateServiceHome } from './config.js';
 import { HttpError, mapNativeError } from './errors.js';
 import { certCreatedAtFromMtime, fingerprintFromPem } from './tls.js';
+import { ProviderRegistry } from './provider-registry.js';
 
 export interface ServiceCore {
   core: NativeCore;
@@ -19,6 +21,8 @@ export interface ServiceCore {
   /** False for the status-only profile: no principal, no KB/host/provider effects. */
   workspaceInitialized: boolean;
   providerReady: boolean;
+  /** HTTP-side session/operation mirror for JS-provider inspect paths (not a second HostManager). */
+  providerRegistry: ProviderRegistry;
 }
 
 export async function openServiceCore(
@@ -28,7 +32,7 @@ export async function openServiceCore(
   nativeCompatibility();
   validateServiceHome(config.home);
 
-  const access = config.domainOnly ? 'direct_writer' : 'engine_owner';
+  const access: 'direct_writer' | 'engine_owner' = config.domainOnly ? 'direct_writer' : 'engine_owner';
   if (!config.domainOnly && !providers) {
     throw new HttpError(
       503,
@@ -40,14 +44,12 @@ export async function openServiceCore(
   // `allow_uninitialized` is the service-only admission flag: an initialized
   // home opens the full core, a missing profile opens the status-only shell so
   // `/runtime/status` can report the existing uninitialized state.
-  const core = await openCore(
-    {
-      user_home: config.home,
-      access,
-      allow_uninitialized: true,
-    },
-    config.domainOnly ? undefined : providers,
-  );
+  const openOptions = {
+    user_home: config.home,
+    access,
+    allow_uninitialized: true,
+  };
+  const core = await openCore(openOptions, config.domainOnly ? undefined : providers);
 
   let workspaceInitialized = false;
   try {
@@ -88,6 +90,7 @@ export async function openServiceCore(
     startedAt: new Date().toISOString(),
     workspaceInitialized,
     providerReady,
+    providerRegistry: new ProviderRegistry(),
   };
 }
 
@@ -104,11 +107,26 @@ export async function openServiceCore(
 async function confirmProviderReadiness(core: NativeCore): Promise<boolean> {
   try {
     const catalog = await core.hostQuery({ query: 'catalog', format: 'catalog' });
-    if ((catalog.catalog?.providers.length ?? 0) === 0) {
+    const providers = catalog.catalog?.providers ?? [];
+    if (providers.length === 0) {
       return false;
     }
     const scan = await core.hostQuery({ query: 'catalog', format: 'scan' });
-    return (scan.scan?.entries ?? []).some((entry) => entry.installed === true);
+    if ((scan.scan?.entries ?? []).some((entry) => entry.installed === true)) {
+      return true;
+    }
+    for (const provider of providers) {
+      const reply = await core.providerCall({
+        method: 'probe',
+        request_id: randomUUID(),
+        deadline_ms: PROVIDER_DEFAULT_DEADLINE_MS,
+        payload: { provider_id: provider.provider_id },
+      });
+      if (reply.ok && reply.health?.available) {
+        return true;
+      }
+    }
+    return false;
   } catch {
     return false;
   }

@@ -1,6 +1,16 @@
+import type { ServerResponse } from 'node:http';
 import type { WorldKbPatchEntityRequest } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
 import { HttpError, mapNativeError, routeNotMigrated } from './errors.js';
+import {
+  cancelProviderOperation,
+  createProviderSession,
+  executeProviderOperation,
+  lookupProviderOperation,
+  lookupProviderSession,
+  shutdownProviderSession,
+} from './provider.js';
+import { streamSessionEvents } from './sse.js';
 import {
   getCoreChanges,
   getWorldKbCandidates,
@@ -13,6 +23,10 @@ import {
 } from './world-kb.js';
 
 export type RouteTier = 'unguarded' | 'tier1' | 'tier2' | 'provider_stream';
+
+export type RouteHandlerResult =
+  | { kind: 'json'; body: unknown }
+  | { kind: 'sse'; run: (res: ServerResponse) => Promise<void> };
 
 export interface RouteMatch {
   tier: RouteTier;
@@ -107,7 +121,7 @@ export async function handleRoute(
   pathname: string,
   searchParams: URLSearchParams,
   body: unknown,
-): Promise<unknown> {
+): Promise<RouteHandlerResult> {
   const route = matchRoute(method, pathname);
   if (!route) {
     throw routeNotMigrated(pathname);
@@ -115,13 +129,13 @@ export async function handleRoute(
 
   switch (route.tier) {
     case 'unguarded':
-      return handleUnguarded(service, pathname);
+      return { kind: 'json', body: handleUnguarded(service, pathname) };
     case 'tier1':
-      return handleTier1(service, method, pathname, body);
+      return { kind: 'json', body: await handleTier1(service, method, pathname, body) };
     case 'tier2':
-      return handleTier2(service, method, pathname, searchParams, body, route);
+      return { kind: 'json', body: await handleTier2(service, method, pathname, searchParams, body, route) };
     case 'provider_stream':
-      throw routeNotMigrated(pathname);
+      return await handleProviderStream(service, method, pathname, searchParams, body, route);
     default:
       throw routeNotMigrated(pathname);
   }
@@ -290,36 +304,60 @@ async function handleTier2(
     return response.sessions ?? { items: [], pagination: { limit: 50, has_more: false, next_cursor: null } };
   }
   if (method === 'GET' && route.sessionId) {
-    try {
-      const response = await hostQuery(service, {
-        query: 'get_session',
-        session_id: route.sessionId,
+    const session = await lookupProviderSession(service, route.sessionId);
+    if (!session) {
+      throw new HttpError(404, 'not_found', `session ${route.sessionId} not found`, {
+        resource: `session:${route.sessionId}`,
       });
-      if (!response.session) {
-        throw new HttpError(404, 'not_found', `session ${route.sessionId} not found`, {
-          resource: `session:${route.sessionId}`,
-        });
-      }
-      return response.session;
-    } catch (error) {
-      throw hostLookupError(error, `session:${route.sessionId}`);
     }
+    return session;
   }
   if (method === 'GET' && route.operationId) {
-    try {
-      const response = await hostQuery(service, {
-        query: 'get_operation',
-        operation_id: route.operationId,
+    const operation = await lookupProviderOperation(service, route.operationId);
+    if (!operation) {
+      throw new HttpError(404, 'not_found', `operation ${route.operationId} not found`, {
+        resource: `operation:${route.operationId}`,
       });
-      if (!response.operation) {
-        throw new HttpError(404, 'not_found', `operation ${route.operationId} not found`, {
-          resource: `operation:${route.operationId}`,
-        });
-      }
-      return response.operation;
-    } catch (error) {
-      throw hostLookupError(error, `operation:${route.operationId}`);
     }
+    const cached = service.providerRegistry.operationRecord(route.operationId);
+    return {
+      operation_id: operation.operation_id,
+      session_id: operation.session_id,
+      status: operation.status,
+      ...(cached?.terminalEvent ? { terminal: cached.terminalEvent } : {}),
+    };
+  }
+  throw routeNotMigrated(pathname);
+}
+
+async function handleProviderStream(
+  service: ServiceCore,
+  method: string,
+  pathname: string,
+  searchParams: URLSearchParams,
+  body: unknown,
+  route: RouteMatch,
+): Promise<RouteHandlerResult> {
+  if (method === 'POST' && pathname === '/v1/daemon/agent-host/sessions') {
+    return { kind: 'json', body: await createProviderSession(service, body) };
+  }
+  if (method === 'DELETE' && route.sessionId) {
+    return { kind: 'json', body: await shutdownProviderSession(service, route.sessionId) };
+  }
+  if (method === 'POST' && route.sessionId && pathname.endsWith('/operations')) {
+    return { kind: 'json', body: await executeProviderOperation(service, route.sessionId, body) };
+  }
+  if (method === 'POST' && route.operationId) {
+    return { kind: 'json', body: await cancelProviderOperation(service, route.operationId) };
+  }
+  if (method === 'GET' && route.sessionId && pathname.endsWith('/events')) {
+    const sessionId = route.sessionId;
+    return {
+      kind: 'sse',
+      run: async (res) => {
+        await streamSessionEvents(service, sessionId, searchParams, res);
+      },
+    };
   }
   throw routeNotMigrated(pathname);
 }

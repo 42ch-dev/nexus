@@ -26,6 +26,36 @@ export const HEADER_DEADLINE_CHECK_MS = 500;
 export const REQUEST_READ_TIMEOUT_MS = 10_000;
 export const CLOSE_BUDGET_MS = 5_000;
 
+/** Node Writable backpressure target for SSE socket handoff (architecture §7). */
+export const SSE_SOCKET_HIGH_WATER_MARK = 64 * 1024;
+/** Max serialized UTF-8 bytes for one outstanding SSE data frame. */
+export const SSE_MAX_OUTSTANDING_FRAME_BYTES = 512 * 1024;
+/** Reserved control slot size for terminal/gap frames (not charged to data permits). */
+export const SSE_RESERVED_CONTROL_BYTES = 4 * 1024;
+/** Max aggregate pending bytes across buffered SSE frames (env override). */
+export const SSE_MAX_AGGREGATE_PENDING_BYTES = resolvePositiveIntEnv(
+  'NEXUS_SSE_MAX_PENDING_BYTES',
+  32 * 1024 * 1024,
+);
+/** Drain wait after write(false) before disconnecting a slow subscriber. */
+export const SSE_DRAIN_TIMEOUT_MS = 2_000;
+/** Live SSE subscribers per session (architecture §7). */
+export const SSE_MAX_SUBSCRIBERS_PER_SESSION = 16;
+/** Native pull batch: max events per nextProviderEvents call. */
+export const PROVIDER_PULL_MAX_EVENTS = 16;
+/** Native pull batch: max bytes per nextProviderEvents call. */
+export const PROVIDER_PULL_MAX_BYTES = 262_144;
+/** Default provider effect deadline. */
+export const PROVIDER_DEFAULT_DEADLINE_MS = 30_000;
+
+function resolvePositiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 8421;
 
