@@ -450,8 +450,21 @@ impl crate::HostFacade for HostManager {
         // Discovery replaces ambient boot registration unless tests pre-registered.
         let pre_registered = !self.providers.read().await.is_empty();
         if !pre_registered {
-            let discovered =
-                discover_provider_entries(&host_config, &host_config.timeouts, &permission_resolver, self.localset_bridge())?;
+            let discovered = if let Some(catalog) = config.admitted_catalog.as_ref() {
+                crate::core::readiness::build_provider_entries_from_catalog(
+                    catalog,
+                    &host_config.timeouts,
+                    &permission_resolver,
+                    self.localset_bridge(),
+                )?
+            } else {
+                discover_provider_entries(
+                    &host_config,
+                    &host_config.timeouts,
+                    &permission_resolver,
+                    self.localset_bridge(),
+                )?
+            };
             *self.providers.write().await = discovered;
         }
 
@@ -1351,6 +1364,7 @@ mod tests {
             max_ops_per_session: 1,
             timeouts: crate::config::TimeoutConfig::default(),
             host_config: None,
+            admitted_catalog: None,
             probe_owner: Some(test_owner()),
         }
     }
@@ -1376,6 +1390,38 @@ mod tests {
             env: std::collections::HashMap::new(),
         }
     }
+
+    #[tokio::test]
+    async fn start_uses_admitted_catalog_without_path_rescan() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let host_config = crate::config::AgentHostConfig::default();
+        let catalog = crate::core::readiness::discover_provider_catalog(&host_config)
+            .expect("discover catalog");
+        let manager = HostManager::new();
+        manager
+            .register_provider(
+                Arc::new(MockProvider {
+                    provider_id: ProviderId::new("mock"),
+                }),
+                mock_launch(),
+            )
+            .await;
+        std::env::set_var("PATH", "");
+        manager
+            .start(HostStartConfig {
+                config_path: temp_dir.path().join("absent-config.toml"),
+                workspace_root: temp_dir.path().to_path_buf(),
+                max_sessions: 4,
+                max_ops_per_session: 1,
+                timeouts: crate::config::TimeoutConfig::default(),
+                host_config: Some(host_config),
+                admitted_catalog: Some(catalog),
+                probe_owner: Some(test_owner_for(temp_dir.path().to_path_buf())),
+            })
+            .await
+            .expect("admitted catalog must not require PATH rescan");
+    }
+
     #[tokio::test]
     async fn absent_optional_config_path_returns_defaults() {
         // An absent optional config whose parent exists is tolerated and

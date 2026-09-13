@@ -9,9 +9,8 @@ use std::sync::Arc;
 
 use nexus_agent_host::capability::model::HostStartConfig;
 use nexus_agent_host::config::{agent_host_config_path, load_config_from_path, validate_workspace_path, AgentHostConfig};
-use nexus_agent_host::core::readiness::discover_provider_entries;
-use nexus_agent_host::policy::HostPermissionResolver;
-use nexus_agent_host::{HostError, HostFacade, HostManager};
+use nexus_agent_host::core::readiness::discover_provider_catalog;
+use nexus_agent_host::{HostError, HostFacade, HostManager, ProviderCatalogEntry};
 use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
 use nexus_contracts::{CoreCloseReport, CoreCloseReportState, NativeOpenOptions};
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
@@ -59,6 +58,7 @@ fn is_genuinely_uninitialized(user_home: &PathBuf, access: CoreAccess) -> bool {
 struct ValidatedHostAdmission {
     config_path: PathBuf,
     host_config: AgentHostConfig,
+    admitted_catalog: Vec<ProviderCatalogEntry>,
 }
 
 fn host_err(err: HostError) -> nexus_contracts::CoreError {
@@ -71,18 +71,11 @@ fn validate_host_admission(
     validate_workspace_path(user_home).map_err(host_err)?;
     let config_path = agent_host_config_path(user_home);
     let host_config = load_config_from_path(&config_path).map_err(host_err)?;
-    let permission_resolver = HostPermissionResolver::new_native_only(&host_config.policy);
-    let bridge = HostManager::new().localset_bridge();
-    discover_provider_entries(
-        &host_config,
-        &host_config.timeouts,
-        &permission_resolver,
-        bridge,
-    )
-    .map_err(host_err)?;
+    let admitted_catalog = discover_provider_catalog(&host_config).map_err(host_err)?;
     Ok(ValidatedHostAdmission {
         config_path,
         host_config,
+        admitted_catalog,
     })
 }
 
@@ -591,6 +584,7 @@ pub async fn open_core(
         max_ops_per_session: admission.host_config.max_ops_per_session,
         timeouts: admission.host_config.timeouts.clone(),
         host_config: Some(admission.host_config),
+        admitted_catalog: Some(admission.admitted_catalog),
         probe_owner: None,
     };
     if let Err(err) = host.start(start_config).await {
@@ -811,6 +805,50 @@ mod tests {
         .await
         .expect("reopen after corrected host config");
         assert!(state.owner_slots_present());
+        let _ = close_core(state).await;
+    }
+
+    #[tokio::test]
+    async fn open_retains_admitted_catalog_snapshot() {
+        use crate::wire_fixture::seed_wire_home;
+        use nexus_agent_host::config::{agent_host_config_path, load_config_from_path};
+        use nexus_agent_host::core::readiness::discover_provider_catalog;
+        use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
+        use nexus_contracts::NativeOpenOptions;
+        use tempfile::tempdir;
+
+        let dir = tempdir().expect("tempdir");
+        seed_wire_home(dir.path()).await;
+        let config_path = agent_host_config_path(dir.path());
+        let host_config = load_config_from_path(&config_path).expect("host config");
+        let expected = discover_provider_catalog(&host_config).expect("admit catalog");
+
+        let state = Arc::new(EnvState::new());
+        open_core(
+            state.clone(),
+            NativeOpenOptions {
+                user_home: dir.path().to_string_lossy().to_string(),
+                access: NativeOpenOptionsAccess::EngineOwner,
+                allow_uninitialized: false,
+            },
+            None,
+        )
+        .await
+        .expect("open");
+
+        let host = state.host.lock().expect("host slot").clone().expect("host");
+        let catalog = host.provider_catalog().await.expect("catalog");
+        assert_eq!(catalog.entries.len(), expected.len());
+        let expected_ids = expected
+            .iter()
+            .map(|e| e.provider_id.to_string())
+            .collect::<std::collections::BTreeSet<_>>();
+        let actual_ids = catalog
+            .entries
+            .iter()
+            .map(|e| e.provider_id.to_string())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(expected_ids, actual_ids);
         let _ = close_core(state).await;
     }
 

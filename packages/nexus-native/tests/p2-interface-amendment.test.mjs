@@ -147,6 +147,55 @@ describe('P2 interface amendment', { concurrency: 1 }, () => {
     await core.close();
   });
 
+  test('host query missing session returns sanitized not_found', async () => {
+    const home = seedHome();
+    const core = await openCore({
+      user_home: home,
+      access: 'engine_owner',
+      allow_uninitialized: false,
+    });
+
+    await assert.rejects(
+      () =>
+        core.hostQuery({
+          query: 'get_session',
+          session_id: '00000000-0000-0000-0000-000000000099',
+        }),
+      (err) => {
+        const wire = parseNativeCoreError(err);
+        assert.equal(wire?.code, 'not_found');
+        assert.equal(wire?.http_status, 404);
+        assert.equal(wire?.message, 'session not found');
+        assert.notEqual(err.message.includes('00000000'), true);
+        return true;
+      },
+    );
+
+    await core.close();
+  });
+
+  test('host query malformed session_id returns invalid_input', async () => {
+    const home = seedHome();
+    const core = await openCore({
+      user_home: home,
+      access: 'engine_owner',
+      allow_uninitialized: false,
+    });
+
+    await assert.rejects(
+      () => core.hostQuery({ query: 'get_session', session_id: 'not-a-uuid' }),
+      (err) => {
+        const wire = parseNativeCoreError(err);
+        assert.equal(wire?.code, 'invalid_input');
+        assert.equal(wire?.http_status, 400);
+        assert.equal(wire?.message, 'invalid session_id');
+        return true;
+      },
+    );
+
+    await core.close();
+  });
+
   test('failed initialized open cleans up and reopens after host config correction', async () => {
     const home = seedHome();
     const agentHostDir = dirname(agentHostConfigPath(home));
