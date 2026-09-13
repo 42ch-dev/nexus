@@ -279,7 +279,7 @@ export async function spawnOwnedConnection(
   } catch (error) {
     const reap = await cleanupOwnedConnection(ownedStub);
     if (!reap.confirmed) {
-      throw new CleanupUnconfirmedError('init_cleanup_unconfirmed', ownedStub);
+      throw new CleanupUnconfirmedError('init_cleanup_unconfirmed', ownedStub, error);
     }
     throw error;
   }
@@ -300,8 +300,7 @@ export async function createAcpSession(owned: OwnedConnection, cwd: string): Pro
   } catch (error) {
     const reap = await cleanupOwnedConnection(owned);
     if (!reap.confirmed) {
-      throw new CleanupUnconfirmedError('new_session_cleanup_unconfirmed', owned);
-
+      throw new CleanupUnconfirmedError('new_session_cleanup_unconfirmed', owned, error);
     }
     throw error;
   }

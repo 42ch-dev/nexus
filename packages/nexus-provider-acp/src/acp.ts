@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { ProviderCallbacks } from './contracts.js';
 import type {
   ProviderCall,
   ProviderEventBatch,
@@ -195,8 +196,26 @@ export class AcpProviderEngine {
     if (this.cleanupFences.size > 0) throw new Error('cleanup_fence_active');
   }
 
+  private ownerIdentityKey(owned: OwnedConnection): string {
+    const id = owned.boundIdentity;
+    return `${id.pid}:${id.process_birth ?? ''}:${id.group_id ?? ''}`;
+  }
+
   private retainCleanupFence(key: string, owned: OwnedConnection): void {
+    const identity = this.ownerIdentityKey(owned);
+    for (const existing of this.cleanupFences.values()) {
+      if (this.ownerIdentityKey(existing) === identity) return;
+    }
     this.cleanupFences.set(key, owned);
+  }
+
+  private clearFencesForOwner(owned: OwnedConnection): void {
+    const identity = this.ownerIdentityKey(owned);
+    for (const [key, existing] of [...this.cleanupFences.entries()]) {
+      if (this.ownerIdentityKey(existing) === identity) {
+        this.cleanupFences.delete(key);
+      }
+    }
   }
 
   private async requireConfirmedCleanup(
@@ -334,26 +353,42 @@ export class AcpProviderEngine {
       });
       return okReply(request.request_id, { session_id: sessionId });
     } catch (error) {
-      if (owned) {
-        try {
-          await this.requireConfirmedCleanup(owned, ownerKey, 'launch_child_not_reaped');
-          this.recipeOwners.delete(ownerKey);
-        } catch (cleanupError) {
-          if (cleanupError instanceof CleanupUnconfirmedError) {
-            return this.fenceCleanupError(cleanupError, ownerKey, request.request_id);
-          }
-          throw cleanupError;
-        }
-      }
-      if (error instanceof CleanupUnconfirmedError) {
-        return this.fenceCleanupError(
-          error,
-          `pre-launch:${recipe.recipe_generation}`,
-          request.request_id,
-        );
-      }
-      throw error;
+      return await this.finalizeLaunchFailure(
+        error,
+        owned,
+        ownerKey,
+        request.request_id,
+      );
     }
+  }
+
+  /** @internal test hook for launch cleanup retry / fence semantics. */
+  async finalizeLaunchFailure(
+    error: unknown,
+    owned: OwnedConnection | null,
+    ownerKey: string,
+    requestId: string,
+  ): Promise<ProviderReply> {
+    const cleanupTarget =
+      owned ??
+      (error instanceof CleanupUnconfirmedError ? error.owner : null);
+    if (cleanupTarget) {
+      try {
+        await this.requireConfirmedCleanup(cleanupTarget, ownerKey, 'launch_child_not_reaped');
+        this.recipeOwners.delete(ownerKey);
+        this.clearFencesForOwner(cleanupTarget);
+      } catch (cleanupError) {
+        if (cleanupError instanceof CleanupUnconfirmedError) {
+          return this.fenceCleanupError(cleanupError, ownerKey, requestId);
+        }
+        throw cleanupError;
+      }
+    }
+    if (error instanceof CleanupUnconfirmedError) {
+      if (error.cause !== undefined) throw error.cause;
+      return this.fenceCleanupError(error, ownerKey, requestId);
+    }
+    throw error;
   }
 
   private async handleExecute(request: ProviderCall): Promise<ProviderReply> {
@@ -517,18 +552,11 @@ export class AcpProviderEngine {
     recipe: ValidatedProviderRecipe,
     sessionId: string,
   ): Promise<OwnedConnection> {
-    try {
-      const owned = await spawnOwnedConnection(recipe, (params) => {
-        this.routeSessionUpdate(String(params.sessionId), params.update);
-      });
-      this.recipeOwners.set(`${recipe.recipe_generation}:${sessionId}`, owned);
-      return owned;
-    } catch (error) {
-      if (error instanceof CleanupUnconfirmedError && error.owner) {
-        this.retainCleanupFence(`connect:${recipe.recipe_generation}`, error.owner);
-      }
-      throw error;
-    }
+    const owned = await spawnOwnedConnection(recipe, (params) => {
+      this.routeSessionUpdate(String(params.sessionId), params.update);
+    });
+    this.recipeOwners.set(`${recipe.recipe_generation}:${sessionId}`, owned);
+    return owned;
   }
 
   private terminalizeSessionOperations(sessionId: string): void {
@@ -616,10 +644,7 @@ export class AcpProviderEngine {
   }
 }
 
-export function createEngine(): {
-  call(request: ProviderCall): Promise<ProviderReply>;
-  next(operationId: string, maxEvents: number, maxBytes: number): Promise<ProviderEventBatch>;
-} {
+export function createEngine(): ProviderCallbacks {
   const engine = new AcpProviderEngine();
   return {
     call: (request) => engine.call(request),

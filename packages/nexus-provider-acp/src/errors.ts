@@ -11,13 +11,16 @@ export class ProviderNextError extends Error {
 export class CleanupUnconfirmedError extends Error {
   readonly code = 'cleanup_unconfirmed' as const;
   readonly owner: import('./process-owner.js').OwnedConnection | null;
+  readonly cause: unknown;
 
   constructor(
     message: string,
     owner: import('./process-owner.js').OwnedConnection | null = null,
+    cause: unknown = undefined,
   ) {
     super(message);
     this.name = 'CleanupUnconfirmedError';
     this.owner = owner;
+    this.cause = cause;
   }
 }

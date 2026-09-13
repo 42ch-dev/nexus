@@ -1,11 +1,7 @@
-import type { ProviderCall, ProviderEventBatch, ProviderReply } from '@42ch/nexus-contracts';
-
-type ProviderCallbacks = {
-  call(request: ProviderCall): Promise<ProviderReply>;
-  next(operationId: string, maxEvents: number, maxBytes: number): Promise<ProviderEventBatch>;
-};
+import type { ProviderCallbacks } from './contracts.js';
 import { createEngine } from './acp.js';
 
+export type { ProviderCallbacks } from './contracts.js';
 export function createAcpProvider(): ProviderCallbacks {
   return createEngine();
 }
