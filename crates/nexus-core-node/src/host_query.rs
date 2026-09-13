@@ -62,7 +62,7 @@ pub async fn dispatch_host_query(
     let host = state
         .host
         .lock()
-        .await
+        .map_err(|_| "host mutex poisoned".to_string())?
         .clone()
         .ok_or_else(|| "host not started".to_string())?;
     match request.query {

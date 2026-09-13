@@ -11,7 +11,7 @@ description = "Node-API cdylib for nexus core + provider port (v1.189 P2-T1)"
 unsafe_code = "deny"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 napi = { workspace = true }
@@ -40,3 +40,6 @@ nexus-local-db = { path = "../nexus-local-db" }
 [[bin]]
 name = "native-wire-fixture-seed"
 path = "src/bin/native_wire_fixture_seed.rs"
+
+[dev-dependencies]
+tempfile = "3"

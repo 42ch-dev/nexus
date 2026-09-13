@@ -90,7 +90,7 @@ function resolveAdmittedPython() {
   throw new Error('no_absolute_python_executable');
 }
 
-function writeAgentHostConfig(home, fixturePath, workspace) {
+function writeAgentHostConfig(home, fixturePath, workspace, extraEnv = {}) {
   const python = resolveAdmittedPython();
   const toml = `[[providers]]
 id = "mock-acp"
@@ -101,12 +101,92 @@ enabled = true
 
 [providers.env]
 ACP_FIXTURE_LOG = "${join(workspace, 'fixture.log').replaceAll('\\', '/')}"
+${Object.entries(extraEnv).map(([k, v]) => `${k} = "${String(v).replaceAll('"', '\\"')}"`).join('\n')}
 `;
   const configDir = join(home, 'config');
   mkdirSync(configDir, { recursive: true });
   writeFileSync(join(configDir, 'agent-host.toml'), toml);
 }
 
+
+
+function isStaleGenerationError(err) {
+  const s = String(err ?? '');
+  return /generation|dead_env|invalid principal|tombstone|closing|interrupted/i.test(s);
+}
+
+function isTransportEofError(err) {
+  const s = String(err ?? '');
+  return /eof|broken pipe|connection reset|transport|child process|exited|closed/i.test(s);
+}
+
+async function runEofWhileLive(core, adapter, home, providers) {
+  const eofHome = mkdtempSync(join(tmpdir(), 'nexus-eof-live-'));
+  const eofWorkspace = mkdtempSync(join(tmpdir(), 'nexus-eof-ws-'));
+  const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
+  writeAgentHostConfig(eofHome, fixture, eofWorkspace, { EOF_AFTER_INIT: '1' });
+  const eofCore = binding.open(
+    JSON.stringify({ user_home: eofHome, access: 'engine_owner', allow_uninitialized: false }),
+    providers,
+  );
+  const launchErr = await eofCore
+    .providerCall(
+      encode({
+        request_id: 'eof-live-launch',
+        method: 'launch',
+        deadline_ms: 5_000,
+        payload: adapter === 'rust-acp' ? rustLaunchPayload(eofHome) : tsLaunchPayload(),
+      }),
+    )
+    .then(() => null)
+    .catch((error) => String(error));
+  await eofCore.close().catch(() => {});
+  if (!launchErr || !isTransportEofError(launchErr)) {
+    return failScenario('eof_after_close', `expected live EOF failure, got: ${launchErr}`);
+  }
+  return passScenario('eof_after_close', { error: launchErr, adapter, mode: 'EOF_AFTER_INIT_live' });
+}
+
+async function runFullQueueShutdown(core, adapter, home) {
+  const burst = [];
+  for (let i = 0; i < 17; i += 1) {
+    burst.push(
+      core
+        .providerCall(
+          encode({
+            request_id: `queue-${i}`,
+            method: 'probe',
+            deadline_ms: 30_000,
+            payload: adapter === 'rust-acp' ? rustProbePayload(home) : tsProbePayload(),
+          }),
+        )
+        .catch((error) => ({ ok: false, error: String(error) })),
+    );
+  }
+  const started = Date.now();
+  await Promise.allSettled(burst);
+  const closeStarted = Date.now();
+  const closeReport = decode(await core.close());
+  const closeMs = Date.now() - closeStarted;
+  const totalMs = Date.now() - started;
+  const survivors = findFixtureChildPids();
+  if (closeMs > 5_000) {
+    return failScenario('full_queue_shutdown', `close exceeded 5s: ${closeMs}ms`);
+  }
+  if (!closeReport.cleanup_confirmed) {
+    return failScenario('full_queue_shutdown', 'cleanup unconfirmed after burst');
+  }
+  if (survivors.length > 0) {
+    return failScenario('full_queue_shutdown', `surviving child pids: ${survivors.join(',')}`);
+  }
+  return passScenario('full_queue_shutdown', {
+    burst_count: 17,
+    close_ms: closeMs,
+    total_ms: totalMs,
+    adapter,
+    surviving_child_pids: survivors,
+  });
+}
 
 const SCENARIO_KEYS = [
   'terminal_identity',
@@ -255,43 +335,42 @@ async function runAdapterScenarios(core, ctx) {
     scenarios.cooperative_cancel_2s = failScenario('cooperative_cancel_2s', String(error));
   }
 
-  // never-settling: start execute then cancel within 2s
+  // never-settling: BLOCK_PROMPT fixture blocks until cancel
   try {
+    const blockHome = mkdtempSync(join(tmpdir(), 'nexus-block-prompt-'));
+    const blockWs = mkdtempSync(join(tmpdir(), 'nexus-block-ws-'));
+    const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
+    writeAgentHostConfig(blockHome, fixture, blockWs, { BLOCK_PROMPT: '1' });
+    const blockCore = binding.open(
+      JSON.stringify({ user_home: blockHome, access: 'engine_owner', allow_uninitialized: false }),
+      providers,
+    );
     const launch = decode(
-      await core.providerCall(
+      await blockCore.providerCall(
         encode({
-          request_id: 'hang-launch',
+          request_id: 'block-launch',
           method: 'launch',
           deadline_ms: 30_000,
-          payload: adapter === 'rust-acp' ? rustLaunchPayload(home) : tsLaunchPayload(),
+          payload: adapter === 'rust-acp' ? rustLaunchPayload(blockHome) : tsLaunchPayload(),
         }),
       ),
     );
     const hangSession = launch.session_id;
     const exec = decode(
-      await core.providerCall(
+      await blockCore.providerCall(
         encode({
-          request_id: 'hang-exec',
+          request_id: 'block-exec',
           method: 'execute',
           session_id: hangSession,
           deadline_ms: 30_000,
-          payload:
-            adapter === 'rust-acp'
-              ? {
-                  Prompt: {
-                    op_id: randomUUID(),
-                    content: [{ Text: { text: 'hang-forever' } }],
-                    permission_scope: null,
-                  },
-                }
-              : { kind: 'prompt', content: 'hang-forever' },
+          payload: adapter === 'rust-acp' ? rustExecutePayload() : tsExecutePayload(),
         }),
       ),
     );
     const started = Date.now();
-    await core.providerCall(
+    await blockCore.providerCall(
       encode({
-        request_id: 'hang-cancel',
+        request_id: 'block-cancel',
         method: 'cancel',
         session_id: hangSession,
         operation_id: exec.operation_id,
@@ -300,18 +379,13 @@ async function runAdapterScenarios(core, ctx) {
       }),
     );
     const cancelMs = Date.now() - started;
-    scenarios.never_settling_callback = cancelMs <= 2000
-      ? passScenario('never_settling_callback', { cancel_ms: cancelMs, adapter })
-      : failScenario('never_settling_callback', `cancel took ${cancelMs}ms`);
-    await core.providerCall(
-      encode({
-        request_id: 'hang-shutdown',
-        method: 'shutdown',
-        session_id: hangSession,
-        deadline_ms: 30_000,
-        payload: {},
-      }),
-    );
+    const closeStarted = Date.now();
+    const closeReport = decode(await blockCore.close());
+    const closeMs = Date.now() - closeStarted;
+    scenarios.never_settling_callback =
+      cancelMs <= 2000 && closeReport.cleanup_confirmed && closeMs <= 5_000
+        ? passScenario('never_settling_callback', { cancel_ms: cancelMs, close_ms: closeMs, adapter })
+        : failScenario('never_settling_callback', `cancel_ms=${cancelMs} close_ms=${closeMs} confirmed=${closeReport.cleanup_confirmed}`);
   } catch (error) {
     scenarios.never_settling_callback = failScenario('never_settling_callback', String(error));
   }
@@ -347,28 +421,13 @@ async function runAdapterScenarios(core, ctx) {
     scenarios.failed_open_child = failScenario('failed_open_child', String(error));
   }
 
-  // full queue + shutdown budget via burst launches
+  // full queue: run on a dedicated core so main session can continue
   try {
-    const burst = [];
-    for (let i = 0; i < 6; i += 1) {
-      burst.push(
-        core
-          .providerCall(
-            encode({
-              request_id: `burst-${i}`,
-              method: 'probe',
-              deadline_ms: 30_000,
-              payload: adapter === 'rust-acp' ? rustProbePayload(home) : tsProbePayload(),
-            }),
-          )
-          .catch((error) => ({ ok: false, error: String(error) })),
-      );
+    const queueCore = binding.open(accessJson, providers);
+    scenarios.full_queue_shutdown = await runFullQueueShutdown(queueCore, adapter, home);
+    if (!scenarios.full_queue_shutdown.ok) {
+      // already failed
     }
-    const results = await Promise.all(burst);
-    const okCount = results.filter((r) => (typeof r === 'object' && r.ok) || (r instanceof Uint8Array)).length;
-    scenarios.full_queue_shutdown = okCount > 0
-      ? passScenario('full_queue_shutdown', { burst_ok: okCount, adapter })
-      : failScenario('full_queue_shutdown', 'burst produced no successful admissions');
   } catch (error) {
     scenarios.full_queue_shutdown = failScenario('full_queue_shutdown', String(error));
   }
@@ -458,12 +517,20 @@ async function runAdapterScenarios(core, ctx) {
       )
       .then(() => null)
       .catch((error) => String(error));
-    scenarios.worker_termination = passScenario('worker_termination', {
-      child_pid: victim ?? null,
-      launch_pids: afterLaunchPids,
-      post_kill_probe_error: eofErr,
-      adapter,
-    });
+    if (!victim) {
+      scenarios.worker_termination = failScenario('worker_termination', 'no fixture child pid observed');
+    } else if (!eofErr) {
+      scenarios.worker_termination = failScenario('worker_termination', 'post-kill probe succeeded unexpectedly');
+    } else if (!isTransportEofError(eofErr)) {
+      scenarios.worker_termination = failScenario('worker_termination', `unexpected post-kill error: ${eofErr}`);
+    } else {
+      scenarios.worker_termination = passScenario('worker_termination', {
+        child_pid: victim,
+        launch_pids: afterLaunchPids,
+        post_kill_probe_error: eofErr,
+        adapter,
+      });
+    }
     await core.providerCall(
       encode({
         request_id: 'kill-shutdown',
@@ -512,9 +579,20 @@ async function runAdapterScenarios(core, ctx) {
       )
       .then((buf) => decode(buf))
       .catch((error) => ({ ok: false, error: String(error) }));
-    scenarios.reentrant_call = probeDuring.ok
-      ? passScenario('reentrant_call', { probe_latency_ms: probeDuring.health?.latency_ms ?? null })
-      : passScenario('reentrant_call', { note: 'probe rejected during execute', error: probeDuring.error });
+    const pullDuring = await core
+      .nextProviderEvents(exec.operation_id, 4, 64 * 1024)
+      .then((buf) => decode(buf))
+      .catch((error) => ({ error: String(error) }));
+    const reentrantOk =
+      probeDuring.ok ||
+      (pullDuring && !pullDuring.error && Array.isArray(pullDuring.events));
+    scenarios.reentrant_call = reentrantOk
+      ? passScenario('reentrant_call', {
+          probe_ok: probeDuring.ok,
+          pull_events: pullDuring?.events?.length ?? 0,
+          adapter,
+        })
+      : failScenario('reentrant_call', `probe and pull both failed: ${probeDuring.error ?? pullDuring?.error}`);
     await drainTerminal(core, exec.operation_id);
     await core.providerCall(
       encode({
@@ -531,8 +609,12 @@ async function runAdapterScenarios(core, ctx) {
 
   scenarios.open_close_100 = await runOpenClose100(home, accessJson, providers);
 
-  scenarios.eof_after_close = failScenario('eof_after_close', 'pending env close');
-  scenarios.late_generation = failScenario('late_generation', 'pending env close');
+  try {
+    scenarios.eof_after_close = await runEofWhileLive(core, adapter, home, providers);
+  } catch (error) {
+    scenarios.eof_after_close = failScenario('eof_after_close', String(error));
+  }
+  scenarios.late_generation = failScenario('late_generation', 'resolved after env close');
 
   const rssEnd = rssSnapshot();
   rssPeak = Math.max(rssPeak, rssEnd.rss);
@@ -594,6 +676,7 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
   const launchPayload = adapter === 'rust-acp' ? rustLaunchPayload(home) : tsLaunchPayload();
   const executePayload = adapter === 'rust-acp' ? rustExecutePayload() : tsExecutePayload();
 
+  let capturedGeneration = null;
   const probeReply = decode(
     await core.providerCall(
       encode({
@@ -607,6 +690,11 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
   if (!probeReply.ok || !probeReply.health?.available) {
     console.error('probe failed', probeReply);
     process.exit(1);
+  }
+  try {
+    capturedGeneration = JSON.parse(await core.activePrincipal()).split(':')[1];
+  } catch {
+    capturedGeneration = null;
   }
 
   const launchReply = decode(
@@ -723,12 +811,12 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
     }),
     ...adapterScenarios,
   };
-  scenarios.eof_after_close = postCloseErr
-    ? passScenario('eof_after_close', { error: postCloseErr })
-    : failScenario('eof_after_close', 'post-close call succeeded unexpectedly');
-  scenarios.late_generation = /generation|closing|dead|interrupted/i.test(postCloseErr || '')
-    ? passScenario('late_generation', { error: postCloseErr })
-    : passScenario('late_generation', { error: postCloseErr, note: 'post-close rejected' });
+  if (!scenarios.eof_after_close?.ok) {
+    scenarios.eof_after_close = failScenario('eof_after_close', 'live EOF scenario missing or failed');
+  }
+  scenarios.late_generation = isStaleGenerationError(postCloseErr)
+    ? passScenario('late_generation', { error: postCloseErr, captured_generation: capturedGeneration })
+    : failScenario('late_generation', `expected stale generation/tombstone error, got: ${postCloseErr}`);
   for (const key of SCENARIO_KEYS) {
     if (!scenarios[key]) {
       scenarios[key] = failScenario(key, 'missing scenario result');

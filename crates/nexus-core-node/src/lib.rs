@@ -9,6 +9,7 @@ mod callbacks;
 mod env_state;
 mod host_query;
 mod lifecycle;
+pub mod wire_fixture;
 mod runtime;
 
 use std::sync::Arc;
@@ -67,7 +68,7 @@ impl NativeCore {
             .inner
             .core
             .lock()
-            .await
+            .map_err(|_| Error::from_reason("core mutex poisoned"))?
             .clone()
             .ok_or_else(|| Error::from_reason("core not open"))?;
         let principal = core
@@ -165,7 +166,7 @@ impl NativeCore {
             .inner
             .provider_port
             .lock()
-            .await
+            .map_err(|_| Error::from_reason("port mutex poisoned"))?
             .clone()
             .ok_or_else(|| Error::from_reason("provider port unavailable"))?;
         let reply = port
@@ -186,7 +187,7 @@ impl NativeCore {
             .inner
             .provider_port
             .lock()
-            .await
+            .map_err(|_| Error::from_reason("port mutex poisoned"))?
             .clone()
             .ok_or_else(|| Error::from_reason("provider port unavailable"))?;
         let batch = port
@@ -215,7 +216,7 @@ impl NativeCore {
             .inner
             .core
             .lock()
-            .await
+            .map_err(|_| Error::from_reason("core mutex poisoned"))?
             .clone()
             .ok_or_else(|| Error::from_reason("core not open"))?;
         let principal = core

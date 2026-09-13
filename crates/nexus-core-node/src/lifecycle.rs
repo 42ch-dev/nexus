@@ -22,9 +22,10 @@ use super::env_state::EnvState;
 /// Test-only forcing of an unconfirmed cleanup (debug builds only).
 #[cfg(debug_assertions)]
 mod forcing {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
     static FORCE_UNCONFIRMED: AtomicBool = AtomicBool::new(false);
+    static CLEANUP_DELAY_MS: AtomicU64 = AtomicU64::new(0);
 
     pub fn set(enable: bool) {
         FORCE_UNCONFIRMED.store(enable, Ordering::SeqCst);
@@ -33,12 +34,26 @@ mod forcing {
     pub fn get() -> bool {
         FORCE_UNCONFIRMED.load(Ordering::SeqCst)
     }
+
+    pub fn set_cleanup_delay_ms(ms: u64) {
+        CLEANUP_DELAY_MS.store(ms, Ordering::SeqCst);
+    }
+
+    pub fn cleanup_delay_ms() -> u64 {
+        CLEANUP_DELAY_MS.load(Ordering::SeqCst)
+    }
 }
 
 /// Enable/disable forced unconfirmed cleanup. Debug builds only.
 #[cfg(debug_assertions)]
 pub fn set_force_unconfirmed(enable: bool) {
     forcing::set(enable);
+}
+
+/// Debug-only: inject async delay at the start of `cleanup_owners`.
+#[cfg(debug_assertions)]
+pub fn set_force_cleanup_delay_ms(ms: u64) {
+    forcing::set_cleanup_delay_ms(ms);
 }
 
 #[cfg(debug_assertions)]
@@ -71,7 +86,7 @@ impl Drop for RestoreCore {
             return;
         }
         if let Some(v) = self.value.take() {
-            let mut guard = self.state.core.blocking_lock();
+            let mut guard = self.state.core.lock().expect("core mutex poisoned");
             if guard.is_none() {
                 *guard = Some(v);
             }
@@ -98,7 +113,7 @@ impl Drop for RestoreHost {
             return;
         }
         if let Some(v) = self.value.take() {
-            let mut guard = self.state.host.blocking_lock();
+            let mut guard = self.state.host.lock().expect("core mutex poisoned");
             if guard.is_none() {
                 *guard = Some(v);
             }
@@ -125,7 +140,7 @@ impl Drop for RestorePort {
             return;
         }
         if let Some(v) = self.value.take() {
-            let mut guard = self.state.provider_port.blocking_lock();
+            let mut guard = self.state.provider_port.lock().expect("core mutex poisoned");
             if guard.is_none() {
                 *guard = Some(v);
             }
@@ -164,12 +179,21 @@ async fn cleanup_owners(
     inject_core: Option<Arc<CoreService>>,
     inject_host: Option<Arc<HostManager>>,
     inject_port: Option<Arc<dyn ProviderPort>>,
+    deadline: Instant,
 ) -> (bool, CoreCloseReport) {
     let forced = forced_unconfirmed();
 
+    #[cfg(debug_assertions)]
+    {
+        let delay_ms = forcing::cleanup_delay_ms();
+        if delay_ms > 0 {
+            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+        }
+    }
+
     let core_taken = match inject_core {
         Some(core) => Some(core),
-        None => state.core.lock().await.take(),
+        None => state.core.lock().expect("core mutex poisoned").take(),
     };
     let mut core_guard = RestoreCore {
         value: core_taken,
@@ -191,7 +215,7 @@ async fn cleanup_owners(
 
     let host_taken = match inject_host {
         Some(host) => Some(host),
-        None => state.host.lock().await.take(),
+        None => state.host.lock().expect("host mutex poisoned").take(),
     };
     let mut host_guard = RestoreHost {
         value: host_taken,
@@ -204,7 +228,7 @@ async fn cleanup_owners(
             let pending = manager.pending_lifecycle_snapshot().await;
             state.record_pending_operations(pending).await;
             let shutdown_ok = manager.shutdown().await.is_ok();
-            let bridge_evidence = manager.localset_bridge().shutdown().await;
+            let bridge_evidence = manager.localset_bridge().shutdown_before(deadline).await;
             let bridge_settled = bridge_evidence.joined_cleanly
                 && bridge_evidence.active_tasks == 0
                 && bridge_evidence.pending_requests == 0;
@@ -235,7 +259,7 @@ async fn cleanup_owners(
 
     let port_taken = match inject_port {
         Some(port) => Some(port),
-        None => state.provider_port.lock().await.take(),
+        None => state.provider_port.lock().expect("port mutex poisoned").take(),
     };
     let mut port_guard = RestorePort {
         value: port_taken,
@@ -262,7 +286,7 @@ async fn cleanup_owners(
 
 /// Settlement of whatever a previous failed rollback or interrupted close retained.
 async fn settle_retained(state: Arc<EnvState>) -> (bool, CoreCloseReport) {
-    cleanup_owners(state, None, None, None).await
+    cleanup_owners(state, None, None, None, Instant::now() + CLOSE_BUDGET).await
 }
 
 /// Open the native core.
@@ -290,7 +314,7 @@ pub async fn open_core(
     if state.is_closing() && state.settled_close.lock().await.is_none() {
         return Err("closing".to_string());
     }
-    if state.core.lock().await.is_some() {
+    if state.core.lock().expect("core mutex poisoned").is_some() {
         return Err("already open".to_string());
     }
     state.try_begin_open().await?;
@@ -325,7 +349,7 @@ pub async fn open_core(
         probe_owner: None,
     };
     if let Err(err) = host.start(start_config).await {
-        let (released, _) = cleanup_owners(state.clone(), Some(Arc::new(core)), Some(host), js_port).await;
+        let (released, _) = cleanup_owners(state.clone(), Some(Arc::new(core)), Some(host), js_port, Instant::now() + CLOSE_BUDGET).await;
         if released {
             state.publish_closed().await;
         } else {
@@ -345,9 +369,9 @@ pub async fn open_core(
     };
 
     let core = Arc::new(core);
-    state.host.lock().await.replace(host);
-    state.provider_port.lock().await.replace(provider_port);
-    state.core.lock().await.replace(core.clone());
+    state.host.lock().expect("host mutex poisoned").replace(host);
+    state.provider_port.lock().expect("port mutex poisoned").replace(provider_port);
+    state.core.lock().expect("core mutex poisoned").replace(core.clone());
     state.publish_open().await;
     Ok(core)
 }
@@ -378,7 +402,8 @@ pub async fn close_core(state: Arc<EnvState>) -> CoreCloseReport {
     let started = Instant::now();
     let deadline = started + CLOSE_BUDGET;
 
-    if let Some(host) = state.host.lock().await.as_ref() {
+    let host_snapshot = state.host.lock().expect("host mutex poisoned").clone();
+    if let Some(host) = host_snapshot {
         state
             .record_pending_operations(host.pending_lifecycle_snapshot().await)
             .await;
@@ -391,7 +416,7 @@ pub async fn close_core(state: Arc<EnvState>) -> CoreCloseReport {
             if !drain_budget.is_zero() {
                 tokio::time::sleep(Duration::from_millis(25).min(drain_budget)).await;
             }
-            let (_, report) = cleanup_owners(state.clone(), None, None, None).await;
+            let (_, report) = cleanup_owners(state.clone(), None, None, None, deadline).await;
             report
         },
     )
@@ -400,7 +425,13 @@ pub async fn close_core(state: Arc<EnvState>) -> CoreCloseReport {
         Ok(report) => report,
         Err(_) => {
             state.mark_interrupted();
-            interrupted_report(state.pending_operations_snapshot().await)
+            let pending = state.pending_operations_snapshot().await;
+            let owners_present = state.owner_slots_present();
+            let mut pending = pending;
+            if owners_present {
+                pending.push("cleanup-owners-retained".to_string());
+            }
+            interrupted_report(pending)
         }
     };
 
@@ -457,4 +488,57 @@ mod tests {
     fn forced_unconfirmed_is_off_in_a_fresh_process() {
         assert!(!forced_unconfirmed());
     }
+
+    #[cfg(debug_assertions)]
+    #[tokio::test]
+    async fn close_timeout_retains_owners_settle_then_reopen() {
+        use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
+        use nexus_contracts::NativeOpenOptions;
+        use tempfile::tempdir;
+        use crate::wire_fixture::seed_wire_home;
+
+        let dir = tempdir().expect("tempdir");
+        seed_wire_home(dir.path()).await;
+        let state = Arc::new(EnvState::new());
+        set_force_cleanup_delay_ms(10_000);
+        let _core = open_core(
+            state.clone(),
+            NativeOpenOptions {
+                user_home: dir.path().to_string_lossy().to_string(),
+                access: NativeOpenOptionsAccess::EngineOwner,
+                allow_uninitialized: false,
+            },
+            None,
+        )
+        .await
+        .expect("open");
+        assert!(state.owner_slots_present());
+
+        let report = close_core(state.clone()).await;
+        assert_eq!(report.state, CoreCloseReportState::Interrupted);
+        assert!(!report.cleanup_confirmed);
+        assert!(state.owner_slots_present(), "timeout must retain owners");
+
+        set_force_cleanup_delay_ms(0);
+        let (released, settled) = settle_retained(state.clone()).await;
+        assert!(released, "settlement must confirm cleanup");
+        assert_eq!(settled.state, CoreCloseReportState::Closed);
+        assert!(!state.owner_slots_present());
+
+        let reopened = open_core(
+            state.clone(),
+            NativeOpenOptions {
+                user_home: dir.path().to_string_lossy().to_string(),
+                access: NativeOpenOptionsAccess::EngineOwner,
+                allow_uninitialized: false,
+            },
+            None,
+        )
+        .await;
+        assert!(reopened.is_ok(), "reopen after settlement must succeed");
+        let final_report = close_core(state.clone()).await;
+        assert_eq!(final_report.state, CoreCloseReportState::Closed);
+        assert!(final_report.cleanup_confirmed);
+    }
+
 }

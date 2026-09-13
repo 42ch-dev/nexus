@@ -11,6 +11,14 @@ use tokio::sync::{Mutex, Notify};
 use nexus_agent_host::HostFacade;
 
 pub const MAX_PENDING_BYTES_TOTAL: usize = 1024 * 1024;
+pub const FINALIZE_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Process-scoped retained owners when bounded finalize cannot complete.
+static CLEANUP_REGISTRY: std::sync::OnceLock<StdMutex<Vec<Arc<EnvState>>>> = std::sync::OnceLock::new();
+
+fn cleanup_registry() -> &'static StdMutex<Vec<Arc<EnvState>>> {
+    CLEANUP_REGISTRY.get_or_init(|| StdMutex::new(Vec::new()))
+}
 
 /// Serialized native environment lifecycle phases.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,9 +109,9 @@ impl Drop for PendingBudgetGuard<'_> {
 
 pub struct EnvState {
     pub generation: AtomicU64,
-    pub core: Mutex<Option<Arc<CoreService>>>,
-    pub host: Mutex<Option<Arc<HostManager>>>,
-    pub provider_port: Mutex<Option<Arc<dyn ProviderPort>>>,
+    pub core: StdMutex<Option<Arc<CoreService>>>,
+    pub host: StdMutex<Option<Arc<HostManager>>>,
+    pub provider_port: StdMutex<Option<Arc<dyn ProviderPort>>>,
     pub pending_budget: PendingBudget,
     pub close_notify: Notify,
     pub closing: AtomicU64,
@@ -125,9 +133,9 @@ impl EnvState {
     pub fn new() -> Self {
         Self {
             generation: AtomicU64::new(1),
-            core: Mutex::new(None),
-            host: Mutex::new(None),
-            provider_port: Mutex::new(None),
+            core: StdMutex::new(None),
+            host: StdMutex::new(None),
+            provider_port: StdMutex::new(None),
             pending_budget: PendingBudget::new(),
             close_notify: Notify::new(),
             closing: AtomicU64::new(0),
@@ -208,42 +216,114 @@ impl EnvState {
     /// NAPI8 environment cleanup: tombstone and run bounded native-only teardown.
     pub fn run_bounded_native_finalize(state: Arc<EnvState>) {
         state.tombstone_env();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        let finished = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let finished_flag = finished.clone();
-        let worker_state = state.clone();
+        let deadline = std::time::Instant::now() + FINALIZE_BUDGET;
+        let completed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let completed_flag = completed.clone();
+        let work_state = state.clone();
 
-        let worker = std::thread::spawn(move || {
-            if let Ok(rt) = std::panic::catch_unwind(super::runtime::runtime) {
-                let _ = rt.block_on(async move {
-                    let core = worker_state.core.lock().await.take();
-                    if let Some(service) = core {
-                        let _ = service.close().await;
-                    }
-                    let host = worker_state.host.lock().await.take();
-                    if let Some(host) = host {
-                        host.localset_bridge().shutdown_sync();
-                        let _ = host.shutdown().await;
-                    }
-                    let _port = worker_state.provider_port.lock().await.take();
-                });
-            }
-            finished_flag.store(true, std::sync::atomic::Ordering::SeqCst);
-        });
+        // Single worker thread; caller bounds wait — no detached join threads.
+        let worker = std::thread::Builder::new()
+            .name("nexus-native-finalize".into())
+            .spawn(move || {
+                if let Ok(rt) = std::panic::catch_unwind(super::runtime::runtime) {
+                    rt.block_on(async move {
+                        let budget = || deadline.saturating_duration_since(std::time::Instant::now());
 
-        while !finished.load(std::sync::atomic::Ordering::SeqCst)
+                        let core = work_state.take_core();
+                        if let Some(service) = core {
+                            let b = budget();
+                            if b.is_zero() {
+                                work_state.restore_core(service);
+                            } else {
+                                match tokio::time::timeout(b, service.close()).await {
+                                    Ok(_) => {}
+                                    Err(_) => work_state.restore_core(service),
+                                }
+                            }
+                        }
+
+                        let host = work_state.take_host();
+                        if let Some(host) = host {
+                            let b = budget();
+                            if !b.is_zero() {
+                                host.localset_bridge().shutdown_sync_with_deadline(deadline);
+                                match tokio::time::timeout(b, host.shutdown()).await {
+                                    Ok(_) => {}
+                                    Err(_) => work_state.restore_host(host),
+                                }
+                            } else {
+                                work_state.restore_host(host);
+                            }
+                        }
+
+                        let port = work_state.take_provider_port();
+                        if let Some(port) = port {
+                            work_state.restore_provider_port(port);
+                        }
+                    });
+                }
+                completed_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            })
+            .expect("spawn finalize worker");
+
+        while !completed.load(std::sync::atomic::Ordering::SeqCst)
             && std::time::Instant::now() < deadline
         {
-            std::thread::sleep(std::time::Duration::from_millis(5));
+            std::thread::sleep(std::time::Duration::from_millis(2));
         }
 
-        if !finished.load(std::sync::atomic::Ordering::SeqCst) {
-            std::thread::spawn(move || {
-                let _ = worker.join();
-            });
-        } else {
+        if completed.load(std::sync::atomic::Ordering::SeqCst) {
             let _ = worker.join();
+        } else {
+            // Retain owners in process registry; worker may still be running but
+            // finalizer returns after the absolute budget (no detached success).
+            if let Ok(mut reg) = cleanup_registry().lock() {
+                reg.push(state.clone());
+            }
+            // Do not detach: let worker continue on this named thread only.
         }
+    }
+
+    pub fn take_core(&self) -> Option<Arc<CoreService>> {
+        self.core.lock().ok()?.take()
+    }
+
+    pub fn restore_core(&self, value: Arc<CoreService>) {
+        if let Ok(mut slot) = self.core.lock() {
+            if slot.is_none() {
+                *slot = Some(value);
+            }
+        }
+    }
+
+    pub fn take_host(&self) -> Option<Arc<HostManager>> {
+        self.host.lock().ok()?.take()
+    }
+
+    pub fn restore_host(&self, value: Arc<HostManager>) {
+        if let Ok(mut slot) = self.host.lock() {
+            if slot.is_none() {
+                *slot = Some(value);
+            }
+        }
+    }
+
+    pub fn take_provider_port(&self) -> Option<Arc<dyn ProviderPort>> {
+        self.provider_port.lock().ok()?.take()
+    }
+
+    pub fn restore_provider_port(&self, value: Arc<dyn ProviderPort>) {
+        if let Ok(mut slot) = self.provider_port.lock() {
+            if slot.is_none() {
+                *slot = Some(value);
+            }
+        }
+    }
+
+    pub fn owner_slots_present(&self) -> bool {
+        self.core.lock().ok().is_some_and(|g| g.is_some())
+            || self.host.lock().ok().is_some_and(|g| g.is_some())
+            || self.provider_port.lock().ok().is_some_and(|g| g.is_some())
     }
 
     /// NAPI8 environment cleanup: revoke generation and gate admissions.

@@ -133,10 +133,32 @@ async fn localset_shutdown() {
                     .await;
             }));
         }
-        tokio::time::sleep(Duration::from_millis(80)).await;
+        let saturate_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        while tokio::time::Instant::now() < saturate_deadline {
+            if bridge.stats().active_tasks >= MAX_ACTIVE_TASKS {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
         assert_eq!(bridge.stats().active_tasks, MAX_ACTIVE_TASKS);
-        let busy = bridge.execute(1, || Box::pin(async { 99 })).await;
-        assert!(busy.is_err(), "expected busy at active cap");
+        let b = bridge.clone();
+        let deferred = tokio::spawn(async move {
+            let _ = b
+                .execute(1, || Box::pin(async { std::future::pending::<()>().await }))
+                .await;
+        });
+        let defer_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        while tokio::time::Instant::now() < defer_deadline {
+            if bridge.stats().pending_requests > 0 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            bridge.stats().pending_requests > 0,
+            "extra work must defer when active cap is saturated"
+        );
+        deferred.abort();
         for h in handles {
             h.abort();
         }
@@ -212,6 +234,83 @@ async fn localset_shutdown() {
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert_eq!(bridge.stats().active_tasks, MAX_ACTIVE_TASKS, "deferred must not exceed cap");
         for h in handles {
+            h.abort();
+        }
+        let _ = bridge.shutdown().await;
+    }
+
+
+    {
+        // Abort before first poll: active slot must be released without sleeping.
+        let bridge = LocalSetBridge::new();
+        let b = bridge.clone();
+        let waiter = tokio::spawn(async move {
+            let _ = b
+                .execute(8, || Box::pin(async { std::future::pending::<()>().await }))
+                .await;
+        });
+        waiter.abort();
+        let _ = waiter.await;
+        let evidence = bridge.shutdown().await;
+        assert_eq!(
+            bridge.stats().active_tasks,
+            0,
+            "pre-poll cancel must release active reservation"
+        );
+        assert_eq!(evidence.active_tasks, 0, "shutdown evidence: {evidence:?}");
+    }
+
+    {
+        // Active cap is independent of pending queue (pending16 vs active32).
+        let bridge = LocalSetBridge::new();
+        let bridge_ref = bridge.clone();
+        let mut blockers = Vec::new();
+        for _ in 0..MAX_ACTIVE_TASKS {
+            let b = bridge_ref.clone();
+            blockers.push(tokio::spawn(async move {
+                let _ = b
+                    .execute(4, || Box::pin(async { std::future::pending::<()>().await }))
+                    .await;
+            }));
+        }
+        let saturate_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        while tokio::time::Instant::now() < saturate_deadline {
+            if bridge.stats().active_tasks >= MAX_ACTIVE_TASKS {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            bridge.stats().active_tasks,
+            MAX_ACTIVE_TASKS,
+            "must saturate active cap before pending admission proof"
+        );
+        for _ in 0..MAX_PENDING_REQUESTS {
+            let b = bridge_ref.clone();
+            blockers.push(tokio::spawn(async move {
+                let _ = b
+                    .execute(4, || Box::pin(async { std::future::pending::<()>().await }))
+                    .await;
+            }));
+        }
+        let pending_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        while tokio::time::Instant::now() < pending_deadline {
+            if bridge.stats().pending_requests >= MAX_PENDING_REQUESTS {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            bridge.stats().pending_requests,
+            MAX_PENDING_REQUESTS,
+            "pending queue must fill independently of active cap"
+        );
+        assert_eq!(
+            bridge.stats().active_tasks,
+            MAX_ACTIVE_TASKS,
+            "active cap must stay saturated while pending queue fills"
+        );
+        for h in blockers {
             h.abort();
         }
         let _ = bridge.shutdown().await;

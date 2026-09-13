@@ -113,9 +113,6 @@ impl AdmissionCounters {
         if pending.bytes.saturating_add(bytes) > MAX_PENDING_BYTES {
             return false;
         }
-        if self.active_tasks.load(Ordering::Acquire) >= MAX_ACTIVE_TASKS {
-            return false;
-        }
         pending.requests += 1;
         pending.bytes += bytes;
         true
@@ -316,6 +313,11 @@ impl LocalSetBridge {
         self.shutdown_inner(true, deadline).await
     }
 
+    /// Shutdown using a caller-supplied absolute deadline (shared across ack + join).
+    pub async fn shutdown_before(&self, deadline: Instant) -> ShutdownEvidence {
+        self.shutdown_inner(true, deadline).await
+    }
+
     async fn shutdown_inner(&self, join_thread: bool, deadline: Instant) -> ShutdownEvidence {
         if self
             .shutdown_claimed
@@ -381,7 +383,7 @@ impl LocalSetBridge {
         };
 
         if join_thread {
-            evidence = self.join_runtime_thread(evidence, Instant::now() + SHUTDOWN_JOIN_BUDGET).await;
+            evidence = self.join_runtime_thread(evidence, deadline).await;
         }
         evidence
     }
@@ -477,6 +479,11 @@ impl LocalSetBridge {
 
     /// Synchronous shutdown for `Drop` / finalizer paths (bounded join).
     pub fn shutdown_sync(&self) {
+        self.shutdown_sync_with_deadline(Instant::now() + SHUTDOWN_JOIN_BUDGET);
+    }
+
+    /// Synchronous shutdown bounded by an absolute deadline.
+    pub fn shutdown_sync_with_deadline(&self, deadline: Instant) {
         if self
             .shutdown_claimed
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
@@ -485,7 +492,6 @@ impl LocalSetBridge {
             return;
         }
         self.counters.shutting_down.store(true, Ordering::SeqCst);
-        let deadline = Instant::now() + SHUTDOWN_JOIN_BUDGET;
         let handle = {
             let guard = self.runtime.lock().ok();
             let control_tx = guard
@@ -559,8 +565,14 @@ impl Drop for CancelGuard {
     }
 }
 
+struct TaskSlot {
+    handle: tokio::task::AbortHandle,
+    /// Set when the spawned future is first polled; until then the tracking entry owns the active reservation.
+    polled: Arc<AtomicBool>,
+}
+
 struct BridgeThreadState {
-    tasks: HashMap<u64, tokio::task::AbortHandle>,
+    tasks: HashMap<u64, TaskSlot>,
     deferred: VecDeque<ExecuteRequest>,
     cancelled_before_start: HashSet<u64>,
 }
@@ -590,8 +602,11 @@ impl BridgeThreadState {
         counters: &AdmissionCounters,
         aborted_ids: &mut Vec<u64>,
     ) {
-        if let Some(handle) = self.tasks.remove(&task_id) {
-            handle.abort();
+        if let Some(slot) = self.tasks.remove(&task_id) {
+            if !slot.polled.load(Ordering::Acquire) {
+                counters.task_finished();
+            }
+            slot.handle.abort();
             aborted_ids.push(task_id);
             return;
         }
@@ -634,7 +649,10 @@ impl BridgeThreadState {
         let result_tx = req.result_tx;
         let task_counters = counters.clone();
         let shared_state = state_ref.clone();
+        let polled = Arc::new(AtomicBool::new(false));
+        let polled_watch = polled.clone();
         let handle = tokio::task::spawn_local(async move {
+            polled_watch.store(true, Ordering::SeqCst);
             let _active = ActiveGuard {
                 counters: task_counters.clone(),
                 state: shared_state.clone(),
@@ -646,7 +664,13 @@ impl BridgeThreadState {
                 let _ = tx.send(output);
             }
         });
-        self.tasks.insert(task_id, handle.abort_handle());
+        self.tasks.insert(
+            task_id,
+            TaskSlot {
+                handle: handle.abort_handle(),
+                polled,
+            },
+        );
     }
 
     fn drain_deferred(&mut self, counters: &Arc<AdmissionCounters>, state_ref: &ThreadStateRef) {
@@ -697,9 +721,12 @@ fn run_localset_thread(
                             }
                             Some(ControlMessage::Shutdown { ack }) => {
                                 if let Ok(mut state) = state_ref.lock() {
-                                    for (task_id, handle) in state.tasks.drain() {
+                                    for (task_id, slot) in state.tasks.drain() {
+                                        if !slot.polled.load(Ordering::Acquire) {
+                                            counters.task_finished();
+                                        }
                                         aborted_ids.push(task_id);
-                                        handle.abort();
+                                        slot.handle.abort();
                                     }
                                     for req in state.deferred.drain(..) {
                                         counters.release_pending(req.byte_charge);
