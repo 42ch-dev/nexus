@@ -11,9 +11,13 @@ export {
   MAX_EVENT_BYTES,
   MAX_PENDING_MESSAGES,
 } from './delivery.js';
-export { ProviderNextError } from './errors.js';
+export { CleanupUnconfirmedError, ProviderNextError } from './errors.js';
+export { observeProcessIdentity, parseProcessIdentity, type ProcessIdentity } from './identity.js';
 export { parseAdmittedRecipe } from './recipe.js';
 
 export function createAcpProvider(): ProviderCallbacks {
   return createEngine();
 }
+
+export { createTestEngine, AcpProviderEngine } from './acp.js';
+export { reapChild } from './process-owner.js';

@@ -28,6 +28,11 @@ function parseProviderCall(payload) {
   return typeof payload === 'string' ? JSON.parse(payload) : payload;
 }
 
+function unpackCallbackPayload(...args) {
+  const payload = args.length > 1 ? args[1] : args[0];
+  return typeof payload === 'string' ? JSON.parse(payload) : payload;
+}
+
 function providerReply(requestId) {
   return JSON.stringify({
     request_id: requestId,
@@ -280,6 +285,31 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
     } finally {
       binding.forceUnconfirmedCleanup(false);
     }
+  });
+
+  test('unknown provider next maps to not_found through real bridge', async () => {
+    const build = spawnSync('pnpm', ['--filter', '@42ch/nexus-provider-acp', 'build'], {
+      cwd: root,
+      stdio: 'inherit',
+    });
+    assert.equal(build.status, 0, build.stderr?.toString());
+    const { createAcpProvider } = await import('../../nexus-provider-acp/dist/index.js');
+    const providers = createAcpProvider();
+    const { core } = openWithProviders({
+      call: async (...args) =>
+        JSON.stringify(await providers.call(unpackCallbackPayload(...args))),
+      next: async (...args) => {
+        const req = unpackCallbackPayload(...args);
+        return JSON.stringify(
+          await providers.next(req.operation_id, req.max_events, req.max_bytes),
+        );
+      },
+    });
+    await assert.rejects(
+      () => core.nextProviderEvents('00000000-0000-4000-8000-000000000099', 16, 65536),
+      (err) => /not.?found|operation_not_found/i.test(String(err)),
+    );
+    await core.close();
   });
 
   test('worker termination does not abort process on require', async () => {

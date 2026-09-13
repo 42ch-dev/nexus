@@ -17,6 +17,28 @@ const MAX_ACTIVE_PROMISES: usize = 32;
 
 type JsPromiseString = Promise<String>;
 
+fn map_callback_rejection(err: napi::Error) -> CoreError {
+    let reason = if err.reason.is_empty() {
+        err.to_string()
+    } else {
+        err.reason.clone()
+    };
+    if reason.contains("operation_not_found:") || reason.contains("ProviderNextError") {
+        return CoreError {
+            code: CoreErrorCode::NotFound,
+            message: reason,
+            details: Default::default(),
+            http_status: Some(404),
+        };
+    }
+    CoreError {
+        code: CoreErrorCode::Internal,
+        message: format!("callback rejected: {reason}"),
+        details: Default::default(),
+        http_status: Some(500),
+    }
+}
+
 pub struct JsProviderBridge {
     state: Arc<EnvState>,
     call_tsfn: ThreadsafeFunction<String, JsPromiseString, String, Status, true, false, 16>,
@@ -115,12 +137,7 @@ impl JsProviderBridge {
                     http_status: Some(503),
                 });
             }
-            result = promise => result.map_err(|e| CoreError {
-                code: CoreErrorCode::Internal,
-                message: format!("callback rejected: {e}"),
-                details: Default::default(),
-                http_status: Some(500),
-            })?,
+            result = promise => result.map_err(map_callback_rejection)?,
         };
 
         drop(permit);

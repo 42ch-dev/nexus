@@ -55,7 +55,16 @@ declare const process: {
   env: Record<string, string | undefined>;
   platform: string;
   kill(pid: number, signal?: string): void;
+  hrtime: { bigint(): bigint };
 };
+
+declare module 'node:fs' {
+  export interface Stats {
+    isDirectory(): boolean;
+  }
+  export function statSync(path: string): Stats;
+  export function realpathSync(path: string): string;
+}
 
 declare function setTimeout(handler: () => void, timeout?: number): unknown;
 declare function clearTimeout(handle: unknown): void;
@@ -66,6 +75,7 @@ declare module 'node:buffer' {
 
 declare module 'node:path' {
   export function isAbsolute(path: string): boolean;
+  export function resolve(...paths: string[]): string;
 }
 
 declare module 'node:util' {

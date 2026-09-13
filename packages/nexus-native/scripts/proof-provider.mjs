@@ -138,6 +138,30 @@ async function runTsAcpLifecycleProof() {
       process.exit(1);
     }
   }
+  try {
+    parseAdmittedRecipe({
+      recipe: { ...recipe, cwd: 'relative/not-canonical' },
+    });
+    console.error('expected invalid_recipe for relative cwd');
+    process.exit(1);
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes('invalid_recipe')) {
+      console.error('unexpected cwd rejection', error);
+      process.exit(1);
+    }
+  }
+  try {
+    parseAdmittedRecipe({
+      recipe: { ...recipe, process_identity: { pid: 1, extra_field: true } },
+    });
+    console.error('expected invalid_recipe for malformed process_identity');
+    process.exit(1);
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes('invalid_recipe')) {
+      console.error('unexpected process_identity rejection', error);
+      process.exit(1);
+    }
+  }
 
   const probeReply = decode(
     await core.providerCall(
