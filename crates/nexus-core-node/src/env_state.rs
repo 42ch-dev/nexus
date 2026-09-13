@@ -28,10 +28,9 @@ pub struct EnvInstance {
 
 impl EnvInstance {
     pub fn install(env: &Env, state: Arc<EnvState>) -> napi::Result<()> {
-        env.set_instance_data(EnvInstance { state }, (), |ctx| {
-            if let Ok(Some(instance)) = ctx.env.get_instance_data::<EnvInstance>() {
-                instance.state.finalize_native_from_env_cleanup();
-            }
+        let finalize_state = state.clone();
+        env.set_instance_data(EnvInstance { state }, (), move |_ctx| {
+            EnvState::run_bounded_native_finalize(finalize_state);
         })?;
         Ok(())
     }
@@ -206,26 +205,45 @@ impl EnvState {
         self.pending_operation_ids.lock().await.clone()
     }
 
-    /// NAPI8 environment cleanup: tombstone and run native-only teardown.
-    pub fn finalize_native_from_env_cleanup(&self) {
-        self.tombstone_env();
-        let state = Arc::new(());
-        let _keep = state;
-        let host = {
-            // Best-effort synchronous native cleanup without JS promises.
-            if let Ok(rt) = std::panic::catch_unwind(|| super::runtime::runtime()) {
-                rt.block_on(async {
-                    let host = self.host.lock().await.take();
+    /// NAPI8 environment cleanup: tombstone and run bounded native-only teardown.
+    pub fn run_bounded_native_finalize(state: Arc<EnvState>) {
+        state.tombstone_env();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let finished = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let finished_flag = finished.clone();
+        let worker_state = state.clone();
+
+        let worker = std::thread::spawn(move || {
+            if let Ok(rt) = std::panic::catch_unwind(super::runtime::runtime) {
+                let _ = rt.block_on(async move {
+                    let core = worker_state.core.lock().await.take();
+                    if let Some(service) = core {
+                        let _ = service.close().await;
+                    }
+                    let host = worker_state.host.lock().await.take();
                     if let Some(host) = host {
                         host.localset_bridge().shutdown_sync();
                         let _ = host.shutdown().await;
                     }
-                    let _core = self.core.lock().await.take();
-                    let _port = self.provider_port.lock().await.take();
+                    let _port = worker_state.provider_port.lock().await.take();
                 });
             }
-        };
-        let _ = host;
+            finished_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        while !finished.load(std::sync::atomic::Ordering::SeqCst)
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+
+        if !finished.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::spawn(move || {
+                let _ = worker.join();
+            });
+        } else {
+            let _ = worker.join();
+        }
     }
 
     /// NAPI8 environment cleanup: revoke generation and gate admissions.

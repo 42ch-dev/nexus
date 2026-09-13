@@ -11,7 +11,8 @@ import { Worker } from 'node:worker_threads';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..', '..', '..');
 const require = createRequire(import.meta.url);
-const nodePath = join(__dirname, '..', 'native', 'nexus_core_node.node');
+const { loadNodePath } = await import('../dist/loader.js');
+const nodePath = loadNodePath();
 
 function seedHome() {
   const home = mkdtempSync(join(tmpdir(), 'nexus-callback-'));

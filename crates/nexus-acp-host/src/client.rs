@@ -1535,7 +1535,7 @@ impl NexusAcpClient for AcpSdkAdapter {
 
         async move {
             bridge
-                .execute(sdk_op_charge("set_config"), move || {
+                .execute(sdk_op_charge("list_sessions"), move || {
                     let connection = connection.clone();
 
                     Box::pin(async move {
@@ -1551,19 +1551,27 @@ impl NexusAcpClient for AcpSdkAdapter {
 
                         // Get connection handle with minimal lock time
                         let connection_handle = Self::get_connection_handle(&connection).await?;
+                        let cancel = CancellationToken::new();
+                        let cancel_watch = cancel.clone();
                         let connection_for_spawn = connection_handle.clone();
-                        // Send the request via raw JSON-RPC using spawn + block_task
                         let (tx, rx) = tokio::sync::oneshot::channel();
                         connection_handle
                             .spawn(async move {
-                                let result = connection_for_spawn
-                                    .send_request_to(Agent, sdk_req)
-                                    .block_task()
-                                    .await;
-                                let _ = tx.send(result);
+                                tokio::select! {
+                                    _ = cancel_watch.cancelled() => {}
+                                    res = async {
+                                        connection_for_spawn
+                                            .send_request_to(Agent, sdk_req)
+                                            .block_task()
+                                            .await
+                                    } => {
+                                        let _ = tx.send(res);
+                                    }
+                                }
                                 Ok(())
                             })
                             .map_err(|e| crate::AcpError::sdk(&e))?;
+                        let _sdk_cancel = SdkSpawnCancel(cancel);
 
                         let list_result = rx
                             .await
@@ -1602,7 +1610,7 @@ impl NexusAcpClient for AcpSdkAdapter {
 
         async move {
             bridge
-                .execute(sdk_op_charge("set_mode"), move || {
+                .execute(sdk_op_charge("set_config_option"), move || {
                     let connection = connection.clone();
 
                     Box::pin(async move {
@@ -1618,20 +1626,27 @@ impl NexusAcpClient for AcpSdkAdapter {
 
                         // Get connection handle with minimal lock time
                         let connection_handle = Self::get_connection_handle(&connection).await?;
+                        let cancel = CancellationToken::new();
+                        let cancel_watch = cancel.clone();
                         let connection_for_spawn = connection_handle.clone();
-
-                        // Send the request via raw JSON-RPC using spawn + block_task
                         let (tx, rx) = tokio::sync::oneshot::channel();
                         connection_handle
                             .spawn(async move {
-                                let result = connection_for_spawn
-                                    .send_request_to(Agent, sdk_req)
-                                    .block_task()
-                                    .await;
-                                let _ = tx.send(result);
+                                tokio::select! {
+                                    _ = cancel_watch.cancelled() => {}
+                                    res = async {
+                                        connection_for_spawn
+                                            .send_request_to(Agent, sdk_req)
+                                            .block_task()
+                                            .await
+                                    } => {
+                                        let _ = tx.send(res);
+                                    }
+                                }
                                 Ok(())
                             })
                             .map_err(|e| crate::AcpError::sdk(&e))?;
+                        let _sdk_cancel = SdkSpawnCancel(cancel);
 
                         let set_result = rx
                             .await
@@ -1689,19 +1704,27 @@ impl NexusAcpClient for AcpSdkAdapter {
                         );
 
                         let connection_handle = Self::get_connection_handle(&connection).await?;
+                        let cancel = CancellationToken::new();
+                        let cancel_watch = cancel.clone();
                         let connection_for_spawn = connection_handle.clone();
-
                         let (tx, rx) = tokio::sync::oneshot::channel();
                         connection_handle
                             .spawn(async move {
-                                let result = connection_for_spawn
-                                    .send_request_to(Agent, sdk_req)
-                                    .block_task()
-                                    .await;
-                                let _ = tx.send(result);
+                                tokio::select! {
+                                    _ = cancel_watch.cancelled() => {}
+                                    res = async {
+                                        connection_for_spawn
+                                            .send_request_to(Agent, sdk_req)
+                                            .block_task()
+                                            .await
+                                    } => {
+                                        let _ = tx.send(res);
+                                    }
+                                }
                                 Ok(())
                             })
                             .map_err(|e| crate::AcpError::sdk(&e))?;
+                        let _sdk_cancel = SdkSpawnCancel(cancel);
 
                         rx.await
                             .map_err(|_| {

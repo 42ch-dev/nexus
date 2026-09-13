@@ -154,4 +154,67 @@ async fn localset_shutdown() {
         assert!(err.is_err(), "oversize payload must be rejected at admission");
         let _ = bridge.shutdown().await;
     }
+    {
+        let bridge = LocalSetBridge::new();
+        let multibyte = "🎉".repeat((MAX_PENDING_BYTES / 4) + 1);
+        let err = bridge
+            .execute(multibyte.len(), move || Box::pin(async move { multibyte.len() }))
+            .await;
+        assert!(err.is_err(), "utf-8 multibyte oversize must fail admission");
+        let _ = bridge.shutdown().await;
+    }
+
+    {
+        let bridge = LocalSetBridge::new();
+        let hang_id = bridge.stats().active_tasks;
+        let b = bridge.clone();
+        let hang = tokio::spawn(async move {
+            let _ = b
+                .execute(8, || Box::pin(async { std::future::pending::<()>().await }))
+                .await;
+        });
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        let evidence = bridge.shutdown().await;
+        hang.abort();
+        assert!(
+            !evidence.aborted_task_ids.is_empty(),
+            "shutdown must record aborted live task ids: {evidence:?}"
+        );
+        assert_eq!(evidence.active_tasks, 0);
+        let _ = hang_id;
+    }
+
+    {
+        let bridge = LocalSetBridge::new();
+        let bridge_ref = bridge.clone();
+        let mut handles = Vec::new();
+        for i in 0..MAX_ACTIVE_TASKS {
+            let b = bridge_ref.clone();
+            handles.push(tokio::spawn(async move {
+                let _ = b
+                    .execute(8, move || {
+                        Box::pin(async move {
+                            tokio::time::sleep(Duration::from_secs(30)).await;
+                            i
+                        })
+                    })
+                    .await;
+            }));
+        }
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        assert_eq!(bridge.stats().active_tasks, MAX_ACTIVE_TASKS);
+        let b = bridge.clone();
+        handles.push(tokio::spawn(async move {
+            let _ = b
+                .execute(8, move || Box::pin(async { 99 }))
+                .await;
+        }));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(bridge.stats().active_tasks, MAX_ACTIVE_TASKS, "deferred must not exceed cap");
+        for h in handles {
+            h.abort();
+        }
+        let _ = bridge.shutdown().await;
+    }
+
 }

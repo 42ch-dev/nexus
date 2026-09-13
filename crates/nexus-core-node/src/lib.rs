@@ -198,7 +198,7 @@ impl NativeCore {
 
     #[napi]
     pub async fn close(&self) -> Result<Buffer> {
-        let report: CoreCloseReport = lifecycle::close_core(&self.inner).await;
+        let report: CoreCloseReport = lifecycle::close_core(self.inner.clone()).await;
         Ok(Buffer::from(serde_json::to_vec(&report)?))
     }
 

@@ -51,6 +51,88 @@ const fn forced_unconfirmed() -> bool {
     false
 }
 
+
+struct RestoreCore {
+    value: Option<Arc<CoreService>>,
+    state: Arc<EnvState>,
+    disarmed: bool,
+}
+
+impl RestoreCore {
+    fn disarm(&mut self) {
+        self.disarmed = true;
+        self.value = None;
+    }
+}
+
+impl Drop for RestoreCore {
+    fn drop(&mut self) {
+        if self.disarmed {
+            return;
+        }
+        if let Some(v) = self.value.take() {
+            let mut guard = self.state.core.blocking_lock();
+            if guard.is_none() {
+                *guard = Some(v);
+            }
+        }
+    }
+}
+
+struct RestoreHost {
+    value: Option<Arc<HostManager>>,
+    state: Arc<EnvState>,
+    disarmed: bool,
+}
+
+impl RestoreHost {
+    fn disarm(&mut self) {
+        self.disarmed = true;
+        self.value = None;
+    }
+}
+
+impl Drop for RestoreHost {
+    fn drop(&mut self) {
+        if self.disarmed {
+            return;
+        }
+        if let Some(v) = self.value.take() {
+            let mut guard = self.state.host.blocking_lock();
+            if guard.is_none() {
+                *guard = Some(v);
+            }
+        }
+    }
+}
+
+struct RestorePort {
+    value: Option<Arc<dyn ProviderPort>>,
+    state: Arc<EnvState>,
+    disarmed: bool,
+}
+
+impl RestorePort {
+    fn disarm(&mut self) {
+        self.disarmed = true;
+        self.value = None;
+    }
+}
+
+impl Drop for RestorePort {
+    fn drop(&mut self) {
+        if self.disarmed {
+            return;
+        }
+        if let Some(v) = self.value.take() {
+            let mut guard = self.state.provider_port.blocking_lock();
+            if guard.is_none() {
+                *guard = Some(v);
+            }
+        }
+    }
+}
+
 fn interrupted_report(pending: Vec<String>) -> CoreCloseReport {
     CoreCloseReport {
         state: CoreCloseReportState::Interrupted,
@@ -78,14 +160,24 @@ fn close_released(report: &CoreCloseReport) -> bool {
 /// Attempt cleanup over the retained owners, using the same ownership discipline
 /// for a rollback, an explicit close, and an admission-fence settlement.
 async fn cleanup_owners(
-    state: &EnvState,
-    core: Option<Arc<CoreService>>,
-    host: Option<Arc<HostManager>>,
-    provider_port: Option<Arc<dyn ProviderPort>>,
+    state: Arc<EnvState>,
+    inject_core: Option<Arc<CoreService>>,
+    inject_host: Option<Arc<HostManager>>,
+    inject_port: Option<Arc<dyn ProviderPort>>,
 ) -> (bool, CoreCloseReport) {
     let forced = forced_unconfirmed();
 
-    let core_report = match &core {
+    let core_taken = match inject_core {
+        Some(core) => Some(core),
+        None => state.core.lock().await.take(),
+    };
+    let mut core_guard = RestoreCore {
+        value: core_taken,
+        state: state.clone(),
+        disarmed: false,
+    };
+
+    let core_report = match core_guard.value.as_ref() {
         Some(service) => match service.close().await {
             Ok(report) => report,
             Err(_) => interrupted_report(vec![]),
@@ -93,13 +185,21 @@ async fn cleanup_owners(
         None => closed_report(),
     };
     let core_released = !forced && close_released(&core_report);
-    if !core_released {
-        if let Some(service) = core {
-            state.core.lock().await.replace(service);
-        }
+    if core_released {
+        core_guard.disarm();
     }
 
-    let host_released = match host {
+    let host_taken = match inject_host {
+        Some(host) => Some(host),
+        None => state.host.lock().await.take(),
+    };
+    let mut host_guard = RestoreHost {
+        value: host_taken,
+        state: state.clone(),
+        disarmed: false,
+    };
+
+    let host_released = match host_guard.value.take() {
         Some(manager) => {
             let pending = manager.pending_lifecycle_snapshot().await;
             state.record_pending_operations(pending).await;
@@ -109,6 +209,7 @@ async fn cleanup_owners(
                 && bridge_evidence.active_tasks == 0
                 && bridge_evidence.pending_requests == 0;
             if !forced && shutdown_ok && bridge_settled {
+                host_guard.disarm();
                 true
             } else {
                 let mut pending = state.pending_operations_snapshot().await;
@@ -125,26 +226,34 @@ async fn cleanup_owners(
                     pending.push("host-shutdown-unconfirmed".to_string());
                 }
                 state.record_pending_operations(pending).await;
-                state.host.lock().await.replace(manager);
+                host_guard.value = Some(manager);
                 false
             }
         }
         None => true,
     };
 
+    let port_taken = match inject_port {
+        Some(port) => Some(port),
+        None => state.provider_port.lock().await.take(),
+    };
+    let mut port_guard = RestorePort {
+        value: port_taken,
+        state: state.clone(),
+        disarmed: false,
+    };
+
     let released = core_released && host_released;
     if released {
-        state.provider_port.lock().await.take();
+        port_guard.disarm();
         state.clear_interrupted();
         state.closing.store(0, std::sync::atomic::Ordering::SeqCst);
         state
             .generation
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        state.publish_closed().await;
         (true, core_report)
     } else {
-        if let Some(port) = provider_port {
-            state.provider_port.lock().await.replace(port);
-        }
         state.mark_interrupted();
         let pending = state.pending_operations_snapshot().await;
         (false, interrupted_report(pending))
@@ -152,11 +261,8 @@ async fn cleanup_owners(
 }
 
 /// Settlement of whatever a previous failed rollback or interrupted close retained.
-async fn settle_retained(state: &EnvState) -> (bool, CoreCloseReport) {
-    let core = state.core.lock().await.take();
-    let host = state.host.lock().await.take();
-    let provider_port = state.provider_port.lock().await.take();
-    cleanup_owners(state, core, host, provider_port).await
+async fn settle_retained(state: Arc<EnvState>) -> (bool, CoreCloseReport) {
+    cleanup_owners(state, None, None, None).await
 }
 
 /// Open the native core.
@@ -165,8 +271,11 @@ pub async fn open_core(
     options: NativeOpenOptions,
     js_port: Option<Arc<dyn ProviderPort>>,
 ) -> Result<Arc<CoreService>, String> {
+    if state.is_env_dead() {
+        return Err("dead_env".to_string());
+    }
     if state.is_interrupted() {
-        let (released, _) = settle_retained(&state).await;
+        let (released, _) = settle_retained(state.clone()).await;
         if !released {
             return Err(
                 "interrupted: retained cleanup owner requires a confirmed close".to_string(),
@@ -177,7 +286,6 @@ pub async fn open_core(
         state.settled_close.lock().await.take();
         *state.close_in_flight.lock().await = false;
         state.closing.store(0, std::sync::atomic::Ordering::SeqCst);
-        state.env_dead.store(false, std::sync::atomic::Ordering::SeqCst);
     }
     if state.is_closing() && state.settled_close.lock().await.is_none() {
         return Err("closing".to_string());
@@ -217,7 +325,7 @@ pub async fn open_core(
         probe_owner: None,
     };
     if let Err(err) = host.start(start_config).await {
-        let (released, _) = cleanup_owners(&state, Some(Arc::new(core)), Some(host), js_port).await;
+        let (released, _) = cleanup_owners(state.clone(), Some(Arc::new(core)), Some(host), js_port).await;
         if released {
             state.publish_closed().await;
         } else {
@@ -245,7 +353,7 @@ pub async fn open_core(
 }
 
 /// Close the environment with a 5s phased budget and one concurrent settlement.
-pub async fn close_core(state: &EnvState) -> CoreCloseReport {
+pub async fn close_core(state: Arc<EnvState>) -> CoreCloseReport {
     if let Some(report) = state.settled_close.lock().await.clone() {
         return report;
     }
@@ -268,43 +376,29 @@ pub async fn close_core(state: &EnvState) -> CoreCloseReport {
     state.begin_close();
     state.begin_closing_phase().await;
     let started = Instant::now();
+    let deadline = started + CLOSE_BUDGET;
 
-    let mut taken_core = state.core.lock().await.take();
-    let mut taken_host = state.host.lock().await.take();
-    let mut taken_port = state.provider_port.lock().await.take();
-    if let Some(host) = taken_host.as_ref() {
+    if let Some(host) = state.host.lock().await.as_ref() {
         state
             .record_pending_operations(host.pending_lifecycle_snapshot().await)
             .await;
     }
 
-    let report = match tokio::time::timeout(CLOSE_BUDGET, async {
-        let drain_budget = CLOSE_CANCEL_PHASE.min(CLOSE_BUDGET.saturating_sub(started.elapsed()));
-        if !drain_budget.is_zero() {
-            tokio::time::sleep(Duration::from_millis(25).min(drain_budget)).await;
-        }
-        let (_, report) = cleanup_owners(
-            state,
-            taken_core.take(),
-            taken_host.take(),
-            taken_port.take(),
-        )
-        .await;
-        report
-    })
+    let report = match tokio::time::timeout_at(
+        tokio::time::Instant::from_std(deadline),
+        async {
+            let drain_budget = CLOSE_CANCEL_PHASE.min(CLOSE_BUDGET.saturating_sub(started.elapsed()));
+            if !drain_budget.is_zero() {
+                tokio::time::sleep(Duration::from_millis(25).min(drain_budget)).await;
+            }
+            let (_, report) = cleanup_owners(state.clone(), None, None, None).await;
+            report
+        },
+    )
     .await
     {
         Ok(report) => report,
         Err(_) => {
-            if let Some(core) = taken_core {
-                state.core.lock().await.replace(core);
-            }
-            if let Some(host) = taken_host {
-                state.host.lock().await.replace(host);
-            }
-            if let Some(port) = taken_port {
-                state.provider_port.lock().await.replace(port);
-            }
             state.mark_interrupted();
             interrupted_report(state.pending_operations_snapshot().await)
         }
@@ -312,11 +406,7 @@ pub async fn close_core(state: &EnvState) -> CoreCloseReport {
 
     *state.settled_close.lock().await = Some(report.clone());
     *state.close_in_flight.lock().await = false;
-    if report.cleanup_confirmed {
-        state.closing.store(0, std::sync::atomic::Ordering::SeqCst);
-        state.publish_closed().await;
-        state.generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    } else {
+    if !report.cleanup_confirmed {
         state.mark_interrupted();
     }
     state.close_notify_settled.notify_waiters();

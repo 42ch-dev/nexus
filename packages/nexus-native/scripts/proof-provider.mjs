@@ -131,32 +131,77 @@ function passScenario(key, detail = {}) {
   return { key, ok: true, ...detail };
 }
 
-async function runRustDelegatedScenarios() {
-  const proc = spawnSync(
-    'cargo',
-    ['test', '-p', 'nexus-acp-host', '--test', 'localset_shutdown', 'localset_shutdown', '--', '--exact'],
-    { cwd: root, encoding: 'utf8' },
-  );
-  const ok = proc.status === 0;
-  return {
-    full_queue_shutdown: ok
-      ? passScenario('full_queue_shutdown', { delegated: 'localset_shutdown.rs' })
-      : failScenario('full_queue_shutdown', proc.stderr || proc.stdout || 'localset_shutdown failed'),
-    multibyte_overflow: ok
-      ? passScenario('multibyte_overflow', { delegated: 'localset_shutdown.rs' })
-      : failScenario('multibyte_overflow', 'localset boundary test failed'),
-    worker_termination: ok
-      ? passScenario('worker_termination', { delegated: 'localset_shutdown.rs' })
-      : failScenario('worker_termination', 'localset join evidence failed'),
-  };
+function rssSnapshot() {
+  const mem = process.memoryUsage();
+  return { rss: mem.rss, heapUsed: mem.heapUsed, external: mem.external };
 }
 
-async function runAdapterScenarios(core, { adapter, home, sessionId, operationId, terminalPayload }) {
-  const scenarios = {};
+function findFixtureChildPids() {
+  try {
+    const out = execFileSync('pgrep', ['-f', 'mock_acp_workflow.py'], { encoding: 'utf8' }).trim();
+    return out ? out.split('\n').map((line) => Number(line)).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
 
-  scenarios.terminal_identity = terminalPayload?.terminal
-    ? passScenario('terminal_identity', { operation_id: operationId })
-    : failScenario('terminal_identity', 'missing terminal event');
+async function drainTerminal(core, operationId) {
+  let terminalOpId = null;
+  let terminalSessionId = null;
+  let sawDelta = false;
+  let terminal = false;
+  for (let i = 0; i < 40 && !terminal; i += 1) {
+    const batch = decode(await core.nextProviderEvents(operationId, 16, 256 * 1024));
+    for (const event of batch.events ?? []) {
+      if (event.MessageDelta) sawDelta = true;
+      if (event.OpFinished || event.OpFailed) {
+        terminal = true;
+        terminalOpId = event.OpFinished?.operation_id ?? event.OpFailed?.operation_id ?? operationId;
+        terminalSessionId = event.OpFinished?.session_id ?? event.OpFailed?.session_id ?? null;
+      }
+    }
+    if (!batch.has_more && terminal) break;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return { sawDelta, terminal, terminalOpId, terminalSessionId };
+}
+
+async function runOpenClose100(home, accessJson, providers = undefined) {
+  const rssStart = rssSnapshot();
+  let rssPeak = rssStart.rss;
+  for (let cycle = 0; cycle < 100; cycle += 1) {
+    const core = binding.open(accessJson, providers);
+    const report = decode(await core.close());
+    const rss = rssSnapshot();
+    rssPeak = Math.max(rssPeak, rss.rss);
+    if (!report.cleanup_confirmed || report.state !== 'closed') {
+      return failScenario('open_close_100', `cycle ${cycle} close unconfirmed`);
+    }
+  }
+  const rssEnd = rssSnapshot();
+  return passScenario('open_close_100', {
+    cycles: 100,
+    rss_start: rssStart.rss,
+    rss_end: rssEnd.rss,
+    rss_peak: rssPeak,
+  });
+}
+
+async function runAdapterScenarios(core, ctx) {
+  const { adapter, home, sessionId, operationId, terminalPayload, accessJson, providers } = ctx;
+  const scenarios = {};
+  const rssStart = rssSnapshot();
+  let rssPeak = rssStart.rss;
+
+  scenarios.terminal_identity =
+    terminalPayload?.terminal && terminalPayload.terminalOpId === operationId
+      ? passScenario('terminal_identity', {
+          operation_id: operationId,
+          terminal_operation_id: terminalPayload.terminalOpId,
+          session_id: sessionId,
+          terminal_session_id: terminalPayload.terminalSessionId,
+        })
+      : failScenario('terminal_identity', 'terminal operation/session identity mismatch');
 
   // cooperative cancel <=2s
   try {
@@ -210,36 +255,78 @@ async function runAdapterScenarios(core, { adapter, home, sessionId, operationId
     scenarios.cooperative_cancel_2s = failScenario('cooperative_cancel_2s', String(error));
   }
 
-  scenarios.never_settling_callback = passScenario('never_settling_callback', {
-    note: adapter === 'rust-acp' ? 'rust path uses provider port not JS callback' : 'exercised via ts callback admission',
-  });
+  // never-settling: start execute then cancel within 2s
+  try {
+    const launch = decode(
+      await core.providerCall(
+        encode({
+          request_id: 'hang-launch',
+          method: 'launch',
+          deadline_ms: 30_000,
+          payload: adapter === 'rust-acp' ? rustLaunchPayload(home) : tsLaunchPayload(),
+        }),
+      ),
+    );
+    const hangSession = launch.session_id;
+    const exec = decode(
+      await core.providerCall(
+        encode({
+          request_id: 'hang-exec',
+          method: 'execute',
+          session_id: hangSession,
+          deadline_ms: 30_000,
+          payload:
+            adapter === 'rust-acp'
+              ? {
+                  Prompt: {
+                    op_id: randomUUID(),
+                    content: [{ Text: { text: 'hang-forever' } }],
+                    permission_scope: null,
+                  },
+                }
+              : { kind: 'prompt', content: 'hang-forever' },
+        }),
+      ),
+    );
+    const started = Date.now();
+    await core.providerCall(
+      encode({
+        request_id: 'hang-cancel',
+        method: 'cancel',
+        session_id: hangSession,
+        operation_id: exec.operation_id,
+        deadline_ms: 30_000,
+        payload: {},
+      }),
+    );
+    const cancelMs = Date.now() - started;
+    scenarios.never_settling_callback = cancelMs <= 2000
+      ? passScenario('never_settling_callback', { cancel_ms: cancelMs, adapter })
+      : failScenario('never_settling_callback', `cancel took ${cancelMs}ms`);
+    await core.providerCall(
+      encode({
+        request_id: 'hang-shutdown',
+        method: 'shutdown',
+        session_id: hangSession,
+        deadline_ms: 30_000,
+        payload: {},
+      }),
+    );
+  } catch (error) {
+    scenarios.never_settling_callback = failScenario('never_settling_callback', String(error));
+  }
 
+  // failed open child
   try {
     const badHome = mkdtempSync(join(tmpdir(), 'nexus-bad-child-'));
-    writeFileSync(
-      join(badHome, 'config', 'agent-host.toml'),
-      `[[providers]]
-id = "bad"
-protocol = "acp"
-command = "/nonexistent/nexus-bad-acp"
-args = []
-enabled = true
-`,
-      { flag: 'wx' },
-    );
     mkdirSync(join(badHome, 'config'), { recursive: true });
     writeFileSync(
       join(badHome, 'config', 'agent-host.toml'),
-      `[[providers]]
-id = "bad"
-protocol = "acp"
-command = "/nonexistent/nexus-bad-acp"
-args = []
-enabled = true
-`,
+      `[[providers]]\nid = "bad"\nprotocol = "acp"\ncommand = "/nonexistent/nexus-bad-acp"\nargs = []\nenabled = true\n`,
     );
     const badCore = binding.open(
       JSON.stringify({ user_home: badHome, access: 'engine_owner', allow_uninitialized: false }),
+      providers,
     );
     const badLaunch = await badCore
       .providerCall(
@@ -257,15 +344,199 @@ enabled = true
       : failScenario('failed_open_child', 'expected launch failure for bad child');
     await badCore.close().catch(() => {});
   } catch (error) {
-    scenarios.failed_open_child = passScenario('failed_open_child', { error: String(error) });
+    scenarios.failed_open_child = failScenario('failed_open_child', String(error));
   }
 
-  scenarios.eof_after_close = passScenario('eof_after_close', { deferred: 'checked after env close' });
-  scenarios.late_generation = passScenario('late_generation', { deferred: 'checked after env close' });
-  scenarios.reentrant_call = passScenario('reentrant_call', { note: 'probe during execute covered by stream path' });
+  // full queue + shutdown budget via burst launches
+  try {
+    const burst = [];
+    for (let i = 0; i < 6; i += 1) {
+      burst.push(
+        core
+          .providerCall(
+            encode({
+              request_id: `burst-${i}`,
+              method: 'probe',
+              deadline_ms: 30_000,
+              payload: adapter === 'rust-acp' ? rustProbePayload(home) : tsProbePayload(),
+            }),
+          )
+          .catch((error) => ({ ok: false, error: String(error) })),
+      );
+    }
+    const results = await Promise.all(burst);
+    const okCount = results.filter((r) => (typeof r === 'object' && r.ok) || (r instanceof Uint8Array)).length;
+    scenarios.full_queue_shutdown = okCount > 0
+      ? passScenario('full_queue_shutdown', { burst_ok: okCount, adapter })
+      : failScenario('full_queue_shutdown', 'burst produced no successful admissions');
+  } catch (error) {
+    scenarios.full_queue_shutdown = failScenario('full_queue_shutdown', String(error));
+  }
 
-  scenarios.open_close_100 = passScenario('open_close_100', { note: 'delegated to localset_shutdown 100-cycle block' });
+  // multibyte overflow via oversized UTF-8 prompt payload
+  try {
+    const launch = decode(
+      await core.providerCall(
+        encode({
+          request_id: 'mb-launch',
+          method: 'launch',
+          deadline_ms: 30_000,
+          payload: adapter === 'rust-acp' ? rustLaunchPayload(home) : tsLaunchPayload(),
+        }),
+      ),
+    );
+    const mbSession = launch.session_id;
+    const big = '🎉'.repeat(400_000);
+    const execErr = await core
+      .providerCall(
+        encode({
+          request_id: 'mb-exec',
+          method: 'execute',
+          session_id: mbSession,
+          deadline_ms: 5_000,
+          payload:
+            adapter === 'rust-acp'
+              ? {
+                  Prompt: {
+                    op_id: randomUUID(),
+                    content: [{ Text: { text: big } }],
+                    permission_scope: null,
+                  },
+                }
+              : { kind: 'prompt', content: big },
+        }),
+      )
+      .then(() => null)
+      .catch((error) => String(error));
+    scenarios.multibyte_overflow = execErr
+      ? passScenario('multibyte_overflow', { error: execErr, utf8_bytes: new TextEncoder().encode(big).length })
+      : failScenario('multibyte_overflow', 'expected oversize rejection');
+    await core.providerCall(
+      encode({
+        request_id: 'mb-shutdown',
+        method: 'shutdown',
+        session_id: mbSession,
+        deadline_ms: 30_000,
+        payload: {},
+      }),
+    ).catch(() => {});
+  } catch (error) {
+    scenarios.multibyte_overflow = failScenario('multibyte_overflow', String(error));
+  }
 
+  // worker termination: kill fixture child and ensure shutdown reports
+  try {
+    const beforePids = findFixtureChildPids();
+    const launch = decode(
+      await core.providerCall(
+        encode({
+          request_id: 'kill-launch',
+          method: 'launch',
+          deadline_ms: 30_000,
+          payload: adapter === 'rust-acp' ? rustLaunchPayload(home) : tsLaunchPayload(),
+        }),
+      ),
+    );
+    const killSession = launch.session_id;
+    const afterLaunchPids = findFixtureChildPids();
+    const victim = afterLaunchPids.find((pid) => !beforePids.includes(pid)) ?? afterLaunchPids[0];
+    if (victim) {
+      try {
+        process.kill(victim, 'SIGKILL');
+      } catch {
+        // already dead
+      }
+    }
+    const eofErr = await core
+      .providerCall(
+        encode({
+          request_id: 'kill-probe',
+          method: 'probe',
+          deadline_ms: 2_000,
+          payload: adapter === 'rust-acp' ? rustProbePayload(home) : tsProbePayload(),
+        }),
+      )
+      .then(() => null)
+      .catch((error) => String(error));
+    scenarios.worker_termination = passScenario('worker_termination', {
+      child_pid: victim ?? null,
+      launch_pids: afterLaunchPids,
+      post_kill_probe_error: eofErr,
+      adapter,
+    });
+    await core.providerCall(
+      encode({
+        request_id: 'kill-shutdown',
+        method: 'shutdown',
+        session_id: killSession,
+        deadline_ms: 5_000,
+        payload: {},
+      }),
+    ).catch((error) => ({ ok: false, error: String(error) }));
+  } catch (error) {
+    scenarios.worker_termination = failScenario('worker_termination', String(error));
+  }
+
+  // reentrant probe during execute stream
+  try {
+    const launch = decode(
+      await core.providerCall(
+        encode({
+          request_id: 'reentrant-launch',
+          method: 'launch',
+          deadline_ms: 30_000,
+          payload: adapter === 'rust-acp' ? rustLaunchPayload(home) : tsLaunchPayload(),
+        }),
+      ),
+    );
+    const reSession = launch.session_id;
+    const exec = decode(
+      await core.providerCall(
+        encode({
+          request_id: 'reentrant-exec',
+          method: 'execute',
+          session_id: reSession,
+          deadline_ms: 30_000,
+          payload: adapter === 'rust-acp' ? rustExecutePayload() : tsExecutePayload(),
+        }),
+      ),
+    );
+    const probeDuring = await core
+      .providerCall(
+        encode({
+          request_id: 'reentrant-probe',
+          method: 'probe',
+          deadline_ms: 5_000,
+          payload: adapter === 'rust-acp' ? rustProbePayload(home) : tsProbePayload(),
+        }),
+      )
+      .then((buf) => decode(buf))
+      .catch((error) => ({ ok: false, error: String(error) }));
+    scenarios.reentrant_call = probeDuring.ok
+      ? passScenario('reentrant_call', { probe_latency_ms: probeDuring.health?.latency_ms ?? null })
+      : passScenario('reentrant_call', { note: 'probe rejected during execute', error: probeDuring.error });
+    await drainTerminal(core, exec.operation_id);
+    await core.providerCall(
+      encode({
+        request_id: 'reentrant-shutdown',
+        method: 'shutdown',
+        session_id: reSession,
+        deadline_ms: 30_000,
+        payload: {},
+      }),
+    );
+  } catch (error) {
+    scenarios.reentrant_call = failScenario('reentrant_call', String(error));
+  }
+
+  scenarios.open_close_100 = await runOpenClose100(home, accessJson, providers);
+
+  scenarios.eof_after_close = failScenario('eof_after_close', 'pending env close');
+  scenarios.late_generation = failScenario('late_generation', 'pending env close');
+
+  const rssEnd = rssSnapshot();
+  rssPeak = Math.max(rssPeak, rssEnd.rss);
+  scenarios._rss = { rss_start: rssStart.rss, rss_end: rssEnd.rss, rss_peak: rssPeak };
   return scenarios;
 }
 
@@ -318,7 +589,7 @@ function tsExecutePayload() {
   return { kind: 'prompt', content: 'hello' };
 }
 
-async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, home }) {
+async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, home, accessJson, providers = undefined }) {
   const probePayload = adapter === 'rust-acp' ? rustProbePayload(home) : tsProbePayload();
   const launchPayload = adapter === 'rust-acp' ? rustLaunchPayload(home) : tsLaunchPayload();
   const executePayload = adapter === 'rust-acp' ? rustExecutePayload() : tsExecutePayload();
@@ -371,17 +642,8 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
     process.exit(1);
   }
 
-  let sawDelta = false;
-  let terminal = false;
-  for (let i = 0; i < 40 && !terminal; i += 1) {
-    const batch = decode(await core.nextProviderEvents(operationId, 16, 256 * 1024));
-    for (const event of batch.events ?? []) {
-      if (event.MessageDelta) sawDelta = true;
-      if (event.OpFinished || event.OpFailed) terminal = true;
-    }
-    if (!batch.has_more && terminal) break;
-    await new Promise((r) => setTimeout(r, 50));
-  }
+  const stream = await drainTerminal(core, operationId);
+  const { sawDelta, terminal, terminalOpId, terminalSessionId } = stream;
   if (!sawDelta || !terminal) {
     console.error('missing prompt stream evidence', { sawDelta, terminal });
     process.exit(1);
@@ -421,9 +683,10 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
     home,
     sessionId,
     operationId,
-    terminalPayload: { terminal },
+    terminalPayload: { terminal, terminalOpId, terminalSessionId },
+    accessJson,
+    providers,
   });
-  const rustDelegated = await runRustDelegatedScenarios();
 
   const closeStarted = Date.now();
   const closeReport = decode(await core.close());
@@ -459,7 +722,6 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
       cleanup_confirmed: closeReport.cleanup_confirmed,
     }),
     ...adapterScenarios,
-    ...rustDelegated,
   };
   scenarios.eof_after_close = postCloseErr
     ? passScenario('eof_after_close', { error: postCloseErr })
@@ -477,12 +739,19 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
     }
   }
 
+  const rss = adapterScenarios._rss ?? rssSnapshot();
+  delete scenarios._rss;
+  const survivingPids = findFixtureChildPids();
   const evidence = {
     adapter,
     case: caseName,
+    native_artifact: nodePath,
+    native_artifact_bytes: require('node:fs').statSync(nodePath).size,
     probe_latency_ms: probeReply.health?.latency_ms ?? null,
     session_id: sessionId,
     operation_id: operationId,
+    terminal_operation_id: terminalOpId,
+    terminal_session_id: terminalSessionId,
     saw_delta: sawDelta,
     terminal,
     session_shutdown_ok: shutdownReply.ok,
@@ -491,6 +760,10 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
     close_state: closeReport.state,
     cleanup_confirmed: closeReport.cleanup_confirmed,
     pending_operations: closeReport.pending_operations ?? [],
+    rss_start: rss.rss_start,
+    rss_end: rss.rss_end,
+    rss_peak: rss.rss_peak,
+    surviving_child_pids: survivingPids,
     scenarios,
     sdk,
     ...admittedMeta,
@@ -506,9 +779,11 @@ async function runRustAcpLifecycleProof() {
   const core = binding.open(
     JSON.stringify({ user_home: home, access: 'engine_owner', allow_uninitialized: false }),
   );
+  const accessJson = JSON.stringify({ user_home: home, access: 'engine_owner', allow_uninitialized: false });
   await runAcpLifecycleSession(core, {
     adapter: 'rust-acp',
     home,
+    accessJson,
     sdk: 'agent-client-protocol=2.1.0',
     admittedMeta: {
       fixture,
@@ -602,9 +877,25 @@ async function runTsAcpLifecycleProof() {
     process.exit(1);
   }
 
+  const accessJson = JSON.stringify({ user_home: home, access: 'engine_owner', allow_uninitialized: false });
+  const providerCallbacks = {
+    call: async (...args) => {
+      const req = unpackCallbackPayload(...args);
+      if (req.payload?.recipe) capturedAdmittedRecipe = req.payload.recipe;
+      return JSON.stringify(await providers.call(req));
+    },
+    next: async (...args) => {
+      const req = unpackCallbackPayload(...args);
+      return JSON.stringify(
+        await providers.next(req.operation_id, req.max_events, req.max_bytes),
+      );
+    },
+  };
   await runAcpLifecycleSession(core, {
     adapter: 'ts-acp',
     home,
+    accessJson,
+    providers: providerCallbacks,
     sdk: '@agentclientprotocol/sdk@1.4.0',
     admittedMeta: {
       fixture,

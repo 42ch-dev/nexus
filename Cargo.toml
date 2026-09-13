@@ -243,3 +243,6 @@ split-debuginfo = "unpacked"
 
 [profile.dev.package."*"]
 debug = false
+
+[profile.release.package.nexus-core-node]
+strip = true

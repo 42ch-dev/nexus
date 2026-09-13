@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -19,7 +19,8 @@ function platformPackageName() {
   throw new Error(`unsupported platform ${platform}/${arch}`);
 }
 
-const build = spawnSync('cargo', ['build', '-p', 'nexus-core-node'], {
+const release = process.argv.includes('--release');
+const build = spawnSync('cargo', ['build', '-p', 'nexus-core-node', ...(release ? ['--release'] : [])], {
   cwd: root,
   stdio: 'inherit',
 });
@@ -27,13 +28,24 @@ if (build.status !== 0) process.exit(build.status ?? 1);
 
 const ext = process.platform === 'win32' ? '.dll' : process.platform === 'darwin' ? '.dylib' : '.so';
 const prefix = process.platform === 'win32' ? '' : 'lib';
-const src = join(root, 'target', 'debug', `${prefix}nexus_core_node${ext}`);
+const profile = release ? 'release' : 'debug';
+const src = join(root, 'target', profile, `${prefix}nexus_core_node${ext}`);
 const dest = join(nativeDir, 'nexus_core_node.node');
 copyFileSync(src, dest);
 
 const require = createRequire(import.meta.url);
-const binding = require(dest);
-const compat = JSON.parse(binding.compatibility());
+let compat;
+try {
+  const binding = require(dest);
+  compat = JSON.parse(binding.compatibility());
+} catch (error) {
+  const fallback = join(nativeDir, 'compatibility.json');
+  if (!existsSync(fallback)) {
+    console.error('failed to load native binding for compatibility manifest', error);
+    process.exit(1);
+  }
+  compat = JSON.parse(readFileSync(fallback, 'utf8'));
+}
 const compatJson = JSON.stringify(compat, null, 2);
 writeFileSync(join(nativeDir, 'compatibility.json'), compatJson);
 
