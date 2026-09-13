@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,7 +17,7 @@ function seedHome() {
   const seed = spawnSync(
     'cargo',
     ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', home],
-    { stdio: 'inherit', stdio: 'inherit' },
+    { stdio: 'inherit' },
   );
   assert.equal(seed.status, 0, seed.stderr?.toString());
   return home;
@@ -193,6 +193,39 @@ describe('world-kb-http (P4-T1)', () => {
     assert.equal(stale.payload.error.code, 'world_kb_conflict');
   });
 
+  test('world kb conflict surfaces structured details', async () => {
+    const res = await jsonFetch(`${baseUrl}/v1/daemon/worlds/${OWNED_WORLD}/kb/patch-entity`, {
+      method: 'POST',
+      body: {
+        entity_id: 'kb_cas',
+        expected_version: 1,
+        patch: { title: 'Stale Again' },
+      },
+    });
+    assert.equal(res.status, 409, res.text);
+    assert.equal(res.payload.error.code, 'world_kb_conflict');
+    assert.equal(res.payload.error.details.entity_id, 'kb_cas');
+    assert.equal(res.payload.error.details.current_version, 2);
+    assert.equal(typeof res.payload.error.details.conflicting_path, 'string');
+    assert.equal(typeof res.payload.error.details.recovery_hint, 'string');
+  });
+
+  test('world kb validation surfaces validation_summary', async () => {
+    const res = await jsonFetch(`${baseUrl}/v1/daemon/worlds/${OWNED_WORLD}/kb/patch-entity`, {
+      method: 'POST',
+      body: {
+        entity_id: 'kb_def456',
+        expected_version: 0,
+        patch: { title: '   ', block_type: 'character' },
+      },
+    });
+    assert.equal(res.status, 422, res.text);
+    assert.equal(res.payload.error.code, 'world_kb_validation');
+    const errors = res.payload.error.details.validation_summary.errors;
+    assert.ok(Array.isArray(errors));
+    assert.ok(errors.length > 0);
+  });
+
   test('oversized request body is rejected before native effects', async () => {
     const padding = 'x'.repeat(1024 * 1024);
     const body = `{"entity_id":"kb_mod","expected_version":0,"patch":{"title":"${padding}"}}`;
@@ -241,5 +274,102 @@ describe('world-kb-http (P4-T1)', () => {
     service = undefined;
     assert.ok(['closed', 'interrupted'].includes(report.state));
     assert.equal(typeof report.cleanup_confirmed, 'boolean');
+  });
+});
+
+describe('world-kb-http uninitialized profile (P4-T1)', () => {
+  let home;
+  let service;
+
+  before(async () => {
+    home = mkdtempSync(join(tmpdir(), 'nexus-service-uninit-'));
+    service = await startDomainService(home, 18_430);
+  });
+
+  after(async () => {
+    if (service) {
+      await service.close();
+    }
+  });
+
+  test('publishes uninitialized status instead of failing startup', async () => {
+    const health = await jsonFetch(`${service.url}/v1/daemon/runtime/health`);
+    assert.equal(health.status, 200);
+
+    const status = await jsonFetch(`${service.url}/v1/daemon/runtime/status`);
+    assert.equal(status.status, 200);
+    assert.equal(status.payload.workspace_initialized, false);
+    assert.equal(status.payload.runtime_mode, 'uninitialized');
+    assert.equal(status.payload.acp.tool_execution_enabled, false);
+
+    const daemon = await jsonFetch(`${service.url}/v1/daemon/daemon/status`);
+    assert.equal(daemon.status, 200);
+    assert.equal(daemon.payload.subsystems.db.status, 'down');
+    assert.equal(daemon.payload.subsystems.engine.status, 'down');
+    assert.deepEqual(daemon.payload.degraded.subsystems, ['db']);
+  });
+
+  test('denies world kb and host effects with typed uninitialized', async () => {
+    const graph = await jsonFetch(`${service.url}/v1/daemon/worlds/${OWNED_WORLD}/kb/graph`);
+    assert.equal(graph.status, 409, graph.text);
+    assert.equal(graph.payload.error.code, 'uninitialized');
+
+    const candidates = await jsonFetch(
+      `${service.url}/v1/daemon/worlds/${OWNED_WORLD}/kb/candidates`,
+    );
+    assert.equal(candidates.status, 409);
+
+    const patch = await jsonFetch(
+      `${service.url}/v1/daemon/worlds/${OWNED_WORLD}/kb/patch-entity`,
+      {
+        method: 'POST',
+        body: { entity_id: 'kb_new', expected_version: 0, patch: { title: 'Denied' } },
+      },
+    );
+    assert.equal(patch.status, 409);
+    assert.equal(patch.payload.error.code, 'uninitialized');
+
+    const host = await jsonFetch(`${service.url}/v1/daemon/agent-host/health`);
+    assert.equal(host.status, 409);
+    assert.equal(host.payload.error.code, 'uninitialized');
+
+    const sessions = await jsonFetch(`${service.url}/v1/daemon/agent-host/sessions`);
+    assert.equal(sessions.status, 409);
+  });
+
+  test('close confirms status-only cleanup', async () => {
+    const report = await service.close();
+    service = undefined;
+    assert.equal(report.state, 'closed');
+    assert.equal(report.cleanup_confirmed, true);
+  });
+
+  test('provider-enabled profile also publishes uninitialized status', async () => {
+    const { startService } = await import(join(serviceRoot, 'dist/index.js'));
+    const local = await startService({
+      home,
+      host: '127.0.0.1',
+      port: 18_431,
+      allowRemote: false,
+    });
+    try {
+      const status = await jsonFetch(`${local.url}/v1/daemon/runtime/status`);
+      assert.equal(status.status, 200);
+      assert.equal(status.payload.workspace_initialized, false);
+      assert.equal(status.payload.runtime_mode, 'uninitialized');
+      assert.equal(status.payload.acp.tool_execution_enabled, false);
+
+      const daemon = await jsonFetch(`${local.url}/v1/daemon/daemon/status`);
+      assert.equal(daemon.payload.subsystems.engine.status, 'down');
+      assert.deepEqual(daemon.payload.degraded.subsystems, ['db', 'engine']);
+
+      const host = await jsonFetch(`${local.url}/v1/daemon/agent-host/health`);
+      assert.equal(host.status, 409);
+      assert.equal(host.payload.error.code, 'uninitialized');
+    } finally {
+      const report = await local.close();
+      assert.equal(report.state, 'closed');
+      assert.equal(report.cleanup_confirmed, true);
+    }
   });
 });

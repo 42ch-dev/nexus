@@ -1,3 +1,4 @@
+import { parseNativeCoreError } from '@42ch/nexus-native';
 import type { CoreError } from '@42ch/nexus-contracts';
 
 export interface ApiErrorBody {
@@ -23,7 +24,7 @@ export class HttpError extends Error {
   }
 }
 
-const STATUS_BY_CODE: Record<string, number> = {
+const STATUS_BY_CODE: Record<CoreError['code'], number> = {
   uninitialized: 409,
   auth_required: 401,
   invalid_input: 400,
@@ -38,14 +39,17 @@ const STATUS_BY_CODE: Record<string, number> = {
   closing: 503,
   interrupted: 503,
   internal: 500,
-  route_not_migrated: 501,
-  input_too_large: 413,
 };
 
 const PUBLIC_INTERNAL_MESSAGE = 'Internal server error';
 
 export function statusForCode(code: string): number {
-  return STATUS_BY_CODE[code] ?? 500;
+  if (code in STATUS_BY_CODE) {
+    return STATUS_BY_CODE[code as CoreError['code']];
+  }
+  if (code === 'route_not_migrated') return 501;
+  if (code === 'input_too_large') return 413;
+  return 500;
 }
 
 export function routeNotMigrated(path: string): HttpError {
@@ -56,99 +60,34 @@ export function routeNotMigrated(path: string): HttpError {
   );
 }
 
-function tryParseCoreError(message: string): CoreError | null {
-  try {
-    const parsed = JSON.parse(message) as CoreError;
-    if (parsed && typeof parsed === 'object' && typeof parsed.code === 'string') {
-      return parsed;
-    }
-  } catch {
-    // fall through
-  }
-  return null;
-}
-
-function mapDisplayMessage(message: string): HttpError {
-  if (message === 'workspace not initialized') {
-    return new HttpError(409, 'uninitialized', 'Workspace not initialized');
-  }
-  if (message === 'authentication required') {
-    return new HttpError(401, 'auth_required', 'Authentication required');
-  }
-  if (message.startsWith('forbidden: ')) {
-    return new HttpError(403, 'forbidden', message, { resource: message.slice('forbidden: '.length) });
-  }
-  if (message.startsWith('not found: ')) {
-    return new HttpError(404, 'not_found', message, { resource: message.slice('not found: '.length) });
-  }
-  const sessionNotFound = /^session (.+) not found$/.exec(message);
-  if (sessionNotFound) {
-    return new HttpError(404, 'not_found', message, { resource: `session:${sessionNotFound[1]}` });
-  }
-  const operationInactive = /^operation (.+) is not active$/.exec(message);
-  if (operationInactive) {
-    return new HttpError(404, 'not_found', message, { resource: `operation:${operationInactive[1]}` });
-  }
-  const invalid = /^invalid input: ([^—]+) — (.+)$/.exec(message);
-  if (invalid) {
-    return new HttpError(400, 'invalid_input', message, {
-      field: invalid[1].trim(),
-      reason: invalid[2].trim(),
-    });
-  }
-  if (message.startsWith('session_id:') || message.startsWith('operation_id:')) {
-    return new HttpError(400, 'invalid_input', message);
-  }
-  if (message.startsWith('invalid ')) {
-    return new HttpError(400, 'invalid_input', message);
-  }
-  if (message === 'world kb conflict') {
-    return new HttpError(409, 'world_kb_conflict', 'World KB conflict');
-  }
-  if (message === 'world kb validation failed') {
-    return new HttpError(422, 'world_kb_validation', 'World KB validation failed');
-  }
-  if (message === 'writer owner busy') {
-    return new HttpError(409, 'owner_busy', 'Writer owner busy');
-  }
-  if (message === 'writer fenced') {
-    return new HttpError(409, 'writer_fenced', 'Writer fenced');
-  }
-  if (message === 'schema mismatch') {
-    return new HttpError(409, 'schema_mismatch', 'Schema mismatch');
-  }
-  if (message === 'busy') {
-    return new HttpError(503, 'busy', 'Service busy');
-  }
-  if (message === 'closing') {
-    return new HttpError(503, 'closing', 'Service is closing');
-  }
-  if (message === 'interrupted') {
-    return new HttpError(503, 'interrupted', 'Operation interrupted');
-  }
-  if (message === 'provider port unavailable') {
-    return new HttpError(503, 'busy', 'Provider port unavailable');
-  }
-  if (message.startsWith('internal: ') || message.startsWith('config_load:') || message.startsWith('database_error:')) {
-    return new HttpError(500, 'internal', PUBLIC_INTERNAL_MESSAGE);
-  }
-  return new HttpError(500, 'internal', PUBLIC_INTERNAL_MESSAGE);
-}
-
+/**
+ * Map a native rejection to the daemon-compatible HTTP error envelope.
+ *
+ * Every migrated native code arrives as a generated `CoreError` JSON envelope
+ * (structured conflict/validation details included); the only remaining
+ * non-wire rejections are this service's own pre-wire validation errors and
+ * unmapped internal faults, which are never leaked to the client.
+ */
 export function mapNativeError(error: unknown): HttpError {
   if (error instanceof HttpError) return error;
-  const message = error instanceof Error ? error.message : String(error);
-  const wire = tryParseCoreError(message);
+
+  const wire = parseNativeCoreError(error);
   if (wire) {
-    const status = wire.http_status ?? statusForCode(wire.code);
     const details =
       wire.details && typeof wire.details === 'object'
         ? (wire.details as Record<string, unknown>)
         : undefined;
-    const publicMessage = wire.code === 'internal' ? PUBLIC_INTERNAL_MESSAGE : wire.message;
-    return new HttpError(status, wire.code, publicMessage, details);
+    const message = wire.code === 'internal' ? PUBLIC_INTERNAL_MESSAGE : wire.message;
+    return new HttpError(wire.http_status ?? statusForCode(wire.code), wire.code, message, details);
   }
-  return mapDisplayMessage(message);
+
+  const message = error instanceof Error ? error.message : String(error);
+  // `@42ch/nexus-native` validates every value before it crosses the wire and
+  // rejects with `invalid <field>: <reason>` — a client error, not a fault.
+  if (message.startsWith('invalid ')) {
+    return new HttpError(400, 'invalid_input', message);
+  }
+  return new HttpError(500, 'internal', PUBLIC_INTERNAL_MESSAGE);
 }
 
 export function toErrorBody(error: HttpError, requestId: string): ApiErrorBody {

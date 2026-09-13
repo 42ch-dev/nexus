@@ -1,8 +1,14 @@
-import { nativeCompatibility, openCore, type NativeCore, type ProviderCallbacks } from '@42ch/nexus-native';
+import {
+  isNativeCoreErrorCode,
+  nativeCompatibility,
+  openCore,
+  type NativeCore,
+  type ProviderCallbacks,
+} from '@42ch/nexus-native';
 import type { CertFingerprintResponse, CoreCloseReport } from '@42ch/nexus-contracts';
 import type { ResolvedServiceConfig } from './config.js';
 import { validateServiceHome } from './config.js';
-import { HttpError } from './errors.js';
+import { HttpError, mapNativeError } from './errors.js';
 import { certCreatedAtFromMtime, fingerprintFromPem } from './tls.js';
 
 export interface ServiceCore {
@@ -10,8 +16,8 @@ export interface ServiceCore {
   domainOnly: boolean;
   tlsFingerprint: CertFingerprintResponse | null;
   startedAt: string;
+  /** False for the status-only profile: no principal, no KB/host/provider effects. */
   workspaceInitialized: boolean;
-  principalId: string;
   providerReady: boolean;
 }
 
@@ -31,21 +37,31 @@ export async function openServiceCore(
     );
   }
 
+  // `allow_uninitialized` is the service-only admission flag: an initialized
+  // home opens the full core, a missing profile opens the status-only shell so
+  // `/runtime/status` can report the existing uninitialized state.
   const core = await openCore(
     {
       user_home: config.home,
       access,
-      allow_uninitialized: false,
+      allow_uninitialized: true,
     },
     config.domainOnly ? undefined : providers,
   );
 
-  let principalId = '';
+  let workspaceInitialized = false;
   try {
-    principalId = await core.activePrincipal();
+    // Publication gate: the initialized profile is published only once the
+    // native principal resolves. A typed `uninitialized` rejection is the
+    // status-only profile, not a startup failure; anything else aborts before
+    // the listener binds.
+    await core.activePrincipal();
+    workspaceInitialized = true;
   } catch (error) {
-    await core.close().catch(() => undefined);
-    throw error;
+    if (!isNativeCoreErrorCode(error, 'uninitialized')) {
+      await core.close().catch(() => undefined);
+      throw mapNativeError(error);
+    }
   }
 
   let tlsFingerprint: CertFingerprintResponse | null = null;
@@ -60,13 +76,17 @@ export async function openServiceCore(
     };
   }
 
-  let providerReady = Boolean(config.domainOnly);
-  if (!config.domainOnly) {
-    try {
-      await core.hostQuery({ query: 'health' });
+  let providerReady = false;
+  if (workspaceInitialized) {
+    if (config.domainOnly) {
       providerReady = true;
-    } catch {
-      providerReady = false;
+    } else {
+      try {
+        await core.hostQuery({ query: 'health' });
+        providerReady = true;
+      } catch {
+        providerReady = false;
+      }
     }
   }
 
@@ -75,8 +95,7 @@ export async function openServiceCore(
     domainOnly: Boolean(config.domainOnly),
     tlsFingerprint,
     startedAt: new Date().toISOString(),
-    workspaceInitialized: true,
-    principalId,
+    workspaceInitialized,
     providerReady,
   };
 }

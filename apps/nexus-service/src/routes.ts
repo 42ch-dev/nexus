@@ -137,11 +137,12 @@ function handleUnguarded(service: ServiceCore, pathname: string): unknown {
       uptime_seconds: Math.floor((Date.now() - Date.parse(service.startedAt)) / 1000),
       workspace_initialized: service.workspaceInitialized,
       acp: {
-        tool_execution_enabled: !service.domainOnly && service.providerReady,
+        tool_execution_enabled:
+          service.workspaceInitialized && !service.domainOnly && service.providerReady,
         active_sessions: 0,
         total_tool_executions: 0,
       },
-      runtime_mode: service.domainOnly ? 'domain_only' : service.providerReady ? 'provider_enabled' : 'provider_degraded',
+      runtime_mode: runtimeMode(service),
     };
   }
   if (pathname === '/v1/daemon/runtime/cert-fingerprint') {
@@ -154,6 +155,7 @@ function handleUnguarded(service: ServiceCore, pathname: string): unknown {
     return service.tlsFingerprint;
   }
   if (pathname === '/v1/daemon/daemon/status') {
+    const degraded = degradedSubsystems(service);
     return {
       schema_version: 2,
       lifecycle_state: 'running',
@@ -162,13 +164,20 @@ function handleUnguarded(service: ServiceCore, pathname: string): unknown {
       uptime_ms: Date.now() - Date.parse(service.startedAt),
       started_at: service.startedAt,
       pid: process.pid,
-      degraded: service.domainOnly || service.providerReady
-        ? { subsystems: [], reasons: [] }
-        : { subsystems: ['engine'], reasons: ['provider host not ready'] },
+      degraded: {
+        subsystems: degraded,
+        reasons: degraded.map((name) => `${name} not ready`),
+      },
       subsystems: {
         http: { status: 'up', last_check_ms: 0 },
         db: { status: service.workspaceInitialized ? 'up' : 'down', last_check_ms: 0 },
-        engine: { status: service.domainOnly ? 'down' : service.providerReady ? 'up' : 'down', last_check_ms: 0 },
+        engine: {
+          status:
+            service.workspaceInitialized && !service.domainOnly && service.providerReady
+              ? 'up'
+              : 'down',
+          last_check_ms: 0,
+        },
       },
       exit_code: null,
       last_error: null,
@@ -177,16 +186,50 @@ function handleUnguarded(service: ServiceCore, pathname: string): unknown {
   throw routeNotMigrated(pathname);
 }
 
+/**
+ * The embedded host is optional in the domain-only profile: "host not started"
+ * is truthful degraded readiness, not a client error. Every other native
+ * rejection (uninitialized, forbidden, not_found, invalid_input, ...) propagates.
+ */
 async function tryHostQuery(service: ServiceCore, request: Parameters<typeof hostQuery>[1]) {
   try {
     return await hostQuery(service, request);
   } catch (error) {
     const mapped = mapNativeError(error);
-    if (mapped.message.includes('host not started') || mapped.message.includes('provider port unavailable')) {
+    if (mapped.code === 'invalid_input' && mapped.message === 'host not started') {
       return null;
     }
     throw mapped;
   }
+}
+
+/** Truthful runtime mode: uninitialized is reported as such, never as ready. */
+/** Native host-query absent-resource message shapes (typed `invalid_input`). */
+const HOST_LOOKUP_MISSING = /^session .+ not found$|^operation .+ is not active$/;
+
+/**
+ * The frozen native host-query boundary reports an absent session/operation as
+ * typed `invalid_input`; the daemon route contract for these two lookups is 404.
+ */
+function hostLookupError(error: unknown, resource: string): HttpError {
+  const mapped = mapNativeError(error);
+  if (mapped.code === 'invalid_input' && HOST_LOOKUP_MISSING.test(mapped.message)) {
+    return new HttpError(404, 'not_found', mapped.message, { resource });
+  }
+  return mapped;
+}
+
+function runtimeMode(service: ServiceCore): string {
+  if (!service.workspaceInitialized) return 'uninitialized';
+  if (service.domainOnly) return 'domain_only';
+  return service.providerReady ? 'provider_enabled' : 'provider_degraded';
+}
+
+function degradedSubsystems(service: ServiceCore): string[] {
+  const degraded: string[] = [];
+  if (!service.workspaceInitialized) degraded.push('db');
+  if (!service.domainOnly && !service.providerReady) degraded.push('engine');
+  return degraded;
 }
 
 async function handleTier1(
@@ -249,24 +292,36 @@ async function handleTier2(
     return response.sessions ?? { items: [], pagination: { limit: 50, has_more: false, next_cursor: null } };
   }
   if (method === 'GET' && route.sessionId) {
-    const response = await hostQuery(service, {
-      query: 'get_session',
-      session_id: route.sessionId,
-    });
-    if (!response.session) {
-      throw new HttpError(404, 'not_found', `session ${route.sessionId} not found`);
+    try {
+      const response = await hostQuery(service, {
+        query: 'get_session',
+        session_id: route.sessionId,
+      });
+      if (!response.session) {
+        throw new HttpError(404, 'not_found', `session ${route.sessionId} not found`, {
+          resource: `session:${route.sessionId}`,
+        });
+      }
+      return response.session;
+    } catch (error) {
+      throw hostLookupError(error, `session:${route.sessionId}`);
     }
-    return response.session;
   }
   if (method === 'GET' && route.operationId) {
-    const response = await hostQuery(service, {
-      query: 'get_operation',
-      operation_id: route.operationId,
-    });
-    if (!response.operation) {
-      throw new HttpError(404, 'not_found', `operation ${route.operationId} not found`);
+    try {
+      const response = await hostQuery(service, {
+        query: 'get_operation',
+        operation_id: route.operationId,
+      });
+      if (!response.operation) {
+        throw new HttpError(404, 'not_found', `operation ${route.operationId} not found`, {
+          resource: `operation:${route.operationId}`,
+        });
+      }
+      return response.operation;
+    } catch (error) {
+      throw hostLookupError(error, `operation:${route.operationId}`);
     }
-    return response.operation;
   }
   throw routeNotMigrated(pathname);
 }
