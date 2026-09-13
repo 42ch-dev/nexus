@@ -118,6 +118,45 @@ impl HostManager {
     }
 
     /// Build a [`ProviderPortAdapter`] wired to this host and registered providers.
+
+    /// Admit the catalog-owned launch recipe for JS provider callbacks.
+    pub async fn admit_validated_provider_recipe(
+        &self,
+        provider_id: &crate::ids::ProviderId,
+    ) -> crate::error::HostResult<nexus_contracts::ValidatedProviderRecipe> {
+        let (command, args, env, recipe_generation) = {
+            let providers = self.providers.read().await;
+            let entry = providers
+                .get(provider_id)
+                .ok_or_else(|| {
+                    crate::error::HostError::provider_unavailable(
+                        provider_id.clone(),
+                        "provider not registered",
+                    )
+                })?;
+            let (command, args, env) = match &entry.metadata.launch {
+                crate::LaunchStrategy::Acp { command, args, env }
+                | crate::LaunchStrategy::NativeCli { command, args, env } => {
+                    (command.clone(), args.clone(), env.clone())
+                }
+            };
+            (command, args, env, entry.identity.launch_fingerprint.to_string())
+        };
+        let boundary = {
+            let ws = self.workspace_root.read().await;
+            ws.clone()
+                .ok_or_else(|| crate::error::HostError::internal("workspace root not set"))?
+        };
+        crate::providers::recipe_admission::build_validated_recipe(
+            provider_id,
+            &command,
+            &args,
+            &env,
+            recipe_generation,
+            &boundary,
+        )
+    }
+
     pub async fn build_provider_port(self: &Arc<Self>) -> crate::providers::port::ProviderPortAdapter {
         let mut port = crate::providers::port::ProviderPortAdapter::new(self.clone());
         let providers = self.providers.read().await;

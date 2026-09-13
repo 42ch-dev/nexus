@@ -16,7 +16,10 @@ declare module 'node:child_process' {
     signalCode: string | null;
     kill(signal?: string): boolean;
     once(event: 'exit', listener: () => void): void;
+    on(event: 'error', listener: () => void): void;
   }
+
+  export function execFileSync(command: string, args: readonly string[], options?: { encoding: string }): string;
 
   export function execFile(
     command: string,
@@ -41,6 +44,8 @@ declare module 'node:stream' {
     static toWeb(stream: Readable): ReadableStream<Uint8Array>;
   }
 
+  export class PassThrough extends Writable {}
+
   export class Writable {
     end(): void;
     static toWeb(stream: Writable): WritableStream<Uint8Array>;
@@ -64,6 +69,7 @@ declare module 'node:fs' {
   }
   export function statSync(path: string): Stats;
   export function realpathSync(path: string): string;
+  export function readFileSync(path: string, encoding: string): string;
 }
 
 declare function setTimeout(handler: () => void, timeout?: number): unknown;

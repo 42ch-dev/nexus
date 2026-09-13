@@ -1,23 +1,28 @@
 import type { ProviderCall, ProviderEventBatch, ProviderReply } from '@42ch/nexus-contracts';
-import { createEngine } from './acp.js';
 
-export interface ProviderCallbacks {
+type ProviderCallbacks = {
   call(request: ProviderCall): Promise<ProviderReply>;
   next(operationId: string, maxEvents: number, maxBytes: number): Promise<ProviderEventBatch>;
-}
-
-export {
-  OperationDelivery,
-  MAX_EVENT_BYTES,
-  MAX_PENDING_MESSAGES,
-} from './delivery.js';
-export { CleanupUnconfirmedError, ProviderNextError } from './errors.js';
-export { observeProcessIdentity, parseProcessIdentity, type ProcessIdentity } from './identity.js';
-export { parseAdmittedRecipe } from './recipe.js';
+};
+import { createEngine } from './acp.js';
 
 export function createAcpProvider(): ProviderCallbacks {
   return createEngine();
 }
 
 export { createTestEngine, AcpProviderEngine } from './acp.js';
-export { reapChild } from './process-owner.js';
+export { CleanupUnconfirmedError, ProviderNextError } from './errors.js';
+export { parseAdmittedRecipe } from './recipe.js';
+export {
+  observeProcessIdentity,
+  parseProcessIdentity,
+  queryOsProcessIdentity,
+  identitiesEqual,
+  type ProcessIdentity,
+} from './identity.js';
+export { reapChild, spawnOwnedConnection } from './process-owner.js';
+export {
+  MAX_EVENT_BYTES,
+  MAX_PENDING_MESSAGES,
+  OperationDelivery,
+} from './delivery.js';

@@ -90,15 +90,21 @@ function resolveAdmittedPython() {
   throw new Error('no_absolute_python_executable');
 }
 
-function buildAdmittedRecipe(fixturePath, workspace) {
-  return {
-    provider_id: 'mock-acp',
-    recipe_generation: '1',
-    executable: resolveAdmittedPython(),
-    args: [fixturePath],
-    env: { ACP_FIXTURE_LOG: join(workspace, 'fixture.log') },
-    cwd: workspace,
-  };
+function writeAgentHostConfig(home, fixturePath, workspace) {
+  const python = resolveAdmittedPython();
+  const toml = `[[providers]]
+id = "mock-acp"
+protocol = "acp"
+command = "${python}"
+args = ["${fixturePath.replaceAll('\\', '/')}"]
+enabled = true
+
+[providers.env]
+ACP_FIXTURE_LOG = "${join(workspace, 'fixture.log').replaceAll('\\', '/')}"
+`;
+  const configDir = join(home, 'config');
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(join(configDir, 'agent-host.toml'), toml);
 }
 
 async function runTsAcpLifecycleProof() {
@@ -108,59 +114,52 @@ async function runTsAcpLifecycleProof() {
   });
   if (build.status !== 0) process.exit(build.status ?? 1);
 
-  const { createAcpProvider, parseAdmittedRecipe } = await import('../../nexus-provider-acp/dist/index.js');
+  const { createAcpProvider } = await import('../../nexus-provider-acp/dist/index.js');
+  const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
+  const workspace = mkdtempSync(join(tmpdir(), 'nexus-acp-ws-'));
+  writeAgentHostConfig(home, fixture, workspace);
+
+  let capturedAdmittedRecipe = null;
   const providers = createAcpProvider();
   const core = binding.open(
     JSON.stringify({ user_home: home, access: 'engine_owner', allow_uninitialized: false }),
     {
-      call: async (...args) =>
-        JSON.stringify(await providers.call(unpackCallbackPayload(...args))),
+      call: async (...args) => {
+        const req = unpackCallbackPayload(...args);
+        if (req.payload?.recipe) capturedAdmittedRecipe = req.payload.recipe;
+        return JSON.stringify(await providers.call(req));
+      },
       next: async (...args) => {
         const req = unpackCallbackPayload(...args);
-        return JSON.stringify(await providers.next(req.operation_id, req.max_events, req.max_bytes));
+        return JSON.stringify(
+          await providers.next(req.operation_id, req.max_events, req.max_bytes),
+        );
       },
     },
   );
 
-  const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
-  const workspace = mkdtempSync(join(tmpdir(), 'nexus-acp-ws-'));
-  const recipe = buildAdmittedRecipe(fixture, workspace);
-  parseAdmittedRecipe({ recipe });
-  try {
-    parseAdmittedRecipe({
-      recipe: { ...recipe, executable: 'python3' },
-    });
-    console.error('expected invalid_recipe for non-absolute executable');
+  const fakeRecipe = {
+    provider_id: 'mock-acp',
+    recipe_generation: '999999',
+    executable: '/tmp/evil',
+    args: [],
+    env: {},
+    cwd: '/tmp',
+  };
+  const fakeProbeErr = await core
+    .providerCall(
+      encode({
+        request_id: 'fake-recipe',
+        method: 'probe',
+        deadline_ms: 30_000,
+        payload: { provider_id: 'mock-acp', recipe: fakeRecipe },
+      }),
+    )
+    .then(() => null)
+    .catch((error) => String(error));
+  if (!fakeProbeErr || !/recipe rejected|invalid_input|policy/i.test(fakeProbeErr)) {
+    console.error('expected rejection for caller-supplied recipe', fakeProbeErr);
     process.exit(1);
-  } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes('invalid_recipe')) {
-      console.error('unexpected recipe rejection', error);
-      process.exit(1);
-    }
-  }
-  try {
-    parseAdmittedRecipe({
-      recipe: { ...recipe, cwd: 'relative/not-canonical' },
-    });
-    console.error('expected invalid_recipe for relative cwd');
-    process.exit(1);
-  } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes('invalid_recipe')) {
-      console.error('unexpected cwd rejection', error);
-      process.exit(1);
-    }
-  }
-  try {
-    parseAdmittedRecipe({
-      recipe: { ...recipe, process_identity: { pid: 1, extra_field: true } },
-    });
-    console.error('expected invalid_recipe for malformed process_identity');
-    process.exit(1);
-  } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes('invalid_recipe')) {
-      console.error('unexpected process_identity rejection', error);
-      process.exit(1);
-    }
   }
 
   const probeReply = decode(
@@ -169,12 +168,24 @@ async function runTsAcpLifecycleProof() {
         request_id: 'probe',
         method: 'probe',
         deadline_ms: 30_000,
-        payload: { provider_id: 'mock-acp', recipe },
+        payload: { provider_id: 'mock-acp' },
       }),
     ),
   );
   if (!probeReply.ok || !probeReply.health?.available) {
     console.error('probe failed', probeReply);
+    process.exit(1);
+  }
+  if (!capturedAdmittedRecipe) {
+    console.error('callback never received Rust-admitted recipe');
+    process.exit(1);
+  }
+  if (capturedAdmittedRecipe.recipe_generation === '999999') {
+    console.error('callback used caller fake recipe generation');
+    process.exit(1);
+  }
+  if (!capturedAdmittedRecipe.executable?.startsWith('/')) {
+    console.error('admitted executable not canonical absolute', capturedAdmittedRecipe);
     process.exit(1);
   }
 
@@ -184,7 +195,7 @@ async function runTsAcpLifecycleProof() {
         request_id: 'launch',
         method: 'launch',
         deadline_ms: 30_000,
-        payload: { provider_id: 'mock-acp', recipe },
+        payload: { provider_id: 'mock-acp' },
       }),
     ),
   );
@@ -229,7 +240,13 @@ async function runTsAcpLifecycleProof() {
 
   const shutdownReply = decode(
     await core.providerCall(
-      encode({ request_id: 'shutdown', method: 'shutdown', session_id: sessionId, deadline_ms: 30_000, payload: {} }),
+      encode({
+        request_id: 'shutdown',
+        method: 'shutdown',
+        session_id: sessionId,
+        deadline_ms: 30_000,
+        payload: {},
+      }),
     ),
   );
   if (!shutdownReply.ok) {
@@ -246,10 +263,11 @@ async function runTsAcpLifecycleProof() {
     saw_delta: sawDelta,
     terminal,
     fixture,
-    executable: recipe.executable,
-    recipe_admission: 'absolute_executable_validated_by_parseAdmittedRecipe',
-    rust_admission_boundary:
-      'proof constructs admitted shape only; Rust-side admission is not exercised in this script',
+    rust_admission_boundary: 'exercised_via_admitting_provider_port',
+    admitted_provider_id: capturedAdmittedRecipe.provider_id,
+    admitted_generation: capturedAdmittedRecipe.recipe_generation,
+    admitted_executable: capturedAdmittedRecipe.executable,
+    admitted_env_keys: Object.keys(capturedAdmittedRecipe.env ?? {}).sort(),
     sdk: '@agentclientprotocol/sdk@1.4.0',
   };
   mkdirSync(outDir, { recursive: true });

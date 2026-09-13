@@ -130,6 +130,9 @@ export class AcpProviderEngine {
       if (message === 'process_identity_mismatch') {
         return interruptedReply(request.request_id, 'process_identity_mismatch');
       }
+      if (message === 'process_identity_unsupported') {
+        return interruptedReply(request.request_id, 'process_identity_unsupported');
+      }
       if (message === 'session_busy') {
         return errReply(request.request_id, {
           code: 'busy',
@@ -268,7 +271,11 @@ export class AcpProviderEngine {
       owned = await spawnOwnedConnection(recipe, () => undefined);
     } catch (error) {
       if (error instanceof CleanupUnconfirmedError) {
-        return interruptedReply(request.request_id, error.message);
+        return this.fenceCleanupError(
+          error,
+          `pre-probe:${recipe.provider_id}`,
+          request.request_id,
+        );
       }
       const message = error instanceof Error ? error.message : 'probe_failed';
       if (message === 'provider_eof' || message === 'stderr_overflow') {
@@ -289,7 +296,11 @@ export class AcpProviderEngine {
       await this.requireConfirmedCleanup(owned, `probe:${recipe.recipe_generation}`, 'probe_child_not_reaped');
     } catch (error) {
       if (error instanceof CleanupUnconfirmedError) {
-        return interruptedReply(request.request_id, error.message);
+        return this.fenceCleanupError(
+          error,
+          `probe:${recipe.recipe_generation}`,
+          request.request_id,
+        );
       }
       throw error;
     }
@@ -329,13 +340,17 @@ export class AcpProviderEngine {
           this.recipeOwners.delete(ownerKey);
         } catch (cleanupError) {
           if (cleanupError instanceof CleanupUnconfirmedError) {
-            return interruptedReply(request.request_id, cleanupError.message);
+            return this.fenceCleanupError(cleanupError, ownerKey, request.request_id);
           }
           throw cleanupError;
         }
       }
       if (error instanceof CleanupUnconfirmedError) {
-        return interruptedReply(request.request_id, error.message);
+        return this.fenceCleanupError(
+          error,
+          `pre-launch:${recipe.recipe_generation}`,
+          request.request_id,
+        );
       }
       throw error;
     }
@@ -502,11 +517,18 @@ export class AcpProviderEngine {
     recipe: ValidatedProviderRecipe,
     sessionId: string,
   ): Promise<OwnedConnection> {
-    const owned = await spawnOwnedConnection(recipe, (params) => {
-      this.routeSessionUpdate(String(params.sessionId), params.update);
-    });
-    this.recipeOwners.set(`${recipe.recipe_generation}:${sessionId}`, owned);
-    return owned;
+    try {
+      const owned = await spawnOwnedConnection(recipe, (params) => {
+        this.routeSessionUpdate(String(params.sessionId), params.update);
+      });
+      this.recipeOwners.set(`${recipe.recipe_generation}:${sessionId}`, owned);
+      return owned;
+    } catch (error) {
+      if (error instanceof CleanupUnconfirmedError && error.owner) {
+        this.retainCleanupFence(`connect:${recipe.recipe_generation}`, error.owner);
+      }
+      throw error;
+    }
   }
 
   private terminalizeSessionOperations(sessionId: string): void {
@@ -537,6 +559,43 @@ export class AcpProviderEngine {
 
   operationCount(): number {
     return this.operations.size;
+  }
+
+
+  private fenceCleanupError(
+    error: CleanupUnconfirmedError,
+    fenceKey: string,
+    requestId: string,
+  ): ProviderReply {
+    if (error.owner) {
+      this.retainCleanupFence(fenceKey, error.owner);
+    }
+    return interruptedReply(requestId, error.message);
+  }
+
+  /** @internal test hook: attempt confirmed settlement of all cleanup fences. */
+  async trySettleCleanupFences(): Promise<{ settled: string[]; pending: string[] }> {
+    const settled: string[] = [];
+    const pending: string[] = [];
+    for (const [key, owned] of [...this.cleanupFences.entries()]) {
+      const reap = await cleanupOwnedConnection(owned);
+      if (reap.confirmed) {
+        this.cleanupFences.delete(key);
+        settled.push(key);
+      } else {
+        pending.push(key);
+      }
+    }
+    return { settled, pending };
+  }
+
+  cleanupFenceCount(): number {
+    return this.cleanupFences.size;
+  }
+
+  /** @internal tests: adopt a pre-engine owner into the engine fence. */
+  adoptCleanupOwner(key: string, owner: OwnedConnection): void {
+    this.retainCleanupFence(key, owner);
   }
 
   private async evictStaleGeneration(currentGeneration: string): Promise<void> {

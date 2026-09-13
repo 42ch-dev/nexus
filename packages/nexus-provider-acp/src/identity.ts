@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 
 /** Observed or Rust-admitted resulting process identity (schema-owned shape). */
@@ -42,15 +44,54 @@ export function parseProcessIdentity(value: unknown): ProcessIdentity | null {
   };
 }
 
+function queryLinuxIdentity(pid: number): ProcessIdentity | null {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const close = stat.lastIndexOf(')');
+    if (close < 0) return null;
+    const rest = stat.slice(close + 2).trim().split(/\s+/);
+    const starttime = rest[19];
+    const pgid = execFileSync('ps', ['-o', 'pgid=', '-p', String(pid)], {
+      encoding: 'utf8',
+    }).trim();
+    if (!starttime || !pgid) return null;
+    return { pid, process_birth: starttime, group_id: pgid };
+  } catch {
+    return null;
+  }
+}
+
+function queryDarwinIdentity(pid: number): ProcessIdentity | null {
+  try {
+    const out = execFileSync('ps', ['-p', String(pid), '-o', 'lstart=,pgid='], {
+      encoding: 'utf8',
+    }).trim();
+    const match = out.match(/^(.+?)\s+(\d+)\s*$/);
+    if (!match) return null;
+    const birth = match[1].trim();
+    const pgid = match[2].trim();
+    if (!birth || !pgid) return null;
+    return { pid, process_birth: birth, group_id: pgid };
+  } catch {
+    return null;
+  }
+}
+
+/** Query canonical OS-derived identity for a live pid. */
+export function queryOsProcessIdentity(pid: number): ProcessIdentity | null {
+  if (pid <= 0) return null;
+  if (process.platform === 'linux') return queryLinuxIdentity(pid);
+  if (process.platform === 'darwin') return queryDarwinIdentity(pid);
+  return null;
+}
+
 /** Capture the spawned child's identity for cleanup fencing. */
 export function observeProcessIdentity(child: ChildProcessWithoutNullStreams): ProcessIdentity {
   const pid = child.pid;
   if (pid === undefined || pid <= 0) throw new Error('provider_spawn_failed');
-  return {
-    pid,
-    process_birth: String(process.hrtime.bigint()),
-    group_id: String(pid),
-  };
+  const queried = queryOsProcessIdentity(pid);
+  if (!queried) throw new Error('process_identity_unsupported');
+  return queried;
 }
 
 /**
@@ -72,9 +113,25 @@ export function bindProcessIdentity(
   return observed;
 }
 
+/** Re-query OS identity and compare all admitted fields before signal/reap. */
 export function identityStillMatches(
   child: ChildProcessWithoutNullStreams,
   bound: ProcessIdentity,
 ): boolean {
-  return child.pid === bound.pid;
+  if (child.pid !== bound.pid) return false;
+  // Already exited: pid match is sufficient; OS tables may be gone.
+  if (child.exitCode !== null || child.signalCode !== null) return true;
+  const current = queryOsProcessIdentity(bound.pid);
+  if (!current) return false;
+  if (bound.process_birth && current.process_birth !== bound.process_birth) return false;
+  if (bound.group_id && current.group_id !== bound.group_id) return false;
+  return true;
+}
+
+export function identitiesEqual(a: ProcessIdentity, b: ProcessIdentity): boolean {
+  return (
+    a.pid === b.pid &&
+    a.process_birth === b.process_birth &&
+    a.group_id === b.group_id
+  );
 }

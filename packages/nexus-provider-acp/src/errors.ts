@@ -7,12 +7,17 @@ export class ProviderNextError extends Error {
   }
 }
 
-/** Raised when owned-child cleanup cannot be confirmed; callers must retain the fence. */
+/** Raised when owned-child cleanup cannot be confirmed; carries the owner for fencing. */
 export class CleanupUnconfirmedError extends Error {
   readonly code = 'cleanup_unconfirmed' as const;
+  readonly owner: import('./process-owner.js').OwnedConnection | null;
 
-  constructor(message: string) {
+  constructor(
+    message: string,
+    owner: import('./process-owner.js').OwnedConnection | null = null,
+  ) {
     super(message);
     this.name = 'CleanupUnconfirmedError';
+    this.owner = owner;
   }
 }

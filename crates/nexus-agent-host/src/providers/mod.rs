@@ -9,6 +9,7 @@
 pub mod acp;
 pub mod native_cli;
 pub mod port;
+pub mod recipe_admission;
 
 use std::sync::Arc;
 

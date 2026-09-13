@@ -1,5 +1,5 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { Readable, Writable } from 'node:stream';
+import { PassThrough, Readable, Writable } from 'node:stream';
 import type { ValidatedProviderRecipe } from '@42ch/nexus-contracts';
 import {
   ClientSideConnection,
@@ -148,6 +148,24 @@ function nodeToWebWritable(nodeStream: Writable): WritableStream<Uint8Array> {
   return Writable.toWeb(nodeStream) as WritableStream<Uint8Array>;
 }
 
+function makeOwnedStub(
+  recipe: ValidatedProviderRecipe,
+  child: ChildProcessWithoutNullStreams,
+  stdinWritable: Writable,
+  boundIdentity: ProcessIdentity,
+  admittedIdentity: ProcessIdentity | null,
+): OwnedConnection {
+  return {
+    recipeGeneration: recipe.recipe_generation,
+    child,
+    connection: null as unknown as ClientSideConnection,
+    acpSessionId: null,
+    stdinWritable,
+    admittedIdentity,
+    boundIdentity,
+  };
+}
+
 async function signalBoundProcessTree(
   owned: OwnedConnection,
   signal: NodeJS.Signals,
@@ -157,11 +175,7 @@ async function signalBoundProcessTree(
   }
   const pid = owned.boundIdentity.pid;
   if (process.platform === 'win32') {
-    const flag = signal === 'SIGKILL' ? '/F' : '';
-    await execFileAsync('taskkill', ['/pid', String(pid), '/T', flag].filter(Boolean) as string[]).catch(
-      () => undefined,
-    );
-    return;
+    throw new Error('process_identity_unsupported');
   }
   const pkillSignal = signal === 'SIGKILL' ? 'KILL' : 'TERM';
   await execFileAsync('pkill', [`-${pkillSignal}`, '-P', String(pid)]).catch(() => undefined);
@@ -182,8 +196,26 @@ export async function spawnOwnedConnection(
     env: buildChildEnv(recipe.env as Record<string, string>),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
+  child.on('error', () => {
+    // ENOENT and similar spawn failures surface via initialize/cleanup paths.
+  });
+
+  const stdinWritable = child.stdin ?? new PassThrough();
+  let ownedStub: OwnedConnection | null = null;
+
   if (!child.stdin || !child.stdout || !child.stderr) {
-    child.kill();
+    let boundIdentity: ProcessIdentity;
+    try {
+      boundIdentity = observeProcessIdentity(child);
+    } catch {
+      if (child.pid === undefined || child.pid <= 0) throw new Error('provider_spawn_failed');
+      boundIdentity = { pid: child.pid, process_birth: null, group_id: null };
+    }
+    ownedStub = makeOwnedStub(recipe, child, stdinWritable, boundIdentity, admittedIdentity);
+    const reap = await reapChild(child, boundIdentity, reapTimeoutMs());
+    if (!reap.confirmed) {
+      throw new CleanupUnconfirmedError('spawn_stdio_cleanup_unconfirmed', ownedStub);
+    }
     throw new Error('provider_spawn_failed');
   }
 
@@ -192,25 +224,22 @@ export async function spawnOwnedConnection(
     const observed = observeProcessIdentity(child);
     boundIdentity = bindProcessIdentity(admittedIdentity, observed);
   } catch (error) {
+    let observed: ProcessIdentity;
     try {
-      const observed = observeProcessIdentity(child);
-      const reap = await reapChild(child, observed, reapTimeoutMs());
-      if (!reap.confirmed) throw new CleanupUnconfirmedError('spawn_identity_cleanup_unconfirmed');
-    } catch (cleanupError) {
-      if (cleanupError instanceof CleanupUnconfirmedError) throw cleanupError;
+      observed = observeProcessIdentity(child);
+    } catch {
+      if (child.pid === undefined || child.pid <= 0) throw error;
+      observed = { pid: child.pid, process_birth: null, group_id: null };
+    }
+    ownedStub = makeOwnedStub(recipe, child, child.stdin, observed, admittedIdentity);
+    const reap = await reapChild(child, ownedStub.boundIdentity, reapTimeoutMs());
+    if (!reap.confirmed) {
+      throw new CleanupUnconfirmedError('spawn_identity_cleanup_unconfirmed', ownedStub);
     }
     throw error;
   }
 
-  const ownedStub: OwnedConnection = {
-    recipeGeneration: recipe.recipe_generation,
-    child,
-    connection: null as unknown as ClientSideConnection,
-    acpSessionId: null,
-    stdinWritable: child.stdin,
-    admittedIdentity,
-    boundIdentity,
-  };
+  ownedStub = makeOwnedStub(recipe, child, child.stdin, boundIdentity, admittedIdentity);
 
   const exitRace = attachExitRace(child);
   const stderrGuard = attachStderrGuard(child, () => undefined);
@@ -249,7 +278,9 @@ export async function spawnOwnedConnection(
     }
   } catch (error) {
     const reap = await cleanupOwnedConnection(ownedStub);
-    if (!reap.confirmed) throw new CleanupUnconfirmedError('init_cleanup_unconfirmed');
+    if (!reap.confirmed) {
+      throw new CleanupUnconfirmedError('init_cleanup_unconfirmed', ownedStub);
+    }
     throw error;
   }
 
@@ -268,7 +299,10 @@ export async function createAcpSession(owned: OwnedConnection, cwd: string): Pro
     return sessionId;
   } catch (error) {
     const reap = await cleanupOwnedConnection(owned);
-    if (!reap.confirmed) throw new CleanupUnconfirmedError('new_session_cleanup_unconfirmed');
+    if (!reap.confirmed) {
+      throw new CleanupUnconfirmedError('new_session_cleanup_unconfirmed', owned);
+
+    }
     throw error;
   }
 }
@@ -292,11 +326,14 @@ export async function reapChild(
   boundIdentity: ProcessIdentity,
   timeoutMs = reapTimeoutMs(),
 ): Promise<ReapResult> {
-  if (!identityStillMatches(child, boundIdentity)) {
+  if (child.pid !== boundIdentity.pid) {
     return { confirmed: false, exitCode: null, signal: 'identity_mismatch' };
   }
   if (child.exitCode !== null || child.signalCode !== null) {
     return { confirmed: true, exitCode: child.exitCode, signal: child.signalCode };
+  }
+  if (!identityStillMatches(child, boundIdentity)) {
+    return { confirmed: false, exitCode: null, signal: 'identity_mismatch' };
   }
 
   const owned: OwnedConnection = {
@@ -308,7 +345,11 @@ export async function reapChild(
     admittedIdentity: null,
     boundIdentity,
   };
-  await signalBoundProcessTree(owned, 'SIGTERM');
+  try {
+    await signalBoundProcessTree(owned, 'SIGTERM');
+  } catch {
+    return { confirmed: false, exitCode: null, signal: 'identity_mismatch' };
+  }
 
   const termWait = Math.min(2_000, timeoutMs);
   const termReaped = await waitForChildExit(child, termWait);
@@ -319,7 +360,11 @@ export async function reapChild(
   if (!identityStillMatches(child, boundIdentity)) {
     return { confirmed: false, exitCode: null, signal: 'identity_mismatch' };
   }
-  await signalBoundProcessTree(owned, 'SIGKILL');
+  try {
+    await signalBoundProcessTree(owned, 'SIGKILL');
+  } catch {
+    return { confirmed: false, exitCode: null, signal: 'identity_mismatch' };
+  }
 
   const killReaped = await waitForChildExit(child, Math.max(0, timeoutMs - termWait));
   return {

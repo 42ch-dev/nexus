@@ -4,6 +4,7 @@
 //! N-API/Javascript interop is confined to dependency-provided shims and
 //! `#[napi]`-generated glue. All crate-local logic is safe Rust.
 
+mod admitting_provider_port;
 mod callbacks;
 mod env_state;
 mod host_query;

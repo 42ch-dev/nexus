@@ -9,6 +9,8 @@ use nexus_contracts::{CoreCloseReport, CoreCloseReportState, NativeOpenOptions};
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService};
 use nexus_provider_ports::ProviderPort;
 
+use super::admitting_provider_port::AdmittingProviderPort;
+
 use super::env_state::EnvState;
 
 /// Test-only forcing of an unconfirmed cleanup (debug builds only).
@@ -179,14 +181,15 @@ pub async fn open_core(
     .map_err(|e| e.to_string())?;
 
     let host = Arc::new(HostManager::new());
-    let host_config = AgentHostConfig::default();
+    let host_defaults = AgentHostConfig::default();
     let start_config = HostStartConfig {
         config_path: user_home.join("config/agent-host.toml"),
         workspace_root: user_home,
-        max_sessions: host_config.max_sessions,
-        max_ops_per_session: host_config.max_ops_per_session,
-        timeouts: host_config.timeouts.clone(),
-        host_config: Some(host_config),
+        max_sessions: host_defaults.max_sessions,
+        max_ops_per_session: host_defaults.max_ops_per_session,
+        timeouts: host_defaults.timeouts.clone(),
+        // Load catalog providers from agent-host.toml when present (Rust admission).
+        host_config: None,
         probe_owner: None,
     };
     if let Err(err) = host.start(start_config).await {
@@ -199,7 +202,7 @@ pub async fn open_core(
     }
 
     let provider_port: Arc<dyn ProviderPort> = if let Some(port) = js_port {
-        port
+        Arc::new(AdmittingProviderPort::new(host.clone(), port))
     } else {
         Arc::new(host.build_provider_port().await)
     };
