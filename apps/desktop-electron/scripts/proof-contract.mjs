@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 /**
  * P3-T3 runtime-evidence contract — the single authority shared by the runtime
- * driver (`proof-runtime.mjs`) and the package/decision gate (`proof-package.mjs`).
+ * driver (`proof-runtime.mjs`) and the package/decision gates.
  *
  * Two consumers, one definition: the driver uses it to decide whether a run may
- * write canonical evidence at all, and the gate uses it to decide whether an
+ * write canonical evidence at all, and the gates use it to decide whether an
  * existing document is acceptable. Keeping one implementation is the point — a
- * second, looser check in the gate is exactly how a partial run becomes a green
- * "pass" (P3-T3 review C1).
+ * second, looser check is exactly how a partial run becomes a green "pass".
  *
- * The evaluator is the sole pass authority, and it validates the *raw*
- * observations (per-launch latencies, per-cycle durations, the resource trace)
- * rather than the summary numbers derived from them: a document that carries the
- * required check IDs with inflated summary counts but no raw samples is not
- * evidence (P3-T3 review C2).
+ * The evaluator is the sole pass authority. It validates the *raw* observations
+ * (per-launch latencies, per-cycle durations, the resource trace) rather than the
+ * summaries derived from them (C2), the canonical run metadata — mode, status and
+ * sample plan — rather than trusting that a document merely looks complete (C5),
+ * and the provenance binding against exact source/tree/artifact expectations
+ * rather than shape alone (I9).
  */
 
 export const RUNTIME_SCHEMA = 'rft-p3-t3-runtime-proof/v2';
@@ -36,11 +36,22 @@ export const REQUIRED_CHECKS = [
 export const NATIVE_LOAD_CHECK_ID = 'LIFECYCLE-native';
 
 /**
- * Canonical sample plan. These are not floors to be padded around: a canonical
- * run records exactly this many observations, so a canonical document must
- * carry exactly this many raw samples.
+ * Canonical sample plan. A canonical run records exactly this many
+ * observations, so a canonical document must carry exactly this many raw
+ * samples and declare exactly this plan.
  */
 export const CANONICAL_SAMPLES = { cold: 10, warm: 30, cycles: 100, soakSeconds: 600 };
+
+/** The `sample_plan` object a canonical document must declare, verbatim. */
+export const CANONICAL_SAMPLE_PLAN = {
+  cold: CANONICAL_SAMPLES.cold,
+  warm: CANONICAL_SAMPLES.warm,
+  cycles: CANONICAL_SAMPLES.cycles,
+  soak_seconds: CANONICAL_SAMPLES.soakSeconds,
+};
+
+/** The only run mode permitted to gate a decision. */
+export const CANONICAL_MODE = 'canonical';
 
 /** Provenance fields a canonical document must carry to be bindable to an artifact. */
 export const REQUIRED_PROVENANCE_FIELDS = [
@@ -56,6 +67,20 @@ export const REQUIRED_PROVENANCE_FIELDS = [
   'tree_dirty',
   'command',
   'utc_start',
+];
+
+/** Provenance fields an expectation may pin; a mismatch makes evidence stale. */
+export const BINDABLE_PROVENANCE_FIELDS = [
+  'app_path',
+  'app_bundle_id',
+  'arch',
+  'app_bundle_sha256',
+  'native_node_sha256',
+  'electron_version',
+  'packager_version',
+  'source_sha',
+  'tree_digest',
+  'tree_dirty',
 ];
 
 /** Confounders that invalidate a measured run rather than recording a product result. */
@@ -149,7 +174,6 @@ function readTrace(root, path, count, valueKey, reasons) {
 
 /** Raw-observation requirements per check, plus the summary that must be derivable from them. */
 function validateRawObservations(doc, reasons) {
-  // START-1 — per-launch latencies, recomputed against the recorded summary.
   const coldMs = readRawSamples(doc, 'launch.samples.cold', CANONICAL_SAMPLES.cold, 'ms', reasons);
   const warmMs = readRawSamples(doc, 'launch.samples.warm', CANONICAL_SAMPLES.warm, 'ms', reasons);
   if (coldMs && !sameSummary(summarise(coldMs), getPath(doc, 'launch.summary.cold'))) {
@@ -159,7 +183,6 @@ function validateRawObservations(doc, reasons) {
     reasons.push('launch.summary.warm does not match the raw warm samples');
   }
 
-  // RES-1 — soak duration, owned-process trace, and the workload counters actually run.
   const soakSeconds = getPath(doc, 'resources.soak.soak_seconds');
   if (soakSeconds !== CANONICAL_SAMPLES.soakSeconds) {
     reasons.push(`resources.soak.soak_seconds=${soakSeconds ?? 'absent'} required=${CANONICAL_SAMPLES.soakSeconds}`);
@@ -179,7 +202,6 @@ function validateRawObservations(doc, reasons) {
     }
   }
 
-  // RES-2 — per-cycle durations and the periodic RSS samples.
   const cycleMs = readRawSamples(doc, 'resources.cycles.durations_ms', CANONICAL_SAMPLES.cycles, null, reasons);
   if (cycleMs && !sameSummary(summarise(cycleMs), getPath(doc, 'resources.cycles.summary'))) {
     reasons.push('resources.cycles.summary does not match the raw cycle durations');
@@ -215,6 +237,20 @@ export function evaluateRuntimeEvidence(doc, expectations = {}) {
       detail: { schema: doc.schema ?? null },
     };
   }
+
+  // --- canonical run metadata (C5) ------------------------------------------
+  // Only an exact canonical run may gate, and the document has to say so. A
+  // diagnostic document that happens to carry canonical-shaped observations is
+  // still not canonical evidence.
+  const meta = [];
+  if (doc.mode !== CANONICAL_MODE) meta.push(`mode is ${doc.mode ?? 'absent'}, expected ${CANONICAL_MODE}`);
+  if (doc.gating !== true) meta.push('gating is not true');
+  if (JSON.stringify(doc.sample_plan ?? null) !== JSON.stringify(CANONICAL_SAMPLE_PLAN)) {
+    meta.push(`sample_plan ${JSON.stringify(doc.sample_plan ?? null)} != ${JSON.stringify(CANONICAL_SAMPLE_PLAN)}`);
+  }
+  if (meta.length > 0) {
+    return { state: 'malformed', reasons: meta, detail: { mode: doc.mode ?? null, sample_plan: doc.sample_plan ?? null } };
+  }
   if (!Array.isArray(doc.checks) || doc.checks.length === 0) {
     return { state: 'malformed', reasons: ['runtime evidence carries no checks'], detail: {} };
   }
@@ -222,15 +258,10 @@ export function evaluateRuntimeEvidence(doc, expectations = {}) {
   // --- completeness: exact phase set, exact check ID set, raw observations ----
   const phases = Array.isArray(doc.phases_executed) ? [...doc.phases_executed].sort() : [];
   const expectedPhases = [...REQUIRED_PHASES].sort();
-  if (doc.gating !== true) {
-    reasons.push('runtime evidence is not marked gating');
-  }
   if (phases.join(',') !== expectedPhases.join(',')) {
     reasons.push(`phases_executed=[${phases.join(',')}] expected=[${expectedPhases.join(',')}]`);
   }
 
-  // Exact set equality: a duplicate can hide an earlier failure behind the
-  // `Map` lookup, and an extra ID means the document is not the locked shape.
   const ids = doc.checks.map((check) => check?.id);
   const duplicates = [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))];
   if (duplicates.length > 0) reasons.push(`duplicate check IDs: ${duplicates.join(', ')}`);
@@ -241,7 +272,7 @@ export function evaluateRuntimeEvidence(doc, expectations = {}) {
 
   validateRawObservations(doc, reasons);
 
-  // --- provenance binding ---------------------------------------------------
+  // --- provenance binding (I9) ----------------------------------------------
   const provenance = doc.provenance ?? {};
   for (const field of REQUIRED_PROVENANCE_FIELDS) {
     if (provenance[field] === undefined || provenance[field] === null || provenance[field] === '') {
@@ -250,30 +281,29 @@ export function evaluateRuntimeEvidence(doc, expectations = {}) {
   }
   const mismatches = [];
   for (const [key, expected] of Object.entries(expectations)) {
+    if (!BINDABLE_PROVENANCE_FIELDS.includes(key)) continue;
     if (expected === undefined || expected === null) continue;
-    const actual = provenance[key];
-    if (actual !== expected) mismatches.push(`${key}: evidence=${actual ?? 'absent'} expected=${expected}`);
+    if (provenance[key] !== expected) {
+      mismatches.push(`${key}: evidence=${provenance[key] ?? 'absent'} expected=${expected}`);
+    }
   }
+  const recordedConfounders = Array.isArray(doc.validity?.confounders) ? doc.validity.confounders : [];
   if (mismatches.length > 0) {
-    return { state: 'stale', reasons: [...reasons, `provenance mismatch: ${mismatches.join('; ')}`], detail: { provenance, mismatches } };
+    return {
+      state: 'stale',
+      reasons: [...reasons, `provenance mismatch: ${mismatches.join('; ')}`],
+      detail: { provenance, mismatches, recorded_confounders: recordedConfounders },
+    };
   }
 
-  // --- validity (confounded runs are not product results) --------------------
-  // Checked before the completeness verdict: a run that admits it was
-  // confounded is a diagnosis, not a shape complaint, so its confounders are
-  // the reason. Provenance is still checked first — stale evidence is stale
-  // regardless of how the run went.
-  const validity = doc.validity ?? {};
-  const confounders = Array.isArray(validity.confounders) ? validity.confounders : [];
-  if (validity.valid === false) {
+  // --- validity: confounded runs are not product results ---------------------
+  if (doc.validity?.valid === false) {
     return {
       state: 'confounded',
-      reasons: confounders.length > 0 ? confounders.map((c) => `confounder: ${c}`) : ['run marked invalid'],
+      reasons: recordedConfounders.length > 0 ? recordedConfounders.map((c) => `confounder: ${c}`) : ['run marked invalid'],
       detail: {
-        validity,
+        validity: doc.validity,
         phases_executed: phases,
-        // Shape problems are recorded, not hidden, but they are not the headline:
-        // the run already declared its measurements unusable.
         secondary_shape_problems: reasons,
       },
     };
@@ -283,17 +313,39 @@ export function evaluateRuntimeEvidence(doc, expectations = {}) {
     return { state: 'incomplete', reasons, detail: { phases_executed: phases } };
   }
 
+  // --- terminal verdicts, with the document's own status required to agree ----
   const byId = new Map(doc.checks.map((check) => [check.id, check]));
   const failed = [...byId.values()].filter((check) => check.ok !== true).map((check) => check.id);
-  const nativeLoad = doc.native_utility_load ?? {};
   if (failed.length > 0) {
+    if (doc.status !== 'fail') {
+      return {
+        state: 'malformed',
+        reasons: [`status ${doc.status ?? 'absent'} contradicts failed checks: ${failed.join(', ')}`],
+        detail: { failed },
+      };
+    }
     return { state: 'valid-fail', reasons: [`failed checks: ${failed.join(', ')}`], detail: { failed } };
   }
+  const nativeLoad = doc.native_utility_load ?? {};
   if (nativeLoad.ok !== true) {
+    if (doc.status !== 'fail') {
+      return {
+        state: 'malformed',
+        reasons: [`status ${doc.status ?? 'absent'} contradicts unproven native utility load`],
+        detail: { native_utility_load: nativeLoad },
+      };
+    }
     return {
       state: 'valid-fail',
       reasons: ['native utility load not proven in this run'],
       detail: { native_utility_load: nativeLoad },
+    };
+  }
+  if (doc.status !== 'pass') {
+    return {
+      state: 'malformed',
+      reasons: [`status ${doc.status ?? 'absent'} contradicts a fully passing run`],
+      detail: { status: doc.status ?? null },
     };
   }
   return { state: 'valid-pass', reasons: [], detail: { native_utility_load: nativeLoad } };
@@ -309,12 +361,21 @@ export function decisionForState(state, { signedOk, stapleOk, hardenedOk }) {
   return 'blocked';
 }
 
+/** Per-criterion verdicts from a canonical runtime document. */
+export function runtimeCriterionVerdict(state, doc, checkId) {
+  if (state === 'valid-pass' || state === 'valid-fail') {
+    const check = (doc?.checks ?? []).find((entry) => entry?.id === checkId);
+    if (!check) return 'NOT OBSERVED';
+    return check.ok === true ? 'PASS' : 'FAIL';
+  }
+  return 'NOT OBSERVED';
+}
+
 /**
  * A provider operation counts as a completed lifecycle only when every
  * observable step succeeded: probe, launch, execute, a drain that saw at least
  * one `MessageDelta` and exactly one terminal event for the same operation, a
- * successful cancel, and a successful shutdown. A dispatched request whose
- * event pull or shutdown failed is not an observed lifecycle (P3-T3 review I7).
+ * successful cancel, and a successful shutdown (I7).
  */
 export function providerLifecycleComplete(op) {
   const steps = op?.steps ?? {};

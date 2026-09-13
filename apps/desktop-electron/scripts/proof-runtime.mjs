@@ -51,6 +51,10 @@ const BUNDLE_ID = 'com.nexus42.rft-electron-proof';
 const EXPECTED_TARGET = 'aarch64-apple-darwin';
 const EXPECTED_CONTRACT_HASH = 'a36f909f94a4842bcbe96ee4e83e355eb14d01a2758b202af364023ceb08b734';
 
+/** PKG-2 Electron size limits (proof-matrix §2). */
+const ELECTRON_ZIP_LIMIT_MIB = 250;
+const ELECTRON_INSTALLED_LIMIT_MIB = 600;
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // --- provenance -----------------------------------------------------------
@@ -1660,7 +1664,55 @@ async function main() {
     writeFileSync(temporary, `${JSON.stringify(evidence, null, 2)}\n`);
     renameSync(temporary, target);
     writeFileSync(`${outDir}/${fileName.replace(/\.json$/, '.raw.json')}`, JSON.stringify(evidence));
+    persistSizes();
     return { fileName, target };
+  };
+
+  /**
+   * Per-architecture Electron size evidence.
+   *
+   * Measuring the bundle on disk does not depend on whether the app can run, so
+   * this document is written independently of the run verdict and of the
+   * canonical/diagnostic distinction. That is what makes the PKG-2 size rows
+   * derivable per architecture — and therefore reachable for a future GO —
+   * without editing the reducer (I11).
+   */
+  const persistSizes = () => {
+    if (!evidence.sizes) return null;
+    const limits = { zip_mib: ELECTRON_ZIP_LIMIT_MIB, installed_mib: ELECTRON_INSTALLED_LIMIT_MIB };
+    const sizeChecks = [
+      {
+        id: 'PKG-2-electron-zip',
+        ok: evidence.sizes.zip_mib != null && evidence.sizes.zip_mib <= limits.zip_mib,
+        measured_mib: evidence.sizes.zip_mib,
+        limit_mib: limits.zip_mib,
+      },
+      {
+        id: 'PKG-2-electron-installed',
+        ok: evidence.sizes.app_bundle_mib != null && evidence.sizes.app_bundle_mib <= limits.installed_mib,
+        measured_mib: evidence.sizes.app_bundle_mib,
+        limit_mib: limits.installed_mib,
+      },
+    ];
+    const sizeDoc = {
+      schema: 'rft-p3-t3-electron-size/v1',
+      status: sizeChecks.every((check) => check.ok) ? 'pass' : 'fail',
+      arch: process.arch,
+      app_path: canonicalAppPath,
+      app_bundle_id: BUNDLE_ID,
+      limits,
+      sizes: evidence.sizes,
+      checks: sizeChecks,
+      ...sourceProvenance(),
+      command,
+      utc_start: evidence.host.utc_start,
+      utc_end: new Date().toISOString(),
+    };
+    const target = join(outDir, 'electron-size.json');
+    const temporary = `${target}.tmp-${process.pid}`;
+    writeFileSync(temporary, `${JSON.stringify(sizeDoc, null, 2)}\n`);
+    renameSync(temporary, target);
+    return target;
   };
 
   const ctx = { args, outDir, appPath, home: args.home, checks, confounders, deadlineAt };

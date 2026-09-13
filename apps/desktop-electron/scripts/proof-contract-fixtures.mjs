@@ -11,6 +11,7 @@
  * Exit code 0 only when every check passes.
  */
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +21,7 @@ import {
   decisionForState,
   evaluateRuntimeEvidence,
   providerLifecycleComplete,
+  runtimeCriterionVerdict,
 } from './proof-contract.mjs';
 import { compareEntitlements } from './proof-package.mjs';
 
@@ -102,6 +104,7 @@ function completeDoc(overrides = {}) {
     schema: RUNTIME_SCHEMA,
     mode: 'canonical',
     gating: true,
+    sample_plan: { cold: 10, warm: 30, cycles: 100, soak_seconds: 600 },
     phases_requested: ['launch', 'resources', 'security', 'lifecycle'],
     phases_executed: ['launch', 'resources', 'security', 'lifecycle'],
     launch: {
@@ -154,7 +157,12 @@ check('no checks is malformed', state({ schema: RUNTIME_SCHEMA, checks: [] }), '
 check('complete document is valid-pass', state(completeDoc()), 'valid-pass');
 check(
   'a failed check is valid-fail',
-  state(completeDoc({ checks: completeDoc().checks.map((c) => (c.id === 'RES-1' ? { ...c, ok: false } : c)) })),
+  state(
+    completeDoc({
+      status: 'fail',
+      checks: completeDoc().checks.map((c) => (c.id === 'RES-1' ? { ...c, ok: false } : c)),
+    }),
+  ),
   'valid-fail',
 );
 
@@ -291,9 +299,9 @@ check(
 // --- contract: provenance / validity ---------------------------------------
 
 check(
-  'non-gating document is incomplete',
+  'non-gating document is rejected',
   state(completeDoc({ gating: false })),
-  'incomplete',
+  'malformed',
 );
 check(
   'missing provenance field is incomplete',
@@ -323,7 +331,11 @@ check(
   ),
   'confounded',
 );
-check('native load not proven is valid-fail', state(completeDoc({ native_utility_load: { ok: false } })), 'valid-fail');
+check(
+  'native load not proven is valid-fail',
+  state(completeDoc({ status: 'fail', native_utility_load: { ok: false } })),
+  'valid-fail',
+);
 
 // --- decision mapping -------------------------------------------------------
 
@@ -449,8 +461,8 @@ check(
   true,
 );
 check(
-  'START/RES/MAINT rows are present and not passing',
-  ['START-1', 'RES-1', 'RES-2', 'MAINT-1', 'SEC-renderer'].every((id) => {
+  'runtime and maintenance rows are present and not passing',
+  ['START-1-arm64', 'RES-1-arm64', 'RES-2-arm64', 'MAINT-1', 'SEC-renderer-arm64'].every((id) => {
     const row = (realDecision.doc?.observed_rows ?? []).find((r) => r.id === id);
     return row && row.verdict !== 'PASS';
   }),
@@ -475,10 +487,433 @@ if (existsSync(sourceEvidence)) {
   tampered.status = 'fail';
   writeFileSync(join(tamperEvidence, 'install-macarm22', 'install-proof.json'), JSON.stringify(tampered));
   const tamperedDecision = runDecisionWithRoot(tamperRoot);
-  const row = (tamperedDecision.doc?.observed_rows ?? []).find((r) => r.id === 'PKG1-arm64-node22');
+  const row = (tamperedDecision.doc?.observed_rows ?? []).find((r) => r.id === 'PKG1-install-arm64-node22');
   check('tampered non-pass receipt drops the row from PASS', row && row.verdict !== 'PASS', true);
   check('tampered receipt row reports the reason', row?.verification?.problems?.length > 0, true);
 }
+
+// --- C5: canonical mode / status / sample-plan consistency ------------------
+
+const plan = { cold: 10, warm: 30, cycles: 100, soak_seconds: 600 };
+check(
+  'diagnostic mode is rejected',
+  evaluateRuntimeEvidence({ ...completeDoc(), mode: 'diagnostic' }, EXPECT).state,
+  'malformed',
+);
+check(
+  'missing mode is rejected',
+  evaluateRuntimeEvidence({ ...completeDoc(), mode: undefined }, EXPECT).state,
+  'malformed',
+);
+check(
+  'non-canonical sample_plan is rejected',
+  evaluateRuntimeEvidence({ ...completeDoc(), sample_plan: { ...plan, cycles: 50 } }, EXPECT).state,
+  'malformed',
+);
+check(
+  'missing sample_plan is rejected',
+  evaluateRuntimeEvidence({ ...completeDoc(), sample_plan: undefined }, EXPECT).state,
+  'malformed',
+);
+check(
+  'status diagnostic with canonical shape is rejected',
+  evaluateRuntimeEvidence({ ...completeDoc(), status: 'diagnostic' }, EXPECT).state,
+  'malformed',
+);
+check(
+  'status fail contradicting passing checks is rejected',
+  evaluateRuntimeEvidence({ ...completeDoc(), status: 'fail' }, EXPECT).state,
+  'malformed',
+);
+check(
+  'status pass contradicting a failed check is rejected',
+  evaluateRuntimeEvidence(
+    { ...completeDoc(), checks: completeDoc().checks.map((c) => (c.id === 'RES-1' ? { ...c, ok: false } : c)) },
+    EXPECT,
+  ).state,
+  'malformed',
+);
+
+// --- I9: runtime evidence bound to current source/tree identity -------------
+
+const SOURCE_EXPECT = { source_sha: 'deadbeef', tree_digest: 'c'.repeat(64), tree_dirty: false };
+check(
+  'matching source identity passes',
+  evaluateRuntimeEvidence(completeDoc(), { ...EXPECT, ...SOURCE_EXPECT }).state,
+  'valid-pass',
+);
+const staleSource = { ...completeDoc(), provenance: { ...PROVENANCE, source_sha: 'othersha' } };
+check('stale source_sha is rejected', evaluateRuntimeEvidence(staleSource, { ...EXPECT, ...SOURCE_EXPECT }).state, 'stale');
+const staleTree = { ...completeDoc(), provenance: { ...PROVENANCE, tree_digest: 'f'.repeat(64) } };
+check('stale tree_digest is rejected', evaluateRuntimeEvidence(staleTree, { ...EXPECT, ...SOURCE_EXPECT }).state, 'stale');
+const dirtyNow = { ...completeDoc(), provenance: { ...PROVENANCE, tree_dirty: true } };
+check(
+  'dirty-tree mismatch is rejected',
+  evaluateRuntimeEvidence(dirtyNow, { ...EXPECT, ...SOURCE_EXPECT }).state,
+  'stale',
+);
+
+// --- C3: per-criterion runtime verdicts -------------------------------------
+
+const failingDoc = {
+  ...completeDoc(),
+  status: 'fail',
+  checks: completeDoc().checks.map((c) => (c.id === 'RES-1' ? { ...c, ok: false } : c)),
+  native_utility_load: { ok: false },
+};
+check('valid-fail state for a failed criterion', evaluateRuntimeEvidence(failingDoc, EXPECT).state, 'valid-fail');
+check('failed criterion maps to FAIL', runtimeCriterionVerdict('valid-fail', failingDoc, 'RES-1'), 'FAIL');
+check('passing criterion maps to PASS', runtimeCriterionVerdict('valid-fail', failingDoc, 'START-1'), 'PASS');
+check('unknown state maps to NOT OBSERVED', runtimeCriterionVerdict('confounded', failingDoc, 'RES-1'), 'NOT OBSERVED');
+check('valid-pass maps to PASS', runtimeCriterionVerdict('valid-pass', completeDoc(), 'START-1'), 'PASS');
+check('a non-canonical document yields no criterion verdict', runtimeCriterionVerdict('stale', completeDoc(), 'START-1'), 'NOT OBSERVED');
+
+// --- synthetic matrix builder ----------------------------------------------
+
+const CHECKS = [
+  'package_receipt_pass',
+  'empty_project_install',
+  'installed_payload_paths',
+  'installed_artifact_matches_packed_payload',
+  'installed_platform_manifest_is_frozen_metadata',
+  'installed_manifest_fences_against_real_artifact',
+  'graph_read_through_installed_payload',
+  'create_through_installed_payload',
+  'update_through_installed_payload',
+  'provider_probe_available',
+  'provider_launch_session',
+  'provider_operation_started',
+  'provider_stream_delta_and_terminal',
+  'provider_shutdown_ok',
+  'happy_close_confirmed',
+  'provider_cancel_accepted',
+  'cancel_close_confirmed',
+  'compilers_shadowed_in_child',
+  'no_compiler_invocation_attempted',
+  'fixture_children_reaped',
+];
+const ARCHES = [
+  { key: 'arm64', target: 'aarch64-apple-darwin', suffix: 'darwin-arm64', install: { '22.22.0': 'install-macarm22', '24.20.0': 'install-macarm24' } },
+  { key: 'x64', target: 'x86_64-apple-darwin', suffix: 'darwin-x64', install: { '22.22.0': 'install-macx6422', '24.20.0': 'install-macx6424' } },
+  { key: 'win', target: 'x86_64-pc-windows-msvc', suffix: 'win32-x64-msvc', install: { '22.22.0': 'install-win22', '24.20.0': 'install-win24' } },
+  { key: 'linux', target: 'x86_64-unknown-linux-gnu', suffix: 'linux-x64-gnu', install: { '22.22.0': 'install-linux22', '24.20.0': 'install-linux24' } },
+];
+const GUI = ARCHES.filter((a) => a.key === 'arm64' || a.key === 'x64');
+const NODE_COHORTS = [
+  { version: '22.22.0', id: 'node22' },
+  { version: '24.20.0', id: 'node24' },
+];
+
+/** The identity the generator will compute for the current tree. */
+function currentIdentity() {
+  const sha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).stdout.trim();
+  const porcelain = spawnSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }).stdout;
+  const diff = spawnSync('git', ['diff', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).stdout;
+  return {
+    source_sha: sha,
+    tree_digest: createHash('sha256').update(`${sha}\0${porcelain}\0${diff}`).digest('hex'),
+    tree_dirty: porcelain.trim().length > 0,
+  };
+}
+
+const IDENTITY = currentIdentity();
+
+function installProof(target, nodeVersion) {
+  return {
+    schema: 'rft-p3-t1-native-install-proof/v1',
+    status: 'pass',
+    target,
+    source_sha: IDENTITY.source_sha,
+    node_version_requested: nodeVersion,
+    checks: [
+      ...CHECKS.map((name) => ({ name, ok: true })),
+      ...Array.from({ length: 11 }, (_, i) => ({ name: `negative:case-${i}`, ok: true })),
+    ],
+  };
+}
+
+function packageReceipt(target, suffix) {
+  return {
+    schema: 'rft-p3-t1-package-receipt/v1',
+    status: 'pass',
+    target,
+    source_sha: IDENTITY.source_sha,
+    artifact: { sha256: (suffix.length % 10).toString().repeat(64).slice(0, 64), bytes: 1024 },
+    compatibility: {
+      source: 'executed artifact compatibility()',
+      manifest: {
+        target_triple: target,
+        native_api_version: 1,
+        writer_protocol: 1,
+        contract_tree_sha256: 'a'.repeat(64),
+      },
+    },
+    packages: [
+      { name: '@42ch/nexus-native', tarball_bytes: 67948 },
+      { name: `@42ch/nexus-native-${suffix}`, tarball_bytes: 6_000_000 },
+    ],
+  };
+}
+
+function binaryInspection(target, artifactSha) {
+  return {
+    schema: 'rft-p3-t1-binary-inspection/v1',
+    status: 'pass',
+    target,
+    artifact: { sha256: artifactSha },
+    checks: [{ name: 'artifact_container_matches_target', ok: true }],
+    findings: { container: { container: 'mach-o', machine: 'arm64' }, minimum_os: '11.0' },
+  };
+}
+
+function runtimeProof(archKey, identity, appPath) {
+  const cold = ms(10);
+  const warm = ms(30, 5);
+  const cycleMs = cycles(100);
+  const soakTrace = trace(300);
+  return {
+    schema: RUNTIME_SCHEMA,
+    mode: 'canonical',
+    gating: true,
+    sample_plan: { cold: 10, warm: 30, cycles: 100, soak_seconds: 600 },
+    phases_requested: ['launch', 'resources', 'security', 'lifecycle'],
+    phases_executed: ['launch', 'resources', 'security', 'lifecycle'],
+    launch: {
+      samples: { cold, warm },
+      summary: { cold: summarise(cold.map((e) => e.ms)), warm: summarise(warm.map((e) => e.ms)) },
+      failures: 0,
+    },
+    resources: {
+      soak: {
+        soak_seconds: 600,
+        trace: soakTrace,
+        summary: summarise(soakTrace.map((e) => e.rss_bytes)),
+        workload: { reads: 6000, writes: 1200, read_errors: 0, write_errors: [] },
+      },
+      cycles: {
+        cycle_count: 100,
+        durations_ms: cycleMs,
+        summary: summarise(cycleMs),
+        samples: trace(11),
+        plateau_after_cooldown: { rss_bytes: 300 * 1024 * 1024 },
+        retained_growth_bytes: 1024,
+      },
+    },
+    validity: { valid: true, launch_method: 'launchservices', confounders: [] },
+    provenance: {
+      app_path: appPath,
+      app_bundle_id: 'com.nexus42.rft-electron-proof',
+      arch: archKey,
+      app_bundle_sha256: 'a'.repeat(64),
+      native_node_sha256: 'b'.repeat(64),
+      electron_version: '44.3.0',
+      packager_version: '20.3.0',
+      source_sha: identity.source_sha,
+      tree_digest: identity.tree_digest,
+      tree_dirty: identity.tree_dirty,
+      command: 'node scripts/proof-runtime.mjs',
+      utc_start: '2026-09-13T00:00:00.000Z',
+    },
+    native_utility_load: {
+      ok: true,
+      target_triple: `arch:${archKey}`,
+      provider_lifecycle: { complete: true },
+    },
+    checks: [
+      { id: 'START-1', ok: true },
+      { id: 'RES-1', ok: true },
+      { id: 'RES-2', ok: true },
+      { id: 'SEC-renderer', ok: true },
+      { id: 'LIFECYCLE-native', ok: true },
+      { id: 'LIFECYCLE-fault', ok: true },
+      { id: 'PKG-2-electron', ok: true },
+    ],
+    status: 'pass',
+  };
+}
+
+function electronSize(archKey) {
+  return {
+    schema: 'rft-p3-t3-electron-size/v1',
+    status: 'pass',
+    arch: archKey,
+    app_bundle_id: 'com.nexus42.rft-electron-proof',
+    limits: { zip_mib: 250, installed_mib: 600 },
+    sizes: { zip_mib: 140, app_bundle_mib: 330 },
+    checks: [
+      { id: 'PKG-2-electron-zip', ok: true, measured_mib: 140, limit_mib: 250 },
+      { id: 'PKG-2-electron-installed', ok: true, measured_mib: 330, limit_mib: 600 },
+    ],
+    ...IDENTITY,
+    command: 'node scripts/proof-runtime.mjs',
+    utc_start: '2026-09-13T00:00:00.000Z',
+    utc_end: '2026-09-13T00:10:00.000Z',
+  };
+}
+
+function packageGate(archKey) {
+  return {
+    schema: 'rft-p3-t3-package-gate/v2',
+    status: 'go',
+    bundle_id: 'com.nexus42.rft-electron-proof',
+    arch: archKey,
+    app_path: `/evidence/electron-packages/${archKey}/app`,
+    app_realpath: `/evidence/electron-packages/${archKey}/Nexus RFT Feasibility-darwin-${archKey}/Nexus RFT Feasibility.app`,
+    missing_inputs: [],
+    reasons: [],
+    decision_inputs: {
+      runtime_contract_state: 'valid-pass',
+      signature_predicates_pass: true,
+      stapler_ok: true,
+      hardened_runtime: true,
+      entitlements_match: true,
+      native_utility_load_proven: true,
+    },
+  };
+}
+
+function maintenanceTrace() {
+  return {
+    schema: 'rft-p3-t3-maintenance-rebuild/v1',
+    status: 'pass',
+    arch: 'arm64',
+    target_electron_version: '44.3.0',
+    packaged_electron_version: '44.3.0',
+    rebuild_count: 1,
+    manual_binary_patch: false,
+    elapsed_seconds: 420,
+    max_seconds: 1800,
+    ...IDENTITY,
+  };
+}
+
+/**
+ * Materialise a complete synthetic matrix. `mutate` receives the document map
+ * (keyed by path below the evidence root) so a case can break exactly one thing.
+ */
+function buildMatrix(name, mutate = () => {}) {
+  const root = join(DECISION_FIXTURES, name, 'iterations');
+  const evidence = join(root, 'v1.189', 'guides', 'evidence');
+  rmSync(join(DECISION_FIXTURES, name), { recursive: true, force: true });
+  const docs = {};
+  const put = (relative, doc) => {
+    docs[relative] = doc;
+  };
+
+  for (const arch of ARCHES) {
+    for (const cohort of NODE_COHORTS) {
+      put(`${arch.install[cohort.version]}/install-proof.json`, installProof(arch.target, cohort.version));
+    }
+    put(`native-packages/${arch.suffix}/package-receipt.json`, packageReceipt(arch.target, arch.suffix));
+  }
+  for (const arch of ARCHES) {
+    const receipt = docs[`native-packages/${arch.suffix}/package-receipt.json`];
+    put(`native-binary-${arch.suffix}/binary-inspection.json`, binaryInspection(arch.target, receipt.artifact.sha256));
+  }
+  for (const arch of GUI) {
+    // The bundle path must exist so the generator's realpath expectation is set.
+    const bundle = join(evidence, `electron-packages/${arch.key}`, `Nexus RFT Feasibility-darwin-${arch.key}`, 'Nexus RFT Feasibility.app', 'Contents', 'MacOS');
+    mkdirSync(bundle, { recursive: true });
+    writeFileSync(join(bundle, 'Nexus RFT Feasibility'), 'fixture\n');
+    const appPath = realpathSync(join(evidence, `electron-packages/${arch.key}`, `Nexus RFT Feasibility-darwin-${arch.key}`, 'Nexus RFT Feasibility.app'));
+    put(`electron-${arch.key}/runtime-lifecycle.json`, runtimeProof(arch.key, IDENTITY, appPath));
+    put(`electron-${arch.key}/electron-size.json`, electronSize(arch.key));
+    put(`electron-${arch.key}/proof-package.json`, packageGate(arch.key));
+  }
+  put('maintenance-rebuild.json', maintenanceTrace());
+
+  mutate(docs);
+
+  for (const [relative, doc] of Object.entries(docs)) {
+    const target = join(evidence, relative);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, `${JSON.stringify(doc, null, 2)}\n`);
+  }
+  return root;
+}
+
+// --- synthetic complete matrix: GO is reachable without editing the reducer --
+
+const greenRoot = buildMatrix('green');
+const greenDecision = runDecisionWithRoot(greenRoot);
+check('a complete signed matrix yields GO', greenDecision.status, 'go');
+check('GO matrix has no non-pass rows', greenDecision.doc?.row_counts?.missing_or_unobserved, 0);
+check('GO matrix row count is the full matrix', greenDecision.doc?.row_counts?.total, 37);
+check(
+  'GO matrix contains both GUI architectures for SEC-1',
+  (greenDecision.doc?.observed_rows ?? []).filter((r) => r.id.startsWith('SEC1-signed-')).every((r) => r.verdict === 'PASS'),
+  true,
+);
+check(
+  'GO matrix derives per-arch Electron size as PASS',
+  ['PKG2-electron-arm64', 'PKG2-electron-x64'].every(
+    (id) => (greenDecision.doc?.observed_rows ?? []).find((r) => r.id === id)?.verdict === 'PASS',
+  ),
+  true,
+);
+check(
+  'GO matrix derives MAINT-1 as PASS',
+  (greenDecision.doc?.observed_rows ?? []).find((r) => r.id === 'MAINT-1')?.verdict,
+  'PASS',
+);
+
+// --- valid measured failures yield no-go ------------------------------------
+
+const failCases = [
+  ['start', (docs) => { docs['electron-arm64/runtime-lifecycle.json'].checks = docs['electron-arm64/runtime-lifecycle.json'].checks.map((c) => (c.id === 'START-1' ? { ...c, ok: false } : c)); docs['electron-arm64/runtime-lifecycle.json'].status = 'fail'; }],
+  ['res', (docs) => { docs['electron-arm64/runtime-lifecycle.json'].checks = docs['electron-arm64/runtime-lifecycle.json'].checks.map((c) => (c.id === 'RES-2' ? { ...c, ok: false } : c)); docs['electron-arm64/runtime-lifecycle.json'].status = 'fail'; }],
+  ['size', (docs) => { docs['electron-x64/electron-size.json'].sizes.zip_mib = 300; docs['electron-x64/electron-size.json'].status = 'fail'; }],
+  ['payload', (docs) => { docs['native-packages/darwin-x64/package-receipt.json'].packages[1].tarball_bytes = 60 * 1048576; docs['native-packages/darwin-x64/package-receipt.json'].status = 'fail'; }],
+  ['install', (docs) => { docs['install-win24/install-proof.json'].status = 'fail'; }],
+  ['maint', (docs) => { docs['maintenance-rebuild.json'].elapsed_seconds = 3600; docs['maintenance-rebuild.json'].status = 'fail'; }],
+  ['gate', (docs) => { docs['electron-arm64/proof-package.json'].status = 'no-go'; }],
+];
+for (const [label, mutate] of failCases) {
+  const root = buildMatrix(`fail-${label}`, mutate);
+  const decision = runDecisionWithRoot(root);
+  check(`measured failure (${label}) yields no-go`, decision.status, 'no-go');
+  check(`measured failure (${label}) records a FAIL row`, (decision.doc?.row_counts?.fail ?? 0) > 0, true);
+}
+
+// --- malformed / inconsistent evidence blocks -------------------------------
+
+const inconsistentCases = [
+  ['status-pass-with-false-check', (docs) => { docs['install-macarm22/install-proof.json'].checks[0].ok = false; }],
+  ['wrong-target', (docs) => { docs['install-macarm22/install-proof.json'].target = 'x86_64-unknown-linux-gnu'; }],
+  ['wrong-source', (docs) => { docs['install-win22/install-proof.json'].source_sha = 'othersha'; }],
+  ['missing-check-name', (docs) => { docs['install-linux22/install-proof.json'].checks = docs['install-linux22/install-proof.json'].checks.filter((c) => c.name !== 'provider_cancel_accepted'); }],
+  ['gate-malformed', (docs) => { docs['electron-arm64/proof-package.json'].schema = 'wrong/v9'; }],
+  ['size-over-limit-with-pass-status', (docs) => { docs['electron-x64/electron-size.json'].sizes.zip_mib = 300; }],
+  ['runtime-status-inconsistent', (docs) => { const doc = docs['electron-arm64/runtime-lifecycle.json']; doc.checks = doc.checks.map((c) => (c.id === 'RES-1' ? { ...c, ok: false } : c)); }],
+];
+for (const [label, mutate] of inconsistentCases) {
+  const root = buildMatrix(`bad-${label}`, mutate);
+  const decision = runDecisionWithRoot(root);
+  check(`inconsistent evidence (${label}) blocks`, decision.status, 'blocked');
+  check(
+    `inconsistent evidence (${label}) yields no PASS row for the broken document`,
+    decision.status !== 'go',
+    true,
+  );
+}
+
+// --- I11: per-arch Electron size rows are independently missing -------------
+
+const halfRoot = buildMatrix('half-size', (docs) => {
+  delete docs['electron-x64/electron-size.json'];
+});
+const halfDecision = runDecisionWithRoot(halfRoot);
+check(
+  'missing x64 size evidence yields MISSING for x64 only',
+  (halfDecision.doc?.observed_rows ?? []).find((r) => r.id === 'PKG2-electron-x64')?.verdict,
+  'MISSING',
+);
+check(
+  'arm64 size evidence still derives PASS',
+  (halfDecision.doc?.observed_rows ?? []).find((r) => r.id === 'PKG2-electron-arm64')?.verdict,
+  'PASS',
+);
+check('one missing per-arch size row blocks GO', halfDecision.status, 'blocked');
 
 rmSync(TMP, { recursive: true, force: true });
 

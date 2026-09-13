@@ -341,12 +341,16 @@ async function main() {
     evidence.missing_inputs.push(`runtime lifecycle evidence missing: ${runtimePath}`);
   }
 
+  const sourceNow = currentSourceIdentity();
   const runtimeExpectations = {
     app_path: appPath,
     app_bundle_id: bundleId,
     arch: args.arch,
     electron_version: readPinVersion('electron'),
     packager_version: readPinVersion('@electron/packager'),
+    source_sha: sourceNow.source_sha,
+    tree_digest: sourceNow.tree_digest,
+    tree_dirty: sourceNow.tree_dirty,
   };
   const verdict = evaluateRuntimeEvidence(runtimeDoc, runtimeExpectations);
   evidence.checks.runtime_lifecycle = {
@@ -361,7 +365,9 @@ async function main() {
       ? runtimeDoc.checks.map((c) => ({ id: c.id, ok: c.ok === true }))
       : null,
     native_utility_load: runtimeDoc?.native_utility_load ?? null,
+    recorded_confounders: runtimeDoc?.validity?.confounders ?? null,
     bound_to: runtimeExpectations,
+    source_identity_now: sourceNow,
   };
   const nativeLoadOk = runtimeDoc?.native_utility_load?.ok === true;
 
@@ -434,6 +440,22 @@ function readPinVersion(name) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Current source identity of the tree producing this gate result. Passed to the
+ * contract as an exact expectation so a runtime document recorded at another
+ * revision is rejected as stale rather than merely shape-validated (I9).
+ */
+function currentSourceIdentity() {
+  const sha = run('git', ['rev-parse', 'HEAD'], { cwd: repoRoot }).stdout.trim();
+  const porcelain = run('git', ['status', '--porcelain'], { cwd: repoRoot }).stdout;
+  const diff = run('git', ['diff', 'HEAD'], { cwd: repoRoot }).stdout;
+  return {
+    source_sha: sha || 'unknown',
+    tree_digest: createHash('sha256').update(`${sha}\0${porcelain}\0${diff}`).digest('hex'),
+    tree_dirty: porcelain.trim().length > 0,
+  };
 }
 
 function isDirectInvocation() {
