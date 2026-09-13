@@ -215,6 +215,73 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
     await core.close();
   });
 
+  test('unconfirmed rollback fences opens until a confirmed settlement', async () => {
+    const binding = require(nodePath);
+    const home = seedHome();
+    // `path.join` would normalize the `..` away; the host policy must see it.
+    const traversal = `${home}/../${basename(home)}`;
+    binding.forceUnconfirmedCleanup(true);
+    try {
+      // 1) core opens, host.start fails, rollback cleanup is unconfirmed.
+      let failure = null;
+      try {
+        binding.open(
+          JSON.stringify({
+            user_home: traversal,
+            access: 'engine_owner',
+            allow_uninitialized: false,
+          }),
+        );
+      } catch (error) {
+        failure = String(error);
+      }
+      assert.ok(failure, 'host start must fail for a traversal config path');
+      assert.match(failure, /interrupted/);
+      assert.match(failure, /cleanup unconfirmed/);
+
+      // 2) while cleanup stays unconfirmed, further opens are denied and the
+      //    retained owners survive (never replaced or dropped).
+      const validHome = seedHome();
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        let denied = null;
+        try {
+          binding.open(
+            JSON.stringify({
+              user_home: validHome,
+              access: 'engine_owner',
+              allow_uninitialized: false,
+            }),
+          );
+        } catch (error) {
+          denied = String(error);
+        }
+        assert.ok(denied, 'open must be denied while a retained owner is unconfirmed');
+        assert.match(denied, /interrupted/);
+      }
+
+      // 3) a confirmed cleanup settles the retained owners and reopens.
+      binding.forceUnconfirmedCleanup(false);
+      const core = binding.open(
+        JSON.stringify({ user_home: validHome, access: 'engine_owner', allow_uninitialized: false }),
+        {
+          call: async () => providerReply('x'),
+          next: async () => JSON.stringify({ operation_id: 'x', events: [], has_more: false }),
+        },
+      );
+      const principal = await core.activePrincipal();
+      assert.ok(principal.startsWith('p:'), `expected a principal handle, got ${principal}`);
+      const health = JSON.parse(
+        new TextDecoder().decode(
+          await core.hostQuery(new TextEncoder().encode(JSON.stringify({ query: 'health' }))),
+        ),
+      );
+      assert.equal(health.health.running, true);
+      await core.close();
+    } finally {
+      binding.forceUnconfirmedCleanup(false);
+    }
+  });
+
   test('worker termination does not abort process on require', async () => {
     const script = `
       const { workerData, parentPort } = require('node:worker_threads');

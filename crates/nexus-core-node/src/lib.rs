@@ -233,6 +233,14 @@ impl NativeCore {
     }
 }
 
+/// Test-only: force cleanup attempts to report unconfirmed. Present only in
+/// debug builds (`debug_assertions`); release artifacts export no such hook.
+#[cfg(debug_assertions)]
+#[napi]
+pub fn force_unconfirmed_cleanup(enable: bool) {
+    lifecycle::set_force_unconfirmed(enable);
+}
+
 #[napi]
 pub fn open(
     env: Env,

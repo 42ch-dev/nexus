@@ -308,6 +308,111 @@ describe('facade wire validation', () => {
     );
   });
 
+  test('accepts a module with an object value', () => {
+    const encoded = JSON.parse(
+      stringifyWire(
+        {
+          entity_id: 'kb_abc123',
+          expected_version: 0,
+          patch: { modules: { mental: { belief: 1 } } },
+        },
+        WORLD_KB_PATCH_ENTITY_SHAPE,
+        'request',
+      ),
+    );
+    assert.deepEqual(encoded.patch.modules, { mental: { belief: 1 } });
+  });
+
+  test('accepts a module with an array value', () => {
+    const encoded = JSON.parse(
+      stringifyWire(
+        {
+          entity_id: 'kb_abc123',
+          expected_version: 0,
+          patch: { modules: { observation: [{ id: 'o1' }] } },
+        },
+        WORLD_KB_PATCH_ENTITY_SHAPE,
+        'request',
+      ),
+    );
+    assert.ok(Array.isArray(encoded.patch.modules.observation));
+  });
+
+  test('accepts a hyphen/underscore/digit module key', () => {
+    assert.doesNotThrow(() =>
+      stringifyWire(
+        {
+          entity_id: 'kb_abc123',
+          expected_version: 0,
+          patch: { modules: { 'l5-mind_state2': {} } },
+        },
+        WORLD_KB_PATCH_ENTITY_SHAPE,
+        'request',
+      ),
+    );
+  });
+
+  test('rejects a module key that breaks the property-name pattern', () => {
+    assert.throws(
+      () =>
+        stringifyWire(
+          {
+            entity_id: 'kb_abc123',
+            expected_version: 0,
+            patch: { modules: { 'Bad!': {} } },
+          },
+          WORLD_KB_PATCH_ENTITY_SHAPE,
+          'request',
+        ),
+      /key does not match the required pattern/,
+    );
+  });
+
+  test('rejects a scalar module value', () => {
+    assert.throws(
+      () =>
+        stringifyWire(
+          {
+            entity_id: 'kb_abc123',
+            expected_version: 0,
+            patch: { modules: { 'Bad!': 'scalar' } },
+          },
+          WORLD_KB_PATCH_ENTITY_SHAPE,
+          'request',
+        ),
+      /key does not match the required pattern/,
+    );
+    assert.throws(
+      () =>
+        stringifyWire(
+          {
+            entity_id: 'kb_abc123',
+            expected_version: 0,
+            patch: { modules: { mental: 'scalar' } },
+          },
+          WORLD_KB_PATCH_ENTITY_SHAPE,
+          'request',
+        ),
+      /must be an object or an array/,
+    );
+  });
+
+  test('rejects a null module value', () => {
+    assert.throws(
+      () =>
+        stringifyWire(
+          {
+            entity_id: 'kb_abc123',
+            expected_version: 0,
+            patch: { modules: { mental: null } },
+          },
+          WORLD_KB_PATCH_ENTITY_SHAPE,
+          'request',
+        ),
+      /must be an object or an array/,
+    );
+  });
+
   test('accepts and encodes a representative valid payload', () => {
     const buffer = encodeWireBuffer(
       { entity_id: 'kb_abc123', expected_version: 0, patch: { title: 'Wire Hero' } },

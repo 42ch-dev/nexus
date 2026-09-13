@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use napi::bindgen_prelude::Error;
@@ -94,6 +94,9 @@ pub struct EnvState {
     pub pending_budget: PendingBudget,
     pub close_notify: Notify,
     pub closing: AtomicU64,
+    /// A rollback or close retained an owner whose cleanup is unconfirmed.
+    /// Blocks new opens until a confirmed settlement releases it.
+    pub interrupted: AtomicBool,
 }
 
 impl EnvState {
@@ -107,11 +110,24 @@ impl EnvState {
             pending_budget: PendingBudget::new(),
             close_notify: Notify::new(),
             closing: AtomicU64::new(0),
+            interrupted: AtomicBool::new(false),
         }
     }
 
     pub fn is_closing(&self) -> bool {
         self.closing.load(Ordering::SeqCst) != 0
+    }
+
+    pub fn is_interrupted(&self) -> bool {
+        self.interrupted.load(Ordering::SeqCst)
+    }
+
+    pub fn mark_interrupted(&self) {
+        self.interrupted.store(true, Ordering::SeqCst);
+    }
+
+    pub fn clear_interrupted(&self) {
+        self.interrupted.store(false, Ordering::SeqCst);
     }
 
     pub fn begin_close(&self) {

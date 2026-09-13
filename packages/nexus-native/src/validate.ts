@@ -17,6 +17,9 @@ import type {
 
 export const MAX_SAFE_INTEGER = 9007199254740991;
 
+/** `world-kb-entity-patch.schema.json` module key shape. */
+const MODULE_KEY_PATTERN = /^[a-z][a-z0-9_-]*$/;
+
 /** Fixed N-API contract value declared by `native-compatibility.schema.json`. */
 export const REQUIRED_NAPI_MINIMUM = 8;
 
@@ -33,6 +36,10 @@ interface FieldSpec {
   readonly nullable?: boolean;
   /** Nested object schema (`kind: 'object'` only). */
   readonly shape?: Shape;
+  /** JSON Schema `propertyNames.pattern` for object keys. */
+  readonly valuePattern?: RegExp;
+  /** JSON Schema `anyOf` — a value must satisfy at least one variant. */
+  readonly values?: readonly FieldSpec[];
   /** Item spec for `kind: 'array'`. */
   readonly items?: FieldSpec;
 }
@@ -58,6 +65,15 @@ type ShapeOf<T> = Omit<Shape, 'fields' | 'required'> & {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function matchesVariant(value: unknown, spec: FieldSpec): boolean {
+  try {
+    checkField(value, spec, 'value');
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function checkField(value: unknown, spec: FieldSpec, path: string): void {
@@ -101,7 +117,23 @@ function checkField(value: unknown, spec: FieldSpec, path: string): void {
     }
     case 'object': {
       if (!isPlainObject(value)) throw new Error(`invalid ${path}: expected an object`);
+      if (spec.valuePattern) {
+        for (const key of Object.keys(value)) {
+          if (!spec.valuePattern.test(key)) {
+            throw new Error(`invalid ${path}.${key}: key does not match the required pattern`);
+          }
+        }
+      }
       if (spec.shape) assertShape(value, spec.shape, path);
+      if (spec.values) {
+        for (const [key, entry] of Object.entries(value)) {
+          if (!spec.values.some((variant) => matchesVariant(entry, variant))) {
+            throw new Error(
+              `invalid ${path}.${key}: value must be an object or an array`,
+            );
+          }
+        }
+      }
       return;
     }
     case 'array': {
@@ -237,7 +269,11 @@ export const WORLD_KB_ENTITY_PATCH_SHAPE: Shape = {
         'era',
       ],
     },
-    modules: { kind: 'object' },
+    modules: {
+      kind: 'object',
+      valuePattern: MODULE_KEY_PATTERN,
+      values: [{ kind: 'object' }, { kind: 'array' }],
+    },
   },
   required: [],
   minProperties: 1,
