@@ -123,12 +123,14 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
       },
     });
     const first = core.nextProviderEvents('op-1', 1, 1024);
-    const second = core.nextProviderEvents('op-1', 1, 1024);
-    void second.catch(() => {});
+    const busy = assert.rejects(
+      () => core.nextProviderEvents('op-1', 1, 1024),
+      /pull already in flight/,
+    );
     await new Promise((r) => setTimeout(r, 50));
     release?.();
-    const results = await Promise.allSettled([first, second]);
-    assert.ok(results.some((r) => r.status === 'rejected'));
+    await busy;
+    await first;
     await core.close();
   });
 
