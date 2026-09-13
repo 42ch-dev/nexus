@@ -48,6 +48,28 @@ env:
   NODE_FLOOR: "22.22.0"
   NODE_COHORT: "24.20.0"
   EVIDENCE: .mstar/iterations/v1.189/guides/evidence
+  # --- immutable build inputs (architecture-contracts §9) -------------------
+  # Every row used to consume at least one mutable input: a moving container
+  # tag on the Linux row and an at-execution-time installer download. Both are
+  # now addressed by immutable identity and the identifiers are written into
+  # the evidence (`proof-build-inputs-*.json`).
+  # Hosted rows: the toolchain installer is the SHA-pinned action below; the
+  # runner label is the pinned image identity for that OS.
+  RUST_INSTALLER_ACTION: "dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8"
+  # Linux row: manylinux_2_28_x86_64:latest resolved 2026-09-13 (linux/amd64).
+  # The digest is the schema-2 manifest digest and equals the SHA-256 of the
+  # manifest body; the runner pulls by digest, so the tag can never be repointed.
+  MANYLINUX_IMAGE: "quay.io/pypa/manylinux_2_28_x86_64"
+  MANYLINUX_TAG: "latest"
+  MANYLINUX_RESOLVED_AT: "2026-09-13"
+  MANYLINUX_IMAGE_DIGEST: "sha256:53390351aeb4688114b02c36a23b3e6ce1166ee9b7afc5df1a4f776354fc764c"
+  # rustup-init from the version-addressed archive (not the sh.rustup.rs
+  # redirector, whose content changes per release). The downloaded binary is
+  # verified against this digest before execution; the same value is published
+  # in the artifact's own `.sha256` sidecar at that immutable URL.
+  RUSTUP_INIT_VERSION: "1.28.2"
+  RUSTUP_INIT_TARGET: "x86_64-unknown-linux-gnu"
+  RUSTUP_INIT_SHA256: "20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c"
 
 jobs:
   native-package-proof:
@@ -75,6 +97,34 @@ jobs:
             target: x86_64-apple-darwin
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Record immutable build inputs
+        shell: bash
+        env:
+          ROW_SLUG: ${{ matrix.slug }}
+          RUNNER_LABEL: ${{ matrix.os }}
+          RUST_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${EVIDENCE}"
+          cat > "${EVIDENCE}/proof-build-inputs-${ROW_SLUG}.json" <<JSON
+          {
+            "schema": "rft-p3-t1-build-inputs/v1",
+            "row": "${ROW_SLUG}",
+            "source_sha": "${GITHUB_SHA}",
+            "runner_label": "${RUNNER_LABEL}",
+            "rust": {
+              "toolchain": "${RUST_TOOLCHAIN}",
+              "target": "${RUST_TARGET}",
+              "installer_action": "${RUST_INSTALLER_ACTION}"
+            },
+            "node": { "floor": "${NODE_FLOOR}", "cohort": "${NODE_COHORT}" },
+            "pnpm": "${PNPM_VERSION}",
+            "container": null,
+            "note": "hosted row: the pinned toolchain installer action plus the pinned runner label are the immutable inputs; measured toolchain versions are recorded by inspect-binary.mjs"
+          }
+          JSON
+          cat "${EVIDENCE}/proof-build-inputs-${ROW_SLUG}.json"
 
       - uses: ./.github/actions/setup-monorepo
         with:
@@ -161,6 +211,7 @@ jobs:
           # Tarballs stay on the runner (large and reproducible); the evidence
           # JSONs are what the matrix summary consumes.
           path: |
+            ${{ env.EVIDENCE }}/proof-build-inputs-${{ matrix.slug }}.json
             ${{ env.EVIDENCE }}/native-packages/${{ matrix.slug }}/package-receipt.json
             ${{ env.EVIDENCE }}/native-binary-${{ matrix.slug }}/binary-inspection.json
             ${{ env.EVIDENCE }}/install-${{ matrix.short }}22/install-proof.json
@@ -176,7 +227,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     container:
-      image: quay.io/pypa/manylinux_2_28_x86_64
+      # Pinned by immutable digest (see MANYLINUX_IMAGE_DIGEST). A tag, even a
+      # version-looking one, can be repointed; a digest cannot.
+      image: quay.io/pypa/manylinux_2_28_x86_64@sha256:53390351aeb4688114b02c36a23b3e6ce1166ee9b7afc5df1a4f776354fc764c
     env:
       TARGET: x86_64-unknown-linux-gnu
       SHORT: linux
@@ -184,6 +237,38 @@ jobs:
       CARGO_HOME: /root/.cargo
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Record immutable build inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${EVIDENCE}"
+          cat > "${EVIDENCE}/proof-build-inputs-linux-x64-gnu.json" <<JSON
+          {
+            "schema": "rft-p3-t1-build-inputs/v1",
+            "row": "linux-x64-gnu",
+            "source_sha": "${GITHUB_SHA}",
+            "runner_label": "ubuntu-24.04",
+            "rust": {
+              "toolchain": "${RUST_TOOLCHAIN}",
+              "target": "${TARGET}",
+              "installer_url": "https://static.rust-lang.org/rustup/archive/${RUSTUP_INIT_VERSION}/${RUSTUP_INIT_TARGET}/rustup-init",
+              "installer_version": "${RUSTUP_INIT_VERSION}",
+              "installer_sha256": "${RUSTUP_INIT_SHA256}"
+            },
+            "node": { "floor": "${NODE_FLOOR}", "cohort": "${NODE_COHORT}" },
+            "pnpm": "${PNPM_VERSION}",
+            "container": {
+              "image": "${MANYLINUX_IMAGE}",
+              "tag_at_resolution": "${MANYLINUX_TAG}",
+              "resolved_at": "${MANYLINUX_RESOLVED_AT}",
+              "digest": "${MANYLINUX_IMAGE_DIGEST}",
+              "reference": "${MANYLINUX_IMAGE}@${MANYLINUX_IMAGE_DIGEST}"
+            },
+            "note": "container and rustup-init are addressed by immutable identity; the artifact is built and executed against the image's glibc 2.28 runtime"
+          }
+          JSON
+          cat "${EVIDENCE}/proof-build-inputs-linux-x64-gnu.json"
 
       - name: Assert glibc 2.28 sysroot and GCC >= 10.1
         shell: bash
@@ -202,17 +287,34 @@ jobs:
             exit 1
           }
 
-      # rustup is the one tool this image does not ship. The official installer
-      # is fetched over TLS from the documented endpoint and pinned to
-      # RUST_TOOLCHAIN; dtolnay/rust-toolchain is not usable on a bare image.
-      - name: Install pinned Rust toolchain
+      # rustup is the one tool this image does not ship. The installer comes
+      # from the version-addressed archive (immutable URL) and is verified
+      # against RUSTUP_INIT_SHA256 before anything executes it; dtolnay/
+      # rust-toolchain is not usable on a bare image.
+      - name: Install pinned Rust toolchain (integrity-checked rustup-init)
         shell: bash
         run: |
           set -euo pipefail
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh
-          sh /tmp/rustup-init.sh -y --no-modify-path --profile minimal \
+          rustup_url="https://static.rust-lang.org/rustup/archive/${RUSTUP_INIT_VERSION}/${RUSTUP_INIT_TARGET}/rustup-init"
+          rustup_init="/tmp/rustup-init-${RUSTUP_INIT_VERSION}"
+          curl --proto '=https' --tlsv1.2 -sSf "${rustup_url}" -o "${rustup_init}"
+          sidecar="$(curl --proto '=https' --tlsv1.2 -sSf "${rustup_url}.sha256" | awk '{print $1}')"
+          measured="$(sha256sum "${rustup_init}" | awk '{print $1}')"
+          if [ "${sidecar}" != "${RUSTUP_INIT_SHA256}" ]; then
+            echo "::error::published rustup-init sidecar ${sidecar} does not match the pinned ${RUSTUP_INIT_SHA256}"
+            exit 1
+          fi
+          if [ "${measured}" != "${RUSTUP_INIT_SHA256}" ]; then
+            echo "::error::rustup-init integrity mismatch: pinned ${RUSTUP_INIT_SHA256}, measured ${measured}"
+            exit 1
+          fi
+          chmod +x "${rustup_init}"
+          "${rustup_init}" -y --no-modify-path --profile minimal \
             --default-toolchain "${RUST_TOOLCHAIN}" \
             --target x86_64-unknown-linux-gnu --target wasm32-unknown-unknown
+          mkdir -p "${EVIDENCE}"
+          printf '%s  rustup-init-%s\n' "${measured}" "${RUSTUP_INIT_VERSION}" \
+            > "${EVIDENCE}/proof-rustup-init-${RUSTUP_INIT_VERSION}.sha256.txt"
           echo "${CARGO_HOME}/bin" >> "$GITHUB_PATH"
           "${CARGO_HOME}/bin/rustc" -Vv
 
@@ -257,6 +359,8 @@ jobs:
         with:
           name: rft-native-evidence-linux-x64-gnu
           path: |
+            ${{ env.EVIDENCE }}/proof-build-inputs-linux-x64-gnu.json
+            ${{ env.EVIDENCE }}/proof-rustup-init-${{ env.RUSTUP_INIT_VERSION }}.sha256.txt
             ${{ env.EVIDENCE }}/native-packages/linux-x64-gnu/package-receipt.json
             ${{ env.EVIDENCE }}/native-binary-linux-x64-gnu/binary-inspection.json
             ${{ env.EVIDENCE }}/install-linux22/install-proof.json
@@ -296,6 +400,7 @@ jobs:
             { suffix: 'darwin-x64', short: 'macx64', job_result: process.env.MATRIX_JOB_RESULT },
           ];
           const out = [];
+          const buildInputs = [];
           for (const row of rows) {
             const files = {
               package_receipt: join(root, 'native-packages', row.suffix, 'package-receipt.json'),
@@ -303,6 +408,11 @@ jobs:
               install_node_floor: join(root, 'install-' + row.short + '22', 'install-proof.json'),
               install_node_cohort: join(root, 'install-' + row.short + '24', 'install-proof.json'),
             };
+            const immutableInputsPath = join(root, 'proof-build-inputs-' + row.suffix + '.json');
+            const immutableInputs = existsSync(immutableInputsPath)
+              ? JSON.parse(readFileSync(immutableInputsPath, 'utf8'))
+              : null;
+            if (immutableInputs) buildInputs.push(immutableInputs);
             const states = {};
             const missing = [];
             for (const [key, path] of Object.entries(files)) {
@@ -313,13 +423,28 @@ jobs:
                 missing.push(path);
               }
             }
+            // A row must carry its immutable build-input record too, or its
+            // provenance is unverifiable and the row cannot be a pass.
+            if (!immutableInputs) {
+              states.build_inputs = 'unavailable';
+              missing.push(immutableInputsPath);
+            } else {
+              states.build_inputs = 'recorded';
+            }
             const values = Object.values(states);
             const status = values.includes('fail')
               ? 'fail'
-              : values.every((value) => value === 'pass')
+              : values.every((value) => value === 'pass' || value === 'recorded')
                 ? 'pass'
                 : 'unavailable';
-            out.push({ suffix: row.suffix, job_result: row.job_result, states, missing_evidence: missing, status });
+            out.push({
+              suffix: row.suffix,
+              job_result: row.job_result,
+              states,
+              missing_evidence: missing,
+              build_inputs: immutableInputs,
+              status,
+            });
           }
           const jobFailure = [process.env.MATRIX_JOB_RESULT, process.env.LINUX_JOB_RESULT].some(
             (result) => result !== 'success',
@@ -337,6 +462,17 @@ jobs:
             run_id: process.env.GITHUB_RUN_ID ?? null,
             utc: new Date().toISOString(),
             jobs: { native_package_proof: process.env.MATRIX_JOB_RESULT, linux_gnu_proof: process.env.LINUX_JOB_RESULT },
+            build_inputs: buildInputs,
+            pinned: {
+              rust_toolchain: process.env.RUST_TOOLCHAIN,
+              node_floor: process.env.NODE_FLOOR,
+              node_cohort: process.env.NODE_COHORT,
+              pnpm: process.env.PNPM_VERSION,
+              manylinux_image: process.env.MANYLINUX_IMAGE,
+              manylinux_digest: process.env.MANYLINUX_IMAGE_DIGEST,
+              rustup_init_version: process.env.RUSTUP_INIT_VERSION,
+              rustup_init_sha256: process.env.RUSTUP_INIT_SHA256,
+            },
             rows: out,
             decision,
             note: 'unavailable means the evidence file was never produced (runner, image or toolchain contract missing) — it blocks P3 and is never a pass',

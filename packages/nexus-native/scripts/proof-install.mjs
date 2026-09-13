@@ -466,7 +466,7 @@ async function runStage(stage, configPath) {
   stageResult.execute = execute;
   if (stage === 'cancel') {
     const started = Date.now();
-    stageResult.cancel = await core
+    const cancelReply = await core
       .providerCall({
         request_id: stage + '-cancel',
         method: 'cancel',
@@ -477,6 +477,15 @@ async function runStage(stage, configPath) {
       })
       .catch((error) => ({ ok: false, error: String(error && error.message ? error.message : error) }));
     stageResult.cancel_ms = Date.now() - started;
+    stageResult.cancel = cancelReply;
+    // The accepted cancel outcome is exact, not a duration: a successful reply
+    // that echoes the cancelled operation through the same session. A
+    // rejection, an interrupted cleanup (ok:false), or a mismatched id is a
+    // failed cancel even though a duration was measured.
+    stageResult.cancel_accepted =
+      cancelReply?.ok === true &&
+      cancelReply.operation_id === execute.operation_id &&
+      cancelReply.session_id === launch.session_id;
   }
   stageResult.stream = await drain(core, execute.operation_id);
   stageResult.shutdown = await core
@@ -826,16 +835,23 @@ if (!positiveUnusable) {
     happy.close,
   );
   const cancel = positiveResult.stages?.cancel ?? {};
-  // The cancel round trip is measured and recorded; whether the blocked prompt
-  // settles with a terminal event or the provider EOFs is a LIFE-2 timing
-  // property owned by P2's adapter proof, so the packaging proof records it
-  // instead of asserting it. The effect of the cancel is proven by
-  // `cancel_close_confirmed` plus `fixture_children_reaped`.
-  record('provider_cancel_round_trip', typeof cancel.cancel_ms === 'number', {
-    cancel_ms: cancel.cancel_ms,
-    cancel: cancel.cancel,
-    terminal_observed: cancel.stream?.terminal ?? null,
-  });
+  // The accepted cancel outcome is required, not merely observed: `ok:true`
+  // echoing the cancelled operation through the same session, plus a measured
+  // duration. The reply and any error are retained so a non-ok or interrupted
+  // cancel is visible in the evidence instead of passing as a timing sample.
+  // Whether the cancelled operation then declares its terminal inside the
+  // 2 s LIFE-2 budget remains P2's criterion; here it is recorded.
+  record(
+    'provider_cancel_accepted',
+    cancel.cancel_accepted === true && typeof cancel.cancel_ms === 'number',
+    {
+      cancel_accepted: cancel.cancel_accepted ?? false,
+      cancel_ms: cancel.cancel_ms ?? null,
+      cancel_reply: cancel.cancel ?? null,
+      cancel_error: cancel.cancel?.error ?? null,
+      terminal_observed: cancel.stream?.terminal ?? null,
+    },
+  );
   record(
     'cancel_close_confirmed',
     cancel.close?.cleanup_confirmed === true && cancel.close?.state === 'closed',
