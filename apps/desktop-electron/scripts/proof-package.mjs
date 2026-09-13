@@ -114,12 +114,14 @@ function readSignedEntitlements(appPath) {
   const res = run('codesign', ['-d', '--entitlements', ':-', appPath]);
   const text = `${res.stdout}${res.stderr}`;
   const plistStart = text.indexOf('<?xml');
-  if (plistStart < 0) return { status: res.status, raw: text.slice(-2000), parsed: null };
+  if (plistStart < 0) {
+    return { status: res.status, raw: text.slice(-2000), parsed: null, parse_error: 'no embedded plist' };
+  }
   const tmp = join('/tmp', `nexus-entitlements-${process.pid}.plist`);
   writeFileSync(tmp, text.slice(plistStart));
   const json = run('plutil', ['-convert', 'json', '-o', '-', tmp]);
   try {
-    return { status: res.status, raw: text.slice(-2000), parsed: JSON.parse(json.stdout) };
+    return { status: res.status, raw: text.slice(-2000), parsed: JSON.parse(json.stdout), plist_sha256: sha256File(tmp) };
   } catch {
     return { status: res.status, raw: text.slice(-2000), parsed: null, parse_error: json.stderr };
   }
@@ -129,10 +131,73 @@ function readExpectedEntitlements() {
   if (!existsSync(expectedEntitlementsFile)) return { path: expectedEntitlementsFile, parsed: null };
   const json = run('plutil', ['-convert', 'json', '-o', '-', expectedEntitlementsFile]);
   try {
-    return { path: expectedEntitlementsFile, parsed: JSON.parse(json.stdout) };
+    return {
+      path: expectedEntitlementsFile,
+      parsed: JSON.parse(json.stdout),
+      source_sha256: sha256File(expectedEntitlementsFile),
+    };
   } catch {
-    return { path: expectedEntitlementsFile, parsed: null, parse_error: json.stderr };
+    return {
+      path: expectedEntitlementsFile,
+      parsed: null,
+      source_sha256: sha256File(expectedEntitlementsFile),
+      parse_error: json.stderr,
+    };
   }
+}
+
+/**
+ * Canonical form of an entitlement plist: keys sorted recursively so two
+ * documents with identical content compare equal regardless of ordering.
+ */
+function canonicaliseEntitlements(value) {
+  if (Array.isArray(value)) return value.map(canonicaliseEntitlements);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, canonicaliseEntitlements(value[key])]),
+    );
+  }
+  return value;
+}
+
+/**
+ * Compare the signed entitlements to the documented narrow set *including
+ * values*. Matching key names alone would accept a signed app whose booleans
+ * changed (P3-T3 review I6); a parse or codesign failure is rejected outright.
+ */
+function compareEntitlements(signed, expected) {
+  const problems = [];
+  const expectedParsed = expected.parsed;
+  if (!expectedParsed || Object.keys(expectedParsed).length === 0) {
+    problems.push('expected entitlements plist is missing or unparseable');
+  }
+  if (signed.status !== 0) problems.push(`codesign -d --entitlements exited ${signed.status}`);
+  if (!signed.parsed) problems.push(`signed entitlements unparseable: ${signed.parse_error ?? 'unknown'}`);
+  let values_match = null;
+  let keys_match = null;
+  if (expectedParsed && signed.parsed) {
+    const expectedKeys = Object.keys(expectedParsed).sort();
+    const signedKeys = Object.keys(signed.parsed).sort();
+    keys_match = JSON.stringify(expectedKeys) === JSON.stringify(signedKeys);
+    values_match =
+      JSON.stringify(canonicaliseEntitlements(signed.parsed)) ===
+      JSON.stringify(canonicaliseEntitlements(expectedParsed));
+    if (!keys_match) problems.push(`entitlement key sets differ: signed=[${signedKeys.join(',')}] expected=[${expectedKeys.join(',')}]`);
+    if (!values_match) problems.push('signed entitlement values differ from the documented narrow set');
+  }
+  return {
+    pass: problems.length === 0 && values_match === true,
+    keys_match,
+    values_match,
+    problems,
+    signed: signed.parsed,
+    expected: expectedParsed,
+    expected_source: { path: expected.path, sha256: expected.source_sha256 },
+    signed_entitlements_plist_sha256: signed.plist_sha256 ?? null,
+    signed_raw_tail: signed.raw,
+  };
 }
 
 function readBundleIdentifier(appPath) {
@@ -209,10 +274,8 @@ async function main() {
   const codesign = verifyCodesign(appPath);
   const entitlements = readSignedEntitlements(appPath);
   const expectedEntitlements = readExpectedEntitlements();
-  const expectedKeys = Object.keys(expectedEntitlements.parsed ?? {}).sort();
-  const signedKeys = Object.keys(entitlements.parsed ?? {}).sort();
-  const entitlementsOk =
-    expectedKeys.length > 0 && JSON.stringify(expectedKeys) === JSON.stringify(signedKeys);
+  const entitlementComparison = compareEntitlements(entitlements, expectedEntitlements);
+  const entitlementsOk = entitlementComparison.pass === true;
 
   if (args.signedRequired) {
     if (!process.env.APPLE_SIGNING_IDENTITY && !args.appPath) {
@@ -222,13 +285,7 @@ async function main() {
     evidence.checks.spctl_execute = verifyGate(appPath);
     evidence.checks.notary = verifyNotary(appPath);
     evidence.checks.stapler_validate = verifyStaple(appPath);
-    evidence.checks.entitlements = {
-      signed: entitlements.parsed,
-      signed_raw_tail: entitlements.raw,
-      expected_file: expectedEntitlements.path,
-      expected: expectedEntitlements.parsed,
-      keys_match: entitlementsOk,
-    };
+    evidence.checks.entitlements = entitlementComparison;
     evidence.checks.bundle_identifier = { expected: bundleId, actual: readBundleIdentifier(appPath) };
 
     const failedSignatureInputs = [];
@@ -238,7 +295,11 @@ async function main() {
     if (evidence.checks.stapler_validate.status !== 0) failedSignatureInputs.push('stapler validate');
     if (evidence.checks.bundle_identifier.actual !== bundleId) failedSignatureInputs.push('bundle identifier mismatch');
     if (!codesign.hardened_runtime) failedSignatureInputs.push('hardened runtime flag absent');
-    if (!entitlementsOk) failedSignatureInputs.push('signed entitlements do not match the documented narrow set');
+    if (!entitlementsOk) {
+      failedSignatureInputs.push(
+        `signed entitlements do not match the documented narrow set: ${entitlementComparison.problems.join('; ') || 'value mismatch'}`,
+      );
+    }
 
     evidence.checks.signature_predicates = {
       pass: failedSignatureInputs.length === 0,
@@ -250,12 +311,7 @@ async function main() {
     };
   } else {
     evidence.checks.codesign = codesign;
-    evidence.checks.entitlements = {
-      signed: entitlements.parsed,
-      expected_file: expectedEntitlements.path,
-      expected: expectedEntitlements.parsed,
-      keys_match: entitlementsOk,
-    };
+    evidence.checks.entitlements = entitlementComparison;
     evidence.checks.signature_predicates = {
       pass: false,
       failed: ['--signed-required not set'],
@@ -380,7 +436,15 @@ function readPinVersion(name) {
   }
 }
 
-main().catch((err) => {
-  console.error(err instanceof Error ? err.message : String(err));
-  process.exit(1);
-});
+function isDirectInvocation() {
+  return process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+}
+
+if (isDirectInvocation()) {
+  main().catch((err) => {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  });
+}
+
+export { canonicaliseEntitlements, compareEntitlements };

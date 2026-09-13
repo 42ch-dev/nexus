@@ -25,6 +25,7 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -34,12 +35,12 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   CANONICAL_SAMPLES,
-  NATIVE_LOAD_CHECK_ID,
-  REQUIRED_CHECKS,
+  KNOWN_CONFOUNDERS,
   REQUIRED_PHASES,
   RUNTIME_SCHEMA,
-  KNOWN_CONFOUNDERS,
   evaluateRuntimeEvidence,
+  providerLifecycleComplete,
+  summarise,
 } from './proof-contract.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -139,6 +140,7 @@ function parseArgs(argv) {
     soakSeconds: 600,
     cycles: 100,
     portBase: 19300,
+    deadlineSeconds: 2100,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -154,6 +156,7 @@ function parseArgs(argv) {
     else if (arg === '--warm') out.warm = Number(argv[++i]);
     else if (arg === '--soak-seconds') out.soakSeconds = Number(argv[++i]);
     else if (arg === '--cycles') out.cycles = Number(argv[++i]);
+    else if (arg === '--deadline-seconds') out.deadlineSeconds = Number(argv[++i]);
     else if (arg === '--port-base') out.portBase = Number(argv[++i]);
     else if (arg === '--help' || arg === '-h') out.help = true;
   }
@@ -415,6 +418,21 @@ class Cdp {
 
 // --- app launch -----------------------------------------------------------
 
+/**
+ * Raised when the packaged owner is observably unable to serve native work.
+ * Callers treat it as a confounder (blocked), never as a measured product fail.
+ */
+class OwnerUnavailableError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'OwnerUnavailableError';
+    this.ownerUnavailable = true;
+  }
+}
+
+/** Readiness diagnostics that mean the owner will never answer this launch. */
+const OWNER_UNAVAILABLE_PATTERN = /utility exited|owner_busy|prior owner interrupted|owner is closing|no preload api/i;
+
 class AppUnderProof {
   constructor(appPath, home, port, logPath, launchMethod = 'direct') {
     this.appPath = appPath;
@@ -426,6 +444,8 @@ class AppUnderProof {
     this.cdp = null;
     this.pid = null;
     this.launchedVia = null;
+    this.exitCode = undefined;
+    this.spawnError = null;
   }
 
   /**
@@ -464,10 +484,26 @@ class AppUnderProof {
         detached: true,
       });
       this.child.on('error', onSpawnError);
+      this.child.on('exit', (code) => {
+        this.exitCode = code ?? 0;
+      });
       this.pid = this.child.pid;
       this.launchedVia = 'direct';
     }
-    const attached = await Cdp.attach(this.port);
+    // A failure to attach can mean the app refused to start (e.g. another
+    // instance holds the single-instance lock and this one exited immediately).
+    // That is an owner-unavailable condition, not a product measurement.
+    let attached;
+    try {
+      attached = await Cdp.attach(this.port);
+    } catch (error) {
+      if (this.hasExited()) {
+        throw new OwnerUnavailableError(
+          `app exited before the renderer was reachable (exit=${this.exitCode ?? 'unknown'}): ${error.message}`,
+        );
+      }
+      throw error;
+    }
     this.cdp = attached.cdp;
     if (!this.pid) this.pid = await this.#discoverMainPid(exe);
     return this;
@@ -486,14 +522,53 @@ class AppUnderProof {
     return null;
   }
 
+  /** True once the main process has died (or failed to spawn) this launch. */
+  hasExited() {
+    if (this.spawnError) return true;
+    if (this.exitCode !== undefined) return true;
+    if (this.pid == null) return false;
+    return !isAlive(this.pid);
+  }
+
+  /** The Electron utility process serving native work, if one is alive. */
+  utilityProcess() {
+    if (!this.pid) return null;
+    return ownedProcesses(this.pid).find((p) => p.command.includes('--type=utility')) ?? null;
+  }
+
+  /**
+   * Wait for graph-interactive readiness.
+   *
+   * Aborts as soon as the owner is observably unavailable rather than burning
+   * the whole window: a dead main process, or a readiness probe that reports the
+   * utility owner died / is fenced, means no measurement will ever arrive. The
+   * caller records that as a confounder and a non-green result instead of
+   * letting a top-level timeout erase the run (P3-T3 review M2).
+   */
   async waitReady(timeoutMs = 60_000) {
     const deadline = Date.now() + timeoutMs;
     let last = null;
+    let ownerFailures = 0;
     while (Date.now() < deadline) {
+      if (this.hasExited()) {
+        throw new OwnerUnavailableError(
+          `app process unavailable during readiness (exit=${this.exitCode ?? 'spawn-failed'}${this.spawnError ? ` ${this.spawnError}` : ''})`,
+        );
+      }
       try {
         last = await this.cdp.evaluateJson(READINESS_EXPR, 60_000);
         if (last?.entities > 0) return last;
+        const diagnostic = `${last?.open_error ?? ''} ${last?.graph_error ?? ''}`;
+        if (OWNER_UNAVAILABLE_PATTERN.test(diagnostic)) {
+          ownerFailures += 1;
+          if (ownerFailures >= 3) {
+            throw new OwnerUnavailableError(`utility owner unavailable: ${diagnostic.trim()}`);
+          }
+        } else {
+          ownerFailures = 0;
+        }
       } catch (error) {
+        if (error instanceof OwnerUnavailableError) throw error;
         last = { error: String(error) };
       }
       await sleep(150);
@@ -586,56 +661,59 @@ function providerPayload(kind, extra = {}) {
 
 // --- phases ---------------------------------------------------------------
 
-function summarise(samples) {
-  const values = samples.filter((v) => typeof v === 'number' && Number.isFinite(v)).sort((a, b) => a - b);
-  if (values.length === 0) return { count: 0, p50: null, p95: null, max: null, min: null };
-  const nearestRank = (q) => values[Math.min(values.length - 1, Math.ceil(q * values.length) - 1)];
-  return {
-    count: values.length,
-    min: values[0],
-    p50: nearestRank(0.5),
-    p95: nearestRank(0.95),
-    max: values[values.length - 1],
-  };
+/** True once the run has passed its top-level deadline. */
+function deadlineExceeded(ctx) {
+  return typeof ctx.deadlineAt === 'number' && Date.now() > ctx.deadlineAt;
+}
+
+/** Run one launch cohort, aborting the cohort as soon as the owner is unavailable. */
+async function runLaunchCohort(ctx, count, label, samples) {
+  const { args, outDir, appPath, home } = ctx;
+  let port = ctx.portCursor.value;
+  let ownerUnavailable = null;
+  for (let i = 0; i < count; i += 1) {
+    if (deadlineExceeded(ctx)) {
+      samples.push({ index: i, ms: null, aborted: 'run_deadline_exceeded' });
+      break;
+    }
+    if (ownerUnavailable) {
+      samples.push({ index: i, ms: null, aborted: 'owner_unavailable', error: ownerUnavailable });
+      continue;
+    }
+    await quiesce();
+    const app = new AppUnderProof(appPath, home, port++, join(outDir, 'app-launch.log'), args.launchMethod);
+    ctx.portCursor.value = port;
+    const started = Date.now();
+    try {
+      await app.launch();
+      const ready = await app.waitReady();
+      samples.push({ index: i, ms: Date.now() - started, ready });
+    } catch (error) {
+      if (error instanceof OwnerUnavailableError) {
+        ownerUnavailable = String(error.message);
+        samples.push({ index: i, ms: null, aborted: 'owner_unavailable', error: ownerUnavailable });
+      } else {
+        samples.push({ index: i, ms: null, error: String(error), log_tail: app.logTail() });
+      }
+    }
+    const exited = await app.closeCleanly();
+    if (!exited) await app.destroy();
+  }
+  return { label, ownerUnavailable };
 }
 
 async function phaseLaunch(ctx) {
-  const { args, outDir, appPath, home, checks } = ctx;
+  const { args, checks } = ctx;
   const samples = { cold: [], warm: [] };
-  let port = args.portBase + 10;
+  ctx.portCursor = { value: args.portBase + 10 };
 
-  for (let i = 0; i < args.cold; i += 1) {
-    await quiesce();
-    const app = new AppUnderProof(appPath, home, port++, join(outDir, 'app-launch.log'), args.launchMethod);
-    const started = Date.now();
-    try {
-      await app.launch();
-      const ready = await app.waitReady();
-      samples.cold.push({ index: i, ms: Date.now() - started, ready });
-    } catch (error) {
-      samples.cold.push({ index: i, ms: null, error: String(error), log_tail: app.logTail() });
-    }
-    const exited = await app.closeCleanly();
-    if (!exited) await app.destroy();
-  }
-
-  for (let i = 0; i < args.warm; i += 1) {
-    const app = new AppUnderProof(appPath, home, port++, join(outDir, 'app-launch.log'), args.launchMethod);
-    const started = Date.now();
-    try {
-      await app.launch();
-      const ready = await app.waitReady();
-      samples.warm.push({ index: i, ms: Date.now() - started, ready });
-    } catch (error) {
-      samples.warm.push({ index: i, ms: null, error: String(error), log_tail: app.logTail() });
-    }
-    const exited = await app.closeCleanly();
-    if (!exited) await app.destroy();
-  }
+  const coldCohort = await runLaunchCohort(ctx, args.cold, 'cold', samples.cold);
+  const warmCohort = await runLaunchCohort(ctx, args.warm, 'warm', samples.warm);
 
   const cold = summarise(samples.cold.map((s) => s.ms));
   const warm = summarise(samples.warm.map((s) => s.ms));
   const failures = [...samples.cold, ...samples.warm].filter((s) => s.ms === null).length;
+  const ownerUnavailable = coldCohort.ownerUnavailable ?? warmCohort.ownerUnavailable ?? null;
   // START-1: cold p95 <= 5s / max <= 8s; warm p95 <= 3s / max <= 5s.
   const pass =
     failures === 0 &&
@@ -648,9 +726,12 @@ async function phaseLaunch(ctx) {
   checks.push({
     id: 'START-1',
     ok: pass,
-    detail: `cold(n=${cold.count},p95=${cold.p95}ms,max=${cold.max}ms) warm(n=${warm.count},p95=${warm.p95}ms,max=${warm.max}ms) failures=${failures}`,
+    detail:
+      `cold(n=${cold.count},p95=${cold.p95}ms,max=${cold.max}ms) warm(n=${warm.count},p95=${warm.p95}ms,max=${warm.max}ms) ` +
+      `failures=${failures}${ownerUnavailable ? ' owner_unavailable' : ''}`,
   });
-  return { samples, summary: { cold, warm }, failures };
+  if (ownerUnavailable) ctx.confounders?.push('utility_owner_unavailable');
+  return { samples, summary: { cold, warm }, failures, owner_unavailable: ownerUnavailable };
 }
 
 const SOAK_START_EXPR = (readsPerSecond, writesPerSecond, entities) => `(() => {
@@ -742,6 +823,10 @@ async function phaseResources(ctx) {
     const soakMs = args.soakSeconds * 1000;
     let nextProviderAt = 15_000;
     while (Date.now() - soakBegan < soakMs) {
+      if (deadlineExceeded(ctx)) {
+        resource.aborted = 'run_deadline_exceeded';
+        break;
+      }
       trace.push(rssSample(app.pid));
       if (Date.now() - soakBegan >= nextProviderAt && providerOps.length < 4) {
         providerOps.push(await runProviderOperation(app, home, providerOps.length));
@@ -800,6 +885,10 @@ async function phaseResources(ctx) {
     const cycleSamples = [];
     const durations = [];
     for (let i = 1; i <= args.cycles; i += 1) {
+      if (deadlineExceeded(ctx)) {
+        resource.cycles_aborted = 'run_deadline_exceeded';
+        break;
+      }
       const began = Date.now();
       await cyclesApp.cdp.evaluate(`window.nexusProof.runProofStep('close')`, 30_000);
       await cyclesApp.cdp.evaluate(`window.nexusProof.runProofStep('open')`, 30_000);
@@ -838,6 +927,9 @@ async function phaseResources(ctx) {
     };
     return resource;
   } catch (error) {
+    if (error instanceof OwnerUnavailableError || /utility exited|owner unavailable/i.test(String(error))) {
+      ctx.confounders?.push('utility_owner_unavailable');
+    }
     checks.push({ id: 'RES-1', ok: false, detail: `resources phase failed: ${error}` });
     resource.error = String(error);
     resource.log_tail = app.logTail();
@@ -857,8 +949,16 @@ async function collectSurvivors(app) {
     .map((p) => ({ pid: p.pid, kind: p.command.includes('--type=utility') ? 'utility' : 'provider-child' }));
 }
 
+/**
+ * Drive one complete provider lifecycle and require every observable step:
+ * probe, launch, execute, a bounded drain that must observe at least one
+ * `MessageDelta` and exactly one terminal (`OpFinished`/`OpFailed`), cancel,
+ * and shutdown. A failed pull, a missing terminal event, or a failed shutdown
+ * makes the whole operation fail — a dispatched request is not an observed
+ * lifecycle (P3-T3 review I7).
+ */
 async function runProviderOperation(app, home, index) {
-  const op = { index, ok: false, steps: {} };
+  const op = { index, ok: false, steps: {}, drain: { batches: 0, events: 0, deltas: 0, terminals: [] } };
   try {
     const probe = await app.cdp.evaluateJson(
       `window.nexusProof.runProofStep('provider_probe', ${JSON.stringify({
@@ -881,7 +981,7 @@ async function runProviderOperation(app, home, index) {
     );
     const sessionId = launch?.result?.session_id ?? null;
     op.steps.launch = { ok: Boolean(launch?.ok), session_id: sessionId };
-    if (!launch?.ok || !sessionId) return op;
+    if (!op.steps.launch.ok || !sessionId) return op;
     const execute = await app.cdp.evaluateJson(
       `window.nexusProof.runProofStep('provider_probe', ${JSON.stringify({
         request_id: `soak-execute-${index}`,
@@ -894,20 +994,55 @@ async function runProviderOperation(app, home, index) {
     );
     const operationId = execute?.result?.operation_id ?? null;
     op.steps.execute = { ok: Boolean(execute?.ok), operation_id: operationId };
-    if (!operationId) return op;
-    const batch = await app.cdp.evaluateJson(
-      `window.nexusProof.runProofStep('provider_pull', ${JSON.stringify({
-        operation_id: operationId,
-        max_events: 16,
-        max_bytes: 262144,
-      })})`,
-      60_000,
-    );
+    if (!op.steps.execute.ok || !operationId) return op;
+
+    // Bounded full drain: pull until the stream reports no more work, requiring
+    // the delta + single terminal pair the lifecycle contract promises.
+    let drained = false;
+    let pullFailed = null;
+    for (let i = 0; i < 40 && !drained; i += 1) {
+      const batch = await app.cdp.evaluateJson(
+        `window.nexusProof.runProofStep('provider_pull', ${JSON.stringify({
+          operation_id: operationId,
+          max_events: 16,
+          max_bytes: 262144,
+        })})`,
+        60_000,
+      );
+      if (!batch?.ok) {
+        pullFailed = batch?.error?.message ?? 'pull rejected';
+        break;
+      }
+      op.drain.batches += 1;
+      for (const event of batch.result?.events ?? []) {
+        op.drain.events += 1;
+        if (event?.MessageDelta) op.drain.deltas += 1;
+        if (event?.OpFinished || event?.OpFailed) {
+          op.drain.terminals.push({
+            kind: event.OpFinished ? 'OpFinished' : 'OpFailed',
+            operation_id: event.OpFinished?.operation_id ?? event.OpFailed?.operation_id ?? null,
+            session_id: event.OpFinished?.session_id ?? event.OpFailed?.session_id ?? null,
+            reason: event.OpFinished?.reason ?? event.OpFailed?.error ?? null,
+          });
+        }
+      }
+      if (!batch.result?.has_more && op.drain.terminals.length > 0) drained = true;
+      else if (!batch.result?.has_more && (batch.result?.events ?? []).length === 0 && i > 2) drained = true;
+      else await sleep(25);
+    }
+    const terminal = op.drain.terminals.at(-1) ?? null;
     op.steps.pull = {
-      ok: Boolean(batch?.ok),
-      events: batch?.result?.events?.length ?? 0,
-      has_more: batch?.result?.has_more ?? null,
+      ok: pullFailed === null && op.drain.terminals.length > 0,
+      error: pullFailed,
+      batches: op.drain.batches,
+      events: op.drain.events,
+      deltas: op.drain.deltas,
+      terminal_count: op.drain.terminals.length,
+      terminal,
+      terminal_matches_operation: terminal?.operation_id === operationId,
+      terminal_matches_session: terminal?.session_id === sessionId,
     };
+
     const cancel = await app.cdp.evaluateJson(
       `window.nexusProof.runProofStep('provider_probe', ${JSON.stringify({
         request_id: `soak-cancel-${index}`,
@@ -931,7 +1066,9 @@ async function runProviderOperation(app, home, index) {
       60_000,
     );
     op.steps.shutdown = { ok: Boolean(shutdown?.ok) };
-    op.ok = Boolean(op.steps.probe.ok && op.steps.launch.ok && op.steps.execute.ok && op.steps.cancel.ok);
+    // Completeness is defined once, in the shared contract, so the runtime and
+    // any fixture verifier cannot disagree about what "done" means.
+    op.ok = providerLifecycleComplete(op);
   } catch (error) {
     op.error = String(error);
   }
@@ -1094,6 +1231,9 @@ async function phaseSecurity(ctx) {
     });
     return evidence;
   } catch (error) {
+    if (error instanceof OwnerUnavailableError || /utility exited|owner unavailable/i.test(String(error))) {
+      ctx.confounders?.push('utility_owner_unavailable');
+    }
     checks.push({ id: 'SEC-renderer', ok: false, detail: `security phase failed: ${error}` });
     evidence.error = String(error);
     evidence.log_tail = app.logTail();
@@ -1252,10 +1392,13 @@ async function phaseLifecycle(ctx) {
     });
     // Provenance-bound proof that the packaged `.node` actually loaded and served
     // real work inside the Electron utility process — the contract requires this
-    // independently of the pass/fail of the surrounding checks.
+    // independently of the pass/fail of the surrounding checks, and the provider
+    // side must be a completed lifecycle (delta + one terminal + shutdown), not a
+    // dispatched request.
     const launchedProcesses = app.pid ? ownedProcesses(app.pid) : [];
+    const providerComplete = providerLifecycleComplete(provider);
     evidence.native_utility_load = {
-      ok: Boolean(nativeOk && provider.ok),
+      ok: Boolean(nativeOk && providerComplete),
       native_loaded_in: 'electron utility process (main is filesystem-probe only)',
       target_triple: native.compat?.target_triple ?? null,
       expected_target_triple: EXPECTED_TARGET,
@@ -1275,8 +1418,12 @@ async function phaseLifecycle(ctx) {
         launch_ok: provider.steps.launch?.ok ?? null,
         execute_ok: provider.steps.execute?.ok ?? null,
         pull_ok: provider.steps.pull?.ok ?? null,
+        message_deltas: provider.steps.pull?.deltas ?? 0,
+        terminal_count: provider.steps.pull?.terminal_count ?? 0,
+        terminal: provider.steps.pull?.terminal ?? null,
         cancel_ok: provider.steps.cancel?.ok ?? null,
         shutdown_ok: provider.steps.shutdown?.ok ?? null,
+        complete: providerComplete,
       },
       utility_process_observed: launchedProcesses.some((p) => p.command.includes('--type=utility')),
       utility_launch_method_evidence: app.launchedVia,
@@ -1294,6 +1441,9 @@ async function phaseLifecycle(ctx) {
     });
     return evidence;
   } catch (error) {
+    if (error instanceof OwnerUnavailableError || /utility exited|owner unavailable/i.test(String(error))) {
+      ctx.confounders?.push('utility_owner_unavailable');
+    }
     checks.push({ id: 'LIFECYCLE-native', ok: false, detail: `lifecycle phase failed: ${error}` });
     evidence.error = String(error);
     evidence.log_tail = app.logTail();
@@ -1413,10 +1563,22 @@ async function main() {
   const gating = !args.diagnostic && canonicalPhases && canonicalSamples;
   const mode = gating ? 'canonical' : 'diagnostic';
 
+  // A previous canonical document must never survive a failed attempt looking
+  // current: quarantine it before any work starts, and write the new one
+  // atomically at the end.
+  const canonicalPath = join(outDir, 'runtime-lifecycle.json');
+  let quarantinedPrevious = null;
+  if (gating && existsSync(canonicalPath)) {
+    quarantinedPrevious = `${canonicalPath}.superseded-${Date.now()}.json`;
+    renameSync(canonicalPath, quarantinedPrevious);
+  }
+
   const fixture = ensureAgentHostConfig(args.home);
   const startedAt = Date.now();
+  const deadlineAt = startedAt + args.deadlineSeconds * 1000;
   const command = ['node', 'scripts/proof-runtime.mjs', ...process.argv.slice(2)].join(' ');
   const checks = [];
+  const confounders = args.launchMethod === 'launchservices' ? [] : ['direct_executable_launch'];
   const evidence = {
     schema: RUNTIME_SCHEMA,
     mode,
@@ -1448,11 +1610,13 @@ async function main() {
       utc_start: new Date(startedAt).toISOString(),
     },
     validity: {
-      valid: args.launchMethod === 'launchservices',
+      valid: confounders.length === 0,
       launch_method: args.launchMethod,
-      confounders: args.launchMethod === 'launchservices' ? [] : ['direct_executable_launch'],
-      confounder_notes: args.launchMethod === 'launchservices' ? {} : { ...KNOWN_CONFOUNDERS },
+      confounders: [],
+      confounder_notes: {},
     },
+    deadline_at: new Date(deadlineAt).toISOString(),
+    quarantined_previous_canonical: quarantinedPrevious,
     provenance: buildProvenance(canonicalAppPath, outDir, command, startedAt),
   };
   if (!gating) {
@@ -1461,7 +1625,56 @@ async function main() {
         `launch=${args.launchMethod}). Non-gating output: it can never be consumed as canonical evidence.`,
     );
   }
-  const ctx = { args, outDir, appPath, home: args.home, checks };
+
+  /**
+   * Persist the evidence in its current state. Used both for the normal exit and
+   * by the top-level deadline, so an expired run still leaves a structured,
+   * non-green record instead of nothing.
+   */
+  /**
+   * Fold the accumulated confounders into the document. Confounders are
+   * deduplicated: the same condition can be observed by several phases, and the
+   * record should state each distinct reason once.
+   */
+  const applyValidity = () => {
+    const unique = [...new Set(confounders)];
+    evidence.validity = {
+      valid: unique.length === 0,
+      launch_method: args.launchMethod,
+      confounders: unique,
+      confounder_notes: Object.fromEntries(
+        unique.map((c) => [c, KNOWN_CONFOUNDERS[c] ?? 'unclassified confounder']),
+      ),
+    };
+  };
+
+  const persist = (finalStatus) => {
+    applyValidity();
+    evidence.checks = checks;
+    evidence.utc_end = new Date().toISOString();
+    evidence.elapsed_ms = Date.now() - startedAt;
+    evidence.status = finalStatus;
+    const fileName = gating ? 'runtime-lifecycle.json' : 'runtime-diagnostic.json';
+    const target = join(outDir, fileName);
+    const temporary = `${target}.tmp-${process.pid}`;
+    writeFileSync(temporary, `${JSON.stringify(evidence, null, 2)}\n`);
+    renameSync(temporary, target);
+    writeFileSync(`${outDir}/${fileName.replace(/\.json$/, '.raw.json')}`, JSON.stringify(evidence));
+    return { fileName, target };
+  };
+
+  const ctx = { args, outDir, appPath, home: args.home, checks, confounders, deadlineAt };
+
+  // Top-level absolute deadline: a run that cannot finish must still record why.
+  const deadlineTimer = setTimeout(() => {
+    confounders.push('run_deadline_exceeded');
+    const { fileName } = persist('fail');
+    console.error(
+      `[proof-runtime] run deadline of ${args.deadlineSeconds}s exceeded; wrote non-green ${fileName} before exit`,
+    );
+    process.exit(1);
+  }, args.deadlineSeconds * 1000);
+  deadlineTimer.unref?.();
 
   if (phases.includes('launch')) {
     evidence.launch = await phaseLaunch(ctx);
@@ -1495,35 +1708,36 @@ async function main() {
     detail: `zip=${evidence.sizes.zip_mib}MiB installed=${evidence.sizes.app_bundle_mib}MiB`,
   });
 
-  evidence.checks = checks;
-  evidence.utc_end = new Date().toISOString();
-  evidence.elapsed_ms = Date.now() - startedAt;
-
+  let finalStatus;
   if (gating) {
     // A canonical document is `pass` only when the shared contract confirms it
-    // is complete (exact phase set, exact check IDs, sample floors, provenance)
-    // *and* every check passed. Anything else is a fail — never a soft pass.
+    // is complete (exact phase set, exact check IDs, raw sample observations,
+    // provenance) *and* every check passed. Anything else is a fail.
+    // Confounders must be in the document *before* the contract evaluates it:
+    // a confounded run is a blocked diagnosis, never a shape complaint.
+    applyValidity();
+    evidence.checks = checks;
     const verdict = evaluateRuntimeEvidence(evidence, {});
     const complete = verdict.state === 'valid-pass' || verdict.state === 'valid-fail';
     evidence.contract_state = verdict.state;
     evidence.contract_reasons = verdict.reasons;
-    evidence.status = complete && checks.every((check) => check.ok) ? 'pass' : 'fail';
+    finalStatus = complete && checks.every((check) => check.ok) ? 'pass' : 'fail';
   } else {
-    evidence.status = 'diagnostic';
     evidence.note =
       'Non-gating diagnostic output. Written to runtime-diagnostic.json only; it is never a ' +
       'substitute for a canonical runtime-lifecycle.json.';
+    finalStatus = 'diagnostic';
   }
 
-  const fileName = gating ? 'runtime-lifecycle.json' : 'runtime-diagnostic.json';
-  writeFileSync(join(outDir, fileName), `${JSON.stringify(evidence, null, 2)}\n`);
-  writeFileSync(join(outDir, fileName.replace(/\.json$/, '.raw.json')), `${JSON.stringify(evidence)}\n`);
+  clearTimeout(deadlineTimer);
+  const { fileName } = persist(finalStatus);
   console.log(
     JSON.stringify(
       {
         mode,
         status: evidence.status,
         contract_state: evidence.contract_state ?? null,
+        confounders: evidence.validity.confounders,
         output: fileName,
         checks: checks.map((c) => `${c.id}:${c.ok ? 'pass' : 'fail'}`),
       },
