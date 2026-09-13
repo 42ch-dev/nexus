@@ -10,7 +10,8 @@
     "proof:dev": "electron dist/main.js",
     "package": "node scripts/package.mjs",
     "proof:package": "node scripts/proof-package.mjs",
-    "proof:native-smoke": "node src/native-smoke.mjs"
+    "proof:native-smoke": "node src/native-smoke.mjs",
+    "test:lifecycle": "pnpm run build && node --test tests/lifecycle-harness.mjs"
   },
   "dependencies": {
     "@42ch/nexus-contracts": "workspace:*",

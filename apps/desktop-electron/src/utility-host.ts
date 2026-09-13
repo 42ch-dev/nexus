@@ -33,6 +33,7 @@ import {
   type LifecyclePhase,
   type UtilityConfig,
 } from './ipc.js';
+import { PullReservationLedger } from './utility-admission.js';
 
 interface OwnerState {
   phase: LifecyclePhase;
@@ -64,7 +65,7 @@ let queuedCount = 0;
 let queuedBytes = 0;
 const pendingOperationIds: string[] = [];
 const workQueue: QueuedWork[] = [];
-const outstandingPullByOperation = new Map<string, string>();
+const pullReservations = new PullReservationLedger();
 let draining = false;
 
 function readConfig(): UtilityConfig {
@@ -105,12 +106,7 @@ function trackOperationStart(requestId: string): void {
 function trackOperationEnd(requestId: string, request: IpcRequest): void {
   const index = pendingOperationIds.indexOf(requestId);
   if (index >= 0) pendingOperationIds.splice(index, 1);
-  if (request.operation === 'pull') {
-    const operationId = (request.payload as { operation_id?: string } | undefined)?.operation_id;
-    if (operationId && outstandingPullByOperation.get(operationId) === requestId) {
-      outstandingPullByOperation.delete(operationId);
-    }
-  }
+  pullReservations.release(request);
 }
 
 function admitOrReject(request: IpcRequest): IpcResponse | null {
@@ -123,15 +119,21 @@ function admitOrReject(request: IpcRequest): IpcResponse | null {
     if (typeof body?.operation_id !== 'string' || body.operation_id.length === 0) {
       return ipcErr(request.request_id, 'invalid_input', 'operation_id is required');
     }
-    if (outstandingPullByOperation.has(body.operation_id)) {
+    if (pullReservations.isReserved(body.operation_id)) {
       return ipcErr(request.request_id, 'busy', 'one outstanding pull per operation');
     }
   }
   if (activeCount < MAX_ACTIVE_CALLS) {
+    if (request.operation === 'pull' && !pullReservations.tryReserve(request)) {
+      return ipcErr(request.request_id, 'busy', 'one outstanding pull per operation');
+    }
     return null;
   }
   if (queuedCount >= MAX_PENDING_CALLS || queuedBytes + payloadBytes > MAX_PENDING_BYTES) {
     return ipcErr(request.request_id, 'busy', 'utility admission cap exceeded');
+  }
+  if (request.operation === 'pull' && !pullReservations.tryReserve(request)) {
+    return ipcErr(request.request_id, 'busy', 'one outstanding pull per operation');
   }
   return null;
 }
@@ -139,10 +141,6 @@ function admitOrReject(request: IpcRequest): IpcResponse | null {
 async function runRequest(request: IpcRequest): Promise<void> {
   activeCount += 1;
   trackOperationStart(request.request_id);
-  if (request.operation === 'pull') {
-    const operationId = (request.payload as { operation_id: string }).operation_id;
-    outstandingPullByOperation.set(operationId, request.request_id);
-  }
   try {
     const response = await dispatch(request);
     port.postMessage(response);
@@ -362,8 +360,10 @@ if (!port) {
 
 port.on('message', (event) => {
   let request_id = 'unknown';
+  let parsedForRelease: IpcRequest | null = null;
   try {
     const parsed = parseIpcRequest(event.data);
+    parsedForRelease = parsed;
     request_id = parsed.request_id;
     if (parsed.operation === 'close') {
       state.acceptingWork = false;
@@ -377,11 +377,17 @@ port.on('message', (event) => {
     }
     const payloadBytes = estimatePayloadBytes(parsed.payload);
     if (activeCount < MAX_ACTIVE_CALLS) {
-      void runRequest(parsed);
+      void runRequest(parsed).catch((err) => {
+        pullReservations.release(parsed);
+        port.postMessage(ipcErr(parsed.request_id, errorCode(err), errorMessage(err)));
+      });
       return;
     }
     enqueue(parsed, payloadBytes);
   } catch (err) {
+    if (parsedForRelease) {
+      pullReservations.release(parsedForRelease);
+    }
     port.postMessage(ipcErr(request_id, errorCode(err), errorMessage(err)));
   }
 });

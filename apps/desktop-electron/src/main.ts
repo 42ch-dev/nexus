@@ -39,6 +39,10 @@ import {
   type LifecycleStatus,
 } from './ipc.js';
 import {
+  remainingCloseBudget,
+  resolveOpenProofPolicy,
+} from './lifecycle-coord.js';
+import {
   allowNavigation,
   assertDistPresent,
   isAllowedExternalUrl,
@@ -83,6 +87,7 @@ let lifecycle: LifecycleStatus = {
 };
 let closeInitiated = false;
 let reopenRequired = false;
+let rendererDetached = false;
 let closeInFlight: Promise<void> | null = null;
 const pendingRequests = new Map<string, PendingEntry>();
 
@@ -220,17 +225,36 @@ function spawnUtilityOwner(): UtilityProcess {
   return child;
 }
 
-async function killAndJoinUtility(generation: number): Promise<void> {
+async function killAndJoinUtility(generation: number, deadlineAt: number): Promise<boolean> {
   const proc = utility;
-  if (!proc || generation !== utilityGeneration) return;
-  const { promise, resolve } = Promise.withResolvers<void>();
-  proc.once('exit', () => resolve());
-  proc.kill();
-  setTimeout(resolve, CLOSE_JOIN_MS);
-  await promise;
-  if (generation === utilityGeneration) {
-    utility = null;
+  if (!proc || generation !== utilityGeneration) {
+    return true;
   }
+  const budgetMs = remainingCloseBudget(deadlineAt);
+  const { promise, resolve } = Promise.withResolvers<boolean>();
+  let exitConfirmed = false;
+  const onExit = () => {
+    exitConfirmed = true;
+    resolve(true);
+  };
+  proc.once('exit', onExit);
+  proc.kill();
+  setTimeout(() => resolve(exitConfirmed), budgetMs);
+  const confirmed = await promise;
+  if (confirmed && generation === utilityGeneration) {
+    utility = null;
+    return true;
+  }
+  reopenRequired = true;
+  setLifecycle({
+    phase: 'interrupted',
+    owner_alive: Boolean(utility),
+    cleanup_confirmed: false,
+    reason: 'utility join unconfirmed — owner remains fenced',
+    pending_operations: [...pendingRequests.keys()],
+  });
+  notifyInterrupted();
+  return false;
 }
 
 async function handleUtilityCrash(generation: number, reason: string): Promise<void> {
@@ -241,10 +265,11 @@ async function handleUtilityCrash(generation: number, reason: string): Promise<v
     owner_alive: false,
     cleanup_confirmed: false,
     reason,
+    pending_operations: [...pendingRequests.keys()],
   });
   settleAllPending(generation, 'interrupted', reason);
   notifyInterrupted();
-  await killAndJoinUtility(generation);
+  await killAndJoinUtility(generation, Date.now() + CLOSE_JOIN_MS);
 }
 
 function notifyInterrupted(): void {
@@ -289,8 +314,8 @@ async function utilityRequest(
     return ipcErr(request.request_id, 'busy', 'main pending byte cap exceeded');
   }
 
-  const activeGeneration = utilityGeneration;
   ensureUtilityOwner();
+  const activeGeneration = utilityGeneration;
 
   const { promise, resolve } = Promise.withResolvers<IpcResponse>();
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
@@ -336,14 +361,18 @@ async function initiateOwnerClose(): Promise<void> {
   }
 
   const generation = utilityGeneration;
+  const deadlineAt = Date.now() + CLOSE_JOIN_MS;
   const request_id = randomUUID();
   try {
     await utilityRequest(
       { request_id, operation: 'close' },
-      { timeoutMs: CLOSE_JOIN_MS, operationHint: 'close' },
+      {
+        timeoutMs: remainingCloseBudget(deadlineAt),
+        operationHint: 'close',
+      },
     );
   } finally {
-    await killAndJoinUtility(generation);
+    await killAndJoinUtility(generation, deadlineAt);
     closeInFlight = null;
     resolve();
   }
@@ -371,10 +400,26 @@ function hardenWindow(win: BrowserWindow): void {
     if (!allowNavigation(url)) event.preventDefault();
   });
   win.webContents.on('render-process-gone', () => {
+    rendererDetached = true;
+    if (mainWindow === win) {
+      mainWindow = null;
+    }
+    if (utility && lifecycle.phase === 'open') {
+      setLifecycle({
+        phase: 'open',
+        owner_alive: true,
+        reason: 'renderer crashed — native owner remains authoritative',
+        pending_operations: [...pendingRequests.keys()],
+      });
+      notifyInterrupted();
+      return;
+    }
     setLifecycle({
       phase: lifecycle.phase === 'closed' ? 'closed' : 'interrupted',
       owner_alive: Boolean(utility),
-      reason: 'renderer crashed — native owner remains authoritative',
+      cleanup_confirmed: utility ? false : lifecycle.cleanup_confirmed,
+      reason: 'renderer crashed — awaiting explicit reopen or replacement window',
+      pending_operations: [...pendingRequests.keys()],
     });
     notifyInterrupted();
   });
@@ -396,6 +441,7 @@ function createMainWindow(): BrowserWindow {
     },
   });
   hardenWindow(win);
+  rendererDetached = false;
   win.on('close', () => {
     initiateOwnerClose().catch(() => undefined);
   });
@@ -430,14 +476,34 @@ function registerIpcHandlers(): void {
         return ipcOk(request_id, lifecycle);
       case 'compatibility':
         return utilityRequest({ request_id, operation: 'compatibility' });
-      case 'open':
-        if (reopenRequired) {
-          await killAndJoinUtility(utilityGeneration);
+      case 'open': {
+        const policy = resolveOpenProofPolicy({
+          reopenRequired,
+          rendererDetached,
+          phase: lifecycle.phase,
+          ownerAlive: lifecycle.owner_alive,
+        });
+        if (policy === 'reopen_after_fence') {
+          const confirmed = await killAndJoinUtility(utilityGeneration, Date.now() + CLOSE_JOIN_MS);
+          if (!confirmed && utility) {
+            return ipcErr(request_id, 'interrupted', 'prior owner join unconfirmed — reopen blocked');
+          }
           utility = null;
           reopenRequired = false;
           closeInitiated = false;
+          rendererDetached = false;
+          return utilityRequest({ request_id, operation: 'open' });
+        }
+        if (policy === 'attach_existing_owner') {
+          rendererDetached = false;
+          return ipcOk(request_id, {
+            readiness: 'open',
+            attached: true,
+            lifecycle,
+          });
         }
         return utilityRequest({ request_id, operation: 'open' });
+      }
       case 'graph':
         return utilityRequest({ request_id, operation: 'graph', payload: raw.payload });
       case 'patch':
