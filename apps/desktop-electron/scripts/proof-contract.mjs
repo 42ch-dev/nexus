@@ -287,7 +287,11 @@ export function evaluateRuntimeEvidence(doc, expectations = {}) {
       mismatches.push(`${key}: evidence=${provenance[key] ?? 'absent'} expected=${expected}`);
     }
   }
-  const recordedConfounders = Array.isArray(doc.validity?.confounders) ? doc.validity.confounders : [];
+  const recordedConfounders = Array.isArray(doc.validity?.confounders) ? doc.validity.confounders : null;
+
+  // Provenance is checked before validity: evidence measured against a different
+  // artifact or revision is stale no matter how the run itself went. The
+  // document's own confounders travel with the verdict so nothing is lost.
   if (mismatches.length > 0) {
     return {
       state: 'stale',
@@ -296,14 +300,38 @@ export function evaluateRuntimeEvidence(doc, expectations = {}) {
     };
   }
 
-  // --- validity: confounded runs are not product results ---------------------
-  if (doc.validity?.valid === false) {
+  // --- validity: confounded runs are not product results (C6) ----------------
+  // Any confounder — recorded, or implied by a non-LaunchServices launch method
+  // — makes the run non-product *regardless* of the boolean the document asserts.
+  // A document claiming `valid: true` alongside a direct launch or a non-empty
+  // confounder list is internally contradictory and must never reach valid-pass.
+  const launchMethod = doc.validity?.launch_method;
+  const implicitConfounders = [];
+  if (launchMethod !== 'launchservices') {
+    implicitConfounders.push(
+      launchMethod === 'direct'
+        ? 'direct_executable_launch'
+        : `unrecognized_launch_method:${launchMethod ?? 'absent'}`,
+    );
+  }
+  const allConfounders = [...new Set([...(recordedConfounders ?? []), ...implicitConfounders])];
+  const declaredInvalid = doc.validity?.valid !== true;
+  if (declaredInvalid || allConfounders.length > 0) {
+    const reasonsOut = allConfounders.length > 0 ? allConfounders.map((c) => `confounder: ${c}`) : [];
+    if (doc.validity?.valid === true && allConfounders.length > 0) {
+      reasonsOut.push('validity.valid is true but the run carries confounders');
+    }
+    if (doc.validity?.valid === undefined) {
+      reasonsOut.push('validity.valid is absent');
+    }
     return {
       state: 'confounded',
-      reasons: recordedConfounders.length > 0 ? recordedConfounders.map((c) => `confounder: ${c}`) : ['run marked invalid'],
+      reasons: reasonsOut.length > 0 ? reasonsOut : ['run marked invalid'],
       detail: {
         validity: doc.validity,
         phases_executed: phases,
+        recorded_confounders: recordedConfounders,
+        effective_confounders: allConfounders,
         secondary_shape_problems: reasons,
       },
     };

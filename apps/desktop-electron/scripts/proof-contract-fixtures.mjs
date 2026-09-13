@@ -331,6 +331,51 @@ check(
   ),
   'confounded',
 );
+
+// C6: confounders win over the `valid` boolean, and a valid canonical product
+// result must have been launched through LaunchServices.
+check(
+  'C6: valid:true with a recorded confounder is confounded',
+  state(
+    completeDoc({
+      validity: { valid: true, launch_method: 'launchservices', confounders: ['direct_executable_launch'] },
+    }),
+  ),
+  'confounded',
+);
+check(
+  'C6: valid:true with an unknown confounder is confounded',
+  state(
+    completeDoc({
+      validity: { valid: true, launch_method: 'launchservices', confounders: ['something_new'] },
+    }),
+  ),
+  'confounded',
+);
+check(
+  'C6: valid:true with a direct launch method is confounded',
+  state(completeDoc({ validity: { valid: true, launch_method: 'direct', confounders: [] } })),
+  'confounded',
+);
+check(
+  'C6: absent validity.valid is confounded, not a pass',
+  state(completeDoc({ validity: { launch_method: 'launchservices', confounders: [] } })),
+  'confounded',
+);
+check(
+  'C6: valid:true, launchservices, empty confounders is a pass',
+  state(completeDoc({ validity: { valid: true, launch_method: 'launchservices', confounders: [] } })),
+  'valid-pass',
+);
+check(
+  'C6: a valid pass cannot coexist with a non-launchservices launch method',
+  state(
+    completeDoc({
+      validity: { valid: true, launch_method: undefined, confounders: [] },
+    }),
+  ),
+  'confounded',
+);
 check(
   'native load not proven is valid-fail',
   state(completeDoc({ status: 'fail', native_utility_load: { ok: false } })),
@@ -461,11 +506,16 @@ check(
   true,
 );
 check(
-  'runtime and maintenance rows are present and not passing',
-  ['START-1-arm64', 'RES-1-arm64', 'RES-2-arm64', 'MAINT-1', 'SEC-renderer-arm64'].every((id) => {
+  'runtime criteria rows are present and not passing',
+  ['START-1-arm64', 'RES-1-arm64', 'RES-2-arm64', 'SEC-renderer-arm64'].every((id) => {
     const row = (realDecision.doc?.observed_rows ?? []).find((r) => r.id === id);
     return row && row.verdict !== 'PASS';
   }),
+  true,
+);
+check(
+  'the maintenance row exists and is derived from a document',
+  (realDecision.doc?.observed_rows ?? []).find((r) => r.id === 'MAINT-1')?.verification?.derived,
   true,
 );
 
@@ -650,7 +700,17 @@ function packageReceipt(target, suffix) {
     },
     packages: [
       { name: '@42ch/nexus-native', tarball_bytes: 67948 },
-      { name: `@42ch/nexus-native-${suffix}`, tarball_bytes: 6_000_000 },
+      {
+        name: `@42ch/nexus-native-${suffix}`,
+        tarball_bytes: 6_000_000,
+        entries: [
+          'package/package.json',
+          'package/AGENTS.md',
+          'package/LICENSE',
+          'package/native/nexus_core_node.node',
+          'package/native/compatibility.json',
+        ],
+      },
     ],
   };
 }
@@ -751,16 +811,41 @@ function electronSize(archKey) {
   };
 }
 
+/**
+ * A gate document with every predicate the SEC-1 row must independently verify
+ * (I12): a bare `status: 'go'` is never sufficient.
+ */
 function packageGate(archKey) {
+  const appRealpath = `/evidence/electron-packages/${archKey}/Nexus RFT Feasibility-darwin-${archKey}/Nexus RFT Feasibility.app`;
   return {
     schema: 'rft-p3-t3-package-gate/v2',
     status: 'go',
     bundle_id: 'com.nexus42.rft-electron-proof',
     arch: archKey,
-    app_path: `/evidence/electron-packages/${archKey}/app`,
-    app_realpath: `/evidence/electron-packages/${archKey}/Nexus RFT Feasibility-darwin-${archKey}/Nexus RFT Feasibility.app`,
+    signed_required: true,
+    app_path: appRealpath,
+    app_realpath: appRealpath,
     missing_inputs: [],
     reasons: [],
+    checks: {
+      signature_predicates: { pass: true, failed: [], hardened_runtime_flags: 'runtime' },
+      stapler_validate: { status: 0 },
+      entitlements: { pass: true, values_match: true, keys_match: true },
+      runtime_lifecycle: {
+        contract_state: 'valid-pass',
+        native_utility_load: { ok: true },
+        provenance: {
+          app_path: appRealpath,
+          app_bundle_id: 'com.nexus42.rft-electron-proof',
+          arch: archKey,
+        },
+        bound_to: {
+          source_sha: IDENTITY.source_sha,
+          tree_digest: IDENTITY.tree_digest,
+          tree_dirty: IDENTITY.tree_dirty,
+        },
+      },
+    },
     decision_inputs: {
       runtime_contract_state: 'valid-pass',
       signature_predicates_pass: true,
@@ -783,6 +868,14 @@ function maintenanceTrace() {
     manual_binary_patch: false,
     elapsed_seconds: 420,
     max_seconds: 1800,
+    checks: [
+      { name: 'pin_is_target', ok: true },
+      { name: 'frozen_lockfile_install', ok: true },
+      { name: 'package_rebuild', ok: true },
+      { name: 'packaged_version_matches_target', ok: true },
+      { name: 'no_manual_binary_patch', ok: true },
+      { name: 'within_thirty_minutes', ok: true },
+    ],
     ...IDENTITY,
   };
 }
@@ -866,7 +959,18 @@ const failCases = [
   ['payload', (docs) => { docs['native-packages/darwin-x64/package-receipt.json'].packages[1].tarball_bytes = 60 * 1048576; docs['native-packages/darwin-x64/package-receipt.json'].status = 'fail'; }],
   ['install', (docs) => { docs['install-win24/install-proof.json'].status = 'fail'; }],
   ['maint', (docs) => { docs['maintenance-rebuild.json'].elapsed_seconds = 3600; docs['maintenance-rebuild.json'].status = 'fail'; }],
-  ['gate', (docs) => { docs['electron-arm64/proof-package.json'].status = 'no-go'; }],
+  [
+    'gate',
+    (docs) => {
+      // A genuine no-go is an unconfounded measured runtime failure, and the
+      // gate's own inputs must agree with that.
+      const gate = docs['electron-arm64/proof-package.json'];
+      gate.status = 'no-go';
+      gate.decision_inputs.runtime_contract_state = 'valid-fail';
+      gate.decision_inputs.native_utility_load_proven = false;
+      gate.checks.runtime_lifecycle.contract_state = 'valid-fail';
+    },
+  ],
 ];
 for (const [label, mutate] of failCases) {
   const root = buildMatrix(`fail-${label}`, mutate);
@@ -893,6 +997,94 @@ for (const [label, mutate] of inconsistentCases) {
   check(
     `inconsistent evidence (${label}) yields no PASS row for the broken document`,
     decision.status !== 'go',
+    true,
+  );
+}
+
+// --- strengthened predicate coverage: a green status cannot carry a bad body --
+
+const BODY_CASES = [
+  ['install-extra-false-check', (docs) => {
+    docs['install-macarm22/install-proof.json'].checks.push({ name: 'some_extra_check', ok: false });
+  }],
+  ['package-missing-frozen-entry', (docs) => {
+    const pkg = docs['native-packages/darwin-arm64/package-receipt.json'];
+    pkg.packages.find((p) => p.name.includes('native-') && p.name !== '@42ch/nexus-native').entries = ['package/package.json'];
+  }],
+  ['maintenance-false-predicate', (docs) => {
+    docs['maintenance-rebuild.json'].checks.find((c) => c.name === 'within_thirty_minutes').ok = false;
+  }],
+  ['maintenance-no-predicates', (docs) => { docs['maintenance-rebuild.json'].checks = []; }],
+  ['binary-inspection-false-check', (docs) => {
+    docs['native-binary-darwin-arm64/binary-inspection.json'].checks.push({ name: 'extra', ok: false });
+  }],
+  ['size-false-check', (docs) => {
+    docs['electron-arm64/electron-size.json'].checks[0].ok = false;
+  }],
+];
+for (const [label, mutate] of BODY_CASES) {
+  const root = buildMatrix(`body-${label}`, mutate);
+  const decision = runDecisionWithRoot(root);
+  check(`green status with bad body (${label}) does not yield GO`, decision.status !== 'go', true);
+  check(`green status with bad body (${label}) blocks`, decision.status, 'blocked');
+}
+
+// --- I12: a forged gate status is never believed ----------------------------
+// Each case keeps the gate identity valid and breaks one predicate, so the row
+// must go BLOCKED rather than accepting the status field at face value.
+
+const FORGED_GATES = [
+  ['go-without-signature-predicate', (g) => { g.decision_inputs.signature_predicates_pass = false; }],
+  ['go-with-failed-signature-check', (g) => { g.checks.signature_predicates = { pass: false, failed: ['codesign --verify --deep --strict'] }; }],
+  ['go-without-signed-required', (g) => { g.signed_required = false; }],
+  ['go-with-failing-stapler', (g) => { g.checks.stapler_validate = { status: 1 }; }],
+  ['go-without-hardened-runtime', (g) => { g.decision_inputs.hardened_runtime = false; }],
+  ['go-with-entitlement-mismatch', (g) => { g.decision_inputs.entitlements_match = false; g.checks.entitlements.values_match = false; }],
+  ['go-with-unproven-native-load', (g) => { g.decision_inputs.native_utility_load_proven = false; }],
+  ['go-with-confounded-runtime', (g) => { g.decision_inputs.runtime_contract_state = 'confounded'; g.checks.runtime_lifecycle.contract_state = 'confounded'; }],
+  ['go-with-stale-source-binding', (g) => { g.checks.runtime_lifecycle.bound_to.source_sha = 'othersha'; }],
+  ['go-with-stale-tree-binding', (g) => { g.checks.runtime_lifecycle.bound_to.tree_digest = 'f'.repeat(64); }],
+  ['go-with-mismatched-runtime-app', (g) => { g.checks.runtime_lifecycle.provenance.app_path = '/elsewhere/Other.app'; }],
+  ['go-with-mismatched-runtime-arch', (g) => { g.checks.runtime_lifecycle.provenance.arch = g.arch === 'arm64' ? 'x64' : 'arm64'; }],
+  ['nogo-with-passing-runtime', (g) => { g.status = 'no-go'; }],
+];
+for (const [label, mutate] of FORGED_GATES) {
+  const root = buildMatrix(`forged-${label}`, (docs) => mutate(docs['electron-arm64/proof-package.json']));
+  const decision = runDecisionWithRoot(root);
+  const row = (decision.doc?.observed_rows ?? []).find((r) => r.id === 'SEC1-signed-arm64');
+  check(`forged gate (${label}) does not pass`, row?.verdict !== 'PASS', true);
+  check(`forged gate (${label}) blocks`, decision.status, 'blocked');
+}
+
+// A consistent no-go is accepted: measured failure, consistent inputs.
+const nogoRoot = buildMatrix('consistent-nogo', (docs) => {
+  const gate = docs['electron-arm64/proof-package.json'];
+  gate.status = 'no-go';
+  gate.decision_inputs.runtime_contract_state = 'valid-fail';
+  gate.decision_inputs.native_utility_load_proven = false;
+  gate.checks.runtime_lifecycle.contract_state = 'valid-fail';
+});
+const nogoDecision = runDecisionWithRoot(nogoRoot);
+check(
+  'a consistent gate no-go derives FAIL',
+  (nogoDecision.doc?.observed_rows ?? []).find((r) => r.id === 'SEC1-signed-arm64')?.verdict,
+  'FAIL',
+);
+check('a consistent gate no-go yields no-go', nogoDecision.status, 'no-go');
+
+// A gate whose schema/identity is wrong blocks regardless of a green status.
+for (const [label, mutate] of [
+  ['bad-schema', (g) => { g.schema = 'other/v1'; }],
+  ['bad-bundle-id', (g) => { g.bundle_id = 'com.example.other'; }],
+  ['bad-arch', (g) => { g.arch = 'x64'; }],
+  ['bad-app-path', (g) => { g.app_realpath = '/evidence/electron-packages/arm64/NotOurApp.app'; }],
+]) {
+  const root = buildMatrix(`gate-${label}`, (docs) => mutate(docs['electron-arm64/proof-package.json']));
+  const decision = runDecisionWithRoot(root);
+  check(`gate identity (${label}) blocks`, decision.status, 'blocked');
+  check(
+    `gate identity (${label}) does not pass the SEC row`,
+    (decision.doc?.observed_rows ?? []).find((r) => r.id === 'SEC1-signed-arm64')?.verdict !== 'PASS',
     true,
   );
 }

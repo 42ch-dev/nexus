@@ -258,6 +258,10 @@ for (const arch of ARCHES) {
         }
         const negativeNames = (doc.checks ?? []).filter((c) => String(c.name).startsWith('negative:'));
         if (negativeNames.length < 10) failed.push('fewer than 10 pre-open negative checks');
+        // A `status: pass` document with any false check is inconsistent evidence.
+        for (const check of doc.checks ?? []) {
+          if (check.ok !== true) failed.push(`check ${check.name} is not ok`);
+        }
         const okCount = (doc.checks ?? []).filter((c) => c.ok).length;
         return {
           required: ['package_receipt_pass', 'empty_project_install'],
@@ -290,6 +294,15 @@ for (const arch of ARCHES) {
         failed.push('compatibility not derived from the executed artifact');
       }
       if (!Array.isArray(doc.packages) || doc.packages.length < 2) failed.push('package tarball list incomplete');
+      const platformRecord = (doc.packages ?? []).find(
+        (p) => p.name.includes('native-') && p.name !== '@42ch/nexus-native',
+      );
+      if (!platformRecord) failed.push('no platform package record');
+      else if (Array.isArray(platformRecord.entries)) {
+        for (const entry of ['package/native/nexus_core_node.node', 'package/native/compatibility.json']) {
+          if (!platformRecord.entries.includes(entry)) failed.push(`platform tarball missing ${entry}`);
+        }
+      }
       for (const field of ['target_triple', 'native_api_version', 'writer_protocol', 'contract_tree_sha256']) {
         if (doc.compatibility?.manifest?.[field] === undefined) failed.push(`compatibility.${field} absent`);
       }
@@ -450,16 +463,133 @@ for (const arch of GUI_ARCHES) {
   });
 }
 
-// --- SEC-1 signed execution, per GUI architecture (C4) ----------------------
+// --- SEC-1 signed execution, per GUI architecture (C4, I12) -----------------
+
+/**
+ * Required predicates inside a package-gate document before its `status` may be
+ * believed. A gate that merely *says* `go` is not evidence: each security
+ * predicate must independently hold in the document, and a `go`/`no-go` whose
+ * own decision inputs contradict it is treated as forged (I12).
+ */
+function validateGateDocument(gate, arch, sourceNow) {
+  const problems = [];
+
+  // --- structural identity ---------------------------------------------------
+  if (gate.schema !== 'rft-p3-t3-package-gate/v2') {
+    problems.push(`schema ${gate.schema ?? 'absent'} != rft-p3-t3-package-gate/v2`);
+  }
+  if (gate.bundle_id !== 'com.nexus42.rft-electron-proof') {
+    problems.push(`bundle_id ${gate.bundle_id ?? 'absent'} != com.nexus42.rft-electron-proof`);
+  }
+  if (gate.arch !== arch.key) problems.push(`arch ${gate.arch ?? 'absent'} != ${arch.key}`);
+  if (!gate.app_realpath || !gate.app_realpath.includes(`darwin-${arch.key}`)) {
+    problems.push(`app_realpath ${gate.app_realpath ?? 'absent'} is not the ${arch.key} package`);
+  }
+  if (gate.app_path && gate.app_realpath && gate.app_path !== gate.app_realpath) {
+    problems.push(`app_path ${gate.app_path} != app_realpath ${gate.app_realpath}`);
+  }
+
+  const inputs = gate.decision_inputs ?? {};
+  const checks = gate.checks ?? {};
+
+  // --- source / tree identity of the gate itself ------------------------------
+  const boundTo = checks.runtime_lifecycle?.bound_to ?? {};
+  if (boundTo.source_sha !== sourceNow.source_sha) {
+    problems.push(`bound_to.source_sha ${boundTo.source_sha ?? 'absent'} != head ${sourceNow.source_sha}`);
+  }
+  if (boundTo.tree_digest !== sourceNow.tree_digest) {
+    problems.push(`bound_to.tree_digest ${boundTo.tree_digest ?? 'absent'} != head ${sourceNow.tree_digest}`);
+  }
+  if (boundTo.tree_dirty !== sourceNow.tree_dirty) {
+    problems.push(`bound_to.tree_dirty ${boundTo.tree_dirty ?? 'absent'} != head ${sourceNow.tree_dirty}`);
+  }
+
+  // --- every security predicate the row claims --------------------------------
+  const predicateProblems = [];
+  if (gate.signed_required !== true) predicateProblems.push('signed_required is not true');
+  if (inputs.signature_predicates_pass !== true) predicateProblems.push('signature_predicates_pass is not true');
+  if (checks.signature_predicates?.pass !== true) {
+    predicateProblems.push(`signature_predicates.pass is ${checks.signature_predicates?.pass ?? 'absent'}`);
+  }
+  const failedSignature = checks.signature_predicates?.failed;
+  if (Array.isArray(failedSignature) && failedSignature.length > 0) {
+    predicateProblems.push(`signature predicates failed: ${failedSignature.join(', ')}`);
+  }
+  if (inputs.stapler_ok !== true || checks.stapler_validate?.status !== 0) {
+    predicateProblems.push('stapler predicate is not satisfied');
+  }
+  if (inputs.hardened_runtime !== true) predicateProblems.push('hardened runtime is not asserted');
+  if (inputs.entitlements_match !== true) predicateProblems.push('entitlements do not match');
+  if (checks.entitlements?.values_match !== true) {
+    predicateProblems.push(`entitlements values_match is ${checks.entitlements?.values_match ?? 'absent'}`);
+  }
+  if (inputs.native_utility_load_proven !== true) predicateProblems.push('native utility load is not proven');
+  if (checks.runtime_lifecycle?.native_utility_load?.ok !== true) {
+    predicateProblems.push('runtime document does not prove a native utility load');
+  }
+
+  // --- runtime contract state and artifact-hash consistency -------------------
+  const runtimeState = inputs.runtime_contract_state ?? checks.runtime_lifecycle?.contract_state ?? null;
+  const runtimeProvenance = checks.runtime_lifecycle?.provenance ?? null;
+  if (runtimeProvenance) {
+    if (runtimeProvenance.app_path && gate.app_realpath && runtimeProvenance.app_path !== gate.app_realpath) {
+      problems.push('runtime document measured a different app bundle than the gate signed');
+    }
+    if (runtimeProvenance.app_bundle_id && runtimeProvenance.app_bundle_id !== gate.bundle_id) {
+      problems.push('runtime bundle id disagrees with the gate bundle id');
+    }
+    if (runtimeProvenance.arch && runtimeProvenance.arch !== arch.key) {
+      problems.push(`runtime arch ${runtimeProvenance.arch} != ${arch.key}`);
+    }
+  }
+
+  // --- status mapping, only after the predicates are known --------------------
+  let status = 'blocked';
+  let summary;
+  if (gate.status === 'go') {
+    const goProblems = [...predicateProblems];
+    if (runtimeState !== 'valid-pass') goProblems.push(`runtime_contract_state ${runtimeState ?? 'absent'} != valid-pass`);
+    if (problems.length > 0) goProblems.push(...problems);
+    if (goProblems.length > 0) {
+      status = 'blocked';
+      summary = `gate claims go but its predicates do not support it: ${goProblems.join('; ')}`;
+    } else {
+      status = 'pass';
+      summary = `signed gate reports go for ${arch.key} with every predicate satisfied`;
+    }
+  } else if (gate.status === 'no-go') {
+    // A no-go must be a genuine unconfounded measured failure. A confounded or
+    // incomplete runtime state means the gate is reporting a failure it did not
+    // actually measure.
+    const noGoProblems = [];
+    if (runtimeState !== 'valid-fail') noGoProblems.push(`runtime_contract_state ${runtimeState ?? 'absent'} != valid-fail`);
+    if (inputs.native_utility_load_proven !== true && inputs.native_utility_load_proven !== false) {
+      noGoProblems.push('native_utility_load_proven is absent');
+    }
+    if (problems.length > 0) noGoProblems.push(...problems);
+    if (noGoProblems.length > 0) {
+      status = 'blocked';
+      summary = `gate claims no-go but its inputs are inconsistent: ${noGoProblems.join('; ')}`;
+    } else {
+      status = 'fail';
+      summary = `signed gate reports a measured failure (no-go) for ${arch.key}`;
+    }
+  } else if (gate.status === 'blocked') {
+    const inputsList = (gate.missing_inputs ?? []).slice(0, 2).join('; ');
+    const reasonsList = (gate.reasons ?? []).slice(0, 2).join('; ');
+    status = 'blocked';
+    summary = `gate blocked: ${reasonsList || inputsList || runtimeState || 'see proof-package.json'}`;
+  } else {
+    status = 'blocked';
+    summary = `gate status ${gate.status ?? 'absent'} is not a decision value`;
+  }
+
+  return { status, summary, problems: [...problems, ...predicateProblems] };
+}
 
 for (const arch of GUI_ARCHES) {
   const evidence = EV(`electron-${arch.key}/proof-package.json`);
   const loaded = readEvidence(evidence);
-  const gate = loaded.doc;
-  const gateIdentityExpected = {
-    bundle_id: 'com.nexus42.rft-electron-proof',
-    arch: arch.key,
-  };
 
   if (!loaded.exists) {
     unavailableRow({
@@ -473,56 +603,28 @@ for (const arch of GUI_ARCHES) {
     continue;
   }
 
-  const structural = [];
-  if (!gate) structural.push(loaded.reason);
-  else {
-    if (gate.schema !== 'rft-p3-t3-package-gate/v2') structural.push(`schema ${gate.schema ?? 'absent'} != rft-p3-t3-package-gate/v2`);
-    for (const [field, expected] of Object.entries(gateIdentityExpected)) {
-      const actual = gate[field];
-      if (actual !== expected) structural.push(`${field} ${actual ?? 'absent'} != ${expected}`);
-    }
-    if (gate.app_realpath && !gate.app_realpath.includes(`darwin-${arch.key}`)) {
-      structural.push(`app_realpath ${gate.app_realpath} is not the ${arch.key} package`);
-    }
-  }
-
-  let verdict;
-  let summary;
-  if (structural.length > 0) {
-    verdict = 'BLOCKED';
-    summary = `package gate unusable: ${structural.join('; ')}`;
-  } else if (gate.status === 'go') {
-    verdict = 'PASS';
-    summary = `signed gate reports go for ${arch.key}`;
-  } else if (gate.status === 'no-go') {
-    verdict = 'FAIL';
-    summary = `signed gate reports a measured failure (no-go) for ${arch.key}`;
-  } else if (gate.status === 'blocked') {
-    // Still derived, not hardcoded: the *reason* is read from the document, and
-    // the moment that document reports go this row becomes PASS.
-    const inputs = (gate.missing_inputs ?? []).slice(0, 2).join('; ');
-    const reasons = (gate.reasons ?? []).slice(0, 2).join('; ');
-    verdict = 'BLOCKED';
-    summary = `gate blocked: ${reasons || inputs || gate.checks?.runtime_lifecycle?.contract_state || 'see proof-package.json'}`;
-  } else {
-    verdict = 'BLOCKED';
-    summary = `gate status ${gate.status ?? 'absent'} is not a decision value`;
-  }
+  const gate = loaded.doc;
+  const outcome = gate
+    ? validateGateDocument(gate, arch, source)
+    : { status: 'blocked', summary: `package gate unparseable: ${loaded.reason}`, problems: [loaded.reason] };
+  const verdict = { pass: 'PASS', fail: 'FAIL', blocked: 'BLOCKED' }[outcome.status];
 
   rows.push({
     id: `SEC1-signed-${arch.key}`,
     row: `SEC-1 signed/hardened/notarized/stapled execution with native load (${arch.key})`,
     verdict,
     raw_evidence: [evidence],
-    summary,
+    summary: outcome.summary,
     verification: {
       derived: true,
       evidence_path: evidence,
       evidence_sha256: loaded.sha256 ?? null,
-      evidence_state: gate?.status ?? 'blocked',
+      evidence_state: outcome.status,
       gate_status: gate?.status ?? null,
       gate_decision_inputs: gate?.decision_inputs ?? null,
-      problems: structural,
+      gate_signature_predicates: gate?.checks?.signature_predicates ?? null,
+      gate_runtime_state: gate?.decision_inputs?.runtime_contract_state ?? null,
+      problems: outcome.problems,
     },
   });
 }
@@ -546,6 +648,10 @@ deriveRow({
       failed.push(
         `packaged Electron ${doc.packaged_electron_version ?? 'absent'} != target ${doc.target_electron_version ?? 'absent'}`,
       );
+    }
+    if (!Array.isArray(doc.checks) || doc.checks.length === 0) failed.push('no rebuild predicates recorded');
+    for (const check of doc.checks ?? []) {
+      if (check.ok !== true) failed.push(`rebuild predicate ${check.name} is not ok`);
     }
     return { failures: failed, notes: [] };
   },
