@@ -134,20 +134,6 @@ async fn seed_only_main(home: PathBuf) {
     println!("{world_id} {entity_id}");
 }
 
-fn pre_barrier_init(port: u16, world_id: &str) {
-    let graph_path = format!("/v1/daemon/worlds/{world_id}/kb/graph");
-    let start = Instant::now();
-    while start.elapsed() < Duration::from_secs(30) {
-        if let Some(resp) = http_get("127.0.0.1", port, &graph_path, Duration::from_secs(5)) {
-            if resp.contains("HTTP/1.1 200") {
-                return;
-            }
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    panic!("pre-barrier graph warmup timed out on port {port}");
-}
-
 async fn prepare_home(port: u16) -> ProofHome {
     let tmp = TempDir::new().expect("temp home");
     let user_home = tmp.path().to_path_buf();
