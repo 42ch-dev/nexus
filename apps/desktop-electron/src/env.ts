@@ -1,7 +1,10 @@
-import { existsSync, realpathSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { UtilityConfig } from './ipc.js';
+
+const require = createRequire(import.meta.url);
 
 const ALLOWED_ENV_KEYS = new Set([
   'PATH',
@@ -74,4 +77,51 @@ export function nativeRefreshHint(): string {
     'for the host architecture, install the packed tarballs into the workspace, ' +
     'and rebuild @42ch/nexus-native if the contract hash changed.'
   );
+}
+
+function expectedPlatformPackageName(): string {
+  const { platform, arch } = process;
+  if (platform === 'darwin' && arch === 'arm64') return '@42ch/nexus-native-darwin-arm64';
+  if (platform === 'darwin' && arch === 'x64') return '@42ch/nexus-native-darwin-x64';
+  if (platform === 'win32' && arch === 'x64') return '@42ch/nexus-native-win32-x64-msvc';
+  if (platform === 'linux' && arch === 'x64') return '@42ch/nexus-native-linux-x64-gnu';
+  throw new Error(`unsupported platform ${platform}/${arch}`);
+}
+
+/** Filesystem-only native payload probe — never loads the `.node` binding in main. */
+export function assertNativePayloadPresent(): void {
+  const pkgName = expectedPlatformPackageName();
+  let pkgRoot: string;
+  try {
+    pkgRoot = dirname(require.resolve(`${pkgName}/package.json`));
+  } catch {
+    throw new Error(
+      `platform native package ${pkgName} is not installed. ${nativeRefreshHint()}`,
+    );
+  }
+  const nodePath = join(pkgRoot, 'native', 'nexus_core_node.node');
+  if (!existsSync(nodePath)) {
+    throw new Error(`missing native artifact ${nodePath}. ${nativeRefreshHint()}`);
+  }
+  const compatPath = join(dirname(nodePath), 'compatibility.json');
+  if (!existsSync(compatPath)) {
+    throw new Error(`missing compatibility manifest ${compatPath}. ${nativeRefreshHint()}`);
+  }
+  const manifest = JSON.parse(readFileSync(compatPath, 'utf8')) as Record<string, unknown>;
+  const required = [
+    'native_api_version',
+    'writer_protocol',
+    'target_triple',
+    'package_version',
+    'contract_tree_sha256',
+    'db_schema_min',
+    'db_schema_max',
+    'napi_minimum',
+  ];
+  for (const field of required) {
+    if (manifest[field] === undefined) {
+      throw new Error(`compatibility manifest missing "${field}" at ${compatPath}`);
+    }
+  }
+  realpathSync(nodePath);
 }

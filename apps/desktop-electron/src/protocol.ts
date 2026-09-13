@@ -1,5 +1,5 @@
 import { protocol } from 'electron';
-import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, lstatSync, realpathSync, statSync } from 'node:fs';
 import { join, normalize, sep } from 'node:path';
 import { Readable } from 'node:stream';
 
@@ -36,6 +36,8 @@ const MIME: Record<string, string> = {
   '.map': 'application/json; charset=utf-8',
 };
 
+let canonicalDistRoot: string | null = null;
+
 export function proofIndexUrl(): string {
   return `${PROOF_SCHEME}://${PROOF_HOST}/index.html`;
 }
@@ -54,8 +56,24 @@ export function assertDistPresent(distRoot: string): void {
   }
 }
 
+function canonicalRoot(distRoot: string): string {
+  if (!canonicalDistRoot) {
+    canonicalDistRoot = realpathSync.native(distRoot);
+  }
+  return canonicalDistRoot;
+}
+
+function isUnderRoot(candidate: string, root: string): boolean {
+  return candidate === root || candidate.startsWith(root + sep);
+}
+
 function resolveSafePath(distRoot: string, urlPath: string): string | null {
-  const decoded = decodeURIComponent(urlPath.split('?')[0]?.split('#')[0] ?? '');
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(urlPath.split('?')[0]?.split('#')[0] ?? '');
+  } catch {
+    return null;
+  }
   const relative = decoded.replace(/^\/+/, '');
   if (relative.includes('..')) {
     return null;
@@ -65,7 +83,23 @@ function resolveSafePath(distRoot: string, urlPath: string): string | null {
   if (!candidate.startsWith(root)) {
     return null;
   }
-  return candidate;
+  if (!existsSync(candidate)) {
+    return null;
+  }
+  let canonicalCandidate: string;
+  try {
+    canonicalCandidate = realpathSync.native(candidate);
+  } catch {
+    return null;
+  }
+  if (!isUnderRoot(canonicalCandidate, canonicalRoot(distRoot))) {
+    return null;
+  }
+  const stat = lstatSync(candidate);
+  if (!stat.isFile()) {
+    return null;
+  }
+  return canonicalCandidate;
 }
 
 function contentType(filePath: string): string {
@@ -75,6 +109,7 @@ function contentType(filePath: string): string {
 
 export function registerProofProtocol(distRoot: string): void {
   assertDistPresent(distRoot);
+  canonicalDistRoot = realpathSync.native(distRoot);
 
   protocol.handle(PROOF_SCHEME, (request) => {
     const url = new URL(request.url);
@@ -85,7 +120,7 @@ export function registerProofProtocol(distRoot: string): void {
     if (pathname.endsWith('/')) pathname += 'index.html';
     if (pathname === '/' || pathname === '') pathname = '/index.html';
     const filePath = resolveSafePath(distRoot, pathname);
-    if (!filePath || !existsSync(filePath)) {
+    if (!filePath) {
       return new Response('not found', { status: 404 });
     }
     const stat = statSync(filePath);
@@ -103,6 +138,10 @@ export function registerProofProtocol(distRoot: string): void {
       },
     });
   });
+}
+
+export function isProofOrigin(url: string): boolean {
+  return allowNavigation(url);
 }
 
 export function allowNavigation(url: string): boolean {

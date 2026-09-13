@@ -9,9 +9,11 @@ import { createHash } from 'node:crypto';
 import {
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -27,6 +29,8 @@ const webDist = join(repoRoot, 'apps', 'web', 'dist');
 const electronVersion = '44.3.0';
 const bundleId = 'com.nexus42.rft-electron-proof';
 const productName = 'Nexus RFT Feasibility';
+const entitlements = join(appRoot, 'resources', 'entitlements.plist');
+const entitlementsChild = join(appRoot, 'resources', 'entitlements-child.plist');
 
 function sha256File(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -115,39 +119,101 @@ function findNativeNodeFiles(root) {
   return hits;
 }
 
-function stageApp(stagingDir) {
+function platformPackageForArch(arch) {
+  if (arch === 'arm64') return '@42ch/nexus-native-darwin-arm64';
+  if (arch === 'x64') return '@42ch/nexus-native-darwin-x64';
+  throw new Error(`unsupported arch ${arch}`);
+}
+
+function packageRootForName(name) {
+  const short = name.replace('@42ch/', '');
+  return join(repoRoot, 'packages', short);
+}
+
+function packDependency(name, packDir) {
+  const pkgDir = packageRootForName(name);
+  if (!existsSync(join(pkgDir, 'package.json'))) {
+    throw new Error(`missing package directory for ${name}: ${pkgDir}`);
+  }
+  const result = spawnSync('pnpm', ['pack', '--pack-destination', packDir], {
+    cwd: pkgDir,
+    encoding: 'utf8',
+  });
+  if (result.status !== 0) {
+    throw new Error(`pnpm pack failed for ${name}: ${result.stderr || result.stdout}`);
+  }
+  const tarball = readdirSync(packDir)
+    .filter((entry) => entry.endsWith('.tgz'))
+    .sort()
+    .at(-1);
+  if (!tarball) {
+    throw new Error(`pnpm pack for ${name} produced no tarball`);
+  }
+  return join(packDir, tarball);
+}
+
+function assertSelfContainedNodeModules(nodeModulesDir, stagingDir) {
+  const queue = [nodeModulesDir];
+  while (queue.length) {
+    const dir = queue.pop();
+    for (const entry of readdirSafe(dir)) {
+      const full = join(dir, entry);
+      const st = lstatSync(full);
+      if (st.isSymbolicLink()) {
+        const target = realpathSync(full);
+        if (!target.startsWith(stagingDir)) {
+          throw new Error(`staging contains workspace symlink outside staging: ${full} -> ${target}`);
+        }
+      }
+      if (st.isDirectory()) queue.push(full);
+    }
+  }
+}
+
+function stageApp(stagingDir, arch) {
   rmSync(stagingDir, { recursive: true, force: true });
   mkdirSync(stagingDir, { recursive: true });
 
-  const pkg = JSON.parse(readFileSync(join(appRoot, 'package.json'), 'utf8'));
+  const packDir = join(stagingDir, '.packs');
+  mkdirSync(packDir, { recursive: true });
+  const contractsTar = packDependency('@42ch/nexus-contracts', packDir);
+  const providerTar = packDependency('@42ch/nexus-provider-acp', packDir);
+  const nativeLoaderTar = packDependency('@42ch/nexus-native', packDir);
+  const platformTar = packDependency(platformPackageForArch(arch), packDir);
+
   const stagedPkg = {
-    name: pkg.name,
-    version: pkg.version,
+    name: 'nexus-desktop-electron-proof-staged',
+    version: '0.1.0',
     private: true,
     type: 'module',
     main: 'dist/main.js',
-    description: pkg.description,
     dependencies: {
-      '@42ch/nexus-contracts': pkg.dependencies['@42ch/nexus-contracts'],
-      '@42ch/nexus-native': pkg.dependencies['@42ch/nexus-native'],
-      '@42ch/nexus-provider-acp': pkg.dependencies['@42ch/nexus-provider-acp'],
+      '@42ch/nexus-contracts': `file:${contractsTar}`,
+      '@42ch/nexus-native': `file:${nativeLoaderTar}`,
+      '@42ch/nexus-provider-acp': `file:${providerTar}`,
+      [platformPackageForArch(arch)]: `file:${platformTar}`,
     },
   };
   writeFileSync(join(stagingDir, 'package.json'), `${JSON.stringify(stagedPkg, null, 2)}\n`);
+  writeFileSync(join(stagingDir, 'pnpm-lock.yaml'), 'lockfileVersion: 9.0\n');
 
   cpSync(join(appRoot, 'dist'), join(stagingDir, 'dist'), { recursive: true });
   cpSync(webDist, join(stagingDir, 'web-dist'), { recursive: true });
 
-  const install = spawnSync('pnpm', ['install', '--prod', '--ignore-scripts'], {
-    cwd: stagingDir,
-    stdio: 'inherit',
-    env: { ...process.env, npm_config_engine_strict: 'false' },
-  });
+  const install = spawnSync(
+    'pnpm',
+    ['install', '--prod', '--ignore-scripts', '--ignore-workspace', '--no-frozen-lockfile'],
+    {
+      cwd: stagingDir,
+      stdio: 'inherit',
+      env: { ...process.env, npm_config_engine_strict: 'false' },
+    },
+  );
   if (install.status !== 0) {
-    throw new Error(
-      'staging install failed — PM may need to serialize lockfile refresh for workspace deps',
-    );
+    throw new Error('isolated staging install failed');
   }
+
+  assertSelfContainedNodeModules(join(stagingDir, 'node_modules'), stagingDir);
 
   const nativeNodes = findNativeNodeFiles(join(stagingDir, 'node_modules'));
   if (nativeNodes.length === 0) {
@@ -169,13 +235,18 @@ async function main() {
   }
   assertHostArch(args.arch);
   assertArtifacts();
+  if (args.signIdentity) {
+    if (!existsSync(entitlements) || !existsSync(entitlementsChild)) {
+      throw new Error(`missing entitlements plists: ${entitlements}, ${entitlementsChild}`);
+    }
+  }
 
   const outDir = resolve(
     args.out ?? join(repoRoot, '.mstar/iterations/v1.189/guides/evidence/electron-packages', args.arch),
   );
   mkdirSync(outDir, { recursive: true });
   const stagingDir = join(outDir, '.staging-app');
-  const nativeNodes = stageApp(stagingDir);
+  const nativeNodes = stageApp(stagingDir, args.arch);
 
   const options = {
     dir: stagingDir,

@@ -71,6 +71,16 @@ function verifyNotary(appPath) {
   return run('spctl', ['--assess', '--type', 'open', '--context', 'notary', '--verbose=4', appPath]);
 }
 
+function readBundleIdentifier(appPath) {
+  const result = run('codesign', ['-dv', '--verbose=4', appPath]);
+  const match = `${result.stdout}\n${result.stderr}`.match(/Identifier=([^\n]+)/);
+  return match?.[1] ?? null;
+}
+
+function runtimeEvidencePath(outDir) {
+  return join(outDir, 'runtime-lifecycle.json');
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help || !args.arch || !args.out) {
@@ -94,7 +104,7 @@ async function main() {
     signed_required: args.signedRequired,
     checks: {},
     missing_inputs: [],
-    note: 'P3-T2 scaffold — PM/P3-T3 Execute fills runtime samples after signed package exists.',
+    note: 'P3-T2 diagnostic driver — pass requires signed/notarized package plus runtime lifecycle evidence (P3-T3 Execute).',
   };
 
   if (!existsSync(appPath)) {
@@ -119,9 +129,15 @@ async function main() {
     evidence.checks.codesign = verifyCodesign(appPath);
     evidence.checks.spctl_execute = verifyGate(appPath);
     evidence.checks.notary = verifyNotary(appPath);
+    evidence.checks.bundle_identifier = {
+      expected: bundleId,
+      actual: readBundleIdentifier(appPath),
+    };
     const signedOk =
       evidence.checks.codesign.deep_status === 0 &&
-      evidence.checks.spctl_execute.status === 0;
+      evidence.checks.spctl_execute.status === 0 &&
+      evidence.checks.notary.status === 0 &&
+      evidence.checks.bundle_identifier.actual === bundleId;
     evidence.checks.signed_execution = { pass: signedOk };
     if (!signedOk) {
       evidence.status = 'fail';
@@ -132,10 +148,26 @@ async function main() {
       'Unsigned diagnostic run — does not satisfy SEC-1. Re-run with --signed-required after signing/notarization.';
   }
 
+  const runtimePath = runtimeEvidencePath(outDir);
+  if (!existsSync(runtimePath)) {
+    evidence.missing_inputs.push(`runtime lifecycle evidence missing: ${runtimePath}`);
+    evidence.checks.runtime_lifecycle = { pass: false, path: runtimePath };
+  } else {
+    const runtime = JSON.parse(readFileSync(runtimePath, 'utf8'));
+    evidence.checks.runtime_lifecycle = runtime;
+    if (runtime.status !== 'pass') {
+      evidence.missing_inputs.push('runtime lifecycle evidence status is not pass');
+    }
+  }
+
   if (evidence.missing_inputs.length > 0) {
-    evidence.status = 'blocked';
+    evidence.status = evidence.status === 'fail' ? 'fail' : 'blocked';
+  } else if (args.signedRequired && evidence.status !== 'fail') {
+    const runtimePass = evidence.checks.runtime_lifecycle?.status === 'pass';
+    const signedPass = evidence.checks.signed_execution?.pass === true;
+    evidence.status = runtimePass && signedPass ? 'pass' : 'blocked';
   } else if (evidence.status !== 'fail') {
-    evidence.status = args.signedRequired ? 'pass' : 'blocked';
+    evidence.status = 'blocked';
   }
 
   writeFileSync(join(outDir, 'proof-package.json'), `${JSON.stringify(evidence, null, 2)}\n`);

@@ -5,14 +5,15 @@ import {
   protocol,
   shell,
   utilityProcess,
+  type IpcMainInvokeEvent,
   type UtilityProcess,
 } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { nativeCompatibility } from '@42ch/nexus-native';
 import {
+  assertNativePayloadPresent,
   buildUtilityConfig,
   nativeRefreshHint,
   repoRootFromMeta,
@@ -21,11 +22,18 @@ import {
 } from './env.js';
 import {
   CLOSE_JOIN_MS,
+  DEFAULT_REQUEST_TIMEOUT_MS,
   INTERRUPT_NOTIFY_MS,
+  MAX_ACTIVE_CALLS,
+  MAX_PENDING_BYTES,
+  MAX_PENDING_CALLS,
+  MAX_REQUEST_BYTES,
   assertProofStep,
   errorMessage,
+  estimatePayloadBytes,
   ipcErr,
   ipcOk,
+  isIpcResponse,
   parseIpcRequest,
   type IpcResponse,
   type LifecycleStatus,
@@ -34,6 +42,7 @@ import {
   allowNavigation,
   assertDistPresent,
   isAllowedExternalUrl,
+  isProofOrigin,
   proofIndexUrl,
   registerProofProtocol,
   resolveDistRoot,
@@ -43,6 +52,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = repoRootFromMeta(import.meta.url);
 const BUNDLE_ID = 'com.nexus42.rft-electron-proof';
 const DISPLAY_NAME = 'Nexus RFT Feasibility';
+
+interface PendingEntry {
+  generation: number;
+  payloadBytes: number;
+  resolve: (response: IpcResponse) => void;
+  timer: NodeJS.Timeout;
+}
 
 function resolveWebDistRoot(): string {
   const packaged = join(process.resourcesPath, 'web-dist');
@@ -56,6 +72,7 @@ const distRoot = resolveWebDistRoot();
 
 let mainWindow: BrowserWindow | null = null;
 let utility: UtilityProcess | null = null;
+let utilityGeneration = 0;
 let lifecycle: LifecycleStatus = {
   phase: 'idle',
   owner_alive: false,
@@ -66,6 +83,12 @@ let lifecycle: LifecycleStatus = {
 };
 let closeInitiated = false;
 let reopenRequired = false;
+let closeInFlight: Promise<void> | null = null;
+const pendingRequests = new Map<string, PendingEntry>();
+
+function syncPendingLifecycle(): void {
+  setLifecycle({ pending_operations: [...pendingRequests.keys()] });
+}
 
 function setLifecycle(next: Partial<LifecycleStatus>): void {
   lifecycle = { ...lifecycle, ...next };
@@ -84,16 +107,74 @@ function preloadPath(): string {
   return join(__dirname, 'preload.js');
 }
 
-function assertNativeArtifacts(): void {
-  try {
-    nativeCompatibility();
-  } catch (err) {
-    const message = errorMessage(err);
-    throw new Error(`${message}. ${nativeRefreshHint()}`);
+function settlePending(requestId: string, response: IpcResponse): boolean {
+  const entry = pendingRequests.get(requestId);
+  if (!entry) return false;
+  clearTimeout(entry.timer);
+  pendingRequests.delete(requestId);
+  syncPendingLifecycle();
+  entry.resolve(response);
+  return true;
+}
+
+function settleAllPending(generation: number, code: string, message: string): void {
+  for (const requestId of [...pendingRequests.keys()]) {
+    const entry = pendingRequests.get(requestId);
+    if (!entry || entry.generation !== generation) continue;
+    settlePending(requestId, ipcErr(requestId, code, message));
   }
 }
 
+function applyResponseLifecycle(requestOperation: string | null, response: IpcResponse): void {
+  if (response.ok && requestOperation === 'open') {
+    setLifecycle({ phase: 'open', owner_alive: true, reason: null });
+  }
+  if (response.ok && requestOperation === 'close') {
+    setLifecycle({
+      phase: 'closed',
+      owner_alive: false,
+      cleanup_confirmed: (response.result as { cleanup_confirmed?: boolean })?.cleanup_confirmed ?? null,
+      last_close_report: response.result,
+      reason: null,
+    });
+    reopenRequired = false;
+  }
+  if (!response.ok && requestOperation === 'close') {
+    setLifecycle({
+      phase: 'interrupted',
+      owner_alive: false,
+      cleanup_confirmed: false,
+      reason: response.error.message,
+      last_close_report: null,
+    });
+    reopenRequired = true;
+  }
+}
+
+function onUtilityMessage(message: unknown, generation: number): void {
+  if (generation !== utilityGeneration) return;
+  const body = message as Record<string, unknown>;
+  if (body && typeof body === 'object' && 'type' in body) {
+    if (body.type === 'utility-ready') {
+      const snapshot = body.lifecycle as LifecycleStatus | undefined;
+      setLifecycle({ ...(snapshot ?? {}), owner_alive: true });
+      return;
+    }
+    if (body.type === 'utility-crashed') {
+      void handleUtilityCrash(generation, (body.lifecycle as LifecycleStatus | undefined)?.reason ?? 'utility crashed');
+      return;
+    }
+    return;
+  }
+  if (!isIpcResponse(message)) return;
+  const pendingEntry = pendingRequests.get(message.request_id);
+  if (!pendingEntry || pendingEntry.generation !== generation) return;
+  settlePending(message.request_id, message);
+}
+
 function spawnUtilityOwner(): UtilityProcess {
+  utilityGeneration += 1;
+  const generation = utilityGeneration;
   const proofHome = resolveProofHome(process.env.NEXUS_PROOF_HOME, repoRoot);
   const config = buildUtilityConfig(proofHome);
   const env = sanitizeInheritedEnv(process.env);
@@ -106,6 +187,7 @@ function spawnUtilityOwner(): UtilityProcess {
   });
 
   child.on('spawn', () => {
+    if (generation !== utilityGeneration) return;
     setLifecycle({ phase: 'starting', owner_alive: true, reason: null });
   });
 
@@ -116,8 +198,12 @@ function spawnUtilityOwner(): UtilityProcess {
     process.stderr.write(`[utility stderr] ${chunk.toString()}`);
   });
 
+  child.on('message', (msg) => onUtilityMessage(msg, generation));
+
   child.on('exit', (code) => {
+    if (generation !== utilityGeneration) return;
     utility = null;
+    settleAllPending(generation, 'interrupted', `utility exited unexpectedly (${code ?? 'unknown'})`);
     if (!closeInitiated) {
       reopenRequired = true;
       setLifecycle({
@@ -130,7 +216,35 @@ function spawnUtilityOwner(): UtilityProcess {
     }
   });
 
+  utility = child;
   return child;
+}
+
+async function killAndJoinUtility(generation: number): Promise<void> {
+  const proc = utility;
+  if (!proc || generation !== utilityGeneration) return;
+  const { promise, resolve } = Promise.withResolvers<void>();
+  proc.once('exit', () => resolve());
+  proc.kill();
+  setTimeout(resolve, CLOSE_JOIN_MS);
+  await promise;
+  if (generation === utilityGeneration) {
+    utility = null;
+  }
+}
+
+async function handleUtilityCrash(generation: number, reason: string): Promise<void> {
+  if (generation !== utilityGeneration) return;
+  reopenRequired = true;
+  setLifecycle({
+    phase: 'interrupted',
+    owner_alive: false,
+    cleanup_confirmed: false,
+    reason,
+  });
+  settleAllPending(generation, 'interrupted', reason);
+  notifyInterrupted();
+  await killAndJoinUtility(generation);
 }
 
 function notifyInterrupted(): void {
@@ -141,101 +255,110 @@ function notifyInterrupted(): void {
   }, Math.min(INTERRUPT_NOTIFY_MS, CLOSE_JOIN_MS));
 }
 
-async function utilityRequest(raw: unknown): Promise<IpcResponse> {
+function ensureUtilityOwner(): UtilityProcess {
+  if (!utility) {
+    return spawnUtilityOwner();
+  }
+  return utility;
+}
+
+async function utilityRequest(
+  raw: unknown,
+  opts?: { timeoutMs?: number; operationHint?: string },
+): Promise<IpcResponse> {
   const request = parseIpcRequest(raw);
   if (reopenRequired && request.operation !== 'close') {
     return ipcErr(request.request_id, 'interrupted', 'prior owner interrupted — explicit reopen required');
   }
-  if (!utility) {
-    utility = spawnUtilityOwner();
+  if (lifecycle.phase === 'closing' && request.operation !== 'close') {
+    return ipcErr(request.request_id, 'closing', 'owner is closing');
   }
-  const active = utility;
-  return new Promise((resolve) => {
-    const onMessage = (message: unknown) => {
-      const body = message as IpcResponse & { type?: string; lifecycle?: LifecycleStatus };
-      if (body && typeof body === 'object' && 'type' in body) {
-        if (body.type === 'utility-ready') {
-          setLifecycle({ ...(body.lifecycle ?? {}), owner_alive: true });
-        }
-        if (body.type === 'utility-crashed') {
-          reopenRequired = true;
-          setLifecycle({
-            phase: 'interrupted',
-            owner_alive: false,
-            cleanup_confirmed: false,
-            reason: body.lifecycle?.reason ?? 'utility crashed',
-          });
-          notifyInterrupted();
-        }
-        return;
-      }
-      active?.off('message', onMessage);
-      const response = body as IpcResponse;
-      if (response.ok && request.operation === 'open') {
-        setLifecycle({ phase: 'open', owner_alive: true, reason: null });
-      }
-      if (response.ok && request.operation === 'close') {
-        setLifecycle({
-          phase: 'closed',
-          owner_alive: false,
-          cleanup_confirmed: (response.result as { cleanup_confirmed?: boolean })?.cleanup_confirmed ?? null,
-          last_close_report: response.result,
-          reason: null,
-        });
-        reopenRequired = false;
-      }
-      if (!response.ok && request.operation === 'close') {
-        setLifecycle({
-          phase: 'interrupted',
-          owner_alive: false,
-          cleanup_confirmed: false,
-          reason: response.error.message,
-          last_close_report: null,
-        });
-        reopenRequired = true;
-      }
+
+  const payloadBytes = estimatePayloadBytes(request.payload);
+  if (payloadBytes > MAX_REQUEST_BYTES) {
+    return ipcErr(request.request_id, 'input_too_large', 'request payload exceeds 1 MiB');
+  }
+  if (pendingRequests.size >= MAX_ACTIVE_CALLS + MAX_PENDING_CALLS) {
+    return ipcErr(request.request_id, 'busy', 'main admission cap exceeded');
+  }
+  let pendingBytes = 0;
+  for (const entry of pendingRequests.values()) {
+    pendingBytes += entry.payloadBytes;
+  }
+  if (pendingBytes + payloadBytes > MAX_PENDING_BYTES) {
+    return ipcErr(request.request_id, 'busy', 'main pending byte cap exceeded');
+  }
+
+  const activeGeneration = utilityGeneration;
+  ensureUtilityOwner();
+
+  const { promise, resolve } = Promise.withResolvers<IpcResponse>();
+  const timeoutMs = opts?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const timer = setTimeout(() => {
+    settlePending(
+      request.request_id,
+      ipcErr(request.request_id, 'timeout', `utility request timed out after ${timeoutMs}ms`),
+    );
+  }, timeoutMs);
+
+  pendingRequests.set(request.request_id, {
+    generation: activeGeneration,
+    payloadBytes,
+    resolve: (response) => {
+      applyResponseLifecycle(opts?.operationHint ?? request.operation, response);
       resolve(response);
-    };
-    active?.on('message', onMessage);
-    active?.postMessage({
-      request_id: request.request_id,
-      operation: request.operation,
-      payload: request.payload,
-    });
+    },
+    timer,
   });
+  syncPendingLifecycle();
+
+  utility?.postMessage({
+    request_id: request.request_id,
+    operation: request.operation,
+    payload: request.payload,
+  });
+
+  return promise;
 }
 
 async function initiateOwnerClose(): Promise<void> {
-  if (closeInitiated) return;
+  if (closeInFlight) return closeInFlight;
+  const { promise, resolve } = Promise.withResolvers<void>();
+  closeInFlight = promise;
   closeInitiated = true;
   setLifecycle({ phase: 'closing', owner_alive: Boolean(utility), reason: null });
+
   if (!utility) {
     setLifecycle({ phase: 'closed', owner_alive: false, cleanup_confirmed: true, reason: null });
+    closeInFlight = null;
+    resolve();
     return;
   }
+
+  const generation = utilityGeneration;
   const request_id = randomUUID();
-  const timer = setTimeout(() => {
-    if (utility) {
-      utility.kill();
-      utility = null;
-      reopenRequired = true;
-      setLifecycle({
-        phase: 'interrupted',
-        owner_alive: false,
-        cleanup_confirmed: false,
-        reason: 'close join exceeded 5s',
-      });
-      notifyInterrupted();
-    }
-  }, CLOSE_JOIN_MS);
   try {
-    await utilityRequest({ request_id, operation: 'close' });
+    await utilityRequest(
+      { request_id, operation: 'close' },
+      { timeoutMs: CLOSE_JOIN_MS, operationHint: 'close' },
+    );
   } finally {
-    clearTimeout(timer);
-    if (utility) {
-      utility.kill();
-      utility = null;
-    }
+    await killAndJoinUtility(generation);
+    closeInFlight = null;
+    resolve();
+  }
+}
+
+function assertProofSender(event: IpcMainInvokeEvent): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    throw Object.assign(new Error('proof window unavailable'), { code: 'invalid_sender' });
+  }
+  if (event.sender !== mainWindow.webContents) {
+    throw Object.assign(new Error('ipc sender is not the selected proof window'), { code: 'invalid_sender' });
+  }
+  const frameUrl = event.senderFrame?.url ?? event.sender.getURL();
+  if (!isProofOrigin(frameUrl)) {
+    throw Object.assign(new Error('ipc sender frame is not nexus-proof origin'), { code: 'invalid_origin' });
   }
 }
 
@@ -285,11 +408,21 @@ function createMainWindow(): BrowserWindow {
 }
 
 function registerIpcHandlers(): void {
-  ipcMain.handle('nexus-proof:lifecycle', async () => lifecycle);
+  ipcMain.handle('nexus-proof:lifecycle', async (event) => {
+    assertProofSender(event);
+    return lifecycle;
+  });
 
-  ipcMain.handle('nexus-proof:renderer-ready', async () => ({ lifecycle, bundle_id: BUNDLE_ID }));
+  ipcMain.handle('nexus-proof:renderer-ready', async (event) => {
+    assertProofSender(event);
+    return { lifecycle, bundle_id: BUNDLE_ID };
+  });
 
-  ipcMain.handle('nexus-proof:proof-step', async (_event, raw: { step?: string; payload?: Record<string, unknown> }) => {
+  ipcMain.handle('nexus-proof:proof-step', async (event, raw: { step?: string; payload?: Record<string, unknown> }) => {
+    assertProofSender(event);
+    if (lifecycle.phase === 'closing') {
+      return ipcErr(randomUUID(), 'closing', 'owner is closing');
+    }
     const step = assertProofStep(raw?.step);
     const request_id = randomUUID();
     switch (step) {
@@ -299,6 +432,7 @@ function registerIpcHandlers(): void {
         return utilityRequest({ request_id, operation: 'compatibility' });
       case 'open':
         if (reopenRequired) {
+          await killAndJoinUtility(utilityGeneration);
           utility = null;
           reopenRequired = false;
           closeInitiated = false;
@@ -348,7 +482,11 @@ async function bootstrap(): Promise<void> {
   await app.whenReady();
 
   assertDistPresent(distRoot);
-  assertNativeArtifacts();
+  try {
+    assertNativePayloadPresent();
+  } catch (err) {
+    throw new Error(`${errorMessage(err)}. ${nativeRefreshHint()}`);
+  }
   registerProofProtocol(distRoot);
   registerIpcHandlers();
 

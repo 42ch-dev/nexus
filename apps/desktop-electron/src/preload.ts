@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 import { contextBridge, ipcRenderer } from 'electron';
 
 /** Frozen preload surface for the private proof shell — no raw ipcRenderer/process/require. */

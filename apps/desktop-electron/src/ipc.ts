@@ -6,8 +6,12 @@
 export const MAX_REQUEST_BYTES = 1024 * 1024;
 export const MAX_BATCH_BYTES = 256 * 1024;
 export const MAX_PULL_EVENTS = 16;
+export const MAX_ACTIVE_CALLS = 32;
+export const MAX_PENDING_CALLS = 16;
+export const MAX_PENDING_BYTES = MAX_REQUEST_BYTES;
 export const CLOSE_JOIN_MS = 5000;
 export const INTERRUPT_NOTIFY_MS = 5000;
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 export const ALLOWED_OPERATIONS = [
   'compatibility',
@@ -133,6 +137,39 @@ export function errorCode(err: unknown): string {
 export function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
+}
+
+export function estimatePayloadBytes(payload: unknown): number {
+  if (payload === undefined) return 0;
+  return Buffer.byteLength(JSON.stringify(payload), 'utf8');
+}
+
+export function isIpcResponse(value: unknown): value is IpcResponse {
+  if (!value || typeof value !== 'object') return false;
+  const body = value as Partial<IpcResponse>;
+  return typeof body.request_id === 'string' && typeof body.ok === 'boolean';
+}
+
+export function clampPullBounds(
+  maxEventsRaw: unknown,
+  maxBytesRaw: unknown,
+): { maxEvents: number; maxBytes: number } {
+  const maxEvents = maxEventsRaw === undefined ? MAX_PULL_EVENTS : Number(maxEventsRaw);
+  const maxBytes = maxBytesRaw === undefined ? MAX_BATCH_BYTES : Number(maxBytesRaw);
+  if (
+    !Number.isFinite(maxEvents) ||
+    !Number.isInteger(maxEvents) ||
+    maxEvents < 0 ||
+    !Number.isFinite(maxBytes) ||
+    !Number.isInteger(maxBytes) ||
+    maxBytes < 0
+  ) {
+    throw ipcError('invalid_input', 'max_events and max_bytes must be finite non-negative integers');
+  }
+  return {
+    maxEvents: Math.min(maxEvents, MAX_PULL_EVENTS),
+    maxBytes: Math.min(maxBytes, MAX_BATCH_BYTES),
+  };
 }
 
 /** Renderer-facing proof steps; each maps to a whitelisted utility operation. */
