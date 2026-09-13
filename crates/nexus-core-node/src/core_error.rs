@@ -67,6 +67,26 @@ pub fn open_reason_invalid_input(message: impl Into<String>) -> String {
     })
 }
 
+/// Serialize a not-found wire error for host-query style rejections.
+pub fn open_reason_not_found(message: impl Into<String>) -> String {
+    open_reason_from_wire(CoreError {
+        code: CoreErrorCode::NotFound,
+        message: message.into(),
+        details: Default::default(),
+        http_status: Some(404),
+    })
+}
+
+/// Serialize a sanitized internal wire error for host-query style rejections.
+pub fn open_reason_internal() -> String {
+    open_reason_from_wire(CoreError {
+        code: CoreErrorCode::Internal,
+        message: "internal error".into(),
+        details: Default::default(),
+        http_status: Some(500),
+    })
+}
+
 fn internal_error_bucket(category: &str) -> &'static str {
     if category.starts_with("config_load:") || category.starts_with("database_error:") {
         "configuration_or_database"

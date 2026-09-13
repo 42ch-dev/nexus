@@ -286,6 +286,12 @@ pub struct HostStartConfig {
     /// Pre-validated config retained from boot (avoids a second disk read).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_config: Option<crate::config::AgentHostConfig>,
+    /// Pre-admitted provider catalog from open-time PATH/recipe discovery.
+    ///
+    /// When set, [`crate::HostManager::start`] materializes adapters from this
+    /// snapshot and does not re-run PATH discovery.
+    #[serde(skip)]
+    pub admitted_catalog: Option<Vec<crate::ProviderCatalogEntry>>,
     /// Verified owner for bounded readiness probes at start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe_owner: Option<SessionOwner>,

@@ -121,6 +121,7 @@ fn host_start_config(ws: &TestWorkspace) -> HostStartConfig {
             shutdown_ms: 2_000,
         },
         host_config: None,
+        admitted_catalog: None,
         // Verified probe owner bound to this fixture's workspace root. The
         // ready-path tests below create real sessions; without an owner every
         // registered entry stays unavailable and admission would refuse.

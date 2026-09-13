@@ -679,6 +679,7 @@ fn host_start_config(workspace_root: &Path, probe_owner: Option<SessionOwner>) -
         max_ops_per_session: 1,
         timeouts: timeouts(),
         host_config: None,
+        admitted_catalog: None,
         probe_owner,
     }
 }
