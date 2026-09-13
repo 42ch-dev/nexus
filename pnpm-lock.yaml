@@ -296,16 +296,16 @@ importers:
         version: 22.20.2
     optionalDependencies:
       '@42ch/nexus-native-darwin-arm64':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../nexus-native-darwin-arm64
       '@42ch/nexus-native-darwin-x64':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../nexus-native-darwin-x64
       '@42ch/nexus-native-linux-x64-gnu':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../nexus-native-linux-x64-gnu
       '@42ch/nexus-native-win32-x64-msvc':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../nexus-native-win32-x64-msvc
 
   packages/nexus-native-darwin-arm64: {}
