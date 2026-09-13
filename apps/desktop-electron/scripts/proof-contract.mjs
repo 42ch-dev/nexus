@@ -16,6 +16,10 @@
  * rather than shape alone (I9).
  */
 
+import { createHash } from 'node:crypto';
+import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+
 export const RUNTIME_SCHEMA = 'rft-p3-t3-runtime-proof/v2';
 
 /** Exact phase set a canonical (gating) runtime run must execute. */
@@ -419,4 +423,55 @@ export function providerLifecycleComplete(op) {
       steps.cancel?.ok === true &&
       steps.shutdown?.ok === true,
   );
+}
+
+// --- artifact identity ------------------------------------------------------
+
+/** SHA-256 of one file, as lowercase hex. */
+export function sha256File(path) {
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+
+/**
+ * Walk a tree without following symlinks.
+ *
+ * macOS `.app` bundles are full of version symlinks, so following them would
+ * count the same bytes several times and make the digest unstable.
+ */
+export function walkFiles(root) {
+  if (!existsSync(root)) return { files: [], symlinks: [] };
+  const files = [];
+  const symlinks = [];
+  const queue = [root];
+  while (queue.length) {
+    const dir = queue.pop();
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry);
+      const st = lstatSync(full);
+      if (st.isSymbolicLink()) symlinks.push(full);
+      else if (st.isDirectory()) queue.push(full);
+      else files.push(full);
+    }
+  }
+  return { files, symlinks };
+}
+
+/**
+ * Deterministic digest of an installed bundle: sorted relative path plus the
+ * content digest of each file. Shared by the runtime driver (which records it)
+ * and the decision generator (which recomputes it), so "the app that was
+ * measured" and "the app on disk now" are compared with one algorithm.
+ */
+export function digestAppBundle(appPath) {
+  const walked = walkFiles(appPath);
+  const hash = createHash('sha256');
+  for (const path of walked.files.map((p) => p.replace(appPath, '')).sort()) {
+    hash.update(path).update('\0');
+    hash.update(sha256File(join(appPath, path.replace(/^\//, ''))));
+  }
+  return {
+    sha256: hash.digest('hex'),
+    file_count: walked.files.length,
+    symlink_count: walked.symlinks.length,
+  };
 }

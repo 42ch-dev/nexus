@@ -21,7 +21,14 @@ import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { evaluateRuntimeEvidence, runtimeCriterionVerdict } from './proof-contract.mjs';
+import {
+  NATIVE_LOAD_CHECK_ID,
+  digestAppBundle,
+  evaluateRuntimeEvidence,
+  runtimeCriterionVerdict,
+  sha256File,
+  walkFiles,
+} from './proof-contract.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..', '..');
@@ -463,110 +470,229 @@ for (const arch of GUI_ARCHES) {
   });
 }
 
-// --- SEC-1 signed execution, per GUI architecture (C4, I12) -----------------
+// --- SEC-1 signed execution, per GUI architecture (C4, I12, C7) -------------
 
 /**
- * Required predicates inside a package-gate document before its `status` may be
- * believed. A gate that merely *says* `go` is not evidence: each security
- * predicate must independently hold in the document, and a `go`/`no-go` whose
- * own decision inputs contradict it is treated as forged (I12).
+ * Every raw predicate the package gate records for one architecture, validated
+ * against its actual field names (read from the gate document, not invented).
+ *
+ * A decision row may not be satisfied by the gate's `status` alone: each of
+ * these must independently hold inside the cited document, and the nested
+ * runtime evidence must describe the artifact that is on disk right now.
  */
-function validateGateDocument(gate, arch, sourceNow) {
+function validateGateDocument(gate, arch, sourceNow, artifact) {
   const problems = [];
+  const add = (condition, message) => {
+    if (!condition) problems.push(message);
+  };
 
   // --- structural identity ---------------------------------------------------
-  if (gate.schema !== 'rft-p3-t3-package-gate/v2') {
-    problems.push(`schema ${gate.schema ?? 'absent'} != rft-p3-t3-package-gate/v2`);
-  }
-  if (gate.bundle_id !== 'com.nexus42.rft-electron-proof') {
-    problems.push(`bundle_id ${gate.bundle_id ?? 'absent'} != com.nexus42.rft-electron-proof`);
-  }
-  if (gate.arch !== arch.key) problems.push(`arch ${gate.arch ?? 'absent'} != ${arch.key}`);
-  if (!gate.app_realpath || !gate.app_realpath.includes(`darwin-${arch.key}`)) {
-    problems.push(`app_realpath ${gate.app_realpath ?? 'absent'} is not the ${arch.key} package`);
-  }
-  if (gate.app_path && gate.app_realpath && gate.app_path !== gate.app_realpath) {
-    problems.push(`app_path ${gate.app_path} != app_realpath ${gate.app_realpath}`);
-  }
+  add(gate.schema === 'rft-p3-t3-package-gate/v2', `schema ${gate.schema ?? 'absent'} != rft-p3-t3-package-gate/v2`);
+  add(gate.bundle_id === 'com.nexus42.rft-electron-proof', `bundle_id ${gate.bundle_id ?? 'absent'} != com.nexus42.rft-electron-proof`);
+  add(gate.arch === arch.key, `arch ${gate.arch ?? 'absent'} != ${arch.key}`);
+  add(
+    typeof gate.app_realpath === 'string' && gate.app_realpath.includes(`darwin-${arch.key}`),
+    `app_realpath ${gate.app_realpath ?? 'absent'} is not the ${arch.key} package`,
+  );
+  add(gate.app_path === gate.app_realpath, `app_path ${gate.app_path ?? 'absent'} != app_realpath ${gate.app_realpath ?? 'absent'}`);
 
-  const inputs = gate.decision_inputs ?? {};
   const checks = gate.checks ?? {};
+  const inputs = gate.decision_inputs ?? {};
+  const codesign = checks.codesign ?? {};
+  const signaturePredicates = checks.signature_predicates ?? {};
+  const entitlements = checks.entitlements ?? {};
+  const runtime = checks.runtime_lifecycle ?? {};
+  const runtimeProvenance = runtime.provenance ?? {};
+  const boundTo = runtime.bound_to ?? {};
+  const nativeLoad = runtime.native_utility_load ?? {};
 
-  // --- source / tree identity of the gate itself ------------------------------
-  const boundTo = checks.runtime_lifecycle?.bound_to ?? {};
-  if (boundTo.source_sha !== sourceNow.source_sha) {
-    problems.push(`bound_to.source_sha ${boundTo.source_sha ?? 'absent'} != head ${sourceNow.source_sha}`);
-  }
-  if (boundTo.tree_digest !== sourceNow.tree_digest) {
-    problems.push(`bound_to.tree_digest ${boundTo.tree_digest ?? 'absent'} != head ${sourceNow.tree_digest}`);
-  }
-  if (boundTo.tree_dirty !== sourceNow.tree_dirty) {
-    problems.push(`bound_to.tree_dirty ${boundTo.tree_dirty ?? 'absent'} != head ${sourceNow.tree_dirty}`);
+  // --- raw signature predicates ----------------------------------------------
+  add(gate.signed_required === true, `signed_required is ${gate.signed_required ?? 'absent'}, not true`);
+  add(inputs.signature_predicates_pass === true, 'decision_inputs.signature_predicates_pass is not true');
+  add(signaturePredicates.pass === true, `checks.signature_predicates.pass is ${signaturePredicates.pass ?? 'absent'}`);
+  add(
+    Array.isArray(signaturePredicates.failed) && signaturePredicates.failed.length === 0,
+    `checks.signature_predicates.failed is ${JSON.stringify(signaturePredicates.failed ?? null)}, not an empty list`,
+  );
+  add(codesign.deep_status === 0, `checks.codesign.deep_status is ${codesign.deep_status ?? 'absent'}, not 0`);
+  add(
+    codesign.identifier === gate.bundle_id,
+    `checks.codesign.identifier ${codesign.identifier ?? 'absent'} != ${gate.bundle_id}`,
+  );
+  add(
+    codesign.signature !== undefined && codesign.signature !== null && codesign.signature !== 'adhoc',
+    `checks.codesign.signature ${codesign.signature ?? 'absent'} is not a real signature`,
+  );
+  add(
+    codesign.team_identifier !== undefined && codesign.team_identifier !== null && codesign.team_identifier !== 'not set',
+    `checks.codesign.team_identifier ${codesign.team_identifier ?? 'absent'} is not set`,
+  );
+  add(
+    Array.isArray(codesign.authority) && codesign.authority.length > 0,
+    `checks.codesign.authority ${JSON.stringify(codesign.authority ?? null)} is empty`,
+  );
+  // Hardened runtime, from the raw flags as well as the derived boolean.
+  add(codesign.hardened_runtime === true, `checks.codesign.hardened_runtime is ${codesign.hardened_runtime ?? 'absent'}, not true`);
+  add(
+    typeof codesign.flags === 'string' && codesign.flags.split(',').includes('runtime'),
+    `checks.codesign.flags ${codesign.flags ?? 'absent'} do not include the hardened runtime option`,
+  );
+  add(
+    typeof signaturePredicates.hardened_runtime_flags === 'string' &&
+      signaturePredicates.hardened_runtime_flags.split(',').includes('runtime'),
+    'checks.signature_predicates.hardened_runtime_flags do not include the runtime option',
+  );
+  add(inputs.hardened_runtime === true, 'decision_inputs.hardened_runtime is not true');
+
+  // --- gatekeeper / notarization / stapling ----------------------------------
+  add(checks.spctl_execute?.status === 0, `checks.spctl_execute.status is ${checks.spctl_execute?.status ?? 'absent'}, not 0`);
+  add(checks.notary?.status === 0, `checks.notary.status is ${checks.notary?.status ?? 'absent'}, not 0`);
+  add(checks.stapler_validate?.status === 0, `checks.stapler_validate.status is ${checks.stapler_validate?.status ?? 'absent'}, not 0`);
+  add(inputs.stapler_ok === true, 'decision_inputs.stapler_ok is not true');
+
+  // --- bundle identifier, from the signed bundle ------------------------------
+  add(
+    checks.bundle_identifier?.actual === gate.bundle_id,
+    `checks.bundle_identifier.actual ${checks.bundle_identifier?.actual ?? 'absent'} != ${gate.bundle_id}`,
+  );
+  add(
+    checks.bundle_identifier?.expected === gate.bundle_id,
+    `checks.bundle_identifier.expected ${checks.bundle_identifier?.expected ?? 'absent'} != ${gate.bundle_id}`,
+  );
+
+  // --- entitlements: parse/status success and canonical value equality ---------
+  add(entitlements.pass === true, `checks.entitlements.pass is ${entitlements.pass ?? 'absent'}, not true`);
+  add(entitlements.values_match === true, `checks.entitlements.values_match is ${entitlements.values_match ?? 'absent'}, not true`);
+  add(entitlements.keys_match === true, `checks.entitlements.keys_match is ${entitlements.keys_match ?? 'absent'}, not true`);
+  add(inputs.entitlements_match === true, 'decision_inputs.entitlements_match is not true');
+  add(
+    entitlements.signed && typeof entitlements.signed === 'object' && Object.keys(entitlements.signed).length > 0,
+    'checks.entitlements.signed is absent or empty',
+  );
+  add(
+    typeof entitlements.signed_entitlements_plist_sha256 === 'string' && entitlements.signed_entitlements_plist_sha256.length === 64,
+    'checks.entitlements.signed_entitlements_plist_sha256 is absent',
+  );
+  add(
+    typeof entitlements.expected_source?.sha256 === 'string' && entitlements.expected_source.sha256.length === 64,
+    'checks.entitlements.expected_source.sha256 is absent',
+  );
+  add(
+    Array.isArray(entitlements.problems) && entitlements.problems.length === 0,
+    `checks.entitlements.problems is ${JSON.stringify(entitlements.problems ?? null)}, not empty`,
+  );
+  if (entitlements.signed && entitlements.expected) {
+    const canonical = (value) => {
+      if (Array.isArray(value)) return value.map(canonical);
+      if (value && typeof value === 'object') {
+        return Object.fromEntries(Object.keys(value).sort().map((k) => [k, canonical(value[k])]));
+      }
+      return value;
+    };
+    add(
+      JSON.stringify(canonical(entitlements.signed)) === JSON.stringify(canonical(entitlements.expected)),
+      'checks.entitlements.signed values do not equal checks.entitlements.expected',
+    );
   }
 
-  // --- every security predicate the row claims --------------------------------
-  const predicateProblems = [];
-  if (gate.signed_required !== true) predicateProblems.push('signed_required is not true');
-  if (inputs.signature_predicates_pass !== true) predicateProblems.push('signature_predicates_pass is not true');
-  if (checks.signature_predicates?.pass !== true) {
-    predicateProblems.push(`signature_predicates.pass is ${checks.signature_predicates?.pass ?? 'absent'}`);
-  }
-  const failedSignature = checks.signature_predicates?.failed;
-  if (Array.isArray(failedSignature) && failedSignature.length > 0) {
-    predicateProblems.push(`signature predicates failed: ${failedSignature.join(', ')}`);
-  }
-  if (inputs.stapler_ok !== true || checks.stapler_validate?.status !== 0) {
-    predicateProblems.push('stapler predicate is not satisfied');
-  }
-  if (inputs.hardened_runtime !== true) predicateProblems.push('hardened runtime is not asserted');
-  if (inputs.entitlements_match !== true) predicateProblems.push('entitlements do not match');
-  if (checks.entitlements?.values_match !== true) {
-    predicateProblems.push(`entitlements values_match is ${checks.entitlements?.values_match ?? 'absent'}`);
-  }
-  if (inputs.native_utility_load_proven !== true) predicateProblems.push('native utility load is not proven');
-  if (checks.runtime_lifecycle?.native_utility_load?.ok !== true) {
-    predicateProblems.push('runtime document does not prove a native utility load');
-  }
+  // --- nested runtime: state agreement ----------------------------------------
+  const nestedState = runtime.contract_state;
+  add(
+    nestedState === inputs.runtime_contract_state,
+    `nested contract_state ${nestedState ?? 'absent'} != decision_inputs.runtime_contract_state ${inputs.runtime_contract_state ?? 'absent'}`,
+  );
+  add(runtime.present === true, 'nested runtime evidence is not present');
+  add(inputs.native_load_check_id === NATIVE_LOAD_CHECK_ID, `decision_inputs.native_load_check_id ${inputs.native_load_check_id ?? 'absent'} != ${NATIVE_LOAD_CHECK_ID}`);
 
-  // --- runtime contract state and artifact-hash consistency -------------------
-  const runtimeState = inputs.runtime_contract_state ?? checks.runtime_lifecycle?.contract_state ?? null;
-  const runtimeProvenance = checks.runtime_lifecycle?.provenance ?? null;
-  if (runtimeProvenance) {
-    if (runtimeProvenance.app_path && gate.app_realpath && runtimeProvenance.app_path !== gate.app_realpath) {
-      problems.push('runtime document measured a different app bundle than the gate signed');
+  // --- nested runtime: provenance bound to the current artifact ---------------
+  add(runtimeProvenance.app_path === gate.app_realpath, 'nested runtime provenance measured a different app bundle than the gate signed');
+  add(runtimeProvenance.app_bundle_id === gate.bundle_id, 'nested runtime provenance bundle id disagrees with the gate');
+  add(runtimeProvenance.arch === arch.key, `nested runtime provenance arch ${runtimeProvenance.arch ?? 'absent'} != ${arch.key}`);
+  add(runtimeProvenance.source_sha === sourceNow.source_sha, `nested runtime provenance source_sha ${runtimeProvenance.source_sha ?? 'absent'} != head ${sourceNow.source_sha}`);
+  add(runtimeProvenance.tree_digest === sourceNow.tree_digest, `nested runtime provenance tree_digest ${runtimeProvenance.tree_digest ?? 'absent'} != head ${sourceNow.tree_digest}`);
+  add(runtimeProvenance.tree_dirty === sourceNow.tree_dirty, `nested runtime provenance tree_dirty ${runtimeProvenance.tree_dirty ?? 'absent'} != head ${sourceNow.tree_dirty}`);
+
+  // The gate's own binding record must agree with the document it bound.
+  add(boundTo.app_path === runtimeProvenance.app_path, 'checks.runtime_lifecycle.bound_to.app_path disagrees with the nested provenance');
+  add(boundTo.app_bundle_id === runtimeProvenance.app_bundle_id, 'checks.runtime_lifecycle.bound_to.app_bundle_id disagrees with the nested provenance');
+  add(boundTo.arch === runtimeProvenance.arch, 'checks.runtime_lifecycle.bound_to.arch disagrees with the nested provenance');
+  add(boundTo.source_sha === sourceNow.source_sha, `checks.runtime_lifecycle.bound_to.source_sha ${boundTo.source_sha ?? 'absent'} != head ${sourceNow.source_sha}`);
+  add(boundTo.tree_digest === sourceNow.tree_digest, `checks.runtime_lifecycle.bound_to.tree_digest ${boundTo.tree_digest ?? 'absent'} != head ${sourceNow.tree_digest}`);
+  add(boundTo.tree_dirty === sourceNow.tree_dirty, `checks.runtime_lifecycle.bound_to.tree_dirty ${boundTo.tree_dirty ?? 'absent'} != head ${sourceNow.tree_dirty}`);
+
+  // --- nested runtime: native load, present and internally consistent ---------
+  // Whether the load *succeeded* is branch-dependent (a no-go is a signed
+  // package whose runtime measurement failed), but the gate must not claim one
+  // thing in `decision_inputs` and another in the nested evidence.
+  const loadChecks = Array.isArray(runtime.checks_summary) ? runtime.checks_summary : [];
+  const loadCheck = loadChecks.find((entry) => entry?.id === NATIVE_LOAD_CHECK_ID);
+  add(loadCheck !== undefined, `nested checks_summary does not include ${NATIVE_LOAD_CHECK_ID}`);
+  const failedChecks = loadChecks.filter((entry) => entry?.ok !== true).map((entry) => entry.id);
+  add(
+    inputs.native_utility_load_proven === (nativeLoad.ok === true),
+    `decision_inputs.native_utility_load_proven ${inputs.native_utility_load_proven ?? 'absent'} contradicts nested native_utility_load.ok ${nativeLoad.ok ?? 'absent'}`,
+  );
+
+  // --- app bundle / native payload hashes vs the current on-disk artifact ------
+  if (!artifact.present) {
+    problems.push(`cannot verify the ${arch.key} app bundle on disk: ${artifact.reason}`);
+  } else {
+    add(
+      runtimeProvenance.app_bundle_sha256 === artifact.bundle_sha256,
+      `nested runtime app_bundle_sha256 ${runtimeProvenance.app_bundle_sha256 ?? 'absent'} != current bundle ${artifact.bundle_sha256}`,
+    );
+    if (typeof runtimeProvenance.native_node_path_relative === 'string') {
+      add(
+        artifact.native_node_sha256 !== null,
+        `no native payload found at ${runtimeProvenance.native_node_path_relative} in the current bundle`,
+      );
+      add(
+        runtimeProvenance.native_node_sha256 === artifact.native_node_sha256,
+        `nested runtime native_node_sha256 ${runtimeProvenance.native_node_sha256 ?? 'absent'} != current ${artifact.native_node_sha256 ?? 'absent'}`,
+      );
+    } else {
+      problems.push('nested runtime provenance does not record a native node path');
     }
-    if (runtimeProvenance.app_bundle_id && runtimeProvenance.app_bundle_id !== gate.bundle_id) {
-      problems.push('runtime bundle id disagrees with the gate bundle id');
-    }
-    if (runtimeProvenance.arch && runtimeProvenance.arch !== arch.key) {
-      problems.push(`runtime arch ${runtimeProvenance.arch} != ${arch.key}`);
-    }
   }
 
-  // --- status mapping, only after the predicates are known --------------------
+  // --- status mapping, only after every predicate above is known --------------
   let status = 'blocked';
   let summary;
   if (gate.status === 'go') {
-    const goProblems = [...predicateProblems];
-    if (runtimeState !== 'valid-pass') goProblems.push(`runtime_contract_state ${runtimeState ?? 'absent'} != valid-pass`);
-    if (problems.length > 0) goProblems.push(...problems);
+    const goProblems = [...problems];
+    if (nestedState !== 'valid-pass') {
+      goProblems.push(`nested contract_state ${nestedState ?? 'absent'} != valid-pass`);
+    }
+    if (inputs.native_utility_load_proven !== true) goProblems.push('decision_inputs.native_utility_load_proven is not true');
+    if (nativeLoad.ok !== true) goProblems.push(`nested native_utility_load.ok is ${nativeLoad.ok ?? 'absent'}, not true`);
+    if (loadCheck?.ok !== true) {
+      goProblems.push(`nested checks_summary reports ${NATIVE_LOAD_CHECK_ID} as ${loadCheck?.ok === undefined ? 'absent' : 'failed'}`);
+    }
+    if (failedChecks.length > 0) goProblems.push(`nested checks_summary contains failing checks: ${failedChecks.join(', ')}`);
     if (goProblems.length > 0) {
       status = 'blocked';
       summary = `gate claims go but its predicates do not support it: ${goProblems.join('; ')}`;
     } else {
       status = 'pass';
-      summary = `signed gate reports go for ${arch.key} with every predicate satisfied`;
+      summary = `signed gate reports go for ${arch.key} with every raw predicate satisfied`;
     }
+    problems.splice(0, problems.length, ...goProblems);
   } else if (gate.status === 'no-go') {
-    // A no-go must be a genuine unconfounded measured failure. A confounded or
-    // incomplete runtime state means the gate is reporting a failure it did not
-    // actually measure.
+    // A genuine no-go is a *signed* package whose unconfounded runtime
+    // measurement failed: the security predicates must still hold, and the
+    // runtime must record that failure consistently.
     const noGoProblems = [];
-    if (runtimeState !== 'valid-fail') noGoProblems.push(`runtime_contract_state ${runtimeState ?? 'absent'} != valid-fail`);
-    if (inputs.native_utility_load_proven !== true && inputs.native_utility_load_proven !== false) {
-      noGoProblems.push('native_utility_load_proven is absent');
+    if (nestedState !== 'valid-fail') {
+      noGoProblems.push(`nested contract_state ${nestedState ?? 'absent'} != valid-fail`);
     }
-    if (problems.length > 0) noGoProblems.push(...problems);
+    if (inputs.native_utility_load_proven !== false) {
+      noGoProblems.push('decision_inputs.native_utility_load_proven is not false for a measured failure');
+    }
+    if (nativeLoad.ok !== false) {
+      noGoProblems.push('nested native_utility_load.ok is not false for a measured failure');
+    }
+    if (failedChecks.length === 0) noGoProblems.push('nested checks_summary records no failing check');
+    if (noGoProblems.length === 0 && problems.length > 0) noGoProblems.push(...problems);
     if (noGoProblems.length > 0) {
       status = 'blocked';
       summary = `gate claims no-go but its inputs are inconsistent: ${noGoProblems.join('; ')}`;
@@ -574,17 +700,40 @@ function validateGateDocument(gate, arch, sourceNow) {
       status = 'fail';
       summary = `signed gate reports a measured failure (no-go) for ${arch.key}`;
     }
+    problems.splice(0, problems.length, ...noGoProblems);
   } else if (gate.status === 'blocked') {
     const inputsList = (gate.missing_inputs ?? []).slice(0, 2).join('; ');
     const reasonsList = (gate.reasons ?? []).slice(0, 2).join('; ');
     status = 'blocked';
-    summary = `gate blocked: ${reasonsList || inputsList || runtimeState || 'see proof-package.json'}`;
+    summary = `gate blocked: ${reasonsList || inputsList || nestedState || 'see proof-package.json'}`;
   } else {
     status = 'blocked';
     summary = `gate status ${gate.status ?? 'absent'} is not a decision value`;
   }
 
-  return { status, summary, problems: [...problems, ...predicateProblems] };
+  return { status, summary, problems };
+}
+
+/**
+ * Identity of the app bundle currently on disk for one architecture, recomputed
+ * with the shared digest so the gate's claims can be checked against reality.
+ */
+function currentArtifact(arch) {
+  const bundlePath = absoluteFor(APP_BUNDLE(arch.key));
+  if (!existsSync(bundlePath)) {
+    return { present: false, reason: `app bundle absent: ${bundlePath}` };
+  }
+  const digest = digestAppBundle(bundlePath);
+  const nativeNode = walkFiles(bundlePath).files.find((path) => path.endsWith('.node')) ?? null;
+  return {
+    present: true,
+    app_path: realpathSync(bundlePath),
+    bundle_sha256: digest.sha256,
+    file_count: digest.file_count,
+    symlink_count: digest.symlink_count,
+    native_node_path_relative: nativeNode ? nativeNode.replace(bundlePath, '') : null,
+    native_node_sha256: nativeNode ? sha256File(nativeNode) : null,
+  };
 }
 
 for (const arch of GUI_ARCHES) {
@@ -604,8 +753,9 @@ for (const arch of GUI_ARCHES) {
   }
 
   const gate = loaded.doc;
+  const artifact = currentArtifact(arch);
   const outcome = gate
-    ? validateGateDocument(gate, arch, source)
+    ? validateGateDocument(gate, arch, source, artifact)
     : { status: 'blocked', summary: `package gate unparseable: ${loaded.reason}`, problems: [loaded.reason] };
   const verdict = { pass: 'PASS', fail: 'FAIL', blocked: 'BLOCKED' }[outcome.status];
 
@@ -622,8 +772,10 @@ for (const arch of GUI_ARCHES) {
       evidence_state: outcome.status,
       gate_status: gate?.status ?? null,
       gate_decision_inputs: gate?.decision_inputs ?? null,
-      gate_signature_predicates: gate?.checks?.signature_predicates ?? null,
-      gate_runtime_state: gate?.decision_inputs?.runtime_contract_state ?? null,
+      gate_nested_runtime_state: gate?.checks?.runtime_lifecycle?.contract_state ?? null,
+      current_artifact: artifact.present
+        ? { bundle_sha256: artifact.bundle_sha256, native_node_sha256: artifact.native_node_sha256 }
+        : { present: false, reason: artifact.reason },
       problems: outcome.problems,
     },
   });

@@ -38,9 +38,12 @@ import {
   KNOWN_CONFOUNDERS,
   REQUIRED_PHASES,
   RUNTIME_SCHEMA,
+  digestAppBundle,
   evaluateRuntimeEvidence,
   providerLifecycleComplete,
+  sha256File,
   summarise,
+  walkFiles,
 } from './proof-contract.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -83,17 +86,6 @@ function sourceProvenance() {
   return { source_sha: sha, tree_digest: treeDigest, tree_dirty: porcelain.trim().length > 0 };
 }
 
-/** Deterministic digest of an installed app bundle (relative path + content). */
-function bundleDigest(appPath) {
-  const walked = walkFiles(appPath);
-  const hash = createHash('sha256');
-  for (const path of walked.files.map((p) => p.replace(appPath, '')).sort()) {
-    hash.update(path).update('\0');
-    hash.update(createHash('sha256').update(readFileSync(join(appPath, path.replace(/^\//, '')))).digest('hex'));
-  }
-  return { sha256: hash.digest('hex'), file_count: walked.files.length, symlink_count: walked.symlinks.length };
-}
-
 function findNativeNodeInBundle(appPath) {
   const walked = walkFiles(appPath);
   return walked.files.find((path) => path.endsWith('.node')) ?? null;
@@ -112,7 +104,7 @@ function readPin(name) {
 
 function buildProvenance(appPath, outDir, command, startedAt) {
   const nativeNode = findNativeNodeInBundle(appPath);
-  const digest = bundleDigest(appPath);
+  const digest = digestAppBundle(appPath);
   return {
     ...sourceProvenance(),
     app_path: appPath,
@@ -179,10 +171,6 @@ function usage() {
       '  and is the only mode that may write runtime-lifecycle.json.\n' +
       'Diagnostic runs write runtime-diagnostic.json and can never gate a decision.',
   );
-}
-
-function sha256File(path) {
-  return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
 function canonicalJson(text) {
@@ -1244,32 +1232,6 @@ async function phaseSecurity(ctx) {
     await app.destroy();
     return evidence;
   }
-}
-
-/**
- * Walk a tree without following symlinks.
- *
- * macOS `.app` bundles are full of version symlinks (`Versions/Current` →
- * `Versions/A`, and the top-level `Electron Framework`/`Resources` links into
- * it). Following them counts the same bytes two to three times, which inflated
- * the installed-bundle measurement by ~2.7x against the real on-disk footprint.
- */
-function walkFiles(root) {
-  if (!existsSync(root)) return [];
-  const files = [];
-  const symlinks = [];
-  const queue = [root];
-  while (queue.length) {
-    const dir = queue.pop();
-    for (const entry of readdirSync(dir)) {
-      const full = join(dir, entry);
-      const st = lstatSync(full);
-      if (st.isSymbolicLink()) symlinks.push(full);
-      else if (st.isDirectory()) queue.push(full);
-      else files.push(full);
-    }
-  }
-  return { files, symlinks };
 }
 
 async function phaseLifecycle(ctx) {

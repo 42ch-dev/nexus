@@ -19,9 +19,12 @@ import {
   CANONICAL_SAMPLES,
   RUNTIME_SCHEMA,
   decisionForState,
+  digestAppBundle,
   evaluateRuntimeEvidence,
   providerLifecycleComplete,
   runtimeCriterionVerdict,
+  sha256File,
+  walkFiles,
 } from './proof-contract.mjs';
 import { compareEntitlements } from './proof-package.mjs';
 
@@ -726,7 +729,37 @@ function binaryInspection(target, artifactSha) {
   };
 }
 
-function runtimeProof(archKey, identity, appPath) {
+const GATE_BUNDLE_ID = 'com.nexus42.rft-electron-proof';
+const NATIVE_NODE_REL =
+  '/Contents/Resources/app.asar.unpacked/node_modules/@42ch/nexus-native-darwin-arm64/native/nexus_core_node.node';
+
+/** Create a real (tiny) app bundle and return its recomputable identity. */
+function makeAppBundle(evidenceDir, archKey) {
+  const bundleDir = join(
+    evidenceDir,
+    `electron-packages/${archKey}`,
+    `Nexus RFT Feasibility-darwin-${archKey}`,
+    'Nexus RFT Feasibility.app',
+  );
+  mkdirSync(join(bundleDir, 'Contents', 'MacOS'), { recursive: true });
+  writeFileSync(join(bundleDir, 'Contents', 'MacOS', 'Nexus RFT Feasibility'), `fixture ${archKey}\n`);
+  const nativePath = join(bundleDir, NATIVE_NODE_REL.replace(/^\//, ''));
+  mkdirSync(dirname(nativePath), { recursive: true });
+  writeFileSync(nativePath, `native fixture ${archKey}\n`);
+  writeFileSync(join(bundleDir, 'Contents', 'Info.plist'), `<plist><dict><key>CFBundleIdentifier</key><string>${GATE_BUNDLE_ID}</string></dict></plist>\n`);
+  const real = realpathSync(bundleDir);
+  const digest = digestAppBundle(real);
+  const nativeNode = walkFiles(real).files.find((p) => p.endsWith('.node')) ?? null;
+  return {
+    dir: real,
+    sha256: digest.sha256,
+    file_count: digest.file_count,
+    native_node_path_relative: nativeNode ? nativeNode.replace(real, '') : null,
+    native_node_sha256: nativeNode ? sha256File(nativeNode) : null,
+  };
+}
+
+function runtimeProof(archKey, identity, appPath, appIdentity) {
   const cold = ms(10);
   const warm = ms(30, 5);
   const cycleMs = cycles(100);
@@ -762,10 +795,11 @@ function runtimeProof(archKey, identity, appPath) {
     validity: { valid: true, launch_method: 'launchservices', confounders: [] },
     provenance: {
       app_path: appPath,
-      app_bundle_id: 'com.nexus42.rft-electron-proof',
+      app_bundle_id: GATE_BUNDLE_ID,
       arch: archKey,
-      app_bundle_sha256: 'a'.repeat(64),
-      native_node_sha256: 'b'.repeat(64),
+      app_bundle_sha256: appIdentity.sha256,
+      native_node_path_relative: appIdentity.native_node_path_relative,
+      native_node_sha256: appIdentity.native_node_sha256,
       electron_version: '44.3.0',
       packager_version: '20.3.0',
       source_sha: identity.source_sha,
@@ -778,6 +812,7 @@ function runtimeProof(archKey, identity, appPath) {
       ok: true,
       target_triple: `arch:${archKey}`,
       provider_lifecycle: { complete: true },
+      native_payload_sha256: appIdentity.native_node_sha256,
     },
     checks: [
       { id: 'START-1', ok: true },
@@ -812,15 +847,15 @@ function electronSize(archKey) {
 }
 
 /**
- * A gate document with every predicate the SEC-1 row must independently verify
- * (I12): a bare `status: 'go'` is never sufficient.
+ * A gate document with every raw predicate the SEC-1 row independently verifies
+ * (C7), using the real field names the package gate emits.
  */
-function packageGate(archKey) {
-  const appRealpath = `/evidence/electron-packages/${archKey}/Nexus RFT Feasibility-darwin-${archKey}/Nexus RFT Feasibility.app`;
+function packageGate(archKey, identity, appIdentity) {
+  const appRealpath = appIdentity.dir;
   return {
     schema: 'rft-p3-t3-package-gate/v2',
     status: 'go',
-    bundle_id: 'com.nexus42.rft-electron-proof',
+    bundle_id: GATE_BUNDLE_ID,
     arch: archKey,
     signed_required: true,
     app_path: appRealpath,
@@ -828,21 +863,91 @@ function packageGate(archKey) {
     missing_inputs: [],
     reasons: [],
     checks: {
-      signature_predicates: { pass: true, failed: [], hardened_runtime_flags: 'runtime' },
-      stapler_validate: { status: 0 },
-      entitlements: { pass: true, values_match: true, keys_match: true },
+      codesign: {
+        deep_status: 0,
+        display_status: 0,
+        identifier: GATE_BUNDLE_ID,
+        team_identifier: 'ABCDE12345',
+        signature: 'Developer ID Application: Nexus (ABCDE12345)',
+        flags: 'runtime',
+        hardened_runtime: true,
+        authority: ['Developer ID Application: Nexus (ABCDE12345)', 'Developer ID Certification Authority'],
+      },
+      signature_predicates: {
+        pass: true,
+        failed: [],
+        hardened_runtime_flags: 'runtime',
+        signature: 'Developer ID Application: Nexus (ABCDE12345)',
+        team_identifier: 'ABCDE12345',
+        authority: ['Developer ID Application: Nexus (ABCDE12345)'],
+      },
+      spctl_execute: { status: 0, stdout: 'accepted', stderr: '' },
+      notary: { status: 0, stdout: 'accepted', stderr: '' },
+      stapler_validate: { status: 0, stdout: 'The validate action worked!', stderr: '' },
+      bundle_identifier: { expected: GATE_BUNDLE_ID, actual: GATE_BUNDLE_ID },
+      entitlements: {
+        pass: true,
+        keys_match: true,
+        values_match: true,
+        problems: [],
+        signed: {
+          'com.apple.security.cs.allow-jit': true,
+          'com.apple.security.cs.allow-unsigned-executable-memory': true,
+          'com.apple.security.files.user-selected.read-only': true,
+          'com.apple.security.network.client': true,
+        },
+        expected: {
+          'com.apple.security.cs.allow-jit': true,
+          'com.apple.security.cs.allow-unsigned-executable-memory': true,
+          'com.apple.security.files.user-selected.read-only': true,
+          'com.apple.security.network.client': true,
+        },
+        expected_source: { path: '/expected.plist', sha256: 'd'.repeat(64) },
+        signed_entitlements_plist_sha256: 'e'.repeat(64),
+        signed_raw_tail: 'Identifier=com.nexus42.rft-electron-proof',
+      },
       runtime_lifecycle: {
+        path: '/runtime-lifecycle.json',
+        present: true,
         contract_state: 'valid-pass',
-        native_utility_load: { ok: true },
+        contract_reasons: [],
         provenance: {
           app_path: appRealpath,
-          app_bundle_id: 'com.nexus42.rft-electron-proof',
+          app_bundle_id: GATE_BUNDLE_ID,
           arch: archKey,
+          app_bundle_sha256: appIdentity.sha256,
+          app_bundle_file_count: appIdentity.file_count,
+          native_node_path_relative: appIdentity.native_node_path_relative,
+          native_node_sha256: appIdentity.native_node_sha256,
+          electron_version: '44.3.0',
+          packager_version: '20.3.0',
+          source_sha: identity.source_sha,
+          tree_digest: identity.tree_digest,
+          tree_dirty: identity.tree_dirty,
+          command: 'node scripts/proof-runtime.mjs',
+          utc_start: '2026-09-13T00:00:00.000Z',
         },
+        phases_executed: ['launch', 'resources', 'security', 'lifecycle'],
+        checks_summary: [
+          { id: 'START-1', ok: true },
+          { id: 'RES-1', ok: true },
+          { id: 'RES-2', ok: true },
+          { id: 'SEC-renderer', ok: true },
+          { id: 'LIFECYCLE-native', ok: true },
+          { id: 'LIFECYCLE-fault', ok: true },
+          { id: 'PKG-2-electron', ok: true },
+        ],
+        native_utility_load: { ok: true, native_payload_sha256: appIdentity.native_node_sha256 },
+        recorded_confounders: [],
         bound_to: {
-          source_sha: IDENTITY.source_sha,
-          tree_digest: IDENTITY.tree_digest,
-          tree_dirty: IDENTITY.tree_dirty,
+          app_path: appRealpath,
+          app_bundle_id: GATE_BUNDLE_ID,
+          arch: archKey,
+          electron_version: '44.3.0',
+          packager_version: '20.3.0',
+          source_sha: identity.source_sha,
+          tree_digest: identity.tree_digest,
+          tree_dirty: identity.tree_dirty,
         },
       },
     },
@@ -853,6 +958,8 @@ function packageGate(archKey) {
       hardened_runtime: true,
       entitlements_match: true,
       native_utility_load_proven: true,
+      native_load_check_id: 'LIFECYCLE-native',
+      rules: 'go = valid-pass runtime + signature predicates + staple + hardened + provenance-bound native load',
     },
   };
 }
@@ -889,6 +996,7 @@ function buildMatrix(name, mutate = () => {}) {
   const evidence = join(root, 'v1.189', 'guides', 'evidence');
   rmSync(join(DECISION_FIXTURES, name), { recursive: true, force: true });
   const docs = {};
+  const context = { apps: {}, evidence };
   const put = (relative, doc) => {
     docs[relative] = doc;
   };
@@ -904,18 +1012,17 @@ function buildMatrix(name, mutate = () => {}) {
     put(`native-binary-${arch.suffix}/binary-inspection.json`, binaryInspection(arch.target, receipt.artifact.sha256));
   }
   for (const arch of GUI) {
-    // The bundle path must exist so the generator's realpath expectation is set.
-    const bundle = join(evidence, `electron-packages/${arch.key}`, `Nexus RFT Feasibility-darwin-${arch.key}`, 'Nexus RFT Feasibility.app', 'Contents', 'MacOS');
-    mkdirSync(bundle, { recursive: true });
-    writeFileSync(join(bundle, 'Nexus RFT Feasibility'), 'fixture\n');
-    const appPath = realpathSync(join(evidence, `electron-packages/${arch.key}`, `Nexus RFT Feasibility-darwin-${arch.key}`, 'Nexus RFT Feasibility.app'));
-    put(`electron-${arch.key}/runtime-lifecycle.json`, runtimeProof(arch.key, IDENTITY, appPath));
+    // A real (tiny) bundle on disk, so the SEC row's bundle/native hash checks
+    // are exercised against actual bytes rather than a fabricated digest.
+    const appIdentity = makeAppBundle(evidence, arch.key);
+    context.apps[arch.key] = appIdentity;
+    put(`electron-${arch.key}/runtime-lifecycle.json`, runtimeProof(arch.key, IDENTITY, appIdentity.dir, appIdentity));
     put(`electron-${arch.key}/electron-size.json`, electronSize(arch.key));
-    put(`electron-${arch.key}/proof-package.json`, packageGate(arch.key));
+    put(`electron-${arch.key}/proof-package.json`, packageGate(arch.key, IDENTITY, appIdentity));
   }
   put('maintenance-rebuild.json', maintenanceTrace());
 
-  mutate(docs);
+  mutate(docs, context);
 
   for (const [relative, doc] of Object.entries(docs)) {
     const target = join(evidence, relative);
@@ -969,6 +1076,10 @@ const failCases = [
       gate.decision_inputs.runtime_contract_state = 'valid-fail';
       gate.decision_inputs.native_utility_load_proven = false;
       gate.checks.runtime_lifecycle.contract_state = 'valid-fail';
+      gate.checks.runtime_lifecycle.native_utility_load = { ok: false };
+      gate.checks.runtime_lifecycle.checks_summary = gate.checks.runtime_lifecycle.checks_summary.map((c) =>
+        c.id === 'RES-1' ? { ...c, ok: false } : c,
+      );
     },
   ],
 ];
@@ -999,6 +1110,98 @@ for (const [label, mutate] of inconsistentCases) {
     decision.status !== 'go',
     true,
   );
+}
+
+// --- C7: one adversarial mutation per raw gate field ------------------------
+// Each case starts from the fully-satisfied gate and breaks exactly one raw
+// field, so the SEC row must not be satisfiable by the `go` status alone.
+
+const RAW_FIELD_MUTATIONS = [
+  ['signed_required', (g) => { g.signed_required = false; }],
+  ['decision_inputs.signature_predicates_pass', (g) => { g.decision_inputs.signature_predicates_pass = false; }],
+  ['signature_predicates.pass', (g) => { g.checks.signature_predicates.pass = false; }],
+  ['signature_predicates.failed', (g) => { g.checks.signature_predicates.failed = ['codesign --verify --deep --strict']; }],
+  ['codesign.deep_status', (g) => { g.checks.codesign.deep_status = 1; }],
+  ['codesign.identifier', (g) => { g.checks.codesign.identifier = 'Electron'; }],
+  ['codesign.signature', (g) => { g.checks.codesign.signature = 'adhoc'; }],
+  ['codesign.team_identifier', (g) => { g.checks.codesign.team_identifier = 'not set'; }],
+  ['codesign.authority', (g) => { g.checks.codesign.authority = []; }],
+  ['codesign.hardened_runtime', (g) => { g.checks.codesign.hardened_runtime = false; }],
+  ['codesign.flags', (g) => { g.checks.codesign.flags = 'adhoc,linker-signed'; }],
+  ['signature_predicates.hardened_runtime_flags', (g) => { g.checks.signature_predicates.hardened_runtime_flags = 'adhoc'; }],
+  ['spctl_execute.status', (g) => { g.checks.spctl_execute.status = 1; }],
+  ['notary.status', (g) => { g.checks.notary.status = 3; }],
+  ['stapler_validate.status', (g) => { g.checks.stapler_validate.status = 65; }],
+  ['bundle_identifier.actual', (g) => { g.checks.bundle_identifier.actual = 'Electron'; }],
+  ['bundle_identifier.expected', (g) => { g.checks.bundle_identifier.expected = 'com.example.other'; }],
+  ['entitlements.pass', (g) => { g.checks.entitlements.pass = false; }],
+  ['entitlements.values_match', (g) => { g.checks.entitlements.values_match = false; }],
+  ['entitlements.keys_match', (g) => { g.checks.entitlements.keys_match = false; }],
+  ['entitlements.signed value', (g) => { g.checks.entitlements.signed['com.apple.security.cs.allow-jit'] = false; }],
+  ['entitlements.signed_entitlements_plist_sha256', (g) => { g.checks.entitlements.signed_entitlements_plist_sha256 = null; }],
+  ['entitlements.expected_source.sha256', (g) => { g.checks.entitlements.expected_source.sha256 = null; }],
+  ['entitlements.problems', (g) => { g.checks.entitlements.problems = ['signed entitlements unparseable']; }],
+  ['decision_inputs.hardened_runtime', (g) => { g.decision_inputs.hardened_runtime = false; }],
+  ['decision_inputs.stapler_ok', (g) => { g.decision_inputs.stapler_ok = false; }],
+  ['decision_inputs.entitlements_match', (g) => { g.decision_inputs.entitlements_match = false; }],
+  ['decision_inputs.native_utility_load_proven', (g) => { g.decision_inputs.native_utility_load_proven = false; }],
+  ['decision_inputs.native_load_check_id', (g) => { g.decision_inputs.native_load_check_id = 'SOMETHING-ELSE'; }],
+  ['nested contract_state vs decision input', (g) => { g.checks.runtime_lifecycle.contract_state = 'confounded'; }],
+  ['nested present', (g) => { g.checks.runtime_lifecycle.present = false; }],
+  ['nested native_utility_load.ok', (g) => { g.checks.runtime_lifecycle.native_utility_load = { ok: false }; }],
+  ['nested checks_summary falsified', (g) => {
+    g.checks.runtime_lifecycle.checks_summary = g.checks.runtime_lifecycle.checks_summary.map((c) =>
+      c.id === 'LIFECYCLE-native' ? { ...c, ok: false } : c,
+    );
+  }],
+  ['nested checks_summary load check removed', (g) => {
+    g.checks.runtime_lifecycle.checks_summary = g.checks.runtime_lifecycle.checks_summary.filter(
+      (c) => c.id !== 'LIFECYCLE-native',
+    );
+  }],
+  ['nested provenance.app_path', (g) => { g.checks.runtime_lifecycle.provenance.app_path = '/elsewhere/Other.app'; }],
+  ['nested provenance.app_bundle_id', (g) => { g.checks.runtime_lifecycle.provenance.app_bundle_id = 'com.example.other'; }],
+  ['nested provenance.arch', (g) => { g.checks.runtime_lifecycle.provenance.arch = g.arch === 'arm64' ? 'x64' : 'arm64'; }],
+  ['nested provenance.source_sha', (g) => { g.checks.runtime_lifecycle.provenance.source_sha = 'othersha'; }],
+  ['nested provenance.tree_digest', (g) => { g.checks.runtime_lifecycle.provenance.tree_digest = 'f'.repeat(64); }],
+  ['nested provenance.tree_dirty', (g) => { g.checks.runtime_lifecycle.provenance.tree_dirty = !g.checks.runtime_lifecycle.provenance.tree_dirty; }],
+  ['nested provenance.app_bundle_sha256', (g) => { g.checks.runtime_lifecycle.provenance.app_bundle_sha256 = 'b'.repeat(64); }],
+  ['nested provenance.native_node_sha256', (g) => { g.checks.runtime_lifecycle.provenance.native_node_sha256 = 'c'.repeat(64); }],
+  ['nested provenance.native_node_path_relative', (g) => { delete g.checks.runtime_lifecycle.provenance.native_node_path_relative; }],
+  ['bound_to.app_path', (g) => { g.checks.runtime_lifecycle.bound_to.app_path = '/elsewhere/Other.app'; }],
+  ['bound_to.app_bundle_id', (g) => { g.checks.runtime_lifecycle.bound_to.app_bundle_id = 'com.example.other'; }],
+  ['bound_to.arch', (g) => { g.checks.runtime_lifecycle.bound_to.arch = g.arch === 'arm64' ? 'x64' : 'arm64'; }],
+  ['bound_to.source_sha', (g) => { g.checks.runtime_lifecycle.bound_to.source_sha = 'othersha'; }],
+  ['bound_to.tree_digest', (g) => { g.checks.runtime_lifecycle.bound_to.tree_digest = 'f'.repeat(64); }],
+  ['bound_to.tree_dirty', (g) => { g.checks.runtime_lifecycle.bound_to.tree_dirty = !g.checks.runtime_lifecycle.bound_to.tree_dirty; }],
+];
+
+for (const [label, mutate] of RAW_FIELD_MUTATIONS) {
+  const root = buildMatrix(`raw-${label.replace(/[^a-z0-9]+/gi, '-')}`, (docs) => {
+    mutate(docs['electron-arm64/proof-package.json']);
+  });
+  const decision = runDecisionWithRoot(root);
+  const row = (decision.doc?.observed_rows ?? []).find((r) => r.id === 'SEC1-signed-arm64');
+  check(`C7 raw field (${label}) does not pass the SEC row`, row?.verdict !== 'PASS', true);
+  check(`C7 raw field (${label}) blocks`, decision.status, 'blocked');
+  check(`C7 raw field (${label}) names the broken predicate`, (row?.verification?.problems ?? []).length > 0, true);
+}
+
+// The on-disk bundle must actually match what the gate claims about it.
+const BUNDLE_MUTATIONS = [
+  ['bundle-file-added', (ctx) => {
+    writeFileSync(join(ctx.apps.arm64.dir, 'Contents', 'injected.txt'), 'tampered\n');
+  }],
+  ['native-node-modified', (ctx) => {
+    writeFileSync(join(ctx.apps.arm64.dir, 'Contents', 'Resources', 'app.asar.unpacked', 'node_modules', '@42ch', 'nexus-native-darwin-arm64', 'native', 'nexus_core_node.node'), 'tampered native\n');
+  }],
+];
+for (const [label, mutate] of BUNDLE_MUTATIONS) {
+  const root = buildMatrix(`bundle-${label}`, (docs, ctx) => mutate(ctx));
+  const decision = runDecisionWithRoot(root);
+  const row = (decision.doc?.observed_rows ?? []).find((r) => r.id === 'SEC1-signed-arm64');
+  check(`C7 on-disk artifact (${label}) does not pass the SEC row`, row?.verdict !== 'PASS', true);
+  check(`C7 on-disk artifact (${label}) blocks`, decision.status, 'blocked');
 }
 
 // --- strengthened predicate coverage: a green status cannot carry a bad body --
@@ -1063,6 +1266,10 @@ const nogoRoot = buildMatrix('consistent-nogo', (docs) => {
   gate.decision_inputs.runtime_contract_state = 'valid-fail';
   gate.decision_inputs.native_utility_load_proven = false;
   gate.checks.runtime_lifecycle.contract_state = 'valid-fail';
+  gate.checks.runtime_lifecycle.native_utility_load = { ok: false };
+  gate.checks.runtime_lifecycle.checks_summary = gate.checks.runtime_lifecycle.checks_summary.map((c) =>
+    c.id === 'RES-1' ? { ...c, ok: false } : c,
+  );
 });
 const nogoDecision = runDecisionWithRoot(nogoRoot);
 check(
