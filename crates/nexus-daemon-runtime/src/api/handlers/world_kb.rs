@@ -159,28 +159,6 @@ async fn reread_promotion_version(
         .map_or(0, |j| u64::try_from(j.version).unwrap_or(0)))
 }
 
-/// Build the wire projection of a pending promotion candidate.
-fn project_candidate(c: &KbExtractPromotion) -> WorldKbCandidateProjection {
-    WorldKbCandidateProjection {
-        // `job_id` is the unique row PK of `kb_extract_jobs` and the value the
-        // promote path already keys on. `canonical_name_guess` is NOT unique
-        // within a world (two source works can guess the same character name),
-        // so using it here made React Flow node IDs collide and caused the
-        // wrong candidate to be promoted (V1.73 greploop issue 2).
-        candidate_id: c.job_id.clone(),
-        job_id: c.job_id.clone(),
-        world_id: c.world_id.clone(),
-        block_type: wire_cast(parse_block_type(
-            c.block_type_guess.as_deref().unwrap_or("character"),
-        )),
-        canonical_name: c.canonical_name_guess.clone().unwrap_or_default(),
-        status: Some(c.promotion_status.clone()),
-        version: u64::try_from(c.version).unwrap_or(0),
-        source_anchor_count: Some(u64::from(c.work_id.is_some())),
-        created_at: Some(c.created_at.clone()),
-    }
-}
-
 /// Build the extract-job projection after a promotion action.
 fn project_job(c: &KbExtractPromotion) -> WorldKbExtractJobProjection {
     WorldKbExtractJobProjection {
