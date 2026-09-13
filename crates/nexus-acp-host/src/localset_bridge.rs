@@ -300,6 +300,8 @@ pub struct LocalSetBridge {
     runtime: Arc<Mutex<Option<BridgeRuntime>>>,
     counters: Arc<AdmissionCounters>,
     shutdown_claimed: Arc<AtomicBool>,
+    /// Retained when a bounded join times out — never detached.
+    retained_thread: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl LocalSetBridge {
@@ -309,6 +311,36 @@ impl LocalSetBridge {
             runtime: Arc::new(Mutex::new(None)),
             counters: Arc::new(AdmissionCounters::new()),
             shutdown_claimed: Arc::new(AtomicBool::new(false)),
+            retained_thread: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// Whether a runtime thread `JoinHandle` is retained after a join timeout.
+    #[must_use]
+    pub fn has_retained_runtime_thread(&self) -> bool {
+        self.retained_thread
+            .lock()
+            .ok()
+            .is_some_and(|slot| slot.is_some())
+    }
+
+    /// Take a retained runtime thread handle for tracked cleanup registration.
+    pub fn take_retained_runtime_thread(&self) -> Option<JoinHandle<()>> {
+        self.retained_thread.lock().ok()?.take()
+    }
+
+    fn retain_runtime_thread(&self, handle: JoinHandle<()>) {
+        if let Ok(mut slot) = self.retained_thread.lock() {
+            if let Some(existing) = slot.take() {
+                if existing.is_finished() {
+                    let _ = existing.join();
+                } else {
+                    *slot = Some(existing);
+                    warn!("replacing retained LocalSet thread handle while prior thread still alive");
+                    return;
+                }
+            }
+            *slot = Some(handle);
         }
     }
 
@@ -687,36 +719,34 @@ impl LocalSetBridge {
             let join_budget = deadline.saturating_duration_since(Instant::now());
             if join_budget.is_zero() {
                 warn!("LocalSet join skipped: no remaining shutdown budget");
+                self.retain_runtime_thread(handle);
                 evidence.thread_alive = true;
             } else {
-                match tokio::time::timeout(
-                    join_budget,
-                    tokio::task::spawn_blocking(move || handle.join()),
-                )
-                .await
-                {
-                    Ok(Ok(Ok(()))) => {
-                        self.counters.mark_thread_joined();
-                        evidence.joined_cleanly = true;
-                        evidence.thread_alive = false;
-                        debug!("LocalSet bridge thread joined");
+                let join_deadline = Instant::now() + join_budget;
+                while !handle.is_finished() && Instant::now() < join_deadline {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                if handle.is_finished() {
+                    match handle.join() {
+                        Ok(()) => {
+                            self.counters.mark_thread_joined();
+                            evidence.joined_cleanly = true;
+                            evidence.thread_alive = false;
+                            debug!("LocalSet bridge thread joined");
+                        }
+                        Err(panic) => {
+                            error!("LocalSet bridge thread panicked: {:?}", panic);
+                            evidence.joined_cleanly = false;
+                            evidence.thread_alive = false;
+                        }
                     }
-                    Ok(Ok(Err(panic))) => {
-                        error!("LocalSet bridge thread panicked: {:?}", panic);
-                        evidence.joined_cleanly = false;
-                        evidence.thread_alive = false;
-                    }
-                    Ok(Err(e)) => {
-                        warn!("LocalSet join helper failed: {:?}", e);
-                        evidence.thread_alive = true;
-                    }
-                    Err(_) => {
-                        warn!(
-                            "LocalSet join timed out after {:?}",
-                            join_budget
-                        );
-                        evidence.thread_alive = true;
-                    }
+                } else {
+                    warn!(
+                        "LocalSet join timed out after {:?}; retaining thread handle",
+                        join_budget
+                    );
+                    self.retain_runtime_thread(handle);
+                    evidence.thread_alive = true;
                 }
             }
         } else {
@@ -734,50 +764,117 @@ impl LocalSetBridge {
     }
 
     /// Synchronous shutdown for `Drop` / finalizer paths (bounded join).
-    pub fn shutdown_sync(&self) {
-        self.shutdown_sync_with_deadline(Instant::now() + SHUTDOWN_JOIN_BUDGET);
+    pub fn shutdown_sync(&self) -> ShutdownEvidence {
+        self.shutdown_sync_with_deadline(Instant::now() + SHUTDOWN_JOIN_BUDGET)
     }
 
     /// Synchronous shutdown bounded by an absolute deadline.
-    pub fn shutdown_sync_with_deadline(&self, deadline: Instant) {
+    pub fn shutdown_sync_with_deadline(&self, deadline: Instant) -> ShutdownEvidence {
         if self
             .shutdown_claimed
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
             .is_err()
         {
-            return;
+            let mut evidence = self.evidence_from_state();
+            let join_budget = deadline.saturating_duration_since(Instant::now());
+            if !join_budget.is_zero() {
+                evidence = self.join_runtime_thread_sync(evidence, deadline);
+            }
+            return evidence;
         }
         self.counters.shutting_down.store(true, Ordering::SeqCst);
-        let handle = {
+
+        // Take the control sender in its own scope: the runtime mutex must be
+        // released before `evidence_from_state` touches it again.
+        let control_tx = {
             let guard = self.runtime.lock().ok();
-            let control_tx = guard
-                .as_ref()
-                .and_then(|g| g.as_ref().map(|rt| rt.control_tx.clone()));
-            if let Some(control_tx) = control_tx {
-                let (ack_tx, mut ack_rx) = oneshot::channel();
-                send_control_reliable(control_tx, ControlMessage::Shutdown { ack: ack_tx });
-                let ack_deadline = Instant::now()
-                    + deadline.saturating_duration_since(Instant::now());
-                while Instant::now() < ack_deadline {
-                    if ack_rx.try_recv().is_ok() {
+            guard.and_then(|g| g.as_ref().map(|rt| rt.control_tx.clone()))
+        };
+
+        let mut evidence = if let Some(control_tx) = control_tx {
+            let (ack_tx, mut ack_rx) = oneshot::channel();
+            send_control_reliable(control_tx, ControlMessage::Shutdown { ack: ack_tx });
+            let ack_deadline =
+                Instant::now() + deadline.saturating_duration_since(Instant::now());
+            let mut acked = None;
+            while Instant::now() < ack_deadline {
+                match ack_rx.try_recv() {
+                    Ok(ev) => {
+                        acked = Some(ev);
                         break;
                     }
-                    thread::sleep(Duration::from_millis(5));
+                    Err(oneshot::error::TryRecvError::Empty) => {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(oneshot::error::TryRecvError::Closed) => break,
                 }
             }
-            guard.and_then(|mut g| g.take().map(|rt| rt.thread_handle))
+            acked.unwrap_or_else(|| self.evidence_from_state())
+        } else {
+            self.evidence_from_state()
+        };
+
+        evidence = self.join_runtime_thread_sync(evidence, deadline);
+        let stats = self.counters.stats();
+        evidence.pending_requests = stats.pending_requests;
+        evidence.pending_bytes = stats.pending_bytes;
+        evidence.active_tasks = stats.active_tasks;
+        evidence.owned_tasks = stats.owned_tasks;
+        evidence.control_tasks = stats.control_tasks;
+        evidence
+    }
+
+    fn join_runtime_thread_sync(
+        &self,
+        mut evidence: ShutdownEvidence,
+        deadline: Instant,
+    ) -> ShutdownEvidence {
+        let handle = {
+            let mut guard = self
+                .runtime
+                .lock()
+                .expect("LocalSet bridge mutex poisoned");
+            guard.take().map(|rt| rt.thread_handle)
         };
         if let Some(handle) = handle {
-            let join_deadline = Instant::now()
-                + deadline.saturating_duration_since(Instant::now());
-            while !handle.is_finished() && Instant::now() < join_deadline {
-                thread::sleep(Duration::from_millis(10));
+            let join_budget = deadline.saturating_duration_since(Instant::now());
+            if join_budget.is_zero() {
+                warn!("LocalSet sync join skipped: no remaining shutdown budget");
+                self.retain_runtime_thread(handle);
+                evidence.thread_alive = true;
+            } else {
+                let join_deadline = Instant::now() + join_budget;
+                while !handle.is_finished() && Instant::now() < join_deadline {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                if handle.is_finished() {
+                    match handle.join() {
+                        Ok(()) => {
+                            self.counters.mark_thread_joined();
+                            evidence.joined_cleanly = true;
+                            evidence.thread_alive = false;
+                        }
+                        Err(panic) => {
+                            error!("LocalSet bridge thread panicked: {:?}", panic);
+                            evidence.joined_cleanly = false;
+                            evidence.thread_alive = false;
+                        }
+                    }
+                } else {
+                    warn!(
+                        "LocalSet sync join timed out after {:?}; retaining thread handle",
+                        join_budget
+                    );
+                    self.retain_runtime_thread(handle);
+                    evidence.thread_alive = true;
+                }
             }
-            if handle.is_finished() {
-                let _ = handle.join();
-                self.counters.mark_thread_joined();
-            }
+        } else {
+            evidence.thread_alive = false;
+            evidence.joined_cleanly =
+                evidence.joined_cleanly || self.counters.thread_joined();
         }
+        evidence
     }
 }
 

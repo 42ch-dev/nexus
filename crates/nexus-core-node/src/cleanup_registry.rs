@@ -76,6 +76,12 @@ pub fn reap_completed() -> usize {
     reaped
 }
 
+
+/// Register a timed-out LocalSet runtime thread. The handle is retained until reaped.
+pub fn register_localset_thread(handle: JoinHandle<()>, state: Arc<EnvState>) {
+    register_pending(handle, state, Arc::new(AtomicBool::new(false)));
+}
+
 /// Register a timed-out finalize worker. The handle is retained until reaped.
 pub fn register_pending(handle: JoinHandle<()>, state: Arc<EnvState>, completed: Arc<AtomicBool>) {
     ensure_reaper();
@@ -85,6 +91,20 @@ pub fn register_pending(handle: JoinHandle<()>, state: Arc<EnvState>, completed:
         state,
         completed,
     });
+}
+
+/// The registry is process-global; tests that assert on its contents must not
+/// interleave with each other.
+#[cfg(test)]
+static REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+/// Serialize a registry-asserting test against every other such test.
+#[cfg(test)]
+#[must_use]
+pub fn registry_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    REGISTRY_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Snapshot registry for tests.
@@ -187,8 +207,50 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::time::Duration;
 
+    /// Drain any entry a previous test left behind so counts are local.
+    fn drain_registry() {
+        for _ in 0..200 {
+            reap_completed();
+            if registry_snapshot().0 == 0 {
+                return;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+
+    #[test]
+    fn localset_thread_entry_is_reaped_after_join() {
+        let _lock = crate::cleanup_registry::registry_test_lock();
+        drain_registry();
+        let done = Arc::new(AtomicBool::new(false));
+        let flag = done.clone();
+        let handle = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(15));
+            flag.store(true, Ordering::SeqCst);
+        });
+        let state = Arc::new(EnvState::new());
+        register_localset_thread(handle, state);
+        let (pending, _) = registry_snapshot();
+        assert_eq!(pending, 1, "LocalSet thread must be tracked");
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            reap_completed();
+            let (pending, _) = registry_snapshot();
+            if pending == 0 {
+                return;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        let (pending, _) = registry_snapshot();
+        assert_eq!(pending, 0, "reaper must join and remove LocalSet thread entry");
+    }
+
     #[test]
     fn registry_reaps_completed_worker_and_removes_entry() {
+        let _lock = crate::cleanup_registry::registry_test_lock();
+        drain_registry();
         let done = Arc::new(AtomicBool::new(false));
         let flag = done.clone();
         let handle = thread::spawn(move || {
@@ -215,6 +277,8 @@ mod tests {
 
     #[test]
     fn reaper_terminates_after_registry_drains() {
+        let _lock = crate::cleanup_registry::registry_test_lock();
+        drain_registry();
         let done = Arc::new(AtomicBool::new(false));
         let flag = done.clone();
         let handle = thread::spawn(move || {

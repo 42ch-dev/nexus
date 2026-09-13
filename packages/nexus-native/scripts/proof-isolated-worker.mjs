@@ -1,6 +1,6 @@
 import { parentPort, workerData } from 'node:worker_threads';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,6 +55,106 @@ function resolveAdmittedPython() {
     } catch { /* next */ }
   }
   throw new Error('no_absolute_python_executable');
+}
+
+
+const CLOSE_DEADLINE_MS = 5_000;
+
+function observeProcessGuard(pid) {
+  if (!pid || pid <= 0) return null;
+  let birth_ms = null;
+  let pgid = null;
+  let alive = false;
+  try {
+    process.kill(pid, 0);
+    alive = true;
+  } catch {
+    return { pid, birth_ms, pgid, alive: false };
+  }
+  try {
+    if (process.platform === 'darwin' || process.platform === 'linux') {
+      pgid = Number(execFileSync('ps', ['-p', String(pid), '-o', 'pgid='], { encoding: 'utf8' }).trim());
+    }
+    if (process.platform === 'darwin') {
+      const birthLine = execFileSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf8' }).trim();
+      const parsed = Date.parse(birthLine);
+      if (!Number.isNaN(parsed)) birth_ms = parsed;
+    } else if (process.platform === 'linux') {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const after = stat.slice(stat.indexOf(')') + 2);
+      const fields = after.split(' ');
+      const starttime = Number(fields[19]);
+      const uptimeSec = Number(readFileSync('/proc/uptime', 'utf8').split(' ')[0]);
+      const hz = 100;
+      birth_ms = Date.now() - Math.round((uptimeSec - starttime / hz) * 1000);
+    }
+  } catch {
+    /* best-effort identity */
+  }
+  return { pid, birth_ms, pgid, alive };
+}
+
+function findSurvivorPids(baseline = []) {
+  const base = new Set(baseline);
+  return findFixtureChildPids().filter((pid) => !base.has(pid));
+}
+
+async function closeWithEvidence(core, opts = {}) {
+  const {
+    startedMs = Date.now(),
+    deadline_ms = CLOSE_DEADLINE_MS,
+    process_guard = null,
+    queue_count = null,
+    queue_bytes = null,
+    terminal_session_id = null,
+    terminal_operation_id = null,
+  } = opts;
+  const closeStarted = Date.now();
+  const closeReport = decode(await core.close());
+  const close_ms = Date.now() - closeStarted;
+  // A confirmed close must leave no owned descendant behind. Give the reaped
+  // group a short, bounded settle window before recording survivors.
+  let surviving_pids = findFixtureChildPids();
+  const settleDeadline = Date.now() + 1_500;
+  while (surviving_pids.length > 0 && Date.now() < settleDeadline) {
+    await new Promise((r) => setTimeout(r, 100));
+    surviving_pids = findFixtureChildPids();
+  }
+  return {
+    closeReport,
+    close_ms,
+    deadline_ms,
+    // `elapsed_ms` is the measured duration of THIS close against the shared
+    // absolute budget; `scenario_elapsed_ms` is the whole-scenario duration.
+    elapsed_ms: close_ms,
+    scenario_elapsed_ms: Date.now() - startedMs,
+    cleanup_confirmed: Boolean(closeReport.cleanup_confirmed),
+    pending_task_ids: (closeReport.pending_operations ?? []).map(String),
+    pending_task_outcomes: (closeReport.pending_operations ?? []).map(String),
+    surviving_pids,
+    process_guard,
+    queue_count,
+    queue_bytes,
+    terminal_session_id,
+    terminal_operation_id,
+  };
+}
+
+function assertCloseGate(key, envelope) {
+  if (envelope.close_ms > CLOSE_DEADLINE_MS) {
+    throw new Error(`${key}: close_ms ${envelope.close_ms} > ${CLOSE_DEADLINE_MS}`);
+  }
+  if (!envelope.cleanup_confirmed) {
+    throw new Error(`${key}: cleanup unconfirmed`);
+  }
+  if ((envelope.surviving_pids ?? []).length > 0) {
+    throw new Error(`${key}: surviving pids ${envelope.surviving_pids.join(',')}`);
+  }
+  return envelope;
+}
+
+function scenarioEnvelope(base, envelope) {
+  return { ...base, ...envelope };
 }
 
 const MAX_PENDING_BYTES = 1024 * 1024;
@@ -120,6 +220,29 @@ function rustExecutePayload() {
 }
 function tsProbePayload() { return { provider_id: 'mock-acp' }; }
 function tsLaunchPayload() { return { provider_id: 'mock-acp' }; }
+function badProbePayload(home) {
+  return adapter === 'rust-acp'
+    ? { provider_id: 'bad', timeout_ms: 30_000, cwd: home, owner: hostOwner(home) }
+    : { provider_id: 'bad' };
+}
+function badLaunchPayload(home) {
+  return adapter === 'rust-acp'
+    ? { provider_id: 'bad', cwd: home, mcp_servers: [], owner: hostOwner(home) }
+    : { provider_id: 'bad' };
+}
+function isProviderNotRegisteredError(err) {
+  return /not registered/i.test(formatProviderError(err));
+}
+
+/// A launch-class failure for a provider whose declared command cannot be
+/// executed. The host sanitizes subprocess detail, so the observable category
+/// is the launch/provider-unavailable one — never the "not registered" case,
+/// which would mean the proof never reached the configured provider at all.
+function isBadExecutableLaunchError(err) {
+  const s = formatProviderError(err);
+  if (!s) return false;
+  return /provider not available|provider_unavailable|launch failed|launch_failed|nonexistent|nexus-bad-acp|enoent|no such file|failed to (launch|spawn|start)|executable|cannot find/i.test(s);
+}
 function tsExecutePayload() { return { kind: 'prompt', content: 'hello' }; }
 
 function formatProviderError(err) {
@@ -223,19 +346,35 @@ function findFixtureChildPids() {
 
 async function runOpenClose100() {
   const steps = [];
+  let worstCloseMs = 0;
   const home = seedHome();
   const accessJson = JSON.stringify({ user_home: home, access: 'engine_owner', allow_uninitialized: false });
   const providers = await providersForScenario();
   for (let cycle = 0; cycle < 100; cycle += 1) {
     steps.push(`open:${cycle}`);
     const core = binding.open(accessJson, providers);
+    const cycleCloseStarted = Date.now();
     const report = decode(await core.close());
+    worstCloseMs = Math.max(worstCloseMs, Date.now() - cycleCloseStarted);
     steps.push(`close:${cycle}`);
     if (!report.cleanup_confirmed || report.state !== 'closed') {
       return fail('open_close_100', `cycle ${cycle} unconfirmed`, { executed_steps: steps, cycle });
     }
   }
-  return pass('open_close_100', { cycles: 100, executed_steps: steps, worker_env: 'fresh' });
+  return pass('open_close_100', {
+    cycles: 100,
+    executed_steps: steps,
+    worker_env: 'fresh',
+    deadline_ms: CLOSE_DEADLINE_MS,
+    elapsed_ms: worstCloseMs,
+    worst_cycle_close_ms: worstCloseMs,
+    cleanup_confirmed: true,
+    pending_task_ids: [],
+    pending_task_outcomes: [],
+    surviving_pids: findFixtureChildPids(),
+    terminal_session_id: null,
+    terminal_operation_id: null,
+  });
 }
 
 async function runNeverSettling() {
@@ -275,17 +414,25 @@ async function runNeverSettling() {
     operation_id: exec.operation_id, deadline_ms: 30_000, payload: {},
   })).catch(() => {});
   const cancelMs = Date.now() - started;
-  const closeStarted = Date.now();
   steps.push('close');
-  const closeReport = decode(await core.close());
-  const closeMs = Date.now() - closeStarted;
-  if (cancelMs <= 2000 && closeReport.cleanup_confirmed && closeMs <= 5_000) {
-    return pass('never_settling_callback', { cancel_ms: cancelMs, close_ms: closeMs, executed_steps: steps, adapter });
+  let envelope;
+  try {
+    envelope = assertCloseGate('never_settling_callback', await closeWithEvidence(core, {
+      startedMs: started,
+      terminal_session_id: launch.session_id,
+      terminal_operation_id: exec.operation_id,
+    }));
+  } catch (error) {
+    return fail('never_settling_callback', String(error), { executed_steps: steps, cancel_ms: cancelMs });
   }
-  return fail('never_settling_callback', `cancel_ms=${cancelMs} close_ms=${closeMs} confirmed=${closeReport.cleanup_confirmed}`, { executed_steps: steps });
+  if (cancelMs <= 2000) {
+    return pass('never_settling_callback', scenarioEnvelope({ cancel_ms: cancelMs, executed_steps: steps, adapter }, envelope));
+  }
+  return fail('never_settling_callback', `cancel_ms=${cancelMs}`, { executed_steps: steps, ...envelope });
 }
 
 async function runFailedOpenChild() {
+  const startedMs = Date.now();
   const steps = ['seed_bad_home'];
   const badHome = mkdtempSync(join(tmpdir(), 'nexus-bad-child-'));
   const seed = spawnSync('cargo', ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', badHome], { cwd: root });
@@ -300,34 +447,79 @@ args = []
 enabled = true
 `);
   const accessJson = JSON.stringify({ user_home: badHome, access: 'engine_owner', allow_uninitialized: false });
+  const beforePids = findFixtureChildPids();
   steps.push('open');
   const providers = await providersForScenario();
   const core = binding.open(accessJson, providers);
+  // A configured provider is only launch-admitted once a bounded probe
+  // succeeds, so the probe is what actually attempts `/nonexistent/nexus-bad-acp`.
+  steps.push('probe_bad_child');
+  const badProbe = await core.providerCall(encode({
+    request_id: 'bad-probe', method: 'probe', deadline_ms: 30_000,
+    payload: badProbePayload(badHome),
+  })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
+  const probeErr = formatProviderError(badProbe.error ?? badProbe.health?.message);
+  if (badProbe.ok && badProbe.health?.available === true) {
+    return fail('failed_open_child', 'probe of a provider with a nonexistent command must not report available', { executed_steps: steps, badProbe });
+  }
+  if (isProviderNotRegisteredError(badProbe.error)) {
+    return fail('failed_open_child', `provider-not-registered is FAIL (probe): ${probeErr}`, { executed_steps: steps, probeErr });
+  }
+  if (!isBadExecutableLaunchError(badProbe.error ?? badProbe.health?.message)) {
+    return fail('failed_open_child', `probe must report a launch-class failure for /nonexistent/nexus-bad-acp, got: ${probeErr}`, { executed_steps: steps, probeErr, badProbe });
+  }
+
   steps.push('launch_bad_child');
   const badLaunch = await core.providerCall(encode({
     request_id: 'bad-launch', method: 'launch', deadline_ms: 5_000,
-    payload: adapter === 'rust-acp' ? rustLaunchPayload(badHome) : tsLaunchPayload(),
-  })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
-  steps.push('close');
-  await core.close().catch(() => {});
-  if (!badLaunch.ok) {
-    return pass('failed_open_child', { error: badLaunch.error, executed_steps: steps });
+    payload: badLaunchPayload(badHome),
+  })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: e }));
+  const launchErr = formatProviderError(badLaunch.error);
+  const launchSurvivors = findSurvivorPids(beforePids);
+  if (badLaunch.ok) {
+    return fail('failed_open_child', 'expected launch failure for bad provider', { executed_steps: steps, launchErr });
   }
-  return fail('failed_open_child', 'expected launch failure', { executed_steps: steps });
+  if (isProviderNotRegisteredError(badLaunch.error)) {
+    return fail('failed_open_child', `provider-not-registered is FAIL: ${launchErr}`, { executed_steps: steps, launchErr });
+  }
+  if (launchSurvivors.length > 0) {
+    return fail('failed_open_child', `child survived failed launch: ${launchSurvivors.join(',')}`, { executed_steps: steps, launchSurvivors });
+  }
+  steps.push('close');
+  let envelope;
+  try {
+    envelope = assertCloseGate('failed_open_child', await closeWithEvidence(core, { startedMs }));
+  } catch (error) {
+    return fail('failed_open_child', String(error), { executed_steps: steps, launchErr });
+  }
+  return pass('failed_open_child', scenarioEnvelope({
+    error: launchErr,
+    launch_ok: false,
+    probe_error: probeErr,
+    probe_ok: badProbe.ok === true,
+    probe_health_available: badProbe.health?.available ?? null,
+    launch_error_category: isProviderNotRegisteredError(badLaunch.error)
+      ? 'provider_not_registered'
+      : 'launch_failed',
+    bad_provider_id: 'bad',
+    bad_command: '/nonexistent/nexus-bad-acp',
+    executed_steps: steps,
+    adapter,
+    launch_survivors: launchSurvivors,
+  }, envelope));
 }
 
 async function runEofWhileLive() {
+  const startedMs = Date.now();
   const steps = ['seed_eof_home'];
   const eofHome = mkdtempSync(join(tmpdir(), 'nexus-eof-live-'));
   const eofWs = mkdtempSync(join(tmpdir(), 'nexus-eof-ws-'));
   const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
   const seed = spawnSync('cargo', ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', eofHome], { cwd: root });
   if (seed.status !== 0) return fail('eof_after_close', seed.stderr?.toString() || 'seed failed', { executed_steps: steps });
-  // Run 1 (the bounded readiness probe) must succeed; run 2 (the real session
-  // launch) exits after initialize, so a live child EOF — not a timeout — must
-  // be surfaced to the caller.
   writeAgentHostConfig(eofHome, fixture, eofWs, { EOF_AFTER_INIT_FROM_RUN: '2' });
   const accessJson = JSON.stringify({ user_home: eofHome, access: 'engine_owner', allow_uninitialized: false });
+  const beforePids = findFixtureChildPids();
   steps.push('open');
   const providers = await providersForScenario();
   const core = binding.open(accessJson, providers);
@@ -336,29 +528,54 @@ async function runEofWhileLive() {
     request_id: 'eof-probe', method: 'probe', deadline_ms: 30_000,
     payload: adapter === 'rust-acp' ? rustProbePayload(eofHome) : tsProbePayload(),
   })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
+  if (!probe.ok) {
+    return fail('eof_after_close', `probe must succeed before EOF launch: ${formatProviderError(probe.error)}`, { executed_steps: steps });
+  }
   steps.push('launch_eof_fixture');
   const launch = await core.providerCall(encode({
     request_id: 'eof-live-launch', method: 'launch', deadline_ms: 5_000,
     payload: adapter === 'rust-acp' ? rustLaunchPayload(eofHome) : tsLaunchPayload(),
-  })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: String(e) }));
-  steps.push('close');
-  await core.close().catch(() => {});
+  })).then((buf) => decode(buf)).catch((e) => ({ ok: false, error: e }));
   const launchErr = formatProviderError(launch.error ?? launch.health?.message);
-  const launchEof = !launch.ok && (/provider_eof/i.test(launchErr) || isTransportFailure(launch.error));
-  if (launchEof) {
-    return pass('eof_after_close', {
-      error: formatProviderError(launch.error ?? launch.health?.message),
-      launch_ok: launch.ok,
-      executed_steps: steps,
-      mode: 'EOF_AFTER_INIT_live',
-      adapter,
-    });
+  const launchEof = !launch.ok && (isProviderEofSignal(launch) || isTransportFailure(launch.error) || /provider_eof|exited|transport|protocol_error/i.test(launchErr));
+  if (!launchEof) {
+    return fail('eof_after_close', `expected typed EOF/transport terminal on launch, got: ${launchErr}`, { executed_steps: steps, launch });
   }
-  return fail('eof_after_close', `expected live ACP child EOF on launch, launch=${formatProviderError(launch.error)}`, { executed_steps: steps });
+  const launchSurvivors = findSurvivorPids(beforePids);
+  const process_guard = launchSurvivors[0] ? observeProcessGuard(launchSurvivors[0]) : null;
+  steps.push('close');
+  let envelope;
+  try {
+    envelope = assertCloseGate('eof_after_close', await closeWithEvidence(core, {
+      startedMs,
+      process_guard,
+      terminal_session_id: launch.session_id ?? null,
+      terminal_operation_id: null,
+    }));
+  } catch (error) {
+    return fail('eof_after_close', String(error), { executed_steps: steps, launchErr, launch });
+  }
+  // The close verdict is authoritative and is gated by `assertCloseGate`
+  // above; a launch error that mentions cleanup is the failed-session message,
+  // not a close result, and must not be conflated with one.
+  if (envelope.closeReport.cleanup_confirmed !== true) {
+    return fail('eof_after_close', `close did not confirm cleanup: ${JSON.stringify(envelope.closeReport)}`, { executed_steps: steps });
+  }
+  return pass('eof_after_close', scenarioEnvelope({
+    error: launchErr,
+    launch_ok: launch.ok,
+    close_cleanup_confirmed: envelope.closeReport.cleanup_confirmed,
+    executed_steps: steps,
+    mode: 'EOF_AFTER_INIT_FROM_RUN_live',
+    adapter,
+    provider_id: 'mock-acp',
+    launch_survivors: launchSurvivors,
+  }, envelope));
 }
 
 async function runFullQueueShutdown() {
   cleanupFixtureChildren();
+  const scenarioStartedMs = Date.now();
   const steps = ['seed'];
   const home = mkdtempSync(join(tmpdir(), 'nexus-queue-'));
   const ws = mkdtempSync(join(tmpdir(), 'nexus-queue-ws-'));
@@ -453,7 +670,8 @@ async function runFullQueueShutdown() {
     if (closeMs > 5_000 || !closeReport.cleanup_confirmed) {
       return fail('full_queue_shutdown', `close_ms=${closeMs} confirmed=${closeReport.cleanup_confirmed}`, { executed_steps: steps });
     }
-    return pass('full_queue_shutdown', {
+    const survivors = findFixtureChildPids();
+    return pass('full_queue_shutdown', scenarioEnvelope({
       admitted: MAX_PENDING_REQUESTS,
       active_count: activeCallbacks,
       pending_count: MAX_PENDING_REQUESTS,
@@ -470,7 +688,23 @@ async function runFullQueueShutdown() {
       active_callbacks: activeCallbacks,
       queue_profile: 'ts_callback_pending_budget_1MiB_16_requests',
       control_bypass: true,
-    });
+      // The callback-budget profile owns no subprocess, so there is no OS
+      // process identity to guard; declare that explicitly.
+      child_observed: false,
+    }, {
+      deadline_ms: CLOSE_DEADLINE_MS,
+      elapsed_ms: closeMs,
+      scenario_elapsed_ms: Date.now() - scenarioStartedMs,
+      cleanup_confirmed: closeReport.cleanup_confirmed,
+      pending_task_ids: (closeReport.pending_operations ?? []).map(String),
+      pending_task_outcomes: (closeReport.pending_operations ?? []).map(String),
+      surviving_pids: survivors,
+      queue_count: MAX_PENDING_REQUESTS,
+      queue_bytes: inputBytes,
+      terminal_session_id: null,
+      terminal_operation_id: null,
+      process_guard: null,
+    }));
   }
 
   // rust-acp: fill the bridge's bounded *request* queue against a full active
@@ -533,6 +767,12 @@ async function runFullQueueShutdown() {
   const rejectedCode = formatProviderError(reject17.error);
   const rejectedBusy = !reject17.ok && isLocalSetBusy(reject17.error);
 
+  // Observe one owned child's identity (pid + OS birth + group) before close.
+  const preClosePids = findFixtureChildPids().filter((pid) => !beforePids.includes(pid));
+  const process_guard = preClosePids[0] ? observeProcessGuard(preClosePids[0]) : null;
+  if (!process_guard || process_guard.birth_ms === null) {
+    return fail('full_queue_shutdown', `process guard missing OS birth identity: ${JSON.stringify(process_guard)}`, { executed_steps: steps });
+  }
   steps.push('close_before_drain');
   const closeStarted = Date.now();
   const closeReport = decode(await core.close());
@@ -582,7 +822,7 @@ async function runFullQueueShutdown() {
   if (survivors.length > 0) {
     return fail('full_queue_shutdown', `survivors ${survivors.join(',')}`, { executed_steps: steps, survivors });
   }
-  return pass('full_queue_shutdown', {
+  return pass('full_queue_shutdown', scenarioEnvelope({
     adapter,
     active_count: queueEvidence.active_at_close,
     pending_count: queueEvidence.queued_at_close,
@@ -601,7 +841,22 @@ async function runFullQueueShutdown() {
     localset_pending_cap: MAX_PENDING_REQUESTS,
     pending_launch_count: pendingLaunches.length,
     close_pending_operations: drained,
-  });
+    process_guard,
+    child_observed: true,
+  }, {
+    deadline_ms: CLOSE_DEADLINE_MS,
+    elapsed_ms: closeMs,
+    scenario_elapsed_ms: Date.now() - scenarioStartedMs,
+    cleanup_confirmed: closeReport.cleanup_confirmed,
+    pending_task_ids: drained,
+    pending_task_outcomes: drained,
+    surviving_pids: survivors,
+    queue_count: queueEvidence.queued_at_close,
+    queue_bytes: queueEvidence.queued_bytes_at_close,
+    terminal_session_id: null,
+    terminal_operation_id: null,
+    close_ms: closeMs,
+  }));
 }
 
 async function runWorkerTermination() {
@@ -633,6 +888,12 @@ async function runWorkerTermination() {
   const launchedPids = findFixtureChildPids().filter((pid) => !beforePids.includes(pid));
   const victim = launchedPids[0];
   if (!victim) return fail('worker_termination', 'no fixture child pid observed', { executed_steps: steps });
+  // Observe the owned process identity (pid + real OS birth + group) BEFORE the
+  // kill: after the action there is nothing left to identify.
+  const process_guard = observeProcessGuard(victim);
+  if (!process_guard || process_guard.birth_ms === null) {
+    return fail('worker_termination', `process guard missing OS birth identity: ${JSON.stringify(process_guard)}`, { executed_steps: steps });
+  }
   steps.push('execute_blocked');
   const execResult = decode(await core.providerCall(encode({
     request_id: 'kill-exec', method: 'execute', session_id: launch.session_id, deadline_ms: 30_000,
@@ -688,7 +949,9 @@ async function runWorkerTermination() {
   }
 
   steps.push('close');
+  const closeStarted = Date.now();
   const closeReport = decode(await core.close());
+  const closeMs = Date.now() - closeStarted;
   const survivors = findFixtureChildPids().filter((pid) => launchedPids.includes(pid));
   let victimAlive = false;
   try { process.kill(victim, 0); victimAlive = true; } catch { victimAlive = false; }
@@ -704,7 +967,19 @@ async function runWorkerTermination() {
   if (survivors.length > 0 || victimAlive) {
     return fail('worker_termination', `survivors ${survivors.join(',')} victim_alive=${victimAlive}`, { executed_steps: steps, survivors });
   }
-  return pass('worker_termination', {
+  const envelope = {
+    deadline_ms: CLOSE_DEADLINE_MS,
+    elapsed_ms: closeMs,
+    cleanup_confirmed: closeReport.cleanup_confirmed,
+    pending_task_ids: (closeReport.pending_operations ?? []).map(String),
+    pending_task_outcomes: (closeReport.pending_operations ?? []).map(String),
+    surviving_pids: survivors,
+    process_guard,
+    terminal_session_id: launch.session_id,
+    terminal_operation_id: execResult.operation_id,
+    close_ms: closeMs,
+  };
+  return pass('worker_termination', scenarioEnvelope({
     child_pid: victim,
     fixture_pid: victim,
     in_flight_terminal_failed: inFlightTerminalFailed,
@@ -717,12 +992,14 @@ async function runWorkerTermination() {
     surviving_child_pids: survivors,
     victim_alive_after_close: victimAlive,
     cleanup_confirmed: closeReport.cleanup_confirmed,
-  });
+    child_observed: true,
+  }, envelope));
 }
 
 
 async function runMultibyteOverflow() {
   cleanupFixtureChildren();
+  const scenarioStartedMs = Date.now();
   const steps = ['seed'];
   const home = mkdtempSync(join(tmpdir(), 'nexus-mb-'));
   const ws = mkdtempSync(join(tmpdir(), 'nexus-mb-ws-'));
@@ -771,7 +1048,16 @@ async function runMultibyteOverflow() {
     await new Promise((r) => setTimeout(r, 50));
   }
   steps.push('close');
-  await core.close().catch(() => {});
+  let mbEnvelope;
+  try {
+    mbEnvelope = assertCloseGate('multibyte_overflow', await closeWithEvidence(core, {
+      startedMs: scenarioStartedMs,
+      terminal_session_id: launch.session_id,
+      terminal_operation_id: exec.operation_id,
+    }));
+  } catch (error) {
+    return fail('multibyte_overflow', String(error), { executed_steps: steps, batch });
+  }
   const seedBytes = new TextEncoder().encode(multibyteSeed).length;
   const utf8Bytes = seedBytes * multibyteRepeat;
   if (!isOversizedOutcome(batch)) {
@@ -780,7 +1066,7 @@ async function runMultibyteOverflow() {
   if (utf8Bytes <= 256 * 1024 || multibyteRepeat >= utf8Bytes) {
     return fail('multibyte_overflow', `probe is not a multibyte byte-boundary case: ${utf8Bytes} bytes over ${multibyteRepeat} code points`, { executed_steps: steps });
   }
-  return pass('multibyte_overflow', {
+  return pass('multibyte_overflow', scenarioEnvelope({
     adapter,
     rejected: true,
     rejected_by: 'adapter_delivery_overflow',
@@ -791,12 +1077,13 @@ async function runMultibyteOverflow() {
     outcome: batch?.gap ?? batch?.error ?? 'oversized',
     batch,
     executed_steps: steps,
-  });
+  }, mbEnvelope));
 }
 
 
 async function runReentrantCall() {
   cleanupFixtureChildren();
+  const scenarioStartedMs = Date.now();
   const steps = ['seed'];
   const home = mkdtempSync(join(tmpdir(), 'nexus-reentrant-'));
   const ws = mkdtempSync(join(tmpdir(), 'nexus-reentrant-ws-'));
@@ -907,20 +1194,25 @@ async function runReentrantCall() {
   }
 
   steps.push('close');
-  const closeReport = decode(await core.close());
-  if (!closeReport.cleanup_confirmed) {
-    return fail('reentrant_call', `close did not confirm cleanup: ${JSON.stringify(closeReport)}`, { executed_steps: steps });
+  let envelope;
+  try {
+    envelope = assertCloseGate('reentrant_call', await closeWithEvidence(core, {
+      startedMs: scenarioStartedMs,
+      terminal_session_id: launch.session_id,
+      terminal_operation_id: opId,
+    }));
+  } catch (error) {
+    return fail('reentrant_call', String(error), { executed_steps: steps });
   }
-  return pass('reentrant_call', {
+  return pass('reentrant_call', scenarioEnvelope({
     adapter,
     operation_id: opId,
     second_pull_error: secondErr,
     graph_query_ok: true,
     pull_settled_then_reused: true,
     held_js_pull: nextHeldCount,
-    cleanup_confirmed: closeReport.cleanup_confirmed,
     executed_steps: steps,
-  });
+  }, envelope));
 }
 
 try {

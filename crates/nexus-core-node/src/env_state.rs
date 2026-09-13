@@ -272,7 +272,19 @@ impl EnvState {
         self.pending_operation_ids.lock().await.clone()
     }
 
-    /// NAPI8 environment cleanup: tombstone and run bounded native-only teardown.
+        /// A host cleanup is only ever confirmed by a successful `HostResult`.
+    ///
+    /// `Err` (including `cleanup_unconfirmed`) and an outer deadline timeout
+    /// both mean the owned sessions were not proven clean, so the environment
+    /// keeps the owner and stays interrupted rather than reporting success.
+    #[must_use]
+    pub fn host_shutdown_confirmed(
+        result: &Result<nexus_agent_host::HostResult<()>, tokio::time::error::Elapsed>,
+    ) -> bool {
+        matches!(result, Ok(Ok(())))
+    }
+
+/// NAPI8 environment cleanup: tombstone and run bounded native-only teardown.
     pub fn run_bounded_native_finalize(state: Arc<EnvState>) {
         state.tombstone_env();
         let deadline = std::time::Instant::now() + FINALIZE_BUDGET;
@@ -308,20 +320,44 @@ impl EnvState {
                         let host = work_state.take_host();
                         if let Some(host) = host {
                             if budget().is_zero() {
+                                work_state.mark_interrupted();
                                 work_state.restore_host(host);
                             } else {
-                                host.localset_bridge().shutdown_sync_with_deadline(deadline);
-                                if budget().is_zero() {
+                                host.localset_bridge().begin_drain();
+                                // The bounded inner join either settles the
+                                // LocalSet thread or hands its `JoinHandle` back
+                                // for tracked cleanup. It is never detached.
+                                let bridge_evidence =
+                                    host.localset_bridge().shutdown_sync_with_deadline(deadline);
+                                if bridge_evidence.thread_alive {
+                                    if let Some(handle) =
+                                        host.localset_bridge().take_retained_runtime_thread()
+                                    {
+                                        super::cleanup_registry::register_localset_thread(
+                                            handle,
+                                            work_state.clone(),
+                                        );
+                                    }
+                                    work_state.mark_interrupted();
+                                    work_state.restore_host(host);
+                                } else if budget().is_zero() {
+                                    work_state.mark_interrupted();
                                     work_state.restore_host(host);
                                 } else {
-                                    match tokio::time::timeout_at(
+                                    // The typed `HostResult` inside the timeout
+                                    // is authoritative: only a confirmed
+                                    // `Ok(())` releases the owner.
+                                    let result = tokio::time::timeout_at(
                                         tokio::time::Instant::from_std(deadline),
                                         host.shutdown(),
                                     )
-                                    .await
-                                    {
-                                        Ok(_) => {}
-                                        Err(_) => work_state.restore_host(host),
+                                    .await;
+                                    if Self::host_shutdown_confirmed(&result) {
+                                        // Owned sessions confirmed clean; the
+                                        // host is released with the worker.
+                                    } else {
+                                        work_state.mark_interrupted();
+                                        work_state.restore_host(host);
                                     }
                                 }
                             }

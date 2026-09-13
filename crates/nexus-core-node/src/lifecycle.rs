@@ -319,6 +319,7 @@ async fn cleanup_owners(
             let shutdown_ok = manager.shutdown().await.is_ok();
             let bridge_evidence = manager.localset_bridge().shutdown_before(deadline).await;
             let bridge_settled = bridge_evidence.joined_cleanly
+                && !bridge_evidence.thread_alive
                 && bridge_evidence.active_tasks == 0
                 && bridge_evidence.pending_requests == 0
                 && bridge_evidence.owned_tasks == 0
@@ -333,6 +334,17 @@ async fn cleanup_owners(
             } else {
                 let mut pending = state.pending_operations_snapshot().await;
                 pending.extend(bridge_entries);
+                if bridge_evidence.thread_alive {
+                    if let Some(handle) =
+                        manager.localset_bridge().take_retained_runtime_thread()
+                    {
+                        super::cleanup_registry::register_localset_thread(
+                            handle,
+                            state.clone(),
+                        );
+                    }
+                    pending.push("localset-thread-alive".to_string());
+                }
                 if !shutdown_ok {
                     pending.push("host-shutdown-unconfirmed".to_string());
                 }
@@ -668,6 +680,99 @@ mod tests {
         let final_report = close_core(state.clone()).await;
         assert_eq!(final_report.state, CoreCloseReportState::Closed);
         assert!(final_report.cleanup_confirmed);
+    }
+
+    #[test]
+    fn host_shutdown_error_never_counts_as_finalize_success() {
+        use nexus_agent_host::HostError;
+
+        assert!(
+            EnvState::host_shutdown_confirmed(&Ok(Ok(()))),
+            "a confirmed host shutdown releases the owner"
+        );
+        assert!(
+            !EnvState::host_shutdown_confirmed(&Ok(Err(HostError::cleanup_unconfirmed("session retained")))),
+            "a typed host error must retain the owner, never report success"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn bounded_native_finalize_retains_live_localset_thread_owner() {
+        use crate::cleanup_registry;
+
+        let _lock = cleanup_registry::registry_test_lock();
+
+        let state = Arc::new(EnvState::new());
+        let host = Arc::new(HostManager::new());
+        let bridge = host.localset_bridge();
+        *state.host.lock().expect("host slot") = Some(host);
+
+        // Block the LocalSet thread *synchronously* past the finalize budget:
+        // the bounded inner join cannot settle inside the deadline, so the
+        // owner must be retained and handed to tracked cleanup.
+        let blocked = bridge.clone();
+        let blocker = tokio::spawn(async move {
+            let _ = blocked
+                .execute(4, || Box::pin(async {
+                    // Just past FINALIZE_BUDGET (5s): the bounded join cannot
+                    // settle inside the deadline, but the thread does exit
+                    // afterwards so tracked cleanup can join it.
+                    std::thread::sleep(Duration::from_millis(6_500));
+                    1
+                }))
+                .await;
+        });
+        tokio::time::sleep(Duration::from_millis(250)).await;
+
+        let finalize_state = state.clone();
+        tokio::task::spawn_blocking(move || {
+            EnvState::run_bounded_native_finalize(finalize_state);
+        })
+        .await
+        .expect("finalize call");
+
+        // The finalize worker is itself a tracked cleanup owner when it cannot
+        // finish inside the budget; wait for it to settle so the assertions see
+        // the post-finalize state, not a mid-flight one.
+        let settle_deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < settle_deadline && !state.is_interrupted() {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        assert!(
+            state.is_interrupted(),
+            "an unsettled LocalSet teardown must leave the environment interrupted"
+        );
+        assert!(
+            state.owner_slots_present(),
+            "the host owner must be retained, never dropped as if cleanup succeeded"
+        );
+        assert!(
+            !bridge.has_retained_runtime_thread(),
+            "the retained handle must move into tracked cleanup, not stay detached"
+        );
+        let (tracked, _) = cleanup_registry::registry_snapshot();
+        assert!(
+            tracked >= 1,
+            "the retained LocalSet thread must be tracked by the cleanup registry"
+        );
+
+        blocker.abort();
+        let _ = blocker.await;
+        // The retained entry is reaped once the thread actually exits.
+        let reap_deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < reap_deadline {
+            cleanup_registry::reap_completed();
+            if cleanup_registry::registry_snapshot().0 == 0 {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let (tracked, _) = cleanup_registry::registry_snapshot();
+        assert_eq!(
+            tracked, 0,
+            "a settled LocalSet thread must be joined and removed by the reaper"
+        );
     }
 
     #[test]

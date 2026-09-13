@@ -426,4 +426,60 @@ async fn localset_shutdown() {
         }
         let _ = bridge.shutdown().await;
     }
+
+    {
+        // The bounded join MUST NOT drop the runtime thread `JoinHandle`. The
+        // task below blocks the LocalSet *thread* synchronously, so the join
+        // cannot settle inside the budget; the handle is retained and stays
+        // joinable, and a later join succeeds once the thread finishes.
+        let bridge = LocalSetBridge::new();
+        let bridge_ref = bridge.clone();
+        let blocker = tokio::spawn(async move {
+            let _ = bridge_ref
+                .execute(4, || {
+                    Box::pin(async {
+                        // Synchronous sleep inside poll: the LocalSet thread
+                        // cannot service the queued shutdown control message.
+                        std::thread::sleep(Duration::from_millis(700));
+                        1
+                    })
+                })
+                .await;
+        });
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        let evidence = tokio::task::spawn_blocking({
+            let bridge = bridge.clone();
+            // Exhausted join budget: the deadline is already in the past.
+            move || bridge.shutdown_sync_with_deadline(std::time::Instant::now())
+        })
+        .await
+        .expect("sync shutdown");
+        assert!(
+            evidence.thread_alive,
+            "expired join budget must report thread_alive: {evidence:?}"
+        );
+        assert!(
+            evidence.aborted_task_ids.len() >= 1 || evidence.active_at_shutdown >= 1,
+            "shutdown evidence must name the live task that outlived the budget: {evidence:?}"
+        );
+        assert!(
+            bridge.has_retained_runtime_thread(),
+            "the runtime thread handle must be retained, never detached"
+        );
+        let handle = bridge
+            .take_retained_runtime_thread()
+            .expect("retained handle");
+        assert!(
+            !handle.is_finished(),
+            "retained handle must reference the still-running LocalSet thread"
+        );
+        blocker.abort();
+        let _ = blocker.await;
+        // Later join succeeds: the LocalSet thread finishes its blocking work,
+        // then processes the queued shutdown and exits.
+        let joined = tokio::task::spawn_blocking(move || handle.join().is_ok())
+            .await
+            .expect("join helper");
+        assert!(joined, "retained LocalSet thread handle must join cleanly");
+    }
 }

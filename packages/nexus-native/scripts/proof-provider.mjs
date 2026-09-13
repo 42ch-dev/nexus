@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,6 +21,10 @@ const caseName = process.argv.includes('--case')
 const outDir = process.argv.includes('--out')
   ? process.argv[process.argv.indexOf('--out') + 1]
   : join(root, '.mstar', 'iterations', 'v1.189', 'guides', 'evidence', 'native-wire');
+
+// Preserve the previous run's evidence before this run can overwrite it —
+// including the early failure paths below.
+archiveEvidencePreFix6(join(outDir, 'lifecycle.json'));
 
 const home = mkdtempSync(join(tmpdir(), 'nexus-provider-proof-'));
 const seed = spawnSync(
@@ -157,77 +161,113 @@ function isStaleGenerationError(err) {
   return /stale generation|generation mismatch|invalid principal|tombstone|dead_env|env_dead|provider port unavailable/i.test(s);
 }
 
-function isTransportEofError(err) {
-  const s = String(err ?? '');
-  return /eof|broken pipe|connection reset|transport|child process|exited|closed/i.test(s);
+// EOF/close/queue behaviour is proved per adapter in the isolated workers
+// (`proof-isolated-worker.mjs`); those scenarios carry the close envelope, so
+// this module no longer keeps a second, weaker implementation of them.
+
+const CLOSE_DEADLINE_MS = 5_000;
+const SCENARIO_EVIDENCE_FIELDS = [
+  'deadline_ms',
+  'elapsed_ms',
+  'cleanup_confirmed',
+  'pending_task_ids',
+  'pending_task_outcomes',
+  'surviving_pids',
+];
+
+// Scenarios that do not own a close of their own: they run inside the
+// happy-path session whose close is measured at the top level, so the close
+// envelope gate is applied to their parent instead of to them.
+const INHERITS_CLOSE_FROM = {
+  terminal_identity: 'happy_lifecycle',
+  cooperative_cancel_2s: 'happy_lifecycle',
+  late_generation: 'happy_lifecycle',
+};
+
+// EOF/close/queue behaviour is proved per adapter in the isolated workers
+// (`proof-isolated-worker.mjs`); those scenarios carry the close envelope, so
+// this module no longer keeps a second, weaker implementation of them.
+
+/// Reject a scenario whose close evidence is missing, over budget, unconfirmed,
+/// or leaves a survivor behind. Returns an error string, or null when the
+/// scenario's evidence satisfies the contract.
+function validateScenarioEvidence(key, scenario) {
+  if (!scenario?.ok) return null;
+  if (INHERITS_CLOSE_FROM[key]) {
+    if (scenario.inherits_close_from !== INHERITS_CLOSE_FROM[key]) {
+      return `${key}: must declare inherits_close_from=${INHERITS_CLOSE_FROM[key]}`;
+    }
+    return null;
+  }
+  for (const field of SCENARIO_EVIDENCE_FIELDS) {
+    if (scenario[field] === undefined) return `${key}: missing ${field}`;
+  }
+  if (scenario.elapsed_ms > CLOSE_DEADLINE_MS) {
+    return `${key}: close took ${scenario.elapsed_ms}ms > ${CLOSE_DEADLINE_MS}ms budget`;
+  }
+  if (!scenario.cleanup_confirmed) {
+    return `${key}: cleanup_confirmed false`;
+  }
+  if ((scenario.surviving_pids ?? []).length > 0) {
+    return `${key}: surviving_pids ${scenario.surviving_pids.join(',')}`;
+  }
+  if (key === 'worker_termination' || key === 'full_queue_shutdown') {
+    // Either the scenario observed an owned child — and then it must carry that
+    // child's real OS identity as observed *before* the action — or it must say
+    // so explicitly, so a missing guard can never pass silently.
+    if (typeof scenario.child_observed !== 'boolean') {
+      return `${key}: must declare child_observed`;
+    }
+    if (scenario.child_observed) {
+      const guard = scenario.process_guard;
+      if (!guard) return `${key}: missing process_guard for an observed child`;
+      if (!(guard.pid > 0)) return `${key}: process_guard has no observed pid`;
+      if (guard.birth_ms === null || guard.birth_ms === undefined) {
+        return `${key}: process_guard has no OS birth identity`;
+      }
+      if (guard.pgid === null || guard.pgid === undefined) {
+        return `${key}: process_guard has no process-group id`;
+      }
+      if (guard.alive !== true) {
+        return `${key}: process_guard must be observed while the child was alive`;
+      }
+    } else if (scenario.process_guard != null) {
+      return `${key}: no child observed, so no process_guard may be claimed`;
+    }
+  }
+  if (key === 'failed_open_child') {
+    if (scenario.bad_provider_id !== 'bad') return `${key}: must target provider id 'bad'`;
+    if (scenario.bad_command !== '/nonexistent/nexus-bad-acp') {
+      return `${key}: must declare the nonexistent command it attempted`;
+    }
+    if (!scenario.executed_steps?.includes('probe_bad_child')) {
+      return `${key}: never attempted the bad provider probe`;
+    }
+    if (scenario.probe_error && /not registered/i.test(String(scenario.probe_error))) {
+      return `${key}: provider-not-registered is FAIL`;
+    }
+    if (scenario.launch_error_category !== 'launch_failed') {
+      return `${key}: launch must fail as a launch-class error, got ${scenario.launch_error_category}`;
+    }
+    if (String(scenario.error ?? '').length === 0) {
+      return `${key}: launch produced no error evidence`;
+    }
+  }
+  if (key === 'eof_after_close') {
+    const err = String(scenario.error ?? '');
+    if (!/provider_eof|transport|protocol_error|exited|eof|broken pipe|failed to connect|session creation failed/i.test(err)) {
+      return `${key}: expected typed EOF/transport terminal, got ${err}`;
+    }
+    if (scenario.close_cleanup_confirmed !== true) {
+      return `${key}: the measured close must confirm cleanup`;
+    }
+  }
+  return null;
 }
 
-async function runEofWhileLive(core, adapter, home, providers) {
-  const eofHome = mkdtempSync(join(tmpdir(), 'nexus-eof-live-'));
-  const eofWorkspace = mkdtempSync(join(tmpdir(), 'nexus-eof-ws-'));
-  const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
-  writeAgentHostConfig(eofHome, fixture, eofWorkspace, { EOF_AFTER_INIT: '1' });
-  const eofCore = binding.open(
-    JSON.stringify({ user_home: eofHome, access: 'engine_owner', allow_uninitialized: false }),
-    providers,
-  );
-  const launchErr = await eofCore
-    .providerCall(
-      encode({
-        request_id: 'eof-live-launch',
-        method: 'launch',
-        deadline_ms: 5_000,
-        payload: adapter === 'rust-acp' ? rustLaunchPayload(eofHome) : tsLaunchPayload(),
-      }),
-    )
-    .then(() => null)
-    .catch((error) => String(error));
-  await eofCore.close().catch(() => {});
-  if (!launchErr || !isTransportEofError(launchErr)) {
-    return failScenario('eof_after_close', `expected live EOF failure, got: ${launchErr}`);
-  }
-  return passScenario('eof_after_close', { error: launchErr, adapter, mode: 'EOF_AFTER_INIT_live' });
-}
-
-async function runFullQueueShutdown(core, adapter, home) {
-  const burst = [];
-  for (let i = 0; i < 17; i += 1) {
-    burst.push(
-      core
-        .providerCall(
-          encode({
-            request_id: `queue-${i}`,
-            method: 'probe',
-            deadline_ms: 30_000,
-            payload: adapter === 'rust-acp' ? rustProbePayload(home) : tsProbePayload(),
-          }),
-        )
-        .catch((error) => ({ ok: false, error: String(error) })),
-    );
-  }
-  const started = Date.now();
-  await Promise.allSettled(burst);
-  const closeStarted = Date.now();
-  const closeReport = decode(await core.close());
-  const closeMs = Date.now() - closeStarted;
-  const totalMs = Date.now() - started;
-  const survivors = findFixtureChildPids();
-  if (closeMs > 5_000) {
-    return failScenario('full_queue_shutdown', `close exceeded 5s: ${closeMs}ms`);
-  }
-  if (!closeReport.cleanup_confirmed) {
-    return failScenario('full_queue_shutdown', 'cleanup unconfirmed after burst');
-  }
-  if (survivors.length > 0) {
-    return failScenario('full_queue_shutdown', `surviving child pids: ${survivors.join(',')}`);
-  }
-  return passScenario('full_queue_shutdown', {
-    burst_count: 17,
-    close_ms: closeMs,
-    total_ms: totalMs,
-    adapter,
-    surviving_child_pids: survivors,
-  });
+function archiveEvidencePreFix6(targetPath) {
+  const archive = targetPath.replace(/lifecycle\.json$/, 'lifecycle.pre-fix6.json');
+  if (existsSync(targetPath)) copyFileSync(targetPath, archive);
 }
 
 const SCENARIO_KEYS = [
@@ -245,8 +285,8 @@ const SCENARIO_KEYS = [
   'happy_lifecycle',
 ];
 
-function failScenario(key, message) {
-  return { key, ok: false, error: message };
+function failScenario(key, message, detail = {}) {
+  return { key, ok: false, error: message, ...detail };
 }
 
 
@@ -336,6 +376,7 @@ async function runAdapterScenarios(core, ctx) {
           terminal_operation_id: terminalPayload.terminalOpId,
           session_id: sessionId,
           terminal_session_id: terminalPayload.terminalSessionId,
+          inherits_close_from: 'happy_lifecycle',
         })
       : failScenario('terminal_identity', 'terminal operation/session identity mismatch');
 
@@ -376,7 +417,12 @@ async function runAdapterScenarios(core, ctx) {
     );
     const cancelMs = Date.now() - started;
     scenarios.cooperative_cancel_2s = cancelMs <= 2000
-      ? passScenario('cooperative_cancel_2s', { cancel_ms: cancelMs })
+      ? passScenario('cooperative_cancel_2s', {
+          cancel_ms: cancelMs,
+          terminal_session_id: cancelSession,
+          terminal_operation_id: exec.operation_id,
+          inherits_close_from: 'happy_lifecycle',
+        })
       : failScenario('cooperative_cancel_2s', `cancel took ${cancelMs}ms`);
     await core.providerCall(
       encode({
@@ -393,7 +439,7 @@ async function runAdapterScenarios(core, ctx) {
 
   try {
     scenarios.never_settling_callback = await runIsolatedScenario('never_settling_callback', adapter, providers);
-    if (!scenarios.never_settling_callback.executed_steps?.includes('cancel')) {
+    if (scenarios.never_settling_callback.ok && !scenarios.never_settling_callback.executed_steps?.includes('cancel')) {
       scenarios.never_settling_callback = failScenario('never_settling_callback', 'never reached cancel step');
     }
   } catch (error) {
@@ -402,7 +448,9 @@ async function runAdapterScenarios(core, ctx) {
 
   try {
     scenarios.failed_open_child = await runIsolatedScenario('failed_open_child', adapter, providers);
-    if (!scenarios.failed_open_child.executed_steps?.includes('launch_bad_child')) {
+    const failedGate = validateScenarioEvidence('failed_open_child', scenarios.failed_open_child);
+    if (failedGate) scenarios.failed_open_child = failScenario('failed_open_child', failedGate);
+    if (scenarios.failed_open_child.ok && !scenarios.failed_open_child.executed_steps?.includes('launch_bad_child')) {
       scenarios.failed_open_child = failScenario('failed_open_child', 'never reached bad child launch');
     }
   } catch (error) {
@@ -415,14 +463,14 @@ async function runAdapterScenarios(core, ctx) {
       if (!scenarios.full_queue_shutdown.rejected_code || /session limit/i.test(String(scenarios.full_queue_shutdown.rejected_code))) {
         scenarios.full_queue_shutdown = failScenario('full_queue_shutdown', `expected LocalSet busy, got ${scenarios.full_queue_shutdown.rejected_code}`);
       }
-      if ((scenarios.full_queue_shutdown.active_count ?? 0) < MAX_ACTIVE_TASKS) {
+      if (scenarios.full_queue_shutdown.ok && (scenarios.full_queue_shutdown.active_count ?? 0) < MAX_ACTIVE_TASKS) {
         scenarios.full_queue_shutdown = failScenario('full_queue_shutdown', `active_count too low: ${scenarios.full_queue_shutdown.active_count}`);
       }
-      if ((scenarios.full_queue_shutdown.pending_count ?? 0) < MAX_PENDING_REQUESTS) {
+      if (scenarios.full_queue_shutdown.ok && (scenarios.full_queue_shutdown.pending_count ?? 0) < MAX_PENDING_REQUESTS) {
         scenarios.full_queue_shutdown = failScenario('full_queue_shutdown', `pending_count too low: ${scenarios.full_queue_shutdown.pending_count}`);
       }
     }
-    if (!scenarios.full_queue_shutdown.executed_steps?.includes('close_before_drain')) {
+    if (scenarios.full_queue_shutdown.ok && !scenarios.full_queue_shutdown.executed_steps?.includes('close_before_drain')) {
       scenarios.full_queue_shutdown = failScenario('full_queue_shutdown', 'never closed before drain');
     }
   } catch (error) {
@@ -431,10 +479,10 @@ async function runAdapterScenarios(core, ctx) {
 
   try {
     scenarios.multibyte_overflow = await runIsolatedScenario('multibyte_overflow', adapter, providers);
-    if (scenarios.multibyte_overflow.rejected === false) {
+    if (scenarios.multibyte_overflow.ok && scenarios.multibyte_overflow.rejected === false) {
       scenarios.multibyte_overflow = failScenario('multibyte_overflow', 'adapter did not reject oversized multibyte update');
     }
-    if (!scenarios.multibyte_overflow.executed_steps?.includes('oversize_execute')) {
+    if (scenarios.multibyte_overflow.ok && !scenarios.multibyte_overflow.executed_steps?.includes('oversize_execute')) {
       scenarios.multibyte_overflow = failScenario('multibyte_overflow', 'never attempted oversize execute');
     }
   } catch (error) {
@@ -443,10 +491,10 @@ async function runAdapterScenarios(core, ctx) {
 
   try {
     scenarios.worker_termination = await runIsolatedScenario('worker_termination', adapter, providers);
-    if (scenarios.worker_termination.post_kill_execute_ok) {
+    if (scenarios.worker_termination.ok && scenarios.worker_termination.post_kill_execute_ok) {
       scenarios.worker_termination = failScenario('worker_termination', 'in-flight execute succeeded after child kill');
     }
-    if (!scenarios.worker_termination.executed_steps?.includes('kill_child')) {
+    if (scenarios.worker_termination.ok && !scenarios.worker_termination.executed_steps?.includes('kill_child')) {
       scenarios.worker_termination = failScenario('worker_termination', 'never killed child mid-operation');
     }
   } catch (error) {
@@ -455,10 +503,10 @@ async function runAdapterScenarios(core, ctx) {
 
   try {
     scenarios.reentrant_call = await runIsolatedScenario('reentrant_call', adapter, providers);
-    if (!scenarios.reentrant_call.executed_steps?.includes('second_pull_busy')) {
+    if (scenarios.reentrant_call.ok && !scenarios.reentrant_call.executed_steps?.includes('second_pull_busy')) {
       scenarios.reentrant_call = failScenario('reentrant_call', 'never attempted concurrent same-op pull');
     }
-    if (!/busy|pull already in flight/i.test(String(scenarios.reentrant_call.second_pull_error ?? ''))) {
+    if (scenarios.reentrant_call.ok && !/busy|pull already in flight/i.test(String(scenarios.reentrant_call.second_pull_error ?? ''))) {
       scenarios.reentrant_call = failScenario('reentrant_call', `missing Busy on second pull: ${scenarios.reentrant_call.second_pull_error}`);
     }
   } catch (error) {
@@ -467,7 +515,7 @@ async function runAdapterScenarios(core, ctx) {
 
   try {
     scenarios.open_close_100 = await runIsolatedScenario('open_close_100', adapter, providers);
-    if (!scenarios.open_close_100.executed_steps?.includes('close:99')) {
+    if (scenarios.open_close_100.ok && !scenarios.open_close_100.executed_steps?.includes('close:99')) {
       scenarios.open_close_100 = failScenario('open_close_100', 'did not complete 100 cycles in worker');
     }
   } catch (error) {
@@ -476,7 +524,9 @@ async function runAdapterScenarios(core, ctx) {
 
   try {
     scenarios.eof_after_close = await runIsolatedScenario('eof_after_close', adapter, providers);
-    if (!scenarios.eof_after_close.executed_steps?.includes('launch_eof_fixture')) {
+    const eofGate = validateScenarioEvidence('eof_after_close', scenarios.eof_after_close);
+    if (eofGate) scenarios.eof_after_close = failScenario('eof_after_close', eofGate);
+    if (scenarios.eof_after_close.ok && !scenarios.eof_after_close.executed_steps?.includes('launch_eof_fixture')) {
       scenarios.eof_after_close = failScenario('eof_after_close', 'never reached EOF fixture launch');
     }
   } catch (error) {
@@ -673,7 +723,16 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
     happy_lifecycle: passScenario('happy_lifecycle', {
       session_shutdown_ok: shutdownReply.ok,
       close_ms: closeMs,
+      close_state: closeReport.state,
       cleanup_confirmed: closeReport.cleanup_confirmed,
+      deadline_ms: CLOSE_DEADLINE_MS,
+      elapsed_ms: closeMs,
+      pending_task_ids: (closeReport.pending_operations ?? []).map(String),
+      pending_task_outcomes: (closeReport.pending_operations ?? []).map(String),
+      surviving_pids: findFixtureChildPids(),
+      process_guard: null,
+      terminal_session_id: terminalSessionId,
+      terminal_operation_id: terminalOpId,
     }),
     ...adapterScenarios,
   };
@@ -681,11 +740,19 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
     scenarios.eof_after_close = failScenario('eof_after_close', 'live EOF scenario missing or failed');
   }
   scenarios.late_generation = isStaleGenerationError(postCloseErr)
-    ? passScenario('late_generation', { error: postCloseErr, captured_generation: capturedGeneration })
+    ? passScenario('late_generation', {
+        error: postCloseErr,
+        captured_generation: capturedGeneration,
+        inherits_close_from: 'happy_lifecycle',
+      })
     : failScenario('late_generation', `expected stale generation/tombstone error, got: ${postCloseErr}`);
   for (const key of SCENARIO_KEYS) {
     if (!scenarios[key]) {
       scenarios[key] = failScenario(key, 'missing scenario result');
+    }
+    const gateErr = validateScenarioEvidence(key, scenarios[key]);
+    if (gateErr && scenarios[key].ok) {
+      scenarios[key] = failScenario(key, gateErr);
     }
     if (!scenarios[key].ok) {
       console.error('scenario failed', key, scenarios[key]);
