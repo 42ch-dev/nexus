@@ -148,6 +148,13 @@ importers:
       '@42ch/nexus-native':
         specifier: workspace:*
         version: link:../../packages/nexus-native
+      '@42ch/nexus-provider-acp':
+        specifier: workspace:*
+        version: link:../../packages/nexus-provider-acp
+    devDependencies:
+      '@types/node':
+        specifier: ^22.15.3
+        version: 22.20.2
 
   apps/web:
     dependencies:
