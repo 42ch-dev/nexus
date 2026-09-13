@@ -156,8 +156,6 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
       next: async () => JSON.stringify({ operation_id: 'x', events: [], has_more: false }),
     });
     const principal = await core.activePrincipal();
-    const parts = principal.split(':');
-    const stalePrincipal = `p:${Math.max(0, Number(parts[1] ?? 0) - 1)}:${parts.slice(2).join(':')}`;
     const closeReport = JSON.parse(new TextDecoder().decode(await core.close()));
     assert.equal(closeReport.cleanup_confirmed, true);
     const home = seedHome();
@@ -169,7 +167,7 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
         next: async () => JSON.stringify({ operation_id: 'x', events: [], has_more: false }),
       },
     );
-    await assert.rejects(() => core2.worldKbGraph(stalePrincipal, 'wld_owned', false));
+    await assert.rejects(() => core2.worldKbGraph(principal, 'wld_owned', false));
     await core2.close();
   });
 

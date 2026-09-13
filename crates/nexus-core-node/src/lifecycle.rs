@@ -285,6 +285,8 @@ pub async fn close_core(state: &EnvState) -> CoreCloseReport {
     *state.close_in_flight.lock().await = false;
     if report.cleanup_confirmed {
         state.closing.store(0, std::sync::atomic::Ordering::SeqCst);
+        // Revoke principal handles from the closed generation so foreign handles fail.
+        state.generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
     state.close_notify_settled.notify_waiters();
     report
