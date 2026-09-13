@@ -49,6 +49,9 @@ pub use skills::{build_v1_0_capabilities, capabilities};
 #[allow(unused_imports)]
 pub use transport::{AcpSession, AgentSpawner, ManagedAcpProcess, Platform, ProcessBirthToken};
 
+#[allow(unused_imports)]
+pub use localset_bridge::LocalSetBridge;
+
 // Re-export the gated MCP wiring for session construction.
 #[cfg(feature = "connect-client")]
 #[allow(unused_imports)]

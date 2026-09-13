@@ -1,0 +1,17 @@
+{
+  "name": "@42ch/nexus-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone Node service shell (reserved: implementation owned by the downstream service task)",
+  "scripts": {
+    "dev": "node src/main.mjs",
+    "start": "node src/main.mjs",
+    "proof:open-smoke": "node src/open-smoke.mjs"
+  },
+  "dependencies": {
+    "@42ch/nexus-contracts": "workspace:*",
+    "@42ch/nexus-native": "workspace:*"
+  },
+  "engines": { "node": ">=22.22" }
+}

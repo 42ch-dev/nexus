@@ -42,6 +42,7 @@ const SKIP_SCHEMAS: &[&str] = &[
     "common/common.schema.json",
     "common/source-anchor.schema.json",
     "platform/sync/bundle-refinement.schema.json",
+    "core/provider-host-event.schema.json",
 ];
 
 /// Resolve the repository root: `NEXUS_REPO_ROOT` env, else
@@ -781,6 +782,35 @@ fn main() {
     }
 
     eprintln!("skipped {skipped} definition-only / canonical-skip schema(s)");
+
+    let provider_host_event_src =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("provider_host_event.rs.template");
+    let provider_host_event_out = out_root.join("core").join("provider_host_event.rs");
+    if provider_host_event_src.exists() {
+        fs::create_dir_all(provider_host_event_out.parent().expect("core parent"))
+            .expect("create core output dir");
+        fs::copy(&provider_host_event_src, &provider_host_event_out)
+            .expect("copy provider_host_event template");
+        generated.insert(provider_host_event_out.clone());
+        generated_modules.push(GeneratedModule {
+            out_rel: PathBuf::from("core").join("provider_host_event.rs"),
+            rust_mod: "provider_host_event".to_string(),
+            export_all: false,
+            export_type: Some("ProviderHostEvent".to_string()),
+        });
+        if let Ok(version) =
+            read_schema_version(&src_dir.join("core/provider-host-event.schema.json"))
+        {
+            schema_versions.push(("ProviderHostEvent".to_string(), version));
+        }
+        println!(
+            "wrote {}",
+            provider_host_event_out
+                .strip_prefix(&root)
+                .unwrap_or(&provider_host_event_out)
+                .display()
+        );
+    }
 
     if !failures.is_empty() {
         for err in &failures {

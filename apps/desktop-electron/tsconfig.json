@@ -1,0 +1,1 @@
+{ "extends": "../../packages/nexus-native/tsconfig.json", "include": [] }

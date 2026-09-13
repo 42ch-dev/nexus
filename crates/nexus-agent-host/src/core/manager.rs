@@ -25,6 +25,7 @@ use crate::ids::{HostOperationId, HostSessionId, ProviderId};
 use crate::policy::admission::AdmissionPolicy;
 use crate::policy::permission::HostPermissionResolver;
 use crate::ProviderAdapter;
+use nexus_acp_host::LocalSetBridge;
 
 /// Broadcast channel capacity for host events.
 ///
@@ -57,6 +58,8 @@ pub struct HostManager {
     workspace_root: RwLock<Option<std::path::PathBuf>>,
     /// Broadcast sender for host events — SSE subscribers consume via `subscribe()`.
     event_tx: tokio::sync::broadcast::Sender<HostEvent>,
+    /// One environment-scoped LocalSet bridge shared by all ACP adapters.
+    localset_bridge: Arc<LocalSetBridge>,
 }
 
 // HashMap import for providers/session_providers
@@ -80,7 +83,31 @@ impl HostManager {
             running: RwLock::new(false),
             workspace_root: RwLock::new(None),
             event_tx,
+            localset_bridge: Arc::new(LocalSetBridge::new()),
         }
+    }
+
+    /// Shared LocalSet bridge for all ACP SDK adapters in this environment.
+    #[must_use]
+
+    /// Snapshot active session/operation IDs for native close reports.
+    pub async fn pending_lifecycle_snapshot(&self) -> Vec<String> {
+        let sessions = self.sessions.read().await;
+        let mut pending = Vec::new();
+        for session in sessions.iter() {
+            pending.push(format!("session:{}", session.id));
+            if let Some(op_id) = &session.active_op_id {
+                pending.push(format!("op:{}", op_id));
+            }
+            if session.state.is_busy() {
+                pending.push(format!("session-busy:{}", session.id));
+            }
+        }
+        pending
+    }
+
+    pub fn localset_bridge(&self) -> LocalSetBridge {
+        self.localset_bridge.as_ref().clone()
     }
 
     /// Create a host manager with a specific admission policy.
@@ -112,6 +139,62 @@ impl HostManager {
     /// Must be called before `start()`. The adapter is stored behind `Arc<dyn ProviderAdapter>`.
     /// `launch` is the configured launch recipe reported truthfully by the
     /// catalog (never a fabricated empty recipe).
+    /// Snapshot of the loaded agent-host configuration (defaults when absent).
+    pub async fn agent_config(&self) -> AgentHostConfig {
+        self.config.read().await.clone().unwrap_or_default()
+    }
+
+    /// Build a [`ProviderPortAdapter`] wired to this host and registered providers.
+
+    /// Admit the catalog-owned launch recipe for JS provider callbacks.
+    pub async fn admit_validated_provider_recipe(
+        &self,
+        provider_id: &crate::ids::ProviderId,
+    ) -> crate::error::HostResult<nexus_contracts::ValidatedProviderRecipe> {
+        let (command, args, env, recipe_generation) = {
+            let providers = self.providers.read().await;
+            let entry = providers
+                .get(provider_id)
+                .ok_or_else(|| {
+                    crate::error::HostError::provider_unavailable(
+                        provider_id.clone(),
+                        "provider not registered",
+                    )
+                })?;
+            let (command, args, env) = match &entry.metadata.launch {
+                crate::LaunchStrategy::Acp { command, args, env }
+                | crate::LaunchStrategy::NativeCli { command, args, env } => {
+                    (command.clone(), args.clone(), env.clone())
+                }
+            };
+            (command, args, env, entry.identity.launch_fingerprint.to_string())
+        };
+        let boundary = {
+            let ws = self.workspace_root.read().await;
+            ws.clone()
+                .ok_or_else(|| crate::error::HostError::internal("workspace root not set"))?
+        };
+        crate::providers::recipe_admission::build_validated_recipe(
+            provider_id,
+            &command,
+            &args,
+            &env,
+            recipe_generation,
+            &boundary,
+        )
+    }
+
+    pub async fn build_provider_port(self: &Arc<Self>) -> crate::providers::port::ProviderPortAdapter {
+        let mut port = crate::providers::port::ProviderPortAdapter::with_manager(self.clone());
+        let providers = self.providers.read().await;
+        for (id, entry) in providers.iter() {
+            if let Some(adapter) = entry.adapter.clone() {
+                port.register_provider(id.clone(), adapter);
+            }
+        }
+        port
+    }
+
     pub async fn register_provider(
         &self,
         adapter: Arc<dyn ProviderAdapter>,
@@ -172,6 +255,22 @@ impl HostManager {
             entry.health.available = false;
             entry.health.latency_ms = None;
             entry.health.message = Some("probe_context_unavailable".to_string());
+        }
+    }
+
+    /// Publish a bounded probe result into the manager catalog (used by provider port).
+    pub async fn record_provider_probe(
+        &self,
+        provider_id: &ProviderId,
+        health: crate::capability::model::ProviderHealth,
+        latency_ms: u64,
+    ) {
+        let identity = {
+            let providers = self.providers.read().await;
+            providers.get(provider_id).map(|entry| entry.identity.clone())
+        };
+        if let Some(identity) = identity {
+            self.publish_probe_result(&identity, health, latency_ms).await;
         }
     }
 
@@ -352,7 +451,7 @@ impl crate::HostFacade for HostManager {
         let pre_registered = !self.providers.read().await.is_empty();
         if !pre_registered {
             let discovered =
-                discover_provider_entries(&host_config, &config.timeouts, &permission_resolver)?;
+                discover_provider_entries(&host_config, &host_config.timeouts, &permission_resolver, self.localset_bridge())?;
             *self.providers.write().await = discovered;
         }
 

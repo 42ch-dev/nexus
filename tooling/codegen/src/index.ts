@@ -1,5 +1,6 @@
 import { execSync } from 'node:child_process';
 import path from 'node:path';
+import { generateCoreSliceClient } from './client-gen';
 import { runPrep } from './schema-prep';
 import { generateTSTypes } from './ts-gen';
 import { logger } from './utils';
@@ -24,6 +25,9 @@ export async function runCodegen(): Promise<void> {
   // Stage 2: TypeScript types → packages/nexus-contracts/src/generated/
   logger.info('\n--- Generating TypeScript Types ---');
   await generateTSTypes();
+
+  logger.info('\n--- Generating CoreSliceClient ---');
+  generateCoreSliceClient();
 
   // Stage 3: Rust types → crates/nexus-contracts/src/generated/
   // Invokes the external `nexus-rust-gen` binary (typify) over the dereferenced tree

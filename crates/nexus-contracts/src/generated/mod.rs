@@ -52,6 +52,15 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("CoreChangesResponse", 1),
     ("CoreCloseReport", 1),
     ("CoreError", 1),
+    ("CoreHostQueryResponse", 1),
+    ("CoreHostQuery", 1),
+    ("CoreServiceOperations", 1),
+    ("NativeCompatibility", 1),
+    ("NativeOpenOptions", 1),
+    ("ProviderCall", 1),
+    ("ProviderEventBatch", 1),
+    ("ProviderReply", 1),
+    ("ValidatedProviderRecipe", 1),
     ("AddKnowledgeEntryRequest", 1),
     ("AddKnowledgeEntryResponse", 1),
     ("DeleteKnowledgeEntryQuery", 1),
@@ -344,6 +353,7 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("SyncCommand", 1),
     ("SyncPullRequest", 1),
     ("SyncPullResponse", 1),
+    ("ProviderHostEvent", 1),
 ];
 
 /// Highest `schema_version` among emitted contract schemas

@@ -1,0 +1,17 @@
+{
+  "name": "nexus-desktop-electron-proof",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron feasibility shell (reserved: implementation owned by the downstream desktop task)",
+  "scripts": {
+    "package": "node scripts/package.mjs",
+    "proof:native-smoke": "node src/native-smoke.mjs"
+  },
+  "dependencies": {
+    "@42ch/nexus-native": "workspace:*"
+  },
+  "devDependencies": {
+    "electron": "44.3.0",
+    "@electron/packager": "20.3.0"
+  }
+}

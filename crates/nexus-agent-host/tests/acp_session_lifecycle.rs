@@ -159,6 +159,7 @@ async fn build_host_with_owner(
         nexus_agent_host::HostPermissionResolver::new_native_only(
             &AgentHostConfig::default().policy,
         ),
+        nexus_acp_host::LocalSetBridge::new(),
     )
     .expect("valid ACP recipe");
     let launch = LaunchStrategy::Acp {
@@ -448,6 +449,7 @@ async fn missing_and_disabled_providers_refuse() {
         nexus_agent_host::HostPermissionResolver::new_native_only(
             &AgentHostConfig::default().policy,
         ),
+        nexus_acp_host::LocalSetBridge::new(),
     )
     .err()
     .expect("disabled provider must refuse");

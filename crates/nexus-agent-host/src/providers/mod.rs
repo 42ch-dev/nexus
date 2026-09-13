@@ -8,6 +8,8 @@
 
 pub mod acp;
 pub mod native_cli;
+pub mod port;
+pub mod recipe_admission;
 
 use std::sync::Arc;
 
@@ -144,6 +146,7 @@ pub fn adapter_from_catalog_entry(
     entry: &ProviderCatalogEntry,
     timeouts: TimeoutConfig,
     permission_resolver: HostPermissionResolver,
+    localset_bridge: nexus_acp_host::LocalSetBridge,
 ) -> HostResult<Arc<dyn ProviderAdapter>> {
     let provider_config = provider_config_from_entry(entry)?;
     validate_provider_config(&provider_config)?;
@@ -170,7 +173,7 @@ pub fn adapter_from_catalog_entry(
     match entry.protocol_kind {
         ProtocolKind::Acp => {
             let provider =
-                acp::AcpProvider::from_config(provider_config, timeouts, permission_resolver)?;
+                acp::AcpProvider::from_config(provider_config, timeouts, permission_resolver, localset_bridge)?;
             Ok(Arc::new(provider))
         }
         ProtocolKind::NativeCli => match entry.provider_id.0.as_str() {

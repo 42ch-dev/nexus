@@ -1,0 +1,51 @@
+{
+  "name": "@42ch/nexus-provider-acp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Nexus TS ACP SDK provider adapter (reserved: implementation owned by P2-T2)",
+  "author": "42ch",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/42ch/nexus"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "module": "./dist/index.mjs",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "prebuild": "pnpm run clean",
+    "build": "tsup src/index.ts --format cjs,esm && tsc --emitDeclarationOnly",
+    "dev": "tsc --emitDeclarationOnly --watch & tsup src/index.ts --format cjs,esm --watch & wait",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@42ch/nexus-contracts": "workspace:*",
+    "@agentclientprotocol/sdk": "1.4.0",
+    "zod": "4.6.2"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "tsup": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=22.22"
+  }
+}
