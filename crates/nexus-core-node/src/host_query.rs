@@ -15,6 +15,7 @@ use nexus_contracts::core_host_query_response::{
 use nexus_contracts::CoreHostQuery;
 use uuid::Uuid;
 
+use super::core_error;
 use super::env_state::EnvState;
 
 fn session_wire(session: &RegistryHostSession) -> NexusAgentHostSessionResponse {
@@ -30,12 +31,12 @@ fn session_wire(session: &RegistryHostSession) -> NexusAgentHostSessionResponse 
 }
 
 fn parse_session_id(raw: &str) -> Result<HostSessionId, String> {
-    let uuid = Uuid::parse_str(raw).map_err(|e| format!("session_id: {e}"))?;
+    let uuid = Uuid::parse_str(raw).map_err(|e| core_error::open_reason_from_wire(nexus_contracts::CoreError { code: nexus_contracts::CoreErrorCode::InvalidInput, message: format!("invalid session_id: {e}"), details: Default::default(), http_status: Some(400) }))?;
     Ok(HostSessionId(uuid))
 }
 
 fn parse_operation_id(raw: &str) -> Result<HostOperationId, String> {
-    let uuid = Uuid::parse_str(raw).map_err(|e| format!("operation_id: {e}"))?;
+    let uuid = Uuid::parse_str(raw).map_err(|e| core_error::open_reason_from_wire(nexus_contracts::CoreError { code: nexus_contracts::CoreErrorCode::InvalidInput, message: format!("invalid operation_id: {e}"), details: Default::default(), http_status: Some(400) }))?;
     Ok(HostOperationId(uuid))
 }
 
@@ -50,7 +51,7 @@ fn path_probe_dirs() -> Vec<std::path::PathBuf> {
 async fn sorted_sessions(
     host: &std::sync::Arc<HostManager>,
 ) -> Result<Vec<RegistryHostSession>, String> {
-    let mut sessions = host.list_sessions().await.map_err(|e| e.to_string())?;
+    let mut sessions = host.list_sessions().await.map_err(|e| core_error::open_reason_invalid_input(e.to_string()))?;
     sessions.sort_by(|a, b| a.id.to_string().cmp(&b.id.to_string()));
     Ok(sessions)
 }
@@ -62,19 +63,19 @@ pub async fn dispatch_host_query(
     let host = state
         .host
         .lock()
-        .map_err(|_| "host mutex poisoned".to_string())?
+        .map_err(|_| core_error::open_reason_from_wire(nexus_contracts::CoreError { code: nexus_contracts::CoreErrorCode::Internal, message: "internal error".into(), details: Default::default(), http_status: Some(500) }))?
         .clone()
-        .ok_or_else(|| "host not started".to_string())?;
+        .ok_or_else(|| core_error::open_reason_from_wire(nexus_contracts::CoreError { code: nexus_contracts::CoreErrorCode::InvalidInput, message: "host not started".into(), details: Default::default(), http_status: Some(400) }))?;
     match request.query {
         CoreHostQueryQuery::Health => {
-            let health = host.health().await.map_err(|e| e.to_string())?;
+            let health = host.health().await.map_err(|e| core_error::open_reason_invalid_input(e.to_string()))?;
             Ok(CoreHostQueryResponse {
                 health: Some(CoreHostQueryResponseHealth {
                     running: health.running,
                     active_sessions: u64::try_from(health.active_sessions)
-                        .map_err(|e| e.to_string())?,
+                        .map_err(|e| core_error::open_reason_invalid_input(e.to_string()))?,
                     active_operations: u64::try_from(health.active_operations)
-                        .map_err(|e| e.to_string())?,
+                        .map_err(|e| core_error::open_reason_invalid_input(e.to_string()))?,
                 }),
                 catalog: None,
                 sessions: None,
@@ -87,7 +88,7 @@ pub async fn dispatch_host_query(
             let format = request.format.unwrap_or(CoreHostQueryFormat::Catalog);
             match format {
                 CoreHostQueryFormat::Catalog => {
-                    let mut catalog = host.provider_catalog().await.map_err(|e| e.to_string())?;
+                    let mut catalog = host.provider_catalog().await.map_err(|e| core_error::open_reason_invalid_input(e.to_string()))?;
                     catalog
                         .entries
                         .sort_by(|a, b| a.provider_id.to_string().cmp(&b.provider_id.to_string()));
@@ -114,7 +115,7 @@ pub async fn dispatch_host_query(
                     let config = HostManager::agent_config(&host).await;
                     let probe_dirs = path_probe_dirs();
                     let native_entries = path_scan::scan_path_in(&config, &[], &probe_dirs)
-                        .map_err(|e| e.to_string())?;
+                        .map_err(|e| core_error::open_reason_invalid_input(e.to_string()))?;
                     let entries: Vec<NexusAgentScanEntry> = native_entries
                         .into_iter()
                         .map(|entry| {
@@ -174,7 +175,7 @@ pub async fn dispatch_host_query(
                 sessions: Some(NexusAgentHostSessionListResponse {
                     items,
                     pagination: NexusPaginationInfo {
-                        limit: i64::try_from(limit).map_err(|e| e.to_string())?,
+                        limit: i64::try_from(limit).map_err(|e| core_error::open_reason_invalid_input(e.to_string()))?,
                         has_more: next_cursor.is_some(),
                         next_cursor,
                     },
@@ -190,13 +191,13 @@ pub async fn dispatch_host_query(
             let session_id = request
                 .session_id
                 .as_deref()
-                .ok_or_else(|| "get_session requires session_id".to_string())?;
+                .ok_or_else(|| core_error::open_reason_invalid_input("get_session requires session_id"))?;
             let sid = parse_session_id(session_id)?;
             let sessions = sorted_sessions(&host).await?;
             let session = sessions
                 .iter()
                 .find(|s| s.id == sid)
-                .ok_or_else(|| format!("session {session_id} not found"))?;
+                .ok_or_else(|| core_error::open_reason_invalid_input(format!("session {session_id} not found")))?;
             Ok(CoreHostQueryResponse {
                 session: Some(session_wire(session)),
                 health: None,
@@ -210,7 +211,7 @@ pub async fn dispatch_host_query(
             let operation_id = request
                 .operation_id
                 .as_deref()
-                .ok_or_else(|| "get_operation requires operation_id".to_string())?;
+                .ok_or_else(|| core_error::open_reason_invalid_input("get_operation requires operation_id"))?;
             let op_id = parse_operation_id(operation_id)?;
             let sessions = sorted_sessions(&host).await?;
             // Status comes from the owning session's live state; an operation the
@@ -219,7 +220,7 @@ pub async fn dispatch_host_query(
             let session = sessions
                 .iter()
                 .find(|s| s.state.active_op_id() == Some(&op_id))
-                .ok_or_else(|| format!("operation {operation_id} is not active"))?;
+                .ok_or_else(|| core_error::open_reason_invalid_input(format!("operation {operation_id} is not active")))?;
             Ok(CoreHostQueryResponse {
                 operation: Some(NexusAgentHostOperationResponse {
                     operation_id: op_id.to_string(),

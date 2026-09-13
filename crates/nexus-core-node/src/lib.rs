@@ -64,16 +64,18 @@ pub struct NativeCore {
 
 #[napi]
 impl NativeCore {
+    fn deny_service_only(&self) -> Result<()> {
+        if self.inner.is_service_only_uninitialized() {
+            return Err(core_error::napi_error_from_wire(
+                core_error::service_only_uninitialized_wire(),
+            ));
+        }
+        Ok(())
+    }
+
     #[napi]
     pub async fn active_principal(&self) -> Result<String> {
-        if self.inner.is_service_only_uninitialized() {
-            return Err(core_error::napi_error_from_wire(nexus_contracts::CoreError {
-                code: nexus_contracts::CoreErrorCode::Uninitialized,
-                message: "workspace not initialized".into(),
-                details: Default::default(),
-                http_status: Some(409),
-            }));
-        }
+        self.deny_service_only()?;
         let core = self
             .inner
             .core
@@ -112,6 +114,7 @@ impl NativeCore {
         world_id: String,
         request_json: Buffer,
     ) -> Result<Buffer> {
+        self.deny_service_only()?;
         let request: WorldKbPatchEntityRequest = serde_json::from_slice(request_json.as_ref())?;
         self.json_call(principal_handle, async move |core, principal| {
             core.patch_world_kb_entity(&principal, world_id, request)
@@ -128,6 +131,7 @@ impl NativeCore {
         limit: Option<f64>,
         cursor: Option<String>,
     ) -> Result<Buffer> {
+        self.deny_service_only()?;
         let limit_i64 = limit.map(|n| {
             if !n.is_finite() || n < 0.0 || n > 9_007_199_254_740_991.0 || n.fract() != 0.0 {
                 return Err(Error::from_reason("invalid limit"));
@@ -146,6 +150,7 @@ impl NativeCore {
         principal_handle: String,
         request_json: Buffer,
     ) -> Result<Buffer> {
+        self.deny_service_only()?;
         let request: CoreChangesRequest = serde_json::from_slice(request_json.as_ref())?;
         self.json_call(principal_handle, async move |core, principal| {
             core.changes(&principal, request)
@@ -156,32 +161,18 @@ impl NativeCore {
 
     #[napi]
     pub async fn host_query(&self, request_json: Buffer) -> Result<Buffer> {
-        if self.inner.is_service_only_uninitialized() {
-            return Err(core_error::napi_error_from_wire(nexus_contracts::CoreError {
-                code: nexus_contracts::CoreErrorCode::Uninitialized,
-                message: "workspace not initialized".into(),
-                details: Default::default(),
-                http_status: Some(409),
-            }));
-        }
+        self.deny_service_only()?;
         let request: CoreHostQuery = serde_json::from_slice(request_json.as_ref())?;
         let response: CoreHostQueryResponse =
             host_query::dispatch_host_query(&self.inner, request)
                 .await
-                .map_err(Error::from_reason)?;
+                .map_err(core_error::napi_error_from_open_reason)?;
         Ok(Buffer::from(serde_json::to_vec(&response)?))
     }
 
     #[napi]
     pub async fn provider_call(&self, request_json: Buffer) -> Result<Buffer> {
-        if self.inner.is_service_only_uninitialized() {
-            return Err(core_error::napi_error_from_wire(nexus_contracts::CoreError {
-                code: nexus_contracts::CoreErrorCode::Uninitialized,
-                message: "workspace not initialized".into(),
-                details: Default::default(),
-                http_status: Some(409),
-            }));
-        }
+        self.deny_service_only()?;
         let request: ProviderCall = serde_json::from_slice(request_json.as_ref())?;
         let port = self
             .inner
@@ -193,7 +184,7 @@ impl NativeCore {
         let reply = port
             .call(request)
             .await
-            .map_err(|e| Error::from_reason(e.message.clone()))?;
+            .map_err(core_error::napi_error_from_wire)?;
         Ok(Buffer::from(serde_json::to_vec(&reply)?))
     }
 
@@ -204,14 +195,7 @@ impl NativeCore {
         max_events: u32,
         max_bytes: u32,
     ) -> Result<Buffer> {
-        if self.inner.is_service_only_uninitialized() {
-            return Err(core_error::napi_error_from_wire(nexus_contracts::CoreError {
-                code: nexus_contracts::CoreErrorCode::Uninitialized,
-                message: "workspace not initialized".into(),
-                details: Default::default(),
-                http_status: Some(409),
-            }));
-        }
+        self.deny_service_only()?;
         let port = self
             .inner
             .provider_port
@@ -222,7 +206,7 @@ impl NativeCore {
         let batch = port
             .next(operation_id, max_events, max_bytes)
             .await
-            .map_err(|e| Error::from_reason(e.message.clone()))?;
+            .map_err(core_error::napi_error_from_wire)?;
         Ok(Buffer::from(serde_json::to_vec(&batch)?))
     }
 
@@ -238,14 +222,7 @@ impl NativeCore {
         F: FnOnce(Arc<nexus_core::CoreService>, Principal) -> Fut,
         Fut: std::future::Future<Output = std::result::Result<T, nexus_core::CoreError>>,
     {
-        if self.inner.is_service_only_uninitialized() {
-            return Err(core_error::napi_error_from_wire(nexus_contracts::CoreError {
-                code: nexus_contracts::CoreErrorCode::Uninitialized,
-                message: "workspace not initialized".into(),
-                details: Default::default(),
-                http_status: Some(409),
-            }));
-        }
+        self.deny_service_only()?;
         if self.inner.is_closing() {
             return Err(Error::from_reason("closing"));
         }
@@ -302,6 +279,6 @@ pub fn open(
     };
     runtime::runtime()
         .block_on(lifecycle::open_core(state.clone(), options, js_port))
-        .map_err(Error::from_reason)?;
+        .map_err(core_error::napi_error_from_open_reason)?;
     Ok(NativeCore { inner: state })
 }
