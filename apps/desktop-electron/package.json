@@ -1,0 +1,15 @@
+{
+  "name": "nexus-desktop-electron-proof",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "package": "node -e \"console.error('reserved for P3'); process.exit(2)\""
+  },
+  "dependencies": {
+    "@42ch/nexus-native": "workspace:*"
+  },
+  "devDependencies": {
+    "electron": "44.3.0",
+    "@electron/packager": "20.3.0"
+  }
+}

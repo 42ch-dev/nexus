@@ -1,0 +1,16 @@
+{
+  "name": "@42ch/nexus-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node -e \"console.error('reserved for P4-T1'); process.exit(2)\"",
+    "dev": "node -e \"console.error('reserved for P4-T1'); process.exit(2)\"",
+    "start": "node -e \"console.error('reserved for P4-T1'); process.exit(2)\""
+  },
+  "dependencies": {
+    "@42ch/nexus-contracts": "workspace:*",
+    "@42ch/nexus-native": "workspace:*"
+  },
+  "engines": { "node": ">=22.22" }
+}

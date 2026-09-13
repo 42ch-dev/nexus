@@ -8,6 +8,7 @@
 
 pub mod acp;
 pub mod native_cli;
+pub mod port;
 
 use std::sync::Arc;
 

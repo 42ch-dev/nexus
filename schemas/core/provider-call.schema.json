@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/provider-call.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ProviderCall",
+  "description": "Schema-owned provider effect port envelope (probe|launch|execute|cancel|shutdown).",
+  "type": "object",
+  "required": ["method", "request_id", "deadline_ms", "payload"],
+  "additionalProperties": false,
+  "properties": {
+    "method": {
+      "type": "string",
+      "enum": ["probe", "launch", "execute", "cancel", "shutdown"]
+    },
+    "request_id": { "type": "string" },
+    "session_id": { "type": ["string", "null"] },
+    "operation_id": { "type": ["string", "null"] },
+    "deadline_ms": { "type": "integer", "minimum": 0 },
+    "payload": { "type": "object" }
+  }
+}

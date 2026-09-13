@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-host-query-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreHostQueryResponse",
+  "description": "Host query response envelope with optional typed branches.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "health": {
+      "type": "object",
+      "required": ["running", "active_sessions", "active_operations"],
+      "additionalProperties": false,
+      "properties": {
+        "running": { "type": "boolean" },
+        "active_sessions": { "type": "integer", "minimum": 0 },
+        "active_operations": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "catalog": {
+      "type": "object",
+      "required": ["providers"],
+      "additionalProperties": false,
+      "properties": {
+        "providers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["provider_id", "display_name", "protocol_kind"],
+            "additionalProperties": false,
+            "properties": {
+              "provider_id": { "type": "string" },
+              "display_name": { "type": "string" },
+              "protocol_kind": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "sessions": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/agent-host/session-list-response.schema.json"
+    },
+    "session": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/agent-host/session-response.schema.json"
+    },
+    "operation": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/agent-host/operation-response.schema.json"
+    },
+    "scan": {
+      "type": "object",
+      "required": ["entries"],
+      "additionalProperties": false,
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "https://nexus42.invalid/schemas/daemon-api/agent-host/agent-scan-entry.schema.json"
+          }
+        }
+      }
+    }
+  }
+}
