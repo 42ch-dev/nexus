@@ -259,14 +259,25 @@ function inspectDarwin(artifact, spec, findings) {
   findings.minimum_os_source = minosMatches[0] ? 'LC_BUILD_VERSION.minos' : versionMinMatches[0] ? 'LC_VERSION_MIN_MACOSX.version' : null;
   findings.deployment_target_env = process.env.MACOSX_DEPLOYMENT_TARGET ?? null;
 
+  // `otool -L` prints the LC_ID_DYLIB install name first. That entry is the
+  // artifact's own identity (a Rust cdylib built by cargo carries its absolute
+  // build path there), not a load dependency, so classify from the load
+  // commands and drop the id from the dependency list.
+  const idCommand = /cmd LC_ID_DYLIB[\s\S]{0,240}?\n\s*name ([^\s(]+)/.exec(loadCommands.stdout);
+  findings.install_name = idCommand?.[1] ?? null;
+  findings.install_name_is_build_path = Boolean(findings.install_name?.startsWith('/'));
+
   const deps = run('otool', ['-L', artifact], { forceNoShell: true });
-  const libraries = deps.stdout
+  const listedLibraries = deps.stdout
     .split('\n')
     .slice(1)
     .map((line) => line.trim().split(' ')[0])
     .filter(Boolean);
-  findings.dependent_libraries = libraries;
-  findings.non_system_libraries = libraries.filter(
+  findings.otool_l_list = listedLibraries;
+  findings.dependent_libraries = listedLibraries.filter(
+    (library, index) => !(index === 0 && library === findings.install_name),
+  );
+  findings.non_system_libraries = findings.dependent_libraries.filter(
     (library) => !/^(@rpath|@loader_path|@executable_path|\/usr\/lib\/|\/System\/Library\/)/.test(library),
   );
 

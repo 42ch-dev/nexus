@@ -19,6 +19,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -537,7 +538,7 @@ const SOAK_START_EXPR = (readsPerSecond, writesPerSecond, entities) => `(() => {
     const entity = entities[slot++ % entities.length];
     const graph = await api.runProofStep('graph', { world_id: 'wld_owned' });
     if (!graph || !graph.ok) { state.write_errors.push('graph'); return; }
-    const row = (graph.result.entities || []).find((e) => e.entity_id === entity);
+    const row = (graph.result.entities || []).find((e) => e.key_block_id === entity);
     if (!row) { state.write_errors.push('missing:' + entity); return; }
     const reply = await api.runProofStep('patch', {
       world_id: 'wld_owned',
@@ -570,12 +571,12 @@ async function phaseResources(ctx) {
 
     // Two dedicated CAS rows so the soak writes are real compare-and-swap
     // updates rather than blind overwrites.
-    const soakEntities = ['kb_soak_a', 'kb_soak_b'];
+    const soakEntities = ['kb_50a1c0de', 'kb_50b2c0de'];
     await app.cdp.evaluate(`(async () => {
       const api = window.nexusProof;
       for (const entity_id of ${JSON.stringify(soakEntities)}) {
         const graph = await api.runProofStep('graph', { world_id: 'wld_owned' });
-        const row = (graph.result.entities || []).find((e) => e.entity_id === entity_id);
+        const row = (graph.result.entities || []).find((e) => e.key_block_id === entity_id);
         await api.runProofStep('patch', {
           world_id: 'wld_owned',
           request: {
@@ -830,11 +831,33 @@ const SECURITY_EXPR = `(async () => {
   };
 })()`;
 
+/**
+ * Read an asar archive's file table.
+ *
+ * The archive starts with a Pickle header: the JSON directory lives at a
+ * 16-byte offset, not immediately after the first size field. Locate it by
+ * content and brace-match so a header-layout change cannot silently yield an
+ * empty entry list (which would make the "no .node in asar" check vacuous).
+ */
 function asarEntries(asarPath) {
   const buffer = readFileSync(asarPath);
-  const headerSize = buffer.readUInt32LE(4);
-  const headerJson = buffer.subarray(8, 8 + headerSize).toString('utf8');
-  const header = JSON.parse(headerJson.replace(/\0+$/, ''));
+  const jsonStart = buffer.indexOf(Buffer.from('{"files"'));
+  if (jsonStart < 0) throw new Error(`asar header not found in ${asarPath}`);
+  let depth = 0;
+  let jsonEnd = -1;
+  for (let i = jsonStart; i < buffer.length; i += 1) {
+    const byte = buffer[i];
+    if (byte === 0x7b) depth += 1;
+    else if (byte === 0x7d) {
+      depth -= 1;
+      if (depth === 0) {
+        jsonEnd = i;
+        break;
+      }
+    }
+  }
+  if (jsonEnd < 0) throw new Error(`asar header is not terminated in ${asarPath}`);
+  const header = JSON.parse(buffer.subarray(jsonStart, jsonEnd + 1).toString('utf8'));
   const files = [];
   const walk = (node, prefix) => {
     for (const [name, value] of Object.entries(node.files ?? {})) {
@@ -844,6 +867,7 @@ function asarEntries(asarPath) {
     }
   };
   walk(header, '');
+  if (files.length === 0) throw new Error(`asar ${asarPath} lists no files`);
   return files;
 }
 
@@ -865,10 +889,14 @@ async function phaseSecurity(ctx) {
       unpacked_entries: entries.filter((entry) => entry.unpacked).map((entry) => entry.path),
       web_dist_index_present: entries.some((entry) => entry.path === '/web-dist/index.html'),
     };
-    evidence.packaged_artifact = {
-      unpacked_files: walkFiles(unpackedDir).map((path) => path.replace(unpackedDir, '<app.asar.unpacked>')),
-      has_native_node_outside_asar: walkFiles(unpackedDir).some((path) => path.endsWith('.node')),
-    };
+    evidence.packaged_artifact = (() => {
+      const walked = walkFiles(unpackedDir);
+      return {
+        unpacked_files: walked.files.map((path) => path.replace(unpackedDir, '<app.asar.unpacked>')),
+        unpacked_symlinks: walked.symlinks.map((path) => path.replace(unpackedDir, '<app.asar.unpacked>')),
+        has_native_node_outside_asar: walked.files.some((path) => path.endsWith('.node')),
+      };
+    })();
 
     await app.launch();
     await app.waitReady();
@@ -932,20 +960,30 @@ async function phaseSecurity(ctx) {
   }
 }
 
+/**
+ * Walk a tree without following symlinks.
+ *
+ * macOS `.app` bundles are full of version symlinks (`Versions/Current` →
+ * `Versions/A`, and the top-level `Electron Framework`/`Resources` links into
+ * it). Following them counts the same bytes two to three times, which inflated
+ * the installed-bundle measurement by ~2.7x against the real on-disk footprint.
+ */
 function walkFiles(root) {
   if (!existsSync(root)) return [];
   const files = [];
+  const symlinks = [];
   const queue = [root];
   while (queue.length) {
     const dir = queue.pop();
     for (const entry of readdirSync(dir)) {
       const full = join(dir, entry);
-      const st = statSync(full);
-      if (st.isDirectory()) queue.push(full);
+      const st = lstatSync(full);
+      if (st.isSymbolicLink()) symlinks.push(full);
+      else if (st.isDirectory()) queue.push(full);
       else files.push(full);
     }
   }
-  return files;
+  return { files, symlinks };
 }
 
 async function phaseLifecycle(ctx) {
@@ -963,15 +1001,15 @@ async function phaseLifecycle(ctx) {
          const api = window.nexusProof;
          const compat = await api.runProofStep('compatibility');
          const before = await api.runProofStep('graph', { world_id: 'wld_owned' });
-         const entityId = 'kb_proof_t3';
-         const existing = (before.result.entities || []).find((e) => e.entity_id === entityId);
+         const entityId = 'kb_a1b2c3d4';
+         const existing = (before.result.entities || []).find((e) => e.key_block_id === entityId);
          const created = await api.runProofStep('patch', {
            world_id: 'wld_owned',
            request: { entity_id: entityId, expected_version: existing ? existing.version : 0,
                       patch: { title: 'native-create', block_type: 'character' } },
          });
          const afterCreate = await api.runProofStep('graph', { world_id: 'wld_owned' });
-         const rowAfterCreate = (afterCreate.result.entities || []).find((e) => e.entity_id === entityId);
+         const rowAfterCreate = (afterCreate.result.entities || []).find((e) => e.key_block_id === entityId);
          const updated = await api.runProofStep('patch', {
            world_id: 'wld_owned',
            request: { entity_id: entityId, expected_version: rowAfterCreate.version,
@@ -982,11 +1020,11 @@ async function phaseLifecycle(ctx) {
            request: { entity_id: entityId, expected_version: 0, patch: { title: 'stale-write' } },
          });
          const afterStale = await api.runProofStep('graph', { world_id: 'wld_owned' });
-         const rowAfterStale = (afterStale.result.entities || []).find((e) => e.entity_id === entityId);
+         const rowAfterStale = (afterStale.result.entities || []).find((e) => e.key_block_id === entityId);
          const foreign = await api.runProofStep('graph', { world_id: 'wld_foreign' });
          return {
            compat: compat.result,
-           graph_entities: (before.result.entities || []).map((e) => e.entity_id),
+           graph_entities: (before.result.entities || []).map((e) => e.key_block_id),
            created_version: created.ok ? created.result.version : null,
            created_ok: created.ok,
            updated_version: updated.ok ? updated.result.version : null,
@@ -994,7 +1032,7 @@ async function phaseLifecycle(ctx) {
            stale_ok: stale.ok,
            stale_error: stale.error ? stale.error.message : null,
            version_after_stale: rowAfterStale ? rowAfterStale.version : null,
-           title_after_stale: rowAfterStale ? rowAfterStale.title : null,
+           title_after_stale: rowAfterStale ? rowAfterStale.canonical_name : null,
            foreign_ok: foreign.ok,
            foreign_error: foreign.ok ? null : foreign.error.message,
          };
@@ -1034,8 +1072,8 @@ async function phaseLifecycle(ctx) {
       `(async () => {
          const api = window.nexusProof;
          const graph = await api.runProofStep('graph', { world_id: 'wld_owned' });
-         const row = (graph.result && graph.result.entities || []).find((e) => e.entity_id === 'kb_proof_t3');
-         return { ok: Boolean(graph.ok), version: row ? row.version : null, title: row ? row.title : null };
+         const row = (graph.result && graph.result.entities || []).find((e) => e.key_block_id === 'kb_a1b2c3d4');
+         return { ok: Boolean(graph.ok), version: row ? row.version : null, title: row ? row.canonical_name : null };
        })()`,
       60_000,
     );
@@ -1089,15 +1127,21 @@ async function phaseLifecycle(ctx) {
 }
 
 function artifactSizes(appPath, outDir) {
-  const appBytes = dirSize(appPath);
+  const appSize = dirSize(appPath);
   const zipPath = join(outDir, 'Nexus-RFT-Feasibility-app.zip');
   rmSync(zipPath, { force: true });
   const zip = spawnSync('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', appPath, zipPath], {
     encoding: 'utf8',
   });
+  const du = spawnSync('du', ['-sk', appPath], { encoding: 'utf8' });
   return {
-    app_bundle_bytes: appBytes,
-    app_bundle_mib: Number((appBytes / 1048576).toFixed(1)),
+    app_bundle_bytes: appSize.bytes,
+    app_bundle_mib: Number((appSize.bytes / 1048576).toFixed(1)),
+    app_bundle_file_count: appSize.file_count,
+    app_bundle_symlink_count: appSize.symlink_count,
+    app_bundle_disk_kib: du.status === 0 ? Number(du.stdout.trim().split(/\s+/)[0]) : null,
+    app_bundle_disk_mib:
+      du.status === 0 ? Number((Number(du.stdout.trim().split(/\s+/)[0]) / 1024).toFixed(1)) : null,
     zip_path: zip.status === 0 ? zipPath : null,
     zip_bytes: zip.status === 0 ? statSync(zipPath).size : null,
     zip_mib: zip.status === 0 ? Number((statSync(zipPath).size / 1048576).toFixed(1)) : null,
@@ -1105,8 +1149,18 @@ function artifactSizes(appPath, outDir) {
   };
 }
 
+/**
+ * Installed-bundle footprint: the bytes actually present in the installed
+ * tree, counting each physical file once (symlinked duplicates are not
+ * followed). This is the measure the PKG-2 "installed bundle" limit refers to.
+ */
 function dirSize(root) {
-  return walkFiles(root).reduce((sum, path) => sum + statSync(path).size, 0);
+  const walked = walkFiles(root);
+  return {
+    bytes: walked.files.reduce((sum, path) => sum + lstatSync(path).size, 0),
+    file_count: walked.files.length,
+    symlink_count: walked.symlinks.length,
+  };
 }
 
 function electronBundleVersions(appPath) {

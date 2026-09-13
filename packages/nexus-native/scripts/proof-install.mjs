@@ -185,13 +185,24 @@ function packedManifest(tarball) {
   return JSON.parse(tar(['-xzOf', tarball, 'package/package.json']).stdout);
 }
 
+/**
+ * Pack one workspace package into `packDir` and return the tarball path.
+ *
+ * Packing into a fresh directory is required: `pnpm pack` overwrites a
+ * same-named tarball in place, so a "which new file appeared" diff against an
+ * existing `packDir` sees nothing on a re-run and the driver fails before it
+ * ever reaches the install step.
+ */
 function packInto(dir, packDir) {
-  const before = new Set(readdirSync(packDir).filter((name) => name.endsWith('.tgz')));
-  const res = run('pnpm', ['pack', '--pack-destination', packDir], { cwd: dir });
+  const staging = mkdtempSync(join(tmpdir(), 'nexus-install-pack-'));
+  const res = run('pnpm', ['pack', '--pack-destination', staging], { cwd: dir });
   if (res.status !== 0) fail(`pnpm pack failed in ${dir}`, { stderr: res.stderr.slice(-2000) });
-  const produced = readdirSync(packDir).filter((name) => name.endsWith('.tgz')).filter((n) => !before.has(n));
-  if (produced.length !== 1) fail(`expected one new tarball from ${dir}`, { produced });
-  return join(packDir, produced[0]);
+  const produced = readdirSync(staging).filter((name) => name.endsWith('.tgz'));
+  if (produced.length !== 1) fail(`expected one tarball from ${dir}`, { produced });
+  const tarball = join(packDir, produced[0]);
+  copyFileSync(join(staging, produced[0]), tarball);
+  rmSync(staging, { recursive: true, force: true });
+  return tarball;
 }
 
 /** Find a workspace package directory by exact package name. */
@@ -509,17 +520,19 @@ async function runPositive() {
   const graph = await core.worldKbGraph(principal, 'wld_owned', false);
   result.graph_entities_before = (graph.entities || []).length;
   result.created = await core.patchWorldKbEntity(principal, 'wld_owned', {
-    entity_id: 'kb_install_proof',
+    entity_id: 'kb_1f2e3d4c',
     expected_version: 0,
     patch: { title: 'Install Proof', block_type: 'character' },
   });
   result.updated = await core.patchWorldKbEntity(principal, 'wld_owned', {
-    entity_id: 'kb_install_proof',
+    entity_id: 'kb_1f2e3d4c',
     expected_version: 1,
     patch: { title: 'Install Proof v2' },
   });
   const graphAfter = await core.worldKbGraph(principal, 'wld_owned', false);
-  const entity = (graphAfter.entities || []).find((row) => row.entity_id === 'kb_install_proof');
+  // The graph projection names the entity key_block_id; only the patch
+  // request speaks entity_id.
+  const entity = (graphAfter.entities || []).find((row) => row.key_block_id === 'kb_1f2e3d4c');
   result.graph_entity_version = entity ? entity.version : null;
   result.core_close = await core.close();
   result.stages.happy = await runStage('happy', happyConfig);
