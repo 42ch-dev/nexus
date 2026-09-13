@@ -27,14 +27,83 @@ export function resolveOpenProofPolicy(input: {
   if (
     input.ownerAlive &&
     (input.phase === 'open' || input.phase === 'starting') &&
-    (input.rendererDetached || input.phase === 'open')
+    (input.rendererDetached || input.phase === 'open' || input.phase === 'starting')
   ) {
     return 'attach_existing_owner';
   }
   return 'open_utility';
 }
 
+/** Readiness returned to a replacement window attaching to an existing owner. */
+export function attachExistingReadiness(phase: LifecyclePhase): 'open' | 'starting' {
+  return phase === 'open' ? 'open' : 'starting';
+}
+
+/** Merge utility-ready snapshot without dropping an in-flight starting phase. */
+export function mergeUtilityReadyLifecycle(
+  current: { phase: LifecyclePhase; owner_alive: boolean },
+  snapshot: { phase?: LifecyclePhase; owner_alive?: boolean } | undefined,
+): { phase: LifecyclePhase; owner_alive: boolean } {
+  const owner_alive = snapshot?.owner_alive ?? current.owner_alive ?? true;
+  if (current.phase === 'starting' && snapshot?.phase !== 'open') {
+    return { phase: 'starting', owner_alive };
+  }
+  return {
+    phase: snapshot?.phase ?? current.phase,
+    owner_alive,
+  };
+}
+
 /** Unconfirmed kill must fence reopen until a later confirmed join. */
 export function joinExitConfirmed(awaitedExit: boolean): boolean {
   return awaitedExit;
+}
+
+/** Whether an unexpected utility exit should interrupt (not suppressed by prior close). */
+export function shouldTreatUtilityExitAsUnexpected(
+  closeInitiatedForGeneration: number | null,
+  ownerGeneration: number,
+): boolean {
+  return closeInitiatedForGeneration !== ownerGeneration;
+}
+
+/** Lifecycle outcome after close request + kill/join — never closed on unconfirmed exit. */
+export function resolveCloseLifecycleAfterJoin(input: {
+  confirmed: boolean;
+  closeOk: boolean;
+  ownerStillReferenced: boolean;
+  cleanupConfirmed?: boolean | null;
+  closeErrorMessage?: string;
+}): {
+  phase: LifecyclePhase;
+  owner_alive: boolean;
+  cleanup_confirmed: boolean | null;
+  reopenRequired: boolean;
+  reason: string | null;
+} {
+  if (!input.confirmed) {
+    return {
+      phase: 'interrupted',
+      owner_alive: input.ownerStillReferenced,
+      cleanup_confirmed: false,
+      reopenRequired: true,
+      reason: 'utility join unconfirmed during close — owner remains fenced',
+    };
+  }
+  if (input.closeOk) {
+    return {
+      phase: 'closed',
+      owner_alive: false,
+      cleanup_confirmed: input.cleanupConfirmed ?? true,
+      reopenRequired: false,
+      reason: null,
+    };
+  }
+  return {
+    phase: 'interrupted',
+    owner_alive: false,
+    cleanup_confirmed: false,
+    reopenRequired: true,
+    reason: input.closeErrorMessage ?? 'close failed',
+  };
 }

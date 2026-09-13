@@ -2,9 +2,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  attachExistingReadiness,
   joinExitConfirmed,
+  mergeUtilityReadyLifecycle,
   remainingCloseBudget,
+  resolveCloseLifecycleAfterJoin,
   resolveOpenProofPolicy,
+  shouldTreatUtilityExitAsUnexpected,
 } from '../dist/lifecycle-coord.js';
 import { PullReservationLedger } from '../dist/utility-admission.js';
 
@@ -23,6 +27,30 @@ test('resolveOpenProofPolicy attaches replacement window to live owner', () => {
       ownerAlive: true,
     }),
     'attach_existing_owner',
+  );
+});
+
+test('starting phase renderer crash uses attach-existing policy', () => {
+  assert.equal(
+    resolveOpenProofPolicy({
+      reopenRequired: false,
+      rendererDetached: true,
+      phase: 'starting',
+      ownerAlive: true,
+    }),
+    'attach_existing_owner',
+  );
+  assert.equal(attachExistingReadiness('starting'), 'starting');
+});
+
+test('mergeUtilityReadyLifecycle keeps starting until utility reports open', () => {
+  assert.deepEqual(
+    mergeUtilityReadyLifecycle({ phase: 'starting', owner_alive: true }, { phase: 'starting', owner_alive: true }),
+    { phase: 'starting', owner_alive: true },
+  );
+  assert.deepEqual(
+    mergeUtilityReadyLifecycle({ phase: 'starting', owner_alive: true }, { phase: 'open', owner_alive: true }),
+    { phase: 'open', owner_alive: true },
   );
 });
 
@@ -54,4 +82,30 @@ test('PullReservationLedger reserves at admission and releases on settle', () =>
 test('joinExitConfirmed blocks reopen when kill join is unconfirmed', () => {
   assert.equal(joinExitConfirmed(false), false);
   assert.equal(joinExitConfirmed(true), true);
+});
+
+test('closeInitiated is per-generation — new owner exit is not suppressed', () => {
+  assert.equal(shouldTreatUtilityExitAsUnexpected(null, 2), true);
+  assert.equal(shouldTreatUtilityExitAsUnexpected(1, 2), true);
+  assert.equal(shouldTreatUtilityExitAsUnexpected(2, 2), false);
+});
+
+test('unconfirmed close join must not report closed', () => {
+  const outcome = resolveCloseLifecycleAfterJoin({
+    confirmed: false,
+    closeOk: true,
+    ownerStillReferenced: true,
+  });
+  assert.equal(outcome.phase, 'interrupted');
+  assert.equal(outcome.reopenRequired, true);
+  assert.equal(outcome.owner_alive, true);
+});
+
+test('close then new owner unexpected exit is treated as interrupted', () => {
+  const priorCloseGeneration = 1;
+  const newOwnerGeneration = 2;
+  assert.equal(
+    shouldTreatUtilityExitAsUnexpected(priorCloseGeneration, newOwnerGeneration),
+    true,
+  );
 });

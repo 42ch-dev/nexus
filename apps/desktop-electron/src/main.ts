@@ -39,8 +39,12 @@ import {
   type LifecycleStatus,
 } from './ipc.js';
 import {
+  attachExistingReadiness,
+  mergeUtilityReadyLifecycle,
   remainingCloseBudget,
+  resolveCloseLifecycleAfterJoin,
   resolveOpenProofPolicy,
+  shouldTreatUtilityExitAsUnexpected,
 } from './lifecycle-coord.js';
 import {
   allowNavigation,
@@ -85,7 +89,7 @@ let lifecycle: LifecycleStatus = {
   reason: null,
   last_close_report: null,
 };
-let closeInitiated = false;
+let closeInitiatedForGeneration: number | null = null;
 let reopenRequired = false;
 let rendererDetached = false;
 let closeInFlight: Promise<void> | null = null;
@@ -135,14 +139,7 @@ function applyResponseLifecycle(requestOperation: string | null, response: IpcRe
     setLifecycle({ phase: 'open', owner_alive: true, reason: null });
   }
   if (response.ok && requestOperation === 'close') {
-    setLifecycle({
-      phase: 'closed',
-      owner_alive: false,
-      cleanup_confirmed: (response.result as { cleanup_confirmed?: boolean })?.cleanup_confirmed ?? null,
-      last_close_report: response.result,
-      reason: null,
-    });
-    reopenRequired = false;
+    lifecycle.last_close_report = response.result;
   }
   if (!response.ok && requestOperation === 'close') {
     setLifecycle({
@@ -162,7 +159,8 @@ function onUtilityMessage(message: unknown, generation: number): void {
   if (body && typeof body === 'object' && 'type' in body) {
     if (body.type === 'utility-ready') {
       const snapshot = body.lifecycle as LifecycleStatus | undefined;
-      setLifecycle({ ...(snapshot ?? {}), owner_alive: true });
+      const merged = mergeUtilityReadyLifecycle(lifecycle, snapshot);
+      setLifecycle({ ...merged, reason: null });
       return;
     }
     if (body.type === 'utility-crashed') {
@@ -180,6 +178,7 @@ function onUtilityMessage(message: unknown, generation: number): void {
 function spawnUtilityOwner(): UtilityProcess {
   utilityGeneration += 1;
   const generation = utilityGeneration;
+  closeInitiatedForGeneration = null;
   const proofHome = resolveProofHome(process.env.NEXUS_PROOF_HOME, repoRoot);
   const config = buildUtilityConfig(proofHome);
   const env = sanitizeInheritedEnv(process.env);
@@ -209,13 +208,14 @@ function spawnUtilityOwner(): UtilityProcess {
     if (generation !== utilityGeneration) return;
     utility = null;
     settleAllPending(generation, 'interrupted', `utility exited unexpectedly (${code ?? 'unknown'})`);
-    if (!closeInitiated) {
+    if (shouldTreatUtilityExitAsUnexpected(closeInitiatedForGeneration, generation)) {
       reopenRequired = true;
       setLifecycle({
         phase: 'interrupted',
         owner_alive: false,
         cleanup_confirmed: false,
         reason: `utility exited unexpectedly (${code ?? 'unknown'})`,
+        pending_operations: [...pendingRequests.keys()],
       });
       notifyInterrupted();
     }
@@ -350,7 +350,7 @@ async function initiateOwnerClose(): Promise<void> {
   if (closeInFlight) return closeInFlight;
   const { promise, resolve } = Promise.withResolvers<void>();
   closeInFlight = promise;
-  closeInitiated = true;
+  closeInitiatedForGeneration = utilityGeneration;
   setLifecycle({ phase: 'closing', owner_alive: Boolean(utility), reason: null });
 
   if (!utility) {
@@ -363,8 +363,9 @@ async function initiateOwnerClose(): Promise<void> {
   const generation = utilityGeneration;
   const deadlineAt = Date.now() + CLOSE_JOIN_MS;
   const request_id = randomUUID();
+  let closeResponse: IpcResponse | null = null;
   try {
-    await utilityRequest(
+    closeResponse = await utilityRequest(
       { request_id, operation: 'close' },
       {
         timeoutMs: remainingCloseBudget(deadlineAt),
@@ -372,7 +373,24 @@ async function initiateOwnerClose(): Promise<void> {
       },
     );
   } finally {
-    await killAndJoinUtility(generation, deadlineAt);
+    const confirmed = await killAndJoinUtility(generation, deadlineAt);
+    const outcome = resolveCloseLifecycleAfterJoin({
+      confirmed,
+      closeOk: Boolean(closeResponse?.ok),
+      ownerStillReferenced: Boolean(utility),
+      cleanupConfirmed: closeResponse?.ok
+        ? ((closeResponse.result as { cleanup_confirmed?: boolean })?.cleanup_confirmed ?? null)
+        : null,
+      closeErrorMessage: closeResponse && !closeResponse.ok ? closeResponse.error.message : undefined,
+    });
+    setLifecycle({
+      phase: outcome.phase,
+      owner_alive: outcome.owner_alive,
+      cleanup_confirmed: outcome.cleanup_confirmed,
+      reason: outcome.reason,
+      last_close_report: closeResponse?.ok ? closeResponse.result : lifecycle.last_close_report,
+    });
+    reopenRequired = outcome.reopenRequired;
     closeInFlight = null;
     resolve();
   }
@@ -404,11 +422,14 @@ function hardenWindow(win: BrowserWindow): void {
     if (mainWindow === win) {
       mainWindow = null;
     }
-    if (utility && lifecycle.phase === 'open') {
+    if (utility && (lifecycle.phase === 'open' || lifecycle.phase === 'starting')) {
       setLifecycle({
-        phase: 'open',
+        phase: lifecycle.phase,
         owner_alive: true,
-        reason: 'renderer crashed — native owner remains authoritative',
+        reason:
+          lifecycle.phase === 'starting'
+            ? 'renderer crashed while owner starting — replacement may attach and await utility-ready'
+            : 'renderer crashed — native owner remains authoritative',
         pending_operations: [...pendingRequests.keys()],
       });
       notifyInterrupted();
@@ -485,19 +506,25 @@ function registerIpcHandlers(): void {
         });
         if (policy === 'reopen_after_fence') {
           const confirmed = await killAndJoinUtility(utilityGeneration, Date.now() + CLOSE_JOIN_MS);
-          if (!confirmed && utility) {
-            return ipcErr(request_id, 'interrupted', 'prior owner join unconfirmed — reopen blocked');
+          if (!confirmed) {
+            return ipcErr(
+              request_id,
+              'interrupted',
+              utility
+                ? 'prior owner join unconfirmed — reopen blocked'
+                : 'prior owner join unconfirmed — owner reference lost',
+            );
           }
           utility = null;
           reopenRequired = false;
-          closeInitiated = false;
+          closeInitiatedForGeneration = null;
           rendererDetached = false;
           return utilityRequest({ request_id, operation: 'open' });
         }
         if (policy === 'attach_existing_owner') {
           rendererDetached = false;
           return ipcOk(request_id, {
-            readiness: 'open',
+            readiness: attachExistingReadiness(lifecycle.phase),
             attached: true,
             lifecycle,
           });
@@ -577,7 +604,7 @@ async function bootstrap(): Promise<void> {
   });
 
   app.on('before-quit', (event) => {
-    if (!closeInitiated) {
+    if (lifecycle.phase !== 'closed' && !closeInFlight) {
       event.preventDefault();
       initiateOwnerClose().finally(() => app.quit());
     }
