@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
 import { randomUUID } from 'node:crypto';
-import { readFileSync, copyFileSync, existsSync } from 'node:fs';
 import { Worker } from 'node:worker_threads';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -66,13 +65,6 @@ function gitHeadSha() {
 
 function artifactSha256(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
-}
-
-function archiveEvidenceIfPresent(targetPath) {
-  const archive = targetPath.replace(/lifecycle\.json$/, 'lifecycle.pre-fix4.json');
-  if (existsSync(targetPath) && !existsSync(archive)) {
-    copyFileSync(targetPath, archive);
-  }
 }
 
 function formatProviderError(err) {
@@ -720,7 +712,6 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
     process.exit(1);
   }
   const lifecyclePath = join(outDir, 'lifecycle.json');
-  archiveEvidenceIfPresent(lifecyclePath);
   const codeSha = gitHeadSha();
   const evidence = {
     adapter,
