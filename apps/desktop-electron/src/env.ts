@@ -4,8 +4,6 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { UtilityConfig } from './ipc.js';
 
-const require = createRequire(import.meta.url);
-
 const ALLOWED_ENV_KEYS = new Set([
   'PATH',
   'HOME',
@@ -88,12 +86,24 @@ function expectedPlatformPackageName(): string {
   throw new Error(`unsupported platform ${platform}/${arch}`);
 }
 
+/**
+ * Resolve the platform package from the loader entry, which is where it
+ * actually lives: the loader declares it as an optional dependency, so pnpm
+ * links it under the loader's own `node_modules` and @electron/packager
+ * flattens it beside the loader inside the app bundle. Anchoring at this app's
+ * directory would miss the workspace layout (packages/nexus-native/node_modules).
+ */
+function resolvePlatformPackageRoot(pkgName: string): string {
+  const loaderEntry = fileURLToPath(import.meta.resolve('@42ch/nexus-native'));
+  return dirname(createRequire(loaderEntry).resolve(`${pkgName}/package.json`));
+}
+
 /** Filesystem-only native payload probe — never loads the `.node` binding in main. */
 export function assertNativePayloadPresent(): void {
   const pkgName = expectedPlatformPackageName();
   let pkgRoot: string;
   try {
-    pkgRoot = dirname(require.resolve(`${pkgName}/package.json`));
+    pkgRoot = resolvePlatformPackageRoot(pkgName);
   } catch {
     throw new Error(
       `platform native package ${pkgName} is not installed. ${nativeRefreshHint()}`,
