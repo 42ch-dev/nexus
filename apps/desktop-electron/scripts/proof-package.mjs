@@ -1,21 +1,42 @@
 #!/usr/bin/env node
 /**
- * P3-T2/T3 driver — validate a packaged Electron proof app and emit evidence JSON.
- * Signed/notarized verification is required for SEC-1; missing credentials encode as blocked.
+ * P3-T2/T3 package + decision gate.
+ *
+ * Verifies a packaged Electron proof app against the SEC-1 signature predicates
+ * and binds the runtime evidence to *this* artifact before any decision is
+ * rendered. The output `status` uses the locked decision vocabulary exactly:
+ *
+ *   go      — signed + stapled + hardened, and complete provenance-bound runtime
+ *             evidence passed every required row
+ *   no-go   — a valid, unconfounded runtime document recorded a measured failure
+ *   blocked — anything else: absent/malformed/incomplete/stale/confounded
+ *             evidence, or missing signing/notary inputs
+ *
+ * Missing input is never a measured failure and a measured failure is never a
+ * missing input (P3-T3 review I1).
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { NATIVE_LOAD_CHECK_ID, decisionForState, evaluateRuntimeEvidence } from './proof-contract.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const appRoot = join(__dirname, '..');
 const repoRoot = resolve(appRoot, '..', '..');
 const bundleId = 'com.nexus42.rft-electron-proof';
 const productName = 'Nexus RFT Feasibility';
+const expectedEntitlementsFile = join(appRoot, 'resources', 'entitlements.plist');
 
 function parseArgs(argv) {
-  const out = { arch: null, signedRequired: false, out: null, appPath: null, home: process.env.NEXUS_PROOF_HOME ?? null };
+  const out = {
+    arch: null,
+    signedRequired: false,
+    out: null,
+    appPath: null,
+    home: process.env.NEXUS_PROOF_HOME ?? null,
+  };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--arch') out.arch = argv[++i];
@@ -49,9 +70,16 @@ function run(cmd, args, opts = {}) {
   };
 }
 
+function sha256File(path) {
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+
 function verifyCodesign(appPath) {
   const deep = run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', appPath]);
   const display = run('codesign', ['-dv', '--verbose=4', appPath]);
+  const combined = `${display.stdout}\n${display.stderr}`;
+  const flags = /flags=0x[0-9a-f]+\(([^)]*)\)/i.exec(combined);
+  // Gatekeeper's execute assessment on the real executable, not the bundle dir.
   return {
     deep_status: deep.status,
     deep_stdout: deep.stdout,
@@ -59,6 +87,12 @@ function verifyCodesign(appPath) {
     display_status: display.status,
     display_stdout: display.stdout,
     display_stderr: display.stderr,
+    identifier: /Identifier=([^\n]+)/.exec(combined)?.[1] ?? null,
+    team_identifier: /TeamIdentifier=([^\n]+)/.exec(combined)?.[1] ?? null,
+    signature: /Signature=([^\n]+)/.exec(combined)?.[1] ?? null,
+    flags: flags?.[1] ?? null,
+    hardened_runtime: Boolean(flags?.[1]?.includes('runtime')),
+    authority: (combined.match(/Authority=([^\n]+)/g) ?? []).map((line) => line.replace('Authority=', '')),
   };
 }
 
@@ -71,14 +105,56 @@ function verifyNotary(appPath) {
   return run('spctl', ['--assess', '--type', 'open', '--context', 'notary', '--verbose=4', appPath]);
 }
 
+/** Explicit staple predicate required by SEC-1, separate from the notary assessment. */
+function verifyStaple(appPath) {
+  return run('xcrun', ['stapler', 'validate', '-v', appPath]);
+}
+
+function readSignedEntitlements(appPath) {
+  const res = run('codesign', ['-d', '--entitlements', ':-', appPath]);
+  const text = `${res.stdout}${res.stderr}`;
+  const plistStart = text.indexOf('<?xml');
+  if (plistStart < 0) return { status: res.status, raw: text.slice(-2000), parsed: null };
+  const tmp = join('/tmp', `nexus-entitlements-${process.pid}.plist`);
+  writeFileSync(tmp, text.slice(plistStart));
+  const json = run('plutil', ['-convert', 'json', '-o', '-', tmp]);
+  try {
+    return { status: res.status, raw: text.slice(-2000), parsed: JSON.parse(json.stdout) };
+  } catch {
+    return { status: res.status, raw: text.slice(-2000), parsed: null, parse_error: json.stderr };
+  }
+}
+
+function readExpectedEntitlements() {
+  if (!existsSync(expectedEntitlementsFile)) return { path: expectedEntitlementsFile, parsed: null };
+  const json = run('plutil', ['-convert', 'json', '-o', '-', expectedEntitlementsFile]);
+  try {
+    return { path: expectedEntitlementsFile, parsed: JSON.parse(json.stdout) };
+  } catch {
+    return { path: expectedEntitlementsFile, parsed: null, parse_error: json.stderr };
+  }
+}
+
 function readBundleIdentifier(appPath) {
-  const result = run('codesign', ['-dv', '--verbose=4', appPath]);
-  const match = `${result.stdout}\n${result.stderr}`.match(/Identifier=([^\n]+)/);
-  return match?.[1] ?? null;
+  return verifyCodesign(appPath).identifier;
 }
 
 function runtimeEvidencePath(outDir) {
   return join(outDir, 'runtime-lifecycle.json');
+}
+
+function decide({ contractState, signedOk, stapleOk, hardenedOk, entitlementsOk, nativeLoadOk }) {
+  let decision = decisionForState(contractState, {
+    signedOk: signedOk && entitlementsOk && nativeLoadOk,
+    stapleOk,
+    hardenedOk,
+  });
+  if (decision === 'no-go' && (!entitlementsOk || !nativeLoadOk)) {
+    // A valid runtime failure still stands on its own; signature/entitlement
+    // gaps do not downgrade a measured product failure into a block.
+    decision = 'no-go';
+  }
+  return decision;
 }
 
 async function main() {
@@ -94,17 +170,24 @@ async function main() {
   const outDir = resolve(args.out);
   mkdirSync(outDir, { recursive: true });
   const packageDir = resolve(args.out, '..', 'electron-packages', args.arch);
-  const appPath = resolve(args.appPath ?? defaultAppPath(args.arch, packageDir));
+  const requestedAppPath = resolve(args.appPath ?? defaultAppPath(args.arch, packageDir));
+  const appPath = existsSync(requestedAppPath) ? realpathSync(requestedAppPath) : requestedAppPath;
 
   const evidence = {
+    schema: 'rft-p3-t3-package-gate/v2',
     status: 'blocked',
     bundle_id: bundleId,
     arch: args.arch,
-    app_path: appPath,
+    app_path: requestedAppPath,
+    app_realpath: appPath,
     signed_required: args.signedRequired,
     checks: {},
     missing_inputs: [],
-    note: 'P3-T2 diagnostic driver — pass requires signed/notarized package plus runtime lifecycle evidence (P3-T3 Execute).',
+    reasons: [],
+    note:
+      'Decision vocabulary is go|no-go|blocked. Missing/absent/malformed/stale/confounded evidence blocks; ' +
+      'a valid unconfounded measured failure is no-go; go additionally requires signed+stapled+hardened ' +
+      'execution with a provenance-bound successful native utility load.',
   };
 
   if (!existsSync(appPath)) {
@@ -122,57 +205,179 @@ async function main() {
     evidence.missing_inputs.push(`proof home missing: ${args.home}`);
   }
 
+  // --- signature / staple / hardened-runtime predicates ----------------------
+  const codesign = verifyCodesign(appPath);
+  const entitlements = readSignedEntitlements(appPath);
+  const expectedEntitlements = readExpectedEntitlements();
+  const expectedKeys = Object.keys(expectedEntitlements.parsed ?? {}).sort();
+  const signedKeys = Object.keys(entitlements.parsed ?? {}).sort();
+  const entitlementsOk =
+    expectedKeys.length > 0 && JSON.stringify(expectedKeys) === JSON.stringify(signedKeys);
+
   if (args.signedRequired) {
     if (!process.env.APPLE_SIGNING_IDENTITY && !args.appPath) {
       evidence.missing_inputs.push('signed package input (package with --sign-identity or provide signed --app)');
     }
-    evidence.checks.codesign = verifyCodesign(appPath);
+    evidence.checks.codesign = codesign;
     evidence.checks.spctl_execute = verifyGate(appPath);
     evidence.checks.notary = verifyNotary(appPath);
-    evidence.checks.bundle_identifier = {
-      expected: bundleId,
-      actual: readBundleIdentifier(appPath),
+    evidence.checks.stapler_validate = verifyStaple(appPath);
+    evidence.checks.entitlements = {
+      signed: entitlements.parsed,
+      signed_raw_tail: entitlements.raw,
+      expected_file: expectedEntitlements.path,
+      expected: expectedEntitlements.parsed,
+      keys_match: entitlementsOk,
     };
-    const signedOk =
-      evidence.checks.codesign.deep_status === 0 &&
-      evidence.checks.spctl_execute.status === 0 &&
-      evidence.checks.notary.status === 0 &&
-      evidence.checks.bundle_identifier.actual === bundleId;
-    evidence.checks.signed_execution = { pass: signedOk };
-    if (!signedOk) {
-      evidence.status = 'fail';
-    }
+    evidence.checks.bundle_identifier = { expected: bundleId, actual: readBundleIdentifier(appPath) };
+
+    const failedSignatureInputs = [];
+    if (codesign.deep_status !== 0) failedSignatureInputs.push('codesign --verify --deep --strict');
+    if (evidence.checks.spctl_execute.status !== 0) failedSignatureInputs.push('spctl --type execute');
+    if (evidence.checks.notary.status !== 0) failedSignatureInputs.push('spctl --context notary');
+    if (evidence.checks.stapler_validate.status !== 0) failedSignatureInputs.push('stapler validate');
+    if (evidence.checks.bundle_identifier.actual !== bundleId) failedSignatureInputs.push('bundle identifier mismatch');
+    if (!codesign.hardened_runtime) failedSignatureInputs.push('hardened runtime flag absent');
+    if (!entitlementsOk) failedSignatureInputs.push('signed entitlements do not match the documented narrow set');
+
+    evidence.checks.signature_predicates = {
+      pass: failedSignatureInputs.length === 0,
+      failed: failedSignatureInputs,
+      hardened_runtime_flags: codesign.flags,
+      signature: codesign.signature,
+      team_identifier: codesign.team_identifier,
+      authority: codesign.authority,
+    };
   } else {
-    evidence.checks.codesign = verifyCodesign(appPath);
-    evidence.note =
-      'Unsigned diagnostic run — does not satisfy SEC-1. Re-run with --signed-required after signing/notarization.';
+    evidence.checks.codesign = codesign;
+    evidence.checks.entitlements = {
+      signed: entitlements.parsed,
+      expected_file: expectedEntitlements.path,
+      expected: expectedEntitlements.parsed,
+      keys_match: entitlementsOk,
+    };
+    evidence.checks.signature_predicates = {
+      pass: false,
+      failed: ['--signed-required not set'],
+      note: 'Unsigned diagnostic run — does not satisfy SEC-1.',
+    };
   }
 
+  const signedOk = evidence.checks.signature_predicates?.pass === true;
+  const stapleOk = evidence.checks.stapler_validate?.status === 0;
+  const hardenedOk = codesign.hardened_runtime === true;
+
+  // --- runtime evidence, bound to THIS artifact -----------------------------
   const runtimePath = runtimeEvidencePath(outDir);
-  if (!existsSync(runtimePath)) {
-    evidence.missing_inputs.push(`runtime lifecycle evidence missing: ${runtimePath}`);
-    evidence.checks.runtime_lifecycle = { pass: false, path: runtimePath };
-  } else {
-    const runtime = JSON.parse(readFileSync(runtimePath, 'utf8'));
-    evidence.checks.runtime_lifecycle = runtime;
-    if (runtime.status !== 'pass') {
-      evidence.missing_inputs.push('runtime lifecycle evidence status is not pass');
+  let runtimeDoc = null;
+  if (existsSync(runtimePath)) {
+    try {
+      runtimeDoc = JSON.parse(readFileSync(runtimePath, 'utf8'));
+    } catch (error) {
+      runtimeDoc = null;
+      evidence.checks.runtime_lifecycle = {
+        parse_error: String(error),
+        path: runtimePath,
+      };
+      evidence.missing_inputs.push(`runtime lifecycle evidence is malformed: ${runtimePath}`);
     }
+  } else {
+    evidence.missing_inputs.push(`runtime lifecycle evidence missing: ${runtimePath}`);
   }
 
-  if (evidence.missing_inputs.length > 0) {
-    evidence.status = evidence.status === 'fail' ? 'fail' : 'blocked';
-  } else if (args.signedRequired && evidence.status !== 'fail') {
-    const runtimePass = evidence.checks.runtime_lifecycle?.status === 'pass';
-    const signedPass = evidence.checks.signed_execution?.pass === true;
-    evidence.status = runtimePass && signedPass ? 'pass' : 'blocked';
-  } else if (evidence.status !== 'fail') {
-    evidence.status = 'blocked';
+  const runtimeExpectations = {
+    app_path: appPath,
+    app_bundle_id: bundleId,
+    arch: args.arch,
+    electron_version: readPinVersion('electron'),
+    packager_version: readPinVersion('@electron/packager'),
+  };
+  const verdict = evaluateRuntimeEvidence(runtimeDoc, runtimeExpectations);
+  evidence.checks.runtime_lifecycle = {
+    path: runtimePath,
+    present: Boolean(runtimeDoc),
+    contract_state: verdict.state,
+    contract_reasons: verdict.reasons,
+    detail: verdict.detail,
+    provenance: runtimeDoc?.provenance ?? null,
+    phases_executed: runtimeDoc?.phases_executed ?? null,
+    checks_summary: Array.isArray(runtimeDoc?.checks)
+      ? runtimeDoc.checks.map((c) => ({ id: c.id, ok: c.ok === true }))
+      : null,
+    native_utility_load: runtimeDoc?.native_utility_load ?? null,
+    bound_to: runtimeExpectations,
+  };
+  const nativeLoadOk = runtimeDoc?.native_utility_load?.ok === true;
+
+  if (verdict.state === 'missing' || verdict.state === 'malformed') {
+    evidence.missing_inputs.push(`runtime lifecycle evidence unusable (${verdict.state})`);
+  } else if (verdict.state === 'confounded') {
+    evidence.reasons.push(
+      `runtime run is confounded, not a product result: ${verdict.reasons.join('; ')}. ` +
+        'Re-run with --launch-method launchservices on a real signed build to obtain a usable measurement.',
+    );
+  } else if (verdict.state === 'stale') {
+    evidence.missing_inputs.push(`runtime evidence does not belong to this artifact: ${verdict.reasons.join('; ')}`);
+  } else if (verdict.state === 'incomplete') {
+    evidence.missing_inputs.push(`runtime evidence incomplete: ${verdict.reasons.join('; ')}`);
   }
+
+  // --- decision -------------------------------------------------------------
+  evidence.status = decide({
+    contractState: verdict.state,
+    signedOk,
+    stapleOk,
+    hardenedOk,
+    entitlementsOk,
+    nativeLoadOk,
+  });
+  if (evidence.status === 'blocked' && evidence.reasons.length === 0 && evidence.missing_inputs.length > 0) {
+    evidence.reasons.push(...evidence.missing_inputs);
+  }
+  evidence.decision_inputs = {
+    runtime_contract_state: verdict.state,
+    signature_predicates_pass: signedOk,
+    stapler_ok: stapleOk,
+    hardened_runtime: hardenedOk,
+    entitlements_match: entitlementsOk,
+    native_utility_load_proven: nativeLoadOk,
+    native_load_check_id: NATIVE_LOAD_CHECK_ID,
+    rules:
+      'go = valid-pass runtime + signature predicates + staple + hardened + provenance-bound native load; ' +
+      'no-go = valid unconfounded measured failure; blocked = everything else',
+  };
 
   writeFileSync(join(outDir, 'proof-package.json'), `${JSON.stringify(evidence, null, 2)}\n`);
-  console.log(JSON.stringify(evidence, null, 2));
-  process.exit(evidence.status === 'pass' ? 0 : 1);
+  console.log(
+    JSON.stringify(
+      {
+        status: evidence.status,
+        runtime_contract_state: verdict.state,
+        missing_inputs: evidence.missing_inputs,
+        reasons: evidence.reasons,
+      },
+      null,
+      2,
+    ),
+  );
+  process.exit(evidence.status === 'go' ? 0 : 1);
+}
+
+function readPinVersion(name) {
+  try {
+    const candidates = [
+      join(appRoot, 'node_modules', name, 'package.json'),
+      join(repoRoot, 'apps', 'desktop-electron', 'node_modules', name, 'package.json'),
+    ];
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) {
+        return JSON.parse(readFileSync(candidate, 'utf8')).version ?? null;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 main().catch((err) => {

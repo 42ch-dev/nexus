@@ -24,6 +24,7 @@ import {
   openSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -31,6 +32,15 @@ import {
 import { cpus, release as osRelease, tmpdir, totalmem } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  CANONICAL_SAMPLES,
+  NATIVE_LOAD_CHECK_ID,
+  REQUIRED_CHECKS,
+  REQUIRED_PHASES,
+  RUNTIME_SCHEMA,
+  KNOWN_CONFOUNDERS,
+  evaluateRuntimeEvidence,
+} from './proof-contract.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const appRoot = join(__dirname, '..');
@@ -42,12 +52,88 @@ const EXPECTED_CONTRACT_HASH = 'a36f909f94a4842bcbe96ee4e83e355eb14d01a2758b202a
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// --- provenance -----------------------------------------------------------
+
+function gitRev(args) {
+  const res = spawnSync('git', args, { cwd: ROOT, encoding: 'utf8' });
+  return res.status === 0 ? res.stdout : '';
+}
+
+/**
+ * Immutable source identity for the run: the commit SHA plus a digest over the
+ * porcelain status and the diff against it, so a dirty tree is recorded as a
+ * stable value rather than an unverifiable "dirty" flag.
+ */
+function sourceProvenance() {
+  const sha = gitRev(['rev-parse', 'HEAD']).trim() || 'unknown';
+  const porcelain = gitRev(['status', '--porcelain']);
+  const diff = gitRev(['diff', 'HEAD']);
+  const treeDigest = createHash('sha256')
+    .update(sha)
+    .update('\0')
+    .update(porcelain)
+    .update('\0')
+    .update(diff)
+    .digest('hex');
+  return { source_sha: sha, tree_digest: treeDigest, tree_dirty: porcelain.trim().length > 0 };
+}
+
+/** Deterministic digest of an installed app bundle (relative path + content). */
+function bundleDigest(appPath) {
+  const walked = walkFiles(appPath);
+  const hash = createHash('sha256');
+  for (const path of walked.files.map((p) => p.replace(appPath, '')).sort()) {
+    hash.update(path).update('\0');
+    hash.update(createHash('sha256').update(readFileSync(join(appPath, path.replace(/^\//, '')))).digest('hex'));
+  }
+  return { sha256: hash.digest('hex'), file_count: walked.files.length, symlink_count: walked.symlinks.length };
+}
+
+function findNativeNodeInBundle(appPath) {
+  const walked = walkFiles(appPath);
+  return walked.files.find((path) => path.endsWith('.node')) ?? null;
+}
+
+function readPin(name) {
+  try {
+    const manifest = JSON.parse(
+      readFileSync(join(ROOT, 'apps', 'desktop-electron', 'node_modules', name, 'package.json'), 'utf8'),
+    );
+    return manifest.version ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function buildProvenance(appPath, outDir, command, startedAt) {
+  const nativeNode = findNativeNodeInBundle(appPath);
+  const digest = bundleDigest(appPath);
+  return {
+    ...sourceProvenance(),
+    app_path: appPath,
+    app_bundle_id: BUNDLE_ID,
+    arch: process.arch,
+    app_bundle_sha256: digest.sha256,
+    app_bundle_file_count: digest.file_count,
+    app_bundle_symlink_count: digest.symlink_count,
+    native_node_path_relative: nativeNode ? nativeNode.replace(appPath, '') : null,
+    native_node_sha256: nativeNode ? sha256File(nativeNode) : null,
+    electron_version: readPin('electron'),
+    packager_version: readPin('@electron/packager'),
+    out_dir: outDir,
+    command,
+    utc_start: new Date(startedAt).toISOString(),
+  };
+}
+
 function parseArgs(argv) {
   const out = {
     app: null,
     out: null,
     home: process.env.NEXUS_PROOF_HOME ?? null,
-    phases: ['launch', 'resources', 'security', 'lifecycle'],
+    phases: null,
+    diagnostic: false,
+    launchMethod: 'direct',
     cold: 10,
     warm: 30,
     soakSeconds: 600,
@@ -59,7 +145,11 @@ function parseArgs(argv) {
     if (arg === '--app') out.app = argv[++i];
     else if (arg === '--out') out.out = argv[++i];
     else if (arg === '--home') out.home = argv[++i];
-    else if (arg === '--phases') out.phases = argv[++i].split(',').map((s) => s.trim());
+    else if (arg === '--phases') {
+      out.phases = argv[++i].split(',').map((s) => s.trim());
+      out.diagnostic = true;
+    } else if (arg === '--diagnostic') out.diagnostic = true;
+    else if (arg === '--launch-method') out.launchMethod = argv[++i];
     else if (arg === '--cold') out.cold = Number(argv[++i]);
     else if (arg === '--warm') out.warm = Number(argv[++i]);
     else if (arg === '--soak-seconds') out.soakSeconds = Number(argv[++i]);
@@ -73,8 +163,14 @@ function parseArgs(argv) {
 function usage() {
   console.error(
     'usage: node scripts/proof-runtime.mjs --app <App.app> --out <dir> [--home <dir>]\n' +
-      '       [--phases launch,resources,security,lifecycle] [--cold N] [--warm N]\n' +
-      '       [--soak-seconds N] [--cycles N]',
+      '       [--launch-method direct|launchservices] [--diagnostic | --phases a,b]\n' +
+      '\n' +
+      'Canonical (gating) run: no --phases/--diagnostic. Executes exactly\n' +
+      `  ${REQUIRED_PHASES.join(', ')}\n` +
+      `  with fixed samples cold=${CANONICAL_SAMPLES.cold} warm=${CANONICAL_SAMPLES.warm} ` +
+      `cycles=${CANONICAL_SAMPLES.cycles} soak=${CANONICAL_SAMPLES.soakSeconds}s,\n` +
+      '  and is the only mode that may write runtime-lifecycle.json.\n' +
+      'Diagnostic runs write runtime-diagnostic.json and can never gate a decision.',
   );
 }
 
@@ -320,28 +416,74 @@ class Cdp {
 // --- app launch -----------------------------------------------------------
 
 class AppUnderProof {
-  constructor(appPath, home, port, logPath) {
+  constructor(appPath, home, port, logPath, launchMethod = 'direct') {
     this.appPath = appPath;
     this.home = home;
     this.port = port;
     this.logPath = logPath;
+    this.launchMethod = launchMethod;
     this.child = null;
     this.cdp = null;
     this.pid = null;
+    this.launchedVia = null;
   }
 
+  /**
+   * Launch the packaged bundle.
+   *
+   * `direct` executes `Contents/MacOS/<binary>`; `launchservices` asks
+   * LaunchServices via `open -n -a`, which is how a user actually starts the
+   * app. The distinction matters: only the LaunchServices path reproduces the
+   * real launch environment, so a run under `direct` records itself as
+   * confounded rather than as a product result.
+   */
   async launch() {
     const exe = appExecutable(this.appPath);
     const fd = openSync(this.logPath, 'a');
-    this.child = spawn(exe, [`--remote-debugging-port=${this.port}`], {
-      env: { ...process.env, NEXUS_PROOF_HOME: this.home },
-      stdio: ['ignore', fd, fd],
-      detached: true,
-    });
-    this.pid = this.child.pid;
+    const args = [`--remote-debugging-port=${this.port}`];
+    // A failed exec raises an 'error' event on the child; without a listener it
+    // becomes an uncaught exception and the run writes no evidence at all. Record
+    // it instead so the phase reports the failure through its normal path.
+    const onSpawnError = (error) => {
+      this.spawnError = `${error.code ?? 'spawn_error'}: ${error.message}`;
+    };
+    if (this.launchMethod === 'launchservices') {
+      this.child = spawn('open', ['-n', '-a', this.appPath, '--args', ...args], {
+        env: { ...process.env, NEXUS_PROOF_HOME: this.home },
+        stdio: ['ignore', fd, fd],
+        detached: false,
+      });
+      this.child.on('error', onSpawnError);
+      this.launchedVia = 'launchservices';
+      await new Promise((resolvePromise) => this.child.once('exit', resolvePromise));
+      this.pid = await this.#discoverMainPid(exe);
+    } else {
+      this.child = spawn(exe, args, {
+        env: { ...process.env, NEXUS_PROOF_HOME: this.home },
+        stdio: ['ignore', fd, fd],
+        detached: true,
+      });
+      this.child.on('error', onSpawnError);
+      this.pid = this.child.pid;
+      this.launchedVia = 'direct';
+    }
     const attached = await Cdp.attach(this.port);
     this.cdp = attached.cdp;
+    if (!this.pid) this.pid = await this.#discoverMainPid(exe);
     return this;
+  }
+
+  /** Find the launched main process (not a `--type=...` helper) by executable path. */
+  async #discoverMainPid(exe, timeoutMs = 20_000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const main = psTable().find(
+        (row) => row.command.startsWith(exe) && !row.command.includes('--type='),
+      );
+      if (main) return main.pid;
+      await sleep(200);
+    }
+    return null;
   }
 
   async waitReady(timeoutMs = 60_000) {
@@ -464,7 +606,7 @@ async function phaseLaunch(ctx) {
 
   for (let i = 0; i < args.cold; i += 1) {
     await quiesce();
-    const app = new AppUnderProof(appPath, home, port++, join(outDir, 'app-launch.log'));
+    const app = new AppUnderProof(appPath, home, port++, join(outDir, 'app-launch.log'), args.launchMethod);
     const started = Date.now();
     try {
       await app.launch();
@@ -478,7 +620,7 @@ async function phaseLaunch(ctx) {
   }
 
   for (let i = 0; i < args.warm; i += 1) {
-    const app = new AppUnderProof(appPath, home, port++, join(outDir, 'app-launch.log'));
+    const app = new AppUnderProof(appPath, home, port++, join(outDir, 'app-launch.log'), args.launchMethod);
     const started = Date.now();
     try {
       await app.launch();
@@ -563,7 +705,7 @@ async function phaseResources(ctx) {
   const { args, outDir, appPath, home, checks } = ctx;
   const resource = { soak: null, cycles: null };
   await quiesce();
-  const app = new AppUnderProof(appPath, home, args.portBase + 200, join(outDir, 'app-soak.log'));
+  const app = new AppUnderProof(appPath, home, args.portBase + 200, join(outDir, 'app-soak.log'), args.launchMethod);
   let soakStats = null;
   try {
     await app.launch();
@@ -652,7 +794,7 @@ async function phaseResources(ctx) {
     };
 
     // RES-2: 100 open/close cycles in one process, plateau comparison.
-    const cyclesApp = new AppUnderProof(appPath, home, args.portBase + 201, join(outDir, 'app-cycles.log'));
+    const cyclesApp = new AppUnderProof(appPath, home, args.portBase + 201, join(outDir, 'app-cycles.log'), args.launchMethod);
     await cyclesApp.launch();
     await cyclesApp.waitReady();
     const cycleSamples = [];
@@ -875,7 +1017,7 @@ async function phaseSecurity(ctx) {
   const { args, outDir, appPath, home, checks } = ctx;
   const evidence = { packaged_artifact: {}, renderer: null, asar: null };
   await quiesce();
-  const app = new AppUnderProof(appPath, home, args.portBase + 300, join(outDir, 'app-security.log'));
+  const app = new AppUnderProof(appPath, home, args.portBase + 300, join(outDir, 'app-security.log'), args.launchMethod);
   try {
     const resourcesDir = join(appPath, 'Contents', 'Resources');
     const asarPath = join(resourcesDir, 'app.asar');
@@ -990,7 +1132,7 @@ async function phaseLifecycle(ctx) {
   const { args, outDir, appPath, home, checks } = ctx;
   const evidence = { native: null, provider: null, kill: null, graph_after_kill: null, reopen: null };
   await quiesce();
-  const app = new AppUnderProof(appPath, home, args.portBase + 400, join(outDir, 'app-lifecycle.log'));
+  const app = new AppUnderProof(appPath, home, args.portBase + 400, join(outDir, 'app-lifecycle.log'), args.launchMethod);
   try {
     await app.launch();
     await app.waitReady();
@@ -1108,6 +1250,40 @@ async function phaseLifecycle(ctx) {
         `foreign_denied=${native.foreign_ok === false} provider_probe=${provider.steps.probe?.ok} ` +
         `provider_cancel=${provider.steps.cancel?.ok} provider_shutdown=${provider.steps.shutdown?.ok}`,
     });
+    // Provenance-bound proof that the packaged `.node` actually loaded and served
+    // real work inside the Electron utility process — the contract requires this
+    // independently of the pass/fail of the surrounding checks.
+    const launchedProcesses = app.pid ? ownedProcesses(app.pid) : [];
+    evidence.native_utility_load = {
+      ok: Boolean(nativeOk && provider.ok),
+      native_loaded_in: 'electron utility process (main is filesystem-probe only)',
+      target_triple: native.compat?.target_triple ?? null,
+      expected_target_triple: EXPECTED_TARGET,
+      contract_tree_sha256: native.compat?.contract_tree_sha256 ?? null,
+      contract_hash_matches: native.compat?.contract_tree_sha256 === EXPECTED_CONTRACT_HASH,
+      native_api_version: native.compat?.native_api_version ?? null,
+      writer_protocol: native.compat?.writer_protocol ?? null,
+      real_native_effects: {
+        graph_entities_read: native.graph_entities ?? [],
+        create_version: native.created_version ?? null,
+        update_version: native.updated_version ?? null,
+        stale_write_refused: native.stale_ok === false,
+        foreign_world_denied: native.foreign_ok === false,
+      },
+      provider_lifecycle: {
+        probe_ok: provider.steps.probe?.ok ?? null,
+        launch_ok: provider.steps.launch?.ok ?? null,
+        execute_ok: provider.steps.execute?.ok ?? null,
+        pull_ok: provider.steps.pull?.ok ?? null,
+        cancel_ok: provider.steps.cancel?.ok ?? null,
+        shutdown_ok: provider.steps.shutdown?.ok ?? null,
+      },
+      utility_process_observed: launchedProcesses.some((p) => p.command.includes('--type=utility')),
+      utility_launch_method_evidence: app.launchedVia,
+      native_payload_sha256: findNativeNodeInBundle(app.path ?? appPath)
+        ? sha256File(findNativeNodeInBundle(app.path ?? appPath))
+        : null,
+    };
     checks.push({
       id: 'LIFECYCLE-fault',
       ok: killOk,
@@ -1207,20 +1383,58 @@ async function main() {
     console.error(`packaged app missing: ${appPath}`);
     process.exit(1);
   }
+  // Canonicalize so the provenance path matches the gate's realpath comparison
+  // even when the evidence root is reached through a symlink (e.g. /tmp).
+  const canonicalAppPath = realpathSync(appPath);
   if (!args.home || !existsSync(args.home)) {
     console.error(`--home (or NEXUS_PROOF_HOME) must point at a seeded disposable home; got ${args.home}`);
     process.exit(1);
   }
+  if (!['direct', 'launchservices'].includes(args.launchMethod)) {
+    console.error(`--launch-method must be direct or launchservices; got ${args.launchMethod}`);
+    process.exit(1);
+  }
+
+  // --- mode resolution ------------------------------------------------------
+  // Only an exact, complete, default-sampled run may write canonical evidence.
+  // Anything narrower is a diagnostic: it gets its own file and cannot gate.
+  const phases = args.phases ?? [...REQUIRED_PHASES];
+  const unknown = phases.filter((phase) => !REQUIRED_PHASES.includes(phase));
+  if (unknown.length > 0) {
+    console.error(`unknown phase(s): ${unknown.join(', ')}; supported: ${REQUIRED_PHASES.join(', ')}`);
+    process.exit(1);
+  }
+  const canonicalPhases = [...phases].sort().join(',') === [...REQUIRED_PHASES].sort().join(',');
+  const canonicalSamples =
+    args.cold === CANONICAL_SAMPLES.cold &&
+    args.warm === CANONICAL_SAMPLES.warm &&
+    args.cycles === CANONICAL_SAMPLES.cycles &&
+    args.soakSeconds === CANONICAL_SAMPLES.soakSeconds;
+  const gating = !args.diagnostic && canonicalPhases && canonicalSamples;
+  const mode = gating ? 'canonical' : 'diagnostic';
 
   const fixture = ensureAgentHostConfig(args.home);
   const startedAt = Date.now();
+  const command = ['node', 'scripts/proof-runtime.mjs', ...process.argv.slice(2)].join(' ');
   const checks = [];
   const evidence = {
-    schema: 'rft-p3-t3-runtime-proof/v1',
-    app_path: appPath,
+    schema: RUNTIME_SCHEMA,
+    mode,
+    gating,
+    app_path: canonicalAppPath,
     bundle_id: BUNDLE_ID,
     home: args.home,
     fixture,
+    repository_root: ROOT,
+    phases_requested: phases,
+    phases_executed: [],
+    sample_plan: {
+      cold: args.cold,
+      warm: args.warm,
+      cycles: args.cycles,
+      soak_seconds: args.soakSeconds,
+    },
+    command,
     host: {
       platform: process.platform,
       arch: process.arch,
@@ -1233,25 +1447,40 @@ async function main() {
       electron_bundle: electronBundleVersions(appPath),
       utc_start: new Date(startedAt).toISOString(),
     },
-    phases_requested: args.phases,
+    validity: {
+      valid: args.launchMethod === 'launchservices',
+      launch_method: args.launchMethod,
+      confounders: args.launchMethod === 'launchservices' ? [] : ['direct_executable_launch'],
+      confounder_notes: args.launchMethod === 'launchservices' ? {} : { ...KNOWN_CONFOUNDERS },
+    },
+    provenance: buildProvenance(canonicalAppPath, outDir, command, startedAt),
   };
-
+  if (!gating) {
+    console.error(
+      `[proof-runtime] DIAGNOSTIC run (phases=${phases.join(',')} samples=${JSON.stringify(evidence.sample_plan)} ` +
+        `launch=${args.launchMethod}). Non-gating output: it can never be consumed as canonical evidence.`,
+    );
+  }
   const ctx = { args, outDir, appPath, home: args.home, checks };
 
-  if (args.phases.includes('launch')) {
+  if (phases.includes('launch')) {
     evidence.launch = await phaseLaunch(ctx);
+    evidence.phases_executed.push('launch');
     writeFileSync(join(outDir, 'runtime-launch.json'), `${JSON.stringify(evidence.launch, null, 2)}\n`);
   }
-  if (args.phases.includes('resources')) {
+  if (phases.includes('resources')) {
     evidence.resources = await phaseResources(ctx);
+    evidence.phases_executed.push('resources');
     writeFileSync(join(outDir, 'runtime-resources.json'), `${JSON.stringify(evidence.resources, null, 2)}\n`);
   }
-  if (args.phases.includes('security')) {
+  if (phases.includes('security')) {
     evidence.security = await phaseSecurity(ctx);
+    evidence.phases_executed.push('security');
     writeFileSync(join(outDir, 'runtime-security.json'), `${JSON.stringify(evidence.security, null, 2)}\n`);
   }
-  if (args.phases.includes('lifecycle')) {
+  if (phases.includes('lifecycle')) {
     evidence.lifecycle = await phaseLifecycle(ctx);
+    evidence.phases_executed.push('lifecycle');
     writeFileSync(join(outDir, 'runtime-lifecycle-phase.json'), `${JSON.stringify(evidence.lifecycle, null, 2)}\n`);
   }
 
@@ -1269,12 +1498,35 @@ async function main() {
   evidence.checks = checks;
   evidence.utc_end = new Date().toISOString();
   evidence.elapsed_ms = Date.now() - startedAt;
-  evidence.status = checks.length > 0 && checks.every((check) => check.ok) ? 'pass' : 'fail';
-  writeFileSync(join(outDir, 'runtime-lifecycle.json'), `${JSON.stringify(evidence, null, 2)}\n`);
-  writeFileSync(join(outDir, 'runtime-lifecycle.raw.json'), `${JSON.stringify(evidence)}\n`);
+
+  if (gating) {
+    // A canonical document is `pass` only when the shared contract confirms it
+    // is complete (exact phase set, exact check IDs, sample floors, provenance)
+    // *and* every check passed. Anything else is a fail — never a soft pass.
+    const verdict = evaluateRuntimeEvidence(evidence, {});
+    const complete = verdict.state === 'valid-pass' || verdict.state === 'valid-fail';
+    evidence.contract_state = verdict.state;
+    evidence.contract_reasons = verdict.reasons;
+    evidence.status = complete && checks.every((check) => check.ok) ? 'pass' : 'fail';
+  } else {
+    evidence.status = 'diagnostic';
+    evidence.note =
+      'Non-gating diagnostic output. Written to runtime-diagnostic.json only; it is never a ' +
+      'substitute for a canonical runtime-lifecycle.json.';
+  }
+
+  const fileName = gating ? 'runtime-lifecycle.json' : 'runtime-diagnostic.json';
+  writeFileSync(join(outDir, fileName), `${JSON.stringify(evidence, null, 2)}\n`);
+  writeFileSync(join(outDir, fileName.replace(/\.json$/, '.raw.json')), `${JSON.stringify(evidence)}\n`);
   console.log(
     JSON.stringify(
-      { status: evidence.status, checks: checks.map((c) => `${c.id}:${c.ok ? 'pass' : 'fail'}`) },
+      {
+        mode,
+        status: evidence.status,
+        contract_state: evidence.contract_state ?? null,
+        output: fileName,
+        checks: checks.map((c) => `${c.id}:${c.ok ? 'pass' : 'fail'}`),
+      },
       null,
       2,
     ),
