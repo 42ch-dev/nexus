@@ -1,6 +1,8 @@
 //! Nexus CLI Configuration
 
-use crate::domain::{DegradationSnapshot, DomainRuntimeMode};
+use crate::domain::DomainRuntimeMode;
+#[cfg(feature = "legacy-cli")]
+use crate::domain::DegradationSnapshot;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -46,6 +48,11 @@ pub struct CliConfig {
 
     /// Persisted degradation guard state (inline in config.toml for V1.2 MVP).
     /// Written by the daemon/runtime when degradation occurs; read-only for CLI display.
+    ///
+    /// v1.189 P1 fix round 2: `legacy-cli`-only — the basic cohort keeps `chrono`
+    /// out of its dependency tree, and serde ignores this key when the field is
+    /// absent (no `deny_unknown_fields`), so a legacy config.toml still loads.
+    #[cfg(feature = "legacy-cli")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degradation_snapshot: Option<DegradationSnapshot>,
 
@@ -65,6 +72,7 @@ impl Default for CliConfig {
             daemon_url: default_daemon_url(),
             runtime_mode: default_runtime_mode(),
             setup_completed: None,
+            #[cfg(feature = "legacy-cli")]
             degradation_snapshot: None,
             device_id: String::new(),
         }
@@ -233,6 +241,7 @@ impl CliConfig {
     }
 
     /// Persisted degradation guard snapshot, if available.
+    #[cfg(feature = "legacy-cli")]
     #[must_use]
     pub const fn degradation_snapshot(&self) -> Option<&DegradationSnapshot> {
         self.degradation_snapshot.as_ref()
@@ -466,12 +475,14 @@ mod tests {
         assert_eq!(c.runtime_mode().to_string(), "local_first");
     }
 
+    #[cfg(feature = "legacy-cli")]
     #[test]
     fn degradation_snapshot_defaults_to_none() {
         let c = CliConfig::default();
         assert!(c.degradation_snapshot().is_none());
     }
 
+    #[cfg(feature = "legacy-cli")]
     #[test]
     fn degradation_snapshot_roundtrips_via_toml() {
         use crate::domain::degradation::DegradationState;
@@ -501,6 +512,7 @@ mod tests {
         assert_eq!(hc.checked_at, "2026-04-15T10:30:00Z");
     }
 
+    #[cfg(feature = "legacy-cli")]
     #[test]
     fn degradation_snapshot_absent_key_loads_as_none() {
         let toml_str = "runtime_mode = \"local_only\"";

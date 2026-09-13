@@ -28,6 +28,7 @@
 //! Pack build/parse helpers live in [`nexus_spoke_adapter::pack`]; this module
 //! is the CLI wiring only.
 
+use crate::commands::creator::world::active_creator_id;
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
@@ -283,7 +284,7 @@ async fn export(args: ExportArgs, config: &CliConfig, pool: &SqlitePool) -> Resu
 async fn import(args: ImportArgs, config: &CliConfig, pool: &SqlitePool) -> Result<()> {
     let world_id = args.world_ref.as_str();
 
-    let creator_id = super::super::active_creator_id(config)?;
+    let creator_id = active_creator_id(config)?;
     super::require_world_owner(pool, world_id, &creator_id).await?;
 
     // Source selection: pack JSON (`--in`) or SillyTavern lorebook

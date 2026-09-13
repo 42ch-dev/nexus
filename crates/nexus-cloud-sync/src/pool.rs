@@ -39,7 +39,6 @@ impl OutboxPool {
         db_path: &Path,
         max_size: usize,
     ) -> Result<Self, nexus_local_db::LocalDbError> {
-        let url = format!("sqlite://{}?mode=rwc", db_path.display());
         // Checked conversion: `max_size` is usize from the caller; a value
         // beyond the `u32` connection domain is rejected rather than
         // truncated (fail-closed).
@@ -48,19 +47,16 @@ impl OutboxPool {
                 "pool max_size {max_size} exceeds the u32 connection domain"
             ))
         })?;
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(max_connections)
-            .connect(&url)
-            .await
-            .map_err(nexus_local_db::LocalDbError::from)?;
-        // SAFETY: PRAGMA statement — no table schema to validate against.
-        sqlx::query("PRAGMA journal_mode = WAL")
-            .execute(&pool)
-            .await?;
-        // SAFETY: PRAGMA statement — no table schema to validate against.
-        sqlx::query("PRAGMA foreign_keys = ON")
-            .execute(&pool)
-            .await?;
+        let pool = nexus_local_db::writer_protocol::open_admitted_pool_with(
+            db_path,
+            nexus_local_db::writer_protocol::BOOTSTRAP_CREATOR_ID,
+            nexus_local_db::writer_protocol::WriterMode::Direct,
+            nexus_local_db::writer_protocol::GuardedPoolOptions {
+                max_connections,
+                acquire_timeout: None,
+            },
+        )
+        .await?;
         Ok(Self { pool })
     }
 

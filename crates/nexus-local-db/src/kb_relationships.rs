@@ -481,6 +481,75 @@ pub async fn list_relationships_for_world(
     Ok(rows)
 }
 
+/// [`list_relationships_for_world`] against a caller-owned transaction.
+pub async fn list_relationships_for_world_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    world_id: &str,
+    include_suggested: bool,
+    limit: i64,
+) -> Result<Vec<KbRelationshipRow>, LocalDbError> {
+    let rows = if include_suggested {
+        sqlx::query_as!(
+            KbRelationshipRow,
+            r#"SELECT
+              relationship_id,
+              world_id,
+              source_entity_id,
+              target_entity_id,
+              relation_type,
+              custom_label as "custom_label?",
+              symmetric,
+              confidence as "confidence?",
+              source_anchor_ids as "source_anchor_ids?",
+              metadata as "metadata?",
+              created_at,
+              updated_at,
+              revision,
+              needs_review,
+              source,
+              extensions_nexus_json as "extensions_nexus_json?"
+            FROM kb_relationships
+            WHERE world_id = ?
+            ORDER BY updated_at DESC
+            LIMIT ?"#,
+            world_id,
+            limit,
+        )
+        .fetch_all(&mut **tx)
+        .await?
+    } else {
+        sqlx::query_as!(
+            KbRelationshipRow,
+            r#"SELECT
+              relationship_id,
+              world_id,
+              source_entity_id,
+              target_entity_id,
+              relation_type,
+              custom_label as "custom_label?",
+              symmetric,
+              confidence as "confidence?",
+              source_anchor_ids as "source_anchor_ids?",
+              metadata as "metadata?",
+              created_at,
+              updated_at,
+              revision,
+              needs_review,
+              source,
+              extensions_nexus_json as "extensions_nexus_json?"
+            FROM kb_relationships
+            WHERE world_id = ? AND needs_review = 0
+            ORDER BY updated_at DESC
+            LIMIT ?"#,
+            world_id,
+            limit,
+        )
+        .fetch_all(&mut **tx)
+        .await?
+    };
+    Ok(rows)
+}
+
 /// Keyset cursor for paginated reads of a world's confirmed relation graph.
 ///
 /// Encodes the `(updated_at, relationship_id)` of the **last** row of the

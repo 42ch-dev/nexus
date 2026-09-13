@@ -3,6 +3,7 @@ members = [
     "crates/nexus-acp-host",
     "crates/nexus-agent-host",
     "crates/nexus-contracts",
+    "crates/nexus-core",
     "crates/nexus-creator",
     "crates/nexus-creator-memory",
     "crates/nexus-daemon-runtime",
@@ -19,6 +20,7 @@ members = [
     "crates/nexus-cloud-sync",
     "crates/nexus-cloud-domain",
     "crates/nexus-local-db",
+    "crates/nexus-storage-guard",
 ]
 # V1.170 P0 (AR-1): `nexus-module-manifest` is a standalone non-workspace crate
 # (own empty `[workspace]` table) that workspace members path-depend on

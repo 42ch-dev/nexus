@@ -19,6 +19,7 @@
 **V1.185 P1 amendment:** §6.2I — `nexus42 creator character binding show|edit` WorldSheet maintenance (binding revision CAS; thin daemon-HTTP leaves).
 **V1.185 P3 amendment:** §6.2I.3 — `nexus42 creator character run --remember` + owner outcome observation (thin daemon-HTTP leaves).
 **V1.185 P2 amendment:** §6.2I.2 — `nexus42 creator character knowledge show|edit|remove` authored-content maintenance (knowledge revision CAS; thin daemon-HTTP leaves; `--summary`/`--summary-file` on add/edit).
+**V1.189 P1 amendment:** §6.2G.7 — `basic-cli` / `legacy-cli` feature cohorts on the same `nexus42` binary/parser; `creator world kb graph` + `entity patch` now call `nexus-core` directly (no daemon HTTP) in both cohorts; all other commands stay daemon-mediated under `legacy-cli`.
 
 ## 0. 文档定位
 
@@ -869,6 +870,44 @@ Rules:
   journeys: rule-suggestion adoption; retention).
 - **World findings are read-only (AR-87 #1).** `creator world findings`
   is a GET-only read; any world-findings write route is a P1 non-goal.
+
+### 6.2G.7 V1.189 P1 amendment — basic-cli cohort: `graph` + `entity patch` route through `nexus-core` (Normative)
+
+`nexus42` gains a **daemon-free basic CLI cohort** built with
+`cargo build -p nexus42 --bin nexus42 --no-default-features --features basic-cli`.
+It is the **same executable and the same clap declarations** — no second
+binary, no second parser, no alternate flags. Cargo features:
+
+| Feature | Meaning |
+| --- | --- |
+| `basic-cli = []` | Daemon-free cohort: World KB `graph` + `entity patch` only. No daemon, no Axum, no orchestration, no WASM host, no libp2p in the dependency tree. |
+| `legacy-cli` | All other commands as they exist today (daemon-mediated or local SQLite). |
+| `default = ["legacy-cli", "web-embed"]` | Unchanged user-facing product: every shipped command still present. |
+| `web-embed`, `connect-host`, `connect-client`, `embedded-mcp` | Each implies `legacy-cli` (M1). RFT-08 removes the `connect-host` implication. |
+
+**Transport change (supersedes the §6.2G.6 dual-write rule for these two verbs).**
+`nexus42 creator world kb graph` and `nexus42 creator world kb entity patch`
+now call `nexus-core` directly (`CoreService::open` with
+`CoreAccess::DirectWriter`, `user_home` from the existing config resolution)
+in **both** cohorts — the CLI no longer proxies
+`GET /v1/daemon/worlds/:world_id/kb/graph` or
+`POST /v1/daemon/worlds/:world_id/kb/patch-entity`. Those daemon routes
+remain in place for the Web UI and other HTTP/native consumers. The
+per-row OCC semantics are unchanged (`expected_version` against
+`kb_key_blocks.revision`); the core path is OCC-guarded exactly as the
+daemon path was, so the V1.175 statement that "only the daemon path is
+OCC-guarded" no longer holds. `creator world kb edit` remains the distinct
+local-SQLite, non-OCC path and is not merged or removed.
+
+**Exit codes** (unchanged vocabulary): version conflict **76**, writer
+busy/contended **75**, config or schema mismatch **78**, other **1**.
+`--json` prints the generated DTO verbatim; human output is preserved.
+
+**Scope of the basic-cli cohort.** Only `creator world kb {graph, entity patch}`
+is exposed daemon-free. Every other command — including the retained basic
+reads `creator works list|status|use` — remains daemon-mediated and is
+compiled only under `legacy-cli`. Modeled on `nexus42 ops inspect`
+(§6.3B), which already proved the daemon-free single-purpose cohort shape.
 
 ### 6.2I V1.185 P0 amendment — `nexus42 creator character` identity lifecycle (Normative)
 

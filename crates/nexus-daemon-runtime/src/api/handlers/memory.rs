@@ -13,6 +13,7 @@
 //! unchanged.
 
 use crate::api::errors::NexusApiError;
+use crate::config::read_active_creator_id;
 use crate::api::handlers::memory_pipeline::BearerPipelineCtx;
 use crate::api::handlers::memory_pipeline::{
     process_bearer_review_batch, reflect_bearer_soul, MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
@@ -767,19 +768,6 @@ fn map_reflect_outcome(
 /// Minimum fragment count before narrative synthesis is attempted.
 fn decode_fragment_keywords(raw: &str) -> Vec<String> {
     serde_json::from_str::<Vec<String>>(raw).unwrap_or_default()
-}
-
-/// Read active `creator_id` from CLI config (matches works.rs pattern).
-///
-/// Returns `None` if no active creator is configured in `config.toml`.
-fn read_active_creator_id(nexus_home: &std::path::Path) -> Option<String> {
-    let config_path = nexus_home.join("config.toml");
-    let content = std::fs::read_to_string(&config_path).ok()?;
-    let config: toml::Value = toml::from_str(&content).ok()?;
-    config
-        .get("active_creator_id")
-        .and_then(|v| v.as_str())
-        .map(std::string::ToString::to_string)
 }
 
 #[cfg(test)]

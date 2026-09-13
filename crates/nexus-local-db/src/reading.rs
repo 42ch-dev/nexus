@@ -361,18 +361,20 @@ pub struct AnnotationRow {
 mod tests {
     use super::*;
     use crate::works;
-    use sqlx::sqlite::SqlitePoolOptions;
 
-    async fn setup_pool() -> Pool<Sqlite> {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .expect("connect");
-        // Route through the central runner: a raw `sqlx::migrate!().run()`
-        // bypasses the FK-suspension scoping and the post-migration
-        // foreign_key_check that crate::run_migrations guarantees.
-        crate::run_migrations(&pool).await.expect("migrate");
-        pool
+    /// File-backed, protocol-admitted pool. Reading tables carry writer
+    /// guards, and the protocol scalar functions are connection-local, so an
+    /// in-memory pool cannot mutate them (and each pooled connection would
+    /// see a different empty database anyway). The caller keeps the returned
+    /// `TempDir` alive for the pool's lifetime.
+    async fn setup_pool() -> (Pool<Sqlite>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("test.db");
+        // Route through the central factory + runner: it installs the protocol
+        // functions per connection, applies migrations with the FK-suspension
+        // scoping, and runs the post-migration `foreign_key_check`.
+        let pool = crate::open_pool(&db_path).await.expect("open pool");
+        (pool, dir)
     }
 
     async fn seed_work(pool: &Pool<Sqlite>, creator_id: &str, work_id: &str) {
@@ -415,7 +417,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_progress_crud() {
-        let pool = setup_pool().await;
+        let (pool, _dir) = setup_pool().await;
         let creator_id = "creator1";
         let work_id = "work1";
         seed_work(&pool, creator_id, work_id).await;
@@ -451,7 +453,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_progress_validation() {
-        let pool = setup_pool().await;
+        let (pool, _dir) = setup_pool().await;
         seed_work(&pool, "c", "w").await;
         let err = upsert_reading_progress(&pool, "c", "w", 1, -1)
             .await
@@ -466,7 +468,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_annotation_crud() {
-        let pool = setup_pool().await;
+        let (pool, _dir) = setup_pool().await;
         let creator_id = "creator1";
         let work_id = "work1";
         seed_work(&pool, creator_id, work_id).await;
@@ -509,7 +511,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_annotation_offset_validation() {
-        let pool = setup_pool().await;
+        let (pool, _dir) = setup_pool().await;
         seed_work(&pool, "c", "w").await;
         let err = create_annotation(
             &pool, "c", "w", 1, "ann_bad", 20, 10, "text", "yellow", None,

@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+#[cfg(feature = "legacy-cli")]
 use nexus_acp_host::AcpError;
 
 /// Nexus CLI result type
@@ -33,8 +34,10 @@ pub enum CliError {
 
     CreatorNotSelected,
 
+    #[cfg(feature = "legacy-cli")]
     Network(reqwest::Error),
 
+    #[cfg(feature = "legacy-cli")]
     Database(sqlx::Error),
 
     Io(std::io::Error),
@@ -48,6 +51,7 @@ pub enum CliError {
         message: String,
     },
 
+    #[cfg(feature = "legacy-cli")]
     Acp(AcpError),
 
     /// Operation requires platform connectivity but current mode prohibits it.
@@ -174,6 +178,25 @@ pub enum CliError {
         actual_version: Option<i64>,
     },
 
+    /// V1.189 P1-T3: World KB per-row OCC conflict on the direct-core path —
+    /// the 409 `world_kb_conflict` family. Same exit code as
+    /// [`CliError::VersionConflict`] (76: retry), but carries the structured
+    /// conflict payload the route contract promises (`current_version`,
+    /// caller `expected_version`, `entity_id`, `conflicting_path`,
+    /// `recovery_hint`) so a stale CAS names the exact fields to act on.
+    WorldKbConflict {
+        /// Row version the core reports now.
+        current_version: u64,
+        /// Version the caller supplied (differs from `current_version` when stale).
+        expected_version: u64,
+        /// Entity whose row lost the CAS.
+        entity_id: String,
+        /// Field that conflicted (e.g. `version`).
+        conflicting_path: String,
+        /// Operator guidance (refetch + reapply).
+        recovery_hint: String,
+    },
+
     /// V1.170 P0 (AR-9): `nexus42 compute` exit-code contract. The AR-9
     /// vocabulary does not fit the CLI-wide 1/75/76/78 mapping, so the compute
     /// group returns this variant with its own code: 1 = build/toolchain
@@ -199,10 +222,13 @@ pub enum CliError {
 impl std::error::Error for CliError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            #[cfg(feature = "legacy-cli")]
             Self::Network(err) => Some(err),
+            #[cfg(feature = "legacy-cli")]
             Self::Database(err) => Some(err),
             Self::Io(err) | Self::LockIo(err) => Some(err),
             Self::Json(err) => Some(err),
+            #[cfg(feature = "legacy-cli")]
             Self::Acp(err) => Some(err),
             _ => None,
         }
@@ -333,14 +359,38 @@ impl fmt::Display for CliError {
                 )
             }
 
+            // World KB direct-core conflict: the same structured surface the
+            // daemon route emitted (`[world_kb_conflict]` + named fields), so
+            // the CLI contract is preserved across the transport change.
+            Self::WorldKbConflict {
+                current_version,
+                expected_version,
+                entity_id,
+                conflicting_path,
+                recovery_hint,
+            } => {
+                write!(
+                    f,
+                    "[world_kb_conflict] World KB conflict: {conflicting_path} \
+                     (conflicting_path: {conflicting_path}) \
+                     (recovery_hint: {recovery_hint}) \
+                     (current_version: {current_version}) \
+                     (expected_version: {expected_version}) \
+                     (entity_id: {entity_id})"
+                )
+            }
+
             // Use #[error] messages for other variants
             Self::Daemon { message } => write!(f, "Daemon error: {message}"),
+            #[cfg(feature = "legacy-cli")]
             Self::Network(err) => write!(f, "Network error: {err}"),
+            #[cfg(feature = "legacy-cli")]
             Self::Database(err) => write!(f, "Database error: {err}"),
             Self::Io(err) => write!(f, "IO error: {err}"),
             Self::Json(err) => write!(f, "JSON error: {err}"),
             Self::Config(msg) => write!(f, "Configuration error: {msg}"),
             Self::Api { status, message } => write!(f, "API error: {status} — {message}"),
+            #[cfg(feature = "legacy-cli")]
             Self::Acp(err) => write!(f, "ACP error: {err}"),
             Self::PlatformOperationProhibited { mode, operation } => {
                 write!(
@@ -431,6 +481,7 @@ impl From<anyhow::Error> for CliError {
     }
 }
 
+#[cfg(feature = "legacy-cli")]
 impl From<chrono::ParseError> for CliError {
     fn from(err: chrono::ParseError) -> Self {
         Self::Other(format!("Date parse error: {err}"))
@@ -448,12 +499,14 @@ impl From<crate::domain::DomainError> for CliError {
     }
 }
 
+#[cfg(feature = "legacy-cli")]
 impl From<nexus_creator_memory::errors::MemoryError> for CliError {
     fn from(err: nexus_creator_memory::errors::MemoryError) -> Self {
         Self::Other(format!("Memory error: {err}"))
     }
 }
 
+#[cfg(feature = "legacy-cli")]
 impl From<reqwest::Error> for CliError {
     fn from(err: reqwest::Error) -> Self {
         // R-V133P1-06: connection-refused / timeout → DaemonNotRunning
@@ -465,6 +518,7 @@ impl From<reqwest::Error> for CliError {
     }
 }
 
+#[cfg(feature = "legacy-cli")]
 impl From<sqlx::Error> for CliError {
     fn from(err: sqlx::Error) -> Self {
         Self::Database(err)
@@ -483,18 +537,21 @@ impl From<serde_json::Error> for CliError {
     }
 }
 
+#[cfg(feature = "legacy-cli")]
 impl From<AcpError> for CliError {
     fn from(err: AcpError) -> Self {
         Self::Acp(err)
     }
 }
 
+#[cfg(feature = "legacy-cli")]
 impl From<nexus_local_db::LocalDbError> for CliError {
     fn from(err: nexus_local_db::LocalDbError) -> Self {
         Self::Other(format!("local database error: {err}"))
     }
 }
 
+#[cfg(feature = "legacy-cli")]
 impl From<nexus_cloud_sync::errors::SyncError> for CliError {
     fn from(err: nexus_cloud_sync::errors::SyncError) -> Self {
         match err {
@@ -511,6 +568,7 @@ impl From<nexus_cloud_sync::errors::SyncError> for CliError {
     }
 }
 
+#[cfg(feature = "legacy-cli")]
 impl CliError {
     /// Convert a [`SyncError`] into a `CreatorVerificationFailed` error.
     ///
@@ -533,7 +591,7 @@ impl CliError {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy-cli"))]
 mod tests {
     use super::*;
 

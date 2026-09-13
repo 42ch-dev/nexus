@@ -65,6 +65,7 @@ pub mod workspace_session;
 pub mod world_findings;
 pub mod world_stories;
 
+pub mod writer_protocol;
 mod error;
 mod seed_shared;
 mod version;
@@ -81,6 +82,9 @@ pub use version::{DB_SCHEMA_VERSION, SCHEMA_VERSION};
 
 // Re-export error types
 pub use error::{ActorContractConflict, LocalDbError};
+pub use writer_protocol::{
+    GuardedPool, GuardedPoolOptions, WriterMode, WorkspaceWriterGuard, BOOTSTRAP_CREATOR_ID,
+};
 
 pub use actor_knowledge_store::{
     delete_actor_knowledge_entry, get_actor_knowledge_entry, update_actor_knowledge_entry,
@@ -366,21 +370,12 @@ pub async fn begin_immediate(
 ///
 /// Returns `LocalDbError` if the connection pool cannot be created.
 pub async fn open_pool(db_path: &std::path::Path) -> Result<sqlx::SqlitePool, LocalDbError> {
-    let url = format!("sqlite://{}?mode=rwc", db_path.display());
-    let pool = sqlx::sqlite::SqlitePoolOptions::new()
-        .max_connections(8)
-        .connect(&url)
-        .await
-        .map_err(LocalDbError::from)?;
-    // SAFETY: PRAGMA statement — no table schema to validate against.
-    sqlx::query("PRAGMA journal_mode = WAL")
-        .execute(&pool)
-        .await?;
-    // SAFETY: PRAGMA statement — no table schema to validate against.
-    sqlx::query("PRAGMA foreign_keys = ON")
-        .execute(&pool)
-        .await?;
-    Ok(pool)
+    writer_protocol::open_admitted_pool(
+        db_path,
+        writer_protocol::BOOTSTRAP_CREATOR_ID,
+        writer_protocol::WriterMode::Direct,
+    )
+    .await
 }
 
 /// Open a read-only pool (`mode=ro`) for verification / read surfaces.
@@ -814,7 +809,7 @@ const MIGRATION_RETRY_BACKOFF: std::time::Duration = std::time::Duration::from_m
 /// The migration runner is a parameter so the retry/backoff control flow is
 /// deterministically testable with a simulated transient failure (production
 /// passes [`run_migrations`]).
-async fn run_migrations_with_retry<'p, F, Fut>(
+pub(crate) async fn run_migrations_with_retry<'p, F, Fut>(
     pool: &'p sqlx::SqlitePool,
     run_once: F,
 ) -> Result<(), LocalDbError>
@@ -886,20 +881,37 @@ fn is_transient_migration_error(err: &LocalDbError) -> bool {
 ///
 /// Returns `LocalDbError` if any step (pool creation, migration, seeding) fails.
 pub async fn init_pool(db_path: &std::path::Path) -> Result<sqlx::SqlitePool, LocalDbError> {
-    let pool = open_pool(db_path).await?;
-    // P2 QC3 F-001: shared-DB co-boot migration race. Both the daemon and the
-    // runtime boot paths call `run_migrations` on the same database; on a
-    // fresh DB two processes can apply the same pending migration concurrently
-    // and the loser fails (SQLITE_BUSY at the write point, or a UNIQUE
-    // violation on `_sqlx_migrations`). The single retry below waits for the
-    // winner's migration transaction to commit, then re-runs migrations —
-    // idempotent, so already-applied migrations are skipped and boot succeeds.
-    // This covers only the narrow first-boot window; steady-state write
-    // contention is handled by the pool's default busy_timeout. Deliberately
-    // no distributed lock — out of scope for this fix.
-    run_migrations_with_retry(&pool, run_migrations).await?;
-    seed_versions(&pool).await?;
-    Ok(pool)
+    let guarded = init_guarded_pool(db_path).await?;
+    // `clone_pool()` registers the returned handle for cooperative quiescence.
+    // The dropped [`GuardedPool`] unregisters only its own RAII token; the
+    // surviving clone stays tracked until it is closed.
+    Ok(guarded.clone_pool())
+}
+
+/// Initialize a guarded pool keeping writer locks alive.
+pub async fn init_guarded_pool(db_path: &std::path::Path) -> Result<GuardedPool, LocalDbError> {
+    writer_protocol::init_guarded_pool(db_path, writer_protocol::BOOTSTRAP_CREATOR_ID).await
+}
+
+/// Initialize an engine-owned guarded pool (migrate + take engine ownership).
+///
+/// Storage callers whose tables are engine-owned (session/run/schedule/job
+/// state) use this instead of [`init_pool`], which admits a direct writer.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if migration, engine acquisition, or pool creation
+/// fails — including [`LocalDbError::OwnerBusy`] when another process owns the
+/// engine.
+pub async fn init_engine_pool(
+    db_path: &std::path::Path,
+) -> Result<GuardedPool, LocalDbError> {
+    writer_protocol::init_engine_pool(
+        db_path,
+        writer_protocol::BOOTSTRAP_CREATOR_ID,
+        writer_protocol::GuardedPoolOptions::default(),
+    )
+    .await
 }
 
 #[cfg(test)]

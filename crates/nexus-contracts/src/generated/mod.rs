@@ -33,11 +33,13 @@
 )]
 
 pub mod common;
+pub mod core;
 pub mod daemon_api;
 pub mod domain;
 pub mod platform;
 
 pub use common::*;
+pub use core::*;
 pub use daemon_api::*;
 pub use domain::*;
 pub use platform::*;
@@ -45,6 +47,11 @@ pub use platform::*;
 /// Schema version constants
 pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("VersionRef", 1),
+    ("CoreChangeRow", 1),
+    ("CoreChangesRequest", 1),
+    ("CoreChangesResponse", 1),
+    ("CoreCloseReport", 1),
+    ("CoreError", 1),
     ("AddKnowledgeEntryRequest", 1),
     ("AddKnowledgeEntryResponse", 1),
     ("DeleteKnowledgeEntryQuery", 1),

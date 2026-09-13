@@ -16,9 +16,8 @@ use nexus_local_db::LocalDbError;
 async fn setup_db() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
-    let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
-    nexus_local_db::run_migrations(&pool).await.unwrap();
-    (pool, dir)
+    let guarded = nexus_local_db::init_engine_pool(&db_path).await.unwrap();
+    (guarded.clone_pool(), dir)
 }
 
 /// Helper: insert a run and transition it to succeeded, returning the `run_id`.
