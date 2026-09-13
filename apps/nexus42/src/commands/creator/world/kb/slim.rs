@@ -1,29 +1,35 @@
-//! Slim `creator world kb` surface for the `basic-cli` cohort (graph + entity patch only).
+//! Slim `creator world kb` surface for the `basic-cli` cohort.
+//!
+//! The daemon-free cohort exposes ONLY the shared graph/patch declarations
+//! from the parent KB module; everything else in the author surface
+//! (`list`/`show`/`edit`/`delete`/`pending`/`adopt`/`pack`/…) is daemon- or
+//! local-DB-mediated and therefore `legacy-cli`-only.
 
-use super::service::{self, KbEntityCommand};
+use super::{service, GraphArgs, KbEntityCommand};
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
 
-/// `creator world kb` subcommands available in the basic-cli build.
+/// `creator world kb` subcommands available in the `basic-cli` build.
 #[derive(Debug, Subcommand)]
 pub enum WorldKbCommand {
-    /// Patch a World KB entity through the core direct-writer route (CAS).
+    /// Patch a World KB entity through the core direct-writer route (CAS on revision).
+    ///
+    /// CAS-guarded: `--expected-version` must match the per-row version observed
+    /// on the last canonical read (`creator world kb graph`). On a
+    /// `world_kb_conflict`, refetch the graph and reapply with the new version.
     Entity {
         #[command(subcommand)]
         command: KbEntityCommand,
     },
     /// Show the World KB entity graph (direct core read).
+    ///
+    /// Prints the `WorldKbGraphResponse` DTO: entities (with per-row `version`
+    /// — the `--expected-version` for `entity patch`), relationships, and
+    /// source anchors. `--json` emits the DTO verbatim.
     Graph {
-        /// World ID (wld_...).
-        #[arg(long, value_name = "WORLD_ID")]
-        world_id: String,
-        /// Include `needs_review = 1` (extraction-suggested) relationships.
-        #[arg(long, default_value_t = false)]
-        include_suggested: bool,
-        /// Emit machine-readable JSON (the `WorldKbGraphResponse` DTO verbatim).
-        #[arg(long, default_value_t = false)]
-        json: bool,
+        #[command(flatten)]
+        args: GraphArgs,
     },
 }
 
@@ -57,10 +63,6 @@ pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
                 .await
             }
         },
-        WorldKbCommand::Graph {
-            world_id,
-            include_suggested,
-            json,
-        } => service::run_graph(config, world_id, include_suggested, json).await,
+        WorldKbCommand::Graph { args } => super::run_graph(args, config).await,
     }
 }

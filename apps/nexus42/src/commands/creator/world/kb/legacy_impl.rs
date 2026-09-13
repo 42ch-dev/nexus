@@ -25,10 +25,9 @@
 //!
 //! Read paths (`list`/`show`) are local-first and do not perform an owner gate.
 
-pub mod daemon;
 pub mod pack;
 
-use super::service::{self, KbEntityCommand};
+use super::{service, GraphArgs, KbEntityCommand};
 use crate::commands::creator::world::{active_creator_id, open_workspace_pool};
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
@@ -163,16 +162,8 @@ pub enum WorldKbCommand {
 
     /// Show the World KB entity graph (direct core read, V1.175 P1 group 4).
     Graph {
-        /// World ID (wld_...).
-        #[arg(long, value_name = "WORLD_ID")]
-        world_id: String,
-        /// Include `needs_review = 1` (extraction-suggested) relationships.
-        #[arg(long, default_value_t = false)]
-        include_suggested: bool,
-        /// Emit machine-readable JSON (the `WorldKbGraphResponse` DTO
-        /// verbatim) instead of human text.
-        #[arg(long, default_value_t = false)]
-        json: bool,
+        #[command(flatten)]
+        args: GraphArgs,
     },
 }
 
@@ -278,11 +269,7 @@ pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
                 .await
             }
         },
-        WorldKbCommand::Graph {
-            world_id,
-            include_suggested,
-            json,
-        } => service::run_graph(config, world_id, include_suggested, json).await,
+        WorldKbCommand::Graph { args } => super::run_graph(args, config).await,
     }
 }
 

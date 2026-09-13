@@ -178,6 +178,25 @@ pub enum CliError {
         actual_version: Option<i64>,
     },
 
+    /// V1.189 P1-T3: World KB per-row OCC conflict on the direct-core path —
+    /// the 409 `world_kb_conflict` family. Same exit code as
+    /// [`CliError::VersionConflict`] (76: retry), but carries the structured
+    /// conflict payload the route contract promises (`current_version`,
+    /// caller `expected_version`, `entity_id`, `conflicting_path`,
+    /// `recovery_hint`) so a stale CAS names the exact fields to act on.
+    WorldKbConflict {
+        /// Row version the core reports now.
+        current_version: u64,
+        /// Version the caller supplied (differs from `current_version` when stale).
+        expected_version: u64,
+        /// Entity whose row lost the CAS.
+        entity_id: String,
+        /// Field that conflicted (e.g. `version`).
+        conflicting_path: String,
+        /// Operator guidance (refetch + reapply).
+        recovery_hint: String,
+    },
+
     /// V1.170 P0 (AR-9): `nexus42 compute` exit-code contract. The AR-9
     /// vocabulary does not fit the CLI-wide 1/75/76/78 mapping, so the compute
     /// group returns this variant with its own code: 1 = build/toolchain
@@ -337,6 +356,27 @@ impl fmt::Display for CliError {
                      (expected v{expected_version}, actual v{actual_version}); \
                      retry the operation",
                     actual_version = actual_version.map_or("?".to_string(), |v| v.to_string())
+                )
+            }
+
+            // World KB direct-core conflict: the same structured surface the
+            // daemon route emitted (`[world_kb_conflict]` + named fields), so
+            // the CLI contract is preserved across the transport change.
+            Self::WorldKbConflict {
+                current_version,
+                expected_version,
+                entity_id,
+                conflicting_path,
+                recovery_hint,
+            } => {
+                write!(
+                    f,
+                    "[world_kb_conflict] World KB conflict: {conflicting_path} \
+                     (conflicting_path: {conflicting_path}) \
+                     (recovery_hint: {recovery_hint}) \
+                     (current_version: {current_version}) \
+                     (expected_version: {expected_version}) \
+                     (entity_id: {entity_id})"
                 )
             }
 

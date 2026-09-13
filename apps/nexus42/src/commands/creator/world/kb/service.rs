@@ -1,112 +1,23 @@
-//! World KB direct core service leaves — `creator world kb graph` + `entity patch`.
+//! World KB direct-core service invocation — `creator world kb graph` +
+//! `entity patch`.
 //!
-//! v1.189 P1-T3: graph/patch invoke `nexus-core` with `CoreAccess::DirectWriter`
-//! (same path when `legacy-cli` is enabled — no daemon HTTP for these verbs).
+//! v1.189 P1-T3 (architecture §2.1): declarations and formatting live in the
+//! parent KB module; this file owns ONLY the `nexus-core` invocation wiring.
+//! Both cohorts take the same `CoreAccess::DirectWriter` path — no daemon HTTP
+//! for these verbs.
 
+use super::{render_graph_response, render_patch_response, BlockTypeArg};
 use crate::config::{user_home_dir, CliConfig};
 use crate::errors::{CliError, Result};
-use clap::Subcommand;
 use nexus_contracts::{
     world_kb_patch_entity_request::{
-        NexusWorldKbEntityPatch, NexusWorldKbEntityPatchBlockType,
-        NexusWorldKbEntityPatchModulesKey, NexusWorldKbEntityPatchModulesValue,
-        NexusWorldKbEntityPatchTitle,
+        NexusWorldKbEntityPatch, NexusWorldKbEntityPatchModulesKey,
+        NexusWorldKbEntityPatchModulesValue, NexusWorldKbEntityPatchTitle,
     },
-    WorldKbGraphResponse, WorldKbPatchEntityRequest, WorldKbPatchEntityResponse,
+    WorldKbPatchEntityRequest,
 };
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
 use std::collections::HashMap;
-
-/// Relationship projection cap enforced by core graph projection (mirrors daemon constant).
-const GRAPH_RELATIONSHIP_CAP: usize = 1000;
-
-/// `creator world kb entity` verbs (direct core OCC surface).
-#[derive(Debug, Subcommand)]
-pub enum KbEntityCommand {
-    /// Patch a World KB entity through the core direct-writer route (CAS on revision).
-    Patch {
-        /// World ID (wld_...).
-        #[arg(long, value_name = "WORLD_ID")]
-        world_id: String,
-        /// Entity ID (kb_...) to patch.
-        #[arg(long, value_name = "ENTITY_ID")]
-        entity_id: String,
-        /// Per-row version observed on the last canonical read (CAS).
-        #[arg(long, value_name = "N")]
-        expected_version: u64,
-        /// New canonical name (display title).
-        #[arg(long)]
-        title: Option<String>,
-        /// Replacement body JSON.
-        #[arg(long)]
-        body: Option<String>,
-        /// Replacement alias list (comma-separated).
-        #[arg(long, value_delimiter = ',')]
-        aliases: Option<Vec<String>>,
-        /// Re-classify the entity (valid `BlockType`).
-        #[arg(long, value_enum)]
-        block_type: Option<BlockTypeArg>,
-        /// Per-entry functional-dialect modules JSON (first-level key upsert).
-        #[arg(long)]
-        modules: Option<String>,
-        /// Emit machine-readable JSON (the `WorldKbPatchEntityResponse` DTO verbatim).
-        #[arg(long, default_value_t = false)]
-        json: bool,
-    },
-}
-
-/// `--block-type` value for `entity patch` (V1.73 wire vocabulary).
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
-pub enum BlockTypeArg {
-    Character,
-    Ability,
-    Scene,
-    Organization,
-    Item,
-    Conflict,
-    #[value(name = "info_point")]
-    InfoPoint,
-    Event,
-    Species,
-    Faction,
-    #[value(name = "magic_system")]
-    MagicSystem,
-    Technology,
-    Deity,
-    Level,
-    #[value(name = "economy_tier")]
-    EconomyTier,
-    Dialogue,
-    Beat,
-    Act,
-    Era,
-}
-
-impl BlockTypeArg {
-    const fn to_generated(self) -> NexusWorldKbEntityPatchBlockType {
-        match self {
-            Self::Character => NexusWorldKbEntityPatchBlockType::Character,
-            Self::Ability => NexusWorldKbEntityPatchBlockType::Ability,
-            Self::Scene => NexusWorldKbEntityPatchBlockType::Scene,
-            Self::Organization => NexusWorldKbEntityPatchBlockType::Organization,
-            Self::Item => NexusWorldKbEntityPatchBlockType::Item,
-            Self::Conflict => NexusWorldKbEntityPatchBlockType::Conflict,
-            Self::InfoPoint => NexusWorldKbEntityPatchBlockType::InfoPoint,
-            Self::Event => NexusWorldKbEntityPatchBlockType::Event,
-            Self::Species => NexusWorldKbEntityPatchBlockType::Species,
-            Self::Faction => NexusWorldKbEntityPatchBlockType::Faction,
-            Self::MagicSystem => NexusWorldKbEntityPatchBlockType::MagicSystem,
-            Self::Technology => NexusWorldKbEntityPatchBlockType::Technology,
-            Self::Deity => NexusWorldKbEntityPatchBlockType::Deity,
-            Self::Level => NexusWorldKbEntityPatchBlockType::Level,
-            Self::EconomyTier => NexusWorldKbEntityPatchBlockType::EconomyTier,
-            Self::Dialogue => NexusWorldKbEntityPatchBlockType::Dialogue,
-            Self::Beat => NexusWorldKbEntityPatchBlockType::Beat,
-            Self::Act => NexusWorldKbEntityPatchBlockType::Act,
-            Self::Era => NexusWorldKbEntityPatchBlockType::Era,
-        }
-    }
-}
 
 async fn open_direct_core(_config: &CliConfig) -> Result<CoreService> {
     let user_home = user_home_dir().map_err(|e| CliError::Config(e.to_string()))?;
@@ -118,6 +29,11 @@ async fn open_direct_core(_config: &CliConfig) -> Result<CoreService> {
     .map_err(map_core_error)
 }
 
+/// Map a core error to the CLI taxonomy.
+///
+/// `WorldKbConflict` is deliberately NOT handled here: it needs the caller's
+/// `expected_version`, which only the patch leaf knows. See
+/// [`map_patch_error`].
 fn map_core_error(err: CoreError) -> CliError {
     match err {
         CoreError::Uninitialized | CoreError::AuthRequired => CliError::CreatorNotSelected,
@@ -132,11 +48,12 @@ fn map_core_error(err: CoreError) -> CliError {
         CoreError::InvalidInput { field, reason } => {
             CliError::Other(format!("invalid input ({field}): {reason}"))
         }
-        CoreError::WorldKbConflict(conflict) => CliError::VersionConflict {
-            table: "kb_key_blocks".to_string(),
-            row_id: conflict.entity_id,
-            expected_version: conflict.current_version as i64,
-            actual_version: Some(conflict.current_version as i64),
+        CoreError::WorldKbConflict(conflict) => CliError::WorldKbConflict {
+            current_version: conflict.current_version,
+            expected_version: conflict.current_version,
+            entity_id: conflict.entity_id,
+            conflicting_path: conflict.conflicting_path,
+            recovery_hint: conflict.recovery_hint,
         },
         CoreError::WorldKbValidation(v) => CliError::Api {
             status: 422,
@@ -158,7 +75,31 @@ fn map_core_error(err: CoreError) -> CliError {
     }
 }
 
+/// Patch-leaf error mapping: the OCC conflict carries the caller's expected
+/// version alongside the row's current version, so the reported pair is
+/// actionable (`expected v1, current v2`) instead of echoing the current
+/// version twice.
+fn map_patch_error(err: CoreError, expected_version: u64) -> CliError {
+    match err {
+        CoreError::WorldKbConflict(conflict) => CliError::WorldKbConflict {
+            current_version: conflict.current_version,
+            expected_version,
+            entity_id: conflict.entity_id,
+            conflicting_path: conflict.conflicting_path,
+            recovery_hint: conflict.recovery_hint,
+        },
+        other => map_core_error(other),
+    }
+}
+
 /// Run `creator world kb entity patch`.
+///
+/// # Errors
+///
+/// Named, non-zero exit for every failure family: invalid input (no patch
+/// field / unparseable `--body` / `--modules` / `--title`), and the core error
+/// taxonomy — `world_kb_conflict` (exit 76), `world_kb_validation_failed`
+/// (422), `not_found` (404), `forbidden` (403), writer-busy (exit 75).
 #[allow(clippy::too_many_arguments)]
 pub async fn run_entity_patch(
     config: &CliConfig,
@@ -247,7 +188,7 @@ pub async fn run_entity_patch(
     let resp = core
         .patch_world_kb_entity(&principal, world_id.clone(), req)
         .await
-        .map_err(map_core_error)?;
+        .map_err(|e| map_patch_error(e, expected_version))?;
     let _ = core.close().await;
 
     render_patch_response(&world_id, &entity_id, &resp, json)
@@ -270,65 +211,3 @@ pub async fn run_graph(
 
     render_graph_response(&world_id, &resp, json)
 }
-
-fn render_patch_response(
-    world_id: &str,
-    entity_id: &str,
-    resp: &WorldKbPatchEntityResponse,
-    json: bool,
-) -> Result<()> {
-    if json {
-        println!("{}", serde_json::to_string_pretty(resp)?);
-    } else {
-        println!(
-            "Patched entity '{entity_id}' in world '{world_id}' (new version {}).",
-            resp.version
-        );
-        println!("  canonical_name: {}", resp.entity.canonical_name.as_str());
-        if !resp.validation_summary.errors.is_empty() {
-            println!("  validation warnings:");
-            for e in &resp.validation_summary.errors {
-                println!("    - {e}");
-            }
-        }
-    }
-    Ok(())
-}
-
-
-fn render_graph_response(world_id: &str, resp: &WorldKbGraphResponse, json: bool) -> Result<()> {
-    if json {
-        println!("{}", serde_json::to_string_pretty(resp)?);
-        return Ok(());
-    }
-    println!("World KB graph for world '{world_id}':\n");
-    println!(
-        "{:<36} {:<24} {:12} {:8} VERSION",
-        "KEY_BLOCK_ID", "CANONICAL_NAME", "BLOCK_TYPE", "STATUS"
-    );
-    println!("{}", "-".repeat(100));
-    for e in &resp.entities {
-        println!(
-            "{:<36} {:<24} {:12} {:8} {}",
-            e.key_block_id,
-            e.canonical_name.as_str(),
-            e.block_type,
-            e.status,
-            e.version
-        );
-    }
-    println!("\n{} entities", resp.entities.len());
-    if !resp.relationships.is_empty() {
-        println!("{} relationships", resp.relationships.len());
-    }
-    if !resp.source_anchors.is_empty() {
-        println!("{} source anchors", resp.source_anchors.len());
-    }
-    if resp.relationships.len() >= GRAPH_RELATIONSHIP_CAP {
-        println!(
-            "\nNote: the graph projects at most {GRAPH_RELATIONSHIP_CAP} relationships (no wire              `truncated` flag exists yet); the graph may be truncated."
-        );
-    }
-    Ok(())
-}
-

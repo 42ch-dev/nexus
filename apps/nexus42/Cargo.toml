@@ -73,7 +73,9 @@ required-features = ["connect-host"]
 [dependencies]
 nexus-contracts = { path = "../../crates/nexus-contracts" }
 nexus-home-layout = { path = "../../crates/nexus-home-layout" }
-nexus-core = { path = "../../crates/nexus-core", optional = true }
+# §2.1 basic allowlist: available to BOTH cohorts as a normal dependency —
+# the `basic-cli` feature must not be a dependency switch (it is `[]`).
+nexus-core = { path = "../../crates/nexus-core" }
 nexus-orchestration = { path = "../../crates/nexus-orchestration", optional = true }
 nexus-moment-context-assembly = { path = "../../crates/nexus-moment-context-assembly", optional = true, features = ["cloud-stage"] }
 nexus-creator-memory = { path = "../../crates/nexus-creator-memory", optional = true }
@@ -217,12 +219,11 @@ tokio-tungstenite = { workspace = true }
 [features]
 # v1.189 P1-T3 (RFT-01 §2.1): daemon-free graph/patch cohort — same binary/parser.
 #
-# No `chrono`: every direct `chrono::` use in nexus42 is gated behind
-# `legacy-cli` (v1.189 P1 fix round 2 gated `domain::degradation` and the
-# `CliConfig::degradation_snapshot` field), so the basic tree is chrono-free.
-basic-cli = ["dep:nexus-core"]
+# EXACT empty declaration per the locked contract: the feature selects the
+# cohort via `cfg`, it does not switch dependencies on. `nexus-core` is a
+# normal dependency (basic allowlist) and `chrono` is legacy-only.
+basic-cli = []
 legacy-cli = [
-  "dep:nexus-core",
   "dep:nexus-orchestration",
   "dep:nexus-moment-context-assembly",
   "dep:nexus-creator-memory",

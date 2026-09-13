@@ -58,7 +58,11 @@ fn main() {
             78
         } else if matches!(e, nexus42::errors::CliError::Config(_)) {
             78
-        } else if matches!(e, nexus42::errors::CliError::VersionConflict { .. }) {
+        } else if matches!(
+            e,
+            nexus42::errors::CliError::VersionConflict { .. }
+                | nexus42::errors::CliError::WorldKbConflict { .. }
+        ) {
             76
         } else if let nexus42::errors::CliError::ComputeExit { code, .. } = e {
             // V1.170 P0 (AR-9): the compute group owns its exit-code
