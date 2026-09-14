@@ -2,8 +2,8 @@
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2024", "DOM"],
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "CommonJS",
+    "moduleResolution": "Bundler",
     "declaration": false,
     "outDir": "dist",
     "rootDir": "src",
@@ -12,6 +12,5 @@
     "esModuleInterop": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["src/preload.ts"]
+  "include": ["src/preload.ts"]
 }
