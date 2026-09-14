@@ -963,8 +963,8 @@ async function main() {
 
 const isMain = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;
 if (isMain) {
-  main().catch(err => {
-    console.error(`proof-rft-dx failed [${err instanceof Error ? err.name : typeof err}]`);
+  main().catch(() => {
+    console.error('proof-rft-dx failed');
     process.exit(1);
   });
 }
