@@ -108,10 +108,9 @@ function commandLineMatchesCargo(commandLine) {
 
 const trackedChildren = new Set();
 let cleanedUp = false;
-// Bounded retained output of exited children: a launch/service failure removes
-// the child from the tracked set at exit, and its captured output is exactly
-// what the failure evidence needs to attribute the failure. Entries are keyed
-// by unique child identity (label + pid + spawn sequence — labels like
+// Bounded retained output of closed children: a child's captured output is
+// exactly what failure evidence needs to attribute the failure. Entries are
+// keyed by unique child identity (label + pid + spawn sequence — labels like
 // `nexus-service` repeat across restarts), and retention is capped in entry
 // count and tail size, so one child's tail can never be mistaken for another's.
 const retainedExitedOutput = new Map();
@@ -124,17 +123,14 @@ function trackChild(child, label) {
   // key binds the label to the pid and a process-global spawn sequence — two
   // children can never collide on one retained-output entry.
   child.__evidenceKey = `${label}-pid${child.pid ?? 'x'}-${(childSpawnSequence += 1)}`;
+  // A child stays in the tracked set until `close`: `exit` can fire before
+  // piped stdout/stderr have drained, and the evidence drain scans this set
+  // for exited-but-not-closed children — removing at `exit` would hide
+  // exactly the children the drain exists to wait for.
   trackedChildren.add(child);
-  // Liveness leaves the tracked set at `exit`, but `exit` can fire before
-  // piped stdout/stderr have drained. Retention waits for `close` — emitted
-  // only after stdio is closed — so the captured tail cannot miss output
-  // that arrives after the process itself is gone.
-  child.once('exit', () => {
-    trackedChildren.delete(child);
-  });
-  // `close` fires only after stdio is closed; the evidence collector awaits
-  // this promise (bounded) for children that exited but have not closed yet,
-  // so the final drained bytes are never missed.
+  // `close` fires only after stdio is closed; the close callback captures the
+  // bounded tail into the retained-output map and only then removes the child
+  // from the tracked set, so a drain racing the exit always finds it.
   child.__closed = new Promise((resolveClose) => {
     child.once('close', () => {
       child.__closeSettled = true;
@@ -147,6 +143,7 @@ function trackChild(child, label) {
           retainedExitedOutput.delete(oldest);
         }
       }
+      trackedChildren.delete(child);
       resolveClose();
     });
   });
@@ -745,7 +742,7 @@ function collectChildOutput(fixtureHome) {
       fixtureHome,
     );
   }
-  // Exited children left the tracked set at exit; their retained (already
+  // Closed children left the tracked set at `close`; their retained (already
   // tail-bounded) output is merged so the failure evidence keeps the very
   // child output that explains a launch/service failure. Keys are unique per
   // child, so a silent restart never masks an earlier child's tail.

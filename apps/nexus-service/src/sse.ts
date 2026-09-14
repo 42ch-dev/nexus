@@ -68,10 +68,13 @@ export class OperationEventHub {
   }
 
   recordEvent(event: ProviderHostEvent): StoredFrame | null {
+    // Fail closed: once the stream has ended — a terminal retained, a
+    // terminal refused, or the hub disposed — every later record is refused,
+    // terminal or not. A post-close event must never append a frame or
+    // consume a sequence: the resync gap is the stream's final word and
+    // canonical truth lives behind the inspect URL.
+    if (this.closed) return this.terminalSlot;
     const terminal = isTerminalHostEvent(event);
-    if (terminal && (this.terminalSlot || this.terminalRejected)) {
-      return this.terminalSlot;
-    }
     const data = JSON.stringify(event);
     // Build against the *candidate* sequence and charge before committing, so a
     // frame that is not retained never consumes a sequence and retained ids stay
@@ -548,8 +551,11 @@ export function ingestEvents(service: ServiceCore, operationId: string, events: 
     } else if (!hub.isClosed()) {
       // Refused terminal with no stream terminal yet: fail closed with a
       // bounded resync gap so the client re-inspects canonical truth instead
-      // of consuming a fabricated terminal.
+      // of consuming a fabricated terminal. The rest of the batch is dead on
+      // arrival: stop immediately so no later event can append or emit after
+      // the interrupted resync marker.
       hub.failClosed();
+      break;
     }
   }
 }

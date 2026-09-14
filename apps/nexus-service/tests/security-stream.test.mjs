@@ -590,18 +590,19 @@ describe('security-stream (P4-T2)', () => {
     const sessionId = '00000000-0000-4000-8000-000000000301';
     const operationId = '00000000-0000-4000-8000-000000000302';
     const lateOpFinished = { OpFinished: { session_id: sessionId, op_id: operationId, reason: 'end_turn' } };
+    const postCloseProgress = { Progress: { message: 'post-close progress must never appear' } };
     const registry = new ProviderRegistry();
     // The live pull loop: the accepted cancel lands while a pull batch is in
-    // flight, so the batch carries BOTH the refused late terminal and a
-    // provider gap — the exact race that must not rewrite the fail-closed
-    // `interrupted` marker.
+    // flight, so the batch carries BOTH the refused late terminal, a trailing
+    // non-terminal event behind it, and a provider gap — the exact race in
+    // which nothing may follow the fail-closed `interrupted` marker.
     const serviceStub = {
       providerRegistry: registry,
       core: {
         nextProviderEvents: async () => {
           registry.settleOperationStatus(operationId, 'cancelled');
           return {
-            events: [lateOpFinished],
+            events: [lateOpFinished, postCloseProgress],
             gap: { reason: 'lagging', operation_id: operationId, resync_required: true, inspect_url: `/v1/daemon/agent-host/operations/${operationId}` },
             has_more: false,
           };
@@ -626,13 +627,15 @@ describe('security-stream (P4-T2)', () => {
       new Promise((_, reject) => setTimeout(() => reject(new Error('SSE loop must terminate after the fail-closed batch')), 2_000)),
     ]);
     const streamText = written.join('');
-    assert.equal((streamText.match(/event: provider_event/g) ?? []).length, 0, 'no fabricated terminal frame is delivered');
+    assert.equal((streamText.match(/event: provider_event/g) ?? []).length, 0, 'no fabricated terminal or post-close event frame is delivered');
+    assert.doesNotMatch(streamText, /post-close progress must never appear/, 'a non-terminal event after the refused terminal must not append or emit');
     assert.equal((streamText.match(/event: gap/g) ?? []).length, 1, 'exactly one gap frame is delivered');
     assert.match(streamText, /"reason":"interrupted"/, 'the canonical fail-closed resync gap is delivered');
     assert.doesNotMatch(streamText, /"reason":"lagging"/, 'the provider batch gap must not overwrite the fail-closed gap');
     const hub = registry.hubForOperation(operationId);
     assert.equal(hub.isClosed(), true);
     const replay = hub.planReplay(undefined);
+    assert.equal(replay.frames.length, 1, 'replay carries exactly one frame — nothing may follow the fail-closed gap');
     const gapPayloads = replay.frames.filter((f) => f.event === 'gap').map((f) => JSON.parse(f.buffer.toString('utf8').split('\ndata: ')[1]));
     assert.equal(gapPayloads.length, 1, 'replay carries exactly one gap');
     assert.equal(gapPayloads[0].reason, 'interrupted', 'replay keeps the canonical interrupted marker');
