@@ -2207,6 +2207,7 @@ async function main() {
   }
   if (phases.includes('lifecycle')) {
     evidence.lifecycle = await phaseLifecycle(ctx);
+    evidence.native_utility_load = evidence.lifecycle.native_utility_load;
     evidence.phases_executed.push('lifecycle');
     writeFileSync(join(outDir, 'runtime-lifecycle-phase.json'), `${JSON.stringify(evidence.lifecycle, null, 2)}\n`);
   }
