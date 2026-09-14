@@ -3556,7 +3556,7 @@ mod tests {
         // task is still unpolled when `closing` is set, so the session IS
         // closed before run admission — deterministically, under parallel
         // test contention on the shared env lock, with no sleeps.
-        let _env_lock = lock_test_env().await;
+        let env_lock = lock_test_env().await;
 
         // Create the stream while the session exists, then close the
         // session before the stream is polled — the run finds the closed
@@ -3576,7 +3576,7 @@ mod tests {
             .expect("execute");
 
         provider.shutdown(handle).await.expect("shutdown");
-        drop(_env_lock);
+        drop(env_lock);
 
         let events = collect_events(stream).await;
         assert_eq!(terminal_count(&events), 1);
