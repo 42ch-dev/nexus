@@ -13,6 +13,6 @@
     "AGENTS.md"
   ],
   "libc": [
-    "gnu"
+    "glibc"
   ]
 }
