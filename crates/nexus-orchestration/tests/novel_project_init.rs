@@ -8,7 +8,7 @@
 //! - T7e: gate-pass verification for downstream `novel-writing`
 //!
 //! All tests use `tempfile::TempDir` for hermetic workspace and in-memory
-//! `SQLite` (via `nexus_local_db::open_pool`) for DB operations.
+//! `SQLite` (via `nexus_local_db::init_engine_pool`) for DB operations.
 
 use std::path::Path;
 
@@ -22,12 +22,10 @@ use nexus_orchestration::capability::Capability;
 async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("tmpdir");
     let db_path = dir.path().join("test.db");
-    let pool = nexus_local_db::open_pool(&db_path)
+    let guarded = nexus_local_db::init_engine_pool(&db_path)
         .await
         .expect("open_pool");
-    nexus_local_db::run_migrations(&pool)
-        .await
-        .expect("migrations");
+    let pool = guarded.clone_pool();
     (pool, dir)
 }
 

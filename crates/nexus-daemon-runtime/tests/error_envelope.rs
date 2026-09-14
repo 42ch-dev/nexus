@@ -53,8 +53,12 @@ async fn preset_gates_failed_returns_canonical_envelope() {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
 
-    let db_url = format!("sqlite:{}?mode=rw", db_path.display());
-    let schedule_pool = Arc::new(sqlx::SqlitePool::connect(&db_url).await.unwrap());
+    let schedule_pool = Arc::new(
+        nexus_local_db::init_engine_pool(&db_path)
+            .await
+            .expect("schedule pool: writer-protocol engine admission")
+            .clone_pool(),
+    );
     let supervisor = Arc::new(ScheduleSupervisor::new(schedule_pool));
     state.set_schedule_supervisor(supervisor);
 

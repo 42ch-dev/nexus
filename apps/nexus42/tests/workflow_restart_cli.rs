@@ -179,9 +179,10 @@ async fn reopen(
     Arc<dyn graph_flow::SessionStorage>,
     Arc<dyn WorkflowStateStore>,
 ) {
-    let pool = nexus_local_db::open_pool(db_path)
+    let pool = nexus_local_db::init_engine_pool(db_path)
         .await
-        .expect("reopen pool");
+        .expect("reopen pool")
+        .clone_pool();
     let sqlite: Arc<SqliteSessionStorage> =
         Arc::new(SqliteSessionStorage::new(Arc::new(pool.clone())));
     let dyn_storage: Arc<dyn graph_flow::SessionStorage> = sqlite.clone();
@@ -268,9 +269,10 @@ async fn restart_durable_status_terminals_stay_terminal_and_never_revert() {
     // STALE interrupted evidence (step_in_flight + cancel_requested + active
     // in-flight prompt) — terminal status must still win (A7 rule 1).
     {
-        let pool = nexus_local_db::open_pool(&db_path)
+        let pool = nexus_local_db::init_engine_pool(&db_path)
             .await
-            .expect("open pool");
+            .expect("open pool")
+            .clone_pool();
         for (id, status) in [
             ("done:completed", "completed"),
             ("done:failed", "failed"),
@@ -425,9 +427,10 @@ async fn restart_durable_status_human_wait_token_survives_not_approved() {
     // (`_gate_park_other`) alongside broad keys — historical gate markers
     // must never demote a live human wait either.
     {
-        let pool = nexus_local_db::open_pool(&db_path)
+        let pool = nexus_local_db::init_engine_pool(&db_path)
             .await
-            .expect("open pool");
+            .expect("open pool")
+            .clone_pool();
         seed_v1_row(
             &pool,
             "wait:plain",
@@ -594,9 +597,10 @@ async fn restart_durable_status_interrupted_not_replayed_and_never_retried() {
     // status with an unfinished step mark; (b) running with a dispatching
     // prompt + cancel requested (crash-after-effect, never "safe to replay").
     {
-        let pool = nexus_local_db::open_pool(&db_path)
+        let pool = nexus_local_db::init_engine_pool(&db_path)
             .await
-            .expect("open pool");
+            .expect("open pool")
+            .clone_pool();
         seed_v1_row(
             &pool,
             "int:explicit",
@@ -737,9 +741,10 @@ async fn restart_durable_status_converge_merge_redrives_after_reopen() {
     // 5), running, exact current-gate park marker, live join keys, one arrival
     // of two. The instrumented start/branch_a edges already fired (fixture).
     {
-        let pool = nexus_local_db::open_pool(&db_path)
+        let pool = nexus_local_db::init_engine_pool(&db_path)
             .await
-            .expect("open pool");
+            .expect("open pool")
+            .clone_pool();
         let context = serde_json::json!({"data": {
             "_converge_arrivals_join": ["branch_a"],
             "_join_wait_start_join": chrono::Utc::now().timestamp_millis(),
@@ -1009,9 +1014,10 @@ async fn restart_durable_status_engine_parked_join_redrives_after_reopen() {
     // exact current-gate marker, live join keys (1/2 arrivals, deadline not
     // yet elapsed), and NO human-wait token.
     {
-        let pool = nexus_local_db::open_pool(&db_path)
+        let pool = nexus_local_db::init_engine_pool(&db_path)
             .await
-            .expect("open pool");
+            .expect("open pool")
+            .clone_pool();
         let context = serde_json::json!({"data": {
             "_converge_arrivals_join": ["branch_a"],
             "_join_wait_start_join": chrono::Utc::now().timestamp_millis(),
@@ -1138,9 +1144,10 @@ async fn restart_durable_status_nested_child_wait_preserved_and_never_auto_resum
     //   child row: waiting_for_input + its own durable token (the child
     //   parked exactly once — the auto-resume loop is forbidden).
     {
-        let pool = nexus_local_db::open_pool(&db_path)
+        let pool = nexus_local_db::init_engine_pool(&db_path)
             .await
-            .expect("open pool");
+            .expect("open pool")
+            .clone_pool();
         let parent_state = serde_json::json!({
             "wait": {
                 "wait_id": "parent-tok-9", "task_id": "parent_state",

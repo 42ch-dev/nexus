@@ -11,7 +11,6 @@
 //! Run with: cargo test -p nexus42 --test `world_kb_authz`
 
 use nexus42::commands::creator::world::kb::{kb_delete, kb_edit, WORLD_KB_FORBIDDEN_CODE};
-use nexus42::db::Schema;
 use nexus42::errors::CliError;
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
@@ -30,7 +29,10 @@ const VALID_BODY: &str =
 async fn fresh_pool_with_block() -> (sqlx::SqlitePool, String, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");
-    let pool = Schema::init(&db_path).await.unwrap();
+    let pool = nexus_local_db::init_engine_pool(&db_path)
+        .await
+        .unwrap()
+        .clone_pool();
 
     nexus_local_db::kb_store::seed::world(
         &pool,
@@ -146,7 +148,10 @@ async fn owner_can_edit_and_delete() {
 #[tokio::test]
 async fn edit_on_missing_world_is_not_a_403() {
     let dir = tempfile::tempdir().unwrap();
-    let pool = Schema::init(&dir.path().join("state.db")).await.unwrap();
+    let pool = nexus_local_db::init_engine_pool(&dir.path().join("state.db"))
+        .await
+        .unwrap()
+        .clone_pool();
 
     let err = kb_edit(&pool, OWNER, "wld_ghost", "kb_none", VALID_BODY, false)
         .await

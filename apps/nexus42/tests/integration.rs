@@ -997,14 +997,18 @@ fn delete_workspace_row(home: &std::path::Path, creator_id: &str) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         let db_path = nexus42::paths::state_db_path(home, creator_id, "default");
-        let pool = nexus42::db::Schema::init(&db_path)
+        let pool = nexus_local_db::init_engine_pool(&db_path)
             .await
-            .expect("open workspace db");
+            .expect("open workspace db")
+            .clone_pool();
         sqlx::query("DELETE FROM creators WHERE creator_id = ?")
             .bind(creator_id)
             .execute(&pool)
             .await
             .expect("delete workspace row");
+        // Hand the writer lock back before the next CLI child boots.
+        pool.close().await;
+        nexus_local_db::writer_protocol::release_retained_writer_guards(&db_path);
     });
 }
 

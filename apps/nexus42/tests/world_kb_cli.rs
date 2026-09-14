@@ -8,14 +8,13 @@
 //!    `list`/`show`/`edit`/`delete` subcommands and each subcommand exposes the
 //!    expected flags (`--json`, `--body`, `--yes`/`-y`).
 //! 2. **Hermetic round-trip** — drives `nexus42::commands::creator::world::kb`
-//!    logic functions directly against a fresh temp DB (`Schema::init` + public
+//!    logic functions directly against a fresh temp DB (`init_engine_pool` + public
 //!    seed helpers) to exercise list/show/edit/delete without `$HOME` or a daemon.
 //!
 //! Run with: cargo test -p nexus42 --test `world_kb_cli`
 
 use assert_cmd::Command;
 use nexus42::commands::creator::world::kb::{kb_delete, kb_edit, kb_list, kb_show};
-use nexus42::db::Schema;
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
 use nexus_knowledge::world_kb::KbStore;
@@ -35,7 +34,10 @@ fn summary_of(block: &KnowledgeEntryRecord) -> Option<&str> {
 async fn fresh_pool_with_block() -> (sqlx::SqlitePool, String, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");
-    let pool = Schema::init(&db_path).await.unwrap();
+    let pool = nexus_local_db::init_engine_pool(&db_path)
+        .await
+        .unwrap()
+        .clone_pool();
 
     nexus_local_db::kb_store::seed::world(
         &pool,

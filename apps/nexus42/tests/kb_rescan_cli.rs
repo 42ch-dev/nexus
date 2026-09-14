@@ -20,7 +20,6 @@
 
 use nexus42::commands::creator::kb::rescan::{kb_rescan_hermetic, WORLD_KB_FORBIDDEN_CODE};
 use nexus42::commands::creator::world::kb::kb_adopt;
-use nexus42::db::Schema;
 use nexus42::errors::CliError;
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody;
 use nexus_knowledge::world_kb::KbStore;
@@ -42,7 +41,10 @@ const CHAPTER_BODY_REL: &str = "Works/rescan-novel/Stories/01-chapter.md";
 async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");
-    let pool = Schema::init(&db_path).await.unwrap();
+    let pool = nexus_local_db::init_engine_pool(&db_path)
+        .await
+        .unwrap()
+        .clone_pool();
     nexus_local_db::kb_store::seed::world(
         &pool,
         WORLD,

@@ -17,7 +17,6 @@ use assert_cmd::Command;
 use nexus42::commands::creator::world::rule::{
     rule_add, rule_deactivate, rule_list, rule_summary_json,
 };
-use nexus42::db::Schema;
 use nexus_local_db::spoke_rules::list_rules_by_world;
 
 const OWNER: &str = "ctr_owner";
@@ -30,7 +29,10 @@ const FOREIGN_WORLD: &str = "wld_rule_foreign";
 async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");
-    let pool = Schema::init(&db_path).await.unwrap();
+    let pool = nexus_local_db::init_engine_pool(&db_path)
+        .await
+        .unwrap()
+        .clone_pool();
     nexus_local_db::kb_store::seed::world(
         &pool,
         WORLD,

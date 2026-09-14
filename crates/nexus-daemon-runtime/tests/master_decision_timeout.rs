@@ -35,8 +35,10 @@ const TEST_WORKSPACE: &str = "ws";
 
 async fn fresh_pool() -> (SqlitePool, test_utils::TestTempRoot) {
     let (tmp, _nexus_home, db_path) = test_utils::create_test_workspace().await;
-    let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
-    nexus_local_db::run_migrations(&pool).await.unwrap();
+    let pool = nexus_local_db::init_engine_pool(&db_path)
+        .await
+        .unwrap()
+        .clone_pool();
     (pool, tmp)
 }
 

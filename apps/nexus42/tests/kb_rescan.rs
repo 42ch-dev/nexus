@@ -22,7 +22,6 @@
 #![allow(clippy::unwrap_used)]
 
 use nexus42::commands::creator::kb::rescan::kb_rescan_work_hermetic;
-use nexus42::db::Schema;
 use nexus42::errors::CliError;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::list_pending_for_world;
@@ -40,7 +39,10 @@ const WORK_REF: &str = "xrescan-novel";
 async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");
-    let pool = Schema::init(&db_path).await.unwrap();
+    let pool = nexus_local_db::init_engine_pool(&db_path)
+        .await
+        .unwrap()
+        .clone_pool();
     nexus_local_db::kb_store::seed::world(
         &pool,
         WORLD,

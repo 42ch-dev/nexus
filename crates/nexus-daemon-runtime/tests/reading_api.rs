@@ -41,9 +41,9 @@ async fn handler_state_no_creator() -> (WorkspaceState, TestTempRoot) {
     let nexus_home = tmp.path().join(".nexus42");
     std::fs::create_dir_all(&nexus_home).unwrap();
     let db_path = nexus_home.join("state.db");
-    let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
-    nexus_local_db::run_migrations(&pool).await.unwrap();
-    nexus_local_db::seed_versions(&pool).await.unwrap();
+    nexus_local_db::init_engine_pool(&db_path)
+        .await
+        .expect("fixture: writer-protocol engine admission");
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
     (state, test_utils::create_test_workspace().await.0)
 }

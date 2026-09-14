@@ -49,8 +49,10 @@ async fn test_ctx() -> TestCtx {
 }
 
 async fn open_db(db_path: &std::path::Path) -> SqlitePool {
-    let db_url = format!("sqlite:{}?mode=rw", db_path.display());
-    SqlitePool::connect(&db_url).await.expect("open creator db")
+    nexus_local_db::init_engine_pool(db_path)
+        .await
+        .expect("fixture: writer-protocol engine admission")
+        .clone_pool()
 }
 
 /// Create a Work via the real HTTP endpoint and return its `work_id`.

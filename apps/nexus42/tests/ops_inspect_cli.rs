@@ -46,10 +46,10 @@ async fn create_db(db_path: &Path) -> sqlx::SqlitePool {
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent).expect("create workspace dir");
     }
-    let pool = nexus_local_db::open_pool(db_path).await.expect("open pool");
-    nexus_local_db::run_migrations(&pool)
+    let pool = nexus_local_db::init_engine_pool(db_path)
         .await
-        .expect("migrations");
+        .expect("open pool")
+        .clone_pool();
     pool
 }
 

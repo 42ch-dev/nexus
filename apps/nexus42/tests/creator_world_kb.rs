@@ -11,7 +11,6 @@
 #![allow(clippy::unwrap_used)]
 
 use nexus42::commands::creator::world::kb::{kb_adopt_auto, kb_pending, WORLD_KB_FORBIDDEN_CODE};
-use nexus42::db::Schema;
 use nexus42::errors::CliError;
 use nexus_local_db::kb_extract_job::insert_pending_with_llm;
 
@@ -24,7 +23,10 @@ const WORK_REF: &str = "missing-cli-novel";
 async fn fresh_pool_and_dir() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");
-    let pool = Schema::init(&db_path).await.unwrap();
+    let pool = nexus_local_db::init_engine_pool(&db_path)
+        .await
+        .unwrap()
+        .clone_pool();
     nexus_local_db::kb_store::seed::world(
         &pool,
         WORLD,

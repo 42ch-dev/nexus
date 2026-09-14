@@ -54,12 +54,10 @@ async fn restart_durability_e2e() {
 
     // Phase 1: Create engine, start session, run one step.
     let sid = {
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open_pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run_migrations");
+        let pool = guarded.clone_pool();
         let storage = Arc::new(nexus_orchestration::storage::SqliteSessionStorage::new(
             std::sync::Arc::new(pool),
         ));
@@ -91,12 +89,10 @@ async fn restart_durability_e2e() {
 
     // Phase 2: Create a fresh engine with a new pool over the same DB.
     {
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open_pool v2");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run_migrations v2");
+        let pool = guarded.clone_pool();
         let storage = Arc::new(nexus_orchestration::storage::SqliteSessionStorage::new(
             std::sync::Arc::new(pool),
         ));
