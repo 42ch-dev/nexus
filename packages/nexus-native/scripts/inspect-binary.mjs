@@ -166,7 +166,7 @@ function detectContainer(buffer, target) {
   if (buffer.length > 64 && buffer[0] === 0x7f && buffer[1] === 0x45 && buffer[2] === 0x4c && buffer[3] === 0x46) {
     const little = buffer[5] === 1;
     const machine = little ? buffer.readUInt16LE(18) : buffer.readUInt16BE(18);
-    const names = { 0x3e: 'x86_64', 0xb7: 'aarch64' };
+    const names = { 0x3e: 'x64', 0xb7: 'arm64' };
     return { container: 'elf', machine: names[machine] ?? `0x${machine.toString(16)}`, matches_target: (names[machine] ?? null) === spec.cpu };
   }
   if (buffer.length > 32 && buffer.readUInt32LE(0) === 0xfeedfacf) {

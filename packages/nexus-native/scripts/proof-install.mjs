@@ -450,7 +450,7 @@ async function drain(core, operationId) {
 }
 
 async function runStage(stage, configPath) {
-  if (configPath) copyFileSync(configPath, join(home, 'config', 'agent-host.toml'));
+  if (configPath) copyFileSync(configPath, join(home, '.nexus42', 'agent-host', 'config.toml'));
   const stageResult = { stage };
   const core = await native.openCore({ user_home: home, access: 'engine_owner', allow_uninitialized: false });
   const probe = await core.providerCall({
@@ -705,7 +705,10 @@ state.evidence.install = {
 // 4. seed the disposable home (outer fixture, not part of the denial scope) --
 state.phase = 'seed-home';
 const home = join(projDir, 'home');
-mkdirSync(join(home, 'config'), { recursive: true });
+// Canonical agent-host config expected by the merged native host:
+// crates/nexus-agent-host/src/config.rs agent_host_config_path().
+const agentHostConfigPath = join(home, '.nexus42', 'agent-host', 'config.toml');
+mkdirSync(dirname(agentHostConfigPath), { recursive: true });
 const fixture = resolve(args.fixture ?? join(ROOT, 'crates', 'nexus-agent-host', 'tests', 'fixtures', 'mock_acp_workflow.py'));
 if (!existsSync(fixture)) fail('ACP fixture missing', { fixture });
 const python = resolvePython(args.python);
@@ -738,8 +741,7 @@ const happyConfigPath = join(projDir, 'agent-host.happy.toml');
 const blockedConfigPath = join(projDir, 'agent-host.blocked.toml');
 writeFileSync(happyConfigPath, agentHostToml(python, fixture, fixtureLog));
 writeFileSync(blockedConfigPath, agentHostToml(python, fixture, fixtureLog, { BLOCK_PROMPT: '1' }));
-copyFileSync(happyConfigPath, join(home, 'config', 'agent-host.toml'));
-
+copyFileSync(happyConfigPath, agentHostConfigPath);
 // 5. install into the empty project with compilers denied -------------------
 state.phase = 'install';
 const installOut = join(projDir, 'install.log');
