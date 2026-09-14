@@ -179,9 +179,11 @@ export function createServiceServer(
             released = true;
             releaseSessionSubscriber(subscriberSessionId);
           };
-          // Safety net for a stream that outlives this handler: the socket's
-          // close still releases the admission.
-          req.socket?.once('close', release);
+          // Safety net for a stream that outlives this handler. Remove it on
+          // normal completion so repeated SSE requests over one keep-alive
+          // socket do not accumulate dead listeners.
+          const subscriberSocket = req.socket;
+          subscriberSocket?.once('close', release);
           try {
             res.setHeader('X-Request-Id', id);
             writeCors(res, origin, config.allowedOrigins);
@@ -190,6 +192,7 @@ export function createServiceServer(
             // Primary release: HTTP keep-alive holds the TCP socket open long
             // after an SSE response completed, so a completed or thrown stream
             // must free its admission here, not at socket close.
+            subscriberSocket?.off('close', release);
             release();
           }
           return;
