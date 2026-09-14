@@ -351,32 +351,11 @@ impl EnvState {
         }
     }
 
-    /// Record a cooperative cancel acknowledgement. The accepted cancel settles
-    /// the session's active operation to the `cancelled` terminal so a repeated
-    /// GET observes `cancelled` rather than a stale `running`. The terminal is
-    /// upserted monotonically (a later `running` write can never downgrade it).
-    pub fn record_js_cancel_ack(&self, session_id: &str) {
-        if let Ok(mut state) = self.js_state.lock() {
-            let active = state
-                .sessions
-                .get(session_id)
-                .and_then(|s| s.active_operation_id.clone());
-            let Some(op_id) = active else {
-                return;
-            };
-            if let Some(session) = state.sessions.get_mut(session_id) {
-                session.active_operation_id = None;
-            }
-            state.upsert_terminal(JsOperationRecord {
-                operation_id: op_id,
-                session_id: session_id.to_string(),
-                status: JsOperationStatus::Cancelled,
-            });
-        }
-    }
-
-    /// Record an operation terminal observed from a real provider event batch.
-    /// Clears the session's active op and upserts a bounded terminal record.
+    /// Record an operation terminal observed from a real provider event batch,
+    /// or an accepted cooperative cancel: the cancel path settles exactly the
+    /// requested operation id (never whichever operation happens to be active
+    /// for the session). Clears the session's active op and upserts a bounded
+    /// terminal record.
     pub fn record_js_operation_terminal(
         &self,
         session_id: &str,
@@ -1076,23 +1055,30 @@ mod tests {
     }
 
     #[test]
-    fn js_cancel_ack_settles_the_operation_to_cancelled() {
+    fn js_cancel_settles_the_targeted_operation_not_the_session_active_op() {
         let state = EnvState::new();
         state.record_js_session("sess-2".to_string(), "mock-acp".to_string());
-        state.record_js_session_operation("sess-2", "op-2".to_string());
-        state.record_js_cancel_ack("sess-2");
+        state.record_js_session_operation("sess-2", "op-y".to_string());
+        // An accepted cancel for `op-x` while `op-y` is the session's active
+        // operation settles exactly `op-x` and never touches `op-y`.
+        state.record_js_operation_terminal("sess-2", "op-x", JsOperationStatus::Cancelled);
         assert_eq!(
-            state.with_js_state(|s| s.operation("op-2")).flatten().unwrap().status.wire(),
+            state.with_js_state(|s| s.operation("op-x")).flatten().unwrap().status.wire(),
             "cancelled",
-            "an accepted cancel must settle the op to the cancelled terminal"
+            "an accepted cancel must settle the requested operation id"
         );
-        // The active op is cleared, so the session is no longer busy.
-        let session = state.with_js_state(|s| s.session("sess-2").cloned()).flatten().unwrap();
-        assert!(session.active_operation_id.is_none());
-        // A later terminal event must never downgrade the settled `cancelled`.
-        state.record_js_operation_terminal("sess-2", "op-2", JsOperationStatus::Finished);
         assert_eq!(
-            state.with_js_state(|s| s.operation("op-2")).flatten().unwrap().status.wire(),
+            state.with_js_state(|s| s.operation("op-y")).flatten().unwrap().status.wire(),
+            "running",
+            "cancel(op-x) must not mark the session's active op op-y cancelled"
+        );
+        // Active-op clearing is preserved only when it matches the targeted op.
+        let session = state.with_js_state(|s| s.session("sess-2").cloned()).flatten().unwrap();
+        assert_eq!(session.active_operation_id.as_deref(), Some("op-y"));
+        // A later terminal event must never downgrade the settled `cancelled`.
+        state.record_js_operation_terminal("sess-2", "op-x", JsOperationStatus::Finished);
+        assert_eq!(
+            state.with_js_state(|s| s.operation("op-x")).flatten().unwrap().status.wire(),
             "cancelled",
             "a later terminal must not downgrade an already-cancelled op"
         );

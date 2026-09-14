@@ -259,10 +259,12 @@ impl ProviderPort for AdmittingProviderPort {
                     }
                 }
             }
-            // A cooperative cancel acknowledgement settles the operation to the
-            // `cancelled` terminal (observable via GET), mirrored durably. A
-            // cancel call may carry only the operation id, so the owning session
-            // is resolved from the operation when session_id is absent.
+            // A cooperative cancel acknowledgement settles exactly the
+            // requested operation to the `cancelled` terminal (observable via
+            // GET), mirrored durably — never whichever operation happens to
+            // be active for the session. A cancel call may carry only the
+            // operation id, so the owning session is resolved from the
+            // operation when session_id is absent.
             ProviderCallMethod::Cancel if reply.ok => {
                 let operation_id = request_operation_id.take();
                 let session_id = session_id.or_else(|| {
@@ -280,28 +282,42 @@ impl ProviderPort for AdmittingProviderPort {
                         .journal_operation_status(&operation_id, "cancelled")
                         .await
                     {
-                        Ok(()) => {}
+                        Ok(()) => {
+                            // Settle exactly the requested operation id —
+                            // never whichever operation happens to be active
+                            // for the session; the session's active op is
+                            // cleared only when it matches the targeted op.
+                            if let Some(session_id) = session_id.as_deref() {
+                                self.state.record_js_operation_terminal(
+                                    session_id,
+                                    &operation_id,
+                                    JsOperationStatus::Cancelled,
+                                );
+                            }
+                        }
                         Err(err) => {
                             // Effect-committed failure: the adapter already
-                            // cancelled the operation, reaped the owned child
-                            // and released the session before this journal
-                            // write ran. The effect is committed — never
-                            // rolled back, never retryable — so EnvState
+                            // cancelled the requested operation, reaped the
+                            // owned child and released the session before this
+                            // journal write ran. The effect is committed —
+                            // never rolled back, never retryable — so EnvState
                             // settles the same `cancelled` terminal the
-                            // provider actually produced, and the typed 500
-                            // names the operation/session for deterministic
+                            // provider actually produced, exactly for the
+                            // requested operation id, and the typed 500 names
+                            // the operation/session for deterministic
                             // inspect/cleanup. The missing durable row is
                             // settled by the next open (orphan settlement).
                             let session = session_id.clone().unwrap_or_default();
                             if !session.is_empty() {
-                                self.state.record_js_cancel_ack(&session);
+                                self.state.record_js_operation_terminal(
+                                    &session,
+                                    &operation_id,
+                                    JsOperationStatus::Cancelled,
+                                );
                             }
                             return Err(effect_committed_failure(err, &operation_id, &session));
                         }
                     }
-                }
-                if let Some(session_id) = session_id.as_deref() {
-                    self.state.record_js_cancel_ack(session_id);
                 }
             }
             ProviderCallMethod::Shutdown if reply.ok => {
@@ -878,6 +894,137 @@ mod tests {
                 .flatten(),
             None,
             "the committed cancel releases the session's active operation"
+        );
+    }
+
+    /// A successful cancel settles exactly the requested operation id — never
+    /// whichever operation happens to be active for the session (QC3-C2).
+    /// With `op-y` active, cancelling `op-x` must reach the `cancelled`
+    /// terminal for `op-x`, leave `op-y` running and still the session's
+    /// active op, and mirror only `op-x` durably.
+    #[tokio::test]
+    async fn cancel_settles_the_requested_operation_not_the_session_active_op() {
+        let state = Arc::new(EnvState::new());
+        state.record_js_session("sess-j".to_string(), "mock-acp".to_string());
+        state.record_js_session_operation("sess-j", "op-y".to_string());
+        let dir = tempfile::tempdir().expect("tempdir");
+        let guarded = nexus_local_db::writer_protocol::init_engine_pool(
+            &dir.path().join("state.db"),
+            nexus_local_db::writer_protocol::BOOTSTRAP_CREATOR_ID,
+            nexus_local_db::writer_protocol::GuardedPoolOptions::default(),
+        )
+        .await
+        .expect("open working journal pool");
+        let pool = guarded.clone_pool();
+        state.set_journal_pool(pool.clone());
+        let port = AdmittingProviderPort::new(
+            Arc::new(HostManager::new()),
+            Arc::new(EchoPort {
+                calls: AtomicUsize::new(0),
+            }),
+            state.clone(),
+        );
+        let request = ProviderCall {
+            method: ProviderCallMethod::Cancel,
+            request_id: "r-cancel-x".into(),
+            session_id: Some("sess-j".into()),
+            operation_id: Some("op-x".into()),
+            deadline_ms: 5_000,
+            payload: serde_json::Map::new(),
+        };
+        port.call(request)
+            .await
+            .expect("a successful cancel with a durable mirror must succeed");
+        assert_eq!(
+            state
+                .with_js_state(|s| s.operation("op-x").map(|op| op.status))
+                .flatten(),
+            Some(JsOperationStatus::Cancelled),
+            "the requested operation reaches the cancelled terminal"
+        );
+        assert_eq!(
+            state
+                .with_js_state(|s| s.operation("op-y").map(|op| op.status))
+                .flatten(),
+            Some(JsOperationStatus::Running),
+            "cancel(op-x) must not mark the session's active op op-y cancelled"
+        );
+        assert_eq!(
+            state
+                .with_js_state(|s| s.session("sess-j").and_then(|r| r.active_operation_id.clone()))
+                .flatten(),
+            Some("op-y".to_string()),
+            "the session keeps its active op when the cancel targets a different operation"
+        );
+        let journaled = nexus_local_db::js_provider_journal::get_operation(&pool, "op-x")
+            .await
+            .expect("journal read")
+            .expect("the durable mirror row exists for the requested op");
+        assert_eq!(journaled.status, "cancelled");
+        assert!(
+            nexus_local_db::js_provider_journal::get_operation(&pool, "op-y")
+                .await
+                .expect("journal read")
+                .is_none(),
+            "the cancel must not journal the untouched active op"
+        );
+    }
+
+    /// A cancel whose durable mirror fails settles the same `cancelled`
+    /// terminal in memory, exactly for the requested operation id (QC3-C2):
+    /// with `op-y` active, a failed cancel of `op-x` must settle `op-x` and
+    /// leave `op-y` running and still the session's active op.
+    #[tokio::test]
+    async fn cancel_journal_failure_settles_the_requested_operation_not_the_active_op() {
+        let state = Arc::new(EnvState::new());
+        state.record_js_session("sess-j".to_string(), "mock-acp".to_string());
+        state.record_js_session_operation("sess-j", "op-y".to_string());
+        state.set_journal_pool(journalless_pool().await);
+        let port = AdmittingProviderPort::new(
+            Arc::new(HostManager::new()),
+            Arc::new(EchoPort {
+                calls: AtomicUsize::new(0),
+            }),
+            state.clone(),
+        );
+        let request = ProviderCall {
+            method: ProviderCallMethod::Cancel,
+            request_id: "r-cancel-x".into(),
+            session_id: Some("sess-j".into()),
+            operation_id: Some("op-x".into()),
+            deadline_ms: 5_000,
+            payload: serde_json::Map::new(),
+        };
+        let err = port
+            .call(request)
+            .await
+            .expect_err("a failed cancel mirror must fail the call");
+        assert_eq!(err.code, CoreErrorCode::Internal);
+        assert!(
+            err.message.contains("op-x"),
+            "the error names the requested operation: {}",
+            err.message
+        );
+        assert_eq!(
+            state
+                .with_js_state(|s| s.operation("op-x").map(|op| op.status))
+                .flatten(),
+            Some(JsOperationStatus::Cancelled),
+            "the failure-recovery path settles the requested operation id"
+        );
+        assert_eq!(
+            state
+                .with_js_state(|s| s.operation("op-y").map(|op| op.status))
+                .flatten(),
+            Some(JsOperationStatus::Running),
+            "cancel(op-x) must not mark the session's active op op-y cancelled"
+        );
+        assert_eq!(
+            state
+                .with_js_state(|s| s.session("sess-j").and_then(|r| r.active_operation_id.clone()))
+                .flatten(),
+            Some("op-y".to_string()),
+            "the session keeps its active op when the cancel targets a different operation"
         );
     }
 }
