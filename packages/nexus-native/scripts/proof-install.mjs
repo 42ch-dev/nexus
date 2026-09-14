@@ -356,12 +356,12 @@ function pidAlive(pid) {
 
 function resolvePython(explicit) {
   if (explicit) {
-    const res = run(explicit, ['-c', 'import sys; print(sys.executable)'], { allowFailure: true });
+    const res = run(explicit, ['-c', 'import sys; print(sys.executable)'], { allowFailure: true, forceNoShell: true });
     if (res.status !== 0) fail(`--python ${explicit} is not a usable interpreter`, { stderr: res.stderr });
     return res.stdout.trim();
   }
   for (const candidate of [process.env.PYTHON, process.env.PYTHON3, 'python3', 'python'].filter(Boolean)) {
-    const res = run(candidate, ['-c', 'import sys; print(sys.executable)'], { allowFailure: true });
+    const res = run(candidate, ['-c', 'import sys; print(sys.executable)'], { allowFailure: true, forceNoShell: true });
     if (res.status === 0 && res.stdout.trim()) return res.stdout.trim();
   }
   fail('no python3 interpreter found for the ACP fixture; pass --python <absolute path>');

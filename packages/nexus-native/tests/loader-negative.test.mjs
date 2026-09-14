@@ -104,7 +104,7 @@ describe('loader negative', () => {
     assert.ok(Array.isArray(manifest.cpu) && manifest.cpu.length > 0, 'cpu is required');
     assert.ok(manifest.cpu.includes(process.arch));
     if (target.libc === 'glibc') {
-      assert.ok(Array.isArray(manifest.libc) && manifest.libc.includes('gnu'), 'libc is required');
+      assert.ok(Array.isArray(manifest.libc) && manifest.libc.includes('glibc'), 'libc is required');
     }
   });
 

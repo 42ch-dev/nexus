@@ -139,8 +139,8 @@ function assertPlatformManifest(
       throw new Error('linux musl host cannot load the gnu platform package');
     }
     if (!manifest.libc?.length) throw new Error('platform package manifest is missing "libc"');
-    if (!manifest.libc.includes('gnu')) {
-      throw new Error(`platform package libc mismatch: expected gnu, got ${manifest.libc.join(',')}`);
+    if (!manifest.libc.includes('glibc')) {
+      throw new Error(`platform package libc mismatch: expected glibc, got ${manifest.libc.join(',')}`);
     }
   }
 }
