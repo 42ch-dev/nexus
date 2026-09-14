@@ -1121,6 +1121,20 @@ for (const label of ['status-only-flip-install', 'status-only-flip-package', 'st
   );
 }
 {
+  const root = buildMatrix('unsupported-fail-unknown-check', (docs) => {
+    const proof = docs['install-macarm22/install-proof.json'];
+    proof.status = 'fail';
+    proof.checks.push({ name: 'unrecognized_future_check', ok: false });
+  });
+  const decision = runDecisionWithRoot(root);
+  check('F-001 failed install with an unknown false check blocks', decision.status, 'blocked');
+  check(
+    'F-001 failed install with an unknown false check records no FAIL row',
+    (decision.doc?.observed_rows ?? []).filter((r) => r.verdict === 'FAIL').length,
+    0,
+  );
+}
+{
   const root = buildMatrix('unsupported-fail-absent-fields', (docs) => {
     const receipt = docs['native-packages/darwin-arm64/package-receipt.json'];
     receipt.status = 'fail';

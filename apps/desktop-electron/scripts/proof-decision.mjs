@@ -300,12 +300,19 @@ for (const arch of ARCHES) {
           if (check.ok !== true) failed.push(`check ${check.name} is not ok`);
         }
         const okCount = (doc.checks ?? []).filter((c) => c.ok).length;
-        const falseChecks = (doc.checks ?? []).filter((c) => c.ok !== true).map((c) => c.name);
+        const falseChecks = (doc.checks ?? [])
+          .filter(
+            (c) =>
+              c.ok !== true &&
+              (INSTALL_REQUIRED_CHECKS.includes(c.name) || String(c.name).startsWith('negative:')),
+          )
+          .map((c) => c.name);
         return {
-          required: ['package_receipt_pass', 'empty_project_install'],
+          required: INSTALL_REQUIRED_CHECKS,
           failures: failed,
           notes: [`${okCount}/${(doc.checks ?? []).length} checks pass`],
-          // A measured failure for this row is a named install check that is false.
+          // Only row-defined install predicates are measurements. Unknown false
+          // checks are unsupported evidence and must block rather than no-go.
           measuredFailure: falseChecks,
         };
       },
