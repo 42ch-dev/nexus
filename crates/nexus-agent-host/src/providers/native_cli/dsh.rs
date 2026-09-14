@@ -3549,6 +3549,15 @@ mod tests {
         );
         let handle = launch_hermetic(&provider).await;
 
+        // The env lock is taken BEFORE `execute`, not around `shutdown`:
+        // `execute` eagerly spawns the run task, and `shutdown` publishes
+        // its `closing` intent synchronously before its first yield. With
+        // no await point between stream creation and `shutdown()`, the run
+        // task is still unpolled when `closing` is set, so the session IS
+        // closed before run admission — deterministically, under parallel
+        // test contention on the shared env lock, with no sleeps.
+        let _env_lock = lock_test_env().await;
+
         // Create the stream while the session exists, then close the
         // session before the stream is polled — the run finds the closed
         // state and emits the stream-abort backstop.
@@ -3566,10 +3575,8 @@ mod tests {
             .await
             .expect("execute");
 
-        {
-            let _env_lock = lock_test_env().await;
-            provider.shutdown(handle).await.expect("shutdown");
-        }
+        provider.shutdown(handle).await.expect("shutdown");
+        drop(_env_lock);
 
         let events = collect_events(stream).await;
         assert_eq!(terminal_count(&events), 1);
