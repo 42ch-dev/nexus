@@ -111,10 +111,6 @@ async function confirmProviderReadiness(core: NativeCore): Promise<boolean> {
     if (providers.length === 0) {
       return false;
     }
-    const scan = await core.hostQuery({ query: 'catalog', format: 'scan' });
-    if ((scan.scan?.entries ?? []).some((entry) => entry.installed === true)) {
-      return true;
-    }
     for (const provider of providers) {
       const reply = await core.providerCall({
         method: 'probe',

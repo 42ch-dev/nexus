@@ -28,6 +28,15 @@ export const CLOSE_BUDGET_MS = 5_000;
 
 /** Node Writable backpressure target for SSE socket handoff (architecture §7). */
 export const SSE_SOCKET_HIGH_WATER_MARK = 64 * 1024;
+
+export function resolveSseSocketHighWaterMark(): number {
+  return resolvePositiveIntEnv('NEXUS_SSE_SOCKET_HWM', SSE_SOCKET_HIGH_WATER_MARK);
+}
+
+/** Defer the first provider pull so pauseImmediately clients can stall the socket. */
+export function resolveSseFirstPullDelayMs(): number {
+  return resolvePositiveIntEnv('NEXUS_SSE_FIRST_PULL_DELAY_MS', 450);
+}
 /** Max serialized UTF-8 bytes for one outstanding SSE data frame. */
 export const SSE_MAX_OUTSTANDING_FRAME_BYTES = 512 * 1024;
 /** Reserved control slot size for terminal/gap frames (not charged to data permits). */
@@ -45,6 +54,16 @@ export const SSE_MAX_SUBSCRIBERS_PER_SESSION = 16;
 export const PROVIDER_PULL_MAX_EVENTS = 16;
 /** Native pull batch: max bytes per nextProviderEvents call. */
 export const PROVIDER_PULL_MAX_BYTES = 262_144;
+/** Retained provider data frames per operation hub (architecture §7). */
+export const HUB_MAX_DATA_FRAMES = 64;
+/** Retained provider data bytes per operation hub. */
+export const HUB_MAX_DATA_BYTES = 1024 * 1024;
+/** Max live SSE pending data frames per subscriber connection. */
+export const SSE_MAX_PENDING_DATA_FRAMES = 16;
+/** Max live SSE pending data bytes per subscriber connection. */
+export const SSE_MAX_PENDING_DATA_BYTES = 1024 * 1024;
+/** Max terminal operations retained in the HTTP registry after completion. */
+export const REGISTRY_MAX_TERMINAL_OPERATIONS = 64;
 /** Default provider effect deadline. */
 export const PROVIDER_DEFAULT_DEADLINE_MS = 30_000;
 

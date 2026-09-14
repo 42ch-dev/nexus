@@ -218,19 +218,6 @@ async function tryHostQuery(service: ServiceCore, request: Parameters<typeof hos
 }
 
 /** Truthful runtime mode: uninitialized is reported as such, never as ready. */
-/**
- * The frozen native host-query boundary reports an absent session/operation as
- * typed `not_found`; this adapter names the missing resource on the wire, and
- * propagates every other native rejection unchanged.
- */
-function hostLookupError(error: unknown, resource: string): HttpError {
-  const mapped = mapNativeError(error);
-  if (mapped.code === 'not_found') {
-    return new HttpError(404, 'not_found', mapped.message, { ...mapped.details, resource });
-  }
-  return mapped;
-}
-
 function runtimeMode(service: ServiceCore): string {
   if (!service.workspaceInitialized) return 'uninitialized';
   if (service.domainOnly) return 'domain_only';
@@ -319,12 +306,10 @@ async function handleTier2(
         resource: `operation:${route.operationId}`,
       });
     }
-    const cached = service.providerRegistry.operationRecord(route.operationId);
     return {
       operation_id: operation.operation_id,
       session_id: operation.session_id,
       status: operation.status,
-      ...(cached?.terminalEvent ? { terminal: cached.terminalEvent } : {}),
     };
   }
   throw routeNotMigrated(pathname);

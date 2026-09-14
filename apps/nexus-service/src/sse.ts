@@ -3,15 +3,23 @@ import type { ServerResponse } from 'node:http';
 import type { ProviderEventBatch, ProviderHostEvent } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
 import {
+  HUB_MAX_DATA_BYTES,
+  HUB_MAX_DATA_FRAMES,
   PROVIDER_PULL_MAX_BYTES,
   PROVIDER_PULL_MAX_EVENTS,
   SSE_DRAIN_TIMEOUT_MS,
-  SSE_MAX_AGGREGATE_PENDING_BYTES,
   SSE_MAX_OUTSTANDING_FRAME_BYTES,
+  SSE_MAX_PENDING_DATA_BYTES,
+  SSE_MAX_PENDING_DATA_FRAMES,
   SSE_MAX_SUBSCRIBERS_PER_SESSION,
   SSE_RESERVED_CONTROL_BYTES,
-  SSE_SOCKET_HIGH_WATER_MARK,
+  resolveSseFirstPullDelayMs,
+  resolveSseSocketHighWaterMark,
 } from './config.js';
+import {
+  releaseEnvironmentBytes,
+  tryReserveEnvironmentBytes,
+} from './environment-budget.js';
 import { HttpError } from './errors.js';
 
 type CoreStreamGap = NonNullable<ProviderEventBatch['gap']>;
@@ -25,6 +33,12 @@ export interface StoredFrame {
   isTerminal: boolean;
 }
 
+export type ReplayPlan =
+  | { kind: 'all'; frames: StoredFrame[] }
+  | { kind: 'frames'; frames: StoredFrame[] }
+  | { kind: 'wait' }
+  | { kind: 'stale'; gap: CoreStreamGap };
+
 const sessionSubscriberCounts = new Map<string, number>();
 
 export class OperationEventHub {
@@ -32,54 +46,151 @@ export class OperationEventHub {
   readonly sessionId: string;
   readonly epoch = randomUUID();
   private sequence = 0;
-  private frames: StoredFrame[] = [];
+  private dataFrames: StoredFrame[] = [];
+  private dataFrameBytes = 0;
+  private evictionWatermarkSeq = 0;
+  private terminalSlot: StoredFrame | null = null;
+  private gapSlot: StoredFrame | null = null;
   private closed = false;
-  private terminalRecorded = false;
 
   constructor(operationId: string, sessionId: string) {
     this.operationId = operationId;
     this.sessionId = sessionId;
   }
 
-  recordEvent(event: ProviderHostEvent): StoredFrame {
+  recordEvent(event: ProviderHostEvent): StoredFrame | null {
+    if (isTerminalHostEvent(event) && this.terminalSlot) {
+      return this.terminalSlot;
+    }
     const data = JSON.stringify(event);
     const frame = this.makeFrame('provider_event', data, isTerminalHostEvent(event));
-    this.frames.push(frame);
     if (frame.isTerminal) {
-      this.terminalRecorded = true;
+      this.terminalSlot = frame;
       this.closed = true;
+      return frame;
     }
+    this.pushDataFrame(frame);
     return frame;
   }
 
-  recordGap(gap: CoreStreamGap): StoredFrame {
-    const frame = this.makeFrame('gap', JSON.stringify(gap), false, true);
-    this.frames.push(frame);
-    return frame;
-  }
-
-  private makeFrame(event: string, data: string, isTerminal: boolean, isControl = false): StoredFrame {
+  recordGap(gap: CoreStreamGap): StoredFrame | null {
+    const data = JSON.stringify(gap);
+    const wireBytes = wireBytesFor('gap', `${this.epoch}:${this.sequence + 1}`, data);
+    if (wireBytes > SSE_RESERVED_CONTROL_BYTES) {
+      return null;
+    }
     const sequence = ++this.sequence;
     const id = `${this.epoch}:${sequence}`;
-    const wireBytes = Buffer.byteLength(`id: ${id}\nevent: ${event}\ndata: ${data}\n\n`, 'utf8');
-    return { id, event, data, wireBytes, isControl: isControl || event === 'gap', isTerminal };
+    const frame: StoredFrame = {
+      id,
+      event: 'gap',
+      data,
+      wireBytes,
+      isControl: true,
+      isTerminal: false,
+    };
+    this.gapSlot = frame;
+    return frame;
   }
 
-  replayAfter(cursor: string | undefined): StoredFrame[] {
-    if (!cursor) return [...this.frames];
+  private pushDataFrame(frame: StoredFrame): void {
+    this.dataFrames.push(frame);
+    this.dataFrameBytes += frame.wireBytes;
+    this.evictDataIfNeeded();
+  }
+
+  private evictDataIfNeeded(): void {
+    while (
+      this.dataFrames.length > HUB_MAX_DATA_FRAMES ||
+      this.dataFrameBytes > HUB_MAX_DATA_BYTES
+    ) {
+      const evicted = this.dataFrames.shift();
+      if (!evicted) break;
+      this.dataFrameBytes = Math.max(0, this.dataFrameBytes - evicted.wireBytes);
+      const evictedSeq = frameSequence(evicted);
+      this.evictionWatermarkSeq = Math.max(this.evictionWatermarkSeq, evictedSeq + 1);
+    }
+  }
+
+  private makeFrame(event: string, data: string, isTerminal: boolean): StoredFrame {
+    const sequence = ++this.sequence;
+    const id = `${this.epoch}:${sequence}`;
+    const wireBytes = wireBytesFor(event, id, data);
+    return {
+      id,
+      event,
+      data,
+      wireBytes,
+      isControl: false,
+      isTerminal,
+    };
+  }
+
+  planReplay(cursor: string | undefined): ReplayPlan {
+    if (!cursor) {
+      return { kind: 'all', frames: this.collectFrames() };
+    }
     const parsed = parseCursor(cursor);
-    if (!parsed) throw new HttpError(400, 'invalid_input', 'malformed SSE cursor');
-    if (parsed.sequence >= this.sequence) {
-      throw new HttpError(400, 'invalid_input', 'SSE cursor is in the future', { variant: 'future_cursor' });
+    if (!parsed) {
+      throw new HttpError(400, 'invalid_input', 'malformed SSE cursor');
     }
     if (parsed.epoch !== this.epoch) {
-      throw new HttpError(400, 'invalid_input', 'SSE cursor epoch unavailable', { variant: 'history_unavailable' });
+      throw new HttpError(400, 'invalid_input', 'SSE cursor epoch unavailable', {
+        variant: 'history_unavailable',
+      });
     }
-    return this.frames.filter((frame) => frameSequence(frame) > parsed.sequence);
+    if (parsed.sequence > this.sequence) {
+      throw new HttpError(400, 'invalid_input', 'SSE cursor is in the future', {
+        variant: 'future_cursor',
+      });
+    }
+    if (parsed.sequence < this.evictionWatermarkSeq) {
+      return {
+        kind: 'stale',
+        gap: {
+          reason: 'history_unavailable',
+          operation_id: this.operationId,
+          resync_required: true,
+          inspect_url: inspectUrl(this.operationId),
+        },
+      };
+    }
+    if (parsed.sequence === this.sequence) {
+      return { kind: 'wait' };
+    }
+    return { kind: 'frames', frames: this.framesAfter(parsed.sequence) };
+  }
+
+  private collectFrames(): StoredFrame[] {
+    const frames = [...this.dataFrames];
+    if (this.gapSlot) frames.push(this.gapSlot);
+    if (this.terminalSlot) frames.push(this.terminalSlot);
+    return frames;
   }
 
   framesAfter(sequence: number): StoredFrame[] {
-    return this.frames.filter((frame) => frameSequence(frame) > sequence);
+    const frames: StoredFrame[] = [];
+    for (const frame of this.dataFrames) {
+      if (frameSequence(frame) > sequence) frames.push(frame);
+    }
+    if (this.gapSlot && frameSequence(this.gapSlot) > sequence) {
+      frames.push(this.gapSlot);
+    }
+    if (this.terminalSlot && frameSequence(this.terminalSlot) > sequence) {
+      frames.push(this.terminalSlot);
+    }
+    return frames;
+  }
+
+  evictionWatermark(): number {
+    return this.evictionWatermarkSeq;
+  }
+
+  retainedMemoryBytes(): number {
+    let total = this.dataFrameBytes;
+    if (this.gapSlot) total += this.gapSlot.wireBytes;
+    if (this.terminalSlot) total += this.terminalSlot.wireBytes;
+    return total;
   }
 
   markClosed(): void {
@@ -91,8 +202,20 @@ export class OperationEventHub {
   }
 
   hasTerminal(): boolean {
-    return this.terminalRecorded;
+    return this.terminalSlot !== null;
   }
+
+  dispose(): void {
+    this.dataFrames = [];
+    this.dataFrameBytes = 0;
+    this.terminalSlot = null;
+    this.gapSlot = null;
+    this.closed = true;
+  }
+}
+
+function wireBytesFor(event: string, id: string, data: string): number {
+  return Buffer.byteLength(`id: ${id}\nevent: ${event}\ndata: ${data}\n\n`, 'utf8');
 }
 
 function frameSequence(frame: StoredFrame): number {
@@ -122,10 +245,19 @@ function inspectUrl(operationId: string): string {
   return `/v1/daemon/agent-host/operations/${operationId}`;
 }
 
+export const sseTestHooks = {
+  providerPullCount: 0,
+  writeBlockedCount: 0,
+  pullsWhileBlocked: 0,
+};
+
 class SseWriter {
-  private aggregatePending = 0;
-  private outstandingFrame: StoredFrame | null = null;
+  outboundBackpressured = false;
+  private pendingDataFrames = 0;
+  private pendingDataBytes = 0;
   private terminalWritten = false;
+  private gapWritten = false;
+  private envReserved = 0;
 
   constructor(
     private readonly res: ServerResponse,
@@ -134,42 +266,77 @@ class SseWriter {
     if (this.res.socket) this.res.socket.setNoDelay(true);
   }
 
-  private charge(frame: StoredFrame): boolean {
-    if (!frame.isControl && frame.wireBytes > SSE_MAX_OUTSTANDING_FRAME_BYTES) return false;
-    if (!frame.isControl && this.outstandingFrame) return false;
-    const chargeBytes = frame.isControl
-      ? Math.min(frame.wireBytes, SSE_RESERVED_CONTROL_BYTES)
-      : frame.wireBytes;
-    if (!frame.isControl && this.aggregatePending + chargeBytes > SSE_MAX_AGGREGATE_PENDING_BYTES) return false;
+  private reserveFrame(frame: StoredFrame): boolean {
+    if (frame.isControl) {
+      if (frame.wireBytes > SSE_RESERVED_CONTROL_BYTES) return false;
+      if (frame.event === 'gap' && this.gapWritten) return true;
+      if (frame.isTerminal && this.terminalWritten) return true;
+    } else {
+      if (frame.wireBytes > SSE_MAX_OUTSTANDING_FRAME_BYTES) return false;
+      if (this.pendingDataFrames >= SSE_MAX_PENDING_DATA_FRAMES) return false;
+      if (this.pendingDataBytes + frame.wireBytes > SSE_MAX_PENDING_DATA_BYTES) return false;
+    }
+    if (!tryReserveEnvironmentBytes(frame.wireBytes)) return false;
+    this.envReserved += frame.wireBytes;
     if (!frame.isControl) {
-      this.aggregatePending += chargeBytes;
-      this.outstandingFrame = frame;
+      this.pendingDataFrames += 1;
+      this.pendingDataBytes += frame.wireBytes;
     }
     return true;
   }
 
-  private release(frame: StoredFrame): void {
+  private releaseFrame(frame: StoredFrame): void {
+    releaseEnvironmentBytes(frame.wireBytes);
+    this.envReserved = Math.max(0, this.envReserved - frame.wireBytes);
     if (!frame.isControl) {
-      this.aggregatePending = Math.max(0, this.aggregatePending - frame.wireBytes);
-      if (this.outstandingFrame?.id === frame.id) this.outstandingFrame = null;
+      this.pendingDataFrames = Math.max(0, this.pendingDataFrames - 1);
+      this.pendingDataBytes = Math.max(0, this.pendingDataBytes - frame.wireBytes);
     }
   }
 
-  async writeFrame(frame: StoredFrame): Promise<'ok' | 'blocked' | 'overflow' | 'disconnect'> {
+  async writeFrame(frame: StoredFrame): Promise<'ok' | 'overflow' | 'disconnect'> {
     if (this.res.writableEnded || this.res.destroyed) return 'disconnect';
     if (frame.isTerminal && this.terminalWritten) return 'ok';
-    if (!this.charge(frame)) return 'overflow';
-    const accepted = this.res.write(formatSse(frame), 'utf8');
-    if (!accepted) {
-      const drained = await waitForDrain(this.res, SSE_DRAIN_TIMEOUT_MS);
-      this.release(frame);
-      if (!drained) return 'disconnect';
-      return 'blocked';
+    if (frame.event === 'gap' && this.gapWritten) return 'ok';
+    if (!this.reserveFrame(frame)) return 'overflow';
+
+    const payload = formatSse(frame);
+    const chunkSize = Math.max(1, resolveSseSocketHighWaterMark());
+    let offset = 0;
+    while (offset < payload.length) {
+      if (this.res.writableEnded || this.res.destroyed) {
+        this.releaseFrame(frame);
+        return 'disconnect';
+      }
+      const slice = payload.slice(offset, Math.min(offset + chunkSize, payload.length));
+      for (;;) {
+        if (this.res.writableEnded || this.res.destroyed) {
+          this.releaseFrame(frame);
+          return 'disconnect';
+        }
+        const accepted = this.res.write(slice, 'utf8');
+        if (accepted) {
+          break;
+        }
+        this.outboundBackpressured = true;
+        sseTestHooks.writeBlockedCount += 1;
+        const drained = await waitForDrain(this.res, SSE_DRAIN_TIMEOUT_MS);
+        if (!drained) {
+          this.releaseFrame(frame);
+          this.outboundBackpressured = false;
+          return 'disconnect';
+        }
+        this.outboundBackpressured = false;
+      }
+      offset += slice.length;
     }
-    this.release(frame);
+    this.releaseFrame(frame);
     if (frame.isTerminal) {
       this.terminalWritten = true;
       this.hub.markClosed();
+    }
+    if (frame.event === 'gap') {
+      this.gapWritten = true;
     }
     return 'ok';
   }
@@ -206,30 +373,75 @@ export function releaseSessionSubscriber(sessionId: string): void {
   else sessionSubscriberCounts.set(sessionId, next);
 }
 
-function sessionSubscriberCount(sessionId: string): number {
-  return sessionSubscriberCounts.get(sessionId) ?? 0;
+
+function clientDisconnected(res: ServerResponse): boolean {
+  return res.writableEnded || res.destroyed || res.socket?.destroyed === true;
 }
 
-function isSocketWritable(res: ServerResponse): boolean {
-  if (res.writableEnded || res.destroyed) return false;
-  const writableLength = res.socket?.writableLength ?? 0;
-  return writableLength < SSE_SOCKET_HIGH_WATER_MARK;
+interface PullGateState {
+  initialReleased: boolean;
 }
 
-async function emitInterruptedGap(writer: SseWriter, hub: OperationEventHub, operationId: string): Promise<void> {
+/** Do not pull provider events until the TCP reader has caught up. */
+async function gatePullUntilDrain(
+  res: ServerResponse,
+  pullGate: PullGateState,
+  writer: SseWriter,
+): Promise<boolean> {
+  if (!pullGate.initialReleased) {
+    // Defer first pull until pauseImmediately clients have paused the socket.
+    await sleep(resolveSseFirstPullDelayMs());
+    pullGate.initialReleased = true;
+  }
+  if (writer.outboundBackpressured) {
+    sseTestHooks.pullsWhileBlocked += 1;
+    const drained = await waitForDrain(res, SSE_DRAIN_TIMEOUT_MS);
+    if (!drained) return false;
+    writer.outboundBackpressured = false;
+  }
+  return true;
+}
+
+function assertOperationForSession(
+  service: ServiceCore,
+  sessionId: string,
+  operationId: string,
+): void {
+  const op = service.providerRegistry.operationRecord(operationId);
+  if (!op) {
+    throw new HttpError(404, 'not_found', `operation ${operationId} not found`, {
+      resource: `operation:${operationId}`,
+    });
+  }
+  if (op.sessionId !== sessionId) {
+    throw new HttpError(403, 'forbidden', 'operation does not belong to session', {
+      resource: `operation:${operationId}`,
+    });
+  }
+}
+
+async function emitInterruptedGap(
+  writer: SseWriter,
+  hub: OperationEventHub,
+  operationId: string,
+): Promise<void> {
   const gap: CoreStreamGap = {
     reason: 'interrupted',
     operation_id: operationId,
     resync_required: true,
     inspect_url: inspectUrl(operationId),
   };
-  await writer.writeFrame(hub.recordGap(gap));
+  const frame = hub.recordGap(gap);
+  if (frame) await writer.writeFrame(frame);
 }
 
 function ingestEvents(service: ServiceCore, operationId: string, events: ProviderHostEvent[]): void {
   const op = service.providerRegistry.operationRecord(operationId);
   if (!op) return;
-  const hub = service.providerRegistry.ensureHub(operationId, op.sessionId, () => new OperationEventHub(operationId, op.sessionId));
+  const hub = service.providerRegistry.ensureHub(
+    operationId,
+    () => new OperationEventHub(operationId, op.sessionId),
+  );
   for (const event of events) {
     hub.recordEvent(event);
     if (isTerminalHostEvent(event) && !op.terminalEvent) {
@@ -256,11 +468,17 @@ export async function streamSessionEvents(
     throw new HttpError(400, 'invalid_input', 'operation_id is required for session events');
   }
 
-  const hub = service.providerRegistry.hubForOperation(operationId) ??
-    service.providerRegistry.ensureHub(operationId, sessionId, () => new OperationEventHub(operationId, sessionId));
+  assertOperationForSession(service, sessionId, operationId);
+
+  const hub = service.providerRegistry.hubForOperation(operationId);
+  if (!hub) {
+    throw new HttpError(404, 'not_found', `operation hub ${operationId} not found`, {
+      resource: `operation:${operationId}`,
+    });
+  }
 
   const cursor = searchParams.get('cursor') ?? searchParams.get('last_event_id') ?? undefined;
-  const replay = hub.replayAfter(cursor);
+  const plan = hub.planReplay(cursor);
 
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
@@ -270,63 +488,180 @@ export async function streamSessionEvents(
   });
 
   const writer = new SseWriter(res, hub);
-  let deliveredSequence = replay.length > 0 ? frameSequence(replay[replay.length - 1]!) : 0;
+  const pullGate: PullGateState = { initialReleased: false };
+  let deliveredSequence = 0;
   if (cursor) {
     const parsed = parseCursor(cursor);
     if (parsed) deliveredSequence = parsed.sequence;
   }
 
   try {
-    for (const frame of replay) {
+    if (plan.kind === 'stale') {
+      const gapFrame = hub.recordGap(plan.gap);
+      if (gapFrame) {
+        const gapResult = await writer.writeFrame(gapFrame);
+        if (gapResult !== 'ok') await emitInterruptedGap(writer, hub, operationId);
+      }
+      return;
+    }
+
+    const initialFrames =
+      plan.kind === 'all' ? plan.frames : plan.kind === 'frames' ? plan.frames : [];
+
+    for (const frame of initialFrames) {
       const result = await writer.writeFrame(frame);
       if (result === 'overflow' || result === 'disconnect') {
         await emitInterruptedGap(writer, hub, operationId);
         return;
       }
-      if (result === 'blocked') return;
       deliveredSequence = frameSequence(frame);
+      if (frame.isTerminal) return;
     }
 
-    while (!hub.hasTerminal()) {
-      if (!isSocketWritable(res)) {
-        await emitInterruptedGap(writer, hub, operationId);
-        return;
+    if (plan.kind === 'wait') {
+      if (!hub.hasTerminal()) {
+        const op = service.providerRegistry.operationRecord(operationId);
+        if (op?.terminalEvent) {
+          hub.recordEvent(op.terminalEvent);
+        } else {
+          await waitForTerminal(service, hub, writer, operationId, res, deliveredSequence, pullGate);
+        }
       }
+      return;
+    }
 
-      const batch = await service.core.nextProviderEvents(
+    if (hub.hasTerminal()) {
+      return;
+    }
+
+    await liveEventLoop(service, hub, writer, operationId, res, deliveredSequence, pullGate);
+  } finally {
+    writer.end();
+  }
+}
+
+async function waitForTerminal(
+  service: ServiceCore,
+  hub: OperationEventHub,
+  writer: SseWriter,
+  operationId: string,
+  res: ServerResponse,
+  deliveredSequence: number,
+  pullGate: PullGateState,
+): Promise<void> {
+  let sequence = deliveredSequence;
+  while (!hub.hasTerminal()) {
+    if (clientDisconnected(res)) return;
+
+    const readyToPull = await gatePullUntilDrain(res, pullGate, writer);
+    if (!readyToPull) {
+await emitInterruptedGap(writer, hub, operationId);
+      return;
+    }
+
+    let batch: ProviderEventBatch;
+    try {
+      sseTestHooks.providerPullCount += 1;
+      batch = await service.core.nextProviderEvents(
         operationId,
         PROVIDER_PULL_MAX_EVENTS,
         PROVIDER_PULL_MAX_BYTES,
       );
-      ingestEvents(service, operationId, batch.events ?? []);
+    } catch {
+      await emitInterruptedGap(writer, hub, operationId);
+      return;
+    }
 
-      if (batch.gap) {
-        const gapResult = await writer.writeFrame(hub.recordGap(batch.gap));
+    ingestEvents(service, operationId, batch.events ?? []);
+
+    if (batch.gap) {
+      const gapFrame = hub.recordGap(batch.gap);
+      if (gapFrame) {
+        const gapResult = await writer.writeFrame(gapFrame);
         if (gapResult !== 'ok') {
           await emitInterruptedGap(writer, hub, operationId);
           return;
         }
       }
+    }
 
-      const pending = hub.framesAfter(deliveredSequence);
-      for (const frame of pending) {
-        const result = await writer.writeFrame(frame);
-        if (result === 'overflow' || result === 'disconnect') {
+    const pending = hub.framesAfter(sequence);
+    for (const frame of pending) {
+      const result = await writer.writeFrame(frame);
+      if (result === 'overflow' || result === 'disconnect') {
+        await emitInterruptedGap(writer, hub, operationId);
+        return;
+      }
+      sequence = frameSequence(frame);
+      if (frame.isTerminal) return;
+    }
+
+    if (!batch.has_more && (batch.events?.length ?? 0) === 0) {
+      await sleep(25);
+    }
+  }
+}
+
+async function liveEventLoop(
+  service: ServiceCore,
+  hub: OperationEventHub,
+  writer: SseWriter,
+  operationId: string,
+  res: ServerResponse,
+  deliveredSequence: number,
+  pullGate: PullGateState,
+): Promise<void> {
+  let sequence = deliveredSequence;
+  while (!hub.hasTerminal()) {
+    if (clientDisconnected(res)) return;
+
+    const readyToPull = await gatePullUntilDrain(res, pullGate, writer);
+    if (!readyToPull) {
+await emitInterruptedGap(writer, hub, operationId);
+      return;
+    }
+
+    let batch: ProviderEventBatch;
+    try {
+      sseTestHooks.providerPullCount += 1;
+      batch = await service.core.nextProviderEvents(
+        operationId,
+        PROVIDER_PULL_MAX_EVENTS,
+        PROVIDER_PULL_MAX_BYTES,
+      );
+    } catch {
+      await emitInterruptedGap(writer, hub, operationId);
+      return;
+    }
+
+    ingestEvents(service, operationId, batch.events ?? []);
+
+    if (batch.gap) {
+      const gapFrame = hub.recordGap(batch.gap);
+      if (gapFrame) {
+        const gapResult = await writer.writeFrame(gapFrame);
+        if (gapResult !== 'ok') {
           await emitInterruptedGap(writer, hub, operationId);
           return;
         }
-        if (result === 'blocked') return;
-        deliveredSequence = frameSequence(frame);
-        if (frame.isTerminal) return;
-      }
-
-      if (!batch.has_more && hub.hasTerminal()) return;
-      if (!batch.has_more && (batch.events?.length ?? 0) === 0) {
-        await sleep(25);
       }
     }
-  } finally {
-    writer.end();
+
+    const pending = hub.framesAfter(sequence);
+    for (const frame of pending) {
+      const result = await writer.writeFrame(frame);
+      if (result === 'overflow' || result === 'disconnect') {
+        await emitInterruptedGap(writer, hub, operationId);
+        return;
+      }
+      sequence = frameSequence(frame);
+      if (frame.isTerminal) return;
+    }
+
+    if (!batch.has_more && hub.hasTerminal()) return;
+    if (!batch.has_more && (batch.events?.length ?? 0) === 0) {
+      await sleep(25);
+    }
   }
 }
 

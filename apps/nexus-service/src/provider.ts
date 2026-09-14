@@ -5,7 +5,6 @@ import type {
   ExecuteOperationRequest,
   OperationResponse,
   ProviderCall,
-  ProviderHostEvent,
   ProviderReply,
   SessionResponse,
   ShutdownSessionResponse,
@@ -13,10 +12,9 @@ import type {
 import type { ServiceCore } from './lifecycle.js';
 import { PROVIDER_DEFAULT_DEADLINE_MS } from './config.js';
 import { HttpError, mapNativeError, routeNotMigrated } from './errors.js';
-import {
-  ProviderRegistry,
-  type ProviderOperationRecord,
-  type ProviderSessionRecord,
+import type {
+  ProviderOperationRecord,
+  ProviderSessionRecord,
 } from './provider-registry.js';
 import { OperationEventHub } from './sse.js';
 import { hostQuery } from './world-kb.js';
@@ -25,16 +23,6 @@ export { ProviderRegistry } from './provider-registry.js';
 export type { ProviderOperationRecord, ProviderSessionRecord } from './provider-registry.js';
 
 const DSH_PROVIDER_ID = 'dsh-native';
-
-function isTerminalHostEvent(event: ProviderHostEvent): boolean {
-  return 'OpFinished' in event || 'OpFailed' in event || 'SessionStopped' in event;
-}
-
-function transcriptFromTerminal(event: ProviderHostEvent): string | null {
-  if ('OpFinished' in event) return JSON.stringify(event.OpFinished);
-  if ('OpFailed' in event) return JSON.stringify(event.OpFailed);
-  return null;
-}
 
 function parseUuid(value: string, field: string): void {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
@@ -145,7 +133,7 @@ export async function executeProviderOperation(service: ServiceCore, sessionId: 
     terminalEvent: null,
     terminalTranscript: null,
   });
-  service.providerRegistry.ensureHub(operationId, sessionId, () => new OperationEventHub(operationId, sessionId));
+  service.providerRegistry.ensureHub(operationId, () => new OperationEventHub(operationId, sessionId));
   return { operation_id: operationId, session_id: sessionId, status: 'started' };
 }
 
@@ -156,6 +144,9 @@ export async function cancelProviderOperation(service: ServiceCore, operationId:
   if (op.providerId === DSH_PROVIDER_ID) {
     throw new HttpError(501, 'route_not_migrated', 'DSH provider does not support cancellation');
   }
+  if (op.terminalEvent) {
+    throw new HttpError(409, 'busy', 'operation already terminal', { resource: `operation:${operationId}` });
+  }
   await providerCall(service, {
     method: 'cancel',
     request_id: randomUUID(),
@@ -163,7 +154,6 @@ export async function cancelProviderOperation(service: ServiceCore, operationId:
     deadline_ms: PROVIDER_DEFAULT_DEADLINE_MS,
     payload: {},
   });
-  service.providerRegistry.clearSessionOperation(op.sessionId);
   return { operation_id: operationId, status: 'cancelled' };
 }
 

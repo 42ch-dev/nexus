@@ -1,4 +1,10 @@
-import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import {
+  createServer as createHttpServer,
+  ServerResponse as HttpServerResponse,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
 import { randomUUID } from 'node:crypto';
 import {
@@ -7,6 +13,7 @@ import {
   HEADER_READ_TIMEOUT_MS,
   MAX_REQUEST_BYTES,
   REQUEST_READ_TIMEOUT_MS,
+  resolveSseSocketHighWaterMark,
   type ResolvedServiceConfig,
 } from './config.js';
 import { HttpError, mapNativeError, stringifyJsonSafe, toErrorBody } from './errors.js';
@@ -184,10 +191,20 @@ export function createServiceServer(
     }
   };
 
+  class BoundedSseHttpResponse extends HttpServerResponse {
+    constructor(req: IncomingMessage) {
+      // @ts-expect-error Node >=18 supports OutgoingMessage highWaterMark options.
+      super(req, { highWaterMark: resolveSseSocketHighWaterMark() });
+    }
+  }
+
   const server =
     config.tlsCert && config.tlsKey
-      ? createHttpsServer({ cert: config.tlsCert, key: config.tlsKey }, handler)
-      : createHttpServer(handler);
+      ? createHttpsServer(
+          { cert: config.tlsCert, key: config.tlsKey, ServerResponse: BoundedSseHttpResponse },
+          handler,
+        )
+      : createHttpServer({ ServerResponse: BoundedSseHttpResponse }, handler);
 
   // Frozen ordinary HTTP bounds: headers 5s (parser-owned, before the handler)
   // and request read 10s (`requestTimeout` >= `headersTimeout`).
