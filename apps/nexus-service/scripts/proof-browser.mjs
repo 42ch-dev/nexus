@@ -1641,17 +1641,26 @@ async function runAdapterEditSample(ctx, sampleIndex) {
       // A failed spawn never emits `exit`; racing the settled lifecycle
       // (which settles on `error`) keeps a build-launch failure bounded and
       // reportable instead of hanging the sample forever.
-      const exitCode = await Promise.race([
-        new Promise((resolveExit) => {
-          if (build.exitCode !== null || build.signalCode !== null) {
-            resolveExit(build.exitCode);
-            return;
-          }
-          build.once('exit', resolveExit);
-        }),
-        build.__closed.then(() => build.exitCode),
-        sleep(60_000).then(() => 'timeout'),
-      ]);
+      let buildTimer;
+      const buildTimeout = new Promise((resolveTimeout) => {
+        buildTimer = setTimeout(() => resolveTimeout('timeout'), 60_000);
+      });
+      let exitCode;
+      try {
+        exitCode = await Promise.race([
+          new Promise((resolveExit) => {
+            if (build.exitCode !== null || build.signalCode !== null) {
+              resolveExit(build.exitCode);
+              return;
+            }
+            build.once('exit', resolveExit);
+          }),
+          build.__closed.then(() => build.exitCode),
+          buildTimeout,
+        ]);
+      } finally {
+        clearTimeout(buildTimer);
+      }
       if (exitCode === 'timeout') {
         await stopChild(build, { graceMs: 0, killMs: 2_000, closeMs: 2_000 });
         throw new Error(
