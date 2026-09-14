@@ -413,7 +413,12 @@ describe('security-stream (P4-T2)', () => {
     try {
       const { sessionId, operationId } = await providerFlow(local.url);
       const completedPath = `/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}`;
-      await rawSseGet(local.url, completedPath);
+      // One completed keep-alive request: the response ends while the pooled
+      // socket stays open, so only a completion-time release frees its slot —
+      // a socket-destroying client would mask the leak via socket close.
+      const completed = await fetch(`${local.url}${completedPath}`, { headers: { Accept: 'text/event-stream' }, signal: AbortSignal.timeout(20_000) });
+      assert.equal(completed.status, 200);
+      await completed.text();
       // Start a second operation in the same session. Its subscribers remain
       // live in the first-pull gate while the completed operation's keep-alive
       // admission must already have been released.
