@@ -97,7 +97,7 @@ function sourceIdentity() {
   const porcelain = spawnSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }).stdout;
   const diff = spawnSync('git', ['diff', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).stdout;
   return {
-    source_sha: sha || 'unknown',
+    source_sha: sha.length > 0 ? sha : 'unknown',
     tree_digest: createHash('sha256').update(`${sha}\0${porcelain}\0${diff}`).digest('hex'),
     tree_dirty: porcelain.trim().length > 0,
   };
@@ -774,7 +774,7 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
   }
 
   // --- status mapping, only after every predicate above is known --------------
-  let status = 'blocked';
+  let status;
   let summary;
   if (gate.status === 'go') {
     const goProblems = [...problems];
