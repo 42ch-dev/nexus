@@ -1125,11 +1125,13 @@ for (const label of ['status-only-flip-install', 'status-only-flip-package', 'st
     const proof = docs['install-macarm22/install-proof.json'];
     proof.status = 'fail';
     proof.checks = proof.checks.filter((c) => c.name !== 'empty_project_install');
+    const unrelated = proof.checks.find((c) => c.name === 'graph_read_through_installed_payload');
+    unrelated.ok = false;
   });
   const decision = runDecisionWithRoot(root);
-  check('F-001 failed install with an absent required check blocks', decision.status, 'blocked');
+  check('F-001 failed install with an absent required check plus unrelated measured failure blocks', decision.status, 'blocked');
   check(
-    'F-001 failed install with an absent required check records no FAIL row',
+    'F-001 failed install with an absent required check plus unrelated measured failure records no FAIL row',
     (decision.doc?.observed_rows ?? []).filter((r) => r.verdict === 'FAIL').length,
     0,
   );

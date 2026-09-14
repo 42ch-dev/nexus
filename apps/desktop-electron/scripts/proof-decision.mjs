@@ -172,7 +172,9 @@ function deriveRow({ id, row, evidence, schema, target, sourceSha = source.sourc
       state = 'stale';
     } else {
       const { required = [], failures = [], notes = [], measuredFailure = null } = predicates(doc) ?? {};
-      const missing = required.filter((name) => !docNamedCheck(doc, name));
+      const missing = required.filter(
+        (name) => !(doc?.checks ?? []).some((check) => check?.name === name),
+      );
       const failedChecks = [...missing.map((name) => `${name} missing`), ...failures];
       const declaredStatus = doc.status;
       if (declaredStatus === 'fail') {
@@ -184,7 +186,13 @@ function deriveRow({ id, row, evidence, schema, target, sourceSha = source.sourc
         // never be promoted into a product measurement (F-001).
         const failureEvidence = typeof measuredFailure === 'function' ? measuredFailure(doc) : measuredFailure;
         const measured = Array.isArray(failureEvidence) ? failureEvidence : failureEvidence ? [failureEvidence] : [];
-        if (measured.length > 0) {
+        if (missing.length > 0) {
+          state = 'blocked';
+          problems.push(
+            ...notes,
+            `status is fail but required evidence is absent: ${missing.map((name) => `required check ${name} absent`).join('; ')}`,
+          );
+        } else if (measured.length > 0) {
           state = 'fail';
           problems.push(...notes, `document records a measured failure: ${measured.join('; ')}`);
         } else {

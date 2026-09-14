@@ -17,7 +17,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm run build && node --test tests/callback-lifecycle.test.mjs tests/loader-negative.test.mjs"
+    "test": "pnpm run build && node --test tests/callback-lifecycle.test.mjs tests/loader-negative.test.mjs tests/provider-tsfn-callback.test.mjs"
   },
   "dependencies": {
     "@42ch/nexus-contracts": "workspace:*"

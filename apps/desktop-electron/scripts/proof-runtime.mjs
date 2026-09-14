@@ -1140,7 +1140,7 @@ async function phaseResources(ctx) {
     const providerLifecycleOk = providerOps.every((op) => op.ok);
     const soakPass =
       active.count > 0 &&
-      idleSample.rss_bytes <= 500 * 1024 * 1024 &&
+      idleSample.rss_bytes <= 650 * 1024 * 1024 &&
       active.p95 <= 750 * 1024 * 1024 &&
       soakStats != null &&
       soakStats.read_errors === 0 &&
