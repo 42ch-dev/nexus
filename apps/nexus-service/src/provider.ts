@@ -10,11 +10,12 @@ import type {
   ShutdownSessionResponse,
 } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
-import { PROVIDER_DEFAULT_DEADLINE_MS } from './config.js';
+import { MAX_ACTIVE_PROVIDER_OPERATIONS, PROVIDER_DEFAULT_DEADLINE_MS } from './config.js';
 import { HttpError, mapNativeError, routeNotMigrated } from './errors.js';
-import type {
-  ProviderOperationRecord,
-  ProviderSessionRecord,
+import {
+  isTerminalOperationStatus,
+  type ProviderOperationRecord,
+  type ProviderSessionRecord,
 } from './provider-registry.js';
 import { OperationEventHub } from './sse.js';
 import { hostQuery } from './world-kb.js';
@@ -116,6 +117,11 @@ export async function executeProviderOperation(service: ServiceCore, sessionId: 
   }
   if (req.kind !== 'prompt') throw routeNotMigrated(`operation kind ${req.kind}`);
   if (typeof req.content !== 'string') throw new HttpError(400, 'invalid_input', 'prompt content is required');
+  // Transport admission: cap live operations *before* the provider effect so a
+  // stalled/hung population cannot grow without bound (architecture §7).
+  if (service.providerRegistry.activeOperationCount() >= MAX_ACTIVE_PROVIDER_OPERATIONS) {
+    throw new HttpError(503, 'busy', 'too many active provider operations');
+  }
   const reply = await providerCall(service, {
     method: 'execute',
     request_id: randomUUID(),
@@ -144,7 +150,9 @@ export async function cancelProviderOperation(service: ServiceCore, operationId:
   if (op.providerId === DSH_PROVIDER_ID) {
     throw new HttpError(501, 'route_not_migrated', 'DSH provider does not support cancellation');
   }
-  if (op.terminalEvent) {
+  // Terminal truth may arrive as a hydrated native status (no local event yet),
+  // so a null `terminalEvent` alone must never authorise a cancel dispatch.
+  if (op.terminalEvent || isTerminalOperationStatus(op.status)) {
     throw new HttpError(409, 'busy', 'operation already terminal', { resource: `operation:${operationId}` });
   }
   await providerCall(service, {

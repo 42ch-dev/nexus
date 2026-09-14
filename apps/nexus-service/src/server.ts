@@ -7,6 +7,7 @@ import {
 } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
 import { randomUUID } from 'node:crypto';
+import type { CoreCloseReport } from '@42ch/nexus-contracts';
 import {
   formatHttpAuthority,
   HEADER_DEADLINE_CHECK_MS,
@@ -24,7 +25,9 @@ import { releaseSessionSubscriber, reserveSessionSubscriber } from './sse.js';
 
 export interface RunningService {
   readonly url: string;
-  close(): Promise<import('@42ch/nexus-contracts').CoreCloseReport>;
+  /** Same-process observability seam for scoped tests; not part of the wire API. */
+  readonly service: ServiceCore;
+  close(): Promise<CoreCloseReport>;
 }
 
 function requestId(req: IncomingMessage): string {
@@ -113,7 +116,7 @@ function sendError(
 export function createServiceServer(
   config: ResolvedServiceConfig,
   service: ServiceCore,
-  closeFn: () => Promise<import('@42ch/nexus-contracts').CoreCloseReport>,
+  closeFn: () => Promise<CoreCloseReport>,
 ): { server: Server; running: RunningService } {
   const protocol = config.tlsCert && config.tlsKey ? 'https' : 'http';
   const url = `${protocol}://${formatHttpAuthority(config.host, config.port)}`;
@@ -219,6 +222,7 @@ export function createServiceServer(
 
   const running: RunningService = {
     url,
+    service,
     close: closeFn,
   };
 

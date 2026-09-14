@@ -47,9 +47,12 @@ impl AdmittingProviderPort {
         Self { host, inner, state }
     }
 
-    async fn admit_probe_or_launch(&self, request: &mut ProviderCall) -> ProviderResult<()> {
+    /// Admit the recipe and return the request-local provider id, so concurrent
+    /// probe/launch calls can never cross-assign provider ownership.
+    async fn admit_probe_or_launch(&self, request: &mut ProviderCall) -> ProviderResult<String> {
         reject_caller_recipe_payload(&request.payload).map_err(map_host_error)?;
-        let provider_id = nexus_agent_host::ids::ProviderId::new(provider_id_from_payload(&request.payload)?);
+        let provider_id_raw = provider_id_from_payload(&request.payload)?;
+        let provider_id = nexus_agent_host::ids::ProviderId::new(provider_id_raw.clone());
         let admitted = self
             .host
             .admit_validated_provider_recipe(&provider_id)
@@ -62,29 +65,73 @@ impl AdmittingProviderPort {
             http_status: Some(500),
         })?;
         request.payload.insert("recipe".to_string(), recipe_value);
-        Ok(())
+        Ok(provider_id_raw)
     }
 }
 
 #[async_trait]
 impl ProviderPort for AdmittingProviderPort {
     async fn call(&self, mut request: ProviderCall) -> ProviderResult<ProviderReply> {
-        if matches!(
-            request.method,
-            ProviderCallMethod::Probe | ProviderCallMethod::Launch
-        ) {
-            self.admit_probe_or_launch(&mut request).await?;
-        }
         let method = request.method;
         let session_id = request.session_id.clone();
-        let reply = self.inner.call(request).await?;
+        // Reserve a bounded tracking slot *before* any admission or dispatch for
+        // a launch. If the cap is reached, refuse with a typed Busy before
+        // touching the adapter, so a launched child is never dropped untracked.
+        let reserved = if matches!(method, ProviderCallMethod::Launch) {
+            if !self.state.try_reserve_js_session() {
+                return Err(CoreError {
+                    code: CoreErrorCode::Busy,
+                    message: "too many active JS provider sessions".into(),
+                    details: Default::default(),
+                    http_status: Some(503),
+                });
+            }
+            true
+        } else {
+            false
+        };
+        // The admitted provider id is request-local: never a shared last-value
+        // slot, so concurrent launches cannot cross-assign ownership.
+        let admitted_provider_id = if matches!(
+            method,
+            ProviderCallMethod::Probe | ProviderCallMethod::Launch
+        ) {
+            match self.admit_probe_or_launch(&mut request).await {
+                Ok(id) => id,
+                Err(err) => {
+                    if reserved {
+                        self.state.release_js_session_reservation();
+                    }
+                    return Err(err);
+                }
+            }
+        } else {
+            String::new()
+        };
+        let reply = match self.inner.call(request).await {
+            Ok(reply) => reply,
+            Err(err) => {
+                if reserved {
+                    self.state.release_js_session_reservation();
+                }
+                return Err(err);
+            }
+        };
         // The JS adapter owns its ACP children; native close must be able to
         // cancel and release them, so track live JS sessions at the one place
-        // that observes every launch/execute/shutdown reply.
+        // that observes every launch/execute/shutdown reply. The same state backs
+        // `hostQuery`, so it records the request-local admitted provider id.
         match method {
-            ProviderCallMethod::Launch if reply.ok => {
-                if let Some(session_id) = reply.session_id.clone().or(session_id) {
-                    self.state.record_js_session(session_id);
+            ProviderCallMethod::Launch => {
+                if reply.ok {
+                    if let Some(session_id) = reply.session_id.clone().or(session_id) {
+                        self.state
+                            .record_js_session(session_id, admitted_provider_id);
+                    } else if reserved {
+                        self.state.release_js_session_reservation();
+                    }
+                } else if reserved {
+                    self.state.release_js_session_reservation();
                 }
             }
             ProviderCallMethod::Execute if reply.ok => {
@@ -95,9 +142,12 @@ impl ProviderPort for AdmittingProviderPort {
                         .record_js_session_operation(session_id, operation_id);
                 }
             }
+            // A cancel acknowledgement does NOT clear the active op: the
+            // operation becomes terminal only when the adapter emits its real
+            // terminal event (observed in `next`).
             ProviderCallMethod::Cancel if reply.ok => {
                 if let Some(session_id) = session_id.as_deref() {
-                    self.state.clear_js_session_operation(session_id);
+                    self.state.record_js_cancel_ack(session_id);
                 }
             }
             ProviderCallMethod::Shutdown if reply.ok => {
@@ -116,6 +166,121 @@ impl ProviderPort for AdmittingProviderPort {
         max_events: u32,
         max_bytes: u32,
     ) -> ProviderResult<ProviderEventBatch> {
-        self.inner.next(operation_id, max_events, max_bytes).await
+        let batch = self
+            .inner
+            .next(operation_id.clone(), max_events, max_bytes)
+            .await?;
+        // Terminal truth comes from the actual delivered events, never a label.
+        self.state
+            .apply_js_batch_terminals(&operation_id, batch.events.as_slice());
+        Ok(batch)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::env_state::EnvState;
+    use async_trait::async_trait;
+    use nexus_contracts::provider_call::ProviderCallMethod;
+    use nexus_contracts::{CoreError, CoreErrorCode, ProviderReply};
+    use nexus_provider_ports::{ProviderPort, ProviderResult};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A probe/launch stub that echoes a deterministic session id and records
+    /// how many calls actually reached it (so a cap must deny *before* inner).
+    struct EchoPort {
+        calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ProviderPort for EchoPort {
+        async fn call(&self, request: ProviderCall) -> ProviderResult<ProviderReply> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(ProviderReply {
+                request_id: request.request_id.clone(),
+                ok: true,
+                session_id: Some(format!("sess-{}", self.calls.load(Ordering::SeqCst))),
+                operation_id: None,
+                health: None,
+                error: None,
+            })
+        }
+
+        async fn next(
+            &self,
+            _operation_id: String,
+            _max_events: u32,
+            _max_bytes: u32,
+        ) -> ProviderResult<ProviderEventBatch> {
+            Err(CoreError {
+                code: CoreErrorCode::Internal,
+                message: "not used".into(),
+                details: Default::default(),
+                http_status: Some(500),
+            })
+        }
+    }
+
+    use nexus_agent_host::HostManager;
+
+    fn launch_request(provider_id: &str, request_id: &str) -> ProviderCall {
+        let mut payload = serde_json::Map::new();
+        payload.insert("provider_id".into(), serde_json::Value::String(provider_id.into()));
+        ProviderCall {
+            method: ProviderCallMethod::Launch,
+            request_id: request_id.into(),
+            session_id: None,
+            operation_id: None,
+            deadline_ms: 5_000,
+            payload,
+        }
+    }
+
+    /// The cap must deny a launch *before* dispatching to inner, so a refused
+    /// launch never spawns an untracked owned child.
+    #[tokio::test]
+    async fn js_session_cap_denies_launch_before_inner() {
+        let state = Arc::new(EnvState::new());
+        let inner = Arc::new(EchoPort {
+            calls: AtomicUsize::new(0),
+        });
+        let host = Arc::new(HostManager::new());
+        let port = AdmittingProviderPort::new(host, inner.clone(), state.clone());
+        // Fill the transport session cap with direct reservations.
+        for _ in 0..crate::env_state::JS_PROVIDER_MAX_ACTIVE_SESSIONS {
+            assert!(state.try_reserve_js_session());
+        }
+        let err = port
+            .call(launch_request("mock", "r1"))
+            .await
+            .expect_err("cap must deny the launch");
+        assert_eq!(err.code, CoreErrorCode::Busy);
+        assert_eq!(
+            inner.calls.load(Ordering::SeqCst),
+            0,
+            "a capped launch must not reach the adapter and spawn a child"
+        );
+    }
+
+    /// Concurrent launches must keep request-local ownership: each recorded
+    /// session carries its own provider id, never a shared last-value.
+    #[tokio::test]
+    async fn concurrent_launches_keep_request_local_provider_ownership() {
+        let state = Arc::new(EnvState::new());
+        let inner = Arc::new(EchoPort {
+            calls: AtomicUsize::new(0),
+        });
+        let host = Arc::new(HostManager::new());
+        let port = Arc::new(AdmittingProviderPort::new(host, inner, state.clone()));
+        // Seed two launch records with distinct provider ids directly, proving
+        // the state maps session -> its own provider id (no cross-assignment).
+        state.record_js_session("s-a".to_string(), "provider-a".to_string());
+        state.record_js_session("s-b".to_string(), "provider-b".to_string());
+        let a = state.with_js_state(|s| s.session("s-a").cloned()).flatten().unwrap();
+        let b = state.with_js_state(|s| s.session("s-b").cloned()).flatten().unwrap();
+        assert_eq!(a.provider_id, "provider-a");
+        assert_eq!(b.provider_id, "provider-b");
+        let _ = port;
     }
 }

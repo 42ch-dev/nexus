@@ -41,11 +41,27 @@ export function resolveSseFirstPullDelayMs(): number {
 export const SSE_MAX_OUTSTANDING_FRAME_BYTES = 512 * 1024;
 /** Reserved control slot size for terminal/gap frames (not charged to data permits). */
 export const SSE_RESERVED_CONTROL_BYTES = 4 * 1024;
-/** Max aggregate pending bytes across buffered SSE frames (env override). */
-export const SSE_MAX_AGGREGATE_PENDING_BYTES = resolvePositiveIntEnv(
+/**
+ * Node-owned retained/handoff frame byte budget (process-wide). The env var may
+ * only *lower* this ceiling — a raised value is clamped back, so no override can
+ * expand the frozen environment total.
+ */
+export const SSE_MAX_AGGREGATE_PENDING_BYTES_CEILING = 8 * 1024 * 1024;
+export const SSE_MAX_AGGREGATE_PENDING_BYTES = resolveCeilEnv(
   'NEXUS_SSE_MAX_PENDING_BYTES',
-  32 * 1024 * 1024,
+  SSE_MAX_AGGREGATE_PENDING_BYTES_CEILING,
 );
+/** Handoff bytes reserved per live SSE socket until the socket is released. */
+export const SSE_SOCKET_RESERVED_BYTES = 64 * 1024;
+/** Process-wide live SSE subscriber cap (architecture §7). */
+export const SSE_MAX_TOTAL_SUBSCRIBERS = 96;
+/**
+ * Max concurrently active (non-terminal) provider operations. Admitted at the
+ * transport boundary as `busy` *before* the provider effect is dispatched.
+ */
+export const MAX_ACTIVE_PROVIDER_OPERATIONS = 6;
+/** Frozen process-wide environment byte ceiling (architecture §7 / STREAM-2). */
+export const ENVIRONMENT_TOTAL_CEILING_BYTES = 32 * 1024 * 1024;
 /** Drain wait after write(false) before disconnecting a slow subscriber. */
 export const SSE_DRAIN_TIMEOUT_MS = 2_000;
 /** Live SSE subscribers per session (architecture §7). */
@@ -64,6 +80,18 @@ export const SSE_MAX_PENDING_DATA_FRAMES = 16;
 export const SSE_MAX_PENDING_DATA_BYTES = 1024 * 1024;
 /** Max terminal operations retained in the HTTP registry after completion. */
 export const REGISTRY_MAX_TERMINAL_OPERATIONS = 64;
+/**
+ * Bound on hubs that may simultaneously hold control frames: at most
+ * {@link REGISTRY_MAX_TERMINAL_OPERATIONS} retained terminal hubs plus
+ * {@link MAX_ACTIVE_PROVIDER_OPERATIONS} live hubs. Each hub holds at most one
+ * terminal and one gap slot of ≤{@link SSE_RESERVED_CONTROL_BYTES}, so the
+ * control reserve below is a hard ceiling that never competes with the data pool.
+ */
+export const ENVIRONMENT_MAX_TRACKED_HUBS =
+  REGISTRY_MAX_TERMINAL_OPERATIONS + MAX_ACTIVE_PROVIDER_OPERATIONS;
+/** Dedicated control-frame byte reserve (terminal+gap slots), separate from data. */
+export const SSE_CONTROL_RESERVED_TOTAL_BYTES =
+  ENVIRONMENT_MAX_TRACKED_HUBS * 2 * SSE_RESERVED_CONTROL_BYTES;
 /** Default provider effect deadline. */
 export const PROVIDER_DEFAULT_DEADLINE_MS = 30_000;
 
@@ -72,6 +100,19 @@ function resolvePositiveIntEnv(name: string, fallback: number): number {
   if (!raw) return fallback;
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isSafeInteger(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+/**
+ * Env override that can only tighten a frozen ceiling. An absent, malformed, or
+ * *larger* value resolves to the ceiling, so no environment variable can raise
+ * the process-wide bound the proof is computed against.
+ */
+function resolveCeilEnv(name: string, ceiling: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return ceiling;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > ceiling) return ceiling;
   return parsed;
 }
 

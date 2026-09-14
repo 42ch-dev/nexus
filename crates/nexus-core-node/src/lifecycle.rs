@@ -1026,7 +1026,7 @@ mod tests {
         .expect("open");
 
         // A live JS session whose operation is still in flight.
-        state.record_js_session("sess-retained".to_string());
+        state.record_js_session("sess-retained".to_string(), "mock-provider".to_string());
         state.record_js_session_operation("sess-retained", "op-live".to_string());
 
         // First close: the release attempt fails, so cleanup cannot be confirmed.

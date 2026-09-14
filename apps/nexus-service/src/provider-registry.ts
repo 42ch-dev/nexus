@@ -14,9 +14,34 @@ export interface ProviderOperationRecord {
   operationId: string;
   sessionId: string;
   providerId: string;
+  /**
+   * Native-authoritative status when hydrated (`running` | `cancelling` |
+   * `pending` | `completed` | `failed` | `unknown`), or the local `started`
+   * value between admission and the first native observation. Never a constant.
+   */
   status: string;
   terminalEvent: ProviderHostEvent | null;
   terminalTranscript: string | null;
+}
+
+/**
+ * Statuses that mean the operation can no longer be cancelled. Covers the
+ * local terminal mapping derived from `ProviderHostEvent` (`finished`/`failed`/
+ * `stopped`) and the native wire statuses transcribed from
+ * `operation_status_wire` in `crates/nexus-agent-host/src/providers/port.rs`
+ * (`completed` for Ready/Stopped, `failed` for the error terminals) plus the
+ * cancel acknowledgment (`cancelled`).
+ */
+const TERMINAL_OPERATION_STATUSES = new Set([
+  'finished',
+  'failed',
+  'stopped',
+  'completed',
+  'cancelled',
+]);
+
+export function isTerminalOperationStatus(status: string): boolean {
+  return TERMINAL_OPERATION_STATUSES.has(status);
 }
 
 export class ProviderRegistry {
@@ -46,16 +71,33 @@ export class ProviderRegistry {
     return hub;
   }
 
+  /**
+   * Live (non-terminal) provider operations. The transport admission cap reads
+   * this before dispatching a provider effect, so a stalled/hung operation
+   * population cannot grow without bound.
+   */
+  activeOperationCount(): number {
+    let count = 0;
+    for (const op of this.operations.values()) {
+      if (!op.terminalEvent && !isTerminalOperationStatus(op.status)) count += 1;
+    }
+    return count;
+  }
+
   registerSession(record: ProviderSessionRecord): void {
     this.sessions.set(record.sessionId, record);
   }
 
   registerOperation(record: ProviderOperationRecord): void {
     this.operations.set(record.operationId, record);
-    const session = this.sessions.get(record.sessionId);
-    if (session) {
-      session.activeOpId = record.operationId;
-      session.state = 'Running';
+    if (isTerminalOperationStatus(record.status)) {
+      this.trackTerminal(record.operationId);
+    } else {
+      const session = this.sessions.get(record.sessionId);
+      if (session) {
+        session.activeOpId = record.operationId;
+        session.state = 'Running';
+      }
     }
     this.evictTerminalOperationsIfNeeded();
   }
@@ -81,9 +123,7 @@ export class ProviderRegistry {
       session.activeOpId = null;
       session.state = 'Ready';
     }
-    if (!this.terminalOrder.includes(operationId)) {
-      this.terminalOrder.push(operationId);
-    }
+    this.trackTerminal(operationId);
     this.evictTerminalOperationsIfNeeded();
   }
 
@@ -93,6 +133,12 @@ export class ProviderRegistry {
       if (op.sessionId === sessionId) {
         this.disposeOperation(opId);
       }
+    }
+  }
+
+  private trackTerminal(operationId: string): void {
+    if (!this.terminalOrder.includes(operationId)) {
+      this.terminalOrder.push(operationId);
     }
   }
 
@@ -111,7 +157,8 @@ export class ProviderRegistry {
       const evictId = this.terminalOrder.shift();
       if (!evictId) break;
       const op = this.operations.get(evictId);
-      if (!op?.terminalEvent) continue;
+      if (!op) continue;
+      if (!op.terminalEvent && !isTerminalOperationStatus(op.status)) continue;
       const session = this.sessions.get(op.sessionId);
       if (session?.activeOpId === evictId) continue;
       this.disposeOperation(evictId);
@@ -123,5 +170,5 @@ function terminalEventStatus(event: ProviderHostEvent): string {
   if ('OpFinished' in event) return 'finished';
   if ('OpFailed' in event) return 'failed';
   if ('SessionStopped' in event) return 'stopped';
-  return 'terminal';
+  return 'finished';
 }

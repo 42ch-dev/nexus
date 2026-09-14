@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
@@ -132,16 +132,132 @@ pub struct EnvState {
     pub close_in_flight: Mutex<bool>,
     /// Last observed pending operation/task IDs for close reports.
     pub pending_operation_ids: Mutex<Vec<String>>,
-    /// Sessions the JS provider reported as live, mapped to their in-flight
-    /// operation id (if any).
+    /// Structured state for JS-provider sessions.
     ///
     /// The JS adapter owns its ACP child processes; native close must drive
     /// their cancellation and release through the live callback bridge before
-    /// the admission fence rises, or an owned child leaks. Empty for
-    /// Rust-owned providers.
-    pub js_sessions: StdMutex<BTreeMap<String, Option<String>>>,
+    /// the admission fence rises, or an owned child leaks. This same state also
+    /// backs `hostQuery` so a JS-provider session/operation is queryable with
+    /// exactly the generated response shape. Empty for Rust-owned providers.
+    pub js_state: StdMutex<JsProviderState>,
     /// Service-only shell: compatibility/status without DB, host, or principal.
     pub service_only_uninitialized: AtomicBool,
+}
+
+/// Terminal statuses a JS-provider operation can reach.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JsOperationStatus {
+    Running,
+    Finished,
+    Failed,
+    Interrupted,
+}
+
+impl JsOperationStatus {
+    /// The generated wire status string for this terminal/live state.
+    #[must_use]
+    pub const fn wire(self) -> &'static str {
+        match self {
+            JsOperationStatus::Running => "running",
+            JsOperationStatus::Finished => "finished",
+            JsOperationStatus::Failed => "failed",
+            JsOperationStatus::Interrupted => "interrupted",
+        }
+    }
+}
+
+/// One JS-provider operation retained for exact operation responses.
+#[derive(Debug, Clone)]
+pub struct JsOperationRecord {
+    pub operation_id: String,
+    pub session_id: String,
+    pub status: JsOperationStatus,
+}
+
+/// A JS-provider session plus its active operation.
+#[derive(Debug, Clone)]
+pub struct JsSessionRecord {
+    pub session_id: String,
+    pub provider_id: String,
+    pub active_operation_id: Option<String>,
+}
+
+/// Bounded structured state for JS-provider sessions and operations.
+///
+/// Session/active-op state is bounded by the transport reservation
+/// ([`JS_PROVIDER_MAX_ACTIVE_SESSIONS`]); retained terminal operations by
+/// [`JS_MAX_TERMINAL_OPERATIONS`]. No collection grows unbounded.
+#[derive(Debug)]
+pub struct JsProviderState {
+    sessions: BTreeMap<String, JsSessionRecord>,
+    terminal: VecDeque<JsOperationRecord>,
+    /// Slots reserved by an in-flight launch, counted against the session cap so
+    /// concurrent launches cannot race past the bound.
+    reserved: usize,
+}
+
+/// Hard cap on retained terminal JS operations across all JS sessions.
+pub const JS_MAX_TERMINAL_OPERATIONS: usize = 64;
+
+/// Explicit transport cap on concurrent JS-provider sessions, reserved before a
+/// launch is dispatched so a successful launched child is never dropped (which
+/// would leak an owned ACP child untracked by close).
+pub const JS_PROVIDER_MAX_ACTIVE_SESSIONS: usize = 16;
+
+impl JsProviderState {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            sessions: BTreeMap::new(),
+            terminal: VecDeque::new(),
+            reserved: 0,
+        }
+    }
+
+    /// Upsert a terminal record by operation_id, so a duplicate terminal event
+    /// can never retain a stale status or waste the cap.
+    fn upsert_terminal(&mut self, record: JsOperationRecord) {
+        if let Some(existing) = self
+            .terminal
+            .iter_mut()
+            .find(|op| op.operation_id == record.operation_id)
+        {
+            *existing = record;
+        } else {
+            self.terminal.push_back(record);
+        }
+        while self.terminal.len() > JS_MAX_TERMINAL_OPERATIONS {
+            self.terminal.pop_front();
+        }
+    }
+
+    /// Look up an active-or-terminal operation by id.
+    #[must_use]
+    pub fn operation(&self, operation_id: &str) -> Option<JsOperationRecord> {
+        for session in self.sessions.values() {
+            if session.active_operation_id.as_deref() == Some(operation_id) {
+                return Some(JsOperationRecord {
+                    operation_id: operation_id.to_string(),
+                    session_id: session.session_id.clone(),
+                    status: JsOperationStatus::Running,
+                });
+            }
+        }
+        self.terminal
+            .iter()
+            .find(|op| op.operation_id == operation_id)
+            .cloned()
+    }
+
+    #[must_use]
+    pub fn session(&self, session_id: &str) -> Option<&JsSessionRecord> {
+        self.sessions.get(session_id)
+    }
+
+    #[must_use]
+    pub fn sessions(&self) -> impl Iterator<Item = &JsSessionRecord> {
+        self.sessions.values()
+    }
 }
 
 impl EnvState {
@@ -163,49 +279,127 @@ impl EnvState {
             settled_close: Mutex::new(None),
             close_in_flight: Mutex::new(false),
             pending_operation_ids: Mutex::new(Vec::new()),
-            js_sessions: StdMutex::new(BTreeMap::new()),
+            js_state: StdMutex::new(JsProviderState::new()),
             service_only_uninitialized: AtomicBool::new(false),
         }
     }
 
-    /// Remember a JS-provider session so close can drive its owned release.
-    pub fn record_js_session(&self, session_id: String) {
-        if let Ok(mut sessions) = self.js_sessions.lock() {
-            sessions.entry(session_id).or_insert(None);
-        }
-    }
-
-    /// Track the session's in-flight operation so close can cancel it first.
-    pub fn record_js_session_operation(&self, session_id: &str, operation_id: String) {
-        if let Ok(mut sessions) = self.js_sessions.lock() {
-            sessions.insert(session_id.to_string(), Some(operation_id));
-        }
-    }
-
-    /// The session's operation reached a terminal: nothing left to cancel.
-    pub fn clear_js_session_operation(&self, session_id: &str) {
-        if let Ok(mut sessions) = self.js_sessions.lock() {
-            if let Some(entry) = sessions.get_mut(session_id) {
-                *entry = None;
+    /// Race-safe pre-launch reservation for a JS-provider session.
+    ///
+    /// Reserves one of the bounded session slots *before* the launch is
+    /// dispatched, so a launched child is never dropped for lack of tracking
+    /// (which would leak an owned ACP child). Returns `false` when the transport
+    /// session cap is reached.
+    pub fn try_reserve_js_session(&self) -> bool {
+        if let Ok(mut state) = self.js_state.lock() {
+            if state.sessions.len() + state.reserved >= JS_PROVIDER_MAX_ACTIVE_SESSIONS {
+                return false;
             }
+            state.reserved += 1;
+            return true;
+        }
+        false
+    }
+
+    /// Release a reservation whose launch did not produce a session.
+    pub fn release_js_session_reservation(&self) {
+        if let Ok(mut state) = self.js_state.lock() {
+            state.reserved = state.reserved.saturating_sub(1);
+        }
+    }
+
+    /// Record a launched JS-provider session and its admitted provider id,
+    /// consuming a pending reservation if one exists.
+    pub fn record_js_session(&self, session_id: String, provider_id: String) {
+        if let Ok(mut state) = self.js_state.lock() {
+            let consumed_reservation = state.reserved > 0;
+            if consumed_reservation {
+                state.reserved -= 1;
+            } else if state.sessions.len() >= JS_PROVIDER_MAX_ACTIVE_SESSIONS {
+                return;
+            }
+            state.sessions.insert(
+                session_id.clone(),
+                JsSessionRecord {
+                    session_id,
+                    provider_id,
+                    active_operation_id: None,
+                },
+            );
+        }
+    }
+
+    /// Record an executed JS-provider operation. Requires the admitted launch
+    /// record: an unknown session is never fabricated with an empty provider id.
+    pub fn record_js_session_operation(&self, session_id: &str, operation_id: String) {
+        if let Ok(mut state) = self.js_state.lock() {
+            if let Some(session) = state.sessions.get_mut(session_id) {
+                session.active_operation_id = Some(operation_id);
+            }
+        }
+    }
+
+    /// A cancel acknowledgement does NOT clear the active op: the operation only
+    /// becomes terminal when the adapter emits its terminal event.
+    pub fn record_js_cancel_ack(&self, _session_id: &str) {}
+
+    /// Record an operation terminal observed from a real provider event batch.
+    /// Clears the session's active op and upserts a bounded terminal record.
+    pub fn record_js_operation_terminal(
+        &self,
+        session_id: &str,
+        operation_id: &str,
+        status: JsOperationStatus,
+    ) {
+        if let Ok(mut state) = self.js_state.lock() {
+            if let Some(session) = state.sessions.get_mut(session_id) {
+                if session.active_operation_id.as_deref() == Some(operation_id) {
+                    session.active_operation_id = None;
+                }
+            }
+            state.upsert_terminal(JsOperationRecord {
+                operation_id: operation_id.to_string(),
+                session_id: session_id.to_string(),
+                status,
+            });
+        }
+    }
+
+    /// A `SessionStopped` marks any active op interrupted and removes the session
+    /// from the active set, consistently with shutdown semantics.
+    pub fn record_js_session_stopped(&self, session_id: &str) {
+        if let Ok(mut state) = self.js_state.lock() {
+            let active = state
+                .sessions
+                .get(session_id)
+                .and_then(|s| s.active_operation_id.clone());
+            if let Some(op_id) = active {
+                state.upsert_terminal(JsOperationRecord {
+                    operation_id: op_id,
+                    session_id: session_id.to_string(),
+                    status: JsOperationStatus::Interrupted,
+                });
+            }
+            state.sessions.remove(session_id);
         }
     }
 
     /// Forget a JS-provider session whose owned cleanup was confirmed.
     pub fn forget_js_session(&self, session_id: &str) {
-        if let Ok(mut sessions) = self.js_sessions.lock() {
-            sessions.remove(session_id);
+        if let Ok(mut state) = self.js_state.lock() {
+            state.sessions.remove(session_id);
         }
     }
 
     /// Live JS-provider sessions awaiting an owned release.
     pub fn js_sessions_snapshot(&self) -> Vec<(String, Option<String>)> {
-        self.js_sessions
+        self.js_state
             .lock()
-            .map(|sessions| {
-                sessions
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
+            .map(|state| {
+                state
+                    .sessions
+                    .values()
+                    .map(|s| (s.session_id.clone(), s.active_operation_id.clone()))
                     .collect()
             })
             .unwrap_or_default()
@@ -217,6 +411,51 @@ impl EnvState {
             .into_iter()
             .map(|(session_id, _)| session_id)
             .collect()
+    }
+
+    /// Run `f` against the structured JS state under one lock.
+    pub fn with_js_state<T>(&self, f: impl FnOnce(&JsProviderState) -> T) -> Option<T> {
+        self.js_state.lock().ok().map(|state| f(&state))
+    }
+
+    /// Inspect the actual delivered provider events and update JS operation
+    /// truth: `OpFinished` → finished, `OpFailed` → failed, `SessionStopped` →
+    /// interrupted (any active op) and the session leaves the active set. The
+    /// terminal is derived from the real batch, never a caller label.
+    pub fn apply_js_batch_terminals(
+        &self,
+        operation_id: &str,
+        events: &[nexus_contracts::provider_event_batch::NexusProviderHostEvent],
+    ) {
+        let Some(session_id) = self
+            .with_js_state(|state| state.operation(operation_id).map(|op| op.session_id))
+            .flatten()
+        else {
+            return;
+        };
+        use nexus_contracts::provider_event_batch::NexusProviderHostEvent as BatchEvent;
+        for event in events {
+            match event {
+                BatchEvent::OpFinished { .. } => {
+                    self.record_js_operation_terminal(
+                        &session_id,
+                        operation_id,
+                        JsOperationStatus::Finished,
+                    );
+                }
+                BatchEvent::OpFailed { .. } => {
+                    self.record_js_operation_terminal(
+                        &session_id,
+                        operation_id,
+                        JsOperationStatus::Failed,
+                    );
+                }
+                BatchEvent::SessionStopped { .. } => {
+                    self.record_js_session_stopped(&session_id);
+                }
+                _ => {}
+            }
+        }
     }
 
     pub fn lifecycle_phase(&self) -> EnvLifecyclePhase {
@@ -635,5 +874,116 @@ mod tests {
             waiter.await.expect("join"),
             "close must wake a registered waiter"
         );
+    }
+
+    fn op_finished(op_id: &str) -> nexus_contracts::provider_event_batch::NexusProviderHostEvent {
+        use nexus_contracts::provider_event_batch::{
+            NexusProviderHostEvent, ProviderEventBatchEventsItemOpFinishedReason,
+        };
+        NexusProviderHostEvent::OpFinished {
+            op_id: op_id.to_string(),
+            session_id: "s".to_string(),
+            reason: ProviderEventBatchEventsItemOpFinishedReason::EndTurn,
+        }
+    }
+
+    #[test]
+    fn js_state_tracks_launch_execute_and_terminal_from_real_events() {
+        let state = EnvState::new();
+        assert!(state.try_reserve_js_session());
+        state.record_js_session("sess-1".to_string(), "mock-acp".to_string());
+        state.record_js_session_operation("sess-1", "op-1".to_string());
+        // Active op is live and queryable with the admitted provider id.
+        let session = state.with_js_state(|s| s.session("sess-1").cloned()).flatten().unwrap();
+        assert_eq!(session.provider_id, "mock-acp");
+        assert_eq!(session.active_operation_id.as_deref(), Some("op-1"));
+        let op = state.with_js_state(|s| s.operation("op-1")).flatten().unwrap();
+        assert_eq!(op.status.wire(), "running");
+        // A real terminal event clears the active op and retains the terminal.
+        state.apply_js_batch_terminals("op-1", &[op_finished("op-1")]);
+        assert_eq!(
+            state.with_js_state(|s| s.operation("op-1")).flatten().unwrap().status.wire(),
+            "finished"
+        );
+        assert!(
+            state
+                .with_js_state(|s| s.session("sess-1").cloned())
+                .flatten()
+                .unwrap()
+                .active_operation_id
+                .is_none(),
+            "terminal must clear the session's active op"
+        );
+    }
+
+    #[test]
+    fn js_cancel_ack_does_not_end_the_operation() {
+        let state = EnvState::new();
+        state.record_js_session("sess-2".to_string(), "mock-acp".to_string());
+        state.record_js_session_operation("sess-2", "op-2".to_string());
+        state.record_js_cancel_ack("sess-2");
+        assert_eq!(
+            state.with_js_state(|s| s.operation("op-2")).flatten().unwrap().status.wire(),
+            "running",
+            "a cancel ack must not mark the op terminal"
+        );
+    }
+
+    #[test]
+    fn js_session_stop_marks_active_op_interrupted_and_removes_session() {
+        let state = EnvState::new();
+        state.record_js_session("sess-3".to_string(), "mock-acp".to_string());
+        state.record_js_session_operation("sess-3", "op-3".to_string());
+        state.record_js_session_stopped("sess-3");
+        assert_eq!(
+            state.with_js_state(|s| s.operation("op-3")).flatten().unwrap().status.wire(),
+            "interrupted"
+        );
+        assert!(state.with_js_state(|s| s.session("sess-3").cloned()).flatten().is_none());
+    }
+
+    #[test]
+    fn js_terminal_operations_are_bounded_and_deduplicated() {
+        let state = EnvState::new();
+        state.record_js_session("sess-4".to_string(), "mock-acp".to_string());
+        for i in 0..(JS_MAX_TERMINAL_OPERATIONS + 10) {
+            let op = format!("op-{i}");
+            state.record_js_operation_terminal("sess-4", &op, JsOperationStatus::Finished);
+        }
+        let retained = state
+            .with_js_state(|s| s.terminal.len())
+            .unwrap();
+        assert_eq!(retained, JS_MAX_TERMINAL_OPERATIONS, "terminal history must be bounded");
+        // A duplicate terminal upserts rather than appending.
+        state.record_js_operation_terminal("sess-4", "op-5", JsOperationStatus::Failed);
+        assert_eq!(state.with_js_state(|s| s.terminal.len()).unwrap(), JS_MAX_TERMINAL_OPERATIONS);
+        assert_eq!(
+            state.with_js_state(|s| s.operation("op-5")).flatten().unwrap().status.wire(),
+            "failed"
+        );
+    }
+
+    #[test]
+    fn js_execute_for_unknown_session_is_not_fabricated() {
+        let state = EnvState::new();
+        state.record_js_session_operation("no-such-session", "op-x".to_string());
+        assert!(
+            state.with_js_state(|s| s.operation("op-x")).flatten().is_none(),
+            "an execute for an unlaunched session must not create state"
+        );
+    }
+
+    #[test]
+    fn js_session_cap_is_enforced_by_reservation() {
+        let state = EnvState::new();
+        let mut reserved = 0;
+        while state.try_reserve_js_session() {
+            reserved += 1;
+            assert!(reserved <= JS_PROVIDER_MAX_ACTIVE_SESSIONS);
+        }
+        assert_eq!(reserved, JS_PROVIDER_MAX_ACTIVE_SESSIONS);
+        // Releasing a reservation frees exactly one slot.
+        state.release_js_session_reservation();
+        assert!(state.try_reserve_js_session());
     }
 }

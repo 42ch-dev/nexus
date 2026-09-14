@@ -96,6 +96,7 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
       const protocol = config.tlsCert && config.tlsKey ? 'https' : 'http';
       return {
         url: `${protocol}://${formatHttpAuthority(config.host, bound.port)}`,
+        service: serviceCore,
         close: created.running.close,
       };
     }

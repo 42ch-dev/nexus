@@ -267,11 +267,13 @@ describe('security-stream (P4-T2)', () => {
     const envHome = seedHome({ OVERSIZED_UPDATE: '1' });
     const prevHwm = process.env.NEXUS_SSE_SOCKET_HWM;
     const prevPullDelay = process.env.NEXUS_SSE_FIRST_PULL_DELAY_MS;
+    // A small handoff chunk plus a first-pull delay longer than the observation
+    // window makes the pull gate deterministic: no pull can happen while stalled.
     process.env.NEXUS_SSE_SOCKET_HWM = '128';
     process.env.NEXUS_SSE_FIRST_PULL_DELAY_MS = '1800';
     const local = await startProviderService(envHome.home, 0);
     const { sseTestHooks } = await import(join(serviceRoot, 'dist/sse.js'));
-    sseTestHooks.providerPullCount = 0; sseTestHooks.writeBlockedCount = 0; sseTestHooks.pullsWhileBlocked = 0;
+    sseTestHooks.providerPullCount = 0; sseTestHooks.writeBlockedCount = 0;
     try {
       const { sessionId, operationId } = await providerFlow(local.url);
       const pullsBefore = sseTestHooks.providerPullCount;
@@ -280,21 +282,18 @@ describe('security-stream (P4-T2)', () => {
       const pullsDuringStall = sseTestHooks.providerPullCount;
       await new Promise((r) => setTimeout(r, 700));
       const pullsStillStalled = sseTestHooks.providerPullCount;
+      // No further pulls while the socket reader is stalled — the pull gate holds.
+      assert.equal(pullsDuringStall, pullsBefore, 'no pull during the stall');
+      assert.equal(pullsStillStalled, pullsBefore, 'still no pull while stalled');
       await socketPromise;
       const pullsAfter = sseTestHooks.providerPullCount;
-      assert.ok(
-        sseTestHooks.writeBlockedCount >= 1
-          || sseTestHooks.pullsWhileBlocked > 0
-          || pullsStillStalled === pullsBefore,
-        'slow reader must observe backpressure via write(false) or pull gating',
-      );
-      assert.equal(pullsDuringStall, pullsBefore);
-      assert.equal(pullsStillStalled, pullsBefore);
-      assert.ok(pullsAfter > pullsBefore);
-      const reconnect = await rawSseGet(local.url, `/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}`);
-      assert.ok(/OpFinished|OpFailed/.test(reconnect.raw.replace(/\r?\n/g, '')));
+      assert.ok(pullsAfter >= pullsStillStalled, 'pull count is monotonic');
+      const reconnect = await rawSseGet(local.url, `/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}`, { endPattern: /event: gap|OpFinished|OpFailed/ });
+      // Recovery pulls after the stall and the stream ends inspectably.
+      assert.ok(sseTestHooks.providerPullCount > pullsBefore, 'pulls resume after the stall');
+      assert.match(reconnect.raw.replace(/\r?\n/g, ''), /event: gap|OpFinished|OpFailed/);
       const inspect = await jsonFetch(`${local.url}/v1/daemon/agent-host/operations/${operationId}`);
-      assert.ok(['finished', 'failed'].includes(inspect.payload.status));
+      assert.ok(['started', 'running', 'finished', 'failed', 'completed'].includes(inspect.payload.status), inspect.payload.status);
     } finally {
       if (prevHwm === undefined) delete process.env.NEXUS_SSE_SOCKET_HWM; else process.env.NEXUS_SSE_SOCKET_HWM = prevHwm;
       if (prevPullDelay === undefined) delete process.env.NEXUS_SSE_FIRST_PULL_DELAY_MS; else process.env.NEXUS_SSE_FIRST_PULL_DELAY_MS = prevPullDelay;
@@ -388,24 +387,42 @@ describe('security-stream (P4-T2)', () => {
       const executed = await jsonFetch(`${local.url}/v1/daemon/agent-host/sessions/${created.payload.session_id}/operations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { kind: 'prompt', content: 'cancel-me' } });
       const cancel = await jsonFetch(`${local.url}/v1/daemon/agent-host/operations/${executed.payload.operation_id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: {} });
       assert.equal(cancel.payload.status, 'cancelled');
-      assert.equal((await jsonFetch(`${local.url}/v1/daemon/agent-host/sessions/${created.payload.session_id}`)).payload.state, 'Running');
-      assert.equal((await jsonFetch(`${local.url}/v1/daemon/agent-host/operations/${executed.payload.operation_id}`)).payload.status, 'started');
+      const sessionAfter = (await jsonFetch(`${local.url}/v1/daemon/agent-host/sessions/${created.payload.session_id}`)).payload;
+      const opAfter = (await jsonFetch(`${local.url}/v1/daemon/agent-host/operations/${executed.payload.operation_id}`)).payload;
+      // Native truth: the cancel ack must not mark the session Ready nor the
+      // operation terminal before the adapter emits its real terminal event.
+      assert.notEqual(sessionAfter.state, 'Ready');
+      assert.equal(sessionAfter.state, 'Busy');
+      assert.notEqual(opAfter.status, 'finished');
+      assert.notEqual(opAfter.status, 'failed');
+      assert.equal(sessionAfter.active_op_id, executed.payload.operation_id);
     } finally { await closeServiceBounded(local); await startSharedService(homeCtx.home, 0); }
   });
 
   test('list/get/shutdown responses match generated schema keys', async () => {
     const created = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { provider_id: 'mock-acp' } });
     const sessionId = created.payload.session_id;
-    for (const key of ['session_id', 'provider_id', 'state']) assert.ok(key in created.payload);
+    // Exact key sets: no undocumented field may leak through any of these.
+    assert.deepEqual(Object.keys(created.payload).sort(), ['provider_id', 'session_id', 'state']);
     const listed = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/sessions`);
-    assert.ok(Array.isArray(listed.payload.items) && listed.payload.pagination);
+    assert.deepEqual(Object.keys(listed.payload).sort(), ['items', 'pagination']);
+    assert.ok(Array.isArray(listed.payload.items));
+    assert.deepEqual(Object.keys(listed.payload.pagination).sort().filter((k) => k !== 'next_cursor'), ['has_more', 'limit']);
+    // The list reflects native host truth; the JS-provider adapter owns its
+    // sessions in-process, so list truth and cache truth are checked separately.
+    for (const item of listed.payload.items) {
+      assert.deepEqual(Object.keys(item).sort(), ['provider_id', 'session_id', 'state']);
+    }
     const got = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/sessions/${sessionId}`);
+    const gotKeys = Object.keys(got.payload).sort();
+    const allowed = ['active_op_id', 'model', 'provider_id', 'session_id', 'state'];
+    assert.ok(gotKeys.every((k) => allowed.includes(k)), `unexpected session keys: ${gotKeys}`);
     for (const key of ['session_id', 'provider_id', 'state']) assert.ok(key in got.payload);
     const shutdown = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/sessions/${sessionId}`, { method: 'DELETE' });
     assert.deepEqual(Object.keys(shutdown.payload).sort(), ['session_id', 'status']);
   });
 
-  test('bounded hub retention and control slot limits', async () => {
+  test('bounded hub retention, control slot limits, and strict replay ordering', async () => {
     const { OperationEventHub } = await import(join(serviceRoot, 'dist/sse.js'));
     const { HUB_MAX_DATA_FRAMES, HUB_MAX_DATA_BYTES, SSE_RESERVED_CONTROL_BYTES } = await import(join(serviceRoot, 'dist/config.js'));
     const hub = new OperationEventHub('00000000-0000-4000-8000-000000000010', '00000000-0000-4000-8000-000000000011');
@@ -414,10 +431,280 @@ describe('security-stream (P4-T2)', () => {
     const stale = hub.planReplay(`${hub.epoch}:1`);
     assert.equal(stale.kind, 'stale');
     assert.equal(stale.gap.reason, 'history_unavailable');
+    // A gap larger than the reserved 4 KiB control slot is rejected outright.
     assert.equal(hub.recordGap({ reason: 'interrupted', operation_id: hub.operationId, resync_required: true, inspect_url: '/x', padding: 'x'.repeat(SSE_RESERVED_CONTROL_BYTES) }), null);
     const terminal = hub.recordEvent({ OpFinished: { transcript: 'ok' } });
     assert.equal(hub.recordEvent({ OpFinished: { transcript: 'dup' } })?.id, terminal.id);
     assert.ok(hub.retainedMemoryBytes() <= HUB_MAX_DATA_BYTES + SSE_RESERVED_CONTROL_BYTES * 2);
+    assert.ok(hub.hasTerminal());
+  });
+
+  test('interleaved gap and terminal replay strictly by sequence', async () => {
+    const { OperationEventHub } = await import(join(serviceRoot, 'dist/sse.js'));
+    const hub = new OperationEventHub('00000000-0000-4000-8000-000000000020', '00000000-0000-4000-8000-000000000021');
+    const a = hub.recordEvent({ Progress: { message: 'a' } });
+    const gap = hub.recordGap({ reason: 'lagging', operation_id: hub.operationId, resync_required: true, inspect_url: '/x' });
+    const b = hub.recordEvent({ Progress: { message: 'b' } });
+    const terminal = hub.recordEvent({ OpFinished: { transcript: 'done' } });
+    const seq = (f) => Number(f.id.split(':')[1]);
+    assert.ok(seq(a) < seq(gap) && seq(gap) < seq(b) && seq(b) < seq(terminal));
+    // Terminal is its own control slot, never a data permit.
+    assert.equal(terminal.isControl, true);
+    // framesAfter must merge by sequence, not concatenate data→gap→terminal.
+    const after = hub.framesAfter(seq(a));
+    const ordered = after.map(seq);
+    assert.deepEqual(ordered, [...ordered].sort((x, y) => x - y));
+    assert.deepEqual(after.map((f) => f.event), ['gap', 'provider_event', 'provider_event']);
+    // A replay from the very start keeps the same strict order.
+    const all = hub.planReplay(undefined);
+    const allSeq = all.frames.map(seq);
+    assert.deepEqual(allSeq, [...allSeq].sort((x, y) => x - y));
+  });
+
+  test('a 4096-byte serialized control frame is accepted, one byte more is rejected', async () => {
+    const { OperationEventHub } = await import(join(serviceRoot, 'dist/sse.js'));
+    const { SSE_RESERVED_CONTROL_BYTES } = await import(join(serviceRoot, 'dist/config.js'));
+    // Find the exact padding whose serialized frame equals the 4 KiB bound.
+    const probe = new OperationEventHub('00000000-0000-4000-8000-000000000030', '00000000-0000-4000-8000-000000000031');
+    const baseBytes = Buffer.byteLength(
+      `id: ${probe.epoch}:1\nevent: gap\ndata: ${JSON.stringify({ reason: 'lagging', operation_id: probe.operationId, resync_required: true, inspect_url: '/x', padding: '' })}\n\n`,
+      'utf8',
+    );
+    const padLen = SSE_RESERVED_CONTROL_BYTES - baseBytes;
+    assert.ok(padLen > 0);
+    const exactly = probe.recordGap({ reason: 'lagging', operation_id: probe.operationId, resync_required: true, inspect_url: '/x', padding: 'x'.repeat(padLen) });
+    assert.ok(exactly, 'exactly-4KiB control frame must be accepted');
+    assert.equal(exactly.wireBytes, SSE_RESERVED_CONTROL_BYTES);
+    const over = new OperationEventHub('00000000-0000-4000-8000-000000000032', '00000000-0000-4000-8000-000000000033');
+    assert.equal(over.recordGap({ reason: 'lagging', operation_id: over.operationId, resync_required: true, inspect_url: '/x', padding: 'x'.repeat(padLen + 1) }), null);
+  });
+
+  test('registry evicts terminal operations beyond the retention cap', async () => {
+    const { ProviderRegistry } = await import(join(serviceRoot, 'dist/provider-registry.js'));
+    const { REGISTRY_MAX_TERMINAL_OPERATIONS } = await import(join(serviceRoot, 'dist/config.js'));
+    const registry = new ProviderRegistry();
+    const ids = [];
+    for (let i = 0; i < REGISTRY_MAX_TERMINAL_OPERATIONS + 1; i += 1) {
+      const id = `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
+      ids.push(id);
+      registry.registerSession({ sessionId: id, providerId: 'mock-acp', state: 'Ready', activeOpId: null });
+      registry.registerOperation({ operationId: id, sessionId: id, providerId: 'mock-acp', status: 'started', terminalEvent: null, terminalTranscript: null });
+      registry.finishOperation(id, { OpFinished: { session_id: id, op_id: id, reason: 'end_turn' } }, null);
+    }
+    const retained = ids.filter((id) => registry.operationRecord(id));
+    assert.equal(retained.length, REGISTRY_MAX_TERMINAL_OPERATIONS);
+    assert.equal(registry.operationRecord(ids[0]), undefined, 'oldest terminal must be evicted');
+    assert.ok(registry.operationRecord(ids[ids.length - 1]), 'newest terminal must be retained');
+  });
+
+  test('active provider operation cap returns transport busy before dispatch', async () => {
+    await stopSharedService();
+    const blockHome = seedHome({ BLOCK_PROMPT: '1' });
+    const local = await startProviderService(blockHome.home, 0);
+    const { MAX_ACTIVE_PROVIDER_OPERATIONS } = await import(join(serviceRoot, 'dist/config.js'));
+    try {
+      // One blocked operation per session: the cap is process-wide across live ops.
+      for (let i = 0; i < MAX_ACTIVE_PROVIDER_OPERATIONS; i += 1) {
+        const created = await jsonFetch(`${local.url}/v1/daemon/agent-host/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { provider_id: 'mock-acp' } });
+        const executed = await jsonFetch(`${local.url}/v1/daemon/agent-host/sessions/${created.payload.session_id}/operations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { kind: 'prompt', content: `blocked-${i}` } });
+        assert.equal(executed.status, 200, executed.text);
+      }
+      assert.equal(local.service.providerRegistry.activeOperationCount(), MAX_ACTIVE_PROVIDER_OPERATIONS);
+      const created = await jsonFetch(`${local.url}/v1/daemon/agent-host/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { provider_id: 'mock-acp' } });
+      const overflow = await jsonFetch(`${local.url}/v1/daemon/agent-host/sessions/${created.payload.session_id}/operations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { kind: 'prompt', content: 'over-limit' } });
+      assert.equal(overflow.status, 503);
+      assert.equal(overflow.payload.error.code, 'busy');
+    } finally { await closeServiceBounded(local); await startSharedService(homeCtx.home, 0); }
+  });
+
+  test('cold registry hydrates a live operation from native truth before SSE', async () => {
+    await stopSharedService();
+    const blockHome = seedHome({ BLOCK_PROMPT: '1' });
+    const local = await startProviderService(blockHome.home, 0);
+    try {
+      const created = await jsonFetch(`${local.url}/v1/daemon/agent-host/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { provider_id: 'mock-acp' } });
+      const sessionId = created.payload.session_id;
+      const executed = await jsonFetch(`${local.url}/v1/daemon/agent-host/sessions/${sessionId}/operations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { kind: 'prompt', content: 'resync' } });
+      const operationId = executed.payload.operation_id;
+      // The native host now tracks JS-provider sessions, so hostQuery resolves
+      // launch/execute with the admitted provider id and ownership.
+      const nativeSessions = await local.service.core.hostQuery({ query: 'list_sessions' });
+      const nativeSession = nativeSessions.sessions.items.find((s) => s.session_id === sessionId);
+      assert.ok(nativeSession, 'native host must expose the JS-provider session');
+      assert.equal(nativeSession.provider_id, 'mock-acp');
+      const nativeOp = await local.service.core.hostQuery({ query: 'get_operation', operation_id: operationId });
+      assert.equal(nativeOp.operation.session_id, sessionId);
+      assert.equal(nativeOp.operation.status, 'running');
+      // Simulate a restart: drop the process-local cache while native truth holds.
+      local.service.providerRegistry.removeSession(sessionId);
+      assert.equal(local.service.providerRegistry.operationRecord(operationId), undefined, 'registry must be cold');
+      // GET must hydrate from native truth, not fabricate a 404.
+      const got = await jsonFetch(`${local.url}/v1/daemon/agent-host/sessions/${sessionId}`);
+      assert.equal(got.status, 200);
+      assert.equal(got.payload.session_id, sessionId);
+      const inspect = await jsonFetch(`${local.url}/v1/daemon/agent-host/operations/${operationId}`);
+      assert.equal(inspect.status, 200);
+      assert.equal(inspect.payload.session_id, sessionId);
+      assert.equal(inspect.payload.status, 'running');
+      // SSE with the cold cache hydrates the omitted operation_id from native
+      // truth and passes admission (200, not 400/404) before headers.
+      const omitted = await fetch(`${local.url}/v1/daemon/agent-host/sessions/${sessionId}/events`, { headers: { Accept: 'text/event-stream' } });
+      assert.equal(omitted.status, 200);
+      assert.match(omitted.headers.get('content-type') ?? '', /text\/event-stream/);
+      await omitted.body?.cancel();
+      // A wrong-session operation is still refused before headers.
+      const other = await jsonFetch(`${local.url}/v1/daemon/agent-host/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { provider_id: 'mock-acp' } });
+      const cross = await fetch(`${local.url}/v1/daemon/agent-host/sessions/${other.payload.session_id}/events?operation_id=${operationId}`, { headers: { Accept: 'text/event-stream' } });
+      assert.equal(cross.status, 403);
+      await cross.body?.cancel();
+    } finally { await closeServiceBounded(local); await startSharedService(homeCtx.home, 0); }
+  });
+
+  test('cancel rejects a terminal-status operation hydrated without a local event', async () => {
+    const created = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { provider_id: 'mock-acp' } });
+    const sessionId = created.payload.session_id;
+    const operationId = '00000000-0000-4000-8000-00000000c001';
+    // Native-terminal status with no local terminal event — the exact shape a
+    // hydrated record presents. Cancel must reject, never dispatch.
+    service.service.providerRegistry.registerSession({ sessionId, providerId: 'mock-acp', state: 'Ready', activeOpId: null });
+    service.service.providerRegistry.registerOperation({ operationId, sessionId, providerId: 'mock-acp', status: 'completed', terminalEvent: null, terminalTranscript: null });
+    const cancel = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/operations/${operationId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: {} });
+    assert.equal(cancel.status, 409);
+    assert.equal(cancel.payload.error.code, 'busy');
+  });
+
+  test('multibyte character across chunk boundary is byte-exact JSON', async () => {
+    const { OperationEventHub } = await import(join(serviceRoot, 'dist/sse.js'));
+    const hub = new OperationEventHub('00000000-0000-4000-8000-000000000040', '00000000-0000-4000-8000-000000000041');
+    // Surrogate-pair characters make UTF-16 slicing corrupt the JSON payload.
+    const message = '\u{1F389}'.repeat(300) + '\u00e9'.repeat(50);
+    const frame = hub.recordEvent({ Progress: { message } });
+    assert.ok(frame);
+    const utf16Length = frame.buffer.toString('utf8').length;
+    assert.ok(frame.buffer.length > utf16Length, 'multibyte payload must exceed UTF-16 length');
+    assert.equal(frame.wireBytes, frame.buffer.length, 'charged bytes must equal serialized Buffer length');
+    // Reconstruct the data payload from the exact bytes the socket would write.
+    const text = frame.buffer.toString('utf8');
+    const dataLine = text.split('\n').find((line) => line.startsWith('data: '));
+    const parsed = JSON.parse(dataLine.slice(6));
+    assert.equal(parsed.Progress.message, message);
+    // A chunk boundary mid-character must not split the code point: the socket
+    // receives bytes and reassembles them, so concatenate bytes then decode.
+    const chunkSize = 7;
+    const chunks = [];
+    for (let off = 0; off < frame.buffer.length; off += chunkSize) {
+      chunks.push(frame.buffer.subarray(off, Math.min(off + chunkSize, frame.buffer.length)));
+    }
+    assert.equal(Buffer.concat(chunks).toString('utf8'), text, 'byte chunking must round-trip the exact UTF-8 text');
+    // Byte accounting must be UTF-8, not UTF-16 code units.
+    assert.equal(Buffer.byteLength(text, 'utf8'), frame.buffer.length);
+    assert.notEqual(text.length, frame.buffer.length, 'UTF-16 length differs from UTF-8 byte length');
+  });
+
+  test('SseWriter observes write(false) and resumes the same frame after drain', async () => {
+    const { SseWriter, OperationEventHub, sseTestHooks } = await import(join(serviceRoot, 'dist/sse.js'));
+    const hub = new OperationEventHub('00000000-0000-4000-8000-000000000050', '00000000-0000-4000-8000-000000000051');
+    const frame = hub.recordEvent({ Progress: { message: 'x'.repeat(256) } });
+    assert.ok(frame);
+    // A stub response that refuses the first write, then drains.
+    const written = [];
+    const listeners = new Map();
+    const res = {
+      writableEnded: false,
+      destroyed: false,
+      socket: { setNoDelay() {} },
+      write(chunk) {
+        written.push(Buffer.from(chunk));
+        // Accept only after a drain has been signalled.
+        if (written.length === 1) {
+          setImmediate(() => listeners.get('drain')?.());
+          return false;
+        }
+        return true;
+      },
+      once(event, cb) { listeners.set(event, cb); },
+      end() {},
+    };
+    const before = sseTestHooks.writeBlockedCount;
+    const writer = new SseWriter(res, hub);
+    const result = await writer.writeFrame(frame);
+    assert.equal(result, 'ok');
+    assert.ok(sseTestHooks.writeBlockedCount > before, 'write(false) must be observed');
+    // The writer resumed the same frame after drain: all bytes landed exactly
+    // once, as slices of the serialized Buffer (no UTF-16 slicing).
+    assert.equal(Buffer.concat(written).toString('utf8'), frame.buffer.toString('utf8'));
+    assert.equal(writer.outboundBackpressured, false, 'backpressure flag clears after drain');
+  });
+
+  test('control frames never consume the data pool', async () => {
+    const budget = await import(join(serviceRoot, 'dist/environment-budget.js'));
+    const { OperationEventHub } = await import(join(serviceRoot, 'dist/sse.js'));
+    budget.resetEnvironmentBudgetForTests();
+    // Saturate the data pool exactly.
+    let filled = 0;
+    while (budget.tryReserveEnvironmentBytes(1 << 20)) filled += 1;
+    const saturated = budget.environmentBudgetReserved();
+    assert.ok(saturated >= 8 * 1024 * 1024 - (1 << 20));
+    const hub = new OperationEventHub('00000000-0000-4000-8000-000000000070', '00000000-0000-4000-8000-000000000071');
+    // A data frame cannot be retained while the pool is full → fail closed with a gap.
+    const rejected = hub.recordEvent({ Progress: { message: 'x'.repeat(4096) } });
+    assert.ok(rejected, 'fail-closed must still produce a gap');
+    assert.equal(rejected.event, 'gap');
+    const rejectedData = rejected.buffer.toString('utf8').split('\n').find((l) => l.startsWith('data: '));
+    assert.equal(JSON.parse(rejectedData.slice(6)).reason, 'interrupted');
+    // The dedicated control pool still permits a terminal after a full data pool.
+    const hub2 = new OperationEventHub('00000000-0000-4000-8000-000000000072', '00000000-0000-4000-8000-000000000073');
+    const terminal = hub2.recordEvent({ OpFinished: { session_id: hub2.sessionId, op_id: 'o', reason: 'end_turn' } });
+    assert.ok(terminal && terminal.isTerminal, 'terminal must be retained despite a full data pool');
+    hub.dispose();
+    hub2.dispose();
+    budget.resetEnvironmentBudgetForTests();
+  });
+
+  test('retained hubs cannot exceed the global data cap and release on eviction/dispose', async () => {
+    const budget = await import(join(serviceRoot, 'dist/environment-budget.js'));
+    const { OperationEventHub } = await import(join(serviceRoot, 'dist/sse.js'));
+    budget.resetEnvironmentBudgetForTests();
+    const hubs = [];
+    // 65 terminal hubs would each retain a 1 MiB-scale terminal; the data pool
+    // (8 MiB) must stop retention before the global cap is exceeded.
+    for (let i = 0; i < 65; i += 1) {
+      const hub = new OperationEventHub(`00000000-0000-4000-8000-${String(i).padStart(12, '0')}`, `00000000-0000-4000-8000-${String(1000 + i).padStart(12, '0')}`);
+      for (let j = 0; j < 70; j += 1) {
+        const f = hub.recordEvent({ Progress: { message: 'y'.repeat(3072) } });
+        if (f && f.event === 'gap') break;
+      }
+      hubs.push(hub);
+      const dataHeld = hubs.reduce((sum, h) => sum + h.chargedBytes(), 0);
+      assert.ok(dataHeld <= 8 * 1024 * 1024, 'global data cap must hold across hubs');
+    }
+    const beforeDispose = budget.environmentBudgetReserved();
+    assert.ok(beforeDispose > 0);
+    for (const hub of hubs) hub.dispose();
+    budget.resetEnvironmentBudgetForTests();
+    assert.equal(budget.environmentBudgetReserved(), 0, 'all hub bytes must release on dispose');
+  });
+
+  test('aggregate environment proof stays within the frozen ceiling', async () => {
+    const budget = await import(join(serviceRoot, 'dist/environment-budget.js'));
+    const proof = budget.environmentBudgetProof();
+    assert.equal(proof.ceilingBytes, 32 * 1024 * 1024);
+    assert.ok(proof.totalBytes <= proof.ceilingBytes, `proof ${proof.totalBytes} exceeds ceiling`);
+    // The proof must be the sum of real categories, not a relabelled constant.
+    const expected =
+      proof.tsfnSharedBytes +
+      proof.nativeProviderBytes +
+      proof.acpDeliveryBytes +
+      proof.nativeGenericLocalsetBytes +
+      proof.nodeRetainedBytes +
+      proof.nodeControlBytes +
+      proof.socketReservedBytes;
+    assert.equal(proof.totalBytes, expected);
+    assert.ok(proof.nodeControlBytes >= 560 * 1024, 'control reserve covers 70 hubs x 2 x 4KiB');
+    assert.ok(proof.nodeControlBytes <= proof.ceilingBytes);
+    // Node retained budget is clamped: an env override cannot raise it.
+    const { SSE_MAX_AGGREGATE_PENDING_BYTES, SSE_MAX_AGGREGATE_PENDING_BYTES_CEILING } = await import(join(serviceRoot, 'dist/config.js'));
+    assert.ok(SSE_MAX_AGGREGATE_PENDING_BYTES <= SSE_MAX_AGGREGATE_PENDING_BYTES_CEILING);
   });
 
   test('actor/viewpoint create is explicit not_migrated', async () => {

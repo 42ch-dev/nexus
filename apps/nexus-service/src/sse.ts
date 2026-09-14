@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { ServerResponse } from 'node:http';
 import type { ProviderEventBatch, ProviderHostEvent } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
+import type { ProviderOperationRecord, ProviderSessionRecord } from './provider-registry.js';
+import { isTerminalOperationStatus } from './provider-registry.js';
 import {
   HUB_MAX_DATA_BYTES,
   HUB_MAX_DATA_FRAMES,
@@ -17,17 +19,23 @@ import {
   resolveSseSocketHighWaterMark,
 } from './config.js';
 import {
+  releaseControlBytes,
   releaseEnvironmentBytes,
+  releaseEnvironmentSocket,
+  reserveEnvironmentSocket,
+  tryReserveControlBytes,
   tryReserveEnvironmentBytes,
 } from './environment-budget.js';
-import { HttpError } from './errors.js';
+import { HttpError, mapNativeError } from './errors.js';
+import { hostQuery } from './world-kb.js';
 
 type CoreStreamGap = NonNullable<ProviderEventBatch['gap']>;
 
 export interface StoredFrame {
   id: string;
   event: string;
-  data: string;
+  /** Serialized once; the socket writes these exact bytes (no UTF-16 slicing). */
+  buffer: Buffer;
   wireBytes: number;
   isControl: boolean;
   isTerminal: boolean;
@@ -50,6 +58,7 @@ export class OperationEventHub {
   private dataFrameBytes = 0;
   private evictionWatermarkSeq = 0;
   private terminalSlot: StoredFrame | null = null;
+  private terminalRejected = false;
   private gapSlot: StoredFrame | null = null;
   private closed = false;
 
@@ -59,44 +68,70 @@ export class OperationEventHub {
   }
 
   recordEvent(event: ProviderHostEvent): StoredFrame | null {
-    if (isTerminalHostEvent(event) && this.terminalSlot) {
+    const terminal = isTerminalHostEvent(event);
+    if (terminal && (this.terminalSlot || this.terminalRejected)) {
       return this.terminalSlot;
     }
     const data = JSON.stringify(event);
-    const frame = this.makeFrame('provider_event', data, isTerminalHostEvent(event));
-    if (frame.isTerminal) {
-      this.terminalSlot = frame;
+    // Build against the *candidate* sequence and charge before committing, so a
+    // frame that is not retained never consumes a sequence and retained ids stay
+    // contiguous. Every *retained* Buffer is charged against the global Node byte
+    // pool; a frame that cannot be charged is never retained uncharged — the hub
+    // fails closed with a bounded interrupted gap so the client resyncs.
+    const frame = this.buildFrame(this.sequence + 1, 'provider_event', data, terminal);
+    if (terminal) {
+      if (frame.wireBytes > SSE_RESERVED_CONTROL_BYTES) {
+        return this.failClosed();
+      }
+      // A terminal is a control frame: it draws on the control pool, never the
+      // data pool, so a full data budget cannot block the terminal transition.
+      if (!tryReserveControlBytes(frame.wireBytes)) {
+        return this.failClosed();
+      }
+      this.sequence += 1;
       this.closed = true;
+      this.terminalSlot = frame;
       return frame;
     }
-    this.pushDataFrame(frame);
+    // Data frames are charged against the global data pool; a frame that cannot
+    // be charged is never retained uncharged — the hub fails closed with a
+    // bounded interrupted gap so the client resyncs.
+    if (!tryReserveEnvironmentBytes(frame.wireBytes)) {
+      return this.failClosed();
+    }
+    this.sequence += 1;
+    this.dataFrames.push(frame);
+    this.dataFrameBytes += frame.wireBytes;
+    this.evictDataIfNeeded();
     return frame;
   }
 
   recordGap(gap: CoreStreamGap): StoredFrame | null {
     const data = JSON.stringify(gap);
-    const wireBytes = wireBytesFor('gap', `${this.epoch}:${this.sequence + 1}`, data);
-    if (wireBytes > SSE_RESERVED_CONTROL_BYTES) {
-      return null;
-    }
-    const sequence = ++this.sequence;
-    const id = `${this.epoch}:${sequence}`;
-    const frame: StoredFrame = {
-      id,
-      event: 'gap',
-      data,
-      wireBytes,
-      isControl: true,
-      isTerminal: false,
-    };
+    const frame = this.buildFrame(this.sequence + 1, 'gap', data, false);
+    if (frame.wireBytes > SSE_RESERVED_CONTROL_BYTES) return null;
+    // Control frames draw on the dedicated control pool, never the data pool, so
+    // a saturated data budget can never block an explicit resync gap.
+    if (!tryReserveControlBytes(frame.wireBytes)) return null;
+    this.sequence += 1;
+    // A replaced gap releases its charge so the slot never leaks bytes.
+    if (this.gapSlot) releaseControlBytes(this.gapSlot.wireBytes);
+    frame.isControl = true;
     this.gapSlot = frame;
     return frame;
   }
 
-  private pushDataFrame(frame: StoredFrame): void {
-    this.dataFrames.push(frame);
-    this.dataFrameBytes += frame.wireBytes;
-    this.evictDataIfNeeded();
+  /** Fail closed: stop the stream and expose a bounded, charged interrupted gap. */
+  private failClosed(): StoredFrame | null {
+    this.closed = true;
+    this.terminalRejected = true;
+    this.recordGap({
+      reason: 'interrupted',
+      operation_id: this.operationId,
+      resync_required: true,
+      inspect_url: inspectUrl(this.operationId),
+    });
+    return this.gapSlot;
   }
 
   private evictDataIfNeeded(): void {
@@ -107,21 +142,20 @@ export class OperationEventHub {
       const evicted = this.dataFrames.shift();
       if (!evicted) break;
       this.dataFrameBytes = Math.max(0, this.dataFrameBytes - evicted.wireBytes);
-      const evictedSeq = frameSequence(evicted);
-      this.evictionWatermarkSeq = Math.max(this.evictionWatermarkSeq, evictedSeq + 1);
+      releaseEnvironmentBytes(evicted.wireBytes);
+      this.evictionWatermarkSeq = Math.max(this.evictionWatermarkSeq, frameSequence(evicted) + 1);
     }
   }
 
-  private makeFrame(event: string, data: string, isTerminal: boolean): StoredFrame {
-    const sequence = ++this.sequence;
+  private buildFrame(sequence: number, event: string, data: string, isTerminal: boolean): StoredFrame {
     const id = `${this.epoch}:${sequence}`;
-    const wireBytes = wireBytesFor(event, id, data);
+    const buffer = Buffer.from(formatSse(id, event, data), 'utf8');
     return {
       id,
       event,
-      data,
-      wireBytes,
-      isControl: false,
+      buffer,
+      wireBytes: buffer.length,
+      isControl: isTerminal,
       isTerminal,
     };
   }
@@ -161,25 +195,18 @@ export class OperationEventHub {
     return { kind: 'frames', frames: this.framesAfter(parsed.sequence) };
   }
 
+  /** Data, gap, and terminal merged and strictly ordered by epoch sequence. */
   private collectFrames(): StoredFrame[] {
     const frames = [...this.dataFrames];
     if (this.gapSlot) frames.push(this.gapSlot);
     if (this.terminalSlot) frames.push(this.terminalSlot);
+    frames.sort((a, b) => frameSequence(a) - frameSequence(b));
     return frames;
   }
 
+  /** Frames strictly after `sequence`, ordered — a gap between data never reorders. */
   framesAfter(sequence: number): StoredFrame[] {
-    const frames: StoredFrame[] = [];
-    for (const frame of this.dataFrames) {
-      if (frameSequence(frame) > sequence) frames.push(frame);
-    }
-    if (this.gapSlot && frameSequence(this.gapSlot) > sequence) {
-      frames.push(this.gapSlot);
-    }
-    if (this.terminalSlot && frameSequence(this.terminalSlot) > sequence) {
-      frames.push(this.terminalSlot);
-    }
-    return frames;
+    return this.collectFrames().filter((frame) => frameSequence(frame) > sequence);
   }
 
   evictionWatermark(): number {
@@ -197,6 +224,7 @@ export class OperationEventHub {
     this.closed = true;
   }
 
+  /** The operation's stream has ended: a terminal was retained or rejected. */
   isClosed(): boolean {
     return this.closed;
   }
@@ -206,21 +234,28 @@ export class OperationEventHub {
   }
 
   dispose(): void {
+    releaseEnvironmentBytes(this.dataFrameBytes);
+    let controlFreed = 0;
+    if (this.gapSlot) controlFreed += this.gapSlot.wireBytes;
+    if (this.terminalSlot) controlFreed += this.terminalSlot.wireBytes;
+    releaseControlBytes(controlFreed);
     this.dataFrames = [];
     this.dataFrameBytes = 0;
     this.terminalSlot = null;
     this.gapSlot = null;
     this.closed = true;
   }
-}
 
-function wireBytesFor(event: string, id: string, data: string): number {
-  return Buffer.byteLength(`id: ${id}\nevent: ${event}\ndata: ${data}\n\n`, 'utf8');
+  /** Data bytes this hub holds against the global data pool. */
+  chargedBytes(): number {
+    return this.dataFrameBytes;
+  }
 }
 
 function frameSequence(frame: StoredFrame): number {
   return Number.parseInt(frame.id.split(':')[1] ?? '0', 10);
 }
+
 
 function isTerminalHostEvent(event: ProviderHostEvent): boolean {
   return 'OpFinished' in event || 'OpFailed' in event || 'SessionStopped' in event;
@@ -237,8 +272,8 @@ export function parseCursor(cursor: string): { epoch: string; sequence: number }
   return { epoch, sequence };
 }
 
-function formatSse(frame: StoredFrame): string {
-  return `id: ${frame.id}\nevent: ${frame.event}\ndata: ${frame.data}\n\n`;
+function formatSse(id: string, event: string, data: string): string {
+  return `id: ${id}\nevent: ${event}\ndata: ${data}\n\n`;
 }
 
 function inspectUrl(operationId: string): string {
@@ -248,16 +283,15 @@ function inspectUrl(operationId: string): string {
 export const sseTestHooks = {
   providerPullCount: 0,
   writeBlockedCount: 0,
-  pullsWhileBlocked: 0,
 };
 
-class SseWriter {
+/** Exported so scoped tests can drive backpressure deterministically. */
+export class SseWriter {
   outboundBackpressured = false;
   private pendingDataFrames = 0;
   private pendingDataBytes = 0;
   private terminalWritten = false;
   private gapWritten = false;
-  private envReserved = 0;
 
   constructor(
     private readonly res: ServerResponse,
@@ -276,8 +310,9 @@ class SseWriter {
       if (this.pendingDataFrames >= SSE_MAX_PENDING_DATA_FRAMES) return false;
       if (this.pendingDataBytes + frame.wireBytes > SSE_MAX_PENDING_DATA_BYTES) return false;
     }
-    if (!tryReserveEnvironmentBytes(frame.wireBytes)) return false;
-    this.envReserved += frame.wireBytes;
+    // Retained hub Buffers are already charged globally; the per-socket 64 KiB
+    // reservation covers the writable queue, so the writer must not double-charge
+    // the same Buffer here.
     if (!frame.isControl) {
       this.pendingDataFrames += 1;
       this.pendingDataBytes += frame.wireBytes;
@@ -286,8 +321,6 @@ class SseWriter {
   }
 
   private releaseFrame(frame: StoredFrame): void {
-    releaseEnvironmentBytes(frame.wireBytes);
-    this.envReserved = Math.max(0, this.envReserved - frame.wireBytes);
     if (!frame.isControl) {
       this.pendingDataFrames = Math.max(0, this.pendingDataFrames - 1);
       this.pendingDataBytes = Math.max(0, this.pendingDataBytes - frame.wireBytes);
@@ -300,35 +333,30 @@ class SseWriter {
     if (frame.event === 'gap' && this.gapWritten) return 'ok';
     if (!this.reserveFrame(frame)) return 'overflow';
 
-    const payload = formatSse(frame);
+    const payload = frame.buffer;
     const chunkSize = Math.max(1, resolveSseSocketHighWaterMark());
     let offset = 0;
     while (offset < payload.length) {
+      const chunk = payload.subarray(offset, Math.min(offset + chunkSize, payload.length));
       if (this.res.writableEnded || this.res.destroyed) {
         this.releaseFrame(frame);
         return 'disconnect';
       }
-      const slice = payload.slice(offset, Math.min(offset + chunkSize, payload.length));
-      for (;;) {
-        if (this.res.writableEnded || this.res.destroyed) {
-          this.releaseFrame(frame);
-          return 'disconnect';
-        }
-        const accepted = this.res.write(slice, 'utf8');
-        if (accepted) {
-          break;
-        }
+      // `write()` returning false means the chunk WAS accepted into the socket
+      // buffer and the caller must stop until 'drain' — it never means the chunk
+      // was dropped. Re-writing it here would duplicate the frame.
+      const accepted = this.res.write(chunk);
+      if (!accepted) {
         this.outboundBackpressured = true;
         sseTestHooks.writeBlockedCount += 1;
         const drained = await waitForDrain(this.res, SSE_DRAIN_TIMEOUT_MS);
+        this.outboundBackpressured = false;
         if (!drained) {
           this.releaseFrame(frame);
-          this.outboundBackpressured = false;
           return 'disconnect';
         }
-        this.outboundBackpressured = false;
       }
-      offset += slice.length;
+      offset += chunk.length;
     }
     this.releaseFrame(frame);
     if (frame.isTerminal) {
@@ -347,16 +375,16 @@ class SseWriter {
 }
 
 function waitForDrain(res: ServerResponse, timeoutMs: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(false), timeoutMs);
-    const done = (ok: boolean) => {
-      clearTimeout(timer);
-      resolve(ok);
-    };
-    res.once('drain', () => done(true));
-    res.once('close', () => done(false));
-    res.once('error', () => done(false));
-  });
+  const { promise, resolve } = Promise.withResolvers<boolean>();
+  const timer = setTimeout(() => resolve(false), timeoutMs);
+  const done = (ok: boolean) => {
+    clearTimeout(timer);
+    resolve(ok);
+  };
+  res.once('drain', () => done(true));
+  res.once('close', () => done(false));
+  res.once('error', () => done(false));
+  return promise;
 }
 
 export function reserveSessionSubscriber(sessionId: string): void {
@@ -364,15 +392,19 @@ export function reserveSessionSubscriber(sessionId: string): void {
   if (count >= SSE_MAX_SUBSCRIBERS_PER_SESSION) {
     throw new HttpError(409, 'busy', 'too many SSE subscribers for session');
   }
+  if (!reserveEnvironmentSocket()) {
+    throw new HttpError(409, 'busy', 'too many SSE subscribers');
+  }
   sessionSubscriberCounts.set(sessionId, count + 1);
 }
 
 export function releaseSessionSubscriber(sessionId: string): void {
-  const next = (sessionSubscriberCounts.get(sessionId) ?? 1) - 1;
-  if (next <= 0) sessionSubscriberCounts.delete(sessionId);
-  else sessionSubscriberCounts.set(sessionId, next);
+  const count = sessionSubscriberCounts.get(sessionId);
+  if (count === undefined) return;
+  releaseEnvironmentSocket();
+  if (count <= 1) sessionSubscriberCounts.delete(sessionId);
+  else sessionSubscriberCounts.set(sessionId, count - 1);
 }
-
 
 function clientDisconnected(res: ServerResponse): boolean {
   return res.writableEnded || res.destroyed || res.socket?.destroyed === true;
@@ -394,7 +426,6 @@ async function gatePullUntilDrain(
     pullGate.initialReleased = true;
   }
   if (writer.outboundBackpressured) {
-    sseTestHooks.pullsWhileBlocked += 1;
     const drained = await waitForDrain(res, SSE_DRAIN_TIMEOUT_MS);
     if (!drained) return false;
     writer.outboundBackpressured = false;
@@ -402,21 +433,68 @@ async function gatePullUntilDrain(
   return true;
 }
 
-function assertOperationForSession(
+/**
+ * Hydrate a session from native truth when the transport cache is cold. The
+ * registry is a cache only: a restart (or a cleared cache) must still resync
+ * from `hostQuery` rather than fabricate a 404.
+ */
+async function hydrateSessionRecord(
   service: ServiceCore,
   sessionId: string,
-  operationId: string,
-): void {
-  const op = service.providerRegistry.operationRecord(operationId);
-  if (!op) {
-    throw new HttpError(404, 'not_found', `operation ${operationId} not found`, {
-      resource: `operation:${operationId}`,
-    });
+): Promise<ProviderSessionRecord | null> {
+  const cached = service.providerRegistry.sessionRecord(sessionId);
+  if (cached) return cached;
+  try {
+    const response = await hostQuery(service, { query: 'get_session', session_id: sessionId });
+    const session = response.session;
+    if (!session) return null;
+    const record: ProviderSessionRecord = {
+      sessionId: session.session_id,
+      providerId: session.provider_id,
+      state: session.state,
+      activeOpId: session.active_op_id ?? null,
+      model: session.model,
+    };
+    service.providerRegistry.registerSession(record);
+    return record;
+  } catch (error) {
+    const mapped = mapNativeError(error);
+    if (mapped.code === 'not_found') return null;
+    if (mapped.code === 'invalid_input' && mapped.message === 'host not started') return null;
+    throw mapped;
   }
-  if (op.sessionId !== sessionId) {
-    throw new HttpError(403, 'forbidden', 'operation does not belong to session', {
-      resource: `operation:${operationId}`,
-    });
+}
+
+/**
+ * Hydrate an operation from native truth, preserving the native status so a
+ * terminal operation is never mistaken for a cancellable one.
+ */
+async function hydrateOperationRecord(
+  service: ServiceCore,
+  operationId: string,
+): Promise<ProviderOperationRecord | null> {
+  const cached = service.providerRegistry.operationRecord(operationId);
+  if (cached) return cached;
+  try {
+    const response = await hostQuery(service, { query: 'get_operation', operation_id: operationId });
+    const operation = response.operation;
+    if (!operation) return null;
+    const session = await hydrateSessionRecord(service, operation.session_id);
+    const record: ProviderOperationRecord = {
+      operationId: operation.operation_id,
+      sessionId: operation.session_id,
+      providerId: session?.providerId ?? '',
+      status: operation.status,
+      terminalEvent: null,
+      terminalTranscript: null,
+    };
+    service.providerRegistry.registerOperation(record);
+    return record;
+  } catch (error) {
+    const mapped = mapNativeError(error);
+    if (mapped.code === 'not_found') return null;
+    if (mapped.code === 'invalid_input' && mapped.message === 'host not started') return null;
+    throw mapped;
   }
 }
 
@@ -462,20 +540,33 @@ export async function streamSessionEvents(
   searchParams: URLSearchParams,
   res: ServerResponse,
 ): Promise<void> {
-  const session = service.providerRegistry.sessionRecord(sessionId);
-  const operationId = searchParams.get('operation_id') ?? session?.activeOpId;
+  const session = await hydrateSessionRecord(service, sessionId);
+  if (!session) {
+    throw new HttpError(404, 'not_found', `session ${sessionId} not found`, {
+      resource: `session:${sessionId}`,
+    });
+  }
+  const operationId = searchParams.get('operation_id') ?? session.activeOpId;
   if (!operationId) {
     throw new HttpError(400, 'invalid_input', 'operation_id is required for session events');
   }
 
-  assertOperationForSession(service, sessionId, operationId);
-
-  const hub = service.providerRegistry.hubForOperation(operationId);
-  if (!hub) {
-    throw new HttpError(404, 'not_found', `operation hub ${operationId} not found`, {
+  const operation = await hydrateOperationRecord(service, operationId);
+  if (!operation) {
+    throw new HttpError(404, 'not_found', `operation ${operationId} not found`, {
       resource: `operation:${operationId}`,
     });
   }
+  if (operation.sessionId !== sessionId) {
+    throw new HttpError(403, 'forbidden', 'operation does not belong to session', {
+      resource: `operation:${operationId}`,
+    });
+  }
+
+  const existingHub = service.providerRegistry.hubForOperation(operationId);
+  const hub =
+    existingHub ??
+    service.providerRegistry.ensureHub(operationId, () => new OperationEventHub(operationId, sessionId));
 
   const cursor = searchParams.get('cursor') ?? searchParams.get('last_event_id') ?? undefined;
   const plan = hub.planReplay(cursor);
@@ -496,6 +587,19 @@ export async function streamSessionEvents(
   }
 
   try {
+    // Cold registry + already-terminal native op: no retained stream to replay.
+    // A bounded resync gap is the truthful answer, never a fabricated terminal.
+    if (!existingHub && isTerminalOperationStatus(operation.status) && !hub.hasTerminal()) {
+      const gapFrame = hub.recordGap({
+        reason: 'history_unavailable',
+        operation_id: operationId,
+        resync_required: true,
+        inspect_url: inspectUrl(operationId),
+      });
+      if (gapFrame) await writer.writeFrame(gapFrame);
+      return;
+    }
+
     if (plan.kind === 'stale') {
       const gapFrame = hub.recordGap(plan.gap);
       if (gapFrame) {
@@ -519,7 +623,7 @@ export async function streamSessionEvents(
     }
 
     if (plan.kind === 'wait') {
-      if (!hub.hasTerminal()) {
+      if (!hub.isClosed()) {
         const op = service.providerRegistry.operationRecord(operationId);
         if (op?.terminalEvent) {
           hub.recordEvent(op.terminalEvent);
@@ -530,7 +634,7 @@ export async function streamSessionEvents(
       return;
     }
 
-    if (hub.hasTerminal()) {
+    if (hub.isClosed()) {
       return;
     }
 
@@ -550,12 +654,12 @@ async function waitForTerminal(
   pullGate: PullGateState,
 ): Promise<void> {
   let sequence = deliveredSequence;
-  while (!hub.hasTerminal()) {
+  while (!hub.isClosed()) {
     if (clientDisconnected(res)) return;
 
     const readyToPull = await gatePullUntilDrain(res, pullGate, writer);
     if (!readyToPull) {
-await emitInterruptedGap(writer, hub, operationId);
+      await emitInterruptedGap(writer, hub, operationId);
       return;
     }
 
@@ -585,8 +689,7 @@ await emitInterruptedGap(writer, hub, operationId);
       }
     }
 
-    const pending = hub.framesAfter(sequence);
-    for (const frame of pending) {
+    for (const frame of hub.framesAfter(sequence)) {
       const result = await writer.writeFrame(frame);
       if (result === 'overflow' || result === 'disconnect') {
         await emitInterruptedGap(writer, hub, operationId);
@@ -612,12 +715,12 @@ async function liveEventLoop(
   pullGate: PullGateState,
 ): Promise<void> {
   let sequence = deliveredSequence;
-  while (!hub.hasTerminal()) {
+  while (!hub.isClosed()) {
     if (clientDisconnected(res)) return;
 
     const readyToPull = await gatePullUntilDrain(res, pullGate, writer);
     if (!readyToPull) {
-await emitInterruptedGap(writer, hub, operationId);
+      await emitInterruptedGap(writer, hub, operationId);
       return;
     }
 
@@ -647,8 +750,7 @@ await emitInterruptedGap(writer, hub, operationId);
       }
     }
 
-    const pending = hub.framesAfter(sequence);
-    for (const frame of pending) {
+    for (const frame of hub.framesAfter(sequence)) {
       const result = await writer.writeFrame(frame);
       if (result === 'overflow' || result === 'disconnect') {
         await emitInterruptedGap(writer, hub, operationId);
@@ -658,7 +760,7 @@ await emitInterruptedGap(writer, hub, operationId);
       if (frame.isTerminal) return;
     }
 
-    if (!batch.has_more && hub.hasTerminal()) return;
+    if (!batch.has_more && hub.isClosed()) return;
     if (!batch.has_more && (batch.events?.length ?? 0) === 0) {
       await sleep(25);
     }
@@ -666,5 +768,7 @@ await emitInterruptedGap(writer, hub, operationId);
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setTimeout(resolve, ms);
+  return promise;
 }
