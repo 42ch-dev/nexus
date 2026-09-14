@@ -7,6 +7,7 @@ use nexus_agent_host::providers::recipe_admission::reject_caller_recipe_payload;
 use nexus_agent_host::HostManager;
 use nexus_contracts::provider_call::ProviderCallMethod;
 use nexus_contracts::{CoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply};
+use nexus_local_db::LocalDbError;
 use nexus_provider_ports::{ProviderPort, ProviderResult};
 
 /// Reuse the effect-path taxonomy so a native caller sees one category per
@@ -15,6 +16,18 @@ use nexus_provider_ports::{ProviderPort, ProviderResult};
 /// malformed input.
 fn map_host_error(err: nexus_agent_host::error::HostError) -> CoreError {
     nexus_agent_host::providers::port::host_error_to_core_error(&err)
+}
+
+/// A durable-journal failure is a typed internal error at the provider
+/// boundary: the effect's required write-through (LIFE-3) did not land, so
+/// success is never reported without its durable mirror.
+fn journal_failure(err: LocalDbError) -> CoreError {
+    CoreError {
+        code: CoreErrorCode::Internal,
+        message: format!("durable js-provider journal write failed: {err}"),
+        details: Default::default(),
+        http_status: Some(500),
+    }
 }
 
 fn provider_id_from_payload(
@@ -152,7 +165,8 @@ impl ProviderPort for AdmittingProviderPort {
                         .unwrap_or_default();
                     self.state
                         .journal_operation(&operation_id, session_id, &provider_id, "running")
-                        .await;
+                        .await
+                        .map_err(journal_failure)?;
                 }
             }
             // A cooperative cancel acknowledgement settles the operation to the
@@ -174,13 +188,17 @@ impl ProviderPort for AdmittingProviderPort {
                 if let Some(operation_id) = operation_id {
                     self.state
                         .journal_operation_status(&operation_id, "cancelled")
-                        .await;
+                        .await
+                        .map_err(journal_failure)?;
                 }
             }
             ProviderCallMethod::Shutdown if reply.ok => {
                 if let Some(session_id) = session_id.as_deref() {
                     self.state.forget_js_session(session_id);
-                    self.state.forget_journal_session(session_id).await;
+                    self.state
+                        .forget_journal_session(session_id)
+                        .await
+                        .map_err(journal_failure)?;
                 }
             }
             _ => {}
@@ -206,7 +224,8 @@ impl ProviderPort for AdmittingProviderPort {
         if let Some(status) = terminal {
             self.state
                 .journal_operation_status(&operation_id, status)
-                .await;
+                .await
+                .map_err(journal_failure)?;
         }
         Ok(batch)
     }
@@ -317,5 +336,112 @@ mod tests {
         assert_eq!(a.provider_id, "provider-a");
         assert_eq!(b.provider_id, "provider-b");
         let _ = port;
+    }
+
+    /// An Execute-ok stub carrying both session and operation ids, so the
+    /// durable write-through path runs after the inner effect succeeds.
+    struct ExecuteOkPort;
+
+    #[async_trait]
+    impl ProviderPort for ExecuteOkPort {
+        async fn call(&self, request: ProviderCall) -> ProviderResult<ProviderReply> {
+            Ok(ProviderReply {
+                request_id: request.request_id.clone(),
+                ok: true,
+                session_id: Some("sess-j".to_string()),
+                operation_id: Some("op-j".to_string()),
+                health: None,
+                error: None,
+            })
+        }
+
+        async fn next(
+            &self,
+            operation_id: String,
+            _max_events: u32,
+            _max_bytes: u32,
+        ) -> ProviderResult<ProviderEventBatch> {
+            Ok(ProviderEventBatch {
+                events: vec![nexus_contracts::provider_event_batch::NexusProviderHostEvent::OpFailed {
+                    error_category: "test".to_string(),
+                    error_message: "terminal".to_string(),
+                    op_id: operation_id.clone(),
+                    session_id: "sess-j".to_string(),
+                }],
+                gap: None,
+                has_more: false,
+                operation_id,
+            })
+        }
+    }
+
+    /// A journal pool whose database has no journal table: the write fails for
+    /// real (no mocks, no fault flags).
+    async fn journalless_pool() -> sqlx::SqlitePool {
+        sqlx::SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("open in-memory pool")
+    }
+
+    fn execute_request() -> ProviderCall {
+        ProviderCall {
+            method: ProviderCallMethod::Execute,
+            request_id: "r-execute".into(),
+            session_id: Some("sess-j".into()),
+            operation_id: None,
+            deadline_ms: 5_000,
+            payload: serde_json::Map::new(),
+        }
+    }
+
+    /// LIFE-3 write-through is part of the Execute contract: a failed journal
+    /// upsert is a typed internal error, never a success reply without its
+    /// durable mirror. The in-memory record still happened first.
+    #[tokio::test]
+    async fn execute_journal_failure_fails_the_reply() {
+        let state = Arc::new(EnvState::new());
+        state.set_journal_pool(journalless_pool().await);
+        // Production records the session at Launch; the in-memory operation
+        // record must land before the durable write-through is attempted.
+        state.record_js_session("sess-j".to_string(), "mock-acp".to_string());
+        let port = AdmittingProviderPort::new(
+            Arc::new(HostManager::new()),
+            Arc::new(ExecuteOkPort),
+            state.clone(),
+        );
+        let err = port
+            .call(execute_request())
+            .await
+            .expect_err("a failed journal write-through must fail the call");
+        assert_eq!(err.code, CoreErrorCode::Internal);
+        assert!(err.message.contains("journal"), "the error names the journal boundary");
+        let recorded = state
+            .with_js_state(|s| {
+                s.session("sess-j")
+                    .and_then(|r| r.active_operation_id.clone())
+            })
+            .flatten();
+        assert_eq!(recorded, Some("op-j".to_string()));
+    }
+
+    /// An observed terminal is never reported as delivered when its durable
+    /// mirror failed: `next` propagates the journal failure instead.
+    #[tokio::test]
+    async fn terminal_journal_failure_on_next_is_propagated() {
+        let state = Arc::new(EnvState::new());
+        state.record_js_session("sess-j".to_string(), "mock-acp".to_string());
+        state.record_js_session_operation("sess-j", "op-j".to_string());
+        state.set_journal_pool(journalless_pool().await);
+        let port = AdmittingProviderPort::new(
+            Arc::new(HostManager::new()),
+            Arc::new(ExecuteOkPort),
+            state,
+        );
+        let err = port
+            .next("op-j".to_string(), 10, 64_000)
+            .await
+            .expect_err("a failed terminal mirror must fail the delivery");
+        assert_eq!(err.code, CoreErrorCode::Internal);
+        assert!(err.message.contains("journal"));
     }
 }

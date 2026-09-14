@@ -135,7 +135,11 @@ export class ProviderRegistry {
 
   finishOperation(operationId: string, terminal: ProviderHostEvent, transcript: string | null): void {
     const op = this.operations.get(operationId);
-    if (!op || op.terminalEvent) return;
+    // First terminal wins: a status settled terminal earlier (e.g. an accepted
+    // cancel, or a native-hydrated terminal) must never be overwritten by a
+    // later provider event, or the registry would disagree with the durable
+    // journal about the one terminal outcome.
+    if (!op || op.terminalEvent || isTerminalOperationStatus(op.status)) return;
     op.terminalEvent = terminal;
     op.terminalTranscript = transcript;
     op.status = terminalEventStatus(terminal);

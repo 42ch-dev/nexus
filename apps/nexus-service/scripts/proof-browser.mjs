@@ -108,11 +108,28 @@ function commandLineMatchesCargo(commandLine) {
 
 const trackedChildren = new Set();
 let cleanedUp = false;
+// Bounded retained output of exited children: a launch/service failure removes
+// the child from the tracked set at exit, and its captured output is exactly
+// what the failure evidence needs to attribute the failure. Retention is
+// capped in entry count and tail size.
+const retainedExitedOutput = new Map();
+const RETAINED_EXITED_OUTPUT_MAX = 8;
 
 function trackChild(child, label) {
   child.__label = label;
   trackedChildren.add(child);
-  child.once('exit', () => trackedChildren.delete(child));
+  child.once('exit', () => {
+    trackedChildren.delete(child);
+    const text = typeof child.output === 'function' ? child.output() : '';
+    if (!text) return;
+    const key = child.__label ?? `pid-${child.pid}`;
+    retainedExitedOutput.delete(key);
+    retainedExitedOutput.set(key, text.slice(-MAX_EVIDENCE_TAIL_CHARS));
+    while (retainedExitedOutput.size > RETAINED_EXITED_OUTPUT_MAX) {
+      const oldest = retainedExitedOutput.keys().next().value;
+      retainedExitedOutput.delete(oldest);
+    }
+  });
   return child;
 }
 
@@ -679,7 +696,8 @@ function redactChildOutput(text, fixtureHome) {
 /**
  * Bounded, redacted tail of every tracked child's captured output, keyed by
  * label. Lets a launch/navigation/service failure be attributed in the failure
- * evidence without dumping unbounded logs.
+ * evidence without dumping unbounded logs; exited children contribute their
+ * retained output so a failed launch is still attributable.
  */
 function collectChildOutput(fixtureHome) {
   const rows = {};
@@ -691,6 +709,13 @@ function collectChildOutput(fixtureHome) {
       text.slice(-MAX_EVIDENCE_TAIL_CHARS),
       fixtureHome,
     );
+  }
+  // Exited children left the tracked set at exit; their retained (already
+  // tail-bounded) output is merged so the failure evidence keeps the very
+  // child output that explains a launch/service failure.
+  for (const [label, text] of retainedExitedOutput) {
+    if (rows[label]) continue;
+    rows[label] = redactChildOutput(text, fixtureHome);
   }
   return rows;
 }
@@ -1232,24 +1257,57 @@ function countCargoTraces(rootPids) {
 }
 
 /**
- * Trace Cargo/native child processes while `work()` runs. Returns the observed
- * samples plus the work result.
+ * Trace Cargo/native child processes while `work()` runs. `resolveRootPids` is
+ * a pid array or a zero-arg function re-resolved on every sample. A sampling
+ * failure or a zero-sample window FAILS the trace: a `cargoTraceCount === 0`
+ * claim requires observed samples, never a blind spot.
  */
-async function traceDuringEdit(rootPids, work, { intervalMs = 50 } = {}) {
+
+/**
+ * Current traced root set for a service-edit window: the proof runner plus the
+ * LIVE service child. Resolved per sample, because `restartServiceFromEdit`
+ * replaces the service process mid-window and the replacement must stay inside
+ * the traced root set.
+ */
+function liveServiceRootPids(ctx) {
+  const roots = [process.pid];
+  const child = ctx.service?.child;
+  if (child && child.pid && child.exitCode === null && child.signalCode === null) {
+    roots.push(child.pid);
+  }
+  return roots;
+}
+
+async function traceDuringEdit(resolveRootPids, work, { intervalMs = 50 } = {}) {
   const samples = [];
+  let samplingError = null;
   let running = true;
   const sampler = (async () => {
     while (running) {
-      samples.push(countCargoTraces(rootPids));
+      try {
+        // Re-resolved on EVERY sample: a restart that replaces the service
+        // process mid-window keeps the replacement inside the traced roots.
+        const roots = typeof resolveRootPids === 'function' ? resolveRootPids() : resolveRootPids;
+        samples.push(countCargoTraces(roots));
+      } catch (err) {
+        samplingError = err instanceof Error ? err : new Error(String(err));
+        break;
+      }
       await sleep(intervalMs);
     }
   })();
   try {
     const result = await work();
+    if (samplingError) {
+      throw new Error(`cargo trace sampling failed during edit: ${samplingError.message}`);
+    }
+    if (samples.length === 0) {
+      throw new Error('cargo trace sampling collected no samples; a zero-Cargo claim is unproven');
+    }
     return { result, cargoSamples: samples };
   } finally {
     running = false;
-    await sampler;
+    await sampler.catch(() => undefined);
   }
 }
 
@@ -1351,9 +1409,8 @@ async function runRouteEditSample(ctx) {
   }
   try {
     edit.write(editedSource);
-    const rootPids = [ctx.service.child.pid, process.pid];
     let restartMs = null;
-    const { cargoSamples } = await traceDuringEdit(rootPids, async () => {
+    const { cargoSamples } = await traceDuringEdit(() => liveServiceRootPids(ctx), async () => {
       const restarted = await restartServiceFromEdit(ctx);
       restartMs = restarted.readyMs;
     });
@@ -1432,17 +1489,22 @@ async function runAdapterEditSample(ctx, sampleIndex) {
   }
   try {
     edit.write(editedSource);
-    const rootPids = [ctx.service.child.pid, process.pid];
     let restartMs = null;
-    const { cargoSamples } = await traceDuringEdit(rootPids, async () => {
+    const { cargoSamples } = await traceDuringEdit(() => liveServiceRootPids(ctx), async () => {
       // Rebuild the adapter package from the edited source with its own build
-      // script (tsup is a TS build, never a Cargo/native one).
-      const build = spawnSync('pnpm', ['-F', '@42ch/nexus-provider-acp', 'run', 'build'], {
-        cwd: repoRoot,
-        encoding: 'utf8',
-      });
-      if (build.status !== 0) {
-        throw new Error(`adapter package build failed: ${build.stderr ?? build.stdout ?? ''}`);
+      // script (tsup is a TS build, never a Cargo/native one). The build runs
+      // as a tracked async child: a synchronous build would block this event
+      // loop and blind the sampler for the whole build window.
+      const build = spawnLogged(
+        'pnpm',
+        ['-F', '@42ch/nexus-provider-acp', 'run', 'build'],
+        { cwd: repoRoot, label: `adapter-build-${sampleIndex}` },
+      );
+      const exitCode = await new Promise((resolveExit) => build.once('exit', resolveExit));
+      if (exitCode !== 0) {
+        throw new Error(
+          `adapter package build failed (exit ${exitCode}): ${build.output().slice(-MAX_EVIDENCE_TAIL_CHARS)}`,
+        );
       }
       const restarted = await restartServiceFromEdit(ctx);
       restartMs = restarted.readyMs;
@@ -1777,11 +1839,17 @@ async function main() {
       cli: evidence.phases.interaction.raceOutcome.cli,
     };
     {
-      // Exactly one writer must win the same-version CAS: the browser either got
-      // HTTP 200 (it won, CLI loses) or a 409 (it lost, CLI won with exit 0).
+      // Exactly one writer must win the same-version CAS, AND the loser must
+      // observe the TYPED conflict outcome: a CLI loss is exit 76
+      // (`world_kb_conflict`), a browser loss is HTTP 409. Any other failure
+      // shape (a browser 5xx/403, a CLI crash or busy-after-deadline) is not a
+      // CAS result and must fail the criterion instead of passing via XOR.
       const browserWon = evidence.phases.interaction.raceOutcome.browser.status === 200;
       const cliWon = evidence.phases.interaction.raceOutcome.cli.status === 0;
-      evidence.criteria['DB-1-stale-cas'].pass = browserWon !== cliWon;
+      const browserConflict = evidence.phases.interaction.raceOutcome.browser.status === 409;
+      const cliConflict = evidence.phases.interaction.raceOutcome.cli.status === 76;
+      evidence.criteria['DB-1-stale-cas'].pass =
+        browserWon !== cliWon && (browserWon ? cliConflict : browserConflict);
     }
     evidence.criteria['LIFE-cooperative-cancel'] = {
       cancelAcknowledged: evidence.phases.cancel.cancelAcknowledged,
@@ -1798,8 +1866,13 @@ async function main() {
         evidence.phases.providerStream.inspect?.status !== undefined,
     };
     evidence.criteria['LIFE-restart-interrupted'] = {
+      httpStatus: evidence.phases.interrupted.httpStatus,
       observed: evidence.phases.interrupted.status,
-      pass: evidence.phases.interrupted.status === 'interrupted',
+      // A non-200 response (404 stale, 403, 5xx) is not an interrupted
+      // observation even when some payload carried the status string.
+      pass:
+        evidence.phases.interrupted.httpStatus === 200 &&
+        evidence.phases.interrupted.status === 'interrupted',
     };
     evidence.criteria['FFI-hashes-unchanged'] = {
       schemaUnchanged: schemaHashBefore === schemaHashAfter,

@@ -463,30 +463,46 @@ impl EnvState {
         self.journal_pool.lock().ok().and_then(|slot| slot.clone())
     }
 
-    /// Journal an operation write-through. Best-effort: a journal failure never
-    /// fails the provider effect (the in-memory state remains authoritative for
-    /// this process).
-    pub async fn journal_operation(&self, operation_id: &str, session_id: &str, provider_id: &str, status: &str) {
+    /// Journal an operation write-through at the provider boundary. The
+    /// in-memory state remains authoritative for this process, but the durable
+    /// mirror is part of the effect contract (LIFE-3): a failed write is
+    /// returned to the caller, never discarded.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`nexus_local_db::LocalDbError`] when the journal upsert fails.
+    pub async fn journal_operation(
+        &self,
+        operation_id: &str,
+        session_id: &str,
+        provider_id: &str,
+        status: &str,
+    ) -> Result<(), nexus_local_db::LocalDbError> {
         let Some(pool) = self.journal_pool() else {
-            return;
+            return Ok(());
         };
-        let _ = nexus_local_db::js_provider_journal::upsert_operation(
+        nexus_local_db::js_provider_journal::upsert_operation(
             &pool,
             operation_id,
             session_id,
             provider_id,
             status,
         )
-        .await;
+        .await
     }
 
     /// Settle orphaned journal entries on open: any non-terminal operation the
     /// predecessor process left behind becomes `interrupted` (LIFE-3).
-    pub async fn settle_journal_on_open(&self) {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`nexus_local_db::LocalDbError`] when the settlement query
+    /// fails.
+    pub async fn settle_journal_on_open(&self) -> Result<u64, nexus_local_db::LocalDbError> {
         let Some(pool) = self.journal_pool() else {
-            return;
+            return Ok(0);
         };
-        let _ = nexus_local_db::js_provider_journal::settle_orphaned_as_interrupted(&pool).await;
+        nexus_local_db::js_provider_journal::settle_orphaned_as_interrupted(&pool).await
     }
 
     /// Inspect the actual delivered provider events and update JS operation
@@ -536,9 +552,17 @@ impl EnvState {
     }
 
     /// Journal an operation's terminal status durably (LIFE-3).
-    pub async fn journal_operation_status(&self, operation_id: &str, status: &str) {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`nexus_local_db::LocalDbError`] when the journal upsert fails.
+    pub async fn journal_operation_status(
+        &self,
+        operation_id: &str,
+        status: &str,
+    ) -> Result<(), nexus_local_db::LocalDbError> {
         let Some(pool) = self.journal_pool() else {
-            return;
+            return Ok(());
         };
         let (session_id, provider_id) = self
             .with_js_state(|s| {
@@ -547,22 +571,29 @@ impl EnvState {
             })
             .flatten()
             .unwrap_or_default();
-        let _ = nexus_local_db::js_provider_journal::upsert_operation(
+        nexus_local_db::js_provider_journal::upsert_operation(
             &pool,
             operation_id,
             &session_id,
             &provider_id,
             status,
         )
-        .await;
+        .await
     }
 
     /// Drop journaled operations for a cleanly shut-down session.
-    pub async fn forget_journal_session(&self, session_id: &str) {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`nexus_local_db::LocalDbError`] when the delete fails.
+    pub async fn forget_journal_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), nexus_local_db::LocalDbError> {
         let Some(pool) = self.journal_pool() else {
-            return;
+            return Ok(());
         };
-        let _ = nexus_local_db::js_provider_journal::forget_session(&pool, session_id).await;
+        nexus_local_db::js_provider_journal::forget_session(&pool, session_id).await
     }
 
     pub fn lifecycle_phase(&self) -> EnvLifecyclePhase {
@@ -1102,5 +1133,71 @@ mod tests {
         // Releasing a reservation frees exactly one slot.
         state.release_js_session_reservation();
         assert!(state.try_reserve_js_session());
+    }
+
+    /// A journal pool whose database genuinely lacks the journal table: every
+    /// write/settlement fails for real, and the Result must say so — LIFE-3 is
+    /// never silently best-effort.
+    #[tokio::test]
+    async fn journal_failures_are_propagated_not_discarded() {
+        let state = EnvState::new();
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("open in-memory pool");
+        state.set_journal_pool(pool);
+        assert!(
+            state
+                .journal_operation("op-x", "sess-x", "mock-acp", "running")
+                .await
+                .is_err(),
+            "a failed running upsert must be observable"
+        );
+        assert!(
+            state.journal_operation_status("op-x", "cancelled").await.is_err(),
+            "a failed terminal upsert must be observable"
+        );
+        assert!(
+            state.forget_journal_session("sess-x").await.is_err(),
+            "a failed clean-session forget must be observable"
+        );
+        assert!(
+            state.settle_journal_on_open().await.is_err(),
+            "a failed open settlement must fail the open path"
+        );
+    }
+
+    /// Success behavior is unchanged: with the real admitted engine pool the
+    /// same calls return Ok and the journal reflects the writes.
+    #[tokio::test]
+    async fn journal_success_path_still_returns_ok() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let guarded = nexus_local_db::writer_protocol::init_engine_pool(
+            &dir.path().join("state.db"),
+            nexus_local_db::writer_protocol::BOOTSTRAP_CREATOR_ID,
+            nexus_local_db::writer_protocol::GuardedPoolOptions::default(),
+        )
+        .await
+        .expect("open admitted engine pool");
+        let state = EnvState::new();
+        state.set_journal_pool(guarded.clone_pool());
+        state.record_js_session("sess-ok".to_string(), "mock-acp".to_string());
+        state.record_js_session_operation("sess-ok", "op-ok".to_string());
+
+        state
+            .journal_operation("op-ok", "sess-ok", "mock-acp", "running")
+            .await
+            .expect("running upsert succeeds");
+        state
+            .journal_operation_status("op-ok", "cancelled")
+            .await
+            .expect("terminal upsert succeeds");
+        // A cancelled operation is already terminal: settlement has nothing to
+        // settle and reports zero affected rows, not an error.
+        let settled = state.settle_journal_on_open().await.expect("settlement succeeds");
+        assert_eq!(settled, 0);
+        state
+            .forget_journal_session("sess-ok")
+            .await
+            .expect("clean-session forget succeeds");
     }
 }

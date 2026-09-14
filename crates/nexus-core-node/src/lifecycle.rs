@@ -599,7 +599,7 @@ pub async fn open_core(
         return Err(reason);
     }
 
-    let provider_port: Arc<dyn ProviderPort> = if let Some(port) = js_port {
+    let provider_port: Arc<dyn ProviderPort> = if let Some(port) = js_port.clone() {
         Arc::new(AdmittingProviderPort::new(
             host.clone(),
             port,
@@ -614,9 +614,15 @@ pub async fn open_core(
     // Install the durable journal pool and settle any operation orphaned by the
     // predecessor process's exit as `interrupted` (LIFE-3). This must happen
     // before the host accepts new work so a restarted process never re-dispatches
-    // a journaled op and the prior active op is queryable immediately.
+    // a journaled op and the prior active op is queryable immediately. A failed
+    // settlement cannot prove that recovery, so the open fails instead of
+    // publishing a settled journal it does not have.
     state.set_journal_pool(core.pool().clone());
-    state.settle_journal_on_open().await;
+    if let Err(err) = state.settle_journal_on_open().await {
+        let reason = format!("journal settlement failed: {err}");
+        abort_opening(state.clone(), Some(core), Some(host), js_port.clone()).await;
+        return Err(reason);
+    }
     state.host.lock().expect("host mutex poisoned").replace(host);
     state.provider_port.lock().expect("port mutex poisoned").replace(provider_port);
     state.core.lock().expect("core mutex poisoned").replace(core);

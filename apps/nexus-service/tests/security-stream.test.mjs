@@ -496,6 +496,30 @@ describe('security-stream (P4-T2)', () => {
     assert.ok(registry.operationRecord(ids[ids.length - 1]), 'newest terminal must be retained');
   });
 
+  test('accepted cancel is never overwritten by a later provider terminal event', async () => {
+    const { ProviderRegistry } = await import(join(serviceRoot, 'dist/provider-registry.js'));
+    const registry = new ProviderRegistry();
+    const sessionId = '00000000-0000-4000-8000-000000000101';
+    const operationId = '00000000-0000-4000-8000-000000000102';
+    registry.registerSession({ sessionId, providerId: 'mock-acp', state: 'Running', activeOpId: operationId });
+    registry.registerOperation({ operationId, sessionId, providerId: 'mock-acp', status: 'started', terminalEvent: null, terminalTranscript: null });
+    // The cancel is accepted first: the registry settles the operation to the
+    // `cancelled` terminal exactly like the cancel route does.
+    registry.settleOperationStatus(operationId, 'cancelled');
+    assert.equal(registry.operationRecord(operationId).status, 'cancelled');
+    assert.equal(registry.activeOperationCount(), 0, 'an accepted cancel is no longer charged as active');
+    // A late provider terminal event must not rewrite the accepted outcome:
+    // first terminal wins, matching the durable journal's one terminal.
+    registry.finishOperation(operationId, { OpFinished: { session_id: sessionId, op_id: operationId, reason: 'end_turn' } }, null);
+    const record = registry.operationRecord(operationId);
+    assert.equal(record.status, 'cancelled', 'a late OpFinished must not overwrite the accepted cancel');
+    assert.equal(record.terminalEvent, null, 'the late event is not adopted as the terminal');
+    // The session stays released exactly once and remains consistent.
+    assert.equal(registry.sessionRecord(sessionId).activeOpId, null);
+    assert.equal(registry.sessionRecord(sessionId).state, 'Ready');
+    assert.equal(registry.activeOperationCount(), 0);
+  });
+
   test('active provider operation cap returns transport busy before dispatch', async () => {
     await stopSharedService();
     const blockHome = seedHome({ BLOCK_PROMPT: '1' });
