@@ -37,9 +37,9 @@
  */
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, mkdtempSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, rmSync, mkdtempSync, readdirSync } from 'node:fs';
 import http from 'node:http';
-import { tmpdir } from 'node:os';
+import { cpus as osCpus, release as osRelease, tmpdir, totalmem as osTotalmem, type as osType } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -195,6 +195,27 @@ function spawnLogged(command, args, { cwd, env, label, collect = true }) {
 }
 
 /**
+ * Shared group-kill path (QC3-C3): signal a child's whole process group. The
+ * immediate-pid fallback fires ONLY on ESRCH — the group, leader included, is
+ * already gone — so a failed group signal (EPERM, …) can never masquerade as
+ * a delivered group kill while group descendants may still be alive. Callers
+ * that need survivor proof verify via `survivingGroupRows`, not via this
+ * function's silence.
+ */
+function signalProcessGroup(pid, signal) {
+  try {
+    process.kill(-pid, signal);
+  } catch (err) {
+    if (err?.code !== 'ESRCH') throw err;
+    try {
+      process.kill(pid, signal);
+    } catch {
+      /* leader already gone too */
+    }
+  }
+}
+
+/**
  * Bounded child stop: SIGTERM the process group, escalate to SIGKILL, sweep
  * the group once more, then await `close` — every wait bounded. A child that
  * already exited but has not closed skips the signaling and goes straight to
@@ -207,13 +228,12 @@ async function stopChild(child, { graceMs = 4_000, killMs = 2_000, closeMs = 2_0
   const pid = child.pid;
   const signalGroup = (signal) => {
     try {
-      process.kill(-pid, signal);
+      signalProcessGroup(pid, signal);
     } catch {
-      try {
-        process.kill(pid, signal);
-      } catch {
-        /* already gone */
-      }
+      // Cleanup path: a group-signal failure must not abort the bounded
+      // escalation below, but it is NOT treated as a delivered group signal.
+      // Survivor proof for the abrupt-restart path lives in
+      // `runInterruptedRestartCycles` (ps sweep), not here.
     }
   };
   const exited = () => child.exitCode !== null || child.signalCode !== null;
@@ -1045,36 +1065,69 @@ async function runBrowserInteractionProof(ctx) {
     client,
     `window.__RFT_NATIVE_PROOF__.client.worldKbPatchEntity(${JSON.stringify(world)}, { entity_id: ${JSON.stringify(CAS_ENTITY)}, expected_version: ${casVersion}, patch: { title: 'BROWSER-UPDATED' } }).then((r) => ({ ok: true, version: r.version })).catch((e) => ({ ok: false, status: e.status ?? 0, code: e.code ?? String((e && e.message) || e) }))`,
   );
-  const postUpdateVersion = await evaluate(
-    client,
-    `window.__RFT_NATIVE_PROOF__.readGraph().then((g) => (g.entities||[]).filter(e => e.key_block_id === ${JSON.stringify(CAS_ENTITY)}).map(e => e.version)[0] ?? null)`,
-  );
+  const readCasVersionExpr = `window.__RFT_NATIVE_PROOF__.readGraph().then((g) => (g.entities||[]).filter(e => e.key_block_id === ${JSON.stringify(CAS_ENTITY)}).map(e => e.version)[0] ?? null)`;
+  const postUpdateVersion = await evaluate(client, readCasVersionExpr);
 
-  // Stale CAS: race the browser and a concurrent direct CLI writer, both at the
-  // same expected version. Exactly one wins; the loser must observe a conflict
-  // (HTTP 409 / CLI exit 76) and no silent lost update.
-  const raceBrowser = evaluate(
-    client,
-    `window.__RFT_NATIVE_PROOF__.client.worldKbPatchEntity(${JSON.stringify(world)}, { entity_id: ${JSON.stringify(CAS_ENTITY)}, expected_version: ${postUpdateVersion}, patch: { title: 'RACE-BROWSER' } }).then((r) => ({ winner: 'browser', status: 200, version: r.version })).catch((e) => ({ winner: 'none', status: e.status ?? 0, code: e.code ?? null }))`,
-  );
-  const cliPromise = runCliPatch(ctx.home, {
-    entityId: CAS_ENTITY,
-    expectedVersion: postUpdateVersion,
-    title: 'RACE-CLI',
-  });
-  const browserRaceResult = await raceBrowser;
-  const cli = await cliPromise;
-  const raceOutcome = {
-    expectedVersion: postUpdateVersion,
-    browser: browserRaceResult,
-    cli: {
-      status: cli.status,
-      stdout: cli.stdout.trim().slice(0, 400),
-      stderr: cli.stderr.trim().slice(0, 400),
-      attempts: cli.attempts,
-      writerBusyMs: cli.writerBusyMs,
-    },
-  };
+  // DB-1 locked protocol (proof matrix §1/§2): 100 deterministic competing-write
+  // pairs. Each pair is a real two-writer barrier — the next expected version
+  // is observed from canonical state, then the browser (BrowserClient in the
+  // page) and the direct CLI writer race at that SAME expected version.
+  // Exactly one wins; the loser must observe the typed conflict (HTTP 409 /
+  // CLI exit 76) and the committed version must advance by exactly one per
+  // pair (no lost commit). The criterion verdict is derived in
+  // `deriveDb1Criterion` from the COMPLETE sample only.
+  const racePairs = [];
+  {
+    let expectedVersion = postUpdateVersion;
+    for (let index = 0; index < DB1_REQUIRED_PAIRS; index += 1) {
+      const raceBrowser = evaluate(
+        client,
+        `window.__RFT_NATIVE_PROOF__.client.worldKbPatchEntity(${JSON.stringify(world)}, { entity_id: ${JSON.stringify(CAS_ENTITY)}, expected_version: ${expectedVersion}, patch: { title: 'RACE-BROWSER-${index}' } }).then((r) => ({ winner: 'browser', status: 200, version: r.version })).catch((e) => ({ winner: 'none', status: e.status ?? 0, code: e.code ?? null }))`,
+      );
+      const cliPromise = runCliPatch(ctx.home, {
+        entityId: CAS_ENTITY,
+        expectedVersion,
+        title: `RACE-CLI-${index}`,
+      });
+      const pairStartedAt = performance.now();
+      const browserRaceResult = await raceBrowser;
+      const cli = await cliPromise;
+      const pairMs = performance.now() - pairStartedAt;
+      const browserWon = browserRaceResult.status === 200;
+      const cliWon = cli.status === 0;
+      if (browserWon === cliWon) {
+        // Neither or both writers won: record the malformed round verbatim and
+        // stop — the derivation fails the criterion, never fabricates a winner.
+        racePairs.push({
+          index,
+          expectedVersion,
+          resultingVersion: null,
+          winner: browserWon ? 'both' : 'none',
+          browserStatus: browserRaceResult.status,
+          cliStatus: cli.status,
+          cliAttempts: cli.attempts,
+          pairMs,
+        });
+        break;
+      }
+      const resultingVersion = await evaluate(client, readCasVersionExpr);
+      racePairs.push({
+        index,
+        expectedVersion,
+        resultingVersion,
+        winner: browserWon ? 'browser' : 'cli',
+        browserStatus: browserRaceResult.status,
+        cliStatus: cli.status,
+        cliAttempts: cli.attempts,
+        pairMs,
+      });
+      if (resultingVersion !== expectedVersion + 1) {
+        // Lost commit or double bump: stop; the malformed sample fails the row.
+        break;
+      }
+      expectedVersion = resultingVersion;
+    }
+  }
 
   // Prove the direct CLI writer becomes visible through the canvas watermark:
   // the CLI (already run above) wins the CAS; then a second CLI-only write lands
@@ -1087,10 +1140,7 @@ async function runBrowserInteractionProof(ctx) {
     client,
     `window.__RFT_NATIVE_PROOF__.readGraph().then((g) => (g.entities||[]).filter(e => e.key_block_id === ${JSON.stringify(CAS_ENTITY)}).map(e => e.canonical_name)[0] ?? null)`,
   );
-  const cliVersion = await evaluate(
-    client,
-    `window.__RFT_NATIVE_PROOF__.readGraph().then((g) => (g.entities||[]).filter(e => e.key_block_id === ${JSON.stringify(CAS_ENTITY)}).map(e => e.version)[0] ?? null)`,
-  );
+  const cliVersion = await evaluate(client, readCasVersionExpr);
   const cliWrite = await runCliPatch(ctx.home, {
     entityId: CAS_ENTITY,
     expectedVersion: cliVersion,
@@ -1164,7 +1214,7 @@ async function runBrowserInteractionProof(ctx) {
     created,
     createShot,
     updateViaBrowser,
-    raceOutcome,
+    racePairs,
     watermarkOutcome,
     fitViewOutcome,
   };
@@ -1199,70 +1249,125 @@ async function runProviderProof(ctx) {
 
 async function runCancelProof(ctx, serviceHandle) {
   const { client } = ctx;
-  const session = await evaluate(
-    client,
-    'window.__RFT_NATIVE_PROOF__.createAgentHostSession({ provider_id: "mock-acp" })',
-  );
-  const operation = await evaluate(
-    client,
-    `window.__RFT_NATIVE_PROOF__.executeAgentHostOperation(${JSON.stringify(session.session_id)}, { kind: "prompt", content: "block" })`,
-  );
-  await sleep(750);
-  const cancel = await evaluate(
-    client,
-    `window.__RFT_NATIVE_PROOF__.cancelAgentHostOperation(${JSON.stringify(operation.operation_id)})`,
-  );
-  // The cancellation acknowledgment alone is not enough: the operation must
-  // SETTLE to `cancelled` (observed via GET), not remain `running`. A cancel ack
-  // with a stale `running` GET is a native defect this criterion must expose.
-  const deadline = Date.now() + 20_000;
-  let status = null;
-  while (Date.now() < deadline) {
-    const inspect = await jsonRequest(
-      `${serviceHandle.url}/v1/daemon/agent-host/operations/${operation.operation_id}`,
+  // LIFE-2 locked protocol (proof matrix §2): 10 cooperative ACP cancel
+  // cycles against the real TS ACP SDK adapter and the blocking protocol
+  // fixture. Each cycle measures acknowledgment→terminal from the driver
+  // send of the cancel (monotonic `performance.now()`), with the terminal
+  // observed through a real GET — a cancel ack with a stale `running` GET is
+  // a native defect this criterion must expose. The verdict is derived in
+  // `deriveCancelCriterion` from the COMPLETE cycle sample only.
+  const cycles = [];
+  for (let index = 0; index < LIFE_REQUIRED_CYCLES; index += 1) {
+    const session = await evaluate(
+      client,
+      'window.__RFT_NATIVE_PROOF__.createAgentHostSession({ provider_id: "mock-acp" })',
     );
-    status = inspect.payload?.status ?? null;
-    if (status && status !== 'started' && status !== 'running') break;
-    await sleep(250);
+    const operation = await evaluate(
+      client,
+      `window.__RFT_NATIVE_PROOF__.executeAgentHostOperation(${JSON.stringify(session.session_id)}, { kind: "prompt", content: "block" })`,
+    );
+    await sleep(750);
+    const cancelStartedAt = performance.now();
+    const cancel = await evaluate(
+      client,
+      `window.__RFT_NATIVE_PROOF__.cancelAgentHostOperation(${JSON.stringify(operation.operation_id)})`,
+    );
+    const deadline = Date.now() + 20_000;
+    let status = null;
+    for (;;) {
+      const inspect = await jsonRequest(
+        `${serviceHandle.url}/v1/daemon/agent-host/operations/${operation.operation_id}`,
+      );
+      status = inspect.payload?.status ?? null;
+      if (status && status !== 'started' && status !== 'running') break;
+      if (Date.now() >= deadline) break;
+      await sleep(100);
+    }
+    cycles.push({
+      index,
+      sessionId: session.session_id,
+      operationId: operation.operation_id,
+      cancel,
+      cancelAcknowledged: cancel?.status === 'cancelled',
+      observedStatus: status,
+      settled: status === 'cancelled',
+      cancelAckToTerminalMs: performance.now() - cancelStartedAt,
+    });
   }
-  return {
-    sessionId: session.session_id,
-    operationId: operation.operation_id,
-    cancel,
-    cancelAcknowledged: cancel?.status === 'cancelled',
-    status,
-    settled: status === 'cancelled',
-  };
+  return { cycles };
 }
 
-async function runInterruptedRestartProof(ctx, serviceHandle) {
-  const { client } = ctx;
-  const session = await evaluate(
-    client,
-    'window.__RFT_NATIVE_PROOF__.createAgentHostSession({ provider_id: "mock-acp" })',
-  );
-  const operation = await evaluate(
-    client,
-    `window.__RFT_NATIVE_PROOF__.executeAgentHostOperation(${JSON.stringify(session.session_id)}, { kind: "prompt", content: "block" })`,
-  );
-  await sleep(750);
-  // Kill the service process group abruptly (SIGKILL) so a non-resumable active
-  // operation is left behind for the reopen to mark Interrupted.
-  try {
-    process.kill(-serviceHandle.child.pid, 'SIGKILL');
-  } catch {
+/**
+ * LIFE-3 locked protocol (proof matrix §2): abrupt-restart cycles. Each cycle
+ * SIGKILLs the service's WHOLE process group through the shared
+ * `signalProcessGroup` path (the immediate-pid fallback fires only on ESRCH),
+ * verifies via `ps` that NO group descendant survived (QC3-C3: an unconditional
+ * pid fallback used to hide survivors), then restarts and requires the
+ * previously active non-resumable operation to be reported `interrupted`.
+ * Every wait is bounded; any surviving descendant is recorded in the cycle row
+ * and fails the criterion via `deriveRestartCriterion`.
+ */
+async function runInterruptedRestartCycles(ctx, serviceHandle, { cycles = LIFE_REQUIRED_CYCLES } = {}) {
+  const rows = [];
+  let handle = serviceHandle;
+  for (let index = 0; index < cycles; index += 1) {
+    const session = await evaluate(
+      ctx.client,
+      'window.__RFT_NATIVE_PROOF__.createAgentHostSession({ provider_id: "mock-acp" })',
+    );
+    const operation = await evaluate(
+      ctx.client,
+      `window.__RFT_NATIVE_PROOF__.executeAgentHostOperation(${JSON.stringify(session.session_id)}, { kind: "prompt", content: "block" })`,
+    );
+    await sleep(750);
+    // Snapshot the tracked tree BEFORE the kill: once the group leader dies,
+    // orphans are re-parented and a fresh ps walk could no longer find them.
+    const groupBefore = collectDescendants([handle.child.pid], psRows()).filter(
+      (row) => row.pid !== handle.child.pid,
+    );
+    const killRequestedAt = performance.now();
+    let groupKillError = null;
     try {
-      process.kill(serviceHandle.child.pid, 'SIGKILL');
-    } catch {
-      /* already gone */
+      signalProcessGroup(handle.child.pid, 'SIGKILL');
+    } catch (err) {
+      groupKillError = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
     }
+    // `__closed` is registered at spawn time, so it cannot miss an early exit;
+    // the bound keeps this abrupt-restart proof finite even if inherited stdio
+    // delays `close`. Port release below remains the authoritative stop check.
+    await Promise.race([handle.child.__closed ?? Promise.resolve(), sleep(5_000)]);
+    const closedSettled = handle.child.__closeSettled === true;
+    // Bounded survivor sweep: one extra group SIGKILL, one bounded settle
+    // window, then the verdict rows. A survivor here is evidence, never a
+    // silent pass.
+    let groupSurvivors = survivingGroupRows(groupBefore, handle.child.pid);
+    if (groupSurvivors.length > 0) {
+      try {
+        signalProcessGroup(handle.child.pid, 'SIGKILL');
+      } catch (err) {
+        groupKillError = groupKillError ?? (err instanceof Error ? `${err.name}: ${err.message}` : String(err));
+      }
+      await Promise.race([handle.child.__closed ?? Promise.resolve(), sleep(1_000)]);
+      groupSurvivors = survivingGroupRows(groupBefore, handle.child.pid);
+    }
+    await waitForPortFree(handle.port);
+    handle = await restartService(handle, { providerEnv: { BLOCK_PROMPT: '1' } });
+    const observed = await observeInterrupted(handle, operation.operation_id);
+    rows.push({
+      index,
+      sessionId: session.session_id,
+      operationId: operation.operation_id,
+      groupKillError,
+      closedSettled,
+      abruptCloseSettledMs: closedSettled ? performance.now() - killRequestedAt : null,
+      groupDescendantsBefore: groupBefore.length,
+      groupSurvivors,
+      restartReadyMs: handle.readyMs,
+      httpStatus: observed.httpStatus,
+      observedStatus: observed.status,
+    });
   }
-  // `__closed` is registered at spawn time, so it cannot miss an early exit;
-  // the timeout keeps this abrupt-restart proof finite even if inherited stdio
-  // delays `close`. Port release below remains the authoritative stop check.
-  await Promise.race([serviceHandle.child.__closed ?? Promise.resolve(), sleep(5_000)]);
-  await waitForPortFree(serviceHandle.port);
-  return { sessionId: session.session_id, operationId: operation.operation_id };
+  return { rows, service: handle };
 }
 
 async function waitForPortFree(port, { timeoutMs = 15_000 } = {}) {
@@ -1326,6 +1431,19 @@ function collectDescendants(rootPids, rows) {
 function countCargoTraces(rootPids) {
   const rows = collectDescendants(rootPids, psRows());
   return rows.filter((row) => commandLineMatchesCargo(row.command)).length;
+}
+
+/**
+ * Members of the snapshotted process tree (excluding the killed leader) whose
+ * exact pid AND command line still exist. The command line must match too: a
+ * bare pid match could be pid reuse inside the observation window.
+ */
+function survivingGroupRows(groupBefore, leaderPid) {
+  const rows = psRows();
+  return groupBefore.filter(
+    (row) =>
+      row.pid !== leaderPid && rows.some((r) => r.pid === row.pid && r.command === row.command),
+  );
 }
 
 /**
@@ -1725,6 +1843,254 @@ async function runAdapterEditSample(ctx, sampleIndex) {
   }
 }
 
+// ── Acceptance derivations (pure; extracted verbatim by focused tests) ──────
+
+// Locked sampling protocol (proof matrix §1/§2): DB-1 requires 100
+// deterministic competing-write pairs; LIFE-2/LIFE-3 require 10 cycles each.
+// A fixed acceptance row may claim `pass` ONLY from the complete locked count
+// of typed outcomes — a smaller sample is recorded as incomplete, never
+// silently green.
+const DB1_REQUIRED_PAIRS = 100;
+const LIFE_REQUIRED_CYCLES = 10;
+const LIFE2_CANCEL_ACK_P95_MAX_MS = 2_000;
+const LIFE2_CANCEL_ACK_MAX_MS = 3_000;
+const LIFE3_RESTART_READY_MAX_MS = 5_000;
+
+/**
+ * One DB-1 sample: exactly one expected-version winner with the TYPED loser
+ * conflict (browser HTTP 409 / CLI exit 76), and the committed version must
+ * have advanced by exactly one (no lost commit).
+ */
+function isValidDb1Pair(pair) {
+  if (pair === null || typeof pair !== 'object') return false;
+  const typedOutcome =
+    pair.winner === 'browser'
+      ? pair.browserStatus === 200 && pair.cliStatus === 76
+      : pair.winner === 'cli' && pair.cliStatus === 0 && pair.browserStatus === 409;
+  return typedOutcome && pair.resultingVersion === pair.expectedVersion + 1;
+}
+
+/**
+ * DB-1 verdict from the full competing-write sample. `pass` requires the
+ * COMPLETE locked count where every pair is typed and version-continuous.
+ */
+function deriveDb1Criterion(pairs, requiredPairs = DB1_REQUIRED_PAIRS) {
+  const rows = Array.isArray(pairs) ? pairs : [];
+  const pairMsSamples = rows.map((p) => p?.pairMs).filter((v) => Number.isFinite(v));
+  return {
+    requiredPairs,
+    sampleCount: rows.length,
+    typedPairCount: rows.filter(isValidDb1Pair).length,
+    pairMs: {
+      p95: nearestRankP95(pairMsSamples),
+      max: maxOf(pairMsSamples),
+      samples: pairMsSamples,
+    },
+    pairs: rows,
+    pass: rows.length === requiredPairs && rows.every(isValidDb1Pair),
+  };
+}
+
+/**
+ * LIFE-2 verdict from the full cooperative-cancel sample: every cycle must be
+ * acknowledged AND settle to `cancelled` within the matrix latency envelope
+ * (ack→terminal nearest-rank p95 ≤2 s, max ≤3 s).
+ */
+function deriveCancelCriterion(cycles, requiredCycles = LIFE_REQUIRED_CYCLES) {
+  const rows = Array.isArray(cycles) ? cycles : [];
+  const ackMsSamples = rows.map((c) => c?.cancelAckToTerminalMs).filter((v) => Number.isFinite(v));
+  const typedCycleCount = rows.filter(
+    (c) =>
+      c !== null &&
+      typeof c === 'object' &&
+      c.cancelAcknowledged === true &&
+      c.settled === true &&
+      c.observedStatus === 'cancelled',
+  ).length;
+  const ackP95 = nearestRankP95(ackMsSamples);
+  const ackMax = maxOf(ackMsSamples);
+  return {
+    requiredCycles,
+    sampleCount: rows.length,
+    typedCycleCount,
+    ackToTerminalMs: { p95: ackP95, max: ackMax, samples: ackMsSamples },
+    cycles: rows,
+    pass:
+      rows.length === requiredCycles &&
+      typedCycleCount === requiredCycles &&
+      ackP95 !== null &&
+      ackP95 <= LIFE2_CANCEL_ACK_P95_MAX_MS &&
+      ackMax !== null &&
+      ackMax <= LIFE2_CANCEL_ACK_MAX_MS,
+  };
+}
+
+/**
+ * LIFE-3 verdict from the full abrupt-restart sample: every cycle must report
+ * the prior operation `interrupted` over HTTP 200, settle the killed child's
+ * close, leave NO group descendant alive, and reach restart readiness within
+ * the matrix bound (≤5 s).
+ */
+function deriveRestartCriterion(cycles, requiredCycles = LIFE_REQUIRED_CYCLES) {
+  const rows = Array.isArray(cycles) ? cycles : [];
+  const readyMsSamples = rows.map((c) => c?.restartReadyMs).filter((v) => Number.isFinite(v));
+  const typedCycleCount = rows.filter(
+    (c) =>
+      c !== null &&
+      typeof c === 'object' &&
+      c.httpStatus === 200 &&
+      c.observedStatus === 'interrupted' &&
+      c.closedSettled === true &&
+      Array.isArray(c.groupSurvivors) &&
+      c.groupSurvivors.length === 0 &&
+      Number.isFinite(c.restartReadyMs) &&
+      c.restartReadyMs <= LIFE3_RESTART_READY_MAX_MS,
+  ).length;
+  return {
+    requiredCycles,
+    sampleCount: rows.length,
+    typedCycleCount,
+    restartReadyMs: {
+      p95: nearestRankP95(readyMsSamples),
+      max: maxOf(readyMsSamples),
+      samples: readyMsSamples,
+    },
+    cycles: rows,
+    pass: rows.length === requiredCycles && typedCycleCount === requiredCycles,
+  };
+}
+
+/**
+ * Common evidence protocol (proof matrix §1): a retained result must be
+ * attributable to its exact source revision, execution environment, and
+ * fixture dataset. Every required fact must be OBSERVED — anything
+ * unavailable stays `null`, lands in `missing`, and blocks acceptance. No
+ * value here is ever defaulted or guessed.
+ */
+function deriveProvenanceCompleteness(provenance) {
+  const observed = (v) => v !== null && v !== undefined && v !== '';
+  const isSha256 = (v) => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
+  const missing = [];
+  if (
+    !observed(provenance?.source?.sha) ||
+    !/^[0-9a-f]{40}$|^[0-9a-f]{64}$/.test(provenance.source.sha)
+  ) {
+    missing.push('source.sha');
+  }
+  if (
+    typeof provenance?.source?.clean !== 'boolean' ||
+    !Number.isFinite(provenance?.source?.dirtyFileCount)
+  ) {
+    missing.push('source.treeState');
+  }
+  for (const key of ['os', 'arch', 'libc', 'cpuModel']) {
+    if (!observed(provenance?.platform?.[key])) missing.push(`platform.${key}`);
+  }
+  if (!Number.isFinite(provenance?.platform?.cpuCount)) missing.push('platform.cpuCount');
+  if (!Number.isFinite(provenance?.platform?.totalMemBytes)) missing.push('platform.totalMemBytes');
+  for (const key of ['node', 'chromium', 'rustc', 'linker']) {
+    if (!observed(provenance?.runtime?.[key])) missing.push(`runtime.${key}`);
+  }
+  if (!isSha256(provenance?.contractHash)) missing.push('contractHash');
+  if (!observed(provenance?.dataset?.seedTool)) missing.push('dataset.seedTool');
+  if (!isSha256(provenance?.dataset?.dbSha256)) missing.push('dataset.dbSha256');
+  if (!Number.isFinite(provenance?.dataset?.dbBytes)) missing.push('dataset.dbBytes');
+  if (!Number.isInteger(provenance?.dataset?.entityCount)) missing.push('dataset.entityCount');
+  if (!Number.isInteger(provenance?.dataset?.candidatesObserved)) {
+    missing.push('dataset.candidatesObserved');
+  }
+  return { complete: missing.length === 0, missing };
+}
+
+// ── Environment provenance (common evidence protocol) ───────────────────────
+
+/** First non-empty stdout line of a version probe; null when unavailable. */
+function firstVersionLine(command, args) {
+  const res = spawnSync(command, args, { cwd: repoRoot, encoding: 'utf8' });
+  if (res.error || res.status !== 0) return null;
+  return (res.stdout ?? '').split('\n').map((s) => s.trim()).find(Boolean) ?? null;
+}
+
+/**
+ * Observed provenance facts for this exact run: committed source SHA + tree
+ * cleanliness from git, OS/arch/libc and CPU/RAM from the running process,
+ * toolchain/runtime versions from the real binaries this runner depends on,
+ * the contract revision hash from the contract document this checkout (or the
+ * harness control root) actually carries, and the seeded fixture dataset
+ * (identity = sha256 + byte size of the freshly seeded workspace `state.db`).
+ * Dataset counts observed later from the live graph/candidate reads are
+ * filled by `main()`. Everything unavailable stays `null`.
+ */
+function collectProvenance(fixtureHome) {
+  const gitOut = (args) => {
+    const res = spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8' });
+    return res.status === 0 ? (res.stdout ?? '') : null;
+  };
+  const sha = gitOut(['rev-parse', 'HEAD'])?.trim() ?? null;
+  const porcelain = gitOut(['status', '--porcelain', '--untracked-files=normal']);
+  const dirtyFiles =
+    porcelain === null ? null : porcelain.split('\n').map((l) => l.trim()).filter(Boolean);
+  // libc: glibc version where Node reports one (Linux); libSystem on darwin.
+  let libc = null;
+  try {
+    const glibc = process.report?.getReport?.()?.header?.glibcVersionRuntime ?? null;
+    libc = glibc ? `glibc ${glibc}` : process.platform === 'darwin' ? 'libSystem (darwin)' : null;
+  } catch {
+    libc = null;
+  }
+  // Contract hash: hash the contract revision this checkout actually carries.
+  // A feature worktree does not mirror `.mstar/iterations/`, so the harness
+  // control root (the parent of `.worktrees/`) is the fallback source; the
+  // hashed path is always recorded next to the hash.
+  const controlRoot = resolve(repoRoot, '..', '..');
+  const contractRelative = join('.mstar', 'iterations', 'v1.189', 'specs', 'architecture-contracts.md');
+  let contractHash = null;
+  let contractHashSource = null;
+  for (const base of [repoRoot, controlRoot]) {
+    const candidate = join(base, contractRelative);
+    if (existsSync(candidate)) {
+      contractHash = sha256File(candidate);
+      contractHashSource = candidate;
+      break;
+    }
+  }
+  const fixtureDbRelative =
+    '.nexus42/creators/test_creator/workspaces/default/state.db';
+  const fixtureDbPath = join(fixtureHome, ...fixtureDbRelative.split('/'));
+  const cpus = osCpus();
+  return {
+    source: {
+      sha,
+      clean: dirtyFiles === null ? null : dirtyFiles.length === 0,
+      dirtyFileCount: dirtyFiles === null ? null : dirtyFiles.length,
+    },
+    platform: {
+      os: `${osType()} ${osRelease()}`,
+      arch: process.arch,
+      libc,
+      cpuModel: cpus[0]?.model?.trim() ?? null,
+      cpuCount: cpus.length,
+      totalMemBytes: osTotalmem(),
+    },
+    runtime: {
+      node: process.version,
+      chromium: null, // filled by main() after the browser launches
+      rustc: firstVersionLine('rustc', ['--version']),
+      linker: firstVersionLine('cc', ['--version']),
+    },
+    contractHash,
+    contractHashSource,
+    dataset: {
+      seedTool: 'cargo run -q -p nexus-core-node --bin native-wire-fixture-seed -- <fixture-home>',
+      dbPath: fixtureDbRelative,
+      dbSha256: existsSync(fixtureDbPath) ? sha256File(fixtureDbPath) : null,
+      dbBytes: existsSync(fixtureDbPath) ? statSync(fixtureDbPath).size : null,
+      entityCount: null, // observed from the first graph read
+      candidatesObserved: null, // observed from the canvas candidate read
+    },
+  };
+}
+
 // ── Main ────────────────────────────────────────────────────────────────────
 
 /**
@@ -1827,6 +2193,11 @@ async function main() {
     seedFixtureHome(fixtureHome);
     writeProviderConfig(fixtureHome, fixtureLog);
 
+    // Common evidence protocol: capture provenance right after the
+    // deterministic fixture dataset exists (dataset identity is the freshly
+    // seeded workspace `state.db`; counts are filled from live reads below).
+    evidence.provenance = collectProvenance(fixtureHome);
+
     // The Vite dev proof server is the browser's real loopback origin; allow it
     // on the service (append-only, user config preserved) so the page's
     // BrowserClient requests are not rejected with 403.
@@ -1855,6 +2226,7 @@ async function main() {
       version: chromium.version?.['Browser'] ?? chromium.version ?? null,
       userDataDir: chromiumProfile,
     };
+    evidence.provenance.runtime.chromium = evidence.chromium.version;
 
     const ctx = {
       client: cdp,
@@ -1874,6 +2246,14 @@ async function main() {
     // 1. Browser interaction: graph/candidates/create-on-absent/stale CAS.
     evidence.phases.interaction = await runBrowserInteractionProof(ctx);
     evidence.navigation = ctx.navigation ?? null;
+    // Dataset accounting from the observed first reads — never guessed.
+    evidence.provenance.dataset.entityCount =
+      evidence.phases.interaction.graphBefore?.entities ?? null;
+    evidence.provenance.dataset.candidatesObserved = Array.isArray(
+      evidence.phases.interaction.candidates,
+    )
+      ? evidence.phases.interaction.candidates.length
+      : null;
 
     // 2. Provider stream + terminal through the real TS ACP adapter.
     evidence.phases.providerStream = await runProviderProof(ctx);
@@ -1889,19 +2269,20 @@ async function main() {
     );
     evidence.phases.cancel = await runCancelProof(ctx, service);
 
-    // 4. Service restart leaves an active non-resumable op Interrupted.
-    const pending = await runInterruptedRestartProof(ctx, service);
+    // 4. LIFE-3 locked protocol: abrupt restarts leave active non-resumable
+    // ops Interrupted, and NO group descendant survives the SIGKILL unnoticed.
+    const interruptedRun = await runInterruptedRestartCycles(ctx, service);
+    service = interruptedRun.service;
+    ctx.service = service;
+    ctx.serviceUrl = service.url;
     // Restore the NORMAL fixture config: `providerEnv: {}` (not `{}`) so the
-    // BLOCK_PROMPT=1 set for the cancel phase is rewritten away — otherwise the
-    // adapter sample's prompt blocks for 30 s.
-    const restarted = await restartService(service, { providerEnv: {} });
-    ctx.service = restarted;
-    ctx.serviceUrl = restarted.url;
-    evidence.phases.interrupted = {
-      ...pending,
-      ...(await observeInterrupted(restarted, pending.operationId)),
-      restartReadyMs: restarted.readyMs,
-    };
+    // BLOCK_PROMPT=1 set for the cancel/restart cycles is rewritten away —
+    // otherwise the adapter sample's prompt blocks for 30 s.
+    const restored = await restartService(service, { providerEnv: {} });
+    service = restored;
+    ctx.service = service;
+    ctx.serviceUrl = service.url;
+    evidence.phases.interrupted = { cycles: interruptedRun.rows };
     // Lightweight assertion that the provider env was restored: the on-disk
     // config the service was restarted with must no longer carry BLOCK_PROMPT.
     const providerConfig = readFileSync(
@@ -1991,30 +2372,12 @@ async function main() {
           evidence.phases.interaction.watermarkOutcome.cliTitle &&
         evidence.phases.interaction.watermarkOutcome.visible === true,
     };
-    evidence.criteria['DB-1-stale-cas'] = {
-      browser: evidence.phases.interaction.raceOutcome.browser,
-      cli: evidence.phases.interaction.raceOutcome.cli,
-    };
-    {
-      // Exactly one writer must win the same-version CAS, AND the loser must
-      // observe the TYPED conflict outcome: a CLI loss is exit 76
-      // (`world_kb_conflict`), a browser loss is HTTP 409. Any other failure
-      // shape (a browser 5xx/403, a CLI crash or busy-after-deadline) is not a
-      // CAS result and must fail the criterion instead of passing via XOR.
-      const browserWon = evidence.phases.interaction.raceOutcome.browser.status === 200;
-      const cliWon = evidence.phases.interaction.raceOutcome.cli.status === 0;
-      const browserConflict = evidence.phases.interaction.raceOutcome.browser.status === 409;
-      const cliConflict = evidence.phases.interaction.raceOutcome.cli.status === 76;
-      evidence.criteria['DB-1-stale-cas'].pass =
-        browserWon !== cliWon && (browserWon ? cliConflict : browserConflict);
-    }
-    evidence.criteria['LIFE-cooperative-cancel'] = {
-      cancelAcknowledged: evidence.phases.cancel.cancelAcknowledged,
-      observedStatus: evidence.phases.cancel.status,
-      pass:
-        evidence.phases.cancel.cancelAcknowledged === true &&
-        evidence.phases.cancel.settled === true,
-    };
+    evidence.criteria['DB-1-stale-cas'] = deriveDb1Criterion(
+      evidence.phases.interaction.racePairs,
+    );
+    evidence.criteria['LIFE-cooperative-cancel'] = deriveCancelCriterion(
+      evidence.phases.cancel.cycles,
+    );
     evidence.criteria['STREAM-terminal'] = {
       terminal: evidence.phases.providerStream.terminal,
       message: evidence.phases.providerStream.message,
@@ -2022,15 +2385,9 @@ async function main() {
         Boolean(evidence.phases.providerStream.terminal) &&
         evidence.phases.providerStream.inspect?.status !== undefined,
     };
-    evidence.criteria['LIFE-restart-interrupted'] = {
-      httpStatus: evidence.phases.interrupted.httpStatus,
-      observed: evidence.phases.interrupted.status,
-      // A non-200 response (404 stale, 403, 5xx) is not an interrupted
-      // observation even when some payload carried the status string.
-      pass:
-        evidence.phases.interrupted.httpStatus === 200 &&
-        evidence.phases.interrupted.status === 'interrupted',
-    };
+    evidence.criteria['LIFE-restart-interrupted'] = deriveRestartCriterion(
+      evidence.phases.interrupted.cycles,
+    );
     evidence.criteria['FFI-hashes-unchanged'] = {
       schemaUnchanged: schemaHashBefore === schemaHashAfter,
       nativeUnchanged: nativeHashBefore === nativeHashAfter,
@@ -2038,6 +2395,17 @@ async function main() {
     evidence.criteria['FFI-hashes-unchanged'].pass =
       evidence.criteria['FFI-hashes-unchanged'].schemaUnchanged &&
       evidence.criteria['FFI-hashes-unchanged'].nativeUnchanged;
+    // Common evidence protocol gate: a retained result must be attributable to
+    // its exact source revision, environment, and fixture dataset. Missing
+    // provenance blocks acceptance — the run cannot claim pass.
+    {
+      const provenanceVerdict = deriveProvenanceCompleteness(evidence.provenance);
+      evidence.criteria['provenance-complete'] = {
+        complete: provenanceVerdict.complete,
+        missing: provenanceVerdict.missing,
+        pass: provenanceVerdict.complete,
+      };
+    }
 
     evidence.pass = Object.values(evidence.criteria).every((c) => c.pass === true);
     evidence.timestamps.utcEnd = new Date().toISOString();
