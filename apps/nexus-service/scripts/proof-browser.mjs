@@ -110,13 +110,20 @@ const trackedChildren = new Set();
 let cleanedUp = false;
 // Bounded retained output of exited children: a launch/service failure removes
 // the child from the tracked set at exit, and its captured output is exactly
-// what the failure evidence needs to attribute the failure. Retention is
-// capped in entry count and tail size.
+// what the failure evidence needs to attribute the failure. Entries are keyed
+// by unique child identity (label + pid + spawn sequence — labels like
+// `nexus-service` repeat across restarts), and retention is capped in entry
+// count and tail size, so one child's tail can never be mistaken for another's.
 const retainedExitedOutput = new Map();
 const RETAINED_EXITED_OUTPUT_MAX = 8;
+let childSpawnSequence = 0;
 
 function trackChild(child, label) {
   child.__label = label;
+  // Unique identity: labels repeat across service restarts, so the evidence
+  // key binds the label to the pid and a process-global spawn sequence — two
+  // children can never collide on one retained-output entry.
+  child.__evidenceKey = `${label}-pid${child.pid ?? 'x'}-${(childSpawnSequence += 1)}`;
   trackedChildren.add(child);
   // Liveness leaves the tracked set at `exit`, but `exit` can fire before
   // piped stdout/stderr have drained. Retention waits for `close` — emitted
@@ -125,18 +132,40 @@ function trackChild(child, label) {
   child.once('exit', () => {
     trackedChildren.delete(child);
   });
-  child.once('close', () => {
-    const text = typeof child.output === 'function' ? child.output() : '';
-    if (!text) return;
-    const key = child.__label ?? `pid-${child.pid}`;
-    retainedExitedOutput.delete(key);
-    retainedExitedOutput.set(key, text.slice(-MAX_EVIDENCE_TAIL_CHARS));
-    while (retainedExitedOutput.size > RETAINED_EXITED_OUTPUT_MAX) {
-      const oldest = retainedExitedOutput.keys().next().value;
-      retainedExitedOutput.delete(oldest);
-    }
+  // `close` fires only after stdio is closed; the evidence collector awaits
+  // this promise (bounded) for children that exited but have not closed yet,
+  // so the final drained bytes are never missed.
+  child.__closed = new Promise((resolveClose) => {
+    child.once('close', () => {
+      child.__closeSettled = true;
+      const text = typeof child.output === 'function' ? child.output() : '';
+      if (text) {
+        retainedExitedOutput.delete(child.__evidenceKey);
+        retainedExitedOutput.set(child.__evidenceKey, text.slice(-MAX_EVIDENCE_TAIL_CHARS));
+        while (retainedExitedOutput.size > RETAINED_EXITED_OUTPUT_MAX) {
+          const oldest = retainedExitedOutput.keys().next().value;
+          retainedExitedOutput.delete(oldest);
+        }
+      }
+      resolveClose();
+    });
   });
   return child;
+}
+
+/**
+ * Await `close` for every tracked child that already exited but whose stdio
+ * has not closed yet, bounded per child. Failure evidence collected after
+ * this drain sees the final retained output of freshly exited children.
+ */
+async function drainExitedChildrenForEvidence({ timeoutMs = 500 } = {}) {
+  const pending = [];
+  for (const child of trackedChildren) {
+    const exited = child.exitCode !== null || child.signalCode !== null;
+    if (!exited || child.__closeSettled || !(child.__closed instanceof Promise)) continue;
+    pending.push(Promise.race([child.__closed, sleep(timeoutMs)]));
+  }
+  await Promise.all(pending);
 }
 
 function spawnLogged(command, args, { cwd, env, label, collect = true }) {
@@ -698,12 +727,12 @@ function redactChildOutput(text, fixtureHome) {
   out = out.replace(/(NEXUS42_DAEMON_API_KEY\s*=\s*)\S+/gi, '$1<redacted>');
   return out;
 }
-
 /**
  * Bounded, redacted tail of every tracked child's captured output, keyed by
- * label. Lets a launch/navigation/service failure be attributed in the failure
- * evidence without dumping unbounded logs; exited children contribute their
- * retained output so a failed launch is still attributable.
+ * unique child identity (label + pid + spawn sequence). Lets a
+ * launch/navigation/service failure be attributed in the failure evidence
+ * without dumping unbounded logs; exited children contribute their retained
+ * output so a failed launch is still attributable to the exact child.
  */
 function collectChildOutput(fixtureHome) {
   const rows = {};
@@ -711,17 +740,18 @@ function collectChildOutput(fixtureHome) {
     if (typeof child.output !== 'function') continue;
     const text = child.output();
     if (!text) continue;
-    rows[child.__label ?? `pid-${child.pid}`] = redactChildOutput(
+    rows[child.__evidenceKey ?? child.__label ?? `pid-${child.pid}`] = redactChildOutput(
       text.slice(-MAX_EVIDENCE_TAIL_CHARS),
       fixtureHome,
     );
   }
   // Exited children left the tracked set at exit; their retained (already
   // tail-bounded) output is merged so the failure evidence keeps the very
-  // child output that explains a launch/service failure.
-  for (const [label, text] of retainedExitedOutput) {
-    if (rows[label]) continue;
-    rows[label] = redactChildOutput(text, fixtureHome);
+  // child output that explains a launch/service failure. Keys are unique per
+  // child, so a silent restart never masks an earlier child's tail.
+  for (const [evidenceKey, text] of retainedExitedOutput) {
+    if (rows[evidenceKey]) continue;
+    rows[evidenceKey] = redactChildOutput(text, fixtureHome);
   }
   return rows;
 }
@@ -1901,8 +1931,12 @@ async function main() {
     evidence.errors.push(err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err));
     evidence.timestamps.utcEnd = new Date().toISOString();
     // Attribute launch/navigation/service failures: bounded, redacted tail of
-    // each still-tracked child's captured output. Redaction strips anything
-    // that looks like a path under the fixture home or an API key header value.
+    // each child's captured output keyed by unique child identity. Children
+    // that exited just before the failure are drained to `close` first (short
+    // bound), so the final drained bytes land in the retained evidence.
+    // Redaction strips anything that looks like a path under the fixture home
+    // or an API key header value.
+    await drainExitedChildrenForEvidence();
     evidence.childOutput = collectChildOutput(fixtureHome);
     writeEvidence(outDir, `browser-vertical-fail.json`, evidence);
     throw err;

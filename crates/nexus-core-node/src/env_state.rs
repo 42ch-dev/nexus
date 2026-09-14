@@ -510,8 +510,9 @@ impl EnvState {
     /// `Interrupted`. The terminal is derived from the real batch, never a
     /// caller label. Returns the terminal status plus the owning session so
     /// the caller can journal first (LIFE-3) and only then apply the terminal
-    /// in memory: a failed journal write must leave the operation retryable,
-    /// never terminal-without-mirror.
+    /// in memory: a failed journal write retains the consumed batch in the
+    /// admitting wrapper for exactly-one re-delivery after the journal retry
+    /// succeeds, never a terminal memory without its durable mirror.
     pub fn detect_js_batch_terminal(
         &self,
         operation_id: &str,

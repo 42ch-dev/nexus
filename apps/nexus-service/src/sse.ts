@@ -729,7 +729,13 @@ async function waitForTerminal(
 
     ingestEvents(service, operationId, batch.events ?? []);
 
-    if (batch.gap) {
+    // A batch whose ingest closed the hub (an accepted terminal, a refused
+    // late terminal, or a memory fail-close) has already recorded the
+    // canonical closing frame. A provider gap from that same batch must
+    // never overwrite the fail-closed `interrupted` resync marker — the
+    // canonical interrupted resync gap is the stream's truthful ending.
+    if (batch.gap && !hub.isClosed()) {
+
       const gapFrame = hub.recordGap(batch.gap);
       if (gapFrame) {
         const gapResult = await writer.writeFrame(gapFrame);
@@ -801,7 +807,12 @@ async function liveEventLoop(
 
     ingestEvents(service, operationId, batch.events ?? []);
 
-    if (batch.gap) {
+    // A batch whose ingest closed the hub (an accepted terminal, a refused
+    // late terminal, or a memory fail-close) has already recorded the
+    // canonical closing frame. A provider gap from that same batch must
+    // never overwrite the fail-closed `interrupted` resync marker — the
+    // canonical interrupted resync gap is the stream's truthful ending.
+    if (batch.gap && !hub.isClosed()) {
       const gapFrame = hub.recordGap(batch.gap);
       if (gapFrame) {
         const gapResult = await writer.writeFrame(gapFrame);
