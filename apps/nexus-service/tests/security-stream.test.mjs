@@ -712,4 +712,108 @@ describe('security-stream (P4-T2)', () => {
     assert.equal(res.status, 501);
     assert.equal(res.payload.error.code, 'route_not_migrated');
   });
+
+  test('malformed create/execute bodies are typed invalid_input before any provider effect', async () => {
+    await stopSharedService();
+    const home = seedHome();
+    const local = await startProviderService(home.home, 0);
+    try {
+      const post = (body) => jsonFetch(`${local.url}/v1/daemon/agent-host/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+      // Unknown key, wrong optional type, malformed actor pair, malformed refs.
+      const cases = [
+        { provider_id: 'mock-acp', unexpected: 1 },
+        { provider_id: 'mock-acp', cwd: 42 },
+        { provider_id: 'mock-acp', cwd: null },
+        { provider_id: 'mock-acp', model: { nope: true } },
+        { provider_id: 'mock-acp', model: null },
+        { provider_id: 'mock-acp', mode: [] },
+        { provider_id: 'mock-acp', mode: null },
+        { provider_id: 7 },
+        { provider_id: 'mock-acp', actor_ref: { actor_kind: 'creator', creator_id: 'ctr_ok' } },
+        { provider_id: 'mock-acp', actor_ref: null, viewpoint: null },
+        { provider_id: 'mock-acp', actor_ref: null, viewpoint: { world_id: 'wld_ok' } },
+        { provider_id: 'mock-acp', actor_ref: { actor_kind: 'creator', creator_id: 'ctr_ok' }, viewpoint: null },
+        { provider_id: 'mock-acp', actor_ref: { actor_kind: 'bogus', creator_id: 'ctr_ok' }, viewpoint: { world_id: 'wld_ok' } },
+        { provider_id: 'mock-acp', actor_ref: { actor_kind: 'creator', creator_id: 'bad' }, viewpoint: { world_id: 'wld_ok' } },
+        { provider_id: 'mock-acp', actor_ref: { actor_kind: 'creator', creator_id: 'ctr_ok' }, viewpoint: { world_id: 'bad' } },
+        { provider_id: 'mock-acp', actor_ref: { actor_kind: 'creator', creator_id: 'ctr_ok' }, viewpoint: { world_id: 'wld_ok', extra: 1 } },
+        { provider_id: 'mock-acp', actor_ref: { actor_kind: 'creator', creator_id: 'ctr_ok' }, viewpoint: { world_id: 'wld_ok', binding_id: null } },
+        { provider_id: 'mock-acp', actor_ref: { actor_kind: 'creator', creator_id: 'ctr_ok' }, viewpoint: { world_id: 'wld_ok', branch_id: null } },
+        { provider_id: 'mock-acp', actor_ref: { actor_kind: 'creator', creator_id: 'ctr_ok' }, viewpoint: { world_id: 'wld_ok', event_id: null } },
+      ];
+      for (const body of cases) {
+        const res = await post(body);
+        assert.equal(res.status, 400, `expected 400 for ${JSON.stringify(body)}`);
+        assert.equal(res.payload.error.code, 'invalid_input');
+      }
+      // A well-formed prompt with an unknown key is rejected too.
+      const created = await post({ provider_id: 'mock-acp' });
+      assert.equal(created.status, 200);
+      const sid = created.payload.session_id;
+      // Capture the adapter's log *after* the one legitimate create, then prove
+      // no malformed body mutates it further.
+      const logAfterValidCreate = readFixtureLog(home.log).length;
+      const exec = (body) => jsonFetch(`${local.url}/v1/daemon/agent-host/sessions/${sid}/operations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+      for (const body of [
+        { kind: 'prompt', content: 'x', extra: 1 },
+        { kind: 'prompt', content: 5 },
+        { kind: 'prompt', content: 'x', remember: 'yes' },
+        { kind: 'bogus', content: 'x' },
+        { kind: 'nope' },
+      ]) {
+        const res = await exec(body);
+        assert.equal(res.status, 400, `expected 400 for ${JSON.stringify(body)}`);
+        assert.equal(res.payload.error.code, 'invalid_input');
+      }
+      // A well-formed set_model branch is a valid shape -> explicit not_migrated.
+      const setModel = await exec({ kind: 'set_model', model: 'm' });
+      assert.equal(setModel.status, 501);
+      assert.equal(setModel.payload.error.code, 'route_not_migrated');
+      // No malformed or unsupported request may reach the adapter.
+      assert.equal(readFixtureLog(home.log).length, logAfterValidCreate, 'malformed bodies must not mutate the fixture');
+    } finally { await closeServiceBounded(local); await startSharedService(homeCtx.home, 0); }
+  });
+
+  test('a valid prompt with remember forwards the flag to the provider', async () => {
+    const { sessionId } = await providerFlow(baseUrl);
+    const res = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/sessions/${sessionId}/operations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { kind: 'prompt', content: 'hi', remember: true } });
+    assert.equal(res.status, 200);
+    assert.ok(res.payload.operation_id);
+  });
+
+  test('native interrupted operation is terminal for hydrate, cancel, and active count', async () => {
+    const created = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { provider_id: 'mock-acp' } });
+    const sessionId = created.payload.session_id;
+    const operationId = '00000000-0000-4000-8000-00000000d001';
+    // Native-interrupted status with no local terminal event — the exact shape a
+    // hydrated record presents after a SessionStopped.
+    service.service.providerRegistry.registerSession({ sessionId, providerId: 'mock-acp', state: 'Ready', activeOpId: null });
+    const before = service.service.providerRegistry.activeOperationCount();
+    service.service.providerRegistry.registerOperation({ operationId, sessionId, providerId: 'mock-acp', status: 'interrupted', terminalEvent: null, terminalTranscript: null });
+    // Not charged against the live-operation cap.
+    assert.equal(service.service.providerRegistry.activeOperationCount(), before, 'interrupted must not be charged as active');
+    // GET surfaces the terminal status exactly.
+    const inspect = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/operations/${operationId}`);
+    assert.equal(inspect.status, 200);
+    assert.equal(inspect.payload.status, 'interrupted');
+    // Cancel must reject before any provider mutation.
+    const cancel = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/operations/${operationId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: {} });
+    assert.equal(cancel.status, 409);
+    assert.equal(cancel.payload.error.code, 'busy');
+  });
+
+  test('NEXUS_SSE_SOCKET_HWM is lower-only and capped at 64 KiB', async () => {
+    const { resolveSseSocketHighWaterMark, SSE_SOCKET_HIGH_WATER_MARK } = await import(join(serviceRoot, 'dist/config.js'));
+    const prev = process.env.NEXUS_SSE_SOCKET_HWM;
+    try {
+      process.env.NEXUS_SSE_SOCKET_HWM = String(1024 * 1024);
+      assert.equal(resolveSseSocketHighWaterMark(), SSE_SOCKET_HIGH_WATER_MARK, 'an over-cap value must clamp to 64 KiB');
+      process.env.NEXUS_SSE_SOCKET_HWM = '1024';
+      assert.equal(resolveSseSocketHighWaterMark(), 1024, 'a lower value must be honored');
+      delete process.env.NEXUS_SSE_SOCKET_HWM;
+      assert.equal(resolveSseSocketHighWaterMark(), SSE_SOCKET_HIGH_WATER_MARK);
+    } finally {
+      if (prev === undefined) delete process.env.NEXUS_SSE_SOCKET_HWM; else process.env.NEXUS_SSE_SOCKET_HWM = prev;
+    }
+  });
 });

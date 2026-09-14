@@ -29,8 +29,13 @@ export const CLOSE_BUDGET_MS = 5_000;
 /** Node Writable backpressure target for SSE socket handoff (architecture §7). */
 export const SSE_SOCKET_HIGH_WATER_MARK = 64 * 1024;
 
+/**
+ * Effective socket HWM. The env override may only *lower* the frozen 64 KiB
+ * value — a raised value is clamped back — so the per-socket reservation in the
+ * environment proof can never be invalidated by configuration.
+ */
 export function resolveSseSocketHighWaterMark(): number {
-  return resolvePositiveIntEnv('NEXUS_SSE_SOCKET_HWM', SSE_SOCKET_HIGH_WATER_MARK);
+  return resolveCeilEnv('NEXUS_SSE_SOCKET_HWM', SSE_SOCKET_HIGH_WATER_MARK);
 }
 
 /** Defer the first provider pull so pauseImmediately clients can stall the socket. */

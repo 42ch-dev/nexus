@@ -25,12 +25,13 @@ export interface ProviderOperationRecord {
 }
 
 /**
- * Statuses that mean the operation can no longer be cancelled. Covers the
- * local terminal mapping derived from `ProviderHostEvent` (`finished`/`failed`/
- * `stopped`) and the native wire statuses transcribed from
- * `operation_status_wire` in `crates/nexus-agent-host/src/providers/port.rs`
- * (`completed` for Ready/Stopped, `failed` for the error terminals) plus the
- * cancel acknowledgment (`cancelled`).
+ * Statuses that mean the operation can no longer be cancelled. Covers the local
+ * terminal mapping derived from `ProviderHostEvent` (`finished`/`failed`/
+ * `stopped`), the native wire statuses transcribed from `operation_status_wire`
+ * in `crates/nexus-agent-host/src/providers/port.rs` (`completed` for Ready/
+ * Stopped, `failed` for the error terminals), the cancel acknowledgment
+ * (`cancelled`), and the native `interrupted` terminal produced when a
+ * `SessionStopped` settles an active JS-provider operation.
  */
 const TERMINAL_OPERATION_STATUSES = new Set([
   'finished',
@@ -38,6 +39,7 @@ const TERMINAL_OPERATION_STATUSES = new Set([
   'stopped',
   'completed',
   'cancelled',
+  'interrupted',
 ]);
 
 export function isTerminalOperationStatus(status: string): boolean {
