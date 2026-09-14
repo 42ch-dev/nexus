@@ -1117,6 +1117,38 @@ for (const label of ['status-only-flip-install', 'status-only-flip-package', 'st
   check(`F-001 unsupported failure (${label}) records no FAIL row`, failedRows.length, 0);
 }
 
+// F-001 (missing-evidence variant): a failed document whose required checks or
+// structural fields are absent is an incomplete producer, not a measurement —
+// it must block, and it must never create a FAIL row or force a no-go.
+{
+  const root = buildMatrix('unsupported-fail-missing-checks', (docs) => {
+    const proof = docs['install-macarm22/install-proof.json'];
+    proof.status = 'fail';
+    proof.checks = proof.checks.filter((c) => c.name !== 'empty_project_install');
+  });
+  const decision = runDecisionWithRoot(root);
+  check('F-001 failed install with an absent required check blocks', decision.status, 'blocked');
+  check(
+    'F-001 failed install with an absent required check records no FAIL row',
+    (decision.doc?.observed_rows ?? []).filter((r) => r.verdict === 'FAIL').length,
+    0,
+  );
+}
+{
+  const root = buildMatrix('unsupported-fail-absent-fields', (docs) => {
+    const receipt = docs['native-packages/darwin-arm64/package-receipt.json'];
+    receipt.status = 'fail';
+    delete receipt.artifact;
+  });
+  const decision = runDecisionWithRoot(root);
+  check('F-001 failed package receipt with absent fields blocks', decision.status, 'blocked');
+  check(
+    'F-001 failed package receipt with absent fields records no FAIL row',
+    (decision.doc?.observed_rows ?? []).filter((r) => r.verdict === 'FAIL').length,
+    0,
+  );
+}
+
 // --- F-002: missing inputs are derived from the rows -------------------------
 const realMissing = realDecision.doc?.missing_inputs ?? [];
 check(
@@ -1363,12 +1395,25 @@ check(
 
 check(
   'F-003: the driver collects survivors only after the close completes',
-  /const closeExited = await app\.closeCleanly\(\);\s*\n\s*const survivalAfterClose = await collectSurvivors\(app\);/.test(RUNTIME_SRC),
+  /const close = await app\.closeCleanly\(\);\s*\n\s*const survivalAfterClose = close\.survivors;/.test(RUNTIME_SRC),
   true,
 );
 check(
   'F-003: the driver asks the app to quit after closing the owner',
   /requestQuit\?\.\(\)/.test(RUNTIME_SRC),
+  true,
+);
+check(
+  'close success requires a bundle-wide empty observation, not a quiet pid tree',
+  /function waitForBundleEmpty/.test(RUNTIME_SRC) &&
+    /await waitForBundleEmpty\(this\.appPath, timeoutMs, this\.trackedDescendants\)/.test(RUNTIME_SRC),
+  true,
+);
+check(
+  'LIFECYCLE-fault tracks the provider child from the live owner before killing it',
+  /app\.trackedDescendants = trackOwnerDescendants\(victim\.pid\);/.test(RUNTIME_SRC) &&
+    /await waitForTrackedExit\(app\.trackedDescendants, 15_000\)/.test(RUNTIME_SRC) &&
+    /tracked_descendants_gone: trackedSurvivors\.length === 0/.test(RUNTIME_SRC),
   true,
 );
 // The unpack pattern is a bare glob and must actually match: @electron/asar

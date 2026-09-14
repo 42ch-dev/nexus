@@ -177,19 +177,27 @@ function deriveRow({ id, row, evidence, schema, target, sourceSha = source.sourc
       const declaredStatus = doc.status;
       if (declaredStatus === 'fail') {
         // A status field is not a measurement. `fail` becomes FAIL — and can
-        // therefore drive the whole decision to no-go — only when the row can
-        // name the predicate that actually failed; otherwise the document is
-        // inconsistent and blocks (F-001).
+        // therefore drive the whole decision to no-go — only when the row
+        // names a row-specific, explicitly measured failure predicate.
+        // Absent required checks and structural gaps stay blocking evidence:
+        // a crashed or incomplete producer that writes `status: "fail"` must
+        // never be promoted into a product measurement (F-001).
         const failureEvidence = typeof measuredFailure === 'function' ? measuredFailure(doc) : measuredFailure;
-        const named = [...failedChecks, ...(Array.isArray(failureEvidence) ? failureEvidence : failureEvidence ? [failureEvidence] : [])];
-        if (named.length > 0) {
+        const measured = Array.isArray(failureEvidence) ? failureEvidence : failureEvidence ? [failureEvidence] : [];
+        if (measured.length > 0) {
           state = 'fail';
-          problems.push(...notes, `document records a measured failure: ${named.join('; ')}`);
+          problems.push(...notes, `document records a measured failure: ${measured.join('; ')}`);
         } else {
           state = 'blocked';
+          const gaps = [
+            ...missing.map((name) => `required check ${name} absent`),
+            ...failures.filter((failure) => !measured.includes(failure)),
+          ];
           problems.push(
             ...notes,
-            'status is fail but no row-specific failed predicate is recorded, so the failure is unsupported',
+            gaps.length > 0
+              ? `status is fail but no measured failure is recorded; blocking gaps: ${gaps.join('; ')}`
+              : 'status is fail but no row-specific failed predicate is recorded, so the failure is unsupported',
           );
         }
       } else if (declaredStatus !== 'pass') {

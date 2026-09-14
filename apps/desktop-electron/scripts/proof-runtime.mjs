@@ -303,6 +303,63 @@ async function waitForExit(rootPid, timeoutMs) {
   return false;
 }
 
+/** True when `pid` and every process under it is gone. */
+function trackedGone(pid) {
+  return !isAlive(pid) && ownedProcesses(pid).length === 0;
+}
+
+/**
+ * Capture the child processes of a live owner while they are still its
+ * descendants.
+ *
+ * The ACP provider is a `/usr/bin/python3` child of the Node utility owner:
+ * its command line carries no bundle marker, so once the owner dies the child
+ * is reparented and bundle-anchored queries are blind to it. The pid tree
+ * rooted at the live owner is the only moment its identity is observable.
+ */
+function trackOwnerDescendants(ownerPid) {
+  if (!ownerPid || !isAlive(ownerPid)) return [];
+  return ownedProcesses(ownerPid).map((row) => ({
+    pid: row.pid,
+    command: row.command,
+    kind: row.command.includes('mock_acp_workflow') ? 'provider-child' : 'owner-descendant',
+  }));
+}
+
+/**
+ * Wait for the exact tracked processes (and their subtrees) to disappear.
+ * Returns the identities that outlived the deadline.
+ */
+async function waitForTrackedExit(tracked, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (tracked.every((entry) => trackedGone(entry.pid))) return [];
+    await sleep(100);
+  }
+  return tracked.filter((entry) => !trackedGone(entry.pid));
+}
+
+/**
+ * Wait until the app bundle has no live process and every tracked owner
+ * descendant is gone; return what survived.
+ *
+ * LaunchServices reparents helpers out of the adopted pid tree on exit, so a
+ * quiet root pid is not proof of cleanup: close success is defined by this
+ * bundle-wide empty observation.
+ */
+async function waitForBundleEmpty(appPath, timeoutMs, tracked = []) {
+  const leftover = () => [
+    ...bundleProcesses(appPath).map((row) => ({ pid: row.pid, kind: 'bundle-process', command: row.command })),
+    ...tracked.filter((entry) => !trackedGone(entry.pid)),
+  ];
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (leftover().length === 0) return { bundle_empty: true, survivors: [] };
+    await sleep(100);
+  }
+  return { bundle_empty: false, survivors: leftover() };
+}
+
 function rssSample(appPath, rootPid) {
   // Bundle-anchored: the adopted LaunchServices pid is not the ppid root of the
   // helpers, so a tree walk silently reports 0 bytes for every sample.
@@ -488,6 +545,10 @@ class AppUnderProof {
     this.launchedVia = null;
     this.exitCode = undefined;
     this.spawnError = null;
+    // Provider/owner-descendant identities captured while their owner was
+    // still alive (trackOwnerDescendants): the only witness for processes
+    // whose command line is not bundle-anchored.
+    this.trackedDescendants = [];
   }
 
   /**
@@ -654,6 +715,15 @@ class AppUnderProof {
         // already gone
       }
     }
+    // Tracked owner descendants are not bundle-anchored; without this a
+    // forced cleanup would leave the provider child behind.
+    for (const entry of this.trackedDescendants) {
+      try {
+        process.kill(entry.pid, 'SIGKILL');
+      } catch {
+        // already gone
+      }
+    }
     if (this.pid) killTree(this.pid);
     if (this.pid) await waitForExit(this.pid, 10_000);
     liveLaunches.delete(this);
@@ -676,7 +746,14 @@ class AppUnderProof {
     }
   }
 
-  /** Ask the app to quit and wait for the whole tree to exit. */
+  /**
+   * Ask the app to quit and wait for the whole tree to exit.
+   *
+   * Exit is proven bundle-wide: a LaunchServices app can go quiet on the
+   * adopted pid tree while reparented helpers survive, so success requires
+   * an empty `bundleProcesses(appPath)` observation and every tracked owner
+   * descendant gone. Survivors are returned for the evidence record.
+   */
   async quitAndWait(timeoutMs = 20_000) {
     try {
       // `app.quit()` is the renderer-invisible half; the proof window cannot
@@ -685,10 +762,11 @@ class AppUnderProof {
     } catch {
       // optional hook; older builds simply exit on window close
     }
-    const exited = await waitForExit(this.pid, timeoutMs);
+    const treeExited = await waitForExit(this.pid, timeoutMs);
+    const postClose = await waitForBundleEmpty(this.appPath, timeoutMs, this.trackedDescendants);
     this.cdp?.close();
     liveLaunches.delete(this);
-    return exited;
+    return { exited: treeExited && postClose.bundle_empty, survivors: postClose.survivors };
   }
 
   /** Close the owner, quit the app, and report whether the tree exited. */
@@ -742,7 +820,6 @@ const READINESS_EXPR = `(async () => {
     graph_error: graph && graph.error ? graph.error.message : null,
   };
 })()`;
-
 // --- fixtures -------------------------------------------------------------
 
 /**
@@ -879,8 +956,14 @@ async function runLaunchCohort(ctx, count, label, samples) {
         samples.push({ index: i, ms: null, error: String(error), log_tail: app.logTail() });
       }
     }
-    const exited = await app.closeCleanly();
-    if (!exited) await app.destroy();
+    const close = await app.closeCleanly();
+    if (!close.exited) await app.destroy();
+    // A bundle or provider survivor here would corrupt every later
+    // measurement in the run; record what the close could not clean.
+    if (close.survivors.length > 0) {
+      ctx.launchSurvivors ??= [];
+      ctx.launchSurvivors.push({ stage: label, index: i, survivors: close.survivors });
+    }
   }
   return { label, ownerUnavailable };
 }
@@ -918,8 +1001,22 @@ async function phaseLaunch(ctx) {
       `failures=${failures}${ownerUnavailable ? ' owner_unavailable' : ''}`,
   });
   if (ownerUnavailable) ctx.confounders?.push('utility_owner_unavailable');
-  if (ctx.evidenceRef) ctx.evidenceRef.launch = { samples, summary: { cold, warm }, failures, partial: false };
-  return { samples, summary: { cold, warm }, failures, owner_unavailable: ownerUnavailable };
+  if (ctx.evidenceRef) {
+    ctx.evidenceRef.launch = {
+      samples,
+      summary: { cold, warm },
+      failures,
+      survivors_after_close: ctx.launchSurvivors ?? [],
+      partial: false,
+    };
+  }
+  return {
+    samples,
+    summary: { cold, warm },
+    failures,
+    owner_unavailable: ownerUnavailable,
+    survivors_after_close: ctx.launchSurvivors ?? [],
+  };
 }
 
 const SOAK_START_EXPR = (readsPerSecond, writesPerSecond, entities) => `(() => {
@@ -1032,9 +1129,13 @@ async function phaseResources(ctx) {
     const totalSamples = trace.map((sample) => sample.rss_bytes);
     const active = summarise(totalSamples);
     const growth = Math.max(...totalSamples.slice(-8)) - idleSample.rss_bytes;
+    // The soak ran provider operations: track the live owner's descendants so
+    // the close must prove none of them (least of all the Python provider
+    // child) survived it.
+    app.trackedDescendants = trackOwnerDescendants(utilityOf(appPath)?.pid ?? null);
     // Order matters: survivors are only meaningful once the close has run.
-    const closeExited = await app.closeCleanly();
-    const survivalAfterClose = await collectSurvivors(app);
+    const close = await app.closeCleanly();
+    const survivalAfterClose = close.survivors;
 
     const providerLifecycleOk = providerOps.every((op) => op.ok);
     const soakPass =
@@ -1045,7 +1146,7 @@ async function phaseResources(ctx) {
       soakStats.read_errors === 0 &&
       soakStats.write_errors.length === 0 &&
       providerLifecycleOk &&
-      closeExited;
+      close.exited;
     checks.push({
       id: 'RES-1',
       ok: soakPass,
@@ -1054,7 +1155,7 @@ async function phaseResources(ctx) {
         `(${idleSample.processes.map((p) => `${p.kind}:${(p.rss_kib / 1024).toFixed(0)}`).join(',')}) ` +
         `p95_active=${(active.p95 / 1048576).toFixed(1)}MiB max=${(active.max / 1048576).toFixed(1)}MiB ` +
         `reads=${soakStats?.reads ?? 0} writes=${soakStats?.writes ?? 0} conflicts=${soakStats?.conflicts ?? 0} ` +
-        `read_errors=${soakStats?.read_errors ?? 'n/a'} provider_ops_ok=${providerLifecycleOk} close_exited=${closeExited}`,
+        `read_errors=${soakStats?.read_errors ?? 'n/a'} provider_ops_ok=${providerLifecycleOk} close_exited=${close.exited}`,
     });
     resource.soak = {
       soak_seconds: args.soakSeconds,
@@ -1065,7 +1166,7 @@ async function phaseResources(ctx) {
       workload: soakStats,
       provider_operations: providerOps,
       survivors_after_close: survivalAfterClose,
-      close_exited: closeExited,
+      close_exited: close.exited,
       note:
         'integer-truncated soak reading: 10 graph reads/s + 2 CAS writes/s continuous; ' +
         '"4 provider operations" run once per quarter of the soak (4 total), matching the ' +
@@ -1093,6 +1194,9 @@ async function phaseResources(ctx) {
     // sample the plateau while the app is STILL ALIVE. Quitting first would
     // sample a dead process and report 0 bytes (which silently "passed" the
     // growth bound with a meaningless -568 MiB figure).
+    // Track the live owner's descendants before its close so the final quit
+    // also waits for the provider child to be gone.
+    cyclesApp.trackedDescendants = trackOwnerDescendants(utilityOf(cyclesApp.appPath)?.pid ?? null);
     await cyclesApp.closeOwner();
     await sleep(30_000);
     const plateau = rssSample(cyclesApp.appPath, cyclesApp.pid);
@@ -1104,13 +1208,13 @@ async function phaseResources(ctx) {
       durations.length === args.cycles &&
       retainedGrowth <= 20 * 1024 * 1024 &&
       survivors.length === 0 &&
-      cycleExit;
+      cycleExit.exited;
     checks.push({
       id: 'RES-2',
       ok: cyclesPass,
       detail:
         `cycles=${durations.length} retained_growth=${(retainedGrowth / 1048576).toFixed(1)}MiB ` +
-        `survivors_after_final_close=${survivors.length} close_exited=${cycleExit} ` +
+        `survivors_after_final_close=${survivors.length} close_exited=${cycleExit.exited} ` +
         `cycle_ms p95=${summarise(durations).p95}`,
     });
     resource.cycles = {
@@ -1121,7 +1225,8 @@ async function phaseResources(ctx) {
       plateau_after_cooldown: plateau,
       retained_growth_bytes: retainedGrowth,
       survivors_after_final_close: survivors,
-      close_exited: cycleExit,
+      survivors_after_final_quit: cycleExit.survivors,
+      close_exited: cycleExit.exited,
     };
     return resource;
   } catch (error) {
@@ -1169,10 +1274,15 @@ async function waitForUtilityRecovery(app, timeoutMs) {
 
 async function collectSurvivors(app) {
   // Bundle-anchored so an orphaned helper is caught even when the pid tree
-  // rooted at the adopted pid does not reach it.
-  return bundleProcesses(app.appPath)
+  // rooted at the adopted pid does not reach it. Tracked owner descendants
+  // add the provider children captured before their owner died: their
+  // command lines are not bundle-anchored, so only the captured identity
+  // can see them.
+  const bundle = bundleProcesses(app.appPath)
     .filter((p) => p.command.includes('mock_acp_workflow') || isNativeOwnerProcess(p.command))
     .map((p) => ({ pid: p.pid, kind: isNativeOwnerProcess(p.command) ? 'utility' : 'provider-child' }));
+  const trackedSurvivors = app.trackedDescendants.filter((entry) => isAlive(entry.pid));
+  return [...bundle, ...trackedSurvivors];
 }
 
 /**
@@ -1430,8 +1540,9 @@ async function phaseSecurity(ctx) {
       30_000,
     );
     evidence.harness_dom = dom;
-    const exited = await app.closeCleanly();
-    evidence.close_exited = exited;
+    const close = await app.closeCleanly();
+    evidence.close_exited = close.exited;
+    evidence.survivors_after_close = close.survivors;
 
     const globals = evidence.renderer.globals ?? {};
     const isolationOk = ['require', 'process', 'module', 'ipcRenderer'].every(
@@ -1575,14 +1686,37 @@ async function phaseLifecycle(ctx) {
       );
     }
     const victim = utilitiesBefore[0];
+    // Capture the provider child while it is still a descendant of the live
+    // owner: the Python command is not bundle-anchored, so once the owner
+    // dies the child is reparented and only these captured identities can
+    // prove it exited.
+    app.trackedDescendants = trackOwnerDescendants(victim.pid);
     process.kill(victim.pid, 'SIGKILL');
     // Wait for main's crash handler to observe the exit and run its join rather
     // than a fixed sleep: reopening before recovery lands is what produced
     // "already open" instead of the documented interrupted/fenced contract.
     await waitForUtilityRecovery(app, 15_000);
     const afterKill = await app.cdp.evaluateJson(`window.nexusProof.getLifecycle()`, 30_000);
-    evidence.kill = { victim_pid: victim.pid, lifecycle_after_kill: afterKill };
+    // Verify the exact tracked processes (and their subtrees) are gone;
+    // record and reap any that outlived the owner so the run leaves no
+    // residual process behind.
+    const trackedSurvivors = await waitForTrackedExit(app.trackedDescendants, 15_000);
+    for (const entry of trackedSurvivors) {
+      try {
+        process.kill(entry.pid, 'SIGKILL');
+      } catch {
+        // already gone
+      }
+    }
     const survivors = await collectSurvivors(app);
+    evidence.kill = {
+      victim_pid: victim.pid,
+      lifecycle_after_kill: afterKill,
+      provider_descendants_tracked: app.trackedDescendants,
+      tracked_descendants_gone: trackedSurvivors.length === 0,
+      tracked_survivors: trackedSurvivors,
+      survivors_after_kill: survivors,
+    };
     const reopen = await app.cdp.evaluateJson(
       `(async () => {
          const api = window.nexusProof;
@@ -1597,7 +1731,6 @@ async function phaseLifecycle(ctx) {
       90_000,
     );
     evidence.reopen = reopen;
-    evidence.kill.survivors_after_kill = survivors;
 
     const graphAfterReopen = await app.cdp.evaluateJson(
       `(async () => {
@@ -1609,8 +1742,12 @@ async function phaseLifecycle(ctx) {
       60_000,
     );
     evidence.graph_after_kill = graphAfterReopen;
+    // Refresh the tracked set from the reopened owner so the ordinary close
+    // also waits for its descendants (if any) to be gone.
+    app.trackedDescendants = trackOwnerDescendants(utilityOf(appPath)?.pid ?? null);
     const closeExit = await app.closeCleanly();
-    evidence.close_exited = closeExit;
+    evidence.close_exited = closeExit.exited;
+    evidence.survivors_after_close = closeExit.survivors;
 
     const nativeOk =
       native.compat?.target_triple === EXPECTED_TARGET &&
@@ -1633,6 +1770,7 @@ async function phaseLifecycle(ctx) {
       afterKill.phase === 'interrupted' &&
       afterKill.owner_alive === false &&
       survivors.length === 0 &&
+      trackedSurvivors.length === 0 &&
       reopenOk;
     checks.push({
       id: 'LIFECYCLE-native',
@@ -1689,8 +1827,9 @@ async function phaseLifecycle(ctx) {
       ok: killOk,
       detail:
         `after_kill_phase=${afterKill.phase} owner_alive=${afterKill.owner_alive} ` +
+        `tracked_descendants=${app.trackedDescendants.length} tracked_survivors=${trackedSurvivors.length} ` +
         `survivors=${survivors.length} reopen_ok=${reopen.open_ok} attached=${reopen.attached} readiness=${reopen.readiness} graph_after_reopen=${reopen.graph_ok} ` +
-        `graph_version=${graphAfterReopen.version} close_exited=${closeExit}`,
+        `graph_version=${graphAfterReopen.version} close_exited=${closeExit.exited}`,
     });
     return evidence;
   } catch (error) {
