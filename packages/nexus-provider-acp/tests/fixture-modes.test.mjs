@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,7 +36,7 @@ function pidAlive(pid) {
   }
 }
 
-async function drainTerminal(provider, opId, sessionId) {
+async function drainTerminal(provider, opId, _sessionId) {
   let terminal = false;
   for (let i = 0; i < 30 && !terminal; i += 1) {
     const batch = await provider.next(opId, 16, 256 * 1024);

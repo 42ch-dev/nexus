@@ -53,6 +53,7 @@ impl CoreError {
         })
     }
 
+    #[must_use]
     pub fn world_kb_validation_failed(errors: &[String], warnings: &[String]) -> Self {
         Self::WorldKbValidation(WorldKbValidationError {
             validation_summary: WorldKbValidationErrorValidationSummary {

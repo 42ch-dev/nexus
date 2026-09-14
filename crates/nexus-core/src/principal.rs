@@ -8,7 +8,7 @@ pub struct Principal {
 }
 
 impl Principal {
-    pub(crate) fn new(creator_id: String, workspace_slug: String, generation: u64) -> Self {
+    pub(crate) const fn new(creator_id: String, workspace_slug: String, generation: u64) -> Self {
         Self {
             creator_id,
             workspace_slug,
@@ -16,14 +16,16 @@ impl Principal {
         }
     }
 
-    pub(crate) fn verify_generation(&self, expected: u64) -> bool {
+    pub(crate) const fn verify_generation(&self, expected: u64) -> bool {
         self.generation == expected
     }
 
+    #[must_use]
     pub fn creator_id(&self) -> &str {
         &self.creator_id
     }
 
+    #[must_use]
     pub fn workspace_slug(&self) -> &str {
         &self.workspace_slug
     }

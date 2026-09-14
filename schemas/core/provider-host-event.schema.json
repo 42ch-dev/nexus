@@ -4,6 +4,7 @@
   "schema_version": 1,
   "title": "Nexus ProviderHostEvent",
   "description": "Externally tagged provider host event union promoted from handwritten HostEvent serde.",
+  "type": "object",
   "oneOf": [
     {
       "type": "object",

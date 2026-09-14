@@ -13,12 +13,12 @@
 //! unchanged.
 
 use crate::api::errors::NexusApiError;
-use crate::config::read_active_creator_id;
 use crate::api::handlers::memory_pipeline::BearerPipelineCtx;
 use crate::api::handlers::memory_pipeline::{
     process_bearer_review_batch, reflect_bearer_soul, MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
     MIN_SOUL_NARRATIVE_FRAGMENTS, REVIEW_BATCH_LIMIT,
 };
+use crate::config::read_active_creator_id;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::Json;

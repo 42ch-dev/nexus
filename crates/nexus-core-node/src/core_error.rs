@@ -119,10 +119,7 @@ pub fn wire_core_error_from_host(err: HostError) -> CoreError {
     CoreError {
         code,
         message,
-        details: serde_json::Map::from_iter([(
-            "category".into(),
-            Value::String(category.into()),
-        )]),
+        details: serde_json::Map::from_iter([("category".into(), Value::String(category.into()))]),
         http_status: Some(http_status),
     }
 }
@@ -154,17 +151,13 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
         DomainError::Forbidden { resource } => CoreError {
             code: CoreErrorCode::Forbidden,
             message: format!("forbidden: {resource}"),
-            details: serde_json::Map::from_iter([
-                ("resource".into(), Value::String(resource)),
-            ]),
+            details: serde_json::Map::from_iter([("resource".into(), Value::String(resource))]),
             http_status: Some(403),
         },
         DomainError::NotFound { resource } => CoreError {
             code: CoreErrorCode::NotFound,
             message: format!("not found: {resource}"),
-            details: serde_json::Map::from_iter([
-                ("resource".into(), Value::String(resource)),
-            ]),
+            details: serde_json::Map::from_iter([("resource".into(), Value::String(resource))]),
             http_status: Some(404),
         },
         DomainError::InvalidInput { field, reason } => CoreError {
@@ -270,16 +263,18 @@ mod tests {
 
     #[test]
     fn world_kb_conflict_serializes_structured_details() {
-        let wire = wire_core_error_from_domain(DomainError::WorldKbConflict(
-            WorldKbConflictError {
+        let wire =
+            wire_core_error_from_domain(DomainError::WorldKbConflict(WorldKbConflictError {
                 current_version: 2,
                 entity_id: "kb_cas".into(),
                 conflicting_path: "revision".into(),
                 recovery_hint: "refetch graph".into(),
-            },
-        ));
+            }));
         assert_eq!(wire.code, CoreErrorCode::WorldKbConflict);
-        assert_eq!(wire.details.get("current_version").and_then(|v| v.as_u64()), Some(2));
+        assert_eq!(
+            wire.details.get("current_version").and_then(|v| v.as_u64()),
+            Some(2)
+        );
         assert_eq!(
             wire.details.get("entity_id").and_then(|v| v.as_str()),
             Some("kb_cas")

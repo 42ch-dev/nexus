@@ -86,7 +86,7 @@ pub struct AcpProvider {
     timeouts: TimeoutConfig,
     /// Permission resolver used to evaluate ACP permission requests.
     permission_resolver: HostPermissionResolver,
-    /// Shared environment LocalSet bridge (one OS thread per native env).
+    /// Shared environment `LocalSet` bridge (one OS thread per native env).
     localset_bridge: LocalSetBridge,
 }
 
@@ -761,6 +761,7 @@ impl ProviderAdapter for AcpProvider {
                 HostError::cleanup_unconfirmed(format!("ACP probe cleanup unconfirmed: {e}"))
                     .with_provider(self.provider_id.clone())
             })?;
+            drop(process);
             std::result::Result::<(), HostError>::Ok(())
         })
         .await
@@ -801,11 +802,11 @@ impl ProviderAdapter for AcpProvider {
         // reported unconfirmed. No transport handle crosses this boundary.
         let process_identity = connected.process.lock().await.birth().map(|birth| {
             crate::capability::model::OwnedProcessIdentity {
-                    pid: birth.pid,
-                    process_birth: Some(birth.start_tick.to_string()),
-                    group_id: Some(birth.pid.to_string()),
+                pid: birth.pid,
+                process_birth: Some(birth.start_tick.to_string()),
+                group_id: Some(birth.pid.to_string()),
             }
-                });
+        });
 
         let host_session_id = HostSessionId::new();
 
@@ -1000,7 +1001,8 @@ impl ProviderAdapter for AcpProvider {
                                         session_id,
                                         op_id,
                                         error_category: "provider_eof".to_string(),
-                                        error_message: "ACP owned child exited during streaming".to_string(),
+                                        error_message: "ACP owned child exited during streaming"
+                                            .to_string(),
                                     })),
                                     None,
                                 ));
@@ -1011,9 +1013,8 @@ impl ProviderAdapter for AcpProvider {
                             break 'recv Err(());
                         }
                         let wait = poll_slice.min(dur.saturating_sub(elapsed));
-                        match tokio::time::timeout(wait, rx.recv()).await {
-                            Ok(update) => break 'recv Ok(update),
-                            Err(_) => {}
+                        if let Ok(update) = tokio::time::timeout(wait, rx.recv()).await {
+                            break 'recv Ok(update);
                         }
                     }
                 };
@@ -1059,7 +1060,7 @@ impl ProviderAdapter for AcpProvider {
                             None,
                         ))
                     }
-                    Err(_) => {
+                    Err(()) => {
                         tracing::warn!(
                             provider_id = %provider_id,
                             session_id = %session_id,

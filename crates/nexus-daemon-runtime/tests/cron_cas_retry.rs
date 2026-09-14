@@ -27,8 +27,10 @@ const WORK_ID: &str = "wrk_cron_cas_v151";
 async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");
-    let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
-    nexus_local_db::run_migrations(&pool).await.unwrap();
+    let pool = nexus_local_db::init_engine_pool(&db_path)
+        .await
+        .unwrap()
+        .clone_pool();
     // Seed a world so foreign-key constraints are satisfied.
     nexus_local_db::kb_store::seed::world(
         &pool,

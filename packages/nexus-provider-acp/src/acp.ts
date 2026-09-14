@@ -11,7 +11,6 @@ import { OperationDelivery } from './delivery.js';
 import { CleanupUnconfirmedError, ProviderNextError } from './errors.js';
 import {
   cleanupOwnedConnection,
-  closeOwnedConnection,
   createAcpSession,
   MAX_PROMPT_INPUT_BYTES,
   spawnOwnedConnection,

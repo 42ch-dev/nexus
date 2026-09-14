@@ -1,17 +1,15 @@
 #!/usr/bin/env node
 /** RFT DX proof runner — cold/warm/no-Cargo evidence for web/studio/shared-ui/desktop-web. */
 import { execFile, spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { cpus, freemem, totalmem, arch, platform, release } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { join, relative, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 import {
   BackendCompatibilityError,
   CURRENT_WRITER_PROTOCOL,
-  RunningDaemonCompatibilityError,
   REMEDIATION_COMMAND,
   assertCompatibleBackend,
   assertCompatibleRunningDaemon,
@@ -23,6 +21,7 @@ import {
   isDaemonCliStatusRunning,
   manifestPathForArtifact,
   readBackendManifest,
+  redactUserinfo,
   refreshBackend,
   resolveDaemonEndpoint,
   resolveListenerPid,
@@ -358,9 +357,14 @@ function spawnLogged(command, args, { cwd, env, label }) {
 export async function writeEvidence(outDir, payload) {
   await mkdir(outDir, { recursive: true });
   const filename = evidenceFilename({ runKind: payload.runKind, pass: payload.pass, startedAt: payload.timestamps.utcStart });
+  if (!/^[\w.-]+\.json$/.test(filename)) throw new Error(`Refusing unsafe evidence filename: ${filename}`);
   const target = join(outDir, filename);
-  if (existsSync(target)) throw new Error(`Evidence file already exists: ${target}`);
-  await writeFile(target, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  try {
+    await writeFile(target, `${JSON.stringify(payload, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
+  } catch (err) {
+    if (err.code === 'EEXIST') throw new Error(`Evidence file already exists: ${target}`);
+    throw err;
+  }
   return target;
 }
 
@@ -502,8 +506,8 @@ export async function runSurfaceLoop(options) {
   const command = process.argv.join(' ');
   let runError = null;
   let environment = null;
-  let cleanupOutcome = { restoredMarker: false, childrenStopped: false, daemonStopped: false };
-  let partial = { surface };
+  const cleanupOutcome = { restoredMarker: false, childrenStopped: false, daemonStopped: false };
+  const partial = { surface };
   let markerEdit = null;
   const children = [];
   let watcherChild = null;
@@ -658,7 +662,7 @@ export async function runNegativeCase(name, { port, outDir, repoRoot, env }) {
   const tempDir = join(repoRoot, 'scripts', `.proof-rft-dx-tmp-${process.pid}`);
   let pass = false;
   let observedError = null;
-  let sampleMeta = { negativeCase: name, sampleCount: 1, outcome: null };
+  const sampleMeta = { negativeCase: name, sampleCount: 1, outcome: null };
   let artifactMeta = { path: 'N/A', manifestPath: 'N/A', sha256: 'N/A', manifestSha256: 'N/A', contractHash: 'N/A' };
   let runError = null;
   let expectedNegativeFailure = null;
@@ -715,7 +719,7 @@ export async function runNegativeCase(name, { port, outDir, repoRoot, env }) {
           });
         } catch (err) {
           observedError = err.message;
-          pass = observedError.includes('stop') || observedError.includes('digest');
+          pass = Boolean(observedError.includes('stop')) || observedError.includes('digest');
         }
       } finally { if (started) await exec(artifactPath, ['daemon', 'stop', '--port', String(stalePort)]); }
     } else throw new Error(`Unknown negative case: ${name}`);
@@ -908,4 +912,10 @@ async function main() {
 }
 
 const isMain = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;
-if (isMain) { main().catch(err => { console.error(err.stack ?? err.message ?? err); process.exit(1); }); }
+if (isMain) {
+  main().catch(err => {
+    const rendered = err instanceof Error ? err.stack ?? err.message ?? err : err;
+    console.error(typeof rendered === 'string' ? redactUserinfo(rendered) : rendered);
+    process.exit(1);
+  });
+}

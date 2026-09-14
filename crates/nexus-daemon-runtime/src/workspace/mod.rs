@@ -1205,7 +1205,15 @@ impl WorkspaceState {
     /// so the first request never pays — or races — the open; the async cell
     /// makes any leftover lazy caller join the same single open instead of
     /// starting a second engine owner.
-    pub async fn core_or_uninit(&self) -> Result<Arc<nexus_core::CoreService>, crate::api::errors::NexusApiError> {
+    ///
+    /// # Errors
+    /// Returns [`crate::api::errors::NexusApiError::Internal`] with code
+    /// `NEXUS_HOME_INVALID` when the workspace nexus home has no parent
+    /// directory, and the mapped core-open error when the engine-owner
+    /// [`nexus_core::CoreService`] cannot be opened or joined.
+    pub async fn core_or_uninit(
+        &self,
+    ) -> Result<Arc<nexus_core::CoreService>, crate::api::errors::NexusApiError> {
         self.core_service
             .get_or_try_init(|| async {
                 let user_home = self
@@ -1251,6 +1259,7 @@ impl WorkspaceState {
     ///
     /// This is the single authority — the HTTP guard delegates here and the
     /// probe owner calls it, so the two can never drift.
+    #[must_use]
     pub fn verified_creator_context(&self) -> Option<(String, String)> {
         let creator_id = crate::config::try_active_creator_id(self.nexus_home())?;
         let workspace_slug =
@@ -1958,9 +1967,10 @@ mod tests {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).expect("db parent");
         }
-        let pool = nexus_local_db::init_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("init existing creator DB");
+        let pool = guarded.clone_pool();
 
         // Seed the checkpoint-before-settlement row: a `driven_v1` schedule
         // PAUSED by an earlier recovery boot whose durable v1 session is

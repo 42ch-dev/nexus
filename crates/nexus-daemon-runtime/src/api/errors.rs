@@ -429,8 +429,10 @@ impl NexusApiError {
                     | "compute_wall_time_exceeded"
                     | "compute_memory_cap_exceeded"
                     | "compute_module_trapped"
-                    | "compute_module_error" => code.as_str(),
-                    "busy" | "closing" | "interrupted" => code.as_str(),
+                    | "compute_module_error"
+                    | "busy"
+                    | "closing"
+                    | "interrupted" => code.as_str(),
                     _ if code.ends_with("_sort_invalid") => code.as_str(),
                     _ => "bad_request",
                 }
@@ -762,10 +764,9 @@ impl From<nexus_core::CoreError> for NexusApiError {
                 reason: "forbidden".to_string(),
             },
             nexus_core::CoreError::NotFound { resource } => Self::NotFound(resource),
-            nexus_core::CoreError::InvalidInput { field, reason } => Self::InvalidInput {
-                field,
-                reason,
-            },
+            nexus_core::CoreError::InvalidInput { field, reason } => {
+                Self::InvalidInput { field, reason }
+            }
             nexus_core::CoreError::WorldKbConflict(details) => Self::world_kb_conflict(
                 details.current_version,
                 details.entity_id,
@@ -1241,8 +1242,8 @@ mod tests {
 
     #[test]
     fn internal_error_spoke_reject_maps_to_500() {
-        // Simulate what map_upsert_reject / spoke_reject_to_api_error /
-        // map_relate_reject emit for SpokeRejectCode::InternalError.
+        // Simulate what spoke_reject_to_api_error / map_relate_reject emit
+        // for SpokeRejectCode::InternalError.
         let err = NexusApiError::Internal {
             code: "INTERNAL_ERROR".to_string(),
             message: "orchestrate_upsert internal error: DB connection lost".to_string(),

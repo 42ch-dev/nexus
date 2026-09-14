@@ -60,8 +60,10 @@ async fn test_pool() -> SqlitePool {
     let db_path = db.path().to_path_buf();
     std::mem::forget(db);
 
-    let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
-    nexus_local_db::run_migrations(&pool).await.unwrap();
+    let pool = nexus_local_db::init_engine_pool(&db_path)
+        .await
+        .unwrap()
+        .clone_pool();
     pool
 }
 

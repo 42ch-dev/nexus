@@ -444,9 +444,7 @@ mod tests {
     /// genuinely depends on the stubs.
     #[test]
     fn scan_path_in_discovers_all_native_providers_when_stubs_executable() {
-        let _lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _lock = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
 
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
 
@@ -543,9 +541,7 @@ mod tests {
     /// validated, canonical command, available, with the AR-6 descriptor.
     #[test]
     fn scan_path_in_emits_env_route_dsh_row_when_env_set() {
-        let _lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _lock = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
 
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
         let bin_dir = temp_dir.path().join("env-bin");
@@ -613,9 +609,7 @@ mod tests {
     /// marks the row unavailable with a safe static reason.
     #[test]
     fn scan_path_in_marks_invalid_env_override_unavailable() {
-        let _lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _lock = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
 
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
         let _path_guard = PathGuard::isolate(temp_dir.path());
@@ -650,9 +644,7 @@ mod tests {
     /// `DSH_RUNTIME_BIN` unset/empty → no `dsh-native` row at all.
     #[test]
     fn scan_path_in_omits_dsh_row_when_command_absent_and_env_unset() {
-        let _lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _lock = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
 
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
         let _path_guard = PathGuard::isolate(temp_dir.path());
@@ -673,9 +665,7 @@ mod tests {
     /// absent even when `DSH_RUNTIME_BIN` is set.
     #[test]
     fn scan_path_in_suppresses_env_route_dsh_row() {
-        let _lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _lock = crate::test_support::PROCESS_ENV_LOCK.blocking_lock();
 
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
         let _path_guard = PathGuard::isolate(temp_dir.path());

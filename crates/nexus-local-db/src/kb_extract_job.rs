@@ -1262,13 +1262,14 @@ async fn fetch_promotion_optional_by_id(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{open_pool, run_migrations};
 
     async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let pool = open_pool(&db_path).await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        let pool = crate::init_engine_pool(&db_path)
+            .await
+            .unwrap()
+            .clone_pool();
         (pool, dir)
     }
 

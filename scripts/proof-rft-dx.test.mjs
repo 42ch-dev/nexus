@@ -5,12 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   nearestRankP95,
-  maxSample,
   evaluateDx2,
   evaluateDx3,
   isCargoFamilyCommand,
   isTauriFamilyCommand,
-  parsePsLines,
   countCargoTraces,
   evidenceFilename,
   markerSource,

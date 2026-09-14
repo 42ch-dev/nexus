@@ -62,10 +62,10 @@ function expectedDerFingerprint(pem) {
   return `SHA256:${[...digest].map((byte) => byte.toString(16).padStart(2, '0')).join(':')}`;
 }
 
-function httpsGet(url) {
+function httpsGet(url, ca) {
   return new Promise((resolve, reject) => {
     https
-      .get(url, { rejectUnauthorized: false }, (res) => {
+      .get(url, { ca, rejectUnauthorized: true }, (res) => {
         let body = '';
         res.setEncoding('utf8');
         res.on('data', (chunk) => {
@@ -615,11 +615,11 @@ describe('world-kb-http tls (P4-T1)', () => {
   test('serves HTTPS and reports the DER certificate fingerprint', async () => {
     assert.match(service.url, /^https:\/\/127\.0\.0\.1:18441$/);
 
-    const health = await httpsGet(`${service.url}/v1/daemon/runtime/health`);
+    const health = await httpsGet(`${service.url}/v1/daemon/runtime/health`, pem);
     assert.equal(health.status, 200);
     assert.match(health.body, /"status":"ok"/);
 
-    const fingerprint = await httpsGet(`${service.url}/v1/daemon/runtime/cert-fingerprint`);
+    const fingerprint = await httpsGet(`${service.url}/v1/daemon/runtime/cert-fingerprint`, pem);
     assert.equal(fingerprint.status, 200);
     const payload = JSON.parse(fingerprint.body);
     assert.equal(payload.algorithm, 'sha256');

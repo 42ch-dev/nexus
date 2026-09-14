@@ -10,8 +10,8 @@ pub use legacy_impl::*;
 compile_error!("Select a CLI cohort: enable `basic-cli` or `legacy-cli` feature");
 
 #[cfg(all(feature = "basic-cli", not(feature = "legacy-cli")))]
-pub mod world;
-#[cfg(all(feature = "basic-cli", not(feature = "legacy-cli")))]
 mod slim;
+#[cfg(all(feature = "basic-cli", not(feature = "legacy-cli")))]
+pub mod world;
 #[cfg(all(feature = "basic-cli", not(feature = "legacy-cli")))]
 pub use slim::*;

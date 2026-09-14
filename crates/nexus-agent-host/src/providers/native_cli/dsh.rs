@@ -2579,19 +2579,20 @@ mod tests {
         .expect("empty native args are accepted")
     }
 
-    fn lock_test_env() -> std::sync::MutexGuard<'static, ()> {
-        crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    async fn lock_test_env() -> tokio::sync::MutexGuard<'static, ()> {
+        crate::test_support::PROCESS_ENV_LOCK.lock().await
+    }
+
+    fn lock_test_env_sync() -> tokio::sync::MutexGuard<'static, ()> {
+        crate::test_support::PROCESS_ENV_LOCK.blocking_lock()
     }
 
     /// Launch under the env lock: `launch()` now initializes the runtime
     /// eagerly, spawning the python fixture whose `#!/usr/bin/env python3`
     /// shebang resolves python3 through PATH at execve time (see lib.rs
     /// `test_support`).
-    #[allow(clippy::future_not_send)]
     async fn launch_hermetic(provider: &DshNativeProvider) -> ManagedSessionHandle {
-        let _env_lock = lock_test_env();
+        let _env_lock = lock_test_env().await;
         provider.launch(launch_spec()).await.expect("launch")
     }
 
@@ -2646,15 +2647,12 @@ mod tests {
     }
 
     /// Run one prompt turn to completion and return the collected events.
-    // The held `PROCESS_ENV_LOCK` guard makes the future !Send; test-only
-    // helper, run on tokio's current-thread test runtime (no Send needed).
-    #[allow(clippy::future_not_send)]
     async fn run_turn(
         provider: &DshNativeProvider,
         handle: &ManagedSessionHandle,
         text: &str,
     ) -> Vec<HostEvent> {
-        let _env_lock = lock_test_env();
+        let _env_lock = lock_test_env().await;
         let stream = provider
             .execute(
                 handle,
@@ -2681,14 +2679,13 @@ mod tests {
     }
 
     /// Execute one prompt with an explicit permission scope.
-    #[allow(clippy::future_not_send)]
     async fn run_turn_scoped(
         provider: &DshNativeProvider,
         handle: &ManagedSessionHandle,
         text: &str,
         scope: Option<PromptPermissionScope>,
     ) -> HostResult<Vec<HostEvent>> {
-        let _env_lock = lock_test_env();
+        let _env_lock = lock_test_env().await;
         let stream = provider
             .execute(
                 handle,
@@ -2870,7 +2867,7 @@ mod tests {
 
     #[test]
     fn resolve_explicit_bare_command_uses_path() {
-        let _env_lock = lock_test_env();
+        let _env_lock = lock_test_env_sync();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let bin = temp_dir.path().join("dsh-custom");
         write_executable(&bin);
@@ -2888,7 +2885,7 @@ mod tests {
 
     #[test]
     fn resolve_invalid_explicit_override_never_falls_back() {
-        let _env_lock = lock_test_env();
+        let _env_lock = lock_test_env_sync();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let env_bin = temp_dir.path().join("env-dsh");
         write_executable(&env_bin);
@@ -2911,7 +2908,7 @@ mod tests {
 
     #[test]
     fn resolve_env_route_then_path_fallback() {
-        let _env_lock = lock_test_env();
+        let _env_lock = lock_test_env_sync();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let env_bin = temp_dir.path().join("env-dsh");
         write_executable(&env_bin);
@@ -2964,7 +2961,7 @@ mod tests {
 
     #[test]
     fn resolve_blank_values_count_as_absent() {
-        let _env_lock = lock_test_env();
+        let _env_lock = lock_test_env_sync();
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let env_bin = temp_dir.path().join("env-dsh");
         write_executable(&env_bin);
@@ -3138,7 +3135,7 @@ mod tests {
 
     #[test]
     fn selected_dsh_home_follows_sdk_precedence() {
-        let _env_lock = lock_test_env();
+        let _env_lock = lock_test_env_sync();
         // Caller env DSH_HOME wins over the parent value.
         let previous = std::env::var("DSH_HOME").ok();
         std::env::set_var("DSH_HOME", "/parent/dsh-home");
@@ -3301,7 +3298,7 @@ mod tests {
         let handle = launch_hermetic(&provider).await;
 
         {
-            let _env_lock = lock_test_env();
+            let _env_lock = lock_test_env().await;
             provider
                 .shutdown(handle.clone())
                 .await
@@ -3360,7 +3357,7 @@ mod tests {
         let handle = launch_hermetic(&provider).await;
 
         let first = {
-            let _env_lock = lock_test_env();
+            let _env_lock = lock_test_env().await;
             provider.shutdown(handle.clone()).await
         };
         assert!(
@@ -3380,7 +3377,7 @@ mod tests {
         // completes, then retry: the SAME completion is observed.
         tokio::time::sleep(std::time::Duration::from_millis(800)).await;
         {
-            let _env_lock = lock_test_env();
+            let _env_lock = lock_test_env().await;
             provider
                 .shutdown(handle.clone())
                 .await
@@ -3529,7 +3526,7 @@ mod tests {
         );
 
         {
-            let _env_lock = lock_test_env();
+            let _env_lock = lock_test_env().await;
             provider
                 .shutdown(handle)
                 .await
@@ -3570,7 +3567,7 @@ mod tests {
             .expect("execute");
 
         {
-            let _env_lock = lock_test_env();
+            let _env_lock = lock_test_env().await;
             provider.shutdown(handle).await.expect("shutdown");
         }
 
@@ -3595,7 +3592,7 @@ mod tests {
     /// never fall back.
     #[tokio::test]
     async fn probe_unavailable_for_invalid_explicit_override() {
-        let _env_lock = lock_test_env();
+        let _env_lock = lock_test_env().await;
         let _bin_guard = DshRuntimeBinGuard::set(Path::new(MOCK_DSH_AGENT));
         let provider = DshNativeProvider::new(
             ProviderId::new("nonexistent-dsh-xyz"),
@@ -3629,7 +3626,7 @@ mod tests {
     /// provider-catalog response (`GET /v1/daemon/agent-host/providers`).
     #[tokio::test]
     async fn probe_initializes_and_closes_both_recipes() {
-        let _env_lock = lock_test_env();
+        let _env_lock = lock_test_env().await;
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let dsh_home = temp_dir.path().join("dsh-home");
@@ -3816,7 +3813,7 @@ mod tests {
             "the sealed lease is retained while live"
         );
         {
-            let _env_lock = lock_test_env();
+            let _env_lock = lock_test_env().await;
             provider.shutdown(handle).await.expect("confirmed close");
         }
         assert!(
@@ -3957,7 +3954,7 @@ mod tests {
         // Start a turn and drive the stream on a task so the run holds
         // the per-session mutex.
         let stream = {
-            let _env_lock = lock_test_env();
+            let _env_lock = lock_test_env().await;
             provider
                 .execute(
                     &handle,
@@ -4183,7 +4180,7 @@ mod tests {
         // A later shutdown still completes (nothing left to close) and
         // removes the record.
         {
-            let _env_lock = lock_test_env();
+            let _env_lock = lock_test_env().await;
             provider
                 .shutdown(handle)
                 .await
@@ -4328,7 +4325,7 @@ mod tests {
     /// close still finishes and deletes the sealed lease afterwards.
     #[tokio::test]
     async fn probe_deadline_drop_keeps_sealed_cleanup_owner() {
-        let _env_lock = lock_test_env();
+        let _env_lock = lock_test_env().await;
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let dsh_home = temp_dir.path().join("dsh-home");
@@ -4373,7 +4370,7 @@ mod tests {
     /// the provisioned lease behind and this test fails.)
     #[tokio::test]
     async fn probe_init_timeout_retains_sealed_owner_and_completes_cleanup() {
-        let _env_lock = lock_test_env();
+        let _env_lock = lock_test_env().await;
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let dsh_home = temp_dir.path().join("dsh-home");
@@ -4431,7 +4428,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn probe_init_timeout_retains_ordinary_owner_and_reaps_child() {
-        let _env_lock = lock_test_env();
+        let _env_lock = lock_test_env().await;
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let dsh_home = temp_dir.path().join("dsh-home");
@@ -4516,7 +4513,7 @@ mod tests {
             .expect("chmod 0500");
 
         let first = {
-            let _env_lock = lock_test_env();
+            let _env_lock = lock_test_env().await;
             provider.shutdown(handle.clone()).await
         };
         assert!(
@@ -4546,7 +4543,7 @@ mod tests {
         std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o755))
             .expect("restore perms");
         {
-            let _env_lock = lock_test_env();
+            let _env_lock = lock_test_env().await;
             provider
                 .shutdown(handle.clone())
                 .await
@@ -4705,7 +4702,7 @@ mod tests {
         );
 
         let first = {
-            let _env_lock = lock_test_env();
+            let _env_lock = lock_test_env().await;
             provider.shutdown(handle.clone()).await
         };
         assert!(
@@ -4726,7 +4723,7 @@ mod tests {
         std::fs::set_permissions(&blocker, std::fs::Permissions::from_mode(0o700))
             .expect("restore blocker perms");
         {
-            let _env_lock = lock_test_env();
+            let _env_lock = lock_test_env().await;
             provider
                 .shutdown(handle.clone())
                 .await
@@ -5323,7 +5320,7 @@ mod tests {
         // This test holds the env lock itself (PATH isolation must cover
         // resolution AND spawn), so it cannot call the locking helpers —
         // execute/collect inline instead.
-        let _env_lock = lock_test_env();
+        let _env_lock = lock_test_env().await;
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let bin_dir = temp_dir.path().join("bin");
         install_fixture_as_dsh(&bin_dir);
@@ -5523,7 +5520,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn wrong_server_identity_fails_closed_and_reaps_child() {
-        let _env_lock = lock_test_env();
+        let _env_lock = lock_test_env().await;
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let mut env = stub_env(&req_log, &temp_dir.path().join("dsh-home"));
@@ -5556,7 +5553,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn initialize_timeout_fails_launch_and_reaps_child() {
-        let _env_lock = lock_test_env();
+        let _env_lock = lock_test_env().await;
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let mut env = stub_env(&req_log, &temp_dir.path().join("dsh-home"));
@@ -5593,7 +5590,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn shutdown_rpc_error_is_diagnostic_and_close_is_confirmed() {
-        let _env_lock = lock_test_env();
+        let _env_lock = lock_test_env().await;
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("reqs.jsonl");
         let mut env = stub_env(&req_log, &temp_dir.path().join("dsh-home"));

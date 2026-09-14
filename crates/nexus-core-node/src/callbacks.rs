@@ -104,17 +104,17 @@ impl JsProviderBridge {
         payload: String,
     ) -> ProviderResult<String> {
         self.check_admission(payload.len())?;
-        let _budget = self
-            .state
-            .pending_budget
-            .try_charge(payload.len())
-            .map_err(|e| e)?;
-        let permit = self.active.clone().try_acquire_owned().map_err(|_| CoreError {
-            code: CoreErrorCode::Busy,
-            message: "callback admission busy".into(),
-            details: Default::default(),
-            http_status: Some(503),
-        })?;
+        let _budget = self.state.pending_budget.try_charge(payload.len())?;
+        let permit = self
+            .active
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| CoreError {
+                code: CoreErrorCode::Busy,
+                message: "callback admission busy".into(),
+                details: Default::default(),
+                http_status: Some(503),
+            })?;
         let gen_at_enqueue = self.state.generation.load(Ordering::SeqCst);
 
         // Subscribe to the versioned close signal BEFORE the enqueue. `wait_for`
@@ -224,9 +224,7 @@ impl ProviderPort for JsProviderBridge {
             "max_events": max_events,
             "max_bytes": max_bytes,
         });
-        let raw = self
-            .invoke_tsfn(&self.next_tsfn, payload.to_string())
-            .await;
+        let raw = self.invoke_tsfn(&self.next_tsfn, payload.to_string()).await;
         pull_flag.store(false, Ordering::Release);
         let raw = raw?;
         serde_json::from_str(&raw).map_err(|e| CoreError {
@@ -243,5 +241,7 @@ pub fn install_js_provider(
     state: Arc<EnvState>,
     callbacks: Object,
 ) -> Result<Arc<dyn ProviderPort>> {
-    Ok(Arc::new(JsProviderBridge::from_callbacks(env, state, callbacks)?))
+    Ok(Arc::new(JsProviderBridge::from_callbacks(
+        env, state, callbacks,
+    )?))
 }

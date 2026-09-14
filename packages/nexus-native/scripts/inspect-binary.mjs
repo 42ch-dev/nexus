@@ -65,6 +65,14 @@ function fail(message, detail) {
   process.exit(1);
 }
 
+function archiveEvidenceFile(path, tag) {
+  try {
+    renameSync(path, `${path.replace(/\.json$/, '')}.${tag}-${Date.now()}.json`);
+  } catch {
+    // nothing left to archive (or it was already replaced) — the fresh write proceeds
+  }
+}
+
 /**
  * A failed run must leave its own record: a stale `pass` document on disk would
  * otherwise be read as a green result by the matrix summary.
@@ -73,10 +81,11 @@ function writeFailEvidence(message, detail) {
   if (!state.evidencePath) return;
   try {
     mkdirSync(dirname(state.evidencePath), { recursive: true });
-    if (existsSync(state.evidencePath)) {
+    try {
       const previous = JSON.parse(readFileSync(state.evidencePath, 'utf8'));
-      const tag = previous.status === 'pass' ? 'pass' : 'pre';
-      renameSync(state.evidencePath, `${state.evidencePath.replace(/\.json$/, '')}.${tag}-${Date.now()}.json`);
+      archiveEvidenceFile(state.evidencePath, previous.status === 'pass' ? 'pass' : 'pre');
+    } catch (error) {
+      if (error?.code !== 'ENOENT') archiveEvidenceFile(state.evidencePath, 'pre');
     }
     writeFileSync(
       state.evidencePath,
@@ -366,7 +375,7 @@ function inspectWindows(buffer, spec, findings) {
   findings.pe = pe;
   const merged = [...new Set([...pe.imported_dlls, ...(findings.host_tool_imports ?? [])])];
   findings.imported_dlls = merged;
-  findings.non_system_dlls = merged.filter((dll) => dll.includes('/') || dll.includes('\\'));
+  findings.non_system_dlls = merged.filter((dll) => /[\\/]/.test(dll));
   return [
     {
       name: 'windows_pe_imports_readable',
@@ -521,13 +530,11 @@ const payload = {
   checks,
 };
 mkdirSync(outDir, { recursive: true });
-if (existsSync(evidencePath)) {
-  try {
-    const previous = JSON.parse(readFileSync(evidencePath, 'utf8'));
-    if (previous.status !== 'pass') renameSync(evidencePath, `${evidencePath.replace(/\.json$/, '')}.pre-${Date.now()}.json`);
-  } catch {
-    renameSync(evidencePath, `${evidencePath.replace(/\.json$/, '')}.pre-${Date.now()}.json`);
-  }
+try {
+  const previous = JSON.parse(readFileSync(evidencePath, 'utf8'));
+  if (previous.status !== 'pass') archiveEvidenceFile(evidencePath, 'pre');
+} catch (error) {
+  if (error?.code !== 'ENOENT') archiveEvidenceFile(evidencePath, 'pre');
 }
 writeFileSync(evidencePath, `${JSON.stringify(payload, null, 2)}\n`);
 process.stdout.write(`${SCRIPT}: ${payload.status} -> ${evidencePath}\n`);

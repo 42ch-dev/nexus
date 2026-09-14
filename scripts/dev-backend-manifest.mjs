@@ -21,6 +21,11 @@ export function getRepoRoot() {
   return resolve(MODULE_DIR, '..');
 }
 
+/** Mask URL userinfo (credentials) before env/user-derived text is logged or persisted. */
+export function redactUserinfo(text) {
+  return text.replace(/\/\/[^\s/@]*@/g, '//[redacted]@');
+}
+
 export async function resolveTargetDir(env = process.env) {
   if (env.CARGO_TARGET_DIR) {
     return resolve(env.CARGO_TARGET_DIR);

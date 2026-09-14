@@ -1,9 +1,9 @@
-//! P1-T2 world_kb contract tests (core service semantics).
+//! P1-T2 `world_kb` contract tests (core service semantics).
 
 use nexus_contracts::WorldKbPatchEntityRequest;
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
-use nexus_local_db::writer_protocol::{GuardedPoolOptions, init_engine_pool};
 use nexus_local_db::open_pool_read_only;
+use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
 use sqlx::SqlitePool;
 use std::path::Path;
 use tempfile::TempDir;
@@ -14,7 +14,7 @@ const OWNED_WORLD: &str = "wld_owned";
 const FOREIGN_WORLD: &str = "wld_foreign";
 
 struct Fixture {
-    _tmp: TempDir,
+    tmp: TempDir,
     core: CoreService,
     principal: nexus_core::Principal,
 }
@@ -60,7 +60,13 @@ async fn seed_kb(
     .unwrap();
 }
 
-async fn seed_pending(pool: &SqlitePool, job_id: &str, world_id: &str, name: &str, created_at: &str) {
+async fn seed_pending(
+    pool: &SqlitePool,
+    job_id: &str,
+    world_id: &str,
+    name: &str,
+    created_at: &str,
+) {
     // kb_extract_jobs is engine-writer-only (writer protocol §4).
     sqlx::query(
         "INSERT INTO kb_extract_jobs (job_id, creator_id, workspace_id, work_entry_id, world_id, status, promotion_status, proposed_payload, block_type_guess, canonical_name_guess, version, created_at) VALUES (?, ?, 'ws', ?, ?, 'done', 'pending', '{}', 'character', ?, 0, ?)",
@@ -79,6 +85,84 @@ async fn seed_pending(pool: &SqlitePool, job_id: &str, world_id: &str, name: &st
 async fn read_only_pool(user_home: &Path) -> SqlitePool {
     let db_path = nexus_home_layout::workspace_state_db_path(user_home, CREATOR, SLUG);
     open_pool_read_only(&db_path).await.expect("read-only pool")
+}
+
+/// Seed the contract fixture rows: owned + foreign worlds, KB rows in every
+/// status under test (deleted/confirmed/merged + NULL modules), and two
+/// pending candidate jobs.
+async fn seed_fixture_rows(pool: &SqlitePool) {
+    seed_world(pool, OWNED_WORLD, CREATOR).await;
+    seed_world(pool, FOREIGN_WORLD, "other_creator").await;
+    seed_kb(
+        pool,
+        "kb_dead",
+        OWNED_WORLD,
+        "Dead",
+        "deleted",
+        Some(1),
+        None,
+    )
+    .await;
+    seed_kb(
+        pool,
+        "kb_mod",
+        OWNED_WORLD,
+        "Mod",
+        "confirmed",
+        Some(0),
+        Some(r#"{"mental":{"goals":["old"]}}"#),
+    )
+    .await;
+    seed_kb(
+        pool,
+        "kb_cas",
+        OWNED_WORLD,
+        "Cas",
+        "confirmed",
+        Some(2),
+        None,
+    )
+    .await;
+    seed_kb(
+        pool,
+        "kb_merged",
+        OWNED_WORLD,
+        "Merged",
+        "merged",
+        Some(1),
+        None,
+    )
+    .await;
+    seed_kb(
+        pool,
+        "kb_nullmod",
+        OWNED_WORLD,
+        "NullMod",
+        "confirmed",
+        Some(1),
+        None,
+    )
+    .await;
+    sqlx::query("UPDATE kb_key_blocks SET modules_json = NULL WHERE key_block_id = 'kb_nullmod'")
+        .execute(pool)
+        .await
+        .unwrap();
+    seed_pending(
+        pool,
+        "xj_job1",
+        OWNED_WORLD,
+        "Cand1",
+        "2020-01-01T00:00:01Z",
+    )
+    .await;
+    seed_pending(
+        pool,
+        "xj_job2",
+        OWNED_WORLD,
+        "Cand2",
+        "2020-01-01T00:00:02Z",
+    )
+    .await;
 }
 
 async fn setup() -> Fixture {
@@ -103,28 +187,7 @@ async fn setup() -> Fixture {
             .await
             .unwrap();
         let pool = guarded.clone_pool();
-        seed_world(&pool, OWNED_WORLD, CREATOR).await;
-        seed_world(&pool, FOREIGN_WORLD, "other_creator").await;
-        seed_kb(&pool, "kb_dead", OWNED_WORLD, "Dead", "deleted", Some(1), None).await;
-        seed_kb(
-            &pool,
-            "kb_mod",
-            OWNED_WORLD,
-            "Mod",
-            "confirmed",
-            Some(0),
-            Some(r#"{"mental":{"goals":["old"]}}"#),
-        )
-        .await;
-        seed_kb(&pool, "kb_cas", OWNED_WORLD, "Cas", "confirmed", Some(2), None).await;
-        seed_kb(&pool, "kb_merged", OWNED_WORLD, "Merged", "merged", Some(1), None).await;
-        seed_kb(&pool, "kb_nullmod", OWNED_WORLD, "NullMod", "confirmed", Some(1), None).await;
-        sqlx::query("UPDATE kb_key_blocks SET modules_json = NULL WHERE key_block_id = 'kb_nullmod'")
-            .execute(&pool)
-            .await
-            .unwrap();
-        seed_pending(&pool, "xj_job1", OWNED_WORLD, "Cand1", "2020-01-01T00:00:01Z").await;
-        seed_pending(&pool, "xj_job2", OWNED_WORLD, "Cand2", "2020-01-01T00:00:02Z").await;
+        seed_fixture_rows(&pool).await;
         pool.close().await;
     }
 
@@ -136,7 +199,7 @@ async fn setup() -> Fixture {
     .unwrap();
     let principal = core.active_principal().await.unwrap();
     Fixture {
-        _tmp: tmp,
+        tmp,
         core,
         principal,
     }
@@ -160,6 +223,13 @@ async fn world_kb_contract() {
         .unwrap_err();
     assert!(matches!(err, CoreError::NotFound { .. }));
 
+    assert_patch_contract(&fx).await;
+    assert_candidates_contract(&fx).await;
+}
+
+/// Patch-path contract: create-on-absent, input validation, terminal-status
+/// rejection, module merge, and OCC conflict/retry behavior.
+async fn assert_patch_contract(fx: &Fixture) {
     let req: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
         "entity_id": "kb_abc123",
         "expected_version": 0,
@@ -251,7 +321,11 @@ async fn world_kb_contract() {
         .await
         .unwrap();
     assert_eq!(resp.version, 3);
+}
 
+/// Candidates contract: keyset pagination, malformed cursor rejection, and
+/// foreign-world denial.
+async fn assert_candidates_contract(fx: &Fixture) {
     let page1 = fx
         .core
         .world_kb_candidates(&fx.principal, OWNED_WORLD.to_string(), Some(1), None)
@@ -350,7 +424,7 @@ async fn world_kb_contract_cas_reports_committed_revision() {
 #[tokio::test]
 async fn world_kb_contract_patch_event_atomicity() {
     let fx = setup().await;
-    let pool = read_only_pool(fx._tmp.path()).await;
+    let pool = read_only_pool(fx.tmp.path()).await;
     let before: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(sequence), 0) FROM core_changes")
         .fetch_one(&pool)
         .await
@@ -380,7 +454,7 @@ async fn world_kb_contract_patch_event_atomicity() {
 #[tokio::test]
 async fn world_kb_contract_stale_principal_after_config_change() {
     let fx = setup().await;
-    let nexus_home = fx._tmp.path().join(".nexus42");
+    let nexus_home = fx.tmp.path().join(".nexus42");
     std::fs::write(
         nexus_home.join("config.toml"),
         "active_creator_id = \"other_creator\"\n[active_workspace_slug_by_creator]\n\"other_creator\" = \"default\"\n",
@@ -425,7 +499,7 @@ async fn world_kb_contract_legacy_json_open() {
 #[tokio::test]
 async fn world_kb_contract_stored_revision_exactness() {
     let fx = setup().await;
-    let pool = read_only_pool(fx._tmp.path()).await;
+    let pool = read_only_pool(fx.tmp.path()).await;
 
     let create_req: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
         "entity_id": "kb_aabbccdd",
@@ -439,15 +513,13 @@ async fn world_kb_contract_stored_revision_exactness() {
         .await
         .unwrap();
     assert_eq!(created.version, 1);
-    let stored_after_create: i64 = sqlx::query_scalar(
-        "SELECT revision FROM kb_key_blocks WHERE key_block_id = 'kb_aabbccdd'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let stored_after_create: i64 =
+        sqlx::query_scalar("SELECT revision FROM kb_key_blocks WHERE key_block_id = 'kb_aabbccdd'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(
-        stored_after_create,
-        1,
+        stored_after_create, 1,
         "create-on-absent must persist revision exactly 1"
     );
 
@@ -463,15 +535,13 @@ async fn world_kb_contract_stored_revision_exactness() {
         .await
         .unwrap();
     assert_eq!(patched.version, 2);
-    let stored_after_patch: i64 = sqlx::query_scalar(
-        "SELECT revision FROM kb_key_blocks WHERE key_block_id = 'kb_aabbccdd'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let stored_after_patch: i64 =
+        sqlx::query_scalar("SELECT revision FROM kb_key_blocks WHERE key_block_id = 'kb_aabbccdd'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(
-        stored_after_patch,
-        2,
+        stored_after_patch, 2,
         "second accepted patch must persist revision exactly 2"
     );
 }
@@ -525,4 +595,3 @@ async fn direct_writer_close_allows_reopen() {
         .expect("graph after reopen");
     core2.close().await.expect("second close must succeed");
 }
-

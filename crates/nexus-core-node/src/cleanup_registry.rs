@@ -58,11 +58,7 @@ pub fn reap_completed() -> usize {
             }
             reg.entries.swap_remove(i);
             reaped += 1;
-        } else if entry
-            .handle
-            .as_ref()
-            .is_some_and(|h| h.is_finished())
-        {
+        } else if entry.handle.as_ref().is_some_and(|h| h.is_finished()) {
             if let Some(handle) = entry.handle.take() {
                 let _ = handle.join();
             }
@@ -75,7 +71,6 @@ pub fn reap_completed() -> usize {
     }
     reaped
 }
-
 
 /// Outcome of an explicit reaper stop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,11 +97,7 @@ pub fn stop_reaper(deadline: Instant) -> ReaperStop {
     };
     owner.stop.store(true, Ordering::SeqCst);
 
-    let handle = owner
-        .handle
-        .lock()
-        .ok()
-        .and_then(|mut slot| slot.take());
+    let handle = owner.handle.lock().ok().and_then(|mut slot| slot.take());
     let mut joined = true;
     if let Some(handle) = handle {
         while !handle.is_finished() && Instant::now() < deadline {
@@ -136,9 +127,7 @@ pub fn stop_reaper(deadline: Instant) -> ReaperStop {
 }
 
 fn entry_count() -> usize {
-    registry()
-        .lock()
-        .map_or(0, |reg| reg.entries.len())
+    registry().lock().map_or(0, |reg| reg.entries.len())
 }
 
 /// Register a timed-out LocalSet runtime thread. The handle is retained until reaped.
@@ -164,7 +153,6 @@ static REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 /// Serialize a registry-asserting test against every other such test.
 #[cfg(test)]
-#[must_use]
 pub fn registry_test_lock() -> std::sync::MutexGuard<'static, ()> {
     REGISTRY_TEST_LOCK
         .lock()
@@ -235,10 +223,12 @@ fn ensure_reaper() {
                     continue;
                 }
                 let now = Instant::now();
-                if idle_since.is_none() {
+                if let Some(idle) = idle_since {
+                    if now.duration_since(idle) >= REAPER_IDLE_EXIT {
+                        break;
+                    }
+                } else {
                     idle_since = Some(now);
-                } else if now.duration_since(idle_since.unwrap()) >= REAPER_IDLE_EXIT {
-                    break;
                 }
             }
         })
@@ -282,7 +272,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn localset_thread_entry_is_reaped_after_join() {
         let _lock = crate::cleanup_registry::registry_test_lock();
@@ -308,7 +297,10 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         let (pending, _) = registry_snapshot();
-        assert_eq!(pending, 0, "reaper must join and remove LocalSet thread entry");
+        assert_eq!(
+            pending, 0,
+            "reaper must join and remove LocalSet thread entry"
+        );
     }
 
     #[test]

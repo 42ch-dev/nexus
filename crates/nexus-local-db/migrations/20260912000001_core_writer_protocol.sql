@@ -4192,7 +4192,7 @@ AFTER INSERT ON character_soul_narratives
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES (COALESCE(NEW.world_id, ''), 'character_soul_narratives', NEW.character_id || ':' || COALESCE(NEW.world_id, ''), NULL, 'insert', nexus_writer_id());
+  VALUES ('', 'character_soul_narratives', NEW.character_id || ':' || COALESCE(NEW.actor_world_binding_id, ''), NULL, 'insert', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_character_soul_narratives_update
@@ -4200,7 +4200,7 @@ AFTER UPDATE ON character_soul_narratives
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES (COALESCE(NEW.world_id, ''), 'character_soul_narratives', NEW.character_id || ':' || COALESCE(NEW.world_id, ''), NULL, 'update', nexus_writer_id());
+  VALUES ('', 'character_soul_narratives', NEW.character_id || ':' || COALESCE(NEW.actor_world_binding_id, ''), NULL, 'update', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_character_soul_narratives_delete
@@ -4208,7 +4208,7 @@ AFTER DELETE ON character_soul_narratives
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES (COALESCE(OLD.world_id, ''), 'character_soul_narratives', OLD.character_id || ':' || COALESCE(OLD.world_id, ''), NULL, 'delete', nexus_writer_id());
+  VALUES ('', 'character_soul_narratives', OLD.character_id || ':' || COALESCE(OLD.actor_world_binding_id, ''), NULL, 'delete', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_characters_insert
@@ -4240,7 +4240,7 @@ AFTER INSERT ON compute_sessions
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES ('', 'compute_sessions', NEW.session_id, NULL, 'insert', nexus_writer_id());
+  VALUES ('', 'compute_sessions', COALESCE(NEW.session_id, NEW.run_id), NULL, 'insert', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_compute_sessions_update
@@ -4248,7 +4248,7 @@ AFTER UPDATE ON compute_sessions
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES ('', 'compute_sessions', NEW.session_id, NULL, 'update', nexus_writer_id());
+  VALUES ('', 'compute_sessions', COALESCE(NEW.session_id, NEW.run_id), NULL, 'update', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_compute_sessions_delete
@@ -4256,7 +4256,7 @@ AFTER DELETE ON compute_sessions
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES ('', 'compute_sessions', OLD.session_id, NULL, 'delete', nexus_writer_id());
+  VALUES ('', 'compute_sessions', COALESCE(OLD.session_id, OLD.run_id), NULL, 'delete', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_core_context_versions_insert
@@ -4264,7 +4264,7 @@ AFTER INSERT ON core_context_versions
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES ('', 'core_context_versions', NEW.version_id, NULL, 'insert', nexus_writer_id());
+  VALUES ('', 'core_context_versions', NEW.schedule_id || ':' || CAST(NEW.version AS TEXT), NULL, 'insert', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_core_context_versions_update
@@ -4272,7 +4272,7 @@ AFTER UPDATE ON core_context_versions
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES ('', 'core_context_versions', NEW.version_id, NULL, 'update', nexus_writer_id());
+  VALUES ('', 'core_context_versions', NEW.schedule_id || ':' || CAST(NEW.version AS TEXT), NULL, 'update', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_core_context_versions_delete
@@ -4280,7 +4280,7 @@ AFTER DELETE ON core_context_versions
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES ('', 'core_context_versions', OLD.version_id, NULL, 'delete', nexus_writer_id());
+  VALUES ('', 'core_context_versions', OLD.schedule_id || ':' || CAST(OLD.version AS TEXT), NULL, 'delete', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_creator_prompt_injections_insert
@@ -4672,7 +4672,7 @@ AFTER INSERT ON moment_directive_chapter_anchors
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES ('', 'moment_directive_chapter_anchors', NEW.directive_id || ':' || NEW.chapter_id, NULL, 'insert', nexus_writer_id());
+  VALUES ('', 'moment_directive_chapter_anchors', NEW.directive_id || ':' || NEW.work_id, NULL, 'insert', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_moment_directive_chapter_anchors_update
@@ -4680,7 +4680,7 @@ AFTER UPDATE ON moment_directive_chapter_anchors
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES ('', 'moment_directive_chapter_anchors', NEW.directive_id || ':' || NEW.chapter_id, NULL, 'update', nexus_writer_id());
+  VALUES ('', 'moment_directive_chapter_anchors', NEW.directive_id || ':' || NEW.work_id, NULL, 'update', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_moment_directive_chapter_anchors_delete
@@ -4688,7 +4688,7 @@ AFTER DELETE ON moment_directive_chapter_anchors
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES ('', 'moment_directive_chapter_anchors', OLD.directive_id || ':' || OLD.chapter_id, NULL, 'delete', nexus_writer_id());
+  VALUES ('', 'moment_directive_chapter_anchors', OLD.directive_id || ':' || OLD.work_id, NULL, 'delete', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_moment_directives_insert
@@ -4912,7 +4912,7 @@ AFTER INSERT ON reading_progress
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES ('', 'reading_progress', NEW.creator_id || ':' || NEW.work_entry_id, NULL, 'insert', nexus_writer_id());
+  VALUES ('', 'reading_progress', NEW.creator_id || ':' || NEW.work_id || ':' || CAST(NEW.chapter AS TEXT), NULL, 'insert', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_reading_progress_update
@@ -4920,7 +4920,7 @@ AFTER UPDATE ON reading_progress
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES ('', 'reading_progress', NEW.creator_id || ':' || NEW.work_entry_id, NULL, 'update', nexus_writer_id());
+  VALUES ('', 'reading_progress', NEW.creator_id || ':' || NEW.work_id || ':' || CAST(NEW.chapter AS TEXT), NULL, 'update', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_reading_progress_delete
@@ -4928,7 +4928,7 @@ AFTER DELETE ON reading_progress
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES ('', 'reading_progress', OLD.creator_id || ':' || OLD.work_entry_id, NULL, 'delete', nexus_writer_id());
+  VALUES ('', 'reading_progress', OLD.creator_id || ':' || OLD.work_id || ':' || CAST(OLD.chapter AS TEXT), NULL, 'delete', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_reference_sources_insert
@@ -4960,7 +4960,7 @@ AFTER INSERT ON schedule_dependencies
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES ('', 'schedule_dependencies', NEW.schedule_id || ':' || NEW.depends_on_schedule_id, NULL, 'insert', nexus_writer_id());
+  VALUES ('', 'schedule_dependencies', NEW.schedule_id || ':' || NEW.depends_on, NULL, 'insert', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_schedule_dependencies_update
@@ -4968,7 +4968,7 @@ AFTER UPDATE ON schedule_dependencies
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES ('', 'schedule_dependencies', NEW.schedule_id || ':' || NEW.depends_on_schedule_id, NULL, 'update', nexus_writer_id());
+  VALUES ('', 'schedule_dependencies', NEW.schedule_id || ':' || NEW.depends_on, NULL, 'update', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_schedule_dependencies_delete
@@ -4976,7 +4976,7 @@ AFTER DELETE ON schedule_dependencies
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES ('', 'schedule_dependencies', OLD.schedule_id || ':' || OLD.depends_on_schedule_id, NULL, 'delete', nexus_writer_id());
+  VALUES ('', 'schedule_dependencies', OLD.schedule_id || ':' || OLD.depends_on, NULL, 'delete', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_soul_meta_insert
@@ -5032,7 +5032,7 @@ AFTER INSERT ON work_chapters
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES ('', 'work_chapters', NEW.work_id || ':' || CAST(NEW.chapter_index AS TEXT), NULL, 'insert', nexus_writer_id());
+  VALUES ('', 'work_chapters', NEW.work_id || ':' || CAST(NEW.volume AS TEXT) || ':' || CAST(NEW.chapter AS TEXT), NULL, 'insert', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_work_chapters_update
@@ -5040,7 +5040,7 @@ AFTER UPDATE ON work_chapters
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES ('', 'work_chapters', NEW.work_id || ':' || CAST(NEW.chapter_index AS TEXT), NULL, 'update', nexus_writer_id());
+  VALUES ('', 'work_chapters', NEW.work_id || ':' || CAST(NEW.volume AS TEXT) || ':' || CAST(NEW.chapter AS TEXT), NULL, 'update', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_work_chapters_delete
@@ -5048,7 +5048,7 @@ AFTER DELETE ON work_chapters
 FOR EACH ROW
 BEGIN
   INSERT INTO core_changes (world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id)
-  VALUES ('', 'work_chapters', OLD.work_id || ':' || CAST(OLD.chapter_index AS TEXT), NULL, 'delete', nexus_writer_id());
+  VALUES ('', 'work_chapters', OLD.work_id || ':' || CAST(OLD.volume AS TEXT) || ':' || CAST(OLD.chapter AS TEXT), NULL, 'delete', nexus_writer_id());
 END;
 
 CREATE TRIGGER IF NOT EXISTS outbox_works_insert

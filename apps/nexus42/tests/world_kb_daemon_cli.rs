@@ -6,8 +6,8 @@
 //!
 //! Each test seeds one owned World + a `KnowledgeEntryRecord` row (revision 0), then
 //! drives the REAL `nexus42` binary. Failure paths: the stale-revision path
-//! (stale `--expected-version` → `world_kb_conflict` rendering `current_version`
-//! + `expected_version` + `entity_id` + recovery hint, exit 76) and the
+//! (stale `--expected-version` → `world_kb_conflict` rendering `current_version` +
+//! `expected_version` + `entity_id` + recovery hint, exit 76) and the
 //! empty-patch fast-fail. `kb graph` reads the entity projection (version +
 //! canonical name) and `--json` emits the DTO verbatim.
 

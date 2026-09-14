@@ -389,10 +389,10 @@ impl ManagedAcpProcess {
 
     /// Non-blocking check whether the owned child has exited.
     pub fn poll_exit(&mut self) -> Option<std::process::ExitStatus> {
-        match self.child.as_mut() {
-            Some(child) => child.try_wait().ok().flatten(),
-            None => Some(std::process::ExitStatus::default()),
-        }
+        self.child.as_mut().map_or_else(
+            || Some(std::process::ExitStatus::default()),
+            |child| child.try_wait().ok().flatten(),
+        )
     }
 
     /// Whether the owned child is still running.
@@ -1281,10 +1281,9 @@ mod tests {
         }
     }
 
-
     #[tokio::test]
     async fn poll_exit_detects_external_sigkill() {
-        let mut child = tokio::process::Command::new("sleep")
+        let child = tokio::process::Command::new("sleep")
             .arg("300")
             .spawn()
             .expect("spawn sleep");

@@ -1,11 +1,11 @@
 //! `core_changes` outbox reads.
 
 use nexus_contracts::{
-    CoreChangesRequest, CoreChangesResponse,
     core_changes_response::{
-        CoreChangesResponseNextSequence, CoreChangesResponseSnapshotSequence,
-        NexusCoreChangeRow, NexusCoreChangeRowSequence,
+        CoreChangesResponseNextSequence, CoreChangesResponseSnapshotSequence, NexusCoreChangeRow,
+        NexusCoreChangeRowSequence,
     },
+    CoreChangesRequest, CoreChangesResponse,
 };
 use sqlx::SqlitePool;
 
@@ -15,7 +15,11 @@ const DEFAULT_LIMIT: i64 = 64;
 const MAX_LIMIT: i64 = 256;
 const RETENTION_MIN_SEQUENCE_GAP: i64 = 4096;
 
-pub(crate) async fn read_changes(
+/// One `core_changes` row as bound by `query_as`: `(sequence, world_id,
+/// resource_kind, resource_id, resource_revision, change_kind, writer_id)`.
+type ChangeRow = (i64, String, String, String, Option<String>, String, String);
+
+pub async fn read_changes(
     pool: &SqlitePool,
     request: CoreChangesRequest,
 ) -> CoreResult<CoreChangesResponse> {
@@ -30,27 +34,29 @@ pub(crate) async fn read_changes(
     .bind(RETENTION_MIN_SEQUENCE_GAP)
     .fetch_optional(pool)
     .await
-    .map_err(db_err)?;
+    .map_err(|e| db_err(&e))?;
 
-    let resync_required = min_retained.map_or(false, |min_seq| after > 0 && after < min_seq - 1);
+    let resync_required = min_retained.is_some_and(|min_seq| after > 0 && after < min_seq - 1);
 
     let snapshot_sequence: i64 =
         sqlx::query_scalar("SELECT COALESCE(MAX(sequence), 0) FROM core_changes")
             .fetch_one(pool)
             .await
-            .map_err(db_err)?;
+            .map_err(|e| db_err(&e))?;
 
-    let rows: Vec<(i64, String, String, String, Option<String>, String, String)> = sqlx::query_as(
+    let rows: Vec<ChangeRow> = sqlx::query_as(
         "SELECT sequence, world_id, resource_kind, resource_id, resource_revision, change_kind, writer_id          FROM core_changes WHERE sequence > ? ORDER BY sequence ASC LIMIT ?",
     )
     .bind(after)
     .bind(limit + 1)
     .fetch_all(pool)
     .await
-    .map_err(db_err)?;
+    .map_err(|e| db_err(&e))?;
 
-    let has_extra = rows.len() as i64 > limit;
-    let page = rows.into_iter().take(limit as usize);
+    // `limit` is clamped to 1..=MAX_LIMIT above, so this conversion cannot fail.
+    let take = usize::try_from(limit).unwrap_or_default();
+    let has_extra = rows.len() > take;
+    let page = rows.into_iter().take(take);
     let mut wire_rows = Vec::new();
     let mut next_sequence = after;
     for (
@@ -126,8 +132,7 @@ fn parse_decimal(raw: &str) -> CoreResult<i64> {
             reason: "must be a non-negative decimal string".to_string(),
         });
     }
-    raw.parse()
-        .map_err(|_| invalid_after_sequence())
+    raw.parse().map_err(|_| invalid_after_sequence())
 }
 
 fn invalid_after_sequence() -> CoreError {
@@ -137,7 +142,7 @@ fn invalid_after_sequence() -> CoreError {
     }
 }
 
-fn db_err(e: sqlx::Error) -> CoreError {
+fn db_err(e: &sqlx::Error) -> CoreError {
     CoreError::Internal {
         category: format!("database_error: {e}"),
     }

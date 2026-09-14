@@ -865,6 +865,17 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
     let prompt_log = tmp.path().join("acp-prompt.jsonl");
     let manager2 = HostManager::new();
     let mut config2 = host_start_config(&workspace_root, Some(owner(&workspace_root)));
+    // The 500ms prompt deadline must be configured on the authoritative
+    // `AgentHostConfig.timeouts`: `HostManager::start` materializes the
+    // discovered provider adapters from the EMBEDDED host config's timeouts,
+    // while the `HostStartConfig.timeouts` copy only feeds the start probe
+    // budget (`initialize_ms`). Configuring the deadline on the start config
+    // alone would leave the provider on the 180s default, and the blocked
+    // prompt would outlive the 3s drain bound below.
+    let prompt_deadline = TimeoutConfig {
+        prompt_ms: 500,
+        ..TimeoutConfig::default()
+    };
     config2.host_config = Some(AgentHostConfig {
         providers: vec![ProviderConfig {
             id: "mock-acp".to_string(),
@@ -880,13 +891,13 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
             ]),
             enabled: true,
         }],
+        timeouts: prompt_deadline.clone(),
         ..AgentHostConfig::default()
     });
-    // The prompt deadline is REAL and configured through the authoritative
-    // `TimeoutConfig` (it flows into the discovered provider). A short deadline
-    // makes a genuine streaming timeout observable, and the drain bound below
-    // is chosen to be discriminating against the 180s unconfigured default.
-    config2.timeouts.prompt_ms = 500;
+    // Keep the derived start-config copy in lockstep with the host config,
+    // mirroring the daemon/core-node constructors so the two timeout sources
+    // never silently diverge.
+    config2.timeouts = prompt_deadline;
     manager2.start(config2).await.expect("host start");
 
     let session = manager2

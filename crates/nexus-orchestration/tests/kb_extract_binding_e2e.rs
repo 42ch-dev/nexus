@@ -11,13 +11,12 @@ use nexus_knowledge::world_kb::store::InMemoryKbStore;
 use nexus_knowledge::world_kb::validation::ValidationMode;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_store::seed;
-use nexus_local_db::{enqueue_extract_job_with_artifact, open_pool, run_migrations};
+use nexus_local_db::{enqueue_extract_job_with_artifact, init_engine_pool};
 
 async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
-    let pool = open_pool(&db_path).await.unwrap();
-    run_migrations(&pool).await.unwrap();
+    let pool = init_engine_pool(&db_path).await.unwrap().clone_pool();
     (pool, dir)
 }
 

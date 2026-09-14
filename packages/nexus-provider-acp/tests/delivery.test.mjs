@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {
   OperationDelivery,
   MAX_EVENT_BYTES,
-  MAX_PENDING_MESSAGES,
   ProviderNextError,
 } from '../dist/index.js';
 

@@ -126,7 +126,7 @@ export class ProviderRegistry {
     op.status = status;
     this.trackTerminal(operationId);
     const session = this.sessions.get(op.sessionId);
-    if (session && session.activeOpId === operationId) {
+    if (session?.activeOpId === operationId) {
       session.activeOpId = null;
       session.state = 'Ready';
     }
@@ -148,7 +148,7 @@ export class ProviderRegistry {
     op.terminalTranscript = transcript;
     op.status = terminalEventStatus(terminal);
     const session = this.sessions.get(op.sessionId);
-    if (session && session.activeOpId === operationId) {
+    if (session?.activeOpId === operationId) {
       session.activeOpId = null;
       session.state = 'Ready';
     }

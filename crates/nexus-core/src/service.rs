@@ -1,5 +1,6 @@
 //! `CoreService` lifecycle and public API surface.
 
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -54,12 +55,29 @@ pub struct CoreService {
 }
 
 impl CoreService {
+    /// Open a [`CoreService`] against the active workspace state DB under
+    /// `options.user_home`.
+    ///
+    /// The active creator and workspace are resolved from the nexus home
+    /// config, then the pool is opened in the requested [`CoreAccess`] mode:
+    /// read-only opens require the DB to exist, `DirectWriter` takes the
+    /// guarded writer pool, and `EngineOwner` joins a live engine's pool or
+    /// initializes one.
+    ///
+    /// # Errors
+    /// Returns [`CoreError::AuthRequired`] when no active creator/workspace is
+    /// configured, [`CoreError::Uninitialized`] when the state DB path cannot
+    /// be resolved (or is missing under read-only access), and the mapped
+    /// pool-initialization error otherwise.
     pub async fn open(options: CoreOpenOptions) -> CoreResult<Self> {
         let nexus_home = nexus_home_layout::nexus_root_from_home(&options.user_home);
         let cfg = CliConfigSnapshot::load(&nexus_home).map_err(|e| CoreError::Internal {
             category: format!("config_load: {e}"),
         })?;
-        let creator_id = cfg.active_creator_id.clone().ok_or(CoreError::AuthRequired)?;
+        let creator_id = cfg
+            .active_creator_id
+            .clone()
+            .ok_or(CoreError::AuthRequired)?;
         let workspace_slug = cfg.workspace_slug_for_creator(&creator_id);
         if workspace_slug.trim().is_empty() {
             return Err(CoreError::AuthRequired);
@@ -84,18 +102,16 @@ impl CoreService {
             }
             CoreAccess::EngineOwner => {
                 let options = GuardedPoolOptions::default();
-                let guarded = match nexus_local_db::writer_protocol::join_live_engine_pool(
-                    &db_path,
-                    options,
-                )
-                .await
-                .map_err(map_db)?
-                {
-                    Some(guarded) => guarded,
-                    None => init_engine_pool(&db_path, &creator_id, options)
+                let guarded =
+                    match nexus_local_db::writer_protocol::join_live_engine_pool(&db_path, options)
                         .await
-                        .map_err(map_db)?,
-                };
+                        .map_err(map_db)?
+                    {
+                        Some(guarded) => guarded,
+                        None => init_engine_pool(&db_path, &creator_id, options)
+                            .await
+                            .map_err(map_db)?,
+                    };
                 let pool = guarded.clone_pool();
                 (pool, Some(guarded))
             }
@@ -150,7 +166,22 @@ impl CoreService {
         Ok(())
     }
 
-    pub async fn active_principal(&self) -> CoreResult<Principal> {
+    /// Snapshot the [`Principal`] for the currently selected creator and
+    /// workspace.
+    ///
+    /// The returned future is immediately ready: the check only reads
+    /// process-local state (closing flag, config files, in-memory fields), so
+    /// there is no await point.
+    ///
+    /// # Errors
+    /// Returns [`CoreError::Closing`] when the service is closing and
+    /// [`CoreError::AuthRequired`] when the on-disk active creator/workspace
+    /// no longer matches the context this service was opened against.
+    pub fn active_principal(&self) -> impl Future<Output = CoreResult<Principal>> {
+        std::future::ready(self.active_principal_snapshot())
+    }
+
+    fn active_principal_snapshot(&self) -> CoreResult<Principal> {
         self.ensure_open()?;
         self.verify_selected_context()?;
         Ok(Principal::new(
@@ -160,6 +191,13 @@ impl CoreService {
         ))
     }
 
+    /// Project the entity graph for a World.
+    ///
+    /// # Errors
+    /// Returns [`CoreError::AuthRequired`] when the principal or the on-disk
+    /// selection fails verification, and the storage error mapped by the
+    /// graph reader otherwise (missing world → [`CoreError::NotFound`],
+    /// foreign world → [`CoreError::Forbidden`]).
     pub async fn world_kb_graph(
         &self,
         principal: &Principal,
@@ -177,6 +215,14 @@ impl CoreService {
         .await
     }
 
+    /// Apply an OCC-guarded entity patch and outbox the change event.
+    ///
+    /// # Errors
+    /// Returns [`CoreError::AuthRequired`] when the principal fails
+    /// verification, [`CoreError::Forbidden`] under read-only access,
+    /// [`CoreError::WorldKbValidation`] for invalid patches, and
+    /// [`CoreError::WorldKbConflict`] carrying the committed revision when
+    /// the expected version is stale.
     pub async fn patch_world_kb_entity(
         &self,
         principal: &Principal,
@@ -189,15 +235,16 @@ impl CoreService {
                 resource: "world_kb_patch: read-only core access".to_string(),
             });
         }
-        patch::patch_entity(
-            &self.inner.pool,
-            principal.creator_id(),
-            &world_id,
-            request,
-        )
-        .await
+        patch::patch_entity(&self.inner.pool, principal.creator_id(), &world_id, request).await
     }
 
+    /// List pending World KB candidates with keyset pagination.
+    ///
+    /// # Errors
+    /// Returns [`CoreError::AuthRequired`] when the principal fails
+    /// verification, [`CoreError::InvalidInput`] when the cursor is
+    /// malformed, and [`CoreError::Forbidden`] when the caller does not own
+    /// the world.
     pub async fn world_kb_candidates(
         &self,
         principal: &Principal,
@@ -216,6 +263,14 @@ impl CoreService {
         .await
     }
 
+    /// Read the `core_changes` outbox page after `request.after_sequence`.
+    ///
+    /// # Errors
+    /// Returns [`CoreError::AuthRequired`] when the principal fails
+    /// verification, [`CoreError::InvalidInput`] when `after_sequence` is
+    /// not a non-negative decimal string, and the mapped database error
+    /// otherwise (`resync_required` is set when the requested tail has been
+    /// retention-trimmed).
     pub async fn changes(
         &self,
         principal: &Principal,
@@ -233,6 +288,12 @@ impl CoreService {
         &self.inner.pool
     }
 
+    /// Close the pool and release writer guards exactly once; repeated calls
+    /// report the already-closed state.
+    ///
+    /// # Errors
+    /// Currently infallible: the report always describes a fully settled
+    /// close (`cleanup_confirmed`), including for repeat callers.
     pub async fn close(&self) -> CoreResult<CoreCloseReport> {
         if self
             .inner
@@ -273,11 +334,11 @@ fn is_sqlite_busy(err: &sqlx::Error) -> bool {
 
 fn map_db(e: nexus_local_db::LocalDbError) -> CoreError {
     match e {
-        nexus_local_db::LocalDbError::OwnerBusy { .. } => CoreError::OwnerBusy,
+        nexus_local_db::LocalDbError::OwnerBusy { .. }
+        | nexus_local_db::LocalDbError::Sqlx(sqlx::Error::PoolTimedOut) => CoreError::OwnerBusy,
         nexus_local_db::LocalDbError::WriterFenced { .. } => CoreError::WriterFenced,
         nexus_local_db::LocalDbError::SchemaMismatch { .. } => CoreError::SchemaMismatch,
         nexus_local_db::LocalDbError::Sqlx(err) if is_sqlite_busy(&err) => CoreError::Busy,
-        nexus_local_db::LocalDbError::Sqlx(sqlx::Error::PoolTimedOut) => CoreError::OwnerBusy,
         other => CoreError::Internal {
             category: format!("database_error: {other}"),
         },

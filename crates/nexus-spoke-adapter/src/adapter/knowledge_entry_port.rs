@@ -32,7 +32,7 @@ use async_trait::async_trait;
 use nexus_knowledge::world_kb::store::{KbStore, KbStoreError};
 use nexus_knowledge::world_kb::KnowledgeEntryRecord;
 use nexus_local_db::kb_store::{
-    cas_update_key_block_fields, CasKeyBlockAuxiliaryFields, SqliteKbStore,
+    cas_update_key_block_fields, CasKeyBlockFieldUpdate, SqliteKbStore,
 };
 use nexus_local_db::LocalDbError;
 use serde_json::{json, Map};
@@ -599,19 +599,19 @@ async fn run_cas_update_in_tx(
             json!({ "entry_id": entry_id }),
         );
     };
-    let auxiliary = CasKeyBlockAuxiliaryFields {
-        status: world_entry.status.clone(),
-        source_anchor_json: source_anchor_json.clone(),
-        extensions_nexus_json: extensions_nexus_json.clone(),
-        modules_json: modules_json.clone(),
-        source_provenance_kind: world_entry.source_provenance_kind.clone(),
+    let fields = CasKeyBlockFieldUpdate {
+        canonical_name: Some(world_entry.canonical_name.as_str()),
+        block_type: Some(block_type_str.as_str()),
+        body_json: body_json.as_deref(),
+        status: Some(world_entry.status.as_str()),
+        source_anchor_json: Some(source_anchor_json.as_deref()),
+        extensions_nexus_json: Some(extensions_nexus_json.as_str()),
+        modules_json: Some(modules_json.as_deref()),
+        source_provenance_kind: world_entry.source_provenance_kind.as_deref(),
     };
     let new_rev = match cas_update_key_block_fields(
         tx,
         entry_id,
-        Some(&world_entry.canonical_name),
-        Some(&block_type_str),
-        body_json.as_deref(),
         expected.cast_signed(),
         // V1.154 P2 (R3 closure): the world bind is the stored-world
         // expected by the request — the candidate's claimed world, which the
@@ -620,7 +620,7 @@ async fn run_cas_update_in_tx(
         // gate check and this CAS, the predicate misses and the storage
         // layer classifies it as WorldConflict.
         world_id,
-        Some(&auxiliary),
+        &fields,
     )
     .await
     {
@@ -669,7 +669,6 @@ fn reject<T>(
     })
 }
 
-
 /// Caller-owned `BEGIN IMMEDIATE` transaction entry point for knowledge-entry
 /// writes. Avoids the `with_tx_cell` lifetime coupling used by daemon promote.
 pub async fn put_knowledge_entry_in_tx(
@@ -689,11 +688,10 @@ async fn entry_exists_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     entry_id: &str,
 ) -> Result<bool, sqlx::Error> {
-    let row: Option<(i64,)> =
-        sqlx::query_as("SELECT 1 FROM kb_key_blocks WHERE key_block_id = ?")
-            .bind(entry_id)
-            .fetch_optional(&mut **tx)
-            .await?;
+    let row: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM kb_key_blocks WHERE key_block_id = ?")
+        .bind(entry_id)
+        .fetch_optional(&mut **tx)
+        .await?;
     Ok(row.is_some())
 }
 
@@ -813,7 +811,6 @@ async fn put_update_in_tx(
     result.revision = Some(new_rev);
     SpokeResult::Ok(result)
 }
-
 
 // ── Tests ─────────────────────────────────────────────────────────────
 

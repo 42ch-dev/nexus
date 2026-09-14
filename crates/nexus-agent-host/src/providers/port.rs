@@ -1,4 +1,4 @@
-//! ProviderPort adapter over existing ProviderAdapter / HostFacade.
+//! `ProviderPort` adapter over existing `ProviderAdapter` / `HostFacade`.
 //!
 //! Owns the host→wire mappings (`HostEvent` promotion, provider/operation wire
 //! vocabulary) and the one-outstanding-pull admission at the port boundary.
@@ -11,10 +11,10 @@ use async_trait::async_trait;
 use dashmap::DashMap;
 use futures_util::StreamExt;
 use nexus_contracts::{
-    CoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderEventBatchGap,
-    ProviderEventBatchGapReason, ProviderHostEvent, ProviderReply,
     generated::core::provider_event_batch::NexusProviderHostEvent,
-    provider_call::ProviderCallMethod, provider_reply::ProviderReplyHealth,
+    provider_call::ProviderCallMethod, provider_reply::ProviderReplyHealth, CoreError,
+    CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderEventBatchGap,
+    ProviderEventBatchGapReason, ProviderHostEvent, ProviderReply,
 };
 use nexus_provider_ports::{ProviderPort, ProviderResult};
 use tokio::sync::Mutex;
@@ -24,19 +24,20 @@ use crate::capability::model::{
     CreateSessionRequest, HostEvent, HostEventStream, HostOperation, LaunchSpec, ProbeRequest,
     ProtocolKind, ProviderHealth,
 };
+use crate::core::manager::HostManager;
 use crate::core::session::SessionState;
 use crate::error::HostError;
 use crate::ids::{HostOperationId, HostSessionId, ProviderId};
-use crate::core::manager::HostManager;
 use crate::{HostFacade, ProviderAdapter};
 
 const MAX_EVENTS_PER_BATCH: u32 = 16;
 const MAX_BYTES_PER_BATCH: u32 = 256 * 1024;
 
-/// Contract §7 — provider data caps per operation. These are rolling
-/// per-operation bounds, not per-batch ones: a caller that keeps pulling must
-/// hit a typed `delivery_overflow` gap rather than grow its buffer without
-/// limit or, worse, have the over-budget item silently disappear.
+/// Contract §7 — provider data caps per operation.
+///
+/// These are rolling per-operation bounds, not per-batch ones: a caller that
+/// keeps pulling must hit a typed `delivery_overflow` gap rather than grow its
+/// buffer without limit or, worse, have the over-budget item silently disappear.
 /// Maximum events the port may hold undelivered for one operation.
 pub const MAX_PENDING_MESSAGES_PER_OP: usize = 64;
 /// Maximum wire bytes the port may hold undelivered for one operation.
@@ -71,12 +72,12 @@ pub fn host_error_to_core_error(err: &HostError) -> CoreError {
     CoreError {
         code,
         message: err.to_string(),
-        details: Default::default(),
+        details: serde_json::Map::default(),
         http_status: Some(http_status),
     }
 }
 
-/// Wire spelling of [`ProtocolKind`] — the contract's snake_case value.
+/// Wire spelling of [`ProtocolKind`] — the contract's `snake_case` value.
 #[must_use]
 pub fn protocol_kind_wire(kind: ProtocolKind) -> String {
     serde_json::to_value(kind)
@@ -154,7 +155,7 @@ impl PullState {
         true
     }
 
-    fn note_emitted(&mut self, bytes: usize) {
+    const fn note_emitted(&mut self, bytes: usize) {
         self.emitted_bytes += bytes;
         self.emitted_messages += 1;
     }
@@ -212,6 +213,16 @@ impl Drop for StreamRestore {
     }
 }
 
+/// Outcome of one bounded-pull stage: a finished batch to return to the
+/// caller, or a signal that the pull may continue with the events
+/// accumulated so far.
+enum PullStage {
+    /// A finished batch — hand it back as-is.
+    Batch(ProviderEventBatch),
+    /// The stage is exhausted; the pull may continue.
+    Continue,
+}
+
 /// Pull-based provider port backed by the existing host facade and adapters.
 pub struct ProviderPortAdapter {
     host: Arc<dyn HostFacade>,
@@ -240,7 +251,11 @@ impl ProviderPortAdapter {
         }
     }
 
-    pub fn register_provider(&mut self, provider_id: ProviderId, adapter: Arc<dyn ProviderAdapter>) {
+    pub fn register_provider(
+        &mut self,
+        provider_id: ProviderId,
+        adapter: Arc<dyn ProviderAdapter>,
+    ) {
         self.providers.insert(provider_id, adapter);
     }
 
@@ -256,15 +271,15 @@ impl ProviderPortAdapter {
         );
     }
 
-    fn map_host_error(err: HostError) -> CoreError {
-        host_error_to_core_error(&err)
+    fn map_host_error(err: &HostError) -> CoreError {
+        host_error_to_core_error(err)
     }
 
     fn invalid_input(message: impl Into<String>) -> CoreError {
         CoreError {
             code: CoreErrorCode::InvalidInput,
             message: message.into(),
-            details: Default::default(),
+            details: serde_json::Map::default(),
             http_status: Some(400),
         }
     }
@@ -273,7 +288,7 @@ impl ProviderPortAdapter {
         CoreError {
             code: CoreErrorCode::Internal,
             message: message.into(),
-            details: Default::default(),
+            details: serde_json::Map::default(),
             http_status: Some(500),
         }
     }
@@ -325,64 +340,126 @@ impl ProviderPortAdapter {
         cap_bytes: u32,
     ) -> ProviderResult<ProviderEventBatch> {
         let mut events: Vec<NexusProviderHostEvent> = Vec::new();
-        let mut used_bytes = 0u32;
+        let mut used_bytes = 0usize;
 
         // (1) Deliver what a previous pull had to defer, oldest first.
+        if let PullStage::Batch(batch) = Self::drain_pending(
+            entry,
+            operation_id,
+            &mut events,
+            &mut used_bytes,
+            cap_events,
+            cap_bytes,
+        )
+        .await
         {
-            let mut state = entry.pull_state.lock().await;
-            if state.overflowed {
-                return Ok(ProviderEventBatch {
-                    operation_id: operation_id.to_string(),
-                    events,
-                    has_more: !state.terminal_delivered,
-                    gap: Some(Self::oversized_gap(operation_id)),
-                });
-            }
-            while (events.len() as u32) < cap_events {
-                let Some(front) = state.pending.front() else {
-                    break;
-                };
-                if used_bytes + front.bytes as u32 > cap_bytes {
-                    break;
-                }
-                let item = state.pending.pop_front().expect("pending front");
-                state.pending_bytes -= item.bytes;
-                used_bytes += item.bytes as u32;
-                state.note_emitted(item.bytes);
-                if item.terminal {
-                    state.terminal_delivered = true;
-                }
-                events.push(item.wire);
-                if item.terminal {
-                    break;
-                }
-            }
-            if state.terminal_delivered {
-                entry.terminal_seen.store(true, Ordering::Release);
-                return Ok(ProviderEventBatch {
-                    operation_id: operation_id.to_string(),
-                    events,
-                    has_more: false,
-                    gap: None,
-                });
-            }
-            if state.terminal_pending {
-                // The terminal the stream already produced is still queued: do
-                // not read past it, and do not report completion yet.
-                return Ok(ProviderEventBatch {
-                    operation_id: operation_id.to_string(),
-                    events,
-                    has_more: true,
-                    gap: None,
-                });
-            }
+            return Ok(batch);
         }
 
         // (2) Read further items, deferring rather than dropping what does not fit.
-        while (events.len() as u32) < cap_events && used_bytes < cap_bytes {
+        if let PullStage::Batch(batch) = Self::pull_stream_events(
+            entry,
+            operation_id,
+            stream,
+            &mut events,
+            &mut used_bytes,
+            cap_events,
+            cap_bytes,
+        )
+        .await?
+        {
+            return Ok(batch);
+        }
+
+        let has_more = !entry.terminal_seen.load(Ordering::Acquire);
+        Ok(ProviderEventBatch {
+            operation_id: operation_id.to_string(),
+            events,
+            has_more,
+            gap: None,
+        })
+    }
+
+    /// Deliver deferred items from the per-operation pending window, oldest
+    /// first. An already-overflowed window keeps reporting the typed gap, a
+    /// delivered terminal completes the operation, and a queued terminal stops
+    /// the pull before the stream is read.
+    async fn drain_pending(
+        entry: &OperationEntry,
+        operation_id: &str,
+        events: &mut Vec<NexusProviderHostEvent>,
+        used_bytes: &mut usize,
+        cap_events: u32,
+        cap_bytes: u32,
+    ) -> PullStage {
+        let mut state = entry.pull_state.lock().await;
+        if state.overflowed {
+            return PullStage::Batch(ProviderEventBatch {
+                operation_id: operation_id.to_string(),
+                events: std::mem::take(events),
+                has_more: !state.terminal_delivered,
+                gap: Some(Self::oversized_gap(operation_id)),
+            });
+        }
+        while events.len() < cap_events as usize {
+            let Some(front) = state.pending.front() else {
+                break;
+            };
+            if *used_bytes + front.bytes > cap_bytes as usize {
+                break;
+            }
+            let item = state.pending.pop_front().expect("pending front");
+            state.pending_bytes -= item.bytes;
+            *used_bytes += item.bytes;
+            state.note_emitted(item.bytes);
+            if item.terminal {
+                state.terminal_delivered = true;
+            }
+            events.push(item.wire);
+            if item.terminal {
+                break;
+            }
+        }
+        if state.terminal_delivered {
+            entry.terminal_seen.store(true, Ordering::Release);
+            return PullStage::Batch(ProviderEventBatch {
+                operation_id: operation_id.to_string(),
+                events: std::mem::take(events),
+                has_more: false,
+                gap: None,
+            });
+        }
+        if state.terminal_pending {
+            // The terminal the stream already produced is still queued: do
+            // not read past it, and do not report completion yet.
+            return PullStage::Batch(ProviderEventBatch {
+                operation_id: operation_id.to_string(),
+                events: std::mem::take(events),
+                has_more: true,
+                gap: None,
+            });
+        }
+        drop(state);
+        PullStage::Continue
+    }
+
+    /// Read further items straight off the owned stream, deferring rather than
+    /// dropping anything that does not fit the remaining batch budget. Stream
+    /// end reports completion only once every deferred item — above all the
+    /// terminal — has been delivered.
+    async fn pull_stream_events(
+        entry: &OperationEntry,
+        operation_id: &str,
+        stream: &mut HostEventStream,
+        events: &mut Vec<NexusProviderHostEvent>,
+        used_bytes: &mut usize,
+        cap_events: u32,
+        cap_bytes: u32,
+    ) -> ProviderResult<PullStage> {
+        while events.len() < cap_events as usize && *used_bytes < cap_bytes as usize {
             match stream.next().await {
                 Some(Ok(event)) => {
-                    let wire = wire_to_batch_event(host_event_to_wire(&event)?)?;
+                    let wire = wire_to_batch_event(&host_event_to_wire(&event)?)?;
                     let size = serde_json::to_vec(&wire).map_or(0, |bytes| bytes.len());
                     let terminal = is_terminal(&event);
 
@@ -390,17 +467,17 @@ impl ProviderPortAdapter {
                     // fit an *empty* batch under the caller's byte cap — can
                     // never be delivered, so deferring it would spin forever.
                     // That is a typed gap, never a partial or silent drop.
-                    if size > MAX_EVENT_BYTES || size as u32 > cap_bytes {
+                    if size > MAX_EVENT_BYTES || size > cap_bytes as usize {
                         entry.pull_state.lock().await.overflowed = true;
-                        return Ok(ProviderEventBatch {
+                        return Ok(PullStage::Batch(ProviderEventBatch {
                             operation_id: operation_id.to_string(),
-                            events,
+                            events: std::mem::take(events),
                             has_more: true,
                             gap: Some(Self::oversized_gap(operation_id)),
-                        });
+                        }));
                     }
 
-                    if used_bytes + size as u32 <= cap_bytes {
+                    if *used_bytes + size <= cap_bytes as usize {
                         {
                             let mut state = entry.pull_state.lock().await;
                             state.note_emitted(size);
@@ -408,7 +485,7 @@ impl ProviderPortAdapter {
                                 state.terminal_delivered = true;
                             }
                         }
-                        used_bytes += size as u32;
+                        *used_bytes += size;
                         events.push(wire);
                         if terminal {
                             entry.terminal_seen.store(true, Ordering::Release);
@@ -421,81 +498,245 @@ impl ProviderPortAdapter {
                     let deferred = entry.pull_state.lock().await.defer(wire, size, terminal);
                     if !deferred {
                         entry.pull_state.lock().await.overflowed = true;
-                        return Ok(ProviderEventBatch {
+                        return Ok(PullStage::Batch(ProviderEventBatch {
                             operation_id: operation_id.to_string(),
-                            events,
+                            events: std::mem::take(events),
                             has_more: true,
                             gap: Some(Self::oversized_gap(operation_id)),
-                        });
+                        }));
                     }
                     break;
                 }
-                Some(Err(err)) => return Err(Self::map_host_error(err)),
+                Some(Err(err)) => return Err(Self::map_host_error(&err)),
                 None => {
                     // Stream ended. Completion may only be reported once every
                     // deferred item — a terminal above all — has been delivered.
                     let mut state = entry.pull_state.lock().await;
                     if !state.pending.is_empty() {
-                        return Ok(ProviderEventBatch {
+                        return Ok(PullStage::Batch(ProviderEventBatch {
                             operation_id: operation_id.to_string(),
-                            events,
+                            events: std::mem::take(events),
                             has_more: true,
                             gap: None,
-                        });
+                        }));
                     }
                     state.terminal_delivered = true;
+                    drop(state);
                     entry.terminal_seen.store(true, Ordering::Release);
-                    return Ok(ProviderEventBatch {
+                    return Ok(PullStage::Batch(ProviderEventBatch {
                         operation_id: operation_id.to_string(),
-                        events,
+                        events: std::mem::take(events),
                         has_more: false,
                         gap: None,
-                    });
+                    }));
                 }
             }
         }
+        Ok(PullStage::Continue)
+    }
 
-        let has_more = !entry.terminal_seen.load(Ordering::Acquire);
-        Ok(ProviderEventBatch {
-            operation_id: operation_id.to_string(),
-            events,
-            has_more,
-            gap: None,
+    /// `ProviderPort::call` probe arm: run the bounded probe and publish the
+    /// result into the manager catalog.
+    async fn call_probe(
+        &self,
+        request: ProviderCall,
+        payload_value: serde_json::Value,
+    ) -> ProviderResult<ProviderReply> {
+        let provider_id = ProviderId::new(
+            payload_value
+                .get("provider_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| Self::invalid_input("probe requires provider_id"))?,
+        );
+        let adapter = self.providers.get(&provider_id).ok_or_else(|| CoreError {
+            code: CoreErrorCode::NotFound,
+            message: format!("provider {provider_id} not registered"),
+            details: serde_json::Map::default(),
+            http_status: Some(404),
+        })?;
+        let probe: ProbeRequest = serde_json::from_value(payload_value)
+            .map_err(|e| Self::invalid_input(format!("probe payload: {e}")))?;
+        let started = std::time::Instant::now();
+        let health = adapter
+            .probe(probe)
+            .await
+            .map_err(|err| Self::map_host_error(&err))?;
+        let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        if let Some(manager) = &self.manager {
+            manager
+                .record_provider_probe(&provider_id, health.clone(), latency_ms)
+                .await;
+        }
+        Ok(ProviderReply {
+            request_id: request.request_id,
+            ok: true,
+            operation_id: None,
+            session_id: None,
+            health: Some(Self::health_to_wire(health)),
+            error: None,
+        })
+    }
+
+    /// `ProviderPort::call` launch arm: admit the session through the host
+    /// facade so manager-side policy, boundary checks, and discovery apply.
+    async fn call_launch(
+        &self,
+        request: ProviderCall,
+        payload_value: serde_json::Value,
+    ) -> ProviderResult<ProviderReply> {
+        let provider_id = ProviderId::new(
+            payload_value
+                .get("provider_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| Self::invalid_input("launch requires provider_id"))?,
+        );
+        let _adapter = self.providers.get(&provider_id).ok_or_else(|| CoreError {
+            code: CoreErrorCode::NotFound,
+            message: format!("provider {provider_id} not registered"),
+            details: serde_json::Map::default(),
+            http_status: Some(404),
+        })?;
+        let spec: LaunchSpec = serde_json::from_value(payload_value)
+            .map_err(|e| Self::invalid_input(format!("launch payload: {e}")))?;
+        let session = self
+            .host
+            .create_session(CreateSessionRequest {
+                provider_id,
+                cwd: spec.cwd,
+                model: spec.model,
+                mode: spec.mode,
+                mcp_servers: spec.mcp_servers,
+                metadata: serde_json::Value::Object(serde_json::Map::default()),
+                owner: spec.owner,
+            })
+            .await
+            .map_err(|err| Self::map_host_error(&err))?;
+        Ok(ProviderReply {
+            request_id: request.request_id,
+            ok: true,
+            operation_id: None,
+            session_id: Some(session.id.to_string()),
+            health: None,
+            error: None,
+        })
+    }
+
+    /// `ProviderPort::call` execute arm: run one operation and register its
+    /// stream for bounded pulling.
+    async fn call_execute(
+        &self,
+        request: ProviderCall,
+        payload_value: serde_json::Value,
+    ) -> ProviderResult<ProviderReply> {
+        let session_raw = request
+            .session_id
+            .as_deref()
+            .ok_or_else(|| Self::invalid_input("execute requires session_id"))?;
+        let session_id = Self::parse_session_id(session_raw)?;
+        let op: HostOperation = serde_json::from_value(payload_value)
+            .map_err(|e| Self::invalid_input(format!("execute payload: {e}")))?;
+        let op_id = match &op {
+            HostOperation::Prompt { op_id, .. } => op_id.clone(),
+            _ => HostOperationId::new(),
+        };
+        let stream = self
+            .host
+            .exec(session_id.clone(), op)
+            .await
+            .map_err(|err| Self::map_host_error(&err))?;
+        self.insert_operation(op_id.to_string(), stream);
+        Ok(ProviderReply {
+            request_id: request.request_id,
+            ok: true,
+            operation_id: Some(op_id.to_string()),
+            session_id: Some(session_id.to_string()),
+            health: None,
+            error: None,
+        })
+    }
+
+    /// `ProviderPort::call` cancel arm: forward the cancellation to the host.
+    async fn call_cancel(&self, request: ProviderCall) -> ProviderResult<ProviderReply> {
+        let op_raw = request
+            .operation_id
+            .as_deref()
+            .ok_or_else(|| Self::invalid_input("cancel requires operation_id"))?;
+        let op_id = Self::parse_operation_id(op_raw)?;
+        let op_id_str = op_id.to_string();
+        self.host
+            .cancel(op_id)
+            .await
+            .map_err(|err| Self::map_host_error(&err))?;
+        Ok(ProviderReply {
+            request_id: request.request_id,
+            ok: true,
+            operation_id: Some(op_id_str),
+            session_id: request.session_id.clone(),
+            health: None,
+            error: None,
+        })
+    }
+
+    /// `ProviderPort::call` shutdown arm: tear the session down through the host.
+    async fn call_shutdown(&self, request: ProviderCall) -> ProviderResult<ProviderReply> {
+        let session_raw = request
+            .session_id
+            .as_deref()
+            .ok_or_else(|| Self::invalid_input("shutdown requires session_id"))?;
+        let session_id = Self::parse_session_id(session_raw)?;
+        self.host
+            .shutdown_session(session_id.clone())
+            .await
+            .map_err(|err| Self::map_host_error(&err))?;
+        Ok(ProviderReply {
+            request_id: request.request_id,
+            ok: true,
+            operation_id: None,
+            session_id: Some(session_id.to_string()),
+            health: None,
+            error: None,
         })
     }
 }
 
-fn wire_to_batch_event(event: ProviderHostEvent) -> ProviderResult<NexusProviderHostEvent> {
-    let value = serde_json::to_value(&event).map_err(|e| CoreError {
+fn wire_to_batch_event(event: &ProviderHostEvent) -> ProviderResult<NexusProviderHostEvent> {
+    let value = serde_json::to_value(event).map_err(|e| CoreError {
         code: CoreErrorCode::Internal,
         message: format!("host_event_batch_serialize: {e}"),
-        details: Default::default(),
+        details: serde_json::Map::default(),
         http_status: Some(500),
     })?;
     serde_json::from_value(value).map_err(|e| CoreError {
         code: CoreErrorCode::SchemaMismatch,
         message: format!("host_event_batch_wire: {e}"),
-        details: Default::default(),
+        details: serde_json::Map::default(),
         http_status: Some(409),
     })
 }
 
+/// Convert a host event into the wire vocabulary via a serde round-trip.
+///
+/// # Errors
+///
+/// Returns an internal [`CoreError`] when the host event cannot be
+/// serialized, and a schema-mismatch [`CoreError`] (409) when the serialized
+/// value does not round-trip into [`ProviderHostEvent`].
 pub fn host_event_to_wire(event: &HostEvent) -> ProviderResult<ProviderHostEvent> {
     let value = serde_json::to_value(event).map_err(|e| CoreError {
         code: CoreErrorCode::Internal,
         message: format!("host_event_serialize: {e}"),
-        details: Default::default(),
+        details: serde_json::Map::default(),
         http_status: Some(500),
     })?;
     serde_json::from_value(value).map_err(|e| CoreError {
         code: CoreErrorCode::SchemaMismatch,
         message: format!("host_event_wire: {e}"),
-        details: Default::default(),
+        details: serde_json::Map::default(),
         http_status: Some(409),
     })
 }
 
-fn is_terminal(event: &HostEvent) -> bool {
+const fn is_terminal(event: &HostEvent) -> bool {
     matches!(
         event,
         HostEvent::OpFinished(_) | HostEvent::OpFailed(_) | HostEvent::SessionStopped(_)
@@ -507,138 +748,11 @@ impl ProviderPort for ProviderPortAdapter {
     async fn call(&self, request: ProviderCall) -> ProviderResult<ProviderReply> {
         let payload_value = serde_json::Value::Object(request.payload.clone());
         match request.method {
-            ProviderCallMethod::Probe => {
-                let provider_id = ProviderId::new(
-                    payload_value
-                        .get("provider_id")
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| Self::invalid_input("probe requires provider_id"))?,
-                );
-                let adapter = self.providers.get(&provider_id).ok_or_else(|| CoreError {
-                    code: CoreErrorCode::NotFound,
-                    message: format!("provider {provider_id} not registered"),
-                    details: Default::default(),
-                    http_status: Some(404),
-                })?;
-                let probe: ProbeRequest = serde_json::from_value(payload_value)
-                    .map_err(|e| Self::invalid_input(format!("probe payload: {e}")))?;
-                let started = std::time::Instant::now();
-                let health = adapter.probe(probe).await.map_err(Self::map_host_error)?;
-                let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-                if let Some(manager) = &self.manager {
-                    manager
-                        .record_provider_probe(&provider_id, health.clone(), latency_ms)
-                        .await;
-                }
-                Ok(ProviderReply {
-                    request_id: request.request_id,
-                    ok: true,
-                    operation_id: None,
-                    session_id: None,
-                    health: Some(Self::health_to_wire(health)),
-                    error: None,
-                })
-            }
-            ProviderCallMethod::Launch => {
-                let provider_id = ProviderId::new(
-                    payload_value
-                        .get("provider_id")
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| Self::invalid_input("launch requires provider_id"))?,
-                );
-                let _adapter = self.providers.get(&provider_id).ok_or_else(|| CoreError {
-                    code: CoreErrorCode::NotFound,
-                    message: format!("provider {provider_id} not registered"),
-                    details: Default::default(),
-                    http_status: Some(404),
-                })?;
-                let spec: LaunchSpec = serde_json::from_value(payload_value)
-                    .map_err(|e| Self::invalid_input(format!("launch payload: {e}")))?;
-                let session = self
-                    .host
-                    .create_session(CreateSessionRequest {
-                        provider_id,
-                        cwd: spec.cwd,
-                        model: spec.model,
-                        mode: spec.mode,
-                        mcp_servers: spec.mcp_servers,
-                        metadata: serde_json::Value::Object(Default::default()),
-                        owner: spec.owner,
-                    })
-                    .await
-                    .map_err(Self::map_host_error)?;
-                Ok(ProviderReply {
-                    request_id: request.request_id,
-                    ok: true,
-                    operation_id: None,
-                    session_id: Some(session.id.to_string()),
-                    health: None,
-                    error: None,
-                })
-            }
-            ProviderCallMethod::Execute => {
-                let session_raw = request
-                    .session_id
-                    .as_deref()
-                    .ok_or_else(|| Self::invalid_input("execute requires session_id"))?;
-                let session_id = Self::parse_session_id(session_raw)?;
-                let op: HostOperation = serde_json::from_value(payload_value)
-                    .map_err(|e| Self::invalid_input(format!("execute payload: {e}")))?;
-                let op_id = match &op {
-                    HostOperation::Prompt { op_id, .. } => op_id.clone(),
-                    _ => HostOperationId::new(),
-                };
-                let stream = self
-                    .host
-                    .exec(session_id.clone(), op)
-                    .await
-                    .map_err(Self::map_host_error)?;
-                self.insert_operation(op_id.to_string(), stream);
-                Ok(ProviderReply {
-                    request_id: request.request_id,
-                    ok: true,
-                    operation_id: Some(op_id.to_string()),
-                    session_id: Some(session_id.to_string()),
-                    health: None,
-                    error: None,
-                })
-            }
-            ProviderCallMethod::Cancel => {
-                let op_raw = request
-                    .operation_id
-                    .as_deref()
-                    .ok_or_else(|| Self::invalid_input("cancel requires operation_id"))?;
-                let op_id = Self::parse_operation_id(op_raw)?;
-                let op_id_str = op_id.to_string();
-                self.host.cancel(op_id).await.map_err(Self::map_host_error)?;
-                Ok(ProviderReply {
-                    request_id: request.request_id,
-                    ok: true,
-                    operation_id: Some(op_id_str),
-                    session_id: request.session_id.clone(),
-                    health: None,
-                    error: None,
-                })
-            }
-            ProviderCallMethod::Shutdown => {
-                let session_raw = request
-                    .session_id
-                    .as_deref()
-                    .ok_or_else(|| Self::invalid_input("shutdown requires session_id"))?;
-                let session_id = Self::parse_session_id(session_raw)?;
-                self.host
-                    .shutdown_session(session_id.clone())
-                    .await
-                    .map_err(Self::map_host_error)?;
-                Ok(ProviderReply {
-                    request_id: request.request_id,
-                    ok: true,
-                    operation_id: None,
-                    session_id: Some(session_id.to_string()),
-                    health: None,
-                    error: None,
-                })
-            }
+            ProviderCallMethod::Probe => self.call_probe(request, payload_value).await,
+            ProviderCallMethod::Launch => self.call_launch(request, payload_value).await,
+            ProviderCallMethod::Execute => self.call_execute(request, payload_value).await,
+            ProviderCallMethod::Cancel => self.call_cancel(request).await,
+            ProviderCallMethod::Shutdown => self.call_shutdown(request).await,
         }
     }
 
@@ -659,7 +773,7 @@ impl ProviderPort for ProviderPortAdapter {
             .ok_or_else(|| CoreError {
                 code: CoreErrorCode::NotFound,
                 message: format!("operation {operation_id} not found"),
-                details: Default::default(),
+                details: serde_json::Map::default(),
                 http_status: Some(404),
             })?;
 
@@ -681,7 +795,7 @@ impl ProviderPort for ProviderPortAdapter {
             return Err(CoreError {
                 code: CoreErrorCode::Busy,
                 message: format!("pull already in flight for operation {operation_id}"),
-                details: Default::default(),
+                details: serde_json::Map::default(),
                 http_status: Some(503),
             });
         }
@@ -756,7 +870,9 @@ mod tests {
         }
 
         async fn provider_catalog(&self) -> crate::HostResult<ProviderCatalog> {
-            Ok(ProviderCatalog { entries: Vec::new() })
+            Ok(ProviderCatalog {
+                entries: Vec::new(),
+            })
         }
 
         fn subscribe_events(
@@ -772,12 +888,12 @@ mod tests {
         ProviderPortAdapter::new(Arc::new(NullHost))
     }
 
-    fn terminal_event() -> HostResult<HostEvent> {
-        Ok(HostEvent::OpFinished(OperationFinishedEvent {
+    fn terminal_event() -> HostEvent {
+        HostEvent::OpFinished(OperationFinishedEvent {
             session_id: HostSessionId::new(),
             op_id: HostOperationId::new(),
             reason: FinishReason::EndTurn,
-        }))
+        })
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -790,7 +906,9 @@ mod tests {
 
         let mut first = Box::pin(port.next("op-1".to_string(), 16, 4096));
         assert!(
-            futures_util::future::poll_immediate(&mut first).await.is_none(),
+            futures_util::future::poll_immediate(&mut first)
+                .await
+                .is_none(),
             "first pull must park on the pending host stream"
         );
 
@@ -802,7 +920,7 @@ mod tests {
         drop(first);
         port.insert_operation(
             "op-2".to_string(),
-            Box::pin(futures_util::stream::iter(vec![terminal_event()])),
+            Box::pin(futures_util::stream::iter(vec![Ok(terminal_event())])),
         );
         let batch = port
             .next("op-2".to_string(), 16, 4096)
@@ -837,7 +955,10 @@ mod tests {
             .next("op-big".to_string(), 16, 64)
             .await
             .expect("oversized pull returns a gap batch");
-        assert!(batch.events.is_empty(), "oversized event must not be pushed");
+        assert!(
+            batch.events.is_empty(),
+            "oversized event must not be pushed"
+        );
         assert!(batch.has_more);
         let gap = batch.gap.expect("gap present");
         assert_eq!(gap.reason, ProviderEventBatchGapReason::Oversized);
@@ -849,6 +970,16 @@ mod tests {
             level: crate::capability::model::StatusLevel::Info,
             message: text.to_string(),
         })
+    }
+
+    /// Serialized wire size of one host event, as the port counts batch bytes.
+    fn wire_size(event: &HostEvent) -> u32 {
+        u32::try_from(
+            serde_json::to_vec(&wire_to_batch_event(&host_event_to_wire(event).unwrap()).unwrap())
+                .unwrap()
+                .len(),
+        )
+        .expect("serialized wire event fits u32")
     }
 
     /// Q1-C1: an event that does not fit the *remaining* batch budget must be
@@ -865,12 +996,7 @@ mod tests {
         );
 
         // A cap that fits exactly one event of this size.
-        let cap = serde_json::to_vec(&wire_to_batch_event(
-            host_event_to_wire(&status_event("second-event-that-does-not-fit")).unwrap(),
-        )
-        .unwrap())
-        .unwrap()
-        .len() as u32;
+        let cap = wire_size(&status_event("second-event-that-does-not-fit"));
 
         let batch = port
             .next("op-defer".to_string(), 16, cap)
@@ -898,19 +1024,20 @@ mod tests {
         let filler = status_event("filler");
         port.insert_operation(
             "op-term".to_string(),
-            Box::pin(futures_util::stream::iter(vec![Ok(filler), terminal_event()])),
+            Box::pin(futures_util::stream::iter(vec![
+                Ok(filler),
+                Ok(terminal_event()),
+            ])),
         );
 
         // A cap that fits each item on its own but not both together: the
         // filler is delivered and the terminal must be deferred, not dropped.
-        let wire_size = |event: &HostEvent| {
-            serde_json::to_vec(&wire_to_batch_event(host_event_to_wire(event).unwrap()).unwrap())
-                .unwrap()
-                .len() as u32
-        };
-        let cap = wire_size(&status_event("filler")) + wire_size(&terminal_event().unwrap()) - 1;
+        let cap = wire_size(&status_event("filler")) + wire_size(&terminal_event()) - 1;
 
-        let first = port.next("op-term".to_string(), 16, cap).await.expect("pull 1");
+        let first = port
+            .next("op-term".to_string(), 16, cap)
+            .await
+            .expect("pull 1");
         assert!(
             first.has_more,
             "completion must not be reported while the terminal is still queued"
@@ -928,7 +1055,10 @@ mod tests {
             .next("op-term".to_string(), 16, cap)
             .await
             .expect("pull 3");
-        assert!(third.events.is_empty(), "terminal must not replay: {third:?}");
+        assert!(
+            third.events.is_empty(),
+            "terminal must not replay: {third:?}"
+        );
         assert!(!third.has_more);
     }
 
@@ -948,7 +1078,9 @@ mod tests {
             .next("op-mixed".to_string(), 16, MAX_BYTES_PER_BATCH)
             .await
             .expect("pull");
-        let gap = batch.gap.expect("oversized non-first event must report a gap");
+        let gap = batch
+            .gap
+            .expect("oversized non-first event must report a gap");
         assert_eq!(gap.reason, ProviderEventBatchGapReason::Oversized);
         assert!(gap.resync_required);
         // The over-budget event is never delivered partially.
@@ -965,7 +1097,7 @@ mod tests {
     #[tokio::test]
     async fn pending_window_is_bounded_and_trips_a_typed_gap() {
         let mut state = PullState::default();
-        let wire = wire_to_batch_event(host_event_to_wire(&status_event("p")).unwrap()).unwrap();
+        let wire = wire_to_batch_event(&host_event_to_wire(&status_event("p")).unwrap()).unwrap();
         let bytes = serde_json::to_vec(&wire).unwrap().len();
 
         for _ in 0..MAX_PENDING_MESSAGES_PER_OP {
@@ -983,7 +1115,7 @@ mod tests {
         assert!(byte_state.defer(wire.clone(), chunk, false));
         assert!(byte_state.defer(wire.clone(), chunk, false));
         assert!(
-            !byte_state.defer(wire.clone(), chunk + 1, false),
+            !byte_state.defer(wire, chunk + 1, false),
             "the byte cap must trip"
         );
     }
@@ -994,14 +1126,20 @@ mod tests {
     #[tokio::test]
     async fn per_operation_emitted_budget_trips_typed_gap() {
         let mut state = PullState::default();
-        let wire = wire_to_batch_event(host_event_to_wire(&status_event("e")).unwrap()).unwrap();
+        let wire = wire_to_batch_event(&host_event_to_wire(&status_event("e")).unwrap()).unwrap();
         let mut deferred = 0usize;
         // Fill the emitted + pending budget; the first refusal is the trip point.
         while state.defer(wire.clone(), 64 * 1024, false) {
             deferred += 1;
-            assert!(deferred <= MAX_PENDING_MESSAGES_PER_OP, "bounded by the window");
+            assert!(
+                deferred <= MAX_PENDING_MESSAGES_PER_OP,
+                "bounded by the window"
+            );
         }
-        assert!(deferred > 0, "the budget must accept something before tripping");
+        assert!(
+            deferred > 0,
+            "the budget must accept something before tripping"
+        );
         assert!(
             state.emitted_bytes + state.pending_bytes <= MAX_EMITTED_BYTES_PER_OP,
             "the accumulator must never exceed the per-operation budget"
@@ -1055,7 +1193,7 @@ mod tests {
             ),
             (
                 HostError::CapabilityUnsupported {
-                    provider_id: provider.clone(),
+                    provider_id: provider,
                     capability: "prompt".into(),
                     message: "unsupported".into(),
                 },
@@ -1067,7 +1205,11 @@ mod tests {
         for (err, code, http_status) in cases {
             let mapped = host_error_to_core_error(&err);
             assert_eq!(mapped.code, code, "wrong category for {err:?}");
-            assert_eq!(mapped.http_status, Some(http_status), "wrong status for {err:?}");
+            assert_eq!(
+                mapped.http_status,
+                Some(http_status),
+                "wrong status for {err:?}"
+            );
         }
 
         // The admission boundary maps through the same function, so the two can
@@ -1112,7 +1254,10 @@ mod tests {
             operation_status_wire(&SessionState::Cancelling(op.clone()), &op),
             "cancelling"
         );
-        assert_eq!(operation_status_wire(&SessionState::Ready, &op), "completed");
+        assert_eq!(
+            operation_status_wire(&SessionState::Ready, &op),
+            "completed"
+        );
         assert_eq!(
             operation_status_wire(&SessionState::Stopped, &op),
             "completed"

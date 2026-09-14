@@ -195,6 +195,12 @@ pub async fn run_entity_patch(
 }
 
 /// Run `creator world kb graph`.
+///
+/// # Errors
+/// Returns [`CliError`] when the direct-writer core cannot be opened, the
+/// active creator/workspace is missing or stale
+/// ([`CliError::CreatorNotSelected`]), the graph query fails, or closing the
+/// core pool fails.
 pub async fn run_graph(
     config: &CliConfig,
     world_id: String,

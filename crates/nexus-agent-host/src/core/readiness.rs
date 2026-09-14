@@ -160,11 +160,19 @@ pub fn discover_provider_catalog(
 ///
 /// Adapter construction failures are NOT errors: that provider is admitted as an
 /// unavailable candidate so the catalog can still explain why it is not ready.
+///
+/// # Errors
+///
+/// Infallible in practice: every per-provider adapter construction failure is
+/// downgraded to an unavailable catalog entry (warned, never propagated), so
+/// the catalog can always explain why a candidate is not ready. The
+/// [`HostResult`] signature is shared with [`discover_provider_entries`] to
+/// keep the two discovery paths interchangeable.
 pub fn build_provider_entries_from_catalog(
     catalog: &[ProviderCatalogEntry],
     timeouts: &TimeoutConfig,
     permission_resolver: &HostPermissionResolver,
-    localset_bridge: nexus_acp_host::LocalSetBridge,
+    localset_bridge: &nexus_acp_host::LocalSetBridge,
 ) -> HostResult<std::collections::HashMap<ProviderId, ProviderEntry>> {
     let mut providers = std::collections::HashMap::new();
     for metadata in catalog {
@@ -208,15 +216,10 @@ pub fn discover_provider_entries(
     host_config: &crate::config::AgentHostConfig,
     timeouts: &TimeoutConfig,
     permission_resolver: &HostPermissionResolver,
-    localset_bridge: nexus_acp_host::LocalSetBridge,
+    localset_bridge: &nexus_acp_host::LocalSetBridge,
 ) -> HostResult<std::collections::HashMap<ProviderId, ProviderEntry>> {
     let catalog = discover_provider_catalog(host_config)?;
-    build_provider_entries_from_catalog(
-        &catalog,
-        timeouts,
-        permission_resolver,
-        localset_bridge,
-    )
+    build_provider_entries_from_catalog(&catalog, timeouts, permission_resolver, localset_bridge)
 }
 
 /// Build a probe request from verified owner context and timeout budget.

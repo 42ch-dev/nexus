@@ -296,7 +296,7 @@ function deniedEnv(denyBin, denyLog) {
   const removed = [];
   const kept = entries.filter((entry) => {
     const hit = toolchainDirs.some((tool) => {
-      if (IS_WIN) return existsSync(join(entry, `${tool}.exe`)) || existsSync(join(entry, `${tool}.cmd`));
+      if (IS_WIN) return [`${tool}.exe`, `${tool}.cmd`].some((name) => existsSync(join(entry, name)));
       return existsSync(join(entry, tool));
     });
     if (hit) removed.push(entry);
@@ -576,6 +576,14 @@ const evidencePath = join(outDir, 'install-proof.json');
 const checks = [];
 const record = (name, ok, detail) => checks.push({ name, ok: Boolean(ok), detail });
 
+function archiveEvidenceFile(path, tag) {
+  try {
+    renameSync(path, `${path.replace(/\.json$/, '')}.${tag}-${Date.now()}.json`);
+  } catch {
+    // nothing left to archive (or it was already replaced) — the fresh write proceeds
+  }
+}
+
 function writeEvidence(extra = {}) {
   const payload = {
     schema: 'rft-p3-t1-native-install-proof/v1',
@@ -605,13 +613,11 @@ function writeEvidence(extra = {}) {
     ...extra,
   };
   mkdirSync(outDir, { recursive: true });
-  if (existsSync(evidencePath)) {
-    try {
-      const previous = JSON.parse(readFileSync(evidencePath, 'utf8'));
-      if (previous.status !== 'pass') renameSync(evidencePath, `${evidencePath.replace(/\.json$/, '')}.pre-${Date.now()}.json`);
-    } catch {
-      renameSync(evidencePath, `${evidencePath.replace(/\.json$/, '')}.pre-${Date.now()}.json`);
-    }
+  try {
+    const previous = JSON.parse(readFileSync(evidencePath, 'utf8'));
+    if (previous.status !== 'pass') archiveEvidenceFile(evidencePath, 'pre');
+  } catch (error) {
+    if (error?.code !== 'ENOENT') archiveEvidenceFile(evidencePath, 'pre');
   }
   writeFileSync(evidencePath, `${JSON.stringify(payload, null, 2)}\n`);
   state.evidenceWritten = true;

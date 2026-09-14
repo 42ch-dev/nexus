@@ -42,7 +42,7 @@ function unpackCallbackPayload(...args) {
 
 let cachedProviders;
 async function providersForScenario() {
-  if (!cachedProviders) cachedProviders = await resolveProviders();
+  cachedProviders ??= await resolveProviders();
   return cachedProviders;
 }
 
@@ -160,8 +160,6 @@ function scenarioEnvelope(base, envelope) {
 const MAX_PENDING_BYTES = 1024 * 1024;
 const MAX_PENDING_REQUESTS = 16;
 const MAX_ACTIVE_TASKS = 32;
-const SDK_CREATE_SESSION_CHARGE = new TextEncoder().encode('create_session').length;
-const SDK_STREAM_PROMPT_CHARGE = new TextEncoder().encode('stream_prompt').length;
 
 function writeAgentHostConfig(home, fixturePath, workspace, extraEnv = {}, hostLimits = {}) {
   const python = resolveAdmittedPython();
@@ -188,6 +186,12 @@ ${Object.entries(extraEnv).map(([k, v]) => `${k} = "${String(v).replaceAll('"', 
   writeFileSync(join(home, 'config', 'agent-host.toml'), toml);
 }
 
+function seedFailText(seedResult) {
+  const text = seedResult.stderr?.toString();
+  if (text) return text;
+  return 'seed failed';
+}
+
 function seedHome() {
   const home = mkdtempSync(join(tmpdir(), `nexus-proof-${scenario}-`));
   const seed = spawnSync(
@@ -195,7 +199,7 @@ function seedHome() {
     ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', home],
     { cwd: root },
   );
-  if (seed.status !== 0) throw new Error(seed.stderr?.toString() || 'seed failed');
+  if (seed.status !== 0) throw new Error(seedFailText(seed));
   return home;
 }
 
@@ -428,7 +432,7 @@ async function runNeverSettling() {
   const ws = mkdtempSync(join(tmpdir(), 'nexus-block-ws-'));
   const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
   const seed = spawnSync('cargo', ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', home], { cwd: root });
-  if (seed.status !== 0) return fail('never_settling_callback', seed.stderr?.toString() || 'seed failed', { executed_steps: steps });
+  if (seed.status !== 0) return fail('never_settling_callback', seedFailText(seed), { executed_steps: steps });
   writeAgentHostConfig(home, fixture, ws, { BLOCK_PROMPT: '1' });
   const accessJson = JSON.stringify({ user_home: home, access: 'engine_owner', allow_uninitialized: false });
   const providers = await providersForScenario();
@@ -481,7 +485,7 @@ async function runFailedOpenChild() {
   const steps = ['seed_bad_home'];
   const badHome = mkdtempSync(join(tmpdir(), 'nexus-bad-child-'));
   const seed = spawnSync('cargo', ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', badHome], { cwd: root });
-  if (seed.status !== 0) return fail('failed_open_child', seed.stderr?.toString() || 'seed failed', { executed_steps: steps });
+  if (seed.status !== 0) return fail('failed_open_child', seedFailText(seed), { executed_steps: steps });
   mkdirSync(join(badHome, 'config'), { recursive: true });
   writeFileSync(join(badHome, 'config', 'agent-host.toml'),
     `[[providers]]
@@ -561,7 +565,7 @@ async function runEofWhileLive() {
   const eofWs = mkdtempSync(join(tmpdir(), 'nexus-eof-ws-'));
   const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
   const seed = spawnSync('cargo', ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', eofHome], { cwd: root });
-  if (seed.status !== 0) return fail('eof_after_close', seed.stderr?.toString() || 'seed failed', { executed_steps: steps });
+  if (seed.status !== 0) return fail('eof_after_close', seedFailText(seed), { executed_steps: steps });
   writeAgentHostConfig(eofHome, fixture, eofWs, { EOF_AFTER_INIT_FROM_RUN: '2' });
   const accessJson = JSON.stringify({ user_home: eofHome, access: 'engine_owner', allow_uninitialized: false });
   const beforePids = findFixtureChildPids();
@@ -626,7 +630,7 @@ async function runFullQueueShutdown() {
   const ws = mkdtempSync(join(tmpdir(), 'nexus-queue-ws-'));
   const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
   const seed = spawnSync('cargo', ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', home], { cwd: root });
-  if (seed.status !== 0) return fail('full_queue_shutdown', seed.stderr?.toString() || 'seed failed', { executed_steps: steps });
+  if (seed.status !== 0) return fail('full_queue_shutdown', seedFailText(seed), { executed_steps: steps });
   writeAgentHostConfig(
     home,
     fixture,
@@ -911,7 +915,7 @@ async function runWorkerTermination() {
   const ws = mkdtempSync(join(tmpdir(), 'nexus-kill-fixture-'));
   const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
   const seed = spawnSync('cargo', ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', home], { cwd: root });
-  if (seed.status !== 0) return fail('worker_termination', seed.stderr?.toString() || 'seed failed', { executed_steps: steps });
+  if (seed.status !== 0) return fail('worker_termination', seedFailText(seed), { executed_steps: steps });
   writeAgentHostConfig(home, fixture, ws, { BLOCK_PROMPT: '1' });
   const accessJson = JSON.stringify({ user_home: home, access: 'engine_owner', allow_uninitialized: false });
   const providers = await providersForScenario();
@@ -1050,7 +1054,7 @@ async function runMultibyteOverflow() {
   const ws = mkdtempSync(join(tmpdir(), 'nexus-mb-ws-'));
   const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
   const seed = spawnSync('cargo', ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', home], { cwd: root });
-  if (seed.status !== 0) return fail('multibyte_overflow', seed.stderr?.toString() || 'seed failed', { executed_steps: steps });
+  if (seed.status !== 0) return fail('multibyte_overflow', seedFailText(seed), { executed_steps: steps });
   writeAgentHostConfig(home, fixture, ws, { OVERSIZED_UPDATE: '1' });
   const accessJson = JSON.stringify({ user_home: home, access: 'engine_owner', allow_uninitialized: false });
   const providers = await providersForScenario();
@@ -1134,7 +1138,7 @@ async function runReentrantCall() {
   const ws = mkdtempSync(join(tmpdir(), 'nexus-reentrant-ws-'));
   const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
   const seed = spawnSync('cargo', ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', home], { cwd: root });
-  if (seed.status !== 0) return fail('reentrant_call', seed.stderr?.toString() || 'seed failed', { executed_steps: steps });
+  if (seed.status !== 0) return fail('reentrant_call', seedFailText(seed), { executed_steps: steps });
   writeAgentHostConfig(home, fixture, ws, { BLOCK_PROMPT: '1' });
   const accessJson = JSON.stringify({ user_home: home, access: 'engine_owner', allow_uninitialized: false });
 

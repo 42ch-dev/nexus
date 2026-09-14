@@ -11,19 +11,18 @@ mod core_error;
 mod env_state;
 mod host_query;
 mod lifecycle;
-pub mod wire_fixture;
 mod runtime;
+pub mod wire_fixture;
 
 use std::sync::Arc;
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
+use nexus_contracts::native_compatibility::NativeCompatibilityContractTreeSha256;
 use nexus_contracts::{
     CoreChangesRequest, CoreCloseReport, CoreHostQuery, CoreHostQueryResponse, NativeCompatibility,
-    NativeOpenOptions, ProviderCall,
-    WorldKbPatchEntityRequest,
+    NativeOpenOptions, ProviderCall, WorldKbPatchEntityRequest,
 };
-use nexus_contracts::native_compatibility::NativeCompatibilityContractTreeSha256;
 use nexus_core::Principal;
 
 use env_state::{EnvInstance, EnvState};
@@ -89,7 +88,9 @@ impl NativeCore {
             .map_err(core_error::napi_error_from_domain)?;
         Ok(EnvState::encode_principal(
             &principal,
-            self.inner.generation.load(std::sync::atomic::Ordering::SeqCst),
+            self.inner
+                .generation
+                .load(std::sync::atomic::Ordering::SeqCst),
         ))
     }
 
@@ -132,29 +133,27 @@ impl NativeCore {
         cursor: Option<String>,
     ) -> Result<Buffer> {
         self.deny_service_only()?;
-        let limit_i64 = limit.map(|n| {
-            if !n.is_finite() || n < 0.0 || n > 9_007_199_254_740_991.0 || n.fract() != 0.0 {
-                return Err(Error::from_reason("invalid limit"));
-            }
-            Ok(n as i64)
-        }).transpose()?;
+        let limit_i64 = limit
+            .map(|n| {
+                if !n.is_finite() || n < 0.0 || n > 9_007_199_254_740_991.0 || n.fract() != 0.0 {
+                    return Err(Error::from_reason("invalid limit"));
+                }
+                Ok(n as i64)
+            })
+            .transpose()?;
         self.json_call(principal_handle, async move |core, principal| {
-            core.world_kb_candidates(&principal, world_id, limit_i64, cursor).await
+            core.world_kb_candidates(&principal, world_id, limit_i64, cursor)
+                .await
         })
         .await
     }
 
     #[napi]
-    pub async fn changes(
-        &self,
-        principal_handle: String,
-        request_json: Buffer,
-    ) -> Result<Buffer> {
+    pub async fn changes(&self, principal_handle: String, request_json: Buffer) -> Result<Buffer> {
         self.deny_service_only()?;
         let request: CoreChangesRequest = serde_json::from_slice(request_json.as_ref())?;
         self.json_call(principal_handle, async move |core, principal| {
-            core.changes(&principal, request)
-                .await
+            core.changes(&principal, request).await
         })
         .await
     }
@@ -163,10 +162,9 @@ impl NativeCore {
     pub async fn host_query(&self, request_json: Buffer) -> Result<Buffer> {
         self.deny_service_only()?;
         let request: CoreHostQuery = serde_json::from_slice(request_json.as_ref())?;
-        let response: CoreHostQueryResponse =
-            host_query::dispatch_host_query(&self.inner, request)
-                .await
-                .map_err(core_error::napi_error_from_open_reason)?;
+        let response: CoreHostQueryResponse = host_query::dispatch_host_query(&self.inner, request)
+            .await
+            .map_err(core_error::napi_error_from_open_reason)?;
         Ok(Buffer::from(serde_json::to_vec(&response)?))
     }
 
@@ -239,7 +237,9 @@ impl NativeCore {
             .map_err(core_error::napi_error_from_domain)?;
         let encoded = EnvState::encode_principal(
             &principal,
-            self.inner.generation.load(std::sync::atomic::Ordering::SeqCst),
+            self.inner
+                .generation
+                .load(std::sync::atomic::Ordering::SeqCst),
         );
         if encoded != principal_handle {
             return Err(Error::from_reason("invalid principal handle"));
@@ -258,11 +258,7 @@ pub fn force_unconfirmed_cleanup(enable: bool) {
 }
 
 #[napi]
-pub fn open(
-    env: Env,
-    options_json: String,
-    callbacks: Option<Object<'_>>,
-) -> Result<NativeCore> {
+pub fn open(env: Env, options_json: String, callbacks: Option<Object<'_>>) -> Result<NativeCore> {
     let options: NativeOpenOptions = serde_json::from_str(&options_json)?;
     let state = match EnvInstance::get(&env) {
         Ok(existing) => existing,
@@ -273,7 +269,11 @@ pub fn open(
         }
     };
     let js_port = if let Some(callbacks) = callbacks {
-        Some(callbacks::install_js_provider(&env, state.clone(), callbacks)?)
+        Some(callbacks::install_js_provider(
+            &env,
+            state.clone(),
+            callbacks,
+        )?)
     } else {
         None
     };

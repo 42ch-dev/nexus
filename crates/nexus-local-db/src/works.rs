@@ -1841,8 +1841,10 @@ mod tests {
     async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let pool = crate::open_pool(&db_path).await.unwrap();
-        crate::run_migrations(&pool).await.unwrap();
+        let pool = crate::init_engine_pool(&db_path)
+            .await
+            .unwrap()
+            .clone_pool();
         (pool, dir)
     }
 

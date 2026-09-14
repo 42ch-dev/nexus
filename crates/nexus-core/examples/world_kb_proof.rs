@@ -26,8 +26,8 @@ use std::time::{Duration, Instant};
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 use nexus_knowledge::world_kb::store::KbStore;
-use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::init_pool;
+use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::writer_protocol::release_retained_writer_guards;
 use sqlx::SqlitePool;
 use tempfile::TempDir;
@@ -37,7 +37,7 @@ const CREATOR: &str = "proof_creator";
 const FOREIGN_CREATOR: &str = "other_creator";
 const SLUG: &str = "default";
 const CLI_DEGRADED_EXIT: i32 = 78;
-/// Exit code the CLI uses for a per-row OCC conflict (E_VERSION family).
+/// Exit code the CLI uses for a per-row OCC conflict (`E_VERSION` family).
 const CLI_CONFLICT_EXIT: i32 = 76;
 
 struct ProofHome {
@@ -76,15 +76,14 @@ impl CliRun {
     }
 }
 
-fn tcp_connect_with_retry<A: ToSocketAddrs>(
-    addr: A,
-    timeout: Duration,
-) -> Option<TcpStream> {
+fn tcp_connect_with_retry<A: ToSocketAddrs>(addr: A, timeout: Duration) -> Option<TcpStream> {
     let start = Instant::now();
     while start.elapsed() < timeout {
         if let Ok(addrs) = addr.to_socket_addrs() {
             for socket_addr in addrs {
-                if let Ok(stream) = TcpStream::connect_timeout(&socket_addr, Duration::from_millis(200)) {
+                if let Ok(stream) =
+                    TcpStream::connect_timeout(&socket_addr, Duration::from_millis(200))
+                {
                     return Some(stream);
                 }
             }
@@ -221,9 +220,7 @@ fn http_get(host: &str, port: u16, path: &str, connect_timeout: Duration) -> Opt
         .expect("read timeout");
     let request =
         format!("GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n");
-    stream
-        .write_all(request.as_bytes())
-        .expect("write GET");
+    stream.write_all(request.as_bytes()).expect("write GET");
     let buf = read_http_body(&mut stream).expect("read GET response");
     Some(String::from_utf8_lossy(&buf).into_owned())
 }
@@ -244,9 +241,7 @@ fn http_post_json(
         body.len(),
         body
     );
-    stream
-        .write_all(request.as_bytes())
-        .expect("write POST");
+    stream.write_all(request.as_bytes()).expect("write POST");
     let buf = read_http_body(&mut stream).expect("read POST response");
     let text = String::from_utf8_lossy(&buf).into_owned();
     let status = text
@@ -261,9 +256,12 @@ fn http_post_json(
 fn wait_healthy(port: u16, timeout: Duration) {
     let start = Instant::now();
     while start.elapsed() < timeout {
-        if let Some(health) =
-            http_get("127.0.0.1", port, "/v1/daemon/runtime/health", Duration::from_secs(2))
-        {
+        if let Some(health) = http_get(
+            "127.0.0.1",
+            port,
+            "/v1/daemon/runtime/health",
+            Duration::from_secs(2),
+        ) {
             if health.contains("HTTP/1.1 200") {
                 return;
             }
@@ -280,8 +278,7 @@ fn cli_supports_direct_path(cli_bin: &Path) -> bool {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+        .is_ok_and(|s| s.success())
 }
 
 fn patch_body(entity_id: &str, title: &str) -> String {
@@ -330,7 +327,12 @@ fn graph_args(world_id: &str) -> Vec<String> {
 }
 
 /// Read the graph via the CLI and return `(version, canonical_name)` for `entity_id`.
-fn cli_graph_entity_version(cli: &Path, home: &Path, world_id: &str, entity_id: &str) -> Option<u64> {
+fn cli_graph_entity_version(
+    cli: &Path,
+    home: &Path,
+    world_id: &str,
+    entity_id: &str,
+) -> Option<u64> {
     let args = graph_args(world_id);
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     let run = run_cli(cli, home, &refs);
@@ -350,7 +352,6 @@ struct BarrierRound {
     http_status_b: u16,
     cli_code: Option<i32>,
     cli_conflict_typed: bool,
-    cli_degraded: bool,
     cli_contended: bool,
     /// True when the CLI leg opened no socket toward the daemon port.
     cli_transport_clean: bool,
@@ -377,23 +378,20 @@ fn run_barrier_round(
     let http_a = {
         let barrier = Arc::clone(&barrier);
         let path = path.clone();
-        let body = body_a.clone();
+        let body = body_a;
         std::thread::spawn(move || {
             barrier.wait();
             http_post_json("127.0.0.1", port, &path, &body, connect_timeout)
-                .map(|(status, _)| status)
-                .unwrap_or(0)
+                .map_or(0, |(status, _)| status)
         })
     };
     let http_b = {
         let barrier = Arc::clone(&barrier);
-        let path = path.clone();
-        let body = body_b.clone();
+        let body = body_b;
         std::thread::spawn(move || {
             barrier.wait();
             http_post_json("127.0.0.1", port, &path, &body, connect_timeout)
-                .map(|(status, _)| status)
-                .unwrap_or(0)
+                .map_or(0, |(status, _)| status)
         })
     };
 
@@ -433,7 +431,6 @@ fn run_barrier_round(
             http_status_b: status_b,
             cli_code,
             cli_conflict_typed,
-            cli_degraded,
             cli_contended,
             cli_transport_clean,
             cli_socket_samples,
@@ -485,11 +482,7 @@ async fn seed_creator(pool: &SqlitePool, owner: &str, name: &str) {
     .expect("seed creator");
 }
 
-async fn insert_entity(
-    pool: &SqlitePool,
-    world_id: &str,
-    name: &str,
-) -> String {
+async fn insert_entity(pool: &SqlitePool, world_id: &str, name: &str) -> String {
     let mut entry = KnowledgeEntryRecord::new(world_id, BlockType::Character, name);
     entry.status = "confirmed".to_string();
     entry.revision = Some(0);
@@ -507,12 +500,7 @@ async fn insert_entity(
 async fn bootstrap_fixture(pool: &SqlitePool) -> (String, String, String, String, String) {
     seed_creator(pool, CREATOR, "Proof").await;
     let world = nexus_local_db::narrative_write::create_world(
-        pool,
-        CREATOR,
-        "Proof",
-        "proof",
-        "private",
-        "manual",
+        pool, CREATOR, "Proof", "proof", "private", "manual",
     )
     .await
     .expect("create world via narrative_write");
@@ -550,7 +538,10 @@ fn seed_fixture_in_child(user_home: &Path) -> (String, String, String, String, S
         .output()
         .expect("spawn seed child");
     if !output.status.success() {
-        eprintln!("seed child stderr: {}", String::from_utf8_lossy(&output.stderr));
+        eprintln!(
+            "seed child stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         panic!("seed child failed");
     }
     let line = String::from_utf8_lossy(&output.stdout);
@@ -571,7 +562,9 @@ async fn seed_only_main(home: PathBuf) {
     let op = nexus_home_layout::operational_workspace_dir(&home, CREATOR, SLUG);
     std::fs::create_dir_all(&op).expect("workspace dir");
     let db_path = nexus_home_layout::workspace_state_db_path(&home, CREATOR, SLUG);
-    let pool = init_pool(&db_path).await.expect("init pool for fixture seed");
+    let pool = init_pool(&db_path)
+        .await
+        .expect("init pool for fixture seed");
     let (world_id, entity_id, entity_b_id, foreign_world_id, foreign_entity_id) =
         bootstrap_fixture(&pool).await;
     pool.close().await;
@@ -579,7 +572,7 @@ async fn seed_only_main(home: PathBuf) {
     println!("{world_id} {entity_id} {entity_b_id} {foreign_world_id} {foreign_entity_id}");
 }
 
-async fn prepare_home(port: u16) -> ProofHome {
+fn prepare_home(port: u16) -> ProofHome {
     let tmp = TempDir::new().expect("temp home");
     let user_home = tmp.path().to_path_buf();
     let nexus_home = user_home.join(".nexus42");
@@ -631,7 +624,32 @@ fn spawn_daemon(http_bin: &Path, home: &Path, port: u16) -> Child {
 /// Named coexistence/recovery cases (proof-matrix §3 P1-T3).
 fn run_named_cases(home: &ProofHome, cli: &Path) -> serde_json::Value {
     let mut out = serde_json::Map::new();
+    out.insert(
+        "distinct_row".to_string(),
+        named_case_distinct_row(home, cli),
+    );
+    out.insert(
+        "db2_visibility".to_string(),
+        named_case_db2_visibility(home, cli),
+    );
+    out.insert(
+        "future_version".to_string(),
+        named_case_future_version(home, cli),
+    );
+    out.insert(
+        "foreign_world".to_string(),
+        named_case_foreign_world(home, cli),
+    );
+    out.insert(
+        "crash_recovery".to_string(),
+        named_case_crash_recovery(home, cli),
+    );
+    serde_json::Value::Object(out)
+}
 
+/// distinct-row: two different entities both succeed.
+fn named_case_distinct_row(home: &ProofHome, cli: &Path) -> serde_json::Value {
+    let mut out = serde_json::Map::new();
     // ── distinct-row: two different entities both succeed ───────────────────
     {
         // Derive each row's current version from the canonical read so the case
@@ -677,7 +695,12 @@ fn run_named_cases(home: &ProofHome, cli: &Path) -> serde_json::Value {
             }),
         );
     }
+    serde_json::Value::Object(out)
+}
 
+/// DB-2 visibility: a read begun after the patch ack sees its version.
+fn named_case_db2_visibility(home: &ProofHome, cli: &Path) -> serde_json::Value {
+    let mut out = serde_json::Map::new();
     // ── DB-2 visibility: a read begun after the patch ack sees its version ──
     {
         let before =
@@ -694,8 +717,7 @@ fn run_named_cases(home: &ProofHome, cli: &Path) -> serde_json::Value {
             ),
         );
         let acked = patch.code == Some(0);
-        let after =
-            cli_graph_entity_version(cli, &home.user_home, &home.world_id, &home.entity_id);
+        let after = cli_graph_entity_version(cli, &home.user_home, &home.world_id, &home.entity_id);
         let visible = matches!(after, Some(v) if v > before);
         out.insert(
             "db2_visibility".to_string(),
@@ -710,7 +732,12 @@ fn run_named_cases(home: &ProofHome, cli: &Path) -> serde_json::Value {
             }),
         );
     }
+    serde_json::Value::Object(out)
+}
 
+/// future-version: expected above the row's version → typed conflict.
+fn named_case_future_version(home: &ProofHome, cli: &Path) -> serde_json::Value {
+    let mut out = serde_json::Map::new();
     // ── future-version: expected above the row's version → typed conflict ───
     {
         let current =
@@ -734,13 +761,23 @@ fn run_named_cases(home: &ProofHome, cli: &Path) -> serde_json::Value {
             }),
         );
     }
+    serde_json::Value::Object(out)
+}
 
+/// foreign-world: the active creator may not patch another's world.
+fn named_case_foreign_world(home: &ProofHome, cli: &Path) -> serde_json::Value {
+    let mut out = serde_json::Map::new();
     // ── foreign-world: the active creator may not patch another's world ─────
     {
         let run = run_cli(
             cli,
             &home.user_home,
-            &patch_args(&home.foreign_world_id, &home.foreign_entity_id, "0", "Intrude"),
+            &patch_args(
+                &home.foreign_world_id,
+                &home.foreign_entity_id,
+                "0",
+                "Intrude",
+            ),
         );
         let denied = run.code != Some(0) && !run.stderr.contains("world_kb_conflict");
         out.insert(
@@ -753,7 +790,13 @@ fn run_named_cases(home: &ProofHome, cli: &Path) -> serde_json::Value {
             }),
         );
     }
+    serde_json::Value::Object(out)
+}
 
+/// crash: SIGKILL mid-write must leave a usable, consistent DB; a post-crash
+/// read must succeed and a retry with the observed version must be accepted.
+fn named_case_crash_recovery(home: &ProofHome, cli: &Path) -> serde_json::Value {
+    let mut out = serde_json::Map::new();
     // ── crash: SIGKILL mid-write must leave a usable, consistent DB ─────────
     {
         let before =
@@ -762,13 +805,17 @@ fn run_named_cases(home: &ProofHome, cli: &Path) -> serde_json::Value {
         let killed_code = spawn_and_kill_cli(
             cli,
             &home.user_home,
-            &patch_args(&home.world_id, &home.entity_id, &before.to_string(), "Crash"),
+            &patch_args(
+                &home.world_id,
+                &home.entity_id,
+                &before.to_string(),
+                "Crash",
+            ),
             Duration::from_millis(8),
         );
         // Recovery: a read must succeed and a retry with the observed version
         // must be accepted — no poisoned lock, no half-applied row.
-        let after =
-            cli_graph_entity_version(cli, &home.user_home, &home.world_id, &home.entity_id);
+        let after = cli_graph_entity_version(cli, &home.user_home, &home.world_id, &home.entity_id);
         let retry = run_cli(
             cli,
             &home.user_home,
@@ -791,89 +838,220 @@ fn run_named_cases(home: &ProofHome, cli: &Path) -> serde_json::Value {
             }),
         );
     }
-
     serde_json::Value::Object(out)
+}
+
+/// Parsed and validated `world_kb_proof` CLI arguments.
+struct ProofArgs {
+    scenario: String,
+    http_bin: PathBuf,
+    cli_bin: PathBuf,
+    out: PathBuf,
+}
+
+impl ProofArgs {
+    fn parse(args: &[String]) -> Self {
+        let mut scenario = String::new();
+        let mut cli_bin: Option<PathBuf> = None;
+        let mut http_bin: Option<PathBuf> = None;
+        let mut out_dir: Option<PathBuf> = None;
+        let mut i = 1;
+        while i < args.len() {
+            match args[i].as_str() {
+                "--scenario" if i + 1 < args.len() => {
+                    scenario.clone_from(&args[i + 1]);
+                    i += 2;
+                }
+                "--http-bin" if i + 1 < args.len() => {
+                    http_bin = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                }
+                "--cli-bin" if i + 1 < args.len() => {
+                    cli_bin = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                }
+                "--out" if i + 1 < args.len() => {
+                    out_dir = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                }
+                other => {
+                    eprintln!("unknown argument: {other}");
+                    std::process::exit(2);
+                }
+            }
+        }
+
+        if scenario != "concurrent-http-cli" {
+            eprintln!("unsupported scenario '{scenario}'; expected --scenario concurrent-http-cli");
+            std::process::exit(2);
+        }
+
+        let http_bin = http_bin.unwrap_or_else(|| PathBuf::from("target/debug/nexus42"));
+        if !http_bin.exists() {
+            eprintln!(
+                "HTTP host binary not found at {}; build with `cargo build -p nexus42 --bin nexus42`",
+                http_bin.display()
+            );
+            std::process::exit(2);
+        }
+        // P1-T3 requires the CLI leg: a two-HTTP-contender run cannot prove
+        // cross-process coexistence between the host and the direct CLI.
+        let Some(cli_bin) = cli_bin else {
+            eprintln!("--cli-bin is required for scenario concurrent-http-cli");
+            std::process::exit(2);
+        };
+        if !cli_bin.exists() {
+            eprintln!(
+                "CLI binary not found at {}; build with `cargo build -p nexus42 --bin nexus42 --no-default-features --features basic-cli`",
+                cli_bin.display()
+            );
+            std::process::exit(2);
+        }
+
+        let out = out_dir.unwrap_or_else(|| PathBuf::from("evidence"));
+        std::fs::create_dir_all(&out).expect("create evidence dir");
+
+        Self {
+            scenario,
+            http_bin,
+            cli_bin,
+            out,
+        }
+    }
+}
+
+/// `--seed-only [--home] <path>` mode: seed a fixture home and exit.
+fn seed_only_home(args: &[String]) -> Option<PathBuf> {
+    let pos = args.iter().position(|a| a == "--seed-only")?;
+    let home_arg = args.get(pos + 1).map(String::as_str);
+    Some(if home_arg == Some("--home") {
+        PathBuf::from(args.get(pos + 2).expect("--home path"))
+    } else {
+        PathBuf::from(home_arg.expect("--home path after --seed-only"))
+    })
+}
+
+/// Evidence payload for a failed transport-sampler positive control.
+fn transport_control_failure_evidence(
+    proof: &ProofArgs,
+    sampler_lines: &[String],
+) -> serde_json::Value {
+    serde_json::json!({
+        "scenario": proof.scenario,
+        "http_bin": proof.http_bin.display().to_string(),
+        "cli_bin": proof.cli_bin.display().to_string(),
+        "transport_sampler_failed": true,
+        "barrier_round_skipped": true,
+        "cli_transport_trace": {
+            "sampler_positive_control_ok": false,
+            "sampler_positive_control_lines": sampler_lines,
+        },
+        "barrier_round": {
+            "barrier_ok": false,
+            "skipped_reason": "transport_sampler_positive_control_failed",
+        },
+    })
+}
+
+/// Serialize pretty-printed evidence to `world_kb_proof.json` under `out`.
+fn write_evidence(out: &Path, evidence: &serde_json::Value) {
+    std::fs::write(
+        out.join("world_kb_proof.json"),
+        serde_json::to_string_pretty(evidence).expect("serialize evidence"),
+    )
+    .expect("write evidence");
+}
+
+/// Record transport-control failure evidence, stop the daemon, and exit.
+fn abort_transport_failure(proof: &ProofArgs, sampler_lines: &[String], daemon: &mut Child) {
+    let evidence = transport_control_failure_evidence(proof, sampler_lines);
+    write_evidence(&proof.out, &evidence);
+    let _ = daemon.kill();
+    let _ = daemon.wait();
+    eprintln!(
+        "transport sampler positive control failed; barrier round skipped (sampler_ok=false)"
+    );
+    std::process::exit(1);
+}
+
+/// CLI transport-trace evidence for the barrier round.
+fn transport_trace_evidence(
+    sampler_ok: bool,
+    sampler_lines: &[String],
+    round: &BarrierRound,
+) -> serde_json::Value {
+    serde_json::json!({
+        "mechanism": "lsof -p <cli-pid> -a -iTCP -n -P sampled continuously for the CLI process lifetime",
+        "sampler_positive_control_ok": sampler_ok,
+        "sampler_positive_control_lines": sampler_lines,
+        "cli_socket_samples": round.cli_socket_samples,
+        "cli_touched_daemon_port": !round.cli_transport_clean,
+    })
+}
+
+/// Barrier-round outcome evidence.
+fn barrier_round_evidence(
+    round: &BarrierRound,
+    contenders: u32,
+    winners: u32,
+    conflicts: u32,
+    untyped: u32,
+    barrier_ok: bool,
+) -> serde_json::Value {
+    serde_json::json!({
+        "http_status_a": round.http_status_a,
+        "http_status_b": round.http_status_b,
+        "cli_exit_code": round.cli_code,
+        "cli_degraded": !round.cli_contended,
+        "cli_contended": round.cli_contended,
+        "cli_conflict_typed": round.cli_conflict_typed,
+        "cli_transport_clean": round.cli_transport_clean,
+        "contender_count": contenders,
+        "winner_count": winners,
+        "conflict_count": conflicts,
+        "untyped_failure_count": untyped,
+        "barrier_ok": barrier_ok,
+    })
+}
+
+/// Detailed barrier-round failure report.
+fn barrier_failure_message(
+    round: &BarrierRound,
+    contenders: u32,
+    winners: u32,
+    conflicts: u32,
+    untyped: u32,
+    sampler_ok: bool,
+) -> String {
+    format!(
+        "barrier round failed: expected one winner and {} typed conflicts across {} contenders; got winners={} conflicts={} untyped={} http=[{}, {}] cli={:?} cli_conflict_typed={} cli_transport_clean={} sampler_ok={}",
+        contenders - 1,
+        contenders,
+        winners,
+        conflicts,
+        untyped,
+        round.http_status_a,
+        round.http_status_b,
+        round.cli_code,
+        round.cli_conflict_typed,
+        round.cli_transport_clean,
+        sampler_ok
+    )
 }
 
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if let Some(pos) = args.iter().position(|a| a == "--seed-only") {
-        let home_arg = args.get(pos + 1).map(String::as_str);
-        let home = if home_arg == Some("--home") {
-            PathBuf::from(args.get(pos + 2).expect("--home path"))
-        } else {
-            PathBuf::from(home_arg.expect("--home path after --seed-only"))
-        };
+    if let Some(home) = seed_only_home(&args) {
         seed_only_main(home).await;
         return;
     }
 
-    let mut scenario = String::new();
-    let mut cli_bin: Option<PathBuf> = None;
-    let mut http_bin: Option<PathBuf> = None;
-    let mut out_dir: Option<PathBuf> = None;
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--scenario" if i + 1 < args.len() => {
-                scenario = args[i + 1].clone();
-                i += 2;
-            }
-            "--http-bin" if i + 1 < args.len() => {
-                http_bin = Some(PathBuf::from(&args[i + 1]));
-                i += 2;
-            }
-            "--cli-bin" if i + 1 < args.len() => {
-                cli_bin = Some(PathBuf::from(&args[i + 1]));
-                i += 2;
-            }
-            "--out" if i + 1 < args.len() => {
-                out_dir = Some(PathBuf::from(&args[i + 1]));
-                i += 2;
-            }
-            other => {
-                eprintln!("unknown argument: {other}");
-                std::process::exit(2);
-            }
-        }
-    }
-
-    if scenario != "concurrent-http-cli" {
-        eprintln!(
-            "unsupported scenario '{scenario}'; expected --scenario concurrent-http-cli"
-        );
-        std::process::exit(2);
-    }
-
-    let http_bin = http_bin.unwrap_or_else(|| PathBuf::from("target/debug/nexus42"));
-    if !http_bin.exists() {
-        eprintln!(
-            "HTTP host binary not found at {}; build with `cargo build -p nexus42 --bin nexus42`",
-            http_bin.display()
-        );
-        std::process::exit(2);
-    }
-    // P1-T3 requires the CLI leg: a two-HTTP-contender run cannot prove
-    // cross-process coexistence between the host and the direct CLI.
-    let Some(cli_bin) = cli_bin else {
-        eprintln!("--cli-bin is required for scenario concurrent-http-cli");
-        std::process::exit(2);
-    };
-    if !cli_bin.exists() {
-        eprintln!(
-            "CLI binary not found at {}; build with `cargo build -p nexus42 --bin nexus42 --no-default-features --features basic-cli`",
-            cli_bin.display()
-        );
-        std::process::exit(2);
-    }
-
-    let out = out_dir.unwrap_or_else(|| PathBuf::from("evidence"));
-    std::fs::create_dir_all(&out).expect("create evidence dir");
-
+    let proof = ProofArgs::parse(&args);
     let port = reserve_port();
-    let home = prepare_home(port).await;
-    let mut daemon = spawn_daemon(&http_bin, &home.user_home, port);
+
+    let home = prepare_home(port);
+    let mut daemon = spawn_daemon(&proof.http_bin, &home.user_home, port);
     wait_healthy(port, Duration::from_secs(30));
 
     // Positive control AFTER the host is listening — it must be able to
@@ -882,32 +1060,7 @@ async fn main() {
     let (sampler_ok, sampler_lines) = sampler_positive_control(port);
 
     if !sampler_ok {
-        let evidence = serde_json::json!({
-            "scenario": scenario,
-            "http_bin": http_bin.display().to_string(),
-            "cli_bin": cli_bin.display().to_string(),
-            "transport_sampler_failed": true,
-            "barrier_round_skipped": true,
-            "cli_transport_trace": {
-                "sampler_positive_control_ok": false,
-                "sampler_positive_control_lines": sampler_lines,
-            },
-            "barrier_round": {
-                "barrier_ok": false,
-                "skipped_reason": "transport_sampler_positive_control_failed",
-            },
-        });
-        std::fs::write(
-            out.join("world_kb_proof.json"),
-            serde_json::to_string_pretty(&evidence).expect("serialize evidence"),
-        )
-        .expect("write evidence");
-        let _ = daemon.kill();
-        let _ = daemon.wait();
-        eprintln!(
-            "transport sampler positive control failed; barrier round skipped (sampler_ok=false)"
-        );
-        std::process::exit(1);
+        abort_transport_failure(&proof, &sampler_lines, &mut daemon);
     }
 
     let (round, cli_degraded) = run_barrier_round(
@@ -915,7 +1068,7 @@ async fn main() {
         &home.user_home,
         &home.world_id,
         &home.entity_id,
-        &cli_bin,
+        &proof.cli_bin,
     );
 
     let (winners, conflicts, contenders, untyped) = contender_outcomes(&round);
@@ -925,50 +1078,29 @@ async fn main() {
         && round.cli_transport_clean
         && sampler_ok;
 
-    let cases = run_named_cases(&home, &cli_bin);
+    let cases = run_named_cases(&home, &proof.cli_bin);
     let cases_ok = cases
         .as_object()
         .is_some_and(|m| m.values().all(|v| v["ok"] == serde_json::Value::Bool(true)));
 
     let evidence = serde_json::json!({
-        "scenario": scenario,
-        "http_bin": http_bin.display().to_string(),
-        "cli_bin": cli_bin.display().to_string(),
+        "scenario": proof.scenario,
+        "http_bin": proof.http_bin.display().to_string(),
+        "cli_bin": proof.cli_bin.display().to_string(),
         "daemon_url": home.daemon_url,
         "world_id": home.world_id,
         "entity_id": home.entity_id,
         "entity_b_id": home.entity_b_id,
         "foreign_world_id": home.foreign_world_id,
         "health_path": "/v1/daemon/runtime/health",
-        "cli_transport_trace": {
-            "mechanism": "lsof -p <cli-pid> -a -iTCP -n -P sampled continuously for the CLI process lifetime",
-            "sampler_positive_control_ok": sampler_ok,
-            "sampler_positive_control_lines": sampler_lines,
-            "cli_socket_samples": round.cli_socket_samples,
-            "cli_touched_daemon_port": !round.cli_transport_clean,
-        },
-        "barrier_round": {
-            "http_status_a": round.http_status_a,
-            "http_status_b": round.http_status_b,
-            "cli_exit_code": round.cli_code,
-            "cli_degraded": round.cli_degraded,
-            "cli_contended": round.cli_contended,
-            "cli_conflict_typed": round.cli_conflict_typed,
-            "cli_transport_clean": round.cli_transport_clean,
-            "contender_count": contenders,
-            "winner_count": winners,
-            "conflict_count": conflicts,
-            "untyped_failure_count": untyped,
-            "barrier_ok": barrier_ok,
-        },
+        "cli_transport_trace": transport_trace_evidence(sampler_ok, &sampler_lines, &round),
+        "barrier_round": barrier_round_evidence(
+            &round, contenders, winners, conflicts, untyped, barrier_ok,
+        ),
         "cases": cases,
         "cases_ok": cases_ok,
     });
-    std::fs::write(
-        out.join("world_kb_proof.json"),
-        serde_json::to_string_pretty(&evidence).expect("serialize evidence"),
-    )
-    .expect("write evidence");
+    write_evidence(&proof.out, &evidence);
 
     let _ = daemon.kill();
     let _ = daemon.wait();
@@ -976,36 +1108,27 @@ async fn main() {
     if cli_degraded {
         eprintln!(
             "CLI binary at {} lacks the direct basic-cli path (P1-T3); degrading with exit {CLI_DEGRADED_EXIT}",
-            cli_bin.display()
+            proof.cli_bin.display()
         );
         std::process::exit(CLI_DEGRADED_EXIT);
     }
 
     if !barrier_ok {
         eprintln!(
-            "barrier round failed: expected one winner and {} typed conflicts across {} contenders; got winners={} conflicts={} untyped={} http=[{}, {}] cli={:?} cli_conflict_typed={} cli_transport_clean={} sampler_ok={}",
-            contenders - 1,
-            contenders,
-            winners,
-            conflicts,
-            untyped,
-            round.http_status_a,
-            round.http_status_b,
-            round.cli_code,
-            round.cli_conflict_typed,
-            round.cli_transport_clean,
-            sampler_ok,
+            "{}",
+            barrier_failure_message(&round, contenders, winners, conflicts, untyped, sampler_ok)
         );
         std::process::exit(1);
     }
 
     if !cases_ok {
-        eprintln!("named coexistence/recovery cases failed: {}", cases);
+        eprintln!("named coexistence/recovery cases failed: {cases}");
         std::process::exit(1);
     }
 
     println!(
-        "world_kb_proof complete for scenario={scenario} out={}",
-        out.display()
+        "world_kb_proof complete for scenario={} out={}",
+        proof.scenario,
+        proof.out.display()
     );
 }

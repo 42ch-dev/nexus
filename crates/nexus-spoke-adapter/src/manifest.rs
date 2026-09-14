@@ -88,7 +88,6 @@ pub const LOCAL_TOOL_OPS: [&str; 2] = [
     "tools.nexus.list_modules",
 ];
 
-
 /// Wire names owned by the `compute` feature (roles / capabilities / ops).
 ///
 /// The `compute` feature (default on) owns the WASM engine, the module cache

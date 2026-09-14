@@ -71,20 +71,6 @@ function artifactSha256(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
-function formatProviderError(err) {
-  if (err == null) return '';
-  if (typeof err === 'string') return err;
-  if (typeof err === 'object') {
-    if (typeof err.message === 'string') return err.message;
-    if (typeof err.error === 'string') return err.error;
-    if (err.error && typeof err.error === 'object' && typeof err.error.message === 'string') return err.error.message;
-    try { return JSON.stringify(err); } catch { return String(err); }
-  }
-  return String(err);
-}
-
-
-
 async function runWireProof(core) {
   const query = (request) => core.hostQuery(encode(request)).then(decode);
   const health = await query({ query: 'health' });
@@ -358,29 +344,8 @@ async function drainTerminal(core, operationId) {
   return { sawDelta, terminal, terminalOpId, terminalSessionId };
 }
 
-async function runOpenClose100(home, accessJson, providers = undefined) {
-  const rssStart = rssSnapshot();
-  let rssPeak = rssStart.rss;
-  for (let cycle = 0; cycle < 100; cycle += 1) {
-    const core = binding.open(accessJson, providers);
-    const report = decode(await core.close());
-    const rss = rssSnapshot();
-    rssPeak = Math.max(rssPeak, rss.rss);
-    if (!report.cleanup_confirmed || report.state !== 'closed') {
-      return failScenario('open_close_100', `cycle ${cycle} close unconfirmed`);
-    }
-  }
-  const rssEnd = rssSnapshot();
-  return passScenario('open_close_100', {
-    cycles: 100,
-    rss_start: rssStart.rss,
-    rss_end: rssEnd.rss,
-    rss_peak: rssPeak,
-  });
-}
-
 async function runAdapterScenarios(core, ctx) {
-  const { adapter, home, sessionId, operationId, terminalPayload, accessJson, providers } = ctx;
+  const { adapter, home, sessionId, operationId, terminalPayload, providers } = ctx;
   const scenarios = {};
   const rssStart = rssSnapshot();
   let rssPeak = rssStart.rss;
@@ -701,7 +666,7 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
   }
   await new Promise((r) => setTimeout(r, 200));
 
-  let shutdownReply = { ok: false, error: null };
+  let shutdownReply;
   try {
     shutdownReply = decode(
       await core.providerCall(
@@ -789,9 +754,7 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
       })
     : failScenario('late_generation', `expected stale generation/tombstone error, got: ${postCloseErr}`);
   for (const key of SCENARIO_KEYS) {
-    if (!scenarios[key]) {
-      scenarios[key] = failScenario(key, 'missing scenario result');
-    }
+    scenarios[key] ??= failScenario(key, 'missing scenario result');
     const gateErr = validateScenarioEvidence(key, scenarios[key]);
     if (gateErr && scenarios[key].ok) {
       scenarios[key] = failScenario(key, gateErr);

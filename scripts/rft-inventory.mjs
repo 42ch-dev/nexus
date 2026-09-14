@@ -17,7 +17,7 @@ export function parseFlags(args) {
   const names = { '--baseline': 'baseline', '--inventories': 'inventoriesDir', '--out': 'out' };
   for (let i = 0; i < args.length; i += 2) {
     const key = names[args[i]];
-    if (!key || result[key] || !args[i + 1] || args[i + 1].startsWith('--')) {
+    if (!key || result[key] || args[i + 1]?.startsWith('--')) {
       throw new Error(`Invalid or duplicate argument: ${args[i]}`);
     }
     result[key] = args[i + 1];
@@ -324,7 +324,7 @@ export function declaredClapPaths(sources) {
       const moduleDir = parent.path.endsWith('/mod.rs') ? dirname(parent.path) : parent.path.replace(/\.rs$/, '');
       const local = candidates.filter(type => type.path === `${moduleDir}/${qualifier}.rs` || type.path === `${moduleDir}/${qualifier}/mod.rs`);
       if (local.length === 1) return local[0];
-      const matched = candidates.filter(type => type.path.endsWith(`/${qualifier}.rs`) || type.path.endsWith(`/${qualifier}/mod.rs`));
+      const matched = candidates.filter(type => Boolean(type.path.endsWith(`/${qualifier}.rs`)) || type.path.endsWith(`/${qualifier}/mod.rs`));
       if (matched.length) candidates = matched;
     }
     if (candidates.length !== 1) throw new Error(`Unresolved clap type ${parent.path}:${ref} (${candidates.map(type => type.path).join(', ')})`);
@@ -355,7 +355,7 @@ export function declaredClapPaths(sources) {
       const aliases = [...attrs.matchAll(/\b(?:visible_alias|alias) = "([^"]+)"/g)].map(match => match[1]);
       const features = [...attrs.matchAll(/feature = "([^"]+)"/g)].map(match => match[1]);
       const condition = sorted([...inherited.features, ...features]);
-      const hidden = inherited.hidden || /hide = true/.test(attrs);
+      const hidden = Boolean(inherited.hidden) || /hide = true/.test(attrs);
       const variants = [{ name: command, alias: null }, ...aliases.map(alias => ({ name: alias, alias: [...path, command].join(' ') }))];
       for (const variant of variants) {
         const next = [...path, variant.name];
@@ -618,7 +618,7 @@ export async function collectInventory({ baseline, inventoriesDir }) {
   for (const path of await filesUnder(join(root, 'schemas/daemon-api'), '.schema.json')) schemaSources.set(relative(root, path), JSON.parse(await text(path)));
   const schemasFor = (handlerSource, route) => sorted([...schemaSources].filter(([, schema]) => {
     const name = schema.title?.replace(/^Nexus\s+/, '').replaceAll(' ', '');
-    return (name && handlerSource.includes(name)) || schema.description?.includes(route);
+    return Boolean(name && handlerSource.includes(name)) || schema.description?.includes(route);
   }).map(([path]) => path));
   const handlerSources = new Map();
   for (const entry of routes) {

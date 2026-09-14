@@ -65,7 +65,7 @@ async fn sorted_sessions(
         .list_sessions()
         .await
         .map_err(core_error::open_reason_from_host)?;
-    sessions.sort_by(|a, b| a.id.to_string().cmp(&b.id.to_string()));
+    sessions.sort_by_key(|a| a.id.to_string());
     Ok(sessions)
 }
 
@@ -128,7 +128,10 @@ pub async fn dispatch_host_query(
                 .iter()
                 .filter(|s| !native_ids.contains(&s.session_id))
                 .collect();
-            let js_active_ops = unique_js.iter().filter(|s| s.active_operation_id.is_some()).count();
+            let js_active_ops = unique_js
+                .iter()
+                .filter(|s| s.active_operation_id.is_some())
+                .count();
             let active_sessions = health.active_sessions + unique_js.len();
             let active_operations = health.active_operations + js_active_ops;
             Ok(CoreHostQueryResponse {
@@ -154,9 +157,7 @@ pub async fn dispatch_host_query(
                         .provider_catalog()
                         .await
                         .map_err(core_error::open_reason_from_host)?;
-                    catalog
-                        .entries
-                        .sort_by(|a, b| a.provider_id.to_string().cmp(&b.provider_id.to_string()));
+                    catalog.entries.sort_by_key(|a| a.provider_id.to_string());
                     Ok(CoreHostQueryResponse {
                         catalog: Some(CoreHostQueryResponseCatalog {
                             providers: catalog
@@ -216,11 +217,7 @@ pub async fn dispatch_host_query(
             let native = sorted_sessions(&host).await?;
             let js = js_sessions_snapshot(state);
             let items_all = merge_session_wires(&native, &js);
-            let limit = request
-                .limit
-                .map(|n| n.get())
-                .unwrap_or(50)
-                .clamp(1, 250);
+            let limit = request.limit.map(|n| n.get()).unwrap_or(50).clamp(1, 250);
             let limit_us = usize::try_from(limit).unwrap_or(250);
             let items: Vec<NexusAgentHostSessionResponse> = items_all
                 .into_iter()
@@ -255,10 +252,9 @@ pub async fn dispatch_host_query(
             })
         }
         CoreHostQueryQuery::GetSession => {
-            let raw = request
-                .session_id
-                .as_deref()
-                .ok_or_else(|| core_error::open_reason_invalid_input("get_session requires session_id"))?;
+            let raw = request.session_id.as_deref().ok_or_else(|| {
+                core_error::open_reason_invalid_input("get_session requires session_id")
+            })?;
             // Native branch only for UUID-shaped ids; never parse a JS id.
             if let Ok(uuid) = Uuid::parse_str(raw) {
                 let native = sorted_sessions(&host).await?;
@@ -274,9 +270,7 @@ pub async fn dispatch_host_query(
                 }
             }
             // JS branch: raw-id compare.
-            let js = state
-                .with_js_state(|s| s.session(raw).cloned())
-                .flatten();
+            let js = state.with_js_state(|s| s.session(raw).cloned()).flatten();
             if let Some(record) = js {
                 return Ok(CoreHostQueryResponse {
                     session: Some(js_session_wire(&record)),
@@ -290,10 +284,9 @@ pub async fn dispatch_host_query(
             Err(not_found("session not found"))
         }
         CoreHostQueryQuery::GetOperation => {
-            let raw = request
-                .operation_id
-                .as_deref()
-                .ok_or_else(|| core_error::open_reason_invalid_input("get_operation requires operation_id"))?;
+            let raw = request.operation_id.as_deref().ok_or_else(|| {
+                core_error::open_reason_invalid_input("get_operation requires operation_id")
+            })?;
             // Native branch first for a UUID, matching GetSession precedence.
             if let Ok(uuid) = Uuid::parse_str(raw) {
                 let op_id = HostOperationId(uuid);

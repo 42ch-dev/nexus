@@ -138,7 +138,8 @@ fn register_scalar(
     func: ScalarFn,
     context: Arc<WriterConnectionContext>,
 ) -> Result<(), sqlx::Error> {
-    let c_name = CString::new(name).map_err(|e| sqlx::Error::Configuration(e.to_string().into()))?;
+    let c_name =
+        CString::new(name).map_err(|e| sqlx::Error::Configuration(e.to_string().into()))?;
     let userdata = Box::into_raw(Box::new(UserData(context)));
     let status = unsafe {
         sqlite3_create_function_v2(

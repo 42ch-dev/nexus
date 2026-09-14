@@ -833,9 +833,6 @@ mod tests {
         )
     }
 
-    // The held `PROCESS_ENV_LOCK` guard makes the future !Send; test-only
-    // helper, run on tokio's current-thread test runtime (no Send needed).
-    #[allow(clippy::future_not_send)]
     async fn launch_and_execute(
         provider: &ClaudeCliProvider,
         text: &str,
@@ -843,9 +840,7 @@ mod tests {
         // Serialize with the env-mutating discovery tests: the fixture is
         // spawned via `#!/usr/bin/env python3`, which resolves python3
         // through PATH at execve time (see lib.rs test_support).
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
         let handle = provider.launch(launch_spec()).await.expect("launch");
         let stream = provider
             .execute(
@@ -1008,9 +1003,7 @@ mod tests {
     async fn second_execute_resumes_session() {
         // Serialize with env-mutating discovery tests (fixture spawns
         // resolve python3 through PATH; see lib.rs test_support).
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("argv.jsonl");
         let req_log_path = req_log.to_string_lossy().into_owned();
@@ -1304,9 +1297,7 @@ mod tests {
     async fn session_b_cancel_and_shutdown_do_not_wait_on_session_a_read() {
         // Serialize with env-mutating discovery tests (fixture spawns
         // resolve python3 through PATH; see lib.rs test_support).
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
         let provider = mock_provider(HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]));
 
         let handle_a = provider.launch(launch_spec()).await.expect("launch a");
@@ -1366,9 +1357,7 @@ mod tests {
     async fn launch_cwd_is_applied_to_cli_child() {
         // Serialize with env-mutating discovery tests (fixture spawns
         // resolve python3 through PATH; see lib.rs test_support).
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let cwd = temp_dir.path().to_path_buf();
         let req_log = temp_dir.path().join("argv.jsonl");

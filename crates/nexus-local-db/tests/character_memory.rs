@@ -38,10 +38,10 @@ struct Seed {
 
 async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
-    let pool = nexus_local_db::open_pool(&dir.path().join("test.db"))
+    let pool = nexus_local_db::init_engine_pool(&dir.path().join("test.db"))
         .await
-        .unwrap();
-    nexus_local_db::run_migrations(&pool).await.unwrap();
+        .unwrap()
+        .clone_pool();
     (pool, dir)
 }
 

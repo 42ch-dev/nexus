@@ -1235,7 +1235,7 @@ async function runProviderProof(ctx) {
     client,
     `window.__RFT_NATIVE_PROOF__.drainAgentHostEvents(${JSON.stringify(sessionId)}, { timeoutMs: 30000 })`,
   );
-  const terminal = events.find((e) => e.OpFinished || e.OpFailed || e.SessionStopped) ?? null;
+  const terminal = events.find((e) => e.OpFinished ?? e.OpFailed ?? e.SessionStopped) ?? null;
   const message = events
     .map((e) => e.MessageDelta?.text ?? e.ThoughtDelta?.text ?? null)
     .filter(Boolean)
@@ -1462,7 +1462,7 @@ function survivingGroupRows(groupBefore, leaderPid) {
 function liveServiceRootPids(ctx) {
   const roots = [process.pid];
   const child = ctx.service?.child;
-  if (child && child.pid && child.exitCode === null && child.signalCode === null) {
+  if (child?.pid && child.exitCode === null && child.signalCode === null) {
     roots.push(child.pid);
   }
   return roots;
@@ -1814,7 +1814,7 @@ async function runAdapterEditSample(ctx, sampleIndex) {
         ctx.client,
         `({ handle: Boolean(window.__RFT_NATIVE_PROOF__), ready: Boolean(window.__RFT_NATIVE_PROOF__ && window.__RFT_NATIVE_PROOF__.ready), location: location.href })`,
         { awaitPromise: false },
-      ).catch((e) => ({ error: String((e && e.message) || e) }));
+      ).catch((e) => ({ error: String(e?.message ?? e) }));
       throw new Error(
         `adapter provider evaluation failed: ${err instanceof Error ? err.message : String(err)}; pageState=${JSON.stringify(pageState)}; serviceOutput=${JSON.stringify(redactChildOutput((ctx.service?.child?.output?.() ?? '').slice(-MAX_EVIDENCE_TAIL_CHARS), ctx.home))}`,
       );
@@ -2356,7 +2356,7 @@ async function main() {
       fitViewControl: evidence.phases.interaction.fitViewOutcome.control,
       createdVisibleAfterFitView: evidence.phases.interaction.fitViewOutcome.visibleAfterFit,
       pass:
-        (evidence.phases.interaction.renderedNodes.nodes.some((n) => n.w > 1 && n.h > 1) ||
+        (evidence.phases.interaction.renderedNodes.nodes.some((n) => n.w > 1 && n.h > 1) ??
           evidence.phases.interaction.renderedNodes.rows.some((n) => n.w > 1 && n.h > 1)) &&
         evidence.phases.interaction.fitViewOutcome.visibleAfterFit === true,
     };

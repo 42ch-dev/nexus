@@ -58,7 +58,7 @@ pub struct HostManager {
     workspace_root: RwLock<Option<std::path::PathBuf>>,
     /// Broadcast sender for host events — SSE subscribers consume via `subscribe()`.
     event_tx: tokio::sync::broadcast::Sender<HostEvent>,
-    /// One environment-scoped LocalSet bridge shared by all ACP adapters.
+    /// One environment-scoped `LocalSet` bridge shared by all ACP adapters.
     localset_bridge: Arc<LocalSetBridge>,
 }
 
@@ -87,9 +87,6 @@ impl HostManager {
         }
     }
 
-    /// Shared LocalSet bridge for all ACP SDK adapters in this environment.
-    #[must_use]
-
     /// Snapshot active session/operation IDs for native close reports.
     pub async fn pending_lifecycle_snapshot(&self) -> Vec<String> {
         let sessions = self.sessions.read().await;
@@ -97,15 +94,18 @@ impl HostManager {
         for session in sessions.iter() {
             pending.push(format!("session:{}", session.id));
             if let Some(op_id) = &session.active_op_id {
-                pending.push(format!("op:{}", op_id));
+                pending.push(format!("op:{op_id}"));
             }
             if session.state.is_busy() {
                 pending.push(format!("session-busy:{}", session.id));
             }
         }
+        drop(sessions);
         pending
     }
 
+    /// Shared `LocalSet` bridge for all ACP SDK adapters in this environment.
+    #[must_use]
     pub fn localset_bridge(&self) -> LocalSetBridge {
         self.localset_bridge.as_ref().clone()
     }
@@ -134,40 +134,48 @@ impl HostManager {
         self.event_tx.subscribe()
     }
 
-    /// Register a provider adapter.
-    ///
-    /// Must be called before `start()`. The adapter is stored behind `Arc<dyn ProviderAdapter>`.
-    /// `launch` is the configured launch recipe reported truthfully by the
-    /// catalog (never a fabricated empty recipe).
     /// Snapshot of the loaded agent-host configuration (defaults when absent).
     pub async fn agent_config(&self) -> AgentHostConfig {
         self.config.read().await.clone().unwrap_or_default()
     }
 
-    /// Build a [`ProviderPortAdapter`] wired to this host and registered providers.
-
     /// Admit the catalog-owned launch recipe for JS provider callbacks.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HostError::ProviderUnavailable`] when the provider is not
+    /// registered, [`HostError::InternalHostError`] when the workspace root
+    /// has not been set (host not started), and the policy-denied variants
+    /// surfaced by [`crate::providers::recipe_admission::build_validated_recipe`]
+    /// when the workspace boundary or the executable resolution rejects the
+    /// launch recipe.
     pub async fn admit_validated_provider_recipe(
         &self,
         provider_id: &crate::ids::ProviderId,
     ) -> crate::error::HostResult<nexus_contracts::ValidatedProviderRecipe> {
         let (command, args, env, recipe_generation) = {
             let providers = self.providers.read().await;
-            let entry = providers
-                .get(provider_id)
-                .ok_or_else(|| {
-                    crate::error::HostError::provider_unavailable(
-                        provider_id.clone(),
-                        "provider not registered",
-                    )
-                })?;
-            let (command, args, env) = match &entry.metadata.launch {
-                crate::LaunchStrategy::Acp { command, args, env }
-                | crate::LaunchStrategy::NativeCli { command, args, env } => {
-                    (command.clone(), args.clone(), env.clone())
-                }
-            };
-            (command, args, env, entry.identity.launch_fingerprint.to_string())
+            let extracted = providers.get(provider_id).map(|entry| {
+                let (command, args, env) = match &entry.metadata.launch {
+                    crate::LaunchStrategy::Acp { command, args, env }
+                    | crate::LaunchStrategy::NativeCli { command, args, env } => {
+                        (command.clone(), args.clone(), env.clone())
+                    }
+                };
+                (
+                    command,
+                    args,
+                    env,
+                    entry.identity.launch_fingerprint.to_string(),
+                )
+            });
+            drop(providers);
+            extracted.ok_or_else(|| {
+                crate::error::HostError::provider_unavailable(
+                    provider_id.clone(),
+                    "provider not registered",
+                )
+            })?
         };
         let boundary = {
             let ws = self.workspace_root.read().await;
@@ -184,7 +192,10 @@ impl HostManager {
         )
     }
 
-    pub async fn build_provider_port(self: &Arc<Self>) -> crate::providers::port::ProviderPortAdapter {
+    /// Build a [`ProviderPortAdapter`] wired to this host and registered providers.
+    pub async fn build_provider_port(
+        self: &Arc<Self>,
+    ) -> crate::providers::port::ProviderPortAdapter {
         let mut port = crate::providers::port::ProviderPortAdapter::with_manager(self.clone());
         let providers = self.providers.read().await;
         for (id, entry) in providers.iter() {
@@ -192,9 +203,15 @@ impl HostManager {
                 port.register_provider(id.clone(), adapter);
             }
         }
+        drop(providers);
         port
     }
 
+    /// Register a provider adapter.
+    ///
+    /// Must be called before `start()`. The adapter is stored behind `Arc<dyn ProviderAdapter>`.
+    /// `launch` is the configured launch recipe reported truthfully by the
+    /// catalog (never a fabricated empty recipe).
     pub async fn register_provider(
         &self,
         adapter: Arc<dyn ProviderAdapter>,
@@ -267,10 +284,13 @@ impl HostManager {
     ) {
         let identity = {
             let providers = self.providers.read().await;
-            providers.get(provider_id).map(|entry| entry.identity.clone())
+            providers
+                .get(provider_id)
+                .map(|entry| entry.identity.clone())
         };
         if let Some(identity) = identity {
-            self.publish_probe_result(&identity, health, latency_ms).await;
+            self.publish_probe_result(&identity, health, latency_ms)
+                .await;
         }
     }
 
@@ -455,14 +475,14 @@ impl crate::HostFacade for HostManager {
                     catalog,
                     &host_config.timeouts,
                     &permission_resolver,
-                    self.localset_bridge(),
+                    &self.localset_bridge(),
                 )?
             } else {
                 discover_provider_entries(
                     &host_config,
                     &host_config.timeouts,
                     &permission_resolver,
-                    self.localset_bridge(),
+                    &self.localset_bridge(),
                 )?
             };
             *self.providers.write().await = discovered;
@@ -1414,13 +1434,9 @@ mod tests {
         }
     }
 
-    // The held `PROCESS_ENV_LOCK` guard makes the future !Send; test-only.
-    #[allow(clippy::future_not_send)]
     #[tokio::test(flavor = "current_thread")]
     async fn start_uses_admitted_catalog_without_path_rescan() {
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let host_config = crate::config::AgentHostConfig::default();
         let catalog = crate::core::readiness::discover_provider_catalog(&host_config)

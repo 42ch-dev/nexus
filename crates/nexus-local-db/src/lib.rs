@@ -66,10 +66,10 @@ pub mod workspace_session;
 pub mod world_findings;
 pub mod world_stories;
 
-pub mod writer_protocol;
 mod error;
 mod seed_shared;
 mod version;
+pub mod writer_protocol;
 
 // Test-only tracing-capture helpers shared by DAO mutation-path tests
 // (R-V146P4-QC1-S1 / R-V146P4-QC3-S1). Compiled only under `cfg(test)`.
@@ -84,7 +84,7 @@ pub use version::{DB_SCHEMA_VERSION, SCHEMA_VERSION};
 // Re-export error types
 pub use error::{ActorContractConflict, LocalDbError};
 pub use writer_protocol::{
-    GuardedPool, GuardedPoolOptions, WriterMode, WorkspaceWriterGuard, BOOTSTRAP_CREATOR_ID,
+    GuardedPool, GuardedPoolOptions, WorkspaceWriterGuard, WriterMode, BOOTSTRAP_CREATOR_ID,
 };
 
 pub use actor_knowledge_store::{
@@ -890,6 +890,13 @@ pub async fn init_pool(db_path: &std::path::Path) -> Result<sqlx::SqlitePool, Lo
 }
 
 /// Initialize a guarded pool keeping writer locks alive.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError`] when the guarded migration run, direct-writer
+/// admission, pool open, or version seeding fails — including
+/// [`LocalDbError::OwnerBusy`] when the workspace admission locks are
+/// contended.
 pub async fn init_guarded_pool(db_path: &std::path::Path) -> Result<GuardedPool, LocalDbError> {
     writer_protocol::init_guarded_pool(db_path, writer_protocol::BOOTSTRAP_CREATOR_ID).await
 }
@@ -904,9 +911,7 @@ pub async fn init_guarded_pool(db_path: &std::path::Path) -> Result<GuardedPool,
 /// Returns `LocalDbError` if migration, engine acquisition, or pool creation
 /// fails — including [`LocalDbError::OwnerBusy`] when another process owns the
 /// engine.
-pub async fn init_engine_pool(
-    db_path: &std::path::Path,
-) -> Result<GuardedPool, LocalDbError> {
+pub async fn init_engine_pool(db_path: &std::path::Path) -> Result<GuardedPool, LocalDbError> {
     writer_protocol::init_engine_pool(
         db_path,
         writer_protocol::BOOTSTRAP_CREATOR_ID,

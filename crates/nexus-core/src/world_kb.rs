@@ -1,6 +1,5 @@
 //! World KB graph/patch/candidates implementation (ported from daemon handlers).
 
-use std::collections::HashMap;
 use nexus_contracts::{
     world_kb_patch_entity_request::{
         NexusWorldKbEntityPatch, NexusWorldKbEntityPatchModulesKey,
@@ -11,10 +10,10 @@ use nexus_contracts::{
     WorldKbPatchEntityResponse, WorldKbRelationshipProjection, WorldKbSourceAnchorProjection,
 };
 use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
+use nexus_knowledge::world_kb::store::KbStoreError;
 use nexus_knowledge::world_kb::validation::{
     validate_body, validate_canonical_name, ValidationMode,
 };
-use nexus_knowledge::world_kb::store::KbStoreError;
 use nexus_local_db::kb_extract_job::list_pending_for_world_after;
 use nexus_local_db::kb_relationships::list_relationships_for_world_in_tx;
 use nexus_local_db::kb_store::{get_knowledge_entry_in_tx, list_by_world_in_tx};
@@ -25,6 +24,7 @@ use nexus_spoke_adapter::{
     SpokeReject, SpokeRejectCode, SpokeResult,
 };
 use sqlx::{Sqlite, SqlitePool};
+use std::collections::HashMap;
 use tracing::warn;
 
 use crate::error::{CoreError, CoreResult};
@@ -113,7 +113,9 @@ fn parse_block_type(s: &str) -> BlockType {
     }
 }
 
-fn project_candidate(c: &nexus_local_db::kb_extract_job::KbExtractPromotion) -> WorldKbCandidateProjection {
+fn project_candidate(
+    c: &nexus_local_db::kb_extract_job::KbExtractPromotion,
+) -> WorldKbCandidateProjection {
     WorldKbCandidateProjection {
         candidate_id: c.job_id.clone(),
         job_id: c.job_id.clone(),
@@ -130,7 +132,7 @@ fn project_candidate(c: &nexus_local_db::kb_extract_job::KbExtractPromotion) -> 
 }
 
 mod guards {
-    use super::*;
+    use super::{db_err, CoreError, CoreResult, Sqlite};
 
     pub(super) async fn require_world_owner(
         executor: impl sqlx::Executor<'_, Database = Sqlite>,
@@ -142,7 +144,7 @@ mod guards {
                 .bind(world_id)
                 .fetch_optional(executor)
                 .await
-                .map_err(db_err)?;
+                .map_err(|e| db_err(&e))?;
         match owner {
             None => Err(CoreError::NotFound { resource: format!("world {world_id}") }),
             Some(Some(owner_id)) if owner_id == creator_id => Ok(()),
@@ -156,31 +158,32 @@ mod guards {
     }
 }
 
-pub(crate) mod graph {
-    use super::*;
+pub mod graph {
+    use super::{
+        db_err, guards, list_by_world_in_tx, list_relationships_for_world_in_tx, local_db_err,
+        project_entity, store_err, warn, wire_cast, CoreAccess, CoreResult, SqlitePool,
+        WorldKbGraphResponse, WorldKbRelationshipProjection, WorldKbSourceAnchorProjection,
+        GRAPH_ENTITY_CAP, GRAPH_RELATIONSHIP_CAP,
+    };
 
-    pub(crate) async fn get_graph(
+    pub async fn get_graph(
         pool: &SqlitePool,
         _access: CoreAccess,
         creator_id: &str,
         world_id: &str,
         include_suggested: bool,
     ) -> CoreResult<WorldKbGraphResponse> {
-        let mut tx = pool.begin().await.map_err(db_err)?;
+        let mut tx = pool.begin().await.map_err(|e| db_err(&e))?;
         guards::require_world_owner(&mut *tx, world_id, creator_id).await?;
 
         let blocks = list_by_world_in_tx(&mut tx, world_id, GRAPH_ENTITY_CAP)
             .await
-            .map_err(store_err)?;
+            .map_err(|e| store_err(&e))?;
         let fetch_limit = i64::try_from(GRAPH_RELATIONSHIP_CAP + 1).unwrap_or(i64::MAX);
-        let rows = list_relationships_for_world_in_tx(
-            &mut tx,
-            world_id,
-            include_suggested,
-            fetch_limit,
-        )
-        .await
-        .map_err(local_db_err)?;
+        let rows =
+            list_relationships_for_world_in_tx(&mut tx, world_id, include_suggested, fetch_limit)
+                .await
+                .map_err(local_db_err)?;
 
         let mut entities = Vec::with_capacity(blocks.len().min(GRAPH_ENTITY_CAP));
         let mut source_anchors = Vec::new();
@@ -211,7 +214,7 @@ pub(crate) mod graph {
         }
 
         let relationships = project_relationships_for_world(&rows, include_suggested);
-        tx.commit().await.map_err(db_err)?;
+        tx.commit().await.map_err(|e| db_err(&e))?;
         Ok(WorldKbGraphResponse {
             entities: wire_cast(entities),
             source_anchors: wire_cast(source_anchors),
@@ -236,7 +239,7 @@ pub(crate) mod graph {
 
         let mut projections = Vec::with_capacity(rows.len().min(GRAPH_RELATIONSHIP_CAP) * 2);
         for row in rows.iter().take(GRAPH_RELATIONSHIP_CAP) {
-            projections.push(project_relationship(&row, "stored"));
+            projections.push(project_relationship(row, "stored"));
             if row.symmetric != 0 {
                 let mut reverse = row.clone();
                 std::mem::swap(&mut reverse.source_entity_id, &mut reverse.target_entity_id);
@@ -262,17 +265,18 @@ pub(crate) mod graph {
             .as_deref()
             .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
 
-        let relation_type: WorldKbRelationshipKind = row.relation_type.parse().unwrap_or_else(|_| {
-            warn!(
-                metric = "world_kb_relation_type_coercion",
-                relationship_id = row.relationship_id,
-                world_id = row.world_id,
-                relation_type = row.relation_type,
-                direction,
-                "unknown relation_type stored in kb_relationships; projecting as Custom"
-            );
-            WorldKbRelationshipKind::Custom
-        });
+        let relation_type: WorldKbRelationshipKind =
+            row.relation_type.parse().unwrap_or_else(|_| {
+                warn!(
+                    metric = "world_kb_relation_type_coercion",
+                    relationship_id = row.relationship_id,
+                    world_id = row.world_id,
+                    relation_type = row.relation_type,
+                    direction,
+                    "unknown relation_type stored in kb_relationships; projecting as Custom"
+                );
+                WorldKbRelationshipKind::Custom
+            });
 
         WorldKbRelationshipProjection {
             relationship_id: row.relationship_id.clone(),
@@ -296,17 +300,22 @@ pub(crate) mod graph {
     }
 }
 
-pub(crate) mod candidates {
-    use super::*;
+pub mod candidates {
+    use super::{
+        db_err, guards, list_pending_for_world_after, project_candidate, wire_cast, CoreError,
+        CoreResult, PaginationInfo, SqlitePool, WorldKbCandidateProjection,
+        WorldKbCandidatesResponse, CANDIDATE_CURSOR_PREFIX, DEFAULT_CANDIDATE_LIMIT,
+        MAX_CANDIDATE_LIMIT,
+    };
 
-    pub(crate) async fn get_candidates(
+    pub async fn get_candidates(
         pool: &SqlitePool,
         creator_id: &str,
         world_id: &str,
         limit: Option<i64>,
         cursor: Option<String>,
     ) -> CoreResult<WorldKbCandidatesResponse> {
-        let mut tx = pool.begin().await.map_err(db_err)?;
+        let mut tx = pool.begin().await.map_err(|e| db_err(&e))?;
         guards::require_world_owner(&mut *tx, world_id, creator_id).await?;
 
         let limit = limit
@@ -323,7 +332,7 @@ pub(crate) mod candidates {
             limit + 1,
         )
         .await
-        .map_err(db_err)?;
+        .map_err(|e| db_err(&e))?;
 
         let next_cursor = if pending.len() > limit_us {
             let last = &pending[limit_us - 1];
@@ -339,7 +348,7 @@ pub(crate) mod candidates {
             .map(project_candidate)
             .collect();
 
-        tx.commit().await.map_err(db_err)?;
+        tx.commit().await.map_err(|e| db_err(&e))?;
         Ok(WorldKbCandidatesResponse {
             items: wire_cast(items),
             pagination: wire_cast(PaginationInfo {
@@ -356,27 +365,29 @@ pub(crate) mod candidates {
         let Some(raw) = cursor else {
             return Ok((None, None));
         };
-        let stripped = raw.strip_prefix(CANDIDATE_CURSOR_PREFIX).ok_or_else(|| {
-            CoreError::InvalidInput {
-                field: "cursor".to_string(),
-                reason: "invalid candidates cursor; pass next_cursor unchanged".to_string(),
-            }
-        })?;
+        let stripped =
+            raw.strip_prefix(CANDIDATE_CURSOR_PREFIX)
+                .ok_or_else(|| CoreError::InvalidInput {
+                    field: "cursor".to_string(),
+                    reason: "invalid candidates cursor; pass next_cursor unchanged".to_string(),
+                })?;
         let mut parts = stripped.splitn(2, '|');
-        let created_at = parts
-            .next()
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| CoreError::InvalidInput {
-                field: "cursor".to_string(),
-                reason: "invalid candidates cursor: missing created_at".to_string(),
-            })?;
-        let job_id = parts
-            .next()
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| CoreError::InvalidInput {
-                field: "cursor".to_string(),
-                reason: "invalid candidates cursor: missing job_id".to_string(),
-            })?;
+        let created_at =
+            parts
+                .next()
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| CoreError::InvalidInput {
+                    field: "cursor".to_string(),
+                    reason: "invalid candidates cursor: missing created_at".to_string(),
+                })?;
+        let job_id =
+            parts
+                .next()
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| CoreError::InvalidInput {
+                    field: "cursor".to_string(),
+                    reason: "invalid candidates cursor: missing job_id".to_string(),
+                })?;
         Ok((Some(created_at.to_string()), Some(job_id.to_string())))
     }
 
@@ -385,16 +396,27 @@ pub(crate) mod candidates {
     }
 }
 
-pub(crate) mod patch {
-    use super::*;
+pub mod patch {
+    use super::{
+        db_err, get_knowledge_entry_in_tx, guards, is_world_conflict_reject,
+        knowledge_record_to_spoke, local_db_err, project_entity, put_knowledge_entry_in_tx,
+        set_nexus_body, spoke_to_knowledge_record, store_err, validate_body,
+        validate_canonical_name, validation_summary, wire_cast, BlockType, CoreError, CoreResult,
+        HashMap, KbStoreError, KnowledgeEntryBody, KnowledgeEntryRecord, NexusWorldKbEntityPatch,
+        NexusWorldKbEntityPatchModulesKey, NexusWorldKbEntityPatchModulesValue,
+        SpokeKnowledgeEntry, SpokeReject, SpokeRejectCode, SpokeResult, Sqlite, SqlitePool,
+        ValidationMode, WorldKbPatchEntityRequest, WorldKbPatchEntityResponse,
+    };
 
-    pub(crate) async fn patch_entity(
+    pub async fn patch_entity(
         pool: &SqlitePool,
         creator_id: &str,
         world_id: &str,
         req: WorldKbPatchEntityRequest,
     ) -> CoreResult<WorldKbPatchEntityResponse> {
-        let mut tx = nexus_local_db::begin_immediate(pool).await.map_err(local_db_err)?;
+        let mut tx = nexus_local_db::begin_immediate(pool)
+            .await
+            .map_err(local_db_err)?;
         guards::require_world_owner(&mut *tx, world_id, creator_id).await?;
 
         let kb_opt = fetch_entry_in_tx(&mut tx, &req.entity_id).await?;
@@ -449,7 +471,7 @@ pub(crate) mod patch {
             validate_canonical_name(name)
                 .map_err(|e| CoreError::world_kb_validation_failed(&[e.to_string()], &[]))?;
         }
-        let validation_block_type = new_block_type.map_or(kb.block_type, |bt| wire_cast(bt));
+        let validation_block_type = new_block_type.map_or(kb.block_type, wire_cast);
         if let Some(ref body) = body_for_validation {
             validate_body(validation_block_type, Some(body), ValidationMode::Novel)
                 .map_err(|e| CoreError::world_kb_validation_failed(&[e.to_string()], &[]))?;
@@ -471,7 +493,7 @@ pub(crate) mod patch {
             version: new_version,
             validation_summary: wire_cast(validation_summary(&[], &[])),
         };
-        tx.commit().await.map_err(db_err)?;
+        tx.commit().await.map_err(|e| db_err(&e))?;
         Ok(response)
     }
 
@@ -511,10 +533,9 @@ pub(crate) mod patch {
         validate_canonical_name(title.as_str())
             .map_err(|e| CoreError::world_kb_validation_failed(&[e.to_string()], &[]))?;
 
-        let entity_id_conforms = req
-            .entity_id
-            .strip_prefix("kb_")
-            .is_some_and(|suffix| !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_hexdigit()));
+        let entity_id_conforms = req.entity_id.strip_prefix("kb_").is_some_and(|suffix| {
+            !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_hexdigit())
+        });
         if !entity_id_conforms {
             return Err(CoreError::world_kb_validation_failed(
                 &["entity_id must follow kb_<hex> convention".to_string()],
@@ -548,7 +569,7 @@ pub(crate) mod patch {
             version: new_version,
             validation_summary: wire_cast(validation_summary(&[], &[])),
         };
-        tx.commit().await.map_err(db_err)?;
+        tx.commit().await.map_err(|e| db_err(&e))?;
         Ok(response)
     }
 
@@ -559,7 +580,7 @@ pub(crate) mod patch {
         match get_knowledge_entry_in_tx(tx, entity_id).await {
             Ok(row) => Ok(Some(row)),
             Err(KbStoreError::NotFound(_)) => Ok(None),
-            Err(e) => Err(store_err(e)),
+            Err(e) => Err(store_err(&e)),
         }
     }
 
@@ -652,8 +673,7 @@ pub(crate) mod patch {
             _ => CoreError::Internal {
                 category: format!(
                     "put_knowledge_entry rejected: {}: {}",
-                    reject.code,
-                    reject.message
+                    reject.code, reject.message
                 ),
             },
         }
@@ -748,10 +768,12 @@ pub(crate) mod patch {
             serde_json::Value::Object(patch.body.clone())
         };
         if !patch.aliases.is_empty() {
-            let obj = value.as_object_mut().ok_or_else(|| CoreError::InvalidInput {
-                field: "body".to_string(),
-                reason: "body must be a JSON object to set aliases".to_string(),
-            })?;
+            let obj = value
+                .as_object_mut()
+                .ok_or_else(|| CoreError::InvalidInput {
+                    field: "body".to_string(),
+                    reason: "body must be a JSON object to set aliases".to_string(),
+                })?;
             let attrs = obj
                 .entry("attributes")
                 .or_insert_with(|| serde_json::json!({}));
@@ -772,8 +794,7 @@ pub(crate) mod patch {
     }
 }
 
-
-fn store_err(e: KbStoreError) -> CoreError {
+fn store_err(e: &KbStoreError) -> CoreError {
     CoreError::Internal {
         category: format!("kb_store: {e}"),
     }
@@ -790,8 +811,8 @@ fn is_sqlite_busy(err: &sqlx::Error) -> bool {
     }
 }
 
-fn db_err(e: sqlx::Error) -> CoreError {
-    if is_sqlite_busy(&e) {
+fn db_err(e: &sqlx::Error) -> CoreError {
+    if is_sqlite_busy(e) {
         CoreError::Busy
     } else if matches!(e, sqlx::Error::PoolTimedOut) {
         CoreError::OwnerBusy
@@ -804,11 +825,11 @@ fn db_err(e: sqlx::Error) -> CoreError {
 
 fn local_db_err(e: nexus_local_db::LocalDbError) -> CoreError {
     match e {
-        nexus_local_db::LocalDbError::OwnerBusy { .. } => CoreError::OwnerBusy,
+        nexus_local_db::LocalDbError::OwnerBusy { .. }
+        | nexus_local_db::LocalDbError::Sqlx(sqlx::Error::PoolTimedOut) => CoreError::OwnerBusy,
         nexus_local_db::LocalDbError::WriterFenced { .. } => CoreError::WriterFenced,
         nexus_local_db::LocalDbError::SchemaMismatch { .. } => CoreError::SchemaMismatch,
         nexus_local_db::LocalDbError::Sqlx(err) if is_sqlite_busy(&err) => CoreError::Busy,
-        nexus_local_db::LocalDbError::Sqlx(sqlx::Error::PoolTimedOut) => CoreError::OwnerBusy,
         other => CoreError::Internal {
             category: format!("database_error: {other}"),
         },

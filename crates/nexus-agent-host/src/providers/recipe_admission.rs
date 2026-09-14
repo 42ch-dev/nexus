@@ -37,23 +37,33 @@ fn resolve_executable(command: &str) -> HostResult<String> {
             "relative executable paths with separators are rejected",
         ));
     } else {
-        which::which(trimmed).ok().and_then(|found| canonicalize_executable(&found))
+        which::which(trimmed)
+            .ok()
+            .and_then(|found| canonicalize_executable(&found))
     };
     resolved
         .map(|p| p.display().to_string())
         .ok_or_else(|| HostError::policy_denied("executable is not an absolute canonical path"))
 }
 
-fn sanitize_env(env: &HashMap<String, String>) -> HashMap<String, String> {
+fn sanitize_env<S: std::hash::BuildHasher>(
+    env: &HashMap<String, String, S>,
+) -> HashMap<String, String> {
     env.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
 }
-
 /// Build the wire recipe from catalog-owned launch fields and workspace boundary.
-pub fn build_validated_recipe(
+///
+/// # Errors
+///
+/// Returns a policy-denied [`HostError`] when `workspace_root` fails
+/// [`crate::config::validate_workspace_path`] (outside the workspace boundary
+/// or unresolvable), or when `command` cannot be resolved to an absolute,
+/// canonical executable file.
+pub fn build_validated_recipe<S: std::hash::BuildHasher>(
     provider_id: &ProviderId,
     command: &str,
     args: &[String],
-    env: &HashMap<String, String>,
+    env: &HashMap<String, String, S>,
     recipe_generation: String,
     workspace_root: &Path,
 ) -> HostResult<ValidatedProviderRecipe> {
@@ -73,6 +83,12 @@ pub fn build_validated_recipe(
 }
 
 /// Reject caller-supplied recipe keys before admission injection.
+///
+/// # Errors
+///
+/// Returns a policy-denied [`HostError`] when `payload` carries a
+/// caller-supplied `recipe` key; Rust-side admission exclusively owns recipe
+/// injection.
 pub fn reject_caller_recipe_payload(
     payload: &serde_json::Map<String, serde_json::Value>,
 ) -> HostResult<()> {

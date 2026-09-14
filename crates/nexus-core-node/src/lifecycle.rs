@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use std::time::{Duration, Instant};
 
@@ -8,13 +8,15 @@ const CLOSE_CANCEL_PHASE: Duration = Duration::from_secs(2);
 use std::sync::Arc;
 
 use nexus_agent_host::capability::model::HostStartConfig;
-use nexus_agent_host::config::{agent_host_config_path, load_config_from_path, validate_workspace_path, AgentHostConfig};
+use nexus_agent_host::config::{
+    agent_host_config_path, load_config_from_path, validate_workspace_path, AgentHostConfig,
+};
 use nexus_agent_host::core::readiness::discover_provider_catalog;
 use nexus_agent_host::{HostError, HostFacade, HostManager, ProviderCatalogEntry};
 use nexus_contracts::native_open_options::NativeOpenOptionsAccess;
 use nexus_contracts::{CoreCloseReport, CoreCloseReportState, NativeOpenOptions};
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
-use nexus_home_layout::active_context::{CliConfigSnapshot, try_resolve_state_db_path};
+use nexus_home_layout::active_context::{try_resolve_state_db_path, CliConfigSnapshot};
 use nexus_home_layout::nexus_root_from_home;
 use nexus_provider_ports::ProviderPort;
 
@@ -28,26 +30,30 @@ fn open_err(err: CoreError) -> String {
 }
 
 fn validate_initialized_prerequisites(
-    user_home: &PathBuf,
+    user_home: &Path,
     access: CoreAccess,
 ) -> Result<(), CoreError> {
     let nexus_home = nexus_root_from_home(user_home);
     let cfg = CliConfigSnapshot::load(&nexus_home).map_err(|e| CoreError::Internal {
         category: format!("config_load: {e}"),
     })?;
-    let creator_id = cfg.active_creator_id.clone().ok_or(CoreError::AuthRequired)?;
+    let creator_id = cfg
+        .active_creator_id
+        .clone()
+        .ok_or(CoreError::AuthRequired)?;
     let workspace_slug = cfg.workspace_slug_for_creator(&creator_id);
     if workspace_slug.trim().is_empty() {
         return Err(CoreError::AuthRequired);
     }
-    let db_path = try_resolve_state_db_path(user_home, &nexus_home).ok_or(CoreError::Uninitialized)?;
+    let db_path =
+        try_resolve_state_db_path(user_home, &nexus_home).ok_or(CoreError::Uninitialized)?;
     if !db_path.exists() && access == CoreAccess::ReadOnly {
         return Err(CoreError::Uninitialized);
     }
     Ok(())
 }
 
-fn is_genuinely_uninitialized(user_home: &PathBuf, access: CoreAccess) -> bool {
+fn is_genuinely_uninitialized(user_home: &Path, access: CoreAccess) -> bool {
     match validate_initialized_prerequisites(user_home, access) {
         Ok(()) => false,
         Err(CoreError::Uninitialized) | Err(CoreError::AuthRequired) => true,
@@ -66,7 +72,7 @@ fn host_err(err: HostError) -> nexus_contracts::CoreError {
 }
 
 fn validate_host_admission(
-    user_home: &PathBuf,
+    user_home: &Path,
 ) -> Result<ValidatedHostAdmission, nexus_contracts::CoreError> {
     validate_workspace_path(user_home).map_err(host_err)?;
     let config_path = agent_host_config_path(user_home);
@@ -126,11 +132,11 @@ mod forcing {
         static CLEANUP_DELAY_MS: AtomicU64 = AtomicU64::new(0);
 
         pub fn set(ms: u64) {
-        CLEANUP_DELAY_MS.store(ms, Ordering::SeqCst);
-    }
+            CLEANUP_DELAY_MS.store(ms, Ordering::SeqCst);
+        }
 
         pub fn get() -> u64 {
-        CLEANUP_DELAY_MS.load(Ordering::SeqCst)
+            CLEANUP_DELAY_MS.load(Ordering::SeqCst)
         }
     }
 }
@@ -223,7 +229,11 @@ impl Drop for RestorePort {
             return;
         }
         if let Some(v) = self.value.take() {
-            let mut guard = self.state.provider_port.lock().expect("core mutex poisoned");
+            let mut guard = self
+                .state
+                .provider_port
+                .lock()
+                .expect("core mutex poisoned");
             if guard.is_none() {
                 *guard = Some(v);
             }
@@ -418,13 +428,8 @@ async fn cleanup_owners(
                 // handle to tracked cleanup; a failed join has none to retain
                 // but is still never released.
                 if bridge_evidence.thread_alive {
-                    if let Some(handle) =
-                        manager.localset_bridge().take_retained_runtime_thread()
-                    {
-                        super::cleanup_registry::register_localset_thread(
-                            handle,
-                            state.clone(),
-                        );
+                    if let Some(handle) = manager.localset_bridge().take_retained_runtime_thread() {
+                        super::cleanup_registry::register_localset_thread(handle, state.clone());
                     }
                 }
                 let mut pending = state.pending_operations_snapshot().await;
@@ -443,7 +448,11 @@ async fn cleanup_owners(
 
     let port_taken = match inject_port {
         Some(port) => Some(port),
-        None => state.provider_port.lock().expect("port mutex poisoned").take(),
+        None => state
+            .provider_port
+            .lock()
+            .expect("port mutex poisoned")
+            .take(),
     };
     let mut port_guard = RestorePort {
         value: port_taken,
@@ -623,9 +632,21 @@ pub async fn open_core(
         abort_opening(state.clone(), Some(core), Some(host), js_port.clone()).await;
         return Err(reason);
     }
-    state.host.lock().expect("host mutex poisoned").replace(host);
-    state.provider_port.lock().expect("port mutex poisoned").replace(provider_port);
-    state.core.lock().expect("core mutex poisoned").replace(core);
+    state
+        .host
+        .lock()
+        .expect("host mutex poisoned")
+        .replace(host);
+    state
+        .provider_port
+        .lock()
+        .expect("port mutex poisoned")
+        .replace(provider_port);
+    state
+        .core
+        .lock()
+        .expect("core mutex poisoned")
+        .replace(core);
     state.publish_open().await;
     Ok(())
 }
@@ -695,15 +716,13 @@ pub async fn close_core(state: Arc<EnvState>) -> CoreCloseReport {
             .await;
     }
 
-    let report = match tokio::time::timeout_at(
-        tokio::time::Instant::from_std(deadline),
-        async {
-            let drain_budget = CLOSE_CANCEL_PHASE.min(CLOSE_BUDGET.saturating_sub(started.elapsed()));
-            if !drain_budget.is_zero() {
-                tokio::time::sleep(Duration::from_millis(25).min(drain_budget)).await;
-            }
-            let (_, report) = cleanup_owners(state.clone(), None, None, None, deadline).await;
-            report
+    let report = match tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
+        let drain_budget = CLOSE_CANCEL_PHASE.min(CLOSE_BUDGET.saturating_sub(started.elapsed()));
+        if !drain_budget.is_zero() {
+            tokio::time::sleep(Duration::from_millis(25).min(drain_budget)).await;
+        }
+        let (_, report) = cleanup_owners(state.clone(), None, None, None, deadline).await;
+        report
     })
     .await
     {
@@ -773,7 +792,6 @@ mod tests {
     fn forced_unconfirmed_is_off_in_a_fresh_process() {
         assert!(!forced_unconfirmed());
     }
-
 
     #[tokio::test]
     async fn failed_host_config_open_resets_and_reopens() {
@@ -904,7 +922,7 @@ mod tests {
         seed_wire_home(dir.path()).await;
         let state = Arc::new(EnvState::new());
         set_force_cleanup_delay_ms(10_000);
-        let _core = open_core(
+        open_core(
             state.clone(),
             NativeOpenOptions {
                 user_home: dir.path().to_string_lossy().to_string(),
@@ -1094,16 +1112,34 @@ mod tests {
             "a confirmed host shutdown releases the owner"
         );
         assert!(
-            !EnvState::host_shutdown_confirmed(&Ok(Err(HostError::cleanup_unconfirmed("session retained")))),
+            !EnvState::host_shutdown_confirmed(&Ok(Err(HostError::cleanup_unconfirmed(
+                "session retained"
+            )))),
             "a typed host error must retain the owner, never report success"
         );
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn bounded_native_finalize_retains_live_localset_thread_owner() {
+    #[test]
+    fn bounded_native_finalize_retains_live_localset_thread_owner() {
         use crate::cleanup_registry;
 
+        // The registry is process-global; hold the test lock for the whole
+        // test. The guard lives on this synchronous frame, so it never spans
+        // an await point.
         let _lock = cleanup_registry::registry_test_lock();
+
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("test runtime")
+            .block_on(bounded_native_finalize_body());
+    }
+
+    /// Async body of the bounded-finalize retention test; the registry test
+    /// lock is held by its synchronous wrapper.
+    async fn bounded_native_finalize_body() {
+        use crate::cleanup_registry;
 
         let state = Arc::new(EnvState::new());
         let host = Arc::new(HostManager::new());
@@ -1116,13 +1152,15 @@ mod tests {
         let blocked = bridge.clone();
         let blocker = tokio::spawn(async move {
             let _ = blocked
-                .execute(4, || Box::pin(async {
-                    // Just past FINALIZE_BUDGET (5s): the bounded join cannot
-                    // settle inside the deadline, but the thread does exit
-                    // afterwards so tracked cleanup can join it.
-                    std::thread::sleep(Duration::from_millis(6_500));
-                    1
-                }))
+                .execute(4, || {
+                    Box::pin(async {
+                        // Just past FINALIZE_BUDGET (5s): the bounded join cannot
+                        // settle inside the deadline, but the thread does exit
+                        // afterwards so tracked cleanup can join it.
+                        std::thread::sleep(Duration::from_millis(6_500));
+                        1
+                    })
+                })
                 .await;
         });
         tokio::time::sleep(Duration::from_millis(250)).await;

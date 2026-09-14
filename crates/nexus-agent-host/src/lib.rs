@@ -274,5 +274,9 @@ pub(crate) mod test_support {
     /// surfaced as flaky `stream_closed` / missing-REQ_LOG failures. Every
     /// env-mutating test AND every python-spawning provider test takes
     /// this lock so the two groups never overlap.
-    pub static PROCESS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    ///
+    /// Async-aware (`tokio::sync::Mutex`) so tests that must keep the lock
+    /// across `.await` points do not hold a blocking guard: async tests take
+    /// it with `.lock().await`, sync `#[test]` fns with `.blocking_lock()`.
+    pub static PROCESS_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 }

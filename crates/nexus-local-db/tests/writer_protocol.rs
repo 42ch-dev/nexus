@@ -19,9 +19,11 @@ use std::time::{Duration, Instant};
 
 use nexus_local_db::writer_protocol::{
     acquire_writer_guard, open_admitted_pool, open_guarded_pool, release_retained_writer_guards,
-    run_guarded_migrations, BOOTSTRAP_CREATOR_ID, WriterMode,
+    run_guarded_migrations, WriterMode, BOOTSTRAP_CREATOR_ID,
 };
-use nexus_local_db::{ensure_creator_row, init_engine_pool, init_pool, open_pool_read_only, LocalDbError};
+use nexus_local_db::{
+    ensure_creator_row, init_engine_pool, init_pool, open_pool_read_only, LocalDbError,
+};
 use sqlx::SqlitePool;
 use tempfile::TempDir;
 
@@ -102,14 +104,22 @@ fn engine_race_round(dir: &Path, db: &Path, round: usize) {
     }
     // Both contenders have passed their own barrier before either acquires.
     for index in 0..2 {
-        wait_barrier(&dir.join(format!("r{round}_self{index}")), Duration::from_secs(30));
+        wait_barrier(
+            &dir.join(format!("r{round}_self{index}")),
+            Duration::from_secs(30),
+        );
     }
     for (child, err) in &mut children {
         reap(child, err);
     }
     let results: Vec<String> = outcomes
         .iter()
-        .map(|path| fs::read_to_string(path).expect("child outcome").trim().to_string())
+        .map(|path| {
+            fs::read_to_string(path)
+                .expect("child outcome")
+                .trim()
+                .to_string()
+        })
         .collect();
     assert_eq!(
         results.iter().filter(|outcome| *outcome == "won").count(),
@@ -199,71 +209,89 @@ async fn writer_protocol() {
     }
 
     let dir = TempDir::new().expect("tempdir");
-
-    // ── DB-4 (pre-migration fixture) ────────────────────────────────────────
-    // A connection opened BEFORE the protocol migration commits a row, keeps
-    // its handle open across activation, and must then be fenced; the row it
-    // committed before activation must survive intact.
-    {
-        let legacy_db = dir.path().join("legacy.db");
-        let url = format!("sqlite://{}?mode=rwc", legacy_db.display());
-        let legacy = SqlitePool::connect(&url).await.expect("legacy connect");
-        // Pre-migration schema bootstrap only (the workspace_meta table exists
-        // from the initial migration; run the full set, then insert).
-        run_guarded_migrations(&legacy_db)
-            .await
-            .expect("activate protocol");
-        // Row committed by a pre-activation writer on the same file: emulate by
-        // writing through a registered writer, then prove the *legacy* handle
-        // (no protocol scalar functions) is fenced.
-        let guard = acquire_writer_guard(&legacy_db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
-            .await
-            .expect("direct guard");
-        let pool = open_guarded_pool(&guard).await.expect("guarded pool");
-        sqlx::query("INSERT INTO workspace_meta (key, value) VALUES ('pre_activation', 'kept')")
-            .execute(&pool)
-            .await
-            .expect("registered write");
-        pool.close().await;
-        drop(guard);
-        assert_fenced(
-            &legacy,
-            "INSERT INTO workspace_meta (key, value) VALUES ('probe', 'x')",
-        )
-        .await;
-        legacy.close().await;
-    }
-
-    // ── main database ───────────────────────────────────────────────────────
     let db = dir.path().join("state.db");
-    {
-        let bootstrap = init_pool(&db).await.expect("init_pool");
-        bootstrap.close().await;
-    }
 
+    pre_migration_fixture_fenced(dir.path()).await;
+    bootstrap_main_database(&db).await;
+    engine_owner_races(dir.path(), &db).await;
+    distinct_direct_writers_succeed(&db).await;
+    engine_owned_table_fences_direct(&db).await;
+    outbox_mutations_bounded(&db).await;
+    newer_protocol_refused(dir.path()).await;
+    raw_writer_fenced_on_outbox(&db).await;
+    engine_ownership_fail_fast(dir.path(), &db).await;
+    legacy_reopen_still_fenced(&db).await;
+    reopen_preserves_committed_mutations(&db).await;
+    revision_bump_not_doubled(dir.path()).await;
+    init_pool_quiescence(dir.path()).await;
+    clone_pool_blocks_pending_migration(dir.path()).await;
+    retention_keeps_newest_row(dir.path()).await;
+    retention_bounds_hold_after_burst(dir.path()).await;
+    pre_activation_state_preserved(dir.path()).await;
+}
 
-    {
-        let pool = open_pool_read_only(&db).await.expect("read-only pool");
-        assert_trigger_coverage(&pool).await;
-        pool.close().await;
-    }
+/// DB-4 (pre-migration fixture): a connection opened before the protocol
+/// migration is fenced after activation.
+async fn pre_migration_fixture_fenced(dir: &Path) {
+    let legacy_db = dir.join("legacy.db");
+    let url = format!("sqlite://{}?mode=rwc", legacy_db.display());
+    let legacy = SqlitePool::connect(&url).await.expect("legacy connect");
+    // Pre-migration schema bootstrap only (the workspace_meta table exists
+    // from the initial migration; run the full set, then insert).
+    run_guarded_migrations(&legacy_db)
+        .await
+        .expect("activate protocol");
+    // Row committed by a pre-activation writer on the same file: emulate by
+    // writing through a registered writer, then prove the *legacy* handle
+    // (no protocol scalar functions) is fenced.
+    let guard = acquire_writer_guard(&legacy_db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+        .await
+        .expect("direct guard");
+    let pool = open_guarded_pool(&guard).await.expect("guarded pool");
+    sqlx::query("INSERT INTO workspace_meta (key, value) VALUES ('pre_activation', 'kept')")
+        .execute(&pool)
+        .await
+        .expect("registered write");
+    pool.close().await;
+    drop(guard);
+    assert_fenced(
+        &legacy,
+        "INSERT INTO workspace_meta (key, value) VALUES ('probe', 'x')",
+    )
+    .await;
+    legacy.close().await;
+}
 
-    // DB-1: 100 barrier-synchronised engine-owner races. Exactly one winner per
-    // round and exactly one engine-epoch advance per round (no lost/duplicated
-    // ownership), driven by two real OS processes.
+/// Bootstrap the main database once and verify trigger coverage on a fresh
+/// schema.
+async fn bootstrap_main_database(db: &Path) {
+    let bootstrap = init_pool(db).await.expect("init_pool");
+    bootstrap.close().await;
+
+    let pool = open_pool_read_only(db).await.expect("read-only pool");
+    assert_trigger_coverage(&pool).await;
+    pool.close().await;
+}
+
+/// DB-1: 100 barrier-synchronised engine-owner races. Exactly one winner per
+/// round and exactly one engine-epoch advance per round (no lost/duplicated
+/// ownership), driven by two real OS processes.
+async fn engine_owner_races(dir: &Path, db: &Path) {
     for round in 0..100 {
-        engine_race_round(dir.path(), &db, round);
-        let epoch = engine_epoch(&db).await;
+        engine_race_round(dir, db, round);
+        let epoch = engine_epoch(db).await;
         assert_eq!(
             epoch,
             i64::try_from(round).unwrap() + 1,
             "round {round}: engine epoch must advance exactly once"
         );
     }
+}
 
-    // Distinct entities: two direct writers both succeed with no engine running.
+/// Distinct entities: two direct writers both succeed with no engine running.
+async fn distinct_direct_writers_succeed(db: &Path) {
     for (key, value) in [("direct_a", "ok"), ("direct_b", "ok")] {
-        let pool = open_admitted_pool(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+        let pool = open_admitted_pool(db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
             .await
             .expect("direct pool");
         sqlx::query("INSERT INTO workspace_meta (key, value) VALUES (?, ?)")
@@ -274,376 +302,405 @@ async fn writer_protocol() {
             .expect("direct write");
         pool.close().await;
     }
+}
 
-    // ── direct vs engine authorization (engine-owned table) ───────────────
-    {
-        let direct = open_admitted_pool(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
-            .await
-            .expect("direct pool");
-        assert_fenced(
-            &direct,
-            "INSERT INTO kb_extract_jobs (job_id, creator_id, workspace_id, work_entry_id, world_id)              VALUES ('xj_direct_denied', 'ctr_test', 'wrk_test', 'entry_test', 'wld_test')",
-        )
-        .await;
-        direct.close().await;
-
-        let engine = init_engine_pool(&db).await.expect("engine pool");
-        sqlx::query(
-            "INSERT INTO kb_extract_jobs (job_id, creator_id, workspace_id, work_entry_id, world_id)              VALUES ('xj_engine_ok', 'ctr_test', 'wrk_test', 'entry_test', 'wld_test')",
-        )
-        .execute(engine.pool())
+/// Direct vs engine authorization on an engine-owned table: the direct
+/// writer is fenced, the engine owner writes successfully.
+async fn engine_owned_table_fences_direct(db: &Path) {
+    let direct = open_admitted_pool(db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
         .await
-        .expect("engine-owned write");
-        engine.pool().close().await;
-        drop(engine);
-        release_retained_writer_guards(&db);
-    }
+        .expect("direct pool");
+    assert_fenced(
+        &direct,
+        "INSERT INTO kb_extract_jobs (job_id, creator_id, workspace_id, work_entry_id, world_id)              VALUES ('xj_direct_denied', 'ctr_test', 'wrk_test', 'entry_test', 'wld_test')",
+    )
+    .await;
+    direct.close().await;
 
-    // ── §12.1 outbox via real application mutations (no engine owner) ───────
-    {
-        let pool = open_admitted_pool(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
-            .await
-            .expect("direct pool");
-        let (before_count, max_before): (i64, i64) = sqlx::query_as(
-            "SELECT COUNT(*), COALESCE(MAX(sequence), 0) FROM core_changes",
-        )
+    let engine = init_engine_pool(db).await.expect("engine pool");
+    sqlx::query(
+        "INSERT INTO kb_extract_jobs (job_id, creator_id, workspace_id, work_entry_id, world_id)              VALUES ('xj_engine_ok', 'ctr_test', 'wrk_test', 'entry_test', 'wld_test')",
+    )
+    .execute(engine.pool())
+    .await
+    .expect("engine-owned write");
+    engine.pool().close().await;
+    drop(engine);
+    release_retained_writer_guards(db);
+}
+
+/// §12.1 outbox via real application mutations (no engine owner): a
+/// rolled-back mutation emits nothing, committed mutations advance the
+/// sequence one-for-one, and bounded retention keeps the newest 4096 rows.
+async fn outbox_mutations_bounded(db: &Path) {
+    let pool = open_admitted_pool(db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+        .await
+        .expect("direct pool");
+    let (before_count, max_before): (i64, i64) =
+        sqlx::query_as("SELECT COUNT(*), COALESCE(MAX(sequence), 0) FROM core_changes")
             .fetch_one(&pool)
             .await
             .expect("baseline outbox");
 
-        let mut tx = pool.begin().await.expect("tx");
-        sqlx::query("INSERT INTO workspace_meta (key, value) VALUES ('rollback_probe', 'x')")
-            .execute(&mut *tx)
-            .await
-            .expect("tx insert");
-        tx.rollback().await.expect("rollback");
-        let (mid_count, max_mid): (i64, i64) = sqlx::query_as(
-            "SELECT COUNT(*), COALESCE(MAX(sequence), 0) FROM core_changes",
-        )
+    let mut tx = pool.begin().await.expect("tx");
+    sqlx::query("INSERT INTO workspace_meta (key, value) VALUES ('rollback_probe', 'x')")
+        .execute(&mut *tx)
+        .await
+        .expect("tx insert");
+    tx.rollback().await.expect("rollback");
+    let (mid_count, max_mid): (i64, i64) =
+        sqlx::query_as("SELECT COUNT(*), COALESCE(MAX(sequence), 0) FROM core_changes")
             .fetch_one(&pool)
             .await
             .expect("outbox after rollback");
-        assert_eq!(mid_count, before_count, "rolled-back mutation must not emit an outbox row");
-        assert_eq!(max_mid, max_before, "rolled-back mutation must not advance sequence");
+    assert_eq!(
+        mid_count, before_count,
+        "rolled-back mutation must not emit an outbox row"
+    );
+    assert_eq!(
+        max_mid, max_before,
+        "rolled-back mutation must not advance sequence"
+    );
 
-        for index in 0..4097 {
-            sqlx::query("INSERT INTO workspace_meta (key, value) VALUES (?, ?)")
-                .bind(format!("outbox_{index}"))
-                .bind("evt")
-                .execute(&pool)
-                .await
-                .expect("application mutation");
-        }
-        let (after_count, max_after, min_seq): (i64, i64, i64) = sqlx::query_as(
-            "SELECT COUNT(*), MAX(sequence), MIN(sequence) FROM core_changes",
-        )
+    for index in 0..4097 {
+        sqlx::query("INSERT INTO workspace_meta (key, value) VALUES (?, ?)")
+            .bind(format!("outbox_{index}"))
+            .bind("evt")
+            .execute(&pool)
+            .await
+            .expect("application mutation");
+    }
+    let (after_count, max_after, min_seq): (i64, i64, i64) =
+        sqlx::query_as("SELECT COUNT(*), MAX(sequence), MIN(sequence) FROM core_changes")
             .fetch_one(&pool)
             .await
             .expect("outbox after mutations");
-        assert_eq!(
-            max_after - max_before,
-            4097,
-            "one outbox event per committed mutation (sequence advances even when retention trims rows)"
-        );
-        assert_eq!(
-            after_count,
-            4096,
-            "automatic bounded retention keeps the newest 4096 rows"
-        );
-        assert!(min_seq > 1, "oldest committed events are trimmed automatically");
-        pool.close().await;
-    }
+    assert_eq!(
+        max_after - max_before,
+        4097,
+        "one outbox event per committed mutation (sequence advances even when retention trims rows)"
+    );
+    assert_eq!(
+        after_count, 4096,
+        "automatic bounded retention keeps the newest 4096 rows"
+    );
+    assert!(
+        min_seq > 1,
+        "oldest committed events are trimmed automatically"
+    );
+    pool.close().await;
+}
 
-    // Protocol newer than this binary is fail-closed (isolated DB; gate is guarded).
-    {
-        let proto_db = dir.path().join("proto_newer.db");
-        let pool = init_pool(&proto_db).await.expect("proto init");
-        pool.close().await;
-        let engine = init_engine_pool(&proto_db).await.expect("engine for gate bump");
-        sqlx::query("UPDATE core_workspace_gate SET protocol_version = 2 WHERE pk = 1")
-            .execute(engine.pool())
-            .await
-            .expect("bump protocol");
-        engine.pool().close().await;
-        drop(engine);
-        release_retained_writer_guards(&proto_db);
-        let err = init_pool(&proto_db).await.expect_err("newer protocol refused");
-        assert!(matches!(err, LocalDbError::SchemaMismatch { .. }), "got {err:?}");
-    }
-
-    // Raw (unregistered) writer is fenced on the outbox too.
-    {
-        let raw = SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db.display()))
-            .await
-            .expect("raw pool");
-        assert_fenced(&raw, "DELETE FROM core_changes WHERE sequence = 2").await;
-        raw.close().await;
-    }
-
-    // ── DB-3: engine ownership is fail-fast while an owner is live ──────────
-    {
-        let owner = acquire_writer_guard(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Engine)
-            .await
-            .expect("engine owner");
-        let started = Instant::now();
-        let err = match acquire_writer_guard(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Engine).await {
-            Ok(_) => panic!("a live engine owner must not be replaced"),
-            Err(err) => err,
-        };
-        let elapsed = started.elapsed();
-        assert!(matches!(err, LocalDbError::OwnerBusy { .. }), "got {err:?}");
-        assert!(
-            elapsed <= ACQUISITION_BOUND,
-            "engine acquisition must stay bounded, took {elapsed:?}"
-        );
-
-        // In-process double acquisition is refused: this process already owns
-        // the engine lock, and engine ownership is not a stealable lease. (The
-        // pool factories differ deliberately: a repeat request there resolves
-        // to the one live owner instead of taking a second lock, which is what
-        // lets the daemon re-open its creator DB; see the direct-writer loop
-        // above.) A refusal must not advance the epoch.
-        let epoch_with_owner = engine_epoch(&db).await;
-        let err = match acquire_writer_guard(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Engine).await {
-            Ok(_) => panic!("a second in-process engine acquisition must be refused"),
-            Err(err) => err,
-        };
-        assert!(matches!(err, LocalDbError::OwnerBusy { .. }), "got {err:?}");
-        assert_eq!(
-            engine_epoch(&db).await,
-            epoch_with_owner,
-            "a refused acquisition must not advance the engine epoch"
-        );
-
-        // Cross-process: a child cannot steal the live owner's engine either.
-        let err_path = dir.path().join("err_owner");
-        let owner_out = dir.path().join("owner_out");
-        let mut child = spawn_child(
-            "engine_solo",
-            &db,
-            &[("OUT_PATH", owner_out.to_string_lossy().to_string())],
-            &err_path,
-        );
-        reap(&mut child, &err_path);
-        assert_eq!(
-            fs::read_to_string(dir.path().join("owner_out")).expect("owner out"),
-            "busy"
-        );
-
-        // Ownership transfer across restart: once the owner is gone the next
-        // engine takes over and advances the epoch exactly once.
-        drop(owner);
-        let successor = acquire_writer_guard(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Engine)
-            .await
-            .expect("engine ownership transfers after the predecessor exits");
-        assert_eq!(
-            engine_epoch(&db).await,
-            epoch_with_owner + 1,
-            "the successor owner advances the engine epoch exactly once"
-        );
-        drop(successor);
-    }
-
-    // Reopened *raw* legacy connection is still fenced on guarded tables.
-    {
-        let legacy = SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db.display()))
-            .await
-            .expect("legacy reopen");
-        assert_fenced(
-            &legacy,
-            "UPDATE workspace_meta SET value = 'bad' WHERE key = 'direct_a'",
-        )
-        .await;
-        legacy.close().await;
-    }
-
-    // Re-open preserves committed mutations exactly once.
-    {
-        let pool = init_pool(&db).await.expect("reopen");
-        let rows: Vec<(String, String)> = sqlx::query_as(
-            "SELECT key, value FROM workspace_meta WHERE key IN ('direct_a', 'direct_b') ORDER BY key",
-        )
-        .fetch_all(&pool)
+/// A workspace whose gate claims a protocol newer than this binary is
+/// fail-closed (isolated DB; gate is guarded).
+async fn newer_protocol_refused(dir: &Path) {
+    let proto_db = dir.join("proto_newer.db");
+    let pool = init_pool(&proto_db).await.expect("proto init");
+    pool.close().await;
+    let engine = init_engine_pool(&proto_db)
         .await
-        .expect("committed rows");
-        assert_eq!(
-            rows,
-            vec![
-                ("direct_a".to_string(), "ok".to_string()),
-                ("direct_b".to_string(), "ok".to_string()),
-            ]
-        );
-        let (events,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM core_changes")
+        .expect("engine for gate bump");
+    sqlx::query("UPDATE core_workspace_gate SET protocol_version = 2 WHERE pk = 1")
+        .execute(engine.pool())
+        .await
+        .expect("bump protocol");
+    engine.pool().close().await;
+    drop(engine);
+    release_retained_writer_guards(&proto_db);
+    let err = init_pool(&proto_db)
+        .await
+        .expect_err("newer protocol refused");
+    assert!(
+        matches!(err, LocalDbError::SchemaMismatch { .. }),
+        "got {err:?}"
+    );
+}
+
+/// A raw (unregistered) writer is fenced on the outbox too.
+async fn raw_writer_fenced_on_outbox(db: &Path) {
+    let raw = SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db.display()))
+        .await
+        .expect("raw pool");
+    assert_fenced(&raw, "DELETE FROM core_changes WHERE sequence = 2").await;
+    raw.close().await;
+}
+
+/// DB-3: engine ownership is fail-fast while an owner is live. A live owner
+/// is never replaced, a refusal stays inside the acquisition bound, a
+/// refused acquisition does not advance the epoch, a child process cannot
+/// steal the lock, and the successor after the owner exits advances the
+/// epoch exactly once.
+async fn engine_ownership_fail_fast(dir: &Path, db: &Path) {
+    let owner = acquire_writer_guard(db, BOOTSTRAP_CREATOR_ID, WriterMode::Engine)
+        .await
+        .expect("engine owner");
+    let started = Instant::now();
+    let acquisition = acquire_writer_guard(db, BOOTSTRAP_CREATOR_ID, WriterMode::Engine).await;
+    let Err(err) = acquisition else {
+        panic!("a live engine owner must not be replaced");
+    };
+    let elapsed = started.elapsed();
+    assert!(matches!(err, LocalDbError::OwnerBusy { .. }), "got {err:?}");
+    assert!(
+        elapsed <= ACQUISITION_BOUND,
+        "engine acquisition must stay bounded, took {elapsed:?}"
+    );
+
+    // In-process double acquisition is refused: this process already owns
+    // the engine lock, and engine ownership is not a stealable lease. (The
+    // pool factories differ deliberately: a repeat request there resolves
+    // to the one live owner instead of taking a second lock, which is what
+    // lets the daemon re-open its creator DB; see the direct-writer loop
+    // above.) A refusal must not advance the epoch.
+    let epoch_with_owner = engine_epoch(db).await;
+    let acquisition = acquire_writer_guard(db, BOOTSTRAP_CREATOR_ID, WriterMode::Engine).await;
+    let Err(err) = acquisition else {
+        panic!("a second in-process engine acquisition must be refused");
+    };
+    assert!(matches!(err, LocalDbError::OwnerBusy { .. }), "got {err:?}");
+    assert_eq!(
+        engine_epoch(db).await,
+        epoch_with_owner,
+        "a refused acquisition must not advance the engine epoch"
+    );
+
+    // Cross-process: a child cannot steal the live owner's engine either.
+    let err_path = dir.join("err_owner");
+    let owner_out = dir.join("owner_out");
+    let mut child = spawn_child(
+        "engine_solo",
+        db,
+        &[("OUT_PATH", owner_out.to_string_lossy().to_string())],
+        &err_path,
+    );
+    reap(&mut child, &err_path);
+    assert_eq!(
+        fs::read_to_string(dir.join("owner_out")).expect("owner out"),
+        "busy"
+    );
+
+    // Ownership transfer across restart: once the owner is gone the next
+    // engine takes over and advances the epoch exactly once.
+    drop(owner);
+    let successor = acquire_writer_guard(db, BOOTSTRAP_CREATOR_ID, WriterMode::Engine)
+        .await
+        .expect("engine ownership transfers after the predecessor exits");
+    assert_eq!(
+        engine_epoch(db).await,
+        epoch_with_owner + 1,
+        "the successor owner advances the engine epoch exactly once"
+    );
+    drop(successor);
+}
+
+/// A reopened raw legacy connection is still fenced on guarded tables.
+async fn legacy_reopen_still_fenced(db: &Path) {
+    let legacy = SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db.display()))
+        .await
+        .expect("legacy reopen");
+    assert_fenced(
+        &legacy,
+        "UPDATE workspace_meta SET value = 'bad' WHERE key = 'direct_a'",
+    )
+    .await;
+    legacy.close().await;
+}
+
+/// Re-open preserves committed mutations exactly once.
+async fn reopen_preserves_committed_mutations(db: &Path) {
+    let pool = init_pool(db).await.expect("reopen");
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT key, value FROM workspace_meta WHERE key IN ('direct_a', 'direct_b') ORDER BY key",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("committed rows");
+    assert_eq!(
+        rows,
+        vec![
+            ("direct_a".to_string(), "ok".to_string()),
+            ("direct_b".to_string(), "ok".to_string()),
+        ]
+    );
+    let (events,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM core_changes")
+        .fetch_one(&pool)
+        .await
+        .expect("outbox rows");
+    assert_eq!(events, 4096, "committed events appear exactly once");
+    pool.close().await;
+}
+
+/// Revision bump: a legacy non-OCC write bumps `revision` exactly once; an
+/// explicit CAS write is not doubled by the trigger.
+async fn revision_bump_not_doubled(dir: &Path) {
+    let rev_db = dir.join("revision.db");
+    let pool = init_pool(&rev_db).await.expect("revision init");
+    ensure_creator_row(&pool, "ctr_test", "Test")
+        .await
+        .expect("creator row");
+    sqlx::query(
+        "INSERT INTO narrative_worlds (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json, created_at)              VALUES ('wld_rev', 'ws', 'ctr_test', 'Rev', 'rev', 'active', 'private', 'manual', '{}', datetime('now'))",
+    )
+    .execute(&pool)
+    .await
+    .expect("seed world");
+    sqlx::query(
+        "INSERT INTO kb_key_blocks (key_block_id, world_id, block_type, canonical_name, status, body_json, revision, created_at)              VALUES ('kb_rev_probe', 'wld_rev', 'info_point', 'probe', 'confirmed', '{}', 0, datetime('now'))",
+    )
+    .execute(&pool)
+    .await
+    .expect("seed kb row");
+    sqlx::query("UPDATE kb_key_blocks SET body_json = ?1 WHERE key_block_id = 'kb_rev_probe'")
+        .bind(r#"{"x":1}"#)
+        .execute(&pool)
+        .await
+        .expect("legacy non-OCC update");
+    let (legacy_rev,): (i64,) =
+        sqlx::query_as("SELECT revision FROM kb_key_blocks WHERE key_block_id = 'kb_rev_probe'")
             .fetch_one(&pool)
             .await
-            .expect("outbox rows");
-        assert_eq!(events, 4096, "committed events appear exactly once");
-        pool.close().await;
-    }
+            .expect("legacy revision");
+    assert_eq!(
+        legacy_rev, 1,
+        "non-OCC update must bump revision exactly once"
+    );
 
-    // ── revision bump: legacy non-OCC write bumps once; explicit CAS is not doubled ─
-    {
-        let rev_db = dir.path().join("revision.db");
-        let pool = init_pool(&rev_db).await.expect("revision init");
-        ensure_creator_row(&pool, "ctr_test", "Test")
+    sqlx::query(
+        "UPDATE kb_key_blocks SET body_json = ?1, revision = 2 WHERE key_block_id = 'kb_rev_probe' AND revision = 1",
+    )
+    .bind(r#"{"x":2}"#)
+    .execute(&pool)
+    .await
+    .expect("explicit CAS bump");
+    let (cas_rev,): (i64,) =
+        sqlx::query_as("SELECT revision FROM kb_key_blocks WHERE key_block_id = 'kb_rev_probe'")
+            .fetch_one(&pool)
             .await
-            .expect("creator row");
-        sqlx::query(
-            "INSERT INTO narrative_worlds (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json, created_at)              VALUES ('wld_rev', 'ws', 'ctr_test', 'Rev', 'rev', 'active', 'private', 'manual', '{}', datetime('now'))",
-        )
+            .expect("cas revision");
+    assert_eq!(
+        cas_rev, 2,
+        "explicit CAS revision must not be doubled by the trigger"
+    );
+    pool.close().await;
+    release_retained_writer_guards(&rev_db);
+}
+
+/// Quiescence: a no-op run must not wait for a live cooperative pool, while
+/// a genuinely pending migration must wait until it closes.
+async fn init_pool_quiescence(dir: &Path) {
+    let init_db = dir.join("init_pool_quiescence.db");
+    let pool = init_pool(&init_db).await.expect("init_pool");
+
+    // Nothing pending: the schema is current, so the guarded path has no
+    // DDL to serialize and must return without waiting for the live pool.
+    run_guarded_migrations(&init_db)
+        .await
+        .expect("a current schema must not wait for cooperative quiescence");
+
+    // A genuinely pending migration still waits for the pool to close.
+    make_migration_pending(&pool).await;
+    let migrate_db = init_db.clone();
+    let migrate = tokio::spawn(async move { run_guarded_migrations(&migrate_db).await });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        !migrate.is_finished(),
+        "migration must wait while an init_pool-returned pool remains open"
+    );
+    pool.close().await;
+    release_retained_writer_guards(&init_db);
+    migrate
+        .await
+        .expect("migrate task")
+        .expect("migration after init_pool pool closed");
+}
+
+/// A surviving `clone_pool` handle blocks a pending migration until closed.
+async fn clone_pool_blocks_pending_migration(dir: &Path) {
+    let quiet_db = dir.join("quiescence.db");
+    let guarded = init_engine_pool(&quiet_db)
+        .await
+        .expect("engine guarded pool");
+    let survivor = guarded.clone_pool();
+    drop(guarded);
+    // Pending work is what makes the wait meaningful; a no-op run fast-paths.
+    make_migration_pending(&survivor).await;
+    let migrate_db = quiet_db.clone();
+    let migrate = tokio::spawn(async move { run_guarded_migrations(&migrate_db).await });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        !migrate.is_finished(),
+        "migration must wait while a cooperative pool clone remains open"
+    );
+    survivor.close().await;
+    release_retained_writer_guards(&quiet_db);
+    migrate
+        .await
+        .expect("migrate task")
+        .expect("migration after quiescence");
+}
+
+/// Retention: the newest outbox row survives a single >8MiB event (F-9).
+async fn retention_keeps_newest_row(dir: &Path) {
+    let newest_db = dir.join("retention_newest_row.db");
+    let pool = open_admitted_pool(&newest_db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
+        .await
+        .expect("direct pool for newest-row retention");
+    let giant = "x".repeat(9 * 1024 * 1024);
+    sqlx::query("INSERT INTO workspace_meta (key, value) VALUES ('huge_outbox', ?)")
+        .bind(&giant)
         .execute(&pool)
         .await
-        .expect("seed world");
-        sqlx::query(
-            "INSERT INTO kb_key_blocks (key_block_id, world_id, block_type, canonical_name, status, body_json, revision, created_at)              VALUES ('kb_rev_probe', 'wld_rev', 'info_point', 'probe', 'confirmed', '{}', 0, datetime('now'))",
-        )
-        .execute(&pool)
-        .await
-        .expect("seed kb row");
-        sqlx::query("UPDATE kb_key_blocks SET body_json = ?1 WHERE key_block_id = 'kb_rev_probe'")
-            .bind(r#"{"x":1}"#)
-            .execute(&pool)
-            .await
-            .expect("legacy non-OCC update");
-        let (legacy_rev,): (i64,) =
-            sqlx::query_as("SELECT revision FROM kb_key_blocks WHERE key_block_id = 'kb_rev_probe'")
-                .fetch_one(&pool)
-                .await
-                .expect("legacy revision");
-        assert_eq!(legacy_rev, 1, "non-OCC update must bump revision exactly once");
-
-        sqlx::query(
-            "UPDATE kb_key_blocks SET body_json = ?1, revision = 2 WHERE key_block_id = 'kb_rev_probe' AND revision = 1",
-        )
-        .bind(r#"{"x":2}"#)
-        .execute(&pool)
-        .await
-        .expect("explicit CAS bump");
-        let (cas_rev,): (i64,) =
-            sqlx::query_as("SELECT revision FROM kb_key_blocks WHERE key_block_id = 'kb_rev_probe'")
-                .fetch_one(&pool)
-                .await
-                .expect("cas revision");
-        assert_eq!(cas_rev, 2, "explicit CAS revision must not be doubled by the trigger");
-        pool.close().await;
-        release_retained_writer_guards(&rev_db);
-    }
-
-    // ── quiescence: a no-op run must not wait, a pending one must ────────────
-    {
-        let init_db = dir.path().join("init_pool_quiescence.db");
-        let pool = init_pool(&init_db).await.expect("init_pool");
-
-        // Nothing pending: the schema is current, so the guarded path has no
-        // DDL to serialize and must return without waiting for the live pool.
-        run_guarded_migrations(&init_db)
-            .await
-            .expect("a current schema must not wait for cooperative quiescence");
-
-        // A genuinely pending migration still waits for the pool to close.
-        make_migration_pending(&pool).await;
-        let migrate_db = init_db.clone();
-        let migrate = tokio::spawn(async move {
-            run_guarded_migrations(&migrate_db).await
-        });
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        assert!(
-            !migrate.is_finished(),
-            "migration must wait while an init_pool-returned pool remains open"
-        );
-        pool.close().await;
-        release_retained_writer_guards(&init_db);
-        migrate
-            .await
-            .expect("migrate task")
-            .expect("migration after init_pool pool closed");
-    }
-
-    // ── cooperative quiescence: surviving clone_pool blocks migration ─────────
-    {
-        let quiet_db = dir.path().join("quiescence.db");
-        let guarded = init_engine_pool(&quiet_db).await.expect("engine guarded pool");
-        let survivor = guarded.clone_pool();
-        drop(guarded);
-        // Pending work is what makes the wait meaningful; a no-op run fast-paths.
-        make_migration_pending(&survivor).await;
-        let migrate_db = quiet_db.clone();
-        let migrate = tokio::spawn(async move {
-            run_guarded_migrations(&migrate_db).await
-        });
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        assert!(
-            !migrate.is_finished(),
-            "migration must wait while a cooperative pool clone remains open"
-        );
-        survivor.close().await;
-        release_retained_writer_guards(&quiet_db);
-        migrate.await.expect("migrate task").expect("migration after quiescence");
-    }
-
-    // ── retention: newest outbox row survives a single >8MiB event (F-9) ────────
-    {
-        let newest_db = dir.path().join("retention_newest_row.db");
-        let pool = open_admitted_pool(&newest_db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
-            .await
-            .expect("direct pool for newest-row retention");
-        let giant = "x".repeat(9 * 1024 * 1024);
-        sqlx::query("INSERT INTO workspace_meta (key, value) VALUES ('huge_outbox', ?)")
-            .bind(&giant)
-            .execute(&pool)
-            .await
-            .expect("single large mutation");
-        let (count, max_seq): (i64, i64) = sqlx::query_as(
-            "SELECT COUNT(*), COALESCE(MAX(sequence), 0) FROM core_changes",
-        )
+        .expect("single large mutation");
+    let (count, max_seq): (i64, i64) =
+        sqlx::query_as("SELECT COUNT(*), COALESCE(MAX(sequence), 0) FROM core_changes")
             .fetch_one(&pool)
             .await
             .expect("outbox after huge insert");
-        assert_eq!(count, 1, "newest row must survive byte-budget retention");
-        assert!(max_seq >= 1, "sequence must advance for the inserted row");
-        pool.close().await;
-        release_retained_writer_guards(&newest_db);
-    }
+    assert_eq!(count, 1, "newest row must survive byte-budget retention");
+    assert!(max_seq >= 1, "sequence must advance for the inserted row");
+    pool.close().await;
+    release_retained_writer_guards(&newest_db);
+}
 
-    // ── retention burst: row and byte bounds hold after rapid inserts ───────────
-    {
-        let burst_db = dir.path().join("retention_burst.db");
-        let pool = init_pool(&burst_db).await.expect("burst init");
-        for index in 0..5000 {
-            let payload = "x".repeat(2048);
-            sqlx::query("INSERT INTO workspace_meta (key, value) VALUES (?, ?)")
-                .bind(format!("burst_{index}"))
-                .bind(payload)
-                .execute(&pool)
-                .await
-                .expect("burst insert");
-        }
-        let (count, bytes): (i64, i64) = sqlx::query_as(
-            "SELECT COUNT(*), COALESCE(SUM(length(world_id) + length(resource_kind) + length(resource_id)              + COALESCE(length(resource_revision), 0) + length(change_kind) + length(writer_id)), 0)              FROM core_changes",
-        )
+/// Retention burst: row and byte bounds hold after rapid inserts.
+async fn retention_bounds_hold_after_burst(dir: &Path) {
+    let burst_db = dir.join("retention_burst.db");
+    let pool = init_pool(&burst_db).await.expect("burst init");
+    for index in 0..5000 {
+        let payload = "x".repeat(2048);
+        sqlx::query("INSERT INTO workspace_meta (key, value) VALUES (?, ?)")
+            .bind(format!("burst_{index}"))
+            .bind(payload)
+            .execute(&pool)
+            .await
+            .expect("burst insert");
+    }
+    let (count, bytes): (i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*), COALESCE(SUM(length(world_id) + length(resource_kind) + length(resource_id)              + COALESCE(length(resource_revision), 0) + length(change_kind) + length(writer_id)), 0)              FROM core_changes",
+    )
+        .fetch_one(&pool)
+        .await
+        .expect("outbox bounds");
+    assert!(count <= 4096, "row retention bound: got {count}");
+    assert!(bytes <= 8_388_608, "byte retention bound: got {bytes}");
+    pool.close().await;
+    release_retained_writer_guards(&burst_db);
+}
+
+/// The pre-activation row committed on the fixture database survived the
+/// whole suite.
+async fn pre_activation_state_preserved(dir: &Path) {
+    let legacy_db = dir.join("legacy.db");
+    let pool = open_pool_read_only(&legacy_db)
+        .await
+        .expect("fixture read-only");
+    let row: (String,) =
+        sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'pre_activation'")
             .fetch_one(&pool)
             .await
-            .expect("outbox bounds");
-        assert!(count <= 4096, "row retention bound: got {count}");
-        assert!(bytes <= 8_388_608, "byte retention bound: got {bytes}");
-        pool.close().await;
-        release_retained_writer_guards(&burst_db);
-    }
-
-    // ── preserved pre-activation state on the fixture database ──────────────
-    {
-        let legacy_db = dir.path().join("legacy.db");
-        let pool = open_pool_read_only(&legacy_db)
-            .await
-            .expect("fixture read-only");
-        let row: (String,) =
-            sqlx::query_as("SELECT value FROM workspace_meta WHERE key = 'pre_activation'")
-                .fetch_one(&pool)
-                .await
-                .expect("pre-activation row survives");
-        assert_eq!(row.0, "kept");
-        pool.close().await;
-    }
+            .expect("pre-activation row survives");
+    assert_eq!(row.0, "kept");
+    pool.close().await;
 }
 
 /// Force a genuinely pending migration by dropping the newest applied
@@ -718,30 +775,28 @@ async fn child_main() {
             let out = PathBuf::from(std::env::var("OUT_PATH").expect("out"));
             barrier(&self_barrier);
             wait_barrier(&peer_barrier, Duration::from_secs(30));
-            let outcome = match acquire_writer_guard(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Engine)
-                .await
-            {
-                Ok(guard) => {
-                    // Hold ownership across the peer's attempt so the loser
-                    // observes a live owner rather than a released lock.
-                    std::thread::sleep(Duration::from_millis(50));
-                    drop(guard);
-                    "won"
-                }
-                Err(LocalDbError::OwnerBusy { .. }) => "busy",
-                Err(err) => panic!("unexpected child error: {err}"),
-            };
+            let outcome =
+                match acquire_writer_guard(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Engine).await {
+                    Ok(guard) => {
+                        // Hold ownership across the peer's attempt so the loser
+                        // observes a live owner rather than a released lock.
+                        std::thread::sleep(Duration::from_millis(50));
+                        drop(guard);
+                        "won"
+                    }
+                    Err(LocalDbError::OwnerBusy { .. }) => "busy",
+                    Err(err) => panic!("unexpected child error: {err}"),
+                };
             fs::write(&out, outcome).expect("write outcome");
         }
         "engine_solo" => {
             let out = PathBuf::from(std::env::var("OUT_PATH").expect("out"));
-            let outcome = match acquire_writer_guard(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Engine)
-                .await
-            {
-                Ok(_) => "won",
-                Err(LocalDbError::OwnerBusy { .. }) => "busy",
-                Err(err) => panic!("unexpected child error: {err}"),
-            };
+            let outcome =
+                match acquire_writer_guard(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Engine).await {
+                    Ok(_) => "won",
+                    Err(LocalDbError::OwnerBusy { .. }) => "busy",
+                    Err(err) => panic!("unexpected child error: {err}"),
+                };
             fs::write(out, outcome).expect("write owner outcome");
         }
         other => panic!("unknown child mode {other}"),

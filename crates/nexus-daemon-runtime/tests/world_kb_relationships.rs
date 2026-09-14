@@ -1424,13 +1424,12 @@ async fn update_preserves_unknown_extensions_nexus_keys() {
         .execute(state.pool().unwrap())
         .await
         .unwrap();
-    let (pre_update_revision,): (i64,) = sqlx::query_as(
-        "SELECT revision FROM kb_relationships WHERE relationship_id = ?",
-    )
-    .bind(&rel_id)
-    .fetch_one(state.pool().unwrap())
-    .await
-    .unwrap();
+    let (pre_update_revision,): (i64,) =
+        sqlx::query_as("SELECT revision FROM kb_relationships WHERE relationship_id = ?")
+            .bind(&rel_id)
+            .fetch_one(state.pool().unwrap())
+            .await
+            .unwrap();
 
     // Update: change only `relation_type`. Unknown keys must survive.
     let req = WorldKbPatchRelationshipRequest {

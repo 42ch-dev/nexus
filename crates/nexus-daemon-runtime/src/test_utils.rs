@@ -74,17 +74,14 @@ pub async fn create_test_workspace() -> (TestTempRoot, PathBuf, PathBuf) {
     let db_path =
         nexus_home_layout::workspace_state_db_path(user_home, TEST_CREATOR_ID, TEST_WORKSPACE_SLUG);
 
-    // Initialize schema via nexus_local_db
-    let pool = nexus_local_db::open_pool(&db_path)
+    // Admitted engine-owner fixture: same admission path the daemon uses in
+    // production (`init_engine_pool` migrates and seeds versions), so the
+    // writer-protocol guards admit the test's writes. The engine guard is
+    // released so each consumer open re-acquires cleanly.
+    let guarded = nexus_local_db::init_engine_pool(&db_path)
         .await
         .expect("failed to open database");
-    nexus_local_db::run_migrations(&pool)
-        .await
-        .expect("failed to run migrations");
-    nexus_local_db::seed_versions(&pool)
-        .await
-        .expect("failed to seed versions");
-    pool.close().await;
+    guarded.pool().close().await;
     nexus_local_db::writer_protocol::release_retained_writer_guards(&db_path);
 
     (tmp, nexus_home, db_path)
@@ -103,9 +100,10 @@ pub async fn create_initialized_test_workspace() -> (TestTempRoot, PathBuf, Path
     std::fs::create_dir_all(&workspace_dir).expect("failed to create workspace dir");
 
     // Seed workspace_meta so middleware recognizes the workspace as initialized
-    let pool = nexus_local_db::open_pool(&db_path)
+    let pool = nexus_local_db::init_engine_pool(&db_path)
         .await
-        .expect("failed to open database");
+        .expect("failed to open database")
+        .clone_pool();
     // SAFETY: test-only — DML helper that seeds workspace_meta for test setup.
     sqlx::query(
         "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('active_manifest_id', 'manifest-test-1')",

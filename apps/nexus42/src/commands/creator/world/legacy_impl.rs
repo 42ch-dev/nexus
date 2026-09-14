@@ -219,7 +219,11 @@ fn slug_from_title(title: &str) -> String {
         .to_string()
 }
 
-/// Open a DB pool for the active workspace.
+/// Open a DB pool for the active workspace (initializing the schema).
+///
+/// # Errors
+/// Returns [`CliError`] when the state DB path cannot be resolved from the
+/// config or schema initialization fails.
 pub async fn open_workspace_pool(config: &CliConfig) -> Result<sqlx::SqlitePool> {
     let db_path = crate::config::resolve_state_db_path(config)?;
     let pool = crate::db::Schema::init(&db_path).await?;
@@ -227,6 +231,10 @@ pub async fn open_workspace_pool(config: &CliConfig) -> Result<sqlx::SqlitePool>
 }
 
 /// Get the active creator ID or error.
+///
+/// # Errors
+/// Returns [`CliError::CreatorNotSelected`] when no creator is active in the
+/// config.
 pub fn active_creator_id(config: &CliConfig) -> Result<String> {
     config
         .active_creator_id

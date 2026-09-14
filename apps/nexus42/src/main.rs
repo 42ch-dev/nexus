@@ -54,9 +54,10 @@ fn main() {
         // - All other errors:                   exit 1
         let code = if matches!(e, nexus42::errors::CliError::Locked { .. }) {
             75
-        } else if matches!(e, nexus42::errors::CliError::LockIo(_)) {
-            78
-        } else if matches!(e, nexus42::errors::CliError::Config(_)) {
+        } else if matches!(
+            e,
+            nexus42::errors::CliError::LockIo(_) | nexus42::errors::CliError::Config(_)
+        ) {
             78
         } else if matches!(
             e,

@@ -9,8 +9,8 @@
 
 use std::path::Path;
 
+use nexus_local_db::work_chapters;
 use nexus_local_db::works::{self, WorkRecord};
-use nexus_local_db::{run_migrations, work_chapters};
 use nexus_orchestration::auto_chronology::{
     advance_manual, outline_path, run_one_tick, AdvanceOutcome, SkipReason,
 };
@@ -23,8 +23,10 @@ async fn fresh_pool() -> sqlx::SqlitePool {
         .unwrap();
     let db_path = db.path().to_path_buf();
     std::mem::forget(db);
-    let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
-    run_migrations(&pool).await.unwrap();
+    let pool = nexus_local_db::init_engine_pool(&db_path)
+        .await
+        .unwrap()
+        .clone_pool();
     pool
 }
 

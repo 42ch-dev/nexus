@@ -21,6 +21,13 @@ pub struct CliConfigSnapshot {
 
 impl CliConfigSnapshot {
     /// Load from `config.toml` with automatic migration from legacy `config.json`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when reading `config.toml` or the legacy `config.json`
+    /// fails, when `config.toml` contains invalid TOML, or when migrating a
+    /// valid `config.json` fails to write `config.toml` or rename the legacy
+    /// file to `config.json.migrated`. Missing config files are not errors.
     pub fn load(nexus_root: &Path) -> Result<Self, anyhow::Error> {
         let toml_path = nexus_root.join("config.toml");
         let json_path = nexus_root.join("config.json");
@@ -65,7 +72,15 @@ impl CliConfigSnapshot {
 }
 
 /// Resolve workspace `state.db` under ADR-014.
-pub fn resolve_state_db_path(user_home: &Path, nexus_root: &Path) -> Result<PathBuf, anyhow::Error> {
+///
+/// # Errors
+///
+/// Returns an error when loading the CLI config fails (see
+/// [`CliConfigSnapshot::load`]) or when no active creator is configured.
+pub fn resolve_state_db_path(
+    user_home: &Path,
+    nexus_root: &Path,
+) -> Result<PathBuf, anyhow::Error> {
     let cfg = CliConfigSnapshot::load(nexus_root)?;
     let cid = cfg.active_creator_id.as_deref().ok_or_else(|| {
         anyhow::anyhow!(

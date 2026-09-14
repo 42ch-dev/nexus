@@ -27,7 +27,7 @@ pub struct JournaledOperation {
     pub sequence: i64,
 }
 
-fn db_err(e: sqlx::Error) -> LocalDbError {
+const fn db_err(e: sqlx::Error) -> LocalDbError {
     LocalDbError::Sqlx(e)
 }
 
@@ -87,15 +87,15 @@ pub async fn get_operation(
     .fetch_optional(pool)
     .await
     .map_err(db_err)?;
-    Ok(row.map(|(operation_id, session_id, provider_id, status, sequence)| {
-        JournaledOperation {
+    Ok(row.map(
+        |(operation_id, session_id, provider_id, status, sequence)| JournaledOperation {
             operation_id,
             session_id,
             provider_id,
             status,
             sequence,
-        }
-    }))
+        },
+    ))
 }
 
 /// List journaled operations, newest first, bounded by `limit`.
@@ -117,15 +117,15 @@ pub async fn list_operations(
     .map_err(db_err)?;
     Ok(rows
         .into_iter()
-        .map(|(operation_id, session_id, provider_id, status, sequence)| {
-            JournaledOperation {
+        .map(
+            |(operation_id, session_id, provider_id, status, sequence)| JournaledOperation {
                 operation_id,
                 session_id,
                 provider_id,
                 status,
                 sequence,
-            }
-        })
+            },
+        )
         .collect())
 }
 
@@ -148,15 +148,15 @@ pub async fn list_session_operations(
     .map_err(db_err)?;
     Ok(rows
         .into_iter()
-        .map(|(operation_id, session_id, provider_id, status, sequence)| {
-            JournaledOperation {
+        .map(
+            |(operation_id, session_id, provider_id, status, sequence)| JournaledOperation {
                 operation_id,
                 session_id,
                 provider_id,
                 status,
                 sequence,
-            }
-        })
+            },
+        )
         .collect())
 }
 
@@ -277,13 +277,16 @@ mod tests {
             .unwrap();
         }
         let all = list_operations(&pool, i64::MAX).await.unwrap();
-        assert_eq!(all.len() as i64, MAX_JOURNAL_ENTRIES, "retention must be bounded");
+        let retained = i64::try_from(all.len()).expect("journal length within i64");
+        assert_eq!(retained, MAX_JOURNAL_ENTRIES, "retention must be bounded");
         // The newest survive; the oldest are pruned.
         assert!(get_operation(&pool, "op-0").await.unwrap().is_none());
-        assert!(get_operation(&pool, &format!("op-{}", MAX_JOURNAL_ENTRIES + 9))
-            .await
-            .unwrap()
-            .is_some());
+        assert!(
+            get_operation(&pool, &format!("op-{}", MAX_JOURNAL_ENTRIES + 9))
+                .await
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[tokio::test]
@@ -301,7 +304,10 @@ mod tests {
         forget_session(&pool, "sess-3").await.unwrap();
         assert!(get_operation(&pool, "op-3").await.unwrap().is_none());
         assert!(get_operation(&pool, "op-4").await.unwrap().is_none());
-        assert!(list_session_operations(&pool, "sess-3").await.unwrap().is_empty());
+        assert!(list_session_operations(&pool, "sess-3")
+            .await
+            .unwrap()
+            .is_empty());
         // Another session's row is untouched.
         assert!(get_operation(&pool, "op-5").await.unwrap().is_some());
     }
@@ -330,9 +336,15 @@ mod tests {
         )
         .execute(&direct)
         .await;
-        assert!(raw.is_err(), "a Direct writer must be fenced for engine-owned journal state");
+        assert!(
+            raw.is_err(),
+            "a Direct writer must be fenced for engine-owned journal state"
+        );
         let msg = format!("{}", raw.unwrap_err());
-        assert!(msg.contains("WRITER_FENCED"), "expected WRITER_FENCED, got: {msg}");
+        assert!(
+            msg.contains("WRITER_FENCED"),
+            "expected WRITER_FENCED, got: {msg}"
+        );
     }
 
     /// A durable `cancelled` is terminal: a late `running` upsert must not
@@ -348,7 +360,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            get_operation(&pool, "op-cancel").await.unwrap().unwrap().status,
+            get_operation(&pool, "op-cancel")
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
             "cancelled",
             "a late running upsert must not downgrade a cancelled operation"
         );
@@ -359,14 +375,21 @@ mod tests {
         let affected = settle_orphaned_as_interrupted(&pool).await.unwrap();
         assert_eq!(affected, 1, "only the genuinely running op is settled");
         assert_eq!(
-            get_operation(&pool, "op-cancel").await.unwrap().unwrap().status,
+            get_operation(&pool, "op-cancel")
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
             "cancelled",
             "settle_orphaned must not rewrite a cancelled operation"
         );
         assert_eq!(
-            get_operation(&pool, "op-run").await.unwrap().unwrap().status,
+            get_operation(&pool, "op-run")
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
             "interrupted"
         );
     }
 }
-

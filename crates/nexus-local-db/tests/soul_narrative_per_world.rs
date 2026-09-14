@@ -8,7 +8,7 @@
 
 #![allow(clippy::unwrap_used)]
 
-use nexus_local_db::{memory_fragment, init_pool, soul_narrative_fragment_stats};
+use nexus_local_db::{init_pool, memory_fragment, soul_narrative_fragment_stats};
 
 /// Create the pre-V1.81 `memory_soul_narratives` table (as created by migration
 /// 20260701) and seed one Creator-level narrative row. Running the full

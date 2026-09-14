@@ -172,8 +172,12 @@ pub fn adapter_from_catalog_entry(
 
     match entry.protocol_kind {
         ProtocolKind::Acp => {
-            let provider =
-                acp::AcpProvider::from_config(provider_config, timeouts, permission_resolver, localset_bridge)?;
+            let provider = acp::AcpProvider::from_config(
+                provider_config,
+                timeouts,
+                permission_resolver,
+                localset_bridge,
+            )?;
             Ok(Arc::new(provider))
         }
         ProtocolKind::NativeCli => match entry.provider_id.0.as_str() {

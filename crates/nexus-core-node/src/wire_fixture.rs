@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use nexus_local_db::writer_protocol::{GuardedPoolOptions, init_engine_pool};
+use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
 use sqlx::SqlitePool;
 
 const CREATOR: &str = "test_creator";
@@ -51,7 +51,13 @@ async fn seed_kb(
     .expect("seed kb");
 }
 
-async fn seed_pending(pool: &SqlitePool, job_id: &str, world_id: &str, name: &str, created_at: &str) {
+async fn seed_pending(
+    pool: &SqlitePool,
+    job_id: &str,
+    world_id: &str,
+    name: &str,
+    created_at: &str,
+) {
     sqlx::query(
         "INSERT INTO kb_extract_jobs (job_id, creator_id, workspace_id, work_entry_id, world_id, status, promotion_status, proposed_payload, block_type_guess, canonical_name_guess, version, created_at) VALUES (?, ?, 'ws', ?, ?, 'done', 'pending', '{}', 'character', ?, 0, ?)",
     )
@@ -87,7 +93,21 @@ pub async fn seed_wire_home(user_home: &Path) {
     seed_world(&pool, FOREIGN_WORLD, "other_creator").await;
     seed_kb(&pool, "kb_mod", OWNED_WORLD, "Mod", "confirmed", Some(0)).await;
     seed_kb(&pool, "kb_cas", OWNED_WORLD, "Cas", "confirmed", Some(2)).await;
-    seed_pending(&pool, "xj_job1", OWNED_WORLD, "Cand1", "2020-01-01T00:00:01Z").await;
-    seed_pending(&pool, "xj_job2", OWNED_WORLD, "Cand2", "2020-01-01T00:00:02Z").await;
+    seed_pending(
+        &pool,
+        "xj_job1",
+        OWNED_WORLD,
+        "Cand1",
+        "2020-01-01T00:00:01Z",
+    )
+    .await;
+    seed_pending(
+        &pool,
+        "xj_job2",
+        OWNED_WORLD,
+        "Cand2",
+        "2020-01-01T00:00:02Z",
+    )
+    .await;
     pool.close().await;
 }

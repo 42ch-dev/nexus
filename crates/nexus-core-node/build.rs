@@ -22,7 +22,12 @@ fn collect_schema_files(dir: &Path, base: &Path, out: &mut Vec<(String, Vec<u8>)
         if path.extension().and_then(|s| s.to_str()) != Some("json") {
             continue;
         }
-        if !path.file_name().and_then(|n| n.to_str()).unwrap_or("").ends_with(".schema.json") {
+        if !path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .ends_with(".schema.json")
+        {
             continue;
         }
         let rel = path

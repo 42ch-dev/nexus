@@ -1,8 +1,8 @@
 //! Nexus CLI Configuration
 
-use crate::domain::DomainRuntimeMode;
 #[cfg(feature = "legacy-cli")]
 use crate::domain::DegradationSnapshot;
+use crate::domain::DomainRuntimeMode;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

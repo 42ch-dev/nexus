@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import net from 'node:net';
 import tls from 'node:tls';
+import https from 'node:https';
 import { describe, test, before, after } from 'node:test';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -102,20 +103,29 @@ function seedHome(extraEnv = {}, extraProviders = '') {
   return { home, log };
 }
 
-async function jsonFetch(url, { method = 'GET', headers = {}, body, rejectUnauthorized = true } = {}) {
-  const prev = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-  if (!rejectUnauthorized) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-  try {
+async function jsonFetch(url, { method = 'GET', headers = {}, body, ca } = {}) {
+  if (ca === undefined) {
     const response = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
     const text = await response.text();
     const payload = text.length > 0 ? JSON.parse(text) : null;
     return { status: response.status, headers: response.headers, payload, text };
-  } finally {
-    if (!rejectUnauthorized) {
-      if (prev === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-      else process.env.NODE_TLS_REJECT_UNAUTHORIZED = prev;
-    }
   }
+  // HTTPS against the test's own generated certificate: full certificate and
+  // hostname validation, scoped to this trust anchor — no process-wide bypass.
+  return new Promise((resolveFetch, rejectFetch) => {
+    const request = https.request(url, { method, headers, ca, rejectUnauthorized: true }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        const payload = text.length > 0 ? JSON.parse(text) : null;
+        resolveFetch({ status: res.statusCode, headers: res.headers, payload, text });
+      });
+    });
+    request.on('error', rejectFetch);
+    if (body !== undefined) request.write(JSON.stringify(body));
+    request.end();
+  });
 }
 
 function parseSseChunks(raw) {
@@ -263,10 +273,10 @@ describe('security-stream (P4-T2)', () => {
       const tlsDir = mkdtempSync(join(tmpdir(), 'nexus-tls-'));
       const cert = join(tlsDir, 'cert.pem');
       const key = join(tlsDir, 'key.pem');
-      execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '1', '-subj', '/CN=localhost']);
+      execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '1', '-subj', '/CN=localhost', '-addext', 'subjectAltName=IP:127.0.0.1']);
       const tlsService = await startProviderService(tlsHome.home, 0, 'stream-secret', { cert, key });
       try {
-        const tlsDenied = await jsonFetch(`${tlsService.url}/v1/daemon/agent-host/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { provider_id: 'mock-acp' }, rejectUnauthorized: false });
+        const tlsDenied = await jsonFetch(`${tlsService.url}/v1/daemon/agent-host/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { provider_id: 'mock-acp' }, ca: readFileSync(cert, 'utf8') });
         assert.equal(tlsDenied.status, 401);
       } finally { await closeServiceBounded(tlsService); }
       assert.ok(readFixtureLog(deniedHome.log).some((e) => e.event === 'session_new'));
@@ -639,7 +649,7 @@ describe('security-stream (P4-T2)', () => {
 
   test('late OpFinished after an accepted cancel never reaches the stream or its replay', async () => {
     const { ProviderRegistry } = await import(join(serviceRoot, 'dist/provider-registry.js'));
-    const { OperationEventHub, ingestEvents, streamSessionEvents } = await import(join(serviceRoot, 'dist/sse.js'));
+    const { ingestEvents, streamSessionEvents } = await import(join(serviceRoot, 'dist/sse.js'));
     const sessionId = '00000000-0000-4000-8000-000000000201';
     const operationId = '00000000-0000-4000-8000-000000000202';
     const lateOpFinished = { OpFinished: { session_id: sessionId, op_id: operationId, reason: 'end_turn' } };
@@ -1016,7 +1026,7 @@ describe('security-stream (P4-T2)', () => {
     // The dedicated control pool still permits a terminal after a full data pool.
     const hub2 = new OperationEventHub('00000000-0000-4000-8000-000000000072', '00000000-0000-4000-8000-000000000073');
     const terminal = hub2.recordEvent({ OpFinished: { session_id: hub2.sessionId, op_id: 'o', reason: 'end_turn' } });
-    assert.ok(terminal && terminal.isTerminal, 'terminal must be retained despite a full data pool');
+    assert.ok(terminal?.isTerminal, 'terminal must be retained despite a full data pool');
     hub.dispose();
     hub2.dispose();
     budget.resetEnvironmentBudgetForTests();
@@ -1033,7 +1043,7 @@ describe('security-stream (P4-T2)', () => {
       const hub = new OperationEventHub(`00000000-0000-4000-8000-${String(i).padStart(12, '0')}`, `00000000-0000-4000-8000-${String(1000 + i).padStart(12, '0')}`);
       for (let j = 0; j < 70; j += 1) {
         const f = hub.recordEvent({ Progress: { message: 'y'.repeat(3072) } });
-        if (f && f.event === 'gap') break;
+        if (f?.event === 'gap') break;
       }
       hubs.push(hub);
       const dataHeld = hubs.reduce((sum, h) => sum + h.chargedBytes(), 0);

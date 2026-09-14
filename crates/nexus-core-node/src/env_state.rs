@@ -265,7 +265,6 @@ impl JsProviderState {
         self.sessions.get(session_id)
     }
 
-    #[must_use]
     pub fn sessions(&self) -> impl Iterator<Item = &JsSessionRecord> {
         self.sessions.values()
     }
@@ -671,11 +670,13 @@ impl EnvState {
     }
 
     pub fn mark_service_only_uninitialized(&self) {
-        self.service_only_uninitialized.store(true, Ordering::SeqCst);
+        self.service_only_uninitialized
+            .store(true, Ordering::SeqCst);
     }
 
     pub fn clear_service_only_uninitialized(&self) {
-        self.service_only_uninitialized.store(false, Ordering::SeqCst);
+        self.service_only_uninitialized
+            .store(false, Ordering::SeqCst);
     }
 
     /// A host cleanup is only ever confirmed by a successful `HostResult`.
@@ -701,7 +702,7 @@ impl EnvState {
         bridge_settled && host_confirmed
     }
 
-/// NAPI8 environment cleanup: tombstone and run bounded native-only teardown.
+    /// NAPI8 environment cleanup: tombstone and run bounded native-only teardown.
     pub fn run_bounded_native_finalize(state: Arc<EnvState>) {
         state.tombstone_env();
         let deadline = std::time::Instant::now() + FINALIZE_BUDGET;
@@ -762,18 +763,17 @@ impl EnvState {
                                 // authoritative, and it only counts once the
                                 // bridge itself settled: a panicked or still-live
                                 // LocalSet thread is never a clean cleanup.
-                                let host_confirmed = if bridge_evidence.is_settled()
-                                    && !budget().is_zero()
-                                {
-                                    let result = tokio::time::timeout_at(
-                                        tokio::time::Instant::from_std(deadline),
-                                        host.shutdown(),
-                                    )
-                                    .await;
-                                    Self::host_shutdown_confirmed(&result)
-                                } else {
-                                    false
-                                };
+                                let host_confirmed =
+                                    if bridge_evidence.is_settled() && !budget().is_zero() {
+                                        let result = tokio::time::timeout_at(
+                                            tokio::time::Instant::from_std(deadline),
+                                            host.shutdown(),
+                                        )
+                                        .await;
+                                        Self::host_shutdown_confirmed(&result)
+                                    } else {
+                                        false
+                                    };
                                 if Self::finalize_owner_released(
                                     bridge_evidence.is_settled(),
                                     host_confirmed,
@@ -902,7 +902,8 @@ mod tests {
     async fn wait_closed(mut rx: tokio::sync::watch::Receiver<bool>) -> bool {
         // Bind the result before returning: a tail expression's temporaries are
         // dropped after the locals they borrow.
-        let waited = tokio::time::timeout(Duration::from_secs(5), rx.wait_for(|closed| *closed)).await;
+        let waited =
+            tokio::time::timeout(Duration::from_secs(5), rx.wait_for(|closed| *closed)).await;
         waited.is_ok()
     }
 
@@ -924,11 +925,8 @@ mod tests {
         // Contrast: a `Notify` waiter registered after the notify never fires.
         // This is the exact lost-wake the versioned signal replaces, and it shows
         // the assertion above is meaningful rather than trivially true.
-        let notify_waiter = tokio::time::timeout(
-            Duration::from_millis(250),
-            state.close_notify.notified(),
-        )
-        .await;
+        let notify_waiter =
+            tokio::time::timeout(Duration::from_millis(250), state.close_notify.notified()).await;
         assert!(
             notify_waiter.is_err(),
             "the Notify-based waiter would be lost here — that is the bug being fixed"
@@ -1020,10 +1018,16 @@ mod tests {
         state.record_js_session("sess-1".to_string(), "mock-acp".to_string());
         state.record_js_session_operation("sess-1", "op-1".to_string());
         // Active op is live and queryable with the admitted provider id.
-        let session = state.with_js_state(|s| s.session("sess-1").cloned()).flatten().unwrap();
+        let session = state
+            .with_js_state(|s| s.session("sess-1").cloned())
+            .flatten()
+            .unwrap();
         assert_eq!(session.provider_id, "mock-acp");
         assert_eq!(session.active_operation_id.as_deref(), Some("op-1"));
-        let op = state.with_js_state(|s| s.operation("op-1")).flatten().unwrap();
+        let op = state
+            .with_js_state(|s| s.operation("op-1"))
+            .flatten()
+            .unwrap();
         assert_eq!(op.status.wire(), "running");
         // A real terminal event clears the active op and retains the terminal:
         // detected without mutating, then applied — the durable mirror runs
@@ -1034,13 +1038,23 @@ mod tests {
         assert_eq!(session_id, "sess-1");
         assert_eq!(status.wire(), "finished");
         assert_eq!(
-            state.with_js_state(|s| s.operation("op-1")).flatten().unwrap().status.wire(),
+            state
+                .with_js_state(|s| s.operation("op-1"))
+                .flatten()
+                .unwrap()
+                .status
+                .wire(),
             "running",
             "detection alone must not mutate the operation"
         );
         state.apply_js_batch_terminal(&session_id, "op-1", status);
         assert_eq!(
-            state.with_js_state(|s| s.operation("op-1")).flatten().unwrap().status.wire(),
+            state
+                .with_js_state(|s| s.operation("op-1"))
+                .flatten()
+                .unwrap()
+                .status
+                .wire(),
             "finished"
         );
         assert!(
@@ -1063,22 +1077,40 @@ mod tests {
         // operation settles exactly `op-x` and never touches `op-y`.
         state.record_js_operation_terminal("sess-2", "op-x", JsOperationStatus::Cancelled);
         assert_eq!(
-            state.with_js_state(|s| s.operation("op-x")).flatten().unwrap().status.wire(),
+            state
+                .with_js_state(|s| s.operation("op-x"))
+                .flatten()
+                .unwrap()
+                .status
+                .wire(),
             "cancelled",
             "an accepted cancel must settle the requested operation id"
         );
         assert_eq!(
-            state.with_js_state(|s| s.operation("op-y")).flatten().unwrap().status.wire(),
+            state
+                .with_js_state(|s| s.operation("op-y"))
+                .flatten()
+                .unwrap()
+                .status
+                .wire(),
             "running",
             "cancel(op-x) must not mark the session's active op op-y cancelled"
         );
         // Active-op clearing is preserved only when it matches the targeted op.
-        let session = state.with_js_state(|s| s.session("sess-2").cloned()).flatten().unwrap();
+        let session = state
+            .with_js_state(|s| s.session("sess-2").cloned())
+            .flatten()
+            .unwrap();
         assert_eq!(session.active_operation_id.as_deref(), Some("op-y"));
         // A later terminal event must never downgrade the settled `cancelled`.
         state.record_js_operation_terminal("sess-2", "op-x", JsOperationStatus::Finished);
         assert_eq!(
-            state.with_js_state(|s| s.operation("op-x")).flatten().unwrap().status.wire(),
+            state
+                .with_js_state(|s| s.operation("op-x"))
+                .flatten()
+                .unwrap()
+                .status
+                .wire(),
             "cancelled",
             "a later terminal must not downgrade an already-cancelled op"
         );
@@ -1091,10 +1123,18 @@ mod tests {
         state.record_js_session_operation("sess-3", "op-3".to_string());
         state.record_js_session_stopped("sess-3");
         assert_eq!(
-            state.with_js_state(|s| s.operation("op-3")).flatten().unwrap().status.wire(),
+            state
+                .with_js_state(|s| s.operation("op-3"))
+                .flatten()
+                .unwrap()
+                .status
+                .wire(),
             "interrupted"
         );
-        assert!(state.with_js_state(|s| s.session("sess-3").cloned()).flatten().is_none());
+        assert!(state
+            .with_js_state(|s| s.session("sess-3").cloned())
+            .flatten()
+            .is_none());
     }
 
     #[test]
@@ -1105,15 +1145,24 @@ mod tests {
             let op = format!("op-{i}");
             state.record_js_operation_terminal("sess-4", &op, JsOperationStatus::Finished);
         }
-        let retained = state
-            .with_js_state(|s| s.terminal.len())
-            .unwrap();
-        assert_eq!(retained, JS_MAX_TERMINAL_OPERATIONS, "terminal history must be bounded");
+        let retained = state.with_js_state(|s| s.terminal.len()).unwrap();
+        assert_eq!(
+            retained, JS_MAX_TERMINAL_OPERATIONS,
+            "terminal history must be bounded"
+        );
         // A duplicate terminal upserts rather than appending.
         state.record_js_operation_terminal("sess-4", "op-5", JsOperationStatus::Failed);
-        assert_eq!(state.with_js_state(|s| s.terminal.len()).unwrap(), JS_MAX_TERMINAL_OPERATIONS);
         assert_eq!(
-            state.with_js_state(|s| s.operation("op-5")).flatten().unwrap().status.wire(),
+            state.with_js_state(|s| s.terminal.len()).unwrap(),
+            JS_MAX_TERMINAL_OPERATIONS
+        );
+        assert_eq!(
+            state
+                .with_js_state(|s| s.operation("op-5"))
+                .flatten()
+                .unwrap()
+                .status
+                .wire(),
             "failed"
         );
     }
@@ -1123,7 +1172,10 @@ mod tests {
         let state = EnvState::new();
         state.record_js_session_operation("no-such-session", "op-x".to_string());
         assert!(
-            state.with_js_state(|s| s.operation("op-x")).flatten().is_none(),
+            state
+                .with_js_state(|s| s.operation("op-x"))
+                .flatten()
+                .is_none(),
             "an execute for an unlaunched session must not create state"
         );
     }
@@ -1160,7 +1212,10 @@ mod tests {
             "a failed running upsert must be observable"
         );
         assert!(
-            state.journal_operation_status("op-x", "cancelled").await.is_err(),
+            state
+                .journal_operation_status("op-x", "cancelled")
+                .await
+                .is_err(),
             "a failed terminal upsert must be observable"
         );
         assert!(
@@ -1200,7 +1255,10 @@ mod tests {
             .expect("terminal upsert succeeds");
         // A cancelled operation is already terminal: settlement has nothing to
         // settle and reports zero affected rows, not an error.
-        let settled = state.settle_journal_on_open().await.expect("settlement succeeds");
+        let settled = state
+            .settle_journal_on_open()
+            .await
+            .expect("settlement succeeds");
         assert_eq!(settled, 0);
         state
             .forget_journal_session("sess-ok")

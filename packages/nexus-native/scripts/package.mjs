@@ -94,6 +94,14 @@ function fail(message, detail) {
   process.exit(1);
 }
 
+function archiveReceipt(path, tag) {
+  try {
+    renameSync(path, `${path.replace(/\.json$/, '')}.${tag}-${Date.now()}.json`);
+  } catch {
+    // nothing left to archive (or it was already replaced) — the fresh write proceeds
+  }
+}
+
 /**
  * A failed run must leave its own record: a stale `pass` receipt on disk would
  * otherwise be read as a green result by the matrix summary.
@@ -102,13 +110,11 @@ function writeFailReceipt(message, detail) {
   if (!state.receiptPath) return;
   try {
     mkdirSync(dirname(state.receiptPath), { recursive: true });
-    if (existsSync(state.receiptPath)) {
+    try {
       const previous = JSON.parse(readFileSync(state.receiptPath, 'utf8'));
-      if (previous.status !== 'pass') {
-        renameSync(state.receiptPath, `${state.receiptPath.replace(/\.json$/, '')}.pre-${Date.now()}.json`);
-      } else {
-        renameSync(state.receiptPath, `${state.receiptPath.replace(/\.json$/, '')}.pass-${Date.now()}.json`);
-      }
+      archiveReceipt(state.receiptPath, previous.status === 'pass' ? 'pass' : 'pre');
+    } catch (error) {
+      if (error?.code !== 'ENOENT') archiveReceipt(state.receiptPath, 'pre');
     }
     writeFileSync(
       state.receiptPath,

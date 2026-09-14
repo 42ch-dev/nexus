@@ -616,7 +616,7 @@ pub struct AcpSdkAdapter {
     /// Kept outside `connection` so cancellation cannot deadlock behind a
     /// streaming prompt that mutably owns the active SDK session.
     control_connection: Arc<RwLock<Option<ConnectionTo<Agent>>>>,
-    /// Handle to the tracked connection-loop task on the bridge's LocalSet
+    /// Handle to the tracked connection-loop task on the bridge's `LocalSet`
     /// thread (aborted on session cleanup).
     setup_owned: Option<crate::localset_bridge::OwnedTaskHandle>,
     /// Permission evaluation callback, set by the host layer.
@@ -718,34 +718,31 @@ impl AcpSdkAdapter {
         // aborted by bridge shutdown, but not charged against the bounded
         // request budget (it lives as long as the owned child transport).
         let owned = bridge_clone.spawn_owned(move || {
-                    let connection_clone = connection_clone.clone();
-                    let agent_id = agent_id_for_log;
-                    let perm_handler = permission_handler_clone;
-                    let perm_events = permission_events_for_handler;
+            let connection_clone = connection_clone.clone();
+            let agent_id = agent_id_for_log;
+            let perm_handler = permission_handler_clone;
+            let perm_events = permission_events_for_handler;
 
-                    // Convert tokio pipes to futures-compatible traits inside the LocalSet
-                    let stdin_compat = stdin.compat_write(); // ChildStdin → AsyncWrite (outgoing)
-                    let stdout_compat = stdout.compat(); // ChildStdout → AsyncRead (incoming)
+            // Convert tokio pipes to futures-compatible traits inside the LocalSet
+            let stdin_compat = stdin.compat_write(); // ChildStdin → AsyncWrite (outgoing)
+            let stdout_compat = stdout.compat(); // ChildStdout → AsyncRead (incoming)
 
-                    Box::pin(async move {
-                        // Create the transport using SDK ByteStreams.
-                        let transport = ByteStreams::new(stdin_compat, stdout_compat);
+            Box::pin(async move {
+                // Create the transport using SDK ByteStreams.
+                let transport = ByteStreams::new(stdin_compat, stdout_compat);
 
-                        // Build the Client with permission request handler
-                        let builder = acp::Client.builder().name(&agent_id);
+                // Build the Client with permission request handler
+                let builder = acp::Client.builder().name(&agent_id);
 
-                        // Register permission request handler via on_receive_request.
-                        // The agent sends `session/request_permission` when it needs
-                        // approval for a tool operation. The handler evaluates using
-                        // the host-level permission callback and responds.
-                        let builder = builder.on_receive_request(
-                            async move |request: RequestPermissionRequest,
-                                        responder,
-                                        _connection| {
-                                let tool_name =
-                                    request.tool_call.fields.title.clone().unwrap_or_default();
+                // Register permission request handler via on_receive_request.
+                // The agent sends `session/request_permission` when it needs
+                // approval for a tool operation. The handler evaluates using
+                // the host-level permission callback and responds.
+                let builder = builder.on_receive_request(
+                    async move |request: RequestPermissionRequest, responder, _connection| {
+                        let tool_name = request.tool_call.fields.title.clone().unwrap_or_default();
 
-                                tracing::info!(
+                        tracing::info!(
                                     session_id = %request.session_id,
                                     tool_name = %tool_name,
                                     option_count = request.options.len(),
@@ -769,11 +766,11 @@ impl AcpSdkAdapter {
                         let response = Self::build_permission_response(&request.options, outcome);
 
                         tracing::info!(
-                            session_id = %request.session_id,
-                            tool_name = %tool_name,
-                            approved = matches!(outcome, AcpPermissionOutcome::Approve),
-                            "Permission response sent"
-                            );
+                        session_id = %request.session_id,
+                        tool_name = %tool_name,
+                        approved = matches!(outcome, AcpPermissionOutcome::Approve),
+                        "Permission response sent"
+                        );
 
                         let _ = perm_events.send(AcpStreamUpdate::PermissionResult {
                             session_id: request.session_id.to_string(),
@@ -821,7 +818,7 @@ impl AcpSdkAdapter {
                         "ACP SDK connection failed"
                     );
                 }
-                })
+            })
         });
 
         let setup_owned = match owned {
@@ -1205,7 +1202,7 @@ impl NexusAcpClient for AcpSdkAdapter {
                         connection_handle
                             .spawn(async move {
                                 tokio::select! {
-                                    _ = cancel_watch.cancelled() => {}
+                                    () = cancel_watch.cancelled() => {}
                                     res = async {
                                         connection_for_spawn
                                             .send_request_to(Agent, sdk_req)
@@ -1281,7 +1278,7 @@ impl NexusAcpClient for AcpSdkAdapter {
                         connection_handle
                             .spawn(async move {
                                 tokio::select! {
-                                    _ = cancel_watch.cancelled() => {}
+                                    () = cancel_watch.cancelled() => {}
                                     res = async {
                                         connection_for_spawn
                                             .build_session_from(sdk_req)
@@ -1551,7 +1548,7 @@ impl NexusAcpClient for AcpSdkAdapter {
                         connection_handle
                             .spawn(async move {
                                 tokio::select! {
-                                    _ = cancel_watch.cancelled() => {}
+                                    () = cancel_watch.cancelled() => {}
                                     res = async {
                                         connection_for_spawn
                                             .send_request_to(Agent, sdk_req)
@@ -1626,7 +1623,7 @@ impl NexusAcpClient for AcpSdkAdapter {
                         connection_handle
                             .spawn(async move {
                                 tokio::select! {
-                                    _ = cancel_watch.cancelled() => {}
+                                    () = cancel_watch.cancelled() => {}
                                     res = async {
                                         connection_for_spawn
                                             .send_request_to(Agent, sdk_req)
@@ -1704,7 +1701,7 @@ impl NexusAcpClient for AcpSdkAdapter {
                         connection_handle
                             .spawn(async move {
                                 tokio::select! {
-                                    _ = cancel_watch.cancelled() => {}
+                                    () = cancel_watch.cancelled() => {}
                                     res = async {
                                         connection_for_spawn
                                             .send_request_to(Agent, sdk_req)

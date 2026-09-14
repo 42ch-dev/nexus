@@ -473,7 +473,10 @@ mod tests {
 
     fn launch_request(provider_id: &str, request_id: &str) -> ProviderCall {
         let mut payload = serde_json::Map::new();
-        payload.insert("provider_id".into(), serde_json::Value::String(provider_id.into()));
+        payload.insert(
+            "provider_id".into(),
+            serde_json::Value::String(provider_id.into()),
+        );
         ProviderCall {
             method: ProviderCallMethod::Launch,
             request_id: request_id.into(),
@@ -524,8 +527,14 @@ mod tests {
         // the state maps session -> its own provider id (no cross-assignment).
         state.record_js_session("s-a".to_string(), "provider-a".to_string());
         state.record_js_session("s-b".to_string(), "provider-b".to_string());
-        let a = state.with_js_state(|s| s.session("s-a").cloned()).flatten().unwrap();
-        let b = state.with_js_state(|s| s.session("s-b").cloned()).flatten().unwrap();
+        let a = state
+            .with_js_state(|s| s.session("s-a").cloned())
+            .flatten()
+            .unwrap();
+        let b = state
+            .with_js_state(|s| s.session("s-b").cloned())
+            .flatten()
+            .unwrap();
         assert_eq!(a.provider_id, "provider-a");
         assert_eq!(b.provider_id, "provider-b");
         let _ = port;
@@ -555,12 +564,14 @@ mod tests {
             _max_bytes: u32,
         ) -> ProviderResult<ProviderEventBatch> {
             Ok(ProviderEventBatch {
-                events: vec![nexus_contracts::provider_event_batch::NexusProviderHostEvent::OpFailed {
-                    error_category: "test".to_string(),
-                    error_message: "terminal".to_string(),
-                    op_id: operation_id.clone(),
-                    session_id: "sess-j".to_string(),
-                }],
+                events: vec![
+                    nexus_contracts::provider_event_batch::NexusProviderHostEvent::OpFailed {
+                        error_category: "test".to_string(),
+                        error_message: "terminal".to_string(),
+                        op_id: operation_id.clone(),
+                        session_id: "sess-j".to_string(),
+                    },
+                ],
                 gap: None,
                 has_more: false,
                 operation_id,
@@ -670,13 +681,18 @@ mod tests {
         );
         assert_eq!(
             state
-                .with_js_state(|s| s.session("sess-j").and_then(|r| r.active_operation_id.clone()))
+                .with_js_state(|s| s
+                    .session("sess-j")
+                    .and_then(|r| r.active_operation_id.clone()))
                 .flatten(),
             Some("op-j".to_string()),
             "the session keeps its active op while the terminal awaits its durable mirror"
         );
         assert!(
-            port.pending_terminal_batches.lock().expect("cache lock").contains_key("op-j"),
+            port.pending_terminal_batches
+                .lock()
+                .expect("cache lock")
+                .contains_key("op-j"),
             "the consumed terminal batch must be retained for re-delivery"
         );
     }
@@ -710,12 +726,14 @@ mod tests {
         ) -> ProviderResult<ProviderEventBatch> {
             let pull = self.pulls.fetch_add(1, Ordering::SeqCst);
             let events = if pull == 0 {
-                vec![nexus_contracts::provider_event_batch::NexusProviderHostEvent::OpFailed {
-                    error_category: "test".to_string(),
-                    error_message: "terminal".to_string(),
-                    op_id: operation_id.clone(),
-                    session_id: "sess-j".to_string(),
-                }]
+                vec![
+                    nexus_contracts::provider_event_batch::NexusProviderHostEvent::OpFailed {
+                        error_category: "test".to_string(),
+                        error_message: "terminal".to_string(),
+                        op_id: operation_id.clone(),
+                        session_id: "sess-j".to_string(),
+                    },
+                ]
             } else {
                 Vec::new()
             };
@@ -742,11 +760,8 @@ mod tests {
         let inner = Arc::new(ConsumingTerminalPort {
             pulls: AtomicUsize::new(0),
         });
-        let port = AdmittingProviderPort::new(
-            Arc::new(HostManager::new()),
-            inner.clone(),
-            state.clone(),
-        );
+        let port =
+            AdmittingProviderPort::new(Arc::new(HostManager::new()), inner.clone(), state.clone());
 
         // First delivery: the provider terminal is consumed, the journal
         // write fails, and the exact batch is retained.
@@ -758,7 +773,10 @@ mod tests {
         assert!(err.message.contains("journal"));
         assert_eq!(inner.pulls.load(Ordering::SeqCst), 1);
         assert!(
-            port.pending_terminal_batches.lock().expect("cache lock").contains_key("op-j"),
+            port.pending_terminal_batches
+                .lock()
+                .expect("cache lock")
+                .contains_key("op-j"),
             "the consumed batch must be retained for re-delivery"
         );
         assert_eq!(
@@ -803,9 +821,17 @@ mod tests {
             1,
             "re-delivery comes from the retained cache, not the provider"
         );
-        assert_eq!(batch.events.len(), 1, "the exact terminal batch is re-delivered");
+        assert_eq!(
+            batch.events.len(),
+            1,
+            "the exact terminal batch is re-delivered"
+        );
         assert!(
-            !port.pending_terminal_batches.lock().expect("cache lock").contains_key("op-j"),
+            !port
+                .pending_terminal_batches
+                .lock()
+                .expect("cache lock")
+                .contains_key("op-j"),
             "the retained batch is consumed exactly once"
         );
         assert_eq!(
@@ -817,16 +843,17 @@ mod tests {
         );
         assert_eq!(
             state
-                .with_js_state(|s| s.session("sess-j").and_then(|r| r.active_operation_id.clone()))
+                .with_js_state(|s| s
+                    .session("sess-j")
+                    .and_then(|r| r.active_operation_id.clone()))
                 .flatten(),
             None,
             "the terminal releases the session's active operation"
         );
-        let journaled =
-            nexus_local_db::js_provider_journal::get_operation(&pool, "op-j")
-                .await
-                .expect("journal read")
-                .expect("the durable mirror row exists");
+        let journaled = nexus_local_db::js_provider_journal::get_operation(&pool, "op-j")
+            .await
+            .expect("journal read")
+            .expect("the durable mirror row exists");
         assert_eq!(journaled.status, "failed");
         assert_eq!(journaled.session_id, "sess-j");
 
@@ -890,7 +917,9 @@ mod tests {
         );
         assert_eq!(
             state
-                .with_js_state(|s| s.session("sess-j").and_then(|r| r.active_operation_id.clone()))
+                .with_js_state(|s| s
+                    .session("sess-j")
+                    .and_then(|r| r.active_operation_id.clone()))
                 .flatten(),
             None,
             "the committed cancel releases the session's active operation"
@@ -951,7 +980,9 @@ mod tests {
         );
         assert_eq!(
             state
-                .with_js_state(|s| s.session("sess-j").and_then(|r| r.active_operation_id.clone()))
+                .with_js_state(|s| s
+                    .session("sess-j")
+                    .and_then(|r| r.active_operation_id.clone()))
                 .flatten(),
             Some("op-y".to_string()),
             "the session keeps its active op when the cancel targets a different operation"
@@ -1021,7 +1052,9 @@ mod tests {
         );
         assert_eq!(
             state
-                .with_js_state(|s| s.session("sess-j").and_then(|r| r.active_operation_id.clone()))
+                .with_js_state(|s| s
+                    .session("sess-j")
+                    .and_then(|r| r.active_operation_id.clone()))
                 .flatten(),
             Some("op-y".to_string()),
             "the session keeps its active op when the cancel targets a different operation"

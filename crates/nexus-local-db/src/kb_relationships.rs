@@ -482,6 +482,10 @@ pub async fn list_relationships_for_world(
 }
 
 /// [`list_relationships_for_world`] against a caller-owned transaction.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::Sqlx`] on database failure.
 pub async fn list_relationships_for_world_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     world_id: &str,

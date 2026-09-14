@@ -61,7 +61,7 @@ impl IsolatedHome {
         let tmp = tempfile::TempDir::new().expect("tempdir for test");
         let original_home = std::env::var("HOME").ok();
         std::env::set_var("HOME", tmp.path());
-        IsolatedHome {
+        Self {
             _tmp: tmp,
             original_home,
             _lock: lock,
