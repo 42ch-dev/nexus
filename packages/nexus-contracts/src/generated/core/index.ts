@@ -19,3 +19,4 @@ export type { ProviderEventBatch } from './provider-event-batch';
 export type { ProviderHostEvent } from './provider-host-event';
 export type { ProviderReply } from './provider-reply';
 export type { ValidatedProviderRecipe } from './validated-provider-recipe';
+export type { CoreSliceClient } from './CoreSliceClient';

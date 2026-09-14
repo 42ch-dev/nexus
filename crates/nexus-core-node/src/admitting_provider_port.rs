@@ -74,6 +74,9 @@ impl ProviderPort for AdmittingProviderPort {
     async fn call(&self, mut request: ProviderCall) -> ProviderResult<ProviderReply> {
         let method = request.method;
         let session_id = request.session_id.clone();
+        // A cancel call may carry only the operation id; capture it before the
+        // request is consumed so the settle path can resolve the owning session.
+        let mut request_operation_id = request.operation_id.clone();
         // Reserve a bounded tracking slot *before* any admission or dispatch for
         // a launch. If the cap is reached, refuse with a typed Busy before
         // touching the adapter, so a launched child is never dropped untracked.
@@ -139,20 +142,45 @@ impl ProviderPort for AdmittingProviderPort {
                     (session_id.as_deref(), reply.operation_id.clone())
                 {
                     self.state
-                        .record_js_session_operation(session_id, operation_id);
+                        .record_js_session_operation(session_id, operation_id.clone());
+                    // Durable write-through: an op still active at process exit
+                    // is settled to `interrupted` by the next open (LIFE-3).
+                    let provider_id = self
+                        .state
+                        .with_js_state(|s| s.session(session_id).map(|r| r.provider_id.clone()))
+                        .flatten()
+                        .unwrap_or_default();
+                    self.state
+                        .journal_operation(&operation_id, session_id, &provider_id, "running")
+                        .await;
                 }
             }
-            // A cancel acknowledgement does NOT clear the active op: the
-            // operation becomes terminal only when the adapter emits its real
-            // terminal event (observed in `next`).
+            // A cooperative cancel acknowledgement settles the operation to the
+            // `cancelled` terminal (observable via GET), mirrored durably. A
+            // cancel call may carry only the operation id, so the owning session
+            // is resolved from the operation when session_id is absent.
             ProviderCallMethod::Cancel if reply.ok => {
+                let operation_id = request_operation_id.take();
+                let session_id = session_id.or_else(|| {
+                    operation_id.as_deref().and_then(|op_id| {
+                        self.state
+                            .with_js_state(|s| s.operation(op_id).map(|op| op.session_id))
+                            .flatten()
+                    })
+                });
                 if let Some(session_id) = session_id.as_deref() {
                     self.state.record_js_cancel_ack(session_id);
+                }
+                if let Some(operation_id) = operation_id {
+                    self.state
+                        .journal_operation_status(&operation_id, "cancelled")
+                        .await;
                 }
             }
             ProviderCallMethod::Shutdown if reply.ok => {
                 if let Some(session_id) = session_id.as_deref() {
                     self.state.forget_js_session(session_id);
+                    self.state.forget_journal_session(session_id).await;
                 }
             }
             _ => {}
@@ -171,8 +199,15 @@ impl ProviderPort for AdmittingProviderPort {
             .next(operation_id.clone(), max_events, max_bytes)
             .await?;
         // Terminal truth comes from the actual delivered events, never a label.
-        self.state
+        let terminal = self
+            .state
             .apply_js_batch_terminals(&operation_id, batch.events.as_slice());
+        // Mirror the observed terminal durably so it survives a restart.
+        if let Some(status) = terminal {
+            self.state
+                .journal_operation_status(&operation_id, status)
+                .await;
+        }
         Ok(batch)
     }
 }

@@ -124,6 +124,19 @@ import type {
   WorldRuleResponse,
   WorldRuleUpdateRequest,
   WorldRulesListResponse,
+  // ── P4-T3 generated Core slice DTOs (`schemas/core/*`) ─────────────────────
+  AgentHostListSessionsQuery,
+  CancelOperationResponse,
+  CoreChangesRequest,
+  CoreChangesResponse,
+  CreateSessionRequest,
+  ExecuteOperationRequest,
+  OperationResponse,
+  ProviderEventBatch,
+  ProviderHostEvent,
+  SessionListResponse,
+  SessionResponse,
+  ShutdownSessionResponse,
 } from '@42ch/nexus-contracts';
 
 import type { PresetProfileResponse } from './preset-profile';
@@ -161,6 +174,15 @@ export interface BrowserClientOptions {
 }
 
 type QueryValue = string | number | boolean | undefined | null;
+
+/**
+ * Bounded SSE control frame carried by the P2-generated `ProviderEventBatch`
+ * `$defs`. The generated core barrel re-exports the batch but not this nested
+ * `$defs` member, so the browser client derives the identical type from the
+ * generated field rather than hand-copying the wire shape (matching the
+ * service-side alias in `apps/nexus-service/src/sse.ts`).
+ */
+type CoreStreamGap = NonNullable<ProviderEventBatch['gap']>;
 
 /**
  * Serialize a query object into a `?a=b&c=d` string, omitting empty values.
@@ -568,6 +590,163 @@ export class BrowserClient implements NexusClient {
     );
   }
 
+  // ── P4-T3 generated Core slice (`CoreSliceClient`) ────────────────────────
+  // The methods below implement the P2-generated `CoreSliceClient` declaration
+  // against the same `/v1/daemon/*` HTTP transport as the rest of this class.
+  // Wire payloads come from the generated DTOs; no handwritten wire shapes.
+
+  /**
+   * `GET /v1/daemon/core/changes` — durable change outbox page after
+   * `after_sequence`. `next_sequence`/`snapshot_sequence` are decimal strings
+   * (never JS numbers) and `resync_required` marks a cursor below the retained
+   * minimum, which callers treat as a gap.
+   */
+  getCoreChanges(request: CoreChangesRequest): Promise<CoreChangesResponse> {
+    return this.get<CoreChangesResponse>('/v1/daemon/core/changes', request);
+  }
+
+  /** `POST /v1/daemon/agent-host/sessions` — create a provider session. */
+  createAgentHostSession(request: CreateSessionRequest): Promise<SessionResponse> {
+    return this.post<SessionResponse>('/v1/daemon/agent-host/sessions', request);
+  }
+
+  /** `GET /v1/daemon/agent-host/sessions` — cursor list of provider sessions. */
+  listAgentHostSessions(query?: AgentHostListSessionsQuery): Promise<SessionListResponse> {
+    return this.get<SessionListResponse>('/v1/daemon/agent-host/sessions', query);
+  }
+
+  /** `GET /v1/daemon/agent-host/sessions/{session_id}` — session summary. */
+  getAgentHostSession(sessionId: string): Promise<SessionResponse> {
+    return this.get<SessionResponse>(
+      `/v1/daemon/agent-host/sessions/${encodeURIComponent(sessionId)}`,
+    );
+  }
+
+  /** `DELETE /v1/daemon/agent-host/sessions/{session_id}` — shut a session down. */
+  shutdownAgentHostSession(sessionId: string): Promise<ShutdownSessionResponse> {
+    return this.delete<ShutdownSessionResponse>(
+      `/v1/daemon/agent-host/sessions/${encodeURIComponent(sessionId)}`,
+    );
+  }
+
+  /** `POST /v1/daemon/agent-host/sessions/{session_id}/operations` — start an operation. */
+  executeAgentHostOperation(
+    sessionId: string,
+    request: ExecuteOperationRequest,
+  ): Promise<OperationResponse> {
+    return this.post<OperationResponse>(
+      `/v1/daemon/agent-host/sessions/${encodeURIComponent(sessionId)}/operations`,
+      request,
+    );
+  }
+
+  /** `GET /v1/daemon/agent-host/operations/{operation_id}` — operation status. */
+  getAgentHostOperation(operationId: string): Promise<OperationResponse> {
+    return this.get<OperationResponse>(
+      `/v1/daemon/agent-host/operations/${encodeURIComponent(operationId)}`,
+    );
+  }
+
+  /**
+   * `POST /v1/daemon/agent-host/operations/{operation_id}` — cancel
+   * (the route's POST verb is cancel; there is no `/cancel` alias).
+   */
+  cancelAgentHostOperation(operationId: string): Promise<CancelOperationResponse> {
+    return this.post<CancelOperationResponse>(
+      `/v1/daemon/agent-host/operations/${encodeURIComponent(operationId)}`,
+    );
+  }
+
+  /**
+   * `GET /v1/daemon/agent-host/sessions/{session_id}/events` — bounded live
+   * provider stream as an `AsyncIterable` of schema-typed values.
+   *
+   * The SSE bytes arrive over a `fetch` `ReadableStream`, so this yields
+   * incrementally decoded `ProviderHostEvent`/`CoreStreamGap` values rather
+   * than a parsed-once page. The response body is read chunk by chunk with a
+   * streaming `TextDecoder` (a multibyte UTF-8 sequence split across two
+   * network chunks never corrupts the frame) and frames are split on the SSE
+   * blank-line delimiter. A trailing frame without its terminating blank line
+   * is still flushed when the stream ends, so a final partial frame is never
+   * lost. Aborting `signal` stops iteration without throwing.
+   */
+  async *subscribeAgentHostEvents(
+    sessionId: string,
+    signal: AbortSignal,
+  ): AsyncIterable<ProviderHostEvent | CoreStreamGap> {
+    const url = `${this.baseUrl}/v1/daemon/agent-host/sessions/${encodeURIComponent(sessionId)}/events`;
+    const headers: Record<string, string> = { Accept: 'text/event-stream' };
+    if (this.apiKey) headers['X-API-Key'] = this.apiKey;
+
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, { method: 'GET', headers, signal });
+    } catch (cause) {
+      if (signal.aborted) return;
+      throw new NexusClientError(
+        0,
+        'transport_unreachable',
+        BrowserClient.transportMessage(this.baseUrl),
+        { cause: String(cause) },
+        BrowserClient.classifyTransportError(this.baseUrl, cause),
+      );
+    }
+
+    if (!response.ok) {
+      let errorBody: unknown = null;
+      try {
+        errorBody = await response.json();
+      } catch {
+        // Non-JSON error body; fall through to the generic status error.
+      }
+      throw NexusClientError.fromBody(response.status, errorBody);
+    }
+
+    const body = response.body;
+    if (!body) {
+      throw new NexusClientError(
+        response.status,
+        'invalid_response',
+        'Provider event stream returned an empty body',
+      );
+    }
+
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    try {
+      while (!signal.aborted) {
+        let chunk: ReadableStreamReadResult<Uint8Array>;
+        try {
+          chunk = await reader.read();
+        } catch (cause) {
+          if (signal.aborted) return;
+          throw cause;
+        }
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
+        let boundary = BrowserClient.nextSseBoundary(buffer);
+        while (boundary) {
+          const frame = buffer.slice(0, boundary.index);
+          buffer = buffer.slice(boundary.index + boundary.length);
+          const parsed = BrowserClient.parseSseFrame(frame);
+          if (parsed) yield parsed;
+          boundary = BrowserClient.nextSseBoundary(buffer);
+        }
+      }
+      // Flush the decoder and any frame whose terminating blank line never
+      // arrived (a final partial frame must not be dropped). An explicit abort
+      // ends iteration without emitting further values.
+      if (!signal.aborted) {
+        buffer += decoder.decode();
+        const trailing = BrowserClient.parseSseFrame(buffer);
+        if (trailing) yield trailing;
+      }
+    } finally {
+      void reader.cancel().catch(() => undefined);
+    }
+  }
+
   // ── World check findings (V1.165 / DR-64 surfacing) ─────────────────────
   listWorldFindings(worldId: string): Promise<WorldFindingsListResponse> {
     return this.get<WorldFindingsListResponse>(
@@ -858,8 +1037,55 @@ export class BrowserClient implements NexusClient {
     return (await response.json()) as T;
   }
 
-  // ── Transport classification helpers (V1.129 P0) ───────────────────────────
+  // ── SSE frame framing (P4-T3 provider event stream) ────────────────────────
 
+  /**
+   * Locate the next complete SSE frame boundary in `buffer`: the blank line
+   * (`\n\n`, `\r\n\r\n`, or mixed) that terminates an event block. Returns the
+   * delimiter's index and length so a `\r\n` split across two network chunks is
+   * still matched once the rest arrives.
+   */
+  private static nextSseBoundary(
+    buffer: string,
+  ): { index: number; length: number } | null {
+    for (let i = 0; i < buffer.length - 1; i += 1) {
+      const ch = buffer[i];
+      if (ch === '\n') {
+        if (buffer[i + 1] === '\n') return { index: i, length: 2 };
+      } else if (ch === '\r') {
+        if (buffer[i + 1] === '\n' && buffer[i + 2] === '\r' && buffer[i + 3] === '\n') {
+          return { index: i, length: 4 };
+        }
+        if (buffer[i + 1] === '\n' && buffer[i + 2] === '\n') {
+          return { index: i, length: 3 };
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Parse one SSE frame into a schema-typed value. Per the SSE spec, multiple
+   * `data:` lines in one event are joined with `\n` (not concatenated); the
+   * frame's joined `data` JSON is returned verbatim and IS the generated
+   * `ProviderHostEvent` or `CoreStreamGap`. Frames with no data (comments,
+   * keep-alive pings) yield `null` and are skipped by the iterator.
+   */
+  private static parseSseFrame(
+    frame: string,
+  ): ProviderHostEvent | CoreStreamGap | null {
+    const dataLines: string[] = [];
+    for (const rawLine of frame.split('\n')) {
+      const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+      if (line.startsWith('data:')) {
+        dataLines.push(line.slice(5).replace(/^ /, ''));
+      }
+    }
+    if (dataLines.length === 0) return null;
+    return JSON.parse(dataLines.join('\n')) as ProviderHostEvent | CoreStreamGap;
+  }
+
+  // ── Transport classification helpers (V1.129 P0) ───────────────────────────
   /**
    * Legacy multi-cause transport message kept for toast-level backwards compat.
    * The dialog no longer renders this string directly — it branches on

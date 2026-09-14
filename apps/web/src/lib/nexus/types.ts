@@ -144,6 +144,7 @@ import type {
   WorldRuleResponse,
   WorldRuleUpdateRequest,
   WorldRulesListResponse,
+  CoreSliceClient,
 } from '@42ch/nexus-contracts';
 
 import type { PresetProfileResponse } from './preset-profile';
@@ -308,8 +309,15 @@ export interface UpdateWorkCronRequest {
  *
  * Daemon API data endpoints are keyless on loopback (V1.20 model); the browser
  * client sends no credentials.
+ *
+ * P4-T3: `NexusClient` extends the generated {@link CoreSliceClient}
+ * declaration so the migrated Core slice (`getCoreChanges`, agent-host
+ * session/operation methods, and the SSE event stream) is part of the one
+ * transport interface. The generated declaration is authoritative for those
+ * signatures; the explicitly-declared method groups below remain for the
+ * unported product surfaces.
  */
-export interface NexusClient {
+export interface NexusClient extends CoreSliceClient {
   // ── Daemon ───────────────────────────────────────────────────────────────
   /** `GET /v1/daemon/runtime/health` — liveness + version for the shell header. */
   health(): Promise<DaemonHealth>;

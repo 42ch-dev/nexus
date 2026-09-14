@@ -333,6 +333,27 @@ pub async fn dispatch_host_query(
                     scan: None,
                 });
             }
+            // Durable journal fallback: after a restart the in-memory state is
+            // gone, but a previously active op is still queryable as interrupted.
+            if let Some(pool) = state.journal_pool() {
+                if let Ok(Some(op)) =
+                    nexus_local_db::js_provider_journal::get_operation(&pool, raw).await
+                {
+                    return Ok(CoreHostQueryResponse {
+                        operation: Some(NexusAgentHostOperationResponse {
+                            operation_id: op.operation_id,
+                            session_id: op.session_id,
+                            status: op.status,
+                            capture: None,
+                        }),
+                        health: None,
+                        catalog: None,
+                        sessions: None,
+                        session: None,
+                        scan: None,
+                    });
+                }
+            }
             Err(not_found("operation not found"))
         }
     }

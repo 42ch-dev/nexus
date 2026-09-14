@@ -114,6 +114,25 @@ export class ProviderRegistry {
     }
   }
 
+  /**
+   * Settle a cached operation to a terminal status (e.g. an accepted cancel).
+   * The cached record is updated so `activeOperationCount` no longer charges it
+   * and a later GET surfaces the same terminal truth as native.
+   */
+  settleOperationStatus(operationId: string, status: string): void {
+    const op = this.operations.get(operationId);
+    if (!op) return;
+    if (isTerminalOperationStatus(op.status)) return;
+    op.status = status;
+    this.trackTerminal(operationId);
+    const session = this.sessions.get(op.sessionId);
+    if (session && session.activeOpId === operationId) {
+      session.activeOpId = null;
+      session.state = 'Ready';
+    }
+    this.evictTerminalOperationsIfNeeded();
+  }
+
   finishOperation(operationId: string, terminal: ProviderHostEvent, transcript: string | null): void {
     const op = this.operations.get(operationId);
     if (!op || op.terminalEvent) return;

@@ -303,6 +303,9 @@ export async function cancelProviderOperation(service: ServiceCore, operationId:
     deadline_ms: PROVIDER_DEFAULT_DEADLINE_MS,
     payload: {},
   });
+  // Settle the cached record so the accepted cancel is observable and no longer
+  // charges the live-operation cap; native truth (journal + EnvState) matches.
+  service.providerRegistry.settleOperationStatus(operationId, 'cancelled');
   return { operation_id: operationId, status: 'cancelled' };
 }
 

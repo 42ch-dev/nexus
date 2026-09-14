@@ -103,6 +103,10 @@ export const queryKeys = {
     graph: (worldId: string) => [...queryKeys.worldKb.all, 'graph', worldId] as const,
     candidates: (worldId: string, query?: object) =>
       [...queryKeys.worldKb.all, 'candidates', worldId, query ?? {}] as const,
+    // P4-T3 — durable change-outbox watermark poll for the migrated Core slice.
+    // Keyed by world so the proof slice can watch exactly its world; never
+    // mounted by the default product UI (the route is development-only).
+    changes: (worldId: string) => [...queryKeys.worldKb.all, 'changes', worldId] as const,
   },
   // V1.166 P2 — world-scoped check findings (DR-64 surfacing half). Read-only:
   // no mutation ever invalidates this key (the panel observes the route).

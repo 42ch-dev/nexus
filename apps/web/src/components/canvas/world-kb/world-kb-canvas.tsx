@@ -17,6 +17,7 @@ import { ErrorState, LoadingState } from '@/components/ui/states';
 import {
   usePatchWorldKbRelationship,
   useWorldKbCandidates,
+  useWorldKbChangesWatch,
   useWorldKbGraph,
   isWorldKbConflictError,
 } from '@/lib/canvas/use-world-kb-data';
@@ -61,9 +62,28 @@ const PROMOTE_BATCH_SIZE = 5;
 
 export interface WorldKbCanvasProps {
   worldId: string;
+  /**
+   * P4-T3: opt into the durable `core_changes` outbox watermark watch so an
+   * external writer (direct CLI) invalidates/refetches the graph + candidates.
+   * Off by default — the production World KB page never enables it, so the
+   * default product never depends on the development-only proof route.
+   */
+  watchCoreChanges?: boolean;
 }
 
-export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
+/**
+ * P4-T3 opt-in watermark watch host. Rendered ONLY when `watchCoreChanges` is
+ * true, so the default `WorldKbCanvas` never calls (or imports at render) the
+ * development-only hook — keeping existing tests' module mocks and standalone
+ * renders isolated. The hook is still called unconditionally WITHIN this
+ * component (correct hook order for the opt-in path).
+ */
+function WorldKbChangesWatch({ worldId }: { worldId: string }) {
+  useWorldKbChangesWatch(worldId, true);
+  return null;
+}
+
+export function WorldKbCanvas({ worldId, watchCoreChanges = false }: WorldKbCanvasProps) {
   const { t } = useTranslation('canvas');
   // List view is the default for keyboard-only / screen-reader users.
   const prefersReducedMotion = useReducedMotionPreference();
@@ -368,6 +388,16 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
   const entryCount = (graph.data?.entities.length ?? 0) + candidateItems.length;
   const lastFetched = graph.dataUpdatedAt ? formatRelative(graph.dataUpdatedAt) : '—';
 
+  // `useCanvasSurface` initializes its local `nodes` to `[]` before the data
+  // projection lands; mounting CanvasShell in that tick runs `fitView` against
+  // empty nodes and never refits when the nodes arrive, leaving entities
+  // offscreen. When there IS something to project but the surface has not yet
+  // produced nodes, hold on the existing LoadingState for that one tick so
+  // CanvasShell first mounts with measured nonempty nodes. A genuinely empty
+  // World (no entities/candidates) still renders the canvas normally.
+  const hasProjectableContent = confirmedEntities.length > 0 || candidateItems.length > 0;
+  const graphPendingProjection = !showList && hasProjectableContent && surface.nodes.length === 0;
+
   const inspectorPanelProps = {
     selection: canvasState.selection,
     worldId,
@@ -383,6 +413,8 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
 
   return (
     <div className="flex flex-col gap-4">
+      {/* P4-T3: opt-in only — the default canvas never mounts this. */}
+      {watchCoreChanges ? <WorldKbChangesWatch worldId={worldId} /> : null}
       <WorldKbHeader
         entryCount={entryCount}
         lastFetched={lastFetched}
@@ -400,6 +432,8 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
           {surface.altView}
           <InspectorPanel {...inspectorPanelProps} />
         </div>
+      ) : graphPendingProjection ? (
+        <LoadingState label={t('worldKb.loading')} />
       ) : (
         <CanvasShell
           nodes={surface.nodes}

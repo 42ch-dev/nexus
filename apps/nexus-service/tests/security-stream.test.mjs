@@ -378,7 +378,7 @@ describe('security-stream (P4-T2)', () => {
     } finally { await closeServiceBounded(local); await startSharedService(homeCtx.home, 0); }
   });
 
-  test('cancel response does not mark session ready before terminal truth', async () => {
+  test('accepted cancel settles session and operation to cancelled truth', async () => {
     await stopSharedService();
     const blockHome = seedHome({ BLOCK_PROMPT: '1' });
     const local = await startProviderService(blockHome.home, 0);
@@ -387,15 +387,14 @@ describe('security-stream (P4-T2)', () => {
       const executed = await jsonFetch(`${local.url}/v1/daemon/agent-host/sessions/${created.payload.session_id}/operations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { kind: 'prompt', content: 'cancel-me' } });
       const cancel = await jsonFetch(`${local.url}/v1/daemon/agent-host/operations/${executed.payload.operation_id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: {} });
       assert.equal(cancel.payload.status, 'cancelled');
-      const sessionAfter = (await jsonFetch(`${local.url}/v1/daemon/agent-host/sessions/${created.payload.session_id}`)).payload;
+      // The accepted cancel must settle observable + durable truth: a repeated
+      // GET reports `cancelled` (never a stale `running`), and the session is no
+      // longer busy.
       const opAfter = (await jsonFetch(`${local.url}/v1/daemon/agent-host/operations/${executed.payload.operation_id}`)).payload;
-      // Native truth: the cancel ack must not mark the session Ready nor the
-      // operation terminal before the adapter emits its real terminal event.
-      assert.notEqual(sessionAfter.state, 'Ready');
-      assert.equal(sessionAfter.state, 'Busy');
-      assert.notEqual(opAfter.status, 'finished');
-      assert.notEqual(opAfter.status, 'failed');
-      assert.equal(sessionAfter.active_op_id, executed.payload.operation_id);
+      assert.equal(opAfter.status, 'cancelled');
+      const sessionAfter = (await jsonFetch(`${local.url}/v1/daemon/agent-host/sessions/${created.payload.session_id}`)).payload;
+      assert.notEqual(sessionAfter.state, 'Busy');
+      assert.ok(sessionAfter.active_op_id === undefined || sessionAfter.active_op_id === null);
     } finally { await closeServiceBounded(local); await startSharedService(homeCtx.home, 0); }
   });
 

@@ -611,6 +611,12 @@ pub async fn open_core(
 
     let core = Arc::new(core);
     state.clear_service_only_uninitialized();
+    // Install the durable journal pool and settle any operation orphaned by the
+    // predecessor process's exit as `interrupted` (LIFE-3). This must happen
+    // before the host accepts new work so a restarted process never re-dispatches
+    // a journaled op and the prior active op is queryable immediately.
+    state.set_journal_pool(core.pool().clone());
+    state.settle_journal_on_open().await;
     state.host.lock().expect("host mutex poisoned").replace(host);
     state.provider_port.lock().expect("port mutex poisoned").replace(provider_port);
     state.core.lock().expect("core mutex poisoned").replace(core);

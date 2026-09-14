@@ -225,6 +225,14 @@ impl CoreService {
         read_changes(&self.inner.pool, request).await
     }
 
+    /// Durable JS-provider operation journal access (LIFE-3). The pool is
+    /// exposed read/write for the native provider-callback bridge and the
+    /// `hostQuery` fallback; it is not a second business truth.
+    #[must_use]
+    pub fn pool(&self) -> &SqlitePool {
+        &self.inner.pool
+    }
+
     pub async fn close(&self) -> CoreResult<CoreCloseReport> {
         if self
             .inner

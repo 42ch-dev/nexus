@@ -132,14 +132,14 @@ pub struct EnvState {
     pub close_in_flight: Mutex<bool>,
     /// Last observed pending operation/task IDs for close reports.
     pub pending_operation_ids: Mutex<Vec<String>>,
-    /// Structured state for JS-provider sessions.
+    /// Bounded structured state for JS-provider sessions and operations.
     ///
-    /// The JS adapter owns its ACP child processes; native close must drive
-    /// their cancellation and release through the live callback bridge before
-    /// the admission fence rises, or an owned child leaks. This same state also
-    /// backs `hostQuery` so a JS-provider session/operation is queryable with
-    /// exactly the generated response shape. Empty for Rust-owned providers.
+    /// `hostQuery` also reads it as a fallback when a hydration miss occurs.
     pub js_state: StdMutex<JsProviderState>,
+    /// Durable journal pool for JS-provider operations (LIFE-3). Set when the
+    /// core opens; `None` for the service-only shell. Survives process exit so
+    /// a previously active op is still queryable as `interrupted`.
+    pub journal_pool: StdMutex<Option<sqlx::SqlitePool>>,
     /// Service-only shell: compatibility/status without DB, host, or principal.
     pub service_only_uninitialized: AtomicBool,
 }
@@ -151,6 +151,9 @@ pub enum JsOperationStatus {
     Finished,
     Failed,
     Interrupted,
+    /// A cooperative cancel was accepted. This is terminal and observable — a
+    /// repeated GET reports `cancelled`, never a stale `running`.
+    Cancelled,
 }
 
 impl JsOperationStatus {
@@ -162,6 +165,7 @@ impl JsOperationStatus {
             JsOperationStatus::Finished => "finished",
             JsOperationStatus::Failed => "failed",
             JsOperationStatus::Interrupted => "interrupted",
+            JsOperationStatus::Cancelled => "cancelled",
         }
     }
 }
@@ -216,16 +220,23 @@ impl JsProviderState {
 
     /// Upsert a terminal record by operation_id, so a duplicate terminal event
     /// can never retain a stale status or waste the cap.
+    ///
+    /// The first terminal wins: a later event must never downgrade an
+    /// already-observed terminal (in particular, a `cancelled` accepted by the
+    /// cooperative cancel path stays `cancelled` even if a subsequent stream
+    /// event would otherwise rewrite it).
     fn upsert_terminal(&mut self, record: JsOperationRecord) {
         if let Some(existing) = self
             .terminal
             .iter_mut()
             .find(|op| op.operation_id == record.operation_id)
         {
-            *existing = record;
-        } else {
-            self.terminal.push_back(record);
+            if existing.status == JsOperationStatus::Running {
+                *existing = record;
+            }
+            return;
         }
+        self.terminal.push_back(record);
         while self.terminal.len() > JS_MAX_TERMINAL_OPERATIONS {
             self.terminal.pop_front();
         }
@@ -280,6 +291,7 @@ impl EnvState {
             close_in_flight: Mutex::new(false),
             pending_operation_ids: Mutex::new(Vec::new()),
             js_state: StdMutex::new(JsProviderState::new()),
+            journal_pool: StdMutex::new(None),
             service_only_uninitialized: AtomicBool::new(false),
         }
     }
@@ -339,9 +351,29 @@ impl EnvState {
         }
     }
 
-    /// A cancel acknowledgement does NOT clear the active op: the operation only
-    /// becomes terminal when the adapter emits its terminal event.
-    pub fn record_js_cancel_ack(&self, _session_id: &str) {}
+    /// Record a cooperative cancel acknowledgement. The accepted cancel settles
+    /// the session's active operation to the `cancelled` terminal so a repeated
+    /// GET observes `cancelled` rather than a stale `running`. The terminal is
+    /// upserted monotonically (a later `running` write can never downgrade it).
+    pub fn record_js_cancel_ack(&self, session_id: &str) {
+        if let Ok(mut state) = self.js_state.lock() {
+            let active = state
+                .sessions
+                .get(session_id)
+                .and_then(|s| s.active_operation_id.clone());
+            let Some(op_id) = active else {
+                return;
+            };
+            if let Some(session) = state.sessions.get_mut(session_id) {
+                session.active_operation_id = None;
+            }
+            state.upsert_terminal(JsOperationRecord {
+                operation_id: op_id,
+                session_id: session_id.to_string(),
+                status: JsOperationStatus::Cancelled,
+            });
+        }
+    }
 
     /// Record an operation terminal observed from a real provider event batch.
     /// Clears the session's active op and upserts a bounded terminal record.
@@ -418,22 +450,63 @@ impl EnvState {
         self.js_state.lock().ok().map(|state| f(&state))
     }
 
+    /// Install the durable journal pool when the core opens.
+    pub fn set_journal_pool(&self, pool: sqlx::SqlitePool) {
+        if let Ok(mut slot) = self.journal_pool.lock() {
+            *slot = Some(pool);
+        }
+    }
+
+    /// A cloned journal pool handle, if the core opened.
+    #[must_use]
+    pub fn journal_pool(&self) -> Option<sqlx::SqlitePool> {
+        self.journal_pool.lock().ok().and_then(|slot| slot.clone())
+    }
+
+    /// Journal an operation write-through. Best-effort: a journal failure never
+    /// fails the provider effect (the in-memory state remains authoritative for
+    /// this process).
+    pub async fn journal_operation(&self, operation_id: &str, session_id: &str, provider_id: &str, status: &str) {
+        let Some(pool) = self.journal_pool() else {
+            return;
+        };
+        let _ = nexus_local_db::js_provider_journal::upsert_operation(
+            &pool,
+            operation_id,
+            session_id,
+            provider_id,
+            status,
+        )
+        .await;
+    }
+
+    /// Settle orphaned journal entries on open: any non-terminal operation the
+    /// predecessor process left behind becomes `interrupted` (LIFE-3).
+    pub async fn settle_journal_on_open(&self) {
+        let Some(pool) = self.journal_pool() else {
+            return;
+        };
+        let _ = nexus_local_db::js_provider_journal::settle_orphaned_as_interrupted(&pool).await;
+    }
+
     /// Inspect the actual delivered provider events and update JS operation
     /// truth: `OpFinished` → finished, `OpFailed` → failed, `SessionStopped` →
     /// interrupted (any active op) and the session leaves the active set. The
-    /// terminal is derived from the real batch, never a caller label.
+    /// terminal is derived from the real batch, never a caller label. Returns
+    /// the wire status if this batch carried a terminal, for durable mirroring.
     pub fn apply_js_batch_terminals(
         &self,
         operation_id: &str,
         events: &[nexus_contracts::provider_event_batch::NexusProviderHostEvent],
-    ) {
+    ) -> Option<&'static str> {
         let Some(session_id) = self
             .with_js_state(|state| state.operation(operation_id).map(|op| op.session_id))
             .flatten()
         else {
-            return;
+            return None;
         };
         use nexus_contracts::provider_event_batch::NexusProviderHostEvent as BatchEvent;
+        let mut terminal = None;
         for event in events {
             match event {
                 BatchEvent::OpFinished { .. } => {
@@ -442,6 +515,7 @@ impl EnvState {
                         operation_id,
                         JsOperationStatus::Finished,
                     );
+                    terminal = Some(JsOperationStatus::Finished.wire());
                 }
                 BatchEvent::OpFailed { .. } => {
                     self.record_js_operation_terminal(
@@ -449,13 +523,46 @@ impl EnvState {
                         operation_id,
                         JsOperationStatus::Failed,
                     );
+                    terminal = Some(JsOperationStatus::Failed.wire());
                 }
                 BatchEvent::SessionStopped { .. } => {
                     self.record_js_session_stopped(&session_id);
+                    terminal = Some(JsOperationStatus::Interrupted.wire());
                 }
                 _ => {}
             }
         }
+        terminal
+    }
+
+    /// Journal an operation's terminal status durably (LIFE-3).
+    pub async fn journal_operation_status(&self, operation_id: &str, status: &str) {
+        let Some(pool) = self.journal_pool() else {
+            return;
+        };
+        let (session_id, provider_id) = self
+            .with_js_state(|s| {
+                s.operation(operation_id)
+                    .map(|op| (op.session_id, String::new()))
+            })
+            .flatten()
+            .unwrap_or_default();
+        let _ = nexus_local_db::js_provider_journal::upsert_operation(
+            &pool,
+            operation_id,
+            &session_id,
+            &provider_id,
+            status,
+        )
+        .await;
+    }
+
+    /// Drop journaled operations for a cleanly shut-down session.
+    pub async fn forget_journal_session(&self, session_id: &str) {
+        let Some(pool) = self.journal_pool() else {
+            return;
+        };
+        let _ = nexus_local_db::js_provider_journal::forget_session(&pool, session_id).await;
     }
 
     pub fn lifecycle_phase(&self) -> EnvLifecyclePhase {
@@ -917,15 +1024,25 @@ mod tests {
     }
 
     #[test]
-    fn js_cancel_ack_does_not_end_the_operation() {
+    fn js_cancel_ack_settles_the_operation_to_cancelled() {
         let state = EnvState::new();
         state.record_js_session("sess-2".to_string(), "mock-acp".to_string());
         state.record_js_session_operation("sess-2", "op-2".to_string());
         state.record_js_cancel_ack("sess-2");
         assert_eq!(
             state.with_js_state(|s| s.operation("op-2")).flatten().unwrap().status.wire(),
-            "running",
-            "a cancel ack must not mark the op terminal"
+            "cancelled",
+            "an accepted cancel must settle the op to the cancelled terminal"
+        );
+        // The active op is cleared, so the session is no longer busy.
+        let session = state.with_js_state(|s| s.session("sess-2").cloned()).flatten().unwrap();
+        assert!(session.active_operation_id.is_none());
+        // A later terminal event must never downgrade the settled `cancelled`.
+        state.record_js_operation_terminal("sess-2", "op-2", JsOperationStatus::Finished);
+        assert_eq!(
+            state.with_js_state(|s| s.operation("op-2")).flatten().unwrap().status.wire(),
+            "cancelled",
+            "a later terminal must not downgrade an already-cancelled op"
         );
     }
 
