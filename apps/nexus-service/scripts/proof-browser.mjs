@@ -715,19 +715,55 @@ async function evaluate(client, expression, { awaitPromise = true, timeoutMs = 3
   return result.result?.value;
 }
 
-async function waitForPageCondition(client, expression, { timeoutMs = 15_000, intervalMs = 150 } = {}) {
+/**
+ * Structured page call: invokes a FIXED function source via CDP
+ * Runtime.callFunctionOn with `args` passed as CDP call arguments, so runtime
+ * values are transported as data and never enter executable page code.
+ * Diagnostics mirror `evaluate` (exceptionDetails thrown verbatim).
+ */
+async function callPage(client, fn, args = [], { awaitPromise = true, timeoutMs = 30_000 } = {}) {
+  const probe = await client.send('Runtime.evaluate', { expression: 'window', returnByValue: false });
+  const objectId = probe.result?.objectId;
+  if (!objectId) throw new Error('page evaluation failed: page global object unavailable');
+  const result = await client.send(
+    'Runtime.callFunctionOn',
+    {
+      functionDeclaration: fn,
+      objectId,
+      arguments: args.map((value) => ({ value })),
+      returnByValue: true,
+      awaitPromise,
+    },
+    { timeoutMs },
+  );
+  if (result.exceptionDetails) {
+    throw new Error(`page evaluation failed: ${JSON.stringify(result.exceptionDetails)}`);
+  }
+  return result.result?.value;
+}
+
+async function pollUntilTruthy(attempt, describe, { timeoutMs = 15_000, intervalMs = 150 } = {}) {
   const deadline = Date.now() + timeoutMs;
   let last;
   while (Date.now() < deadline) {
     try {
-      last = await evaluate(client, expression);
+      last = await attempt();
       if (last) return last;
     } catch (err) {
       last = err instanceof Error ? err.message : String(err);
     }
     await sleep(intervalMs);
   }
-  throw new Error(`Timed out waiting for page condition: ${expression}; last=${JSON.stringify(last)}`);
+  throw new Error(`Timed out waiting for page condition: ${describe}; last=${JSON.stringify(last)}`);
+}
+
+async function waitForPageCondition(client, expression, opts = {}) {
+  return pollUntilTruthy(() => evaluate(client, expression), expression, opts);
+}
+
+/** Poll a structured page call until truthy; same semantics as waitForPageCondition. */
+async function waitForPageFunction(client, fn, args = [], opts = {}) {
+  return pollUntilTruthy(() => callPage(client, fn, args), fn, opts);
 }
 
 /**
@@ -890,9 +926,10 @@ async function runBrowserInteractionProof(ctx) {
     `Boolean(document.querySelector('[data-testid="rft-native-proof-page"]'))`,
   );
 
-  const graphBefore = await evaluate(
+  const graphBefore = await callPage(
     client,
-    `window.__RFT_NATIVE_PROOF__.readGraph().then((g) => ({ entities: (g.entities||[]).length, casVersion: (g.entities||[]).filter(e => e.key_block_id === ${JSON.stringify(CAS_ENTITY)}).map(e => e.version)[0] ?? null }))`,
+    `async (entityId) => window.__RFT_NATIVE_PROOF__.readGraph().then((g) => ({ entities: (g.entities||[]).length, casVersion: (g.entities||[]).filter(e => e.key_block_id === entityId).map(e => e.version)[0] ?? null }))`,
+    [CAS_ENTITY],
   );
   // Require the EXISTING canvas to actually render entity content in the DOM
   // before screenshotting — React Flow mounts nodes asynchronously and applies
@@ -902,9 +939,9 @@ async function runBrowserInteractionProof(ctx) {
   // seeded entity name (an offscreen/zero-size element is not meaningful
   // evidence).
   try {
-    await waitForPageCondition(
+    await waitForPageFunction(
       client,
-      `(() => {
+      `async (needle) => {
         const onScreen = (el) => {
           const r = el.getBoundingClientRect();
           return r.width > 1 && r.height > 1 && r.bottom > 0 && r.right > 0 &&
@@ -913,8 +950,9 @@ async function runBrowserInteractionProof(ctx) {
         const nodes = Array.from(document.querySelectorAll('.react-flow__node'));
         const rows = Array.from(document.querySelectorAll('table tbody tr'));
         const candidates = [...nodes, ...rows].filter(onScreen);
-        return candidates.some((el) => (el.innerText || '').includes(${JSON.stringify('Cas')}));
-      })()`,
+        return candidates.some((el) => (el.innerText || '').includes(needle));
+      }`,
+      ['Cas'],
       { timeoutMs: 25_000 },
     );
   } catch (err) {
@@ -962,18 +1000,20 @@ async function runBrowserInteractionProof(ctx) {
 
   // Create-on-absent through the real BrowserClient in page context, then
   // observe the existing canvas (which refetches via the graph query).
-  const created = await evaluate(
+  const created = await callPage(
     client,
-    `window.__RFT_NATIVE_PROOF__.createEntityOnAbsent({ entity_id: ${JSON.stringify(CREATE_ENTITY)}, expected_version: 0, patch: { title: 'Proof Entity', block_type: 'character' } }).then((r) => ({ ok: true, version: r.version, id: r.entity.key_block_id })).catch((e) => ({ ok: false, status: e.status ?? 0, code: e.code ?? null, message: String((e && e.message) || e) }))`,
+    `async (entityId) => window.__RFT_NATIVE_PROOF__.createEntityOnAbsent({ entity_id: entityId, expected_version: 0, patch: { title: 'Proof Entity', block_type: 'character' } }).then((r) => ({ ok: true, version: r.version, id: r.entity.key_block_id })).catch((e) => ({ ok: false, status: e.status ?? 0, code: e.code ?? null, message: String((e && e.message) || e) }))`,
+    [CREATE_ENTITY],
   );
   // Assert immediately (before polling) so a validation failure is attributable:
   // the created id and version must match, else throw with the serialized body.
   if (!created?.ok || created.id !== CREATE_ENTITY || typeof created.version !== 'number') {
     throw new Error(`create-on-absent did not succeed: ${JSON.stringify(created)}`);
   }
-  await waitForPageCondition(
+  await waitForPageFunction(
     client,
-    `window.__RFT_NATIVE_PROOF__.readGraph().then((g) => (g.entities||[]).some(e => e.key_block_id === ${JSON.stringify(CREATE_ENTITY)}))`,
+    `async (entityId) => window.__RFT_NATIVE_PROOF__.readGraph().then((g) => (g.entities||[]).some(e => e.key_block_id === entityId))`,
+    [CREATE_ENTITY],
     { timeoutMs: 15_000 },
   );
   // Require the NEW entity's node to EXIST in the canvas DOM first (any
@@ -992,9 +1032,9 @@ async function runBrowserInteractionProof(ctx) {
       { timeoutMs: 20_000 },
     );
   } catch (err) {
-    const diagnostics = await evaluate(
+    const diagnostics = await callPage(
       client,
-      `(async () => {
+      `async (entityId) => {
         const rect = (el) => { const r = el.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), left: Math.round(r.left), top: Math.round(r.top), right: Math.round(r.right), bottom: Math.round(r.bottom) }; };
         const styleOf = (el) => { const s = getComputedStyle(el); return { display: s.display, visibility: s.visibility, opacity: s.opacity, transform: s.transform }; };
         const nodes = Array.from(document.querySelectorAll('.react-flow__node')).map((n) => ({ id: n.getAttribute('data-id'), text: (n.innerText || '').slice(0, 60), rect: rect(n), style: styleOf(n) }));
@@ -1004,7 +1044,7 @@ async function runBrowserInteractionProof(ctx) {
         let changes = null;
         try {
           const g = await window.__RFT_NATIVE_PROOF__.readGraph();
-          graphCreated = (g.entities || []).find((e) => e.key_block_id === ${JSON.stringify(CREATE_ENTITY)}) ?? null;
+          graphCreated = (g.entities || []).find((e) => e.key_block_id === entityId) ?? null;
         } catch (ge) { graphCreated = { error: String((ge && ge.message) || ge) }; }
         try { changes = await window.__RFT_NATIVE_PROOF__.readCoreChanges({ after_sequence: '0' }); } catch (ce) { changes = { error: String((ce && ce.message) || ce) }; }
         return {
@@ -1018,7 +1058,8 @@ async function runBrowserInteractionProof(ctx) {
           coreChanges: changes,
           bodyExcerpt: (document.body.innerText || '').slice(0, 400),
         };
-      })()`,
+      }`,
+      [CREATE_ENTITY],
     );
     throw new Error(
       `created entity absent from canvas DOM: ${err instanceof Error ? err.message : String(err)}; diagnostics=${JSON.stringify(diagnostics)}`,
@@ -1061,12 +1102,13 @@ async function runBrowserInteractionProof(ctx) {
 
   // Update via the browser at the observed current version.
   const casVersion = graphBefore.casVersion;
-  const updateViaBrowser = await evaluate(
+  const updateViaBrowser = await callPage(
     client,
-    `window.__RFT_NATIVE_PROOF__.client.worldKbPatchEntity(${JSON.stringify(world)}, { entity_id: ${JSON.stringify(CAS_ENTITY)}, expected_version: ${casVersion}, patch: { title: 'BROWSER-UPDATED' } }).then((r) => ({ ok: true, version: r.version })).catch((e) => ({ ok: false, status: e.status ?? 0, code: e.code ?? String((e && e.message) || e) }))`,
+    `async (worldId, entityId, expectedVersion) => window.__RFT_NATIVE_PROOF__.client.worldKbPatchEntity(worldId, { entity_id: entityId, expected_version: expectedVersion, patch: { title: 'BROWSER-UPDATED' } }).then((r) => ({ ok: true, version: r.version })).catch((e) => ({ ok: false, status: e.status ?? 0, code: e.code ?? String((e && e.message) || e) }))`,
+    [world, CAS_ENTITY, casVersion],
   );
-  const readCasVersionExpr = `window.__RFT_NATIVE_PROOF__.readGraph().then((g) => (g.entities||[]).filter(e => e.key_block_id === ${JSON.stringify(CAS_ENTITY)}).map(e => e.version)[0] ?? null)`;
-  const postUpdateVersion = await evaluate(client, readCasVersionExpr);
+  const readCasVersionFn = `async (entityId) => window.__RFT_NATIVE_PROOF__.readGraph().then((g) => (g.entities||[]).filter(e => e.key_block_id === entityId).map(e => e.version)[0] ?? null)`;
+  const postUpdateVersion = await callPage(client, readCasVersionFn, [CAS_ENTITY]);
 
   // DB-1 locked protocol (proof matrix §1/§2): 100 deterministic competing-write
   // pairs. Each pair is a real two-writer barrier — the next expected version
@@ -1080,9 +1122,10 @@ async function runBrowserInteractionProof(ctx) {
   {
     let expectedVersion = postUpdateVersion;
     for (let index = 0; index < DB1_REQUIRED_PAIRS; index += 1) {
-      const raceBrowser = evaluate(
+      const raceBrowser = callPage(
         client,
-        `window.__RFT_NATIVE_PROOF__.client.worldKbPatchEntity(${JSON.stringify(world)}, { entity_id: ${JSON.stringify(CAS_ENTITY)}, expected_version: ${expectedVersion}, patch: { title: 'RACE-BROWSER-${index}' } }).then((r) => ({ winner: 'browser', status: 200, version: r.version })).catch((e) => ({ winner: 'none', status: e.status ?? 0, code: e.code ?? null }))`,
+        `async (worldId, entityId, expectedVersion, title) => window.__RFT_NATIVE_PROOF__.client.worldKbPatchEntity(worldId, { entity_id: entityId, expected_version: expectedVersion, patch: { title } }).then((r) => ({ winner: 'browser', status: 200, version: r.version })).catch((e) => ({ winner: 'none', status: e.status ?? 0, code: e.code ?? null }))`,
+        [world, CAS_ENTITY, expectedVersion, `RACE-BROWSER-${index}`],
       );
       const cliPromise = runCliPatch(ctx.home, {
         entityId: CAS_ENTITY,
@@ -1110,7 +1153,7 @@ async function runBrowserInteractionProof(ctx) {
         });
         break;
       }
-      const resultingVersion = await evaluate(client, readCasVersionExpr);
+      const resultingVersion = await callPage(client, readCasVersionFn, [CAS_ENTITY]);
       racePairs.push({
         index,
         expectedVersion,
@@ -1136,11 +1179,12 @@ async function runBrowserInteractionProof(ctx) {
   // without any browser-side mutation. This observes canonical state, not a
   // promise resolution.
   const cliTitle = 'CLI-WATERMARK-VISIBLE';
-  const canonicalBeforeCli = await evaluate(
+  const canonicalBeforeCli = await callPage(
     client,
-    `window.__RFT_NATIVE_PROOF__.readGraph().then((g) => (g.entities||[]).filter(e => e.key_block_id === ${JSON.stringify(CAS_ENTITY)}).map(e => e.canonical_name)[0] ?? null)`,
+    `async (entityId) => window.__RFT_NATIVE_PROOF__.readGraph().then((g) => (g.entities||[]).filter(e => e.key_block_id === entityId).map(e => e.canonical_name)[0] ?? null)`,
+    [CAS_ENTITY],
   );
-  const cliVersion = await evaluate(client, readCasVersionExpr);
+  const cliVersion = await callPage(client, readCasVersionFn, [CAS_ENTITY]);
   const cliWrite = await runCliPatch(ctx.home, {
     entityId: CAS_ENTITY,
     expectedVersion: cliVersion,
@@ -1157,9 +1201,10 @@ async function runBrowserInteractionProof(ctx) {
   //    failure (service/core/DB) from a render failure before the DOM check.
   let graphCanonical = null;
   try {
-    graphCanonical = await waitForPageCondition(
+    graphCanonical = await waitForPageFunction(
       client,
-      `window.__RFT_NATIVE_PROOF__.readGraph().then((g) => (g.entities||[]).filter(e => e.key_block_id === ${JSON.stringify(CAS_ENTITY)}).map(e => e.canonical_name)[0] ?? null).then((n) => n === ${JSON.stringify(cliTitle)} ? n : false)`,
+      `async (entityId, title) => window.__RFT_NATIVE_PROOF__.readGraph().then((g) => (g.entities||[]).filter(e => e.key_block_id === entityId).map(e => e.canonical_name)[0] ?? null).then((n) => n === title ? n : false)`,
+      [CAS_ENTITY, cliTitle],
       { timeoutMs: 20_000 },
     );
   } catch (err) {
@@ -1172,21 +1217,23 @@ async function runBrowserInteractionProof(ctx) {
   //    core_changes page so the failure is attributable.
   let canvasText = null;
   try {
-    canvasText = await waitForPageCondition(
+    canvasText = await waitForPageFunction(
       client,
-      `(document.body.innerText || '').includes(${JSON.stringify(cliTitle)}) ? ${JSON.stringify(cliTitle)} : false`,
+      `(title) => (document.body.innerText || '').includes(title) ? title : false`,
+      [cliTitle],
       { timeoutMs: 20_000 },
     );
   } catch (err) {
-    const latest = await evaluate(
+    const latest = await callPage(
       client,
-      `(async () => {
+      `async (entityId) => {
         const g = await window.__RFT_NATIVE_PROOF__.readGraph();
-        const e = (g.entities||[]).find((x) => x.key_block_id === ${JSON.stringify(CAS_ENTITY)});
+        const e = (g.entities||[]).find((x) => x.key_block_id === entityId);
         let changes = null;
         try { changes = await window.__RFT_NATIVE_PROOF__.readCoreChanges({ after_sequence: '0' }); } catch (ce) { changes = { error: String((ce && ce.message) || ce) }; }
         return { graph: { canonical_name: e?.canonical_name ?? null, version: e?.version ?? null }, changes };
-      })()`,
+      }`,
+      [CAS_ENTITY],
     );
     throw new Error(
       `CLI watermark DOM visibility failed: ${err instanceof Error ? err.message : String(err)}; cliWrite=${JSON.stringify({ status: cliWrite.status, stdout: cliWrite.stdout.trim().slice(0, 400) })}; latest=${JSON.stringify(latest)}`,
@@ -1227,22 +1274,25 @@ async function runProviderProof(ctx) {
     'window.__RFT_NATIVE_PROOF__.createAgentHostSession({ provider_id: "mock-acp" })',
   );
   const sessionId = session.session_id;
-  const operation = await evaluate(
+  const operation = await callPage(
     client,
-    `window.__RFT_NATIVE_PROOF__.executeAgentHostOperation(${JSON.stringify(sessionId)}, { kind: "prompt", content: "hello" })`,
+    `async (sessionId) => window.__RFT_NATIVE_PROOF__.executeAgentHostOperation(sessionId, { kind: "prompt", content: "hello" })`,
+    [sessionId],
   );
-  const events = await evaluate(
+  const events = await callPage(
     client,
-    `window.__RFT_NATIVE_PROOF__.drainAgentHostEvents(${JSON.stringify(sessionId)}, { timeoutMs: 30000 })`,
+    `async (sessionId) => window.__RFT_NATIVE_PROOF__.drainAgentHostEvents(sessionId, { timeoutMs: 30000 })`,
+    [sessionId],
   );
   const terminal = events.find((e) => e.OpFinished ?? e.OpFailed ?? e.SessionStopped) ?? null;
   const message = events
     .map((e) => e.MessageDelta?.text ?? e.ThoughtDelta?.text ?? null)
     .filter(Boolean)
     .join('');
-  const inspect = await evaluate(
+  const inspect = await callPage(
     client,
-    `window.__RFT_NATIVE_PROOF__.getAgentHostOperation(${JSON.stringify(operation.operation_id)})`,
+    `async (operationId) => window.__RFT_NATIVE_PROOF__.getAgentHostOperation(operationId)`,
+    [operation.operation_id],
   );
   return { session, operation, terminal, message, inspect, eventCount: events.length };
 }
@@ -1262,15 +1312,17 @@ async function runCancelProof(ctx, serviceHandle) {
       client,
       'window.__RFT_NATIVE_PROOF__.createAgentHostSession({ provider_id: "mock-acp" })',
     );
-    const operation = await evaluate(
+    const operation = await callPage(
       client,
-      `window.__RFT_NATIVE_PROOF__.executeAgentHostOperation(${JSON.stringify(session.session_id)}, { kind: "prompt", content: "block" })`,
+      `async (sessionId) => window.__RFT_NATIVE_PROOF__.executeAgentHostOperation(sessionId, { kind: "prompt", content: "block" })`,
+      [session.session_id],
     );
     await sleep(750);
     const cancelStartedAt = performance.now();
-    const cancel = await evaluate(
+    const cancel = await callPage(
       client,
-      `window.__RFT_NATIVE_PROOF__.cancelAgentHostOperation(${JSON.stringify(operation.operation_id)})`,
+      `async (operationId) => window.__RFT_NATIVE_PROOF__.cancelAgentHostOperation(operationId)`,
+      [operation.operation_id],
     );
     const deadline = Date.now() + 20_000;
     let status = null;
@@ -1315,9 +1367,10 @@ async function runInterruptedRestartCycles(ctx, serviceHandle, { cycles = LIFE_R
       ctx.client,
       'window.__RFT_NATIVE_PROOF__.createAgentHostSession({ provider_id: "mock-acp" })',
     );
-    const operation = await evaluate(
+    const operation = await callPage(
       ctx.client,
-      `window.__RFT_NATIVE_PROOF__.executeAgentHostOperation(${JSON.stringify(session.session_id)}, { kind: "prompt", content: "block" })`,
+      `async (sessionId) => window.__RFT_NATIVE_PROOF__.executeAgentHostOperation(sessionId, { kind: "prompt", content: "block" })`,
+      [session.session_id],
     );
     await sleep(750);
     // Snapshot the tracked tree BEFORE the kill: once the group leader dies,
@@ -1542,9 +1595,10 @@ async function runWebEditSample(ctx, sampleIndex) {
     const started = Date.now();
     const { cargoSamples } = await traceDuringEdit(rootPids, async () => {
       edit.write(source);
-      await waitForPageCondition(
+      await waitForPageFunction(
         client,
-        `(document.querySelector('[data-testid="rft-native-proof-marker"]')?.textContent ?? '').includes(${JSON.stringify(value)})`,
+        `(value) => (document.querySelector('[data-testid="rft-native-proof-marker"]')?.textContent ?? '').includes(value)`,
+        [value],
         { timeoutMs: 5_000 },
       );
     });

@@ -21,7 +21,6 @@ import {
   isDaemonCliStatusRunning,
   manifestPathForArtifact,
   readBackendManifest,
-  redactUserinfo,
   refreshBackend,
   resolveDaemonEndpoint,
   resolveListenerPid,
@@ -354,13 +353,64 @@ function spawnLogged(command, args, { cwd, env, label }) {
   return child;
 }
 
+const EVIDENCE_FIELDS = new Set([
+  'runKind', 'pass', 'command', 'error', 'cleanupOutcome', 'timestamps', 'environment', 'surface',
+  'artifact', 'criteria', 'endpoint', 'loopCommand', 'sidecarBaseline', 'observedOutcomes', 'notes',
+  'negativeCase', 'observedError', 'remediation', 'sample', 'boundary', 'beforeSha256', 'afterSha256',
+  'artifactPath',
+]);
+const EVIDENCE_MAX_DEPTH = 12;
+const EVIDENCE_MAX_STRING = 256 * 1024;
+const EVIDENCE_MAX_ITEMS = 50_000;
+
+/** Strict evidence schema: only allowlisted top-level fields are persisted. */
+function toEvidenceObject(payload) {
+  const evidence = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (EVIDENCE_FIELDS.has(key)) evidence[key] = boundEvidenceData(value, 0);
+  }
+  return evidence;
+}
+
+/** Strong bounded validator before persistence: plain JSON values only, with depth/size/key-shape limits. */
+function boundEvidenceData(value, depth) {
+  if (value === null || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new Error('Evidence number must be finite');
+    return value;
+  }
+  if (typeof value === 'string') {
+    if (value.length > EVIDENCE_MAX_STRING) throw new Error(`Evidence string exceeds ${EVIDENCE_MAX_STRING} characters`);
+    return value;
+  }
+  if (depth >= EVIDENCE_MAX_DEPTH) throw new Error('Evidence nesting exceeds maximum depth');
+  if (Array.isArray(value)) {
+    if (value.length > EVIDENCE_MAX_ITEMS) throw new Error('Evidence array exceeds maximum size');
+    return value.map(item => boundEvidenceData(item, depth + 1));
+  }
+  if (typeof value === 'object') {
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) throw new Error('Evidence must be plain JSON data');
+    const out = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (key === '' || key.length > 128 || key === '__proto__' || key === 'constructor' || key === 'prototype') {
+        throw new Error(`Unsafe evidence key: ${key}`);
+      }
+      out[key] = boundEvidenceData(item, depth + 1);
+    }
+    return out;
+  }
+  throw new Error(`Unsupported evidence value type: ${typeof value}`);
+}
+
 export async function writeEvidence(outDir, payload) {
   await mkdir(outDir, { recursive: true });
+  const evidence = toEvidenceObject(payload);
   const filename = evidenceFilename({ runKind: payload.runKind, pass: payload.pass, startedAt: payload.timestamps.utcStart });
   if (!/^[\w.-]+\.json$/.test(filename)) throw new Error(`Refusing unsafe evidence filename: ${filename}`);
   const target = join(outDir, filename);
   try {
-    await writeFile(target, `${JSON.stringify(payload, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
+    await writeFile(target, `${JSON.stringify(evidence, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
   } catch (err) {
     if (err.code === 'EEXIST') throw new Error(`Evidence file already exists: ${target}`);
     throw err;
@@ -914,8 +964,7 @@ async function main() {
 const isMain = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;
 if (isMain) {
   main().catch(err => {
-    const rendered = err instanceof Error ? err.stack ?? err.message ?? err : err;
-    console.error(typeof rendered === 'string' ? redactUserinfo(rendered) : rendered);
+    console.error(`proof-rft-dx failed [${err instanceof Error ? err.name : typeof err}]`);
     process.exit(1);
   });
 }
