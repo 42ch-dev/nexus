@@ -123,17 +123,22 @@ function trackChild(child, label) {
   // key binds the label to the pid and a process-global spawn sequence — two
   // children can never collide on one retained-output entry.
   child.__evidenceKey = `${label}-pid${child.pid ?? 'x'}-${(childSpawnSequence += 1)}`;
-  // A child stays in the tracked set until `close`: `exit` can fire before
-  // piped stdout/stderr have drained, and the evidence drain scans this set
-  // for exited-but-not-closed children — removing at `exit` would hide
-  // exactly the children the drain exists to wait for.
+  // A child stays in the tracked set until its lifecycle settles: `exit` can
+  // fire before piped stdout/stderr have drained, and the evidence drain scans
+  // this set for exited-but-not-closed children — removing at `exit` would
+  // hide exactly the children the drain exists to wait for.
   trackedChildren.add(child);
-  // `close` fires only after stdio is closed; the close callback captures the
-  // bounded tail into the retained-output map and only then removes the child
-  // from the tracked set, so a drain racing the exit always finds it.
+  // The lifecycle settles on the FIRST of `close` or `error`: a failed spawn
+  // (ENOENT) never emits `exit`, so every waiter (evidence drain, stop,
+  // cleanup) must observe a settled child instead of waiting forever. This
+  // `error` listener also keeps a spawn failure from crashing the process as
+  // an unhandled 'error' event. `close` still captures the bounded trailing
+  // output before the child leaves the tracked set.
   child.__closed = new Promise((resolveClose) => {
-    child.once('close', () => {
+    const settle = (err) => {
+      if (child.__closeSettled) return;
       child.__closeSettled = true;
+      if (err) child.__error = err;
       const text = typeof child.output === 'function' ? child.output() : '';
       if (text) {
         retainedExitedOutput.delete(child.__evidenceKey);
@@ -145,7 +150,9 @@ function trackChild(child, label) {
       }
       trackedChildren.delete(child);
       resolveClose();
-    });
+    };
+    child.once('close', () => settle());
+    child.once('error', (err) => settle(err));
   });
   return child;
 }
@@ -187,8 +194,16 @@ function spawnLogged(command, args, { cwd, env, label, collect = true }) {
   return child;
 }
 
-async function stopChild(child, { graceMs = 4_000 } = {}) {
-  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+/**
+ * Bounded child stop: SIGTERM the process group, escalate to SIGKILL, sweep
+ * the group once more, then await `close` — every wait bounded. A child that
+ * already exited but has not closed skips the signaling and goes straight to
+ * the sweep + bounded close drain, so a group descendant holding the pipes
+ * cannot outlive cleanup, and cleanup can never hang on a pending
+ * `exit`/`close`.
+ */
+async function stopChild(child, { graceMs = 4_000, killMs = 2_000, closeMs = 2_000 } = {}) {
+  if (!child || child.__closeSettled) return;
   const pid = child.pid;
   const signalGroup = (signal) => {
     try {
@@ -201,14 +216,35 @@ async function stopChild(child, { graceMs = 4_000 } = {}) {
       }
     }
   };
-  signalGroup('SIGTERM');
-  const exited = await Promise.race([
-    new Promise((r) => child.once('exit', () => r(true))),
-    sleep(graceMs).then(() => false),
-  ]);
-  if (!exited) {
+  const exited = () => child.exitCode !== null || child.signalCode !== null;
+  const awaitExit = (ms) =>
+    Promise.race([
+      new Promise((resolve) => {
+        // Checked synchronously beside the listener registration: a child
+        // exiting between the two would otherwise be missed and awaited
+        // forever (the exit-listener race).
+        if (exited()) return resolve(true);
+        child.once('exit', () => resolve(true));
+        child.once('error', () => resolve(true));
+      }),
+      sleep(ms).then(() => false),
+    ]);
+  if (!exited()) {
+    signalGroup('SIGTERM');
+    if (!(await awaitExit(graceMs))) {
+      signalGroup('SIGKILL');
+      // Bounded even post-SIGKILL: an uninterruptible child must not hang
+      // cleanup past this deadline.
+      await awaitExit(killMs);
+    }
+  }
+  if (!child.__closeSettled) {
+    // Exited (or spawn-errored) with stdio still open: a group descendant
+    // inheriting the pipes keeps `close` pending. Bounded group sweep so the
+    // descendant dies, then a bounded close drain so cleanup neither leaks
+    // the pipes nor hangs on them.
     signalGroup('SIGKILL');
-    await new Promise((r) => child.once('exit', r));
+    await Promise.race([child.__closed ?? Promise.resolve(), sleep(closeMs)]);
   }
 }
 
@@ -1497,6 +1533,70 @@ async function restartServiceFromEdit(ctx) {
   return next;
 }
 
+// ── Adapter edit restore gate ───────────────────────────────────────────────
+
+/**
+ * The real provider session an adapter sample runs in the page: create a
+ * session, prompt once, drain all events, and project the streamed message
+ * text plus terminal settlement. Shared verbatim by the edited-adapter
+ * evaluation and the restored-baseline assertion so both observe the SAME
+ * provider vertical.
+ */
+const ADAPTER_SESSION_SCRIPT = `(async () => {
+  const h = window.__RFT_NATIVE_PROOF__;
+  const s = await h.createAgentHostSession({ provider_id: 'mock-acp' });
+  const op = await h.executeAgentHostOperation(s.session_id, { kind: 'prompt', content: 'hello' });
+  const events = await h.drainAgentHostEvents(s.session_id, { timeoutMs: 30000 });
+  const text = events.map(e => (e.MessageDelta && e.MessageDelta.text) || (e.ThoughtDelta && e.ThoughtDelta.text) || '').join('');
+  const terminal = events.some(e => e.OpFinished || e.OpFailed);
+  return { text, terminal, op: op.operation_id };
+})()`;
+
+/**
+ * Enforced restore rebuild of the adapter package: a nonzero exit or a spawn
+ * error throws with a bounded output tail. The adapter edit sample must never
+ * continue past a failed restore — the stale edited `dist` would keep serving
+ * the edited behavior while the proof reports success.
+ */
+function requireRestoredAdapterBuild() {
+  const restore = spawnSync('pnpm', ['-F', '@42ch/nexus-provider-acp', 'run', 'build'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  if (restore.error || restore.status !== 0) {
+    const tail = `${restore.stdout ?? ''}${restore.stderr ?? ''}`.slice(-MAX_EVIDENCE_TAIL_CHARS);
+    throw new Error(
+      `adapter restore build failed (exit ${restore.status}${restore.error ? `: ${restore.error.message}` : ''}): ${tail}`,
+    );
+  }
+}
+
+/**
+ * Consumer-observable restored baseline: after the enforced restore rebuild
+ * and service restart, a fresh provider session must reach a terminal event
+ * WITHOUT the edit marker. Proves the restored runnable output actually
+ * serves — a stale or failed restore cannot masquerade as a successful proof.
+ */
+async function assertRestoredAdapterBaseline(ctx, marker) {
+  await waitForHttpOk(`${ctx.serviceUrl}/v1/daemon/runtime/health`, { timeoutMs: 30_000 });
+  await waitForPageCondition(
+    ctx.client,
+    'Boolean(window.__RFT_NATIVE_PROOF__ && window.__RFT_NATIVE_PROOF__.ready)',
+    { timeoutMs: 60_000 },
+  );
+  const stream = await evaluate(ctx.client, ADAPTER_SESSION_SCRIPT, { timeoutMs: 45_000 });
+  if (!stream?.terminal) {
+    throw new Error(
+      `restored adapter baseline did not reach a terminal event: ${JSON.stringify(stream ?? null).slice(0, 400)}`,
+    );
+  }
+  if (typeof stream.text === 'string' && stream.text.includes(marker)) {
+    throw new Error(
+      `restored adapter still emits the edited marker ${marker}: ${stream.text.slice(0, 200)}`,
+    );
+  }
+}
+
 /**
  * TS SDK adapter edit sample: rewrite the real TS ACP adapter source marker,
  * rebuild the adapter package with its existing tooling, restart the service,
@@ -1533,10 +1633,16 @@ async function runAdapterEditSample(ctx, sampleIndex) {
         ['-F', '@42ch/nexus-provider-acp', 'run', 'build'],
         { cwd: repoRoot, label: `adapter-build-${sampleIndex}` },
       );
-      const exitCode = await new Promise((resolveExit) => build.once('exit', resolveExit));
+      // A failed spawn never emits `exit`; racing the settled lifecycle
+      // (which settles on `error`) keeps a build-launch failure bounded and
+      // reportable instead of hanging the sample forever.
+      const exitCode = await Promise.race([
+        new Promise((resolveExit) => build.once('exit', resolveExit)),
+        build.__closed.then(() => build.exitCode),
+      ]);
       if (exitCode !== 0) {
         throw new Error(
-          `adapter package build failed (exit ${exitCode}): ${build.output().slice(-MAX_EVIDENCE_TAIL_CHARS)}`,
+          `adapter package build failed (exit ${exitCode}${build.__error ? `: ${build.__error.message}` : ''}): ${build.output().slice(-MAX_EVIDENCE_TAIL_CHARS)}`,
         );
       }
       const restarted = await restartServiceFromEdit(ctx);
@@ -1557,19 +1663,7 @@ async function runAdapterEditSample(ctx, sampleIndex) {
     // resolve/report rather than being cut off by the transport.
     let stream;
     try {
-      stream = await evaluate(
-        ctx.client,
-        `(async () => {
-          const h = window.__RFT_NATIVE_PROOF__;
-          const s = await h.createAgentHostSession({ provider_id: 'mock-acp' });
-          const op = await h.executeAgentHostOperation(s.session_id, { kind: 'prompt', content: 'hello' });
-          const events = await h.drainAgentHostEvents(s.session_id, { timeoutMs: 30000 });
-          const text = events.map(e => (e.MessageDelta && e.MessageDelta.text) || (e.ThoughtDelta && e.ThoughtDelta.text) || '').join('');
-          const terminal = events.some(e => e.OpFinished || e.OpFailed);
-          return { text, terminal, op: op.operation_id };
-        })()`,
-        { timeoutMs: 45_000 },
-      );
+      stream = await evaluate(ctx.client, ADAPTER_SESSION_SCRIPT, { timeoutMs: 45_000 });
     } catch (err) {
       const pageState = await evaluate(
         ctx.client,
@@ -1593,11 +1687,14 @@ async function runAdapterEditSample(ctx, sampleIndex) {
   } finally {
     edit.restore();
     if (!edit.isRestored()) throw new Error(`adapter file not restored: ${targetPath}`);
-    spawnSync('pnpm', ['-F', '@42ch/nexus-provider-acp', 'run', 'build'], {
-      cwd: repoRoot,
-      encoding: 'utf8',
-    });
+    // Restore gates, in order: the rebuild must SUCCEED before anything is
+    // restarted (a failed rebuild leaves the edited dist serving), then the
+    // restored adapter must observably serve the BASELINE (no edit marker)
+    // before this sample can report success. A restore failure therefore
+    // fails the proof before any PASS can be recorded.
+    requireRestoredAdapterBuild();
     await restartServiceFromEdit(ctx);
+    await assertRestoredAdapterBaseline(ctx, marker);
   }
 }
 
