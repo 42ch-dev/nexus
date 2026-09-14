@@ -57,9 +57,7 @@ export function assertDistPresent(distRoot: string): void {
 }
 
 function canonicalRoot(distRoot: string): string {
-  if (!canonicalDistRoot) {
-    canonicalDistRoot = realpathSync.native(distRoot);
-  }
+  canonicalDistRoot ??= realpathSync.native(distRoot);
   return canonicalDistRoot;
 }
 

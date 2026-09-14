@@ -24,14 +24,13 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
-  readdirSync,
   realpathSync,
   renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { cpus, release as osRelease, tmpdir, totalmem } from 'node:os';
+import { cpus, release as osRelease, totalmem } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -176,10 +175,6 @@ function usage() {
       '  and is the only mode that may write runtime-lifecycle.json.\n' +
       'Diagnostic runs write runtime-diagnostic.json and can never gate a decision.',
   );
-}
-
-function canonicalJson(text) {
-  return JSON.stringify(JSON.parse(text));
 }
 
 function appExecutable(appPath) {
@@ -634,7 +629,7 @@ class AppUnderProof {
       throw error;
     }
     this.cdp = attached.cdp;
-    if (!this.pid) this.pid = await this.#discoverMainPid(exe);
+    this.pid ??= await this.#discoverMainPid(exe);
     return this;
   }
 
@@ -1061,7 +1056,6 @@ const SOAK_START_EXPR = (readsPerSecond, writesPerSecond, entities) => `(() => {
 })()`;
 
 const SOAK_STOP_EXPR = `(() => { if (window.__proofSoak) window.__proofSoak.running = false; return window.__proofSoak; })()`;
-const SOAK_STATS_EXPR = `(() => window.__proofSoak || null)()`;
 
 async function quiesce() {
   await sleep(2000);
@@ -1142,8 +1136,7 @@ async function phaseResources(ctx) {
       active.count > 0 &&
       idleSample.rss_bytes <= 650 * 1024 * 1024 &&
       active.p95 <= 750 * 1024 * 1024 &&
-      soakStats != null &&
-      soakStats.read_errors === 0 &&
+      soakStats?.read_errors === 0 &&
       soakStats.write_errors.length === 0 &&
       providerLifecycleOk &&
       close.exited;
@@ -1264,7 +1257,7 @@ async function waitForUtilityRecovery(app, timeoutMs) {
     if (snapshot && snapshot.phase !== 'open' && snapshot.phase !== 'starting') {
       return { settled: true, lifecycle: snapshot };
     }
-    if (snapshot && snapshot.phase === 'open' && snapshot.cleanup_confirmed === false) {
+    if (snapshot?.phase === 'open' && snapshot.cleanup_confirmed === false) {
       return { settled: true, lifecycle: snapshot };
     }
     await sleep(250);
@@ -1786,7 +1779,6 @@ async function phaseLifecycle(ctx) {
     // independently of the pass/fail of the surrounding checks, and the provider
     // side must be a completed lifecycle (delta + one terminal + shutdown), not a
     // dispatched request.
-    const launchedProcesses = bundleProcesses(appPath);
     const providerComplete = providerLifecycleComplete(provider);
     evidence.native_utility_load = {
       ok: Boolean(nativeOk && providerComplete),
@@ -1971,8 +1963,8 @@ async function main() {
       );
       process.exit(1);
     }
-  } else if (args.launchMethod === undefined) {
-    args.launchMethod = 'direct';
+  } else {
+    args.launchMethod ??= 'direct';
   }
   const mode = gating ? 'canonical' : 'diagnostic';
 

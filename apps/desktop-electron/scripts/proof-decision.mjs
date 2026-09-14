@@ -823,7 +823,7 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
     const inputsList = (gate.missing_inputs ?? []).slice(0, 2).join('; ');
     const reasonsList = (gate.reasons ?? []).slice(0, 2).join('; ');
     status = 'blocked';
-    summary = `gate blocked: ${reasonsList || inputsList || nestedState || 'see proof-package.json'}`;
+    summary = `gate blocked: ${[reasonsList, inputsList, nestedState].find(Boolean) ?? 'see proof-package.json'}`;
   } else {
     status = 'blocked';
     summary = `gate status ${gate.status ?? 'absent'} is not a decision value`;
@@ -951,41 +951,6 @@ deriveRow({
 
 // --- missing inputs ---------------------------------------------------------
 
-const MISSING_INPUTS = [
-  {
-    input: 'Apple Developer signing identity (Developer ID Application)',
-    needed_for: 'SEC-1 and any signed package',
-    observed_state: '0 valid code-signing identities in the login keychain; APPLE_SIGNING_IDENTITY unset',
-    external_action: 'Install the Developer ID Application certificate and key on the proof host and re-package with --sign-identity.',
-  },
-  {
-    input: 'Notarization credentials and a notarytool keychain profile',
-    needed_for: 'SEC-1 staple/notary predicates',
-    observed_state:
-      'APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID / APPLE_API_KEY / APPLE_API_KEY_ID / APPLE_API_ISSUER / NOTARY_KEYCHAIN_PROFILE unset; no notarytool profile',
-    external_action: 'Provide notarization credentials, notarize+staple during packaging, then re-run the gate.',
-  },
-  {
-    input: 'Native x86_64 macOS runner with Xcode 16.4',
-    needed_for: 'PKG-1 darwin-x64, PKG-2 x64, SEC-1 x64 execution',
-    observed_state: 'host is arm64; rustup has only aarch64-apple-darwin; no x64 artifact exists',
-    external_action: 'Provide a real Intel macOS runner (CI row is pinned to macos-15-intel).',
-  },
-  {
-    input: 'Windows x64 and Linux x64 GNU runners',
-    needed_for: 'PKG-1 win32-x64-msvc and linux-x64-gnu rows',
-    observed_state: 'no such host available; no artifacts present',
-    external_action: 'Run .github/workflows/rft-native-proof.yml on its pinned runners.',
-  },
-  {
-    input: 'A contract-valid canonical runtime run on a signed build',
-    needed_for: 'START-1, RES-1, RES-2, SEC-renderer, LIFECYCLE rows',
-    observed_state: 'the canonical arm64 run recorded the utility_owner_unavailable confounder; no x64 run exists',
-    external_action:
-      'Re-run proof-runtime.mjs with --launch-method launchservices and the canonical phase set on each signed package.',
-  },
-];
-
 /**
  * Missing inputs derived from the row array rather than asserted.
  *
@@ -1012,35 +977,6 @@ function deriveMissingRows(rowList) {
               : 'Resolve the recorded predicate failures for this row.',
     }));
 }
-
-/** External prerequisites that are not rows (credentials, foreign runners). */
-const EXTERNAL_PREREQUISITES = [
-  {
-    input: 'Apple Developer signing identity (Developer ID Application)',
-    needed_for: 'SEC-1 signed/stapled execution',
-    observed_state: '0 valid code-signing identities in the login keychain; APPLE_SIGNING_IDENTITY unset',
-    external_action: 'Install the Developer ID Application certificate and key on the proof host and re-package with --sign-identity.',
-  },
-  {
-    input: 'Notarization credentials and a notarytool keychain profile',
-    needed_for: 'SEC-1 notary/staple predicates',
-    observed_state:
-      'APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID / APPLE_API_KEY / APPLE_API_KEY_ID / APPLE_API_ISSUER / NOTARY_KEYCHAIN_PROFILE unset; no notarytool profile',
-    external_action: 'Provide notarization credentials, notarize+staple during packaging, then re-run the gate.',
-  },
-  {
-    input: 'Native x86_64 macOS runner with Xcode 16.4',
-    needed_for: 'PKG-1 darwin-x64, PKG-2 x64, SEC-1 x64 execution',
-    observed_state: 'host is arm64; rustup has only aarch64-apple-darwin; no x64 artifact exists',
-    external_action: 'Provide a real Intel macOS runner (CI row is pinned to macos-15-intel).',
-  },
-  {
-    input: 'Windows x64 and Linux x64 GNU runners',
-    needed_for: 'PKG-1 win32-x64-msvc and linux-x64-gnu rows',
-    observed_state: 'no such host available; no artifacts present',
-    external_action: 'Run .github/workflows/rft-native-proof.yml on its pinned runners.',
-  },
-];
 
 const RUNTIME_FIXES = [
   ['P3-T1 entity id convention', 'packages/nexus-native/scripts/proof-install.mjs', 'consumer minted kb_install_proof, violating the core-enforced kb_<hex> convention'],

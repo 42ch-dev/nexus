@@ -1511,10 +1511,10 @@ const PATH_SUBSTITUTION_CASES = [
     gate.app_path = decoyReal;
     gate.app_realpath = decoyReal;
   }],
-  ['runtime-provenance-app-path-elsewhere', (docs, ctx) => {
+  ['runtime-provenance-app-path-elsewhere', (docs, _ctx) => {
     docs['electron-arm64/proof-package.json'].checks.runtime_lifecycle.provenance.app_path = '/tmp/elsewhere/darwin-arm64/Nexus RFT Feasibility.app';
   }],
-  ['bound-to-app-path-elsewhere', (docs, ctx) => {
+  ['bound-to-app-path-elsewhere', (docs, _ctx) => {
     docs['electron-arm64/proof-package.json'].checks.runtime_lifecycle.bound_to.app_path = '/tmp/elsewhere/darwin-arm64/Nexus RFT Feasibility.app';
   }],
   ['gate-app-path-traversal', (docs, ctx) => {
