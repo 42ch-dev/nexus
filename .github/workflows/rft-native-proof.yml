@@ -44,7 +44,7 @@ env:
   SQLX_OFFLINE: "true"
   CARGO_INCREMENTAL: "0"
   RUST_TOOLCHAIN: "1.98.1"
-  PNPM_VERSION: "11"
+  PNPM_VERSION: "11.25.0"
   NODE_FLOOR: "22.22.0"
   NODE_COHORT: "24.20.0"
   EVIDENCE: .mstar/iterations/v1.189/guides/evidence
@@ -85,7 +85,7 @@ jobs:
             short: win
             target: x86_64-pc-windows-msvc
           - slug: darwin-arm64
-            os: macos-14
+            os: macos-15
             short: macarm
             target: aarch64-apple-darwin
           # The x64 macOS row needs an Intel runner: the artifact must be
@@ -179,8 +179,10 @@ jobs:
             exit 1
           }
 
-      - name: Build loader facade
-        run: pnpm --filter @42ch/nexus-native run build
+      - name: Build contracts and loader facade
+        run: |
+          pnpm --filter @42ch/nexus-contracts run build
+          pnpm --filter @42ch/nexus-native run build
 
       - name: Package target tarballs
         run: node packages/nexus-native/scripts/package.mjs --target ${{ matrix.target }} --out ${{ env.EVIDENCE }}/native-packages/${{ matrix.slug }}
@@ -274,10 +276,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          head -2 /etc/os-release
-          ldd --version | head -1
-          cc --version | head -1
-          ldd --version | head -1 | grep -qE ' 2\.28(\.|$)' || {
+          sed -n '1,2p' /etc/os-release
+          glibc_line="$(ldd --version 2>&1 | sed -n '1p')"
+          cc_line="$(cc --version 2>&1 | sed -n '1p')"
+          echo "${glibc_line}"
+          echo "${cc_line}"
+          printf '%s\n' "${glibc_line}" | grep -qE ' 2\.28(\.|$)' || {
             echo "::error::expected a glibc 2.28 sysroot (architecture-contracts §9)"
             exit 1
           }
@@ -331,8 +335,10 @@ jobs:
           cache-all-crates: false
           cache-on-failure: false
 
-      - name: Build loader facade
-        run: pnpm --filter @42ch/nexus-native run build
+      - name: Build contracts and loader facade
+        run: |
+          pnpm --filter @42ch/nexus-contracts run build
+          pnpm --filter @42ch/nexus-native run build
 
       - name: Package target tarballs
         run: node packages/nexus-native/scripts/package.mjs --target ${TARGET} --out ${EVIDENCE}/native-packages/linux-x64-gnu
