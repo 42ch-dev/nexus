@@ -154,10 +154,11 @@ impl ProviderPort for AdmittingProviderPort {
                 if let (Some(session_id), Some(operation_id)) =
                     (session_id.as_deref(), reply.operation_id.clone())
                 {
-                    self.state
-                        .record_js_session_operation(session_id, operation_id.clone());
-                    // Durable write-through: an op still active at process exit
-                    // is settled to `interrupted` by the next open (LIFE-3).
+                    // Durable write-through FIRST (LIFE-3): an op still active
+                    // at process exit is settled to `interrupted` by the next
+                    // open. A failed journal write must leave no in-memory
+                    // active-operation record, so the effect stays retryable
+                    // instead of failing as terminal-without-mirror.
                     let provider_id = self
                         .state
                         .with_js_state(|s| s.session(session_id).map(|r| r.provider_id.clone()))
@@ -167,6 +168,8 @@ impl ProviderPort for AdmittingProviderPort {
                         .journal_operation(&operation_id, session_id, &provider_id, "running")
                         .await
                         .map_err(journal_failure)?;
+                    self.state
+                        .record_js_session_operation(session_id, operation_id);
                 }
             }
             // A cooperative cancel acknowledgement settles the operation to the
@@ -182,23 +185,30 @@ impl ProviderPort for AdmittingProviderPort {
                             .flatten()
                     })
                 });
-                if let Some(session_id) = session_id.as_deref() {
-                    self.state.record_js_cancel_ack(session_id);
-                }
                 if let Some(operation_id) = operation_id {
+                    // Journal the `cancelled` terminal BEFORE the in-memory
+                    // acknowledgement (LIFE-3): a failed mirror leaves the
+                    // operation active and retryable, never a terminal memory
+                    // without its durable row.
                     self.state
                         .journal_operation_status(&operation_id, "cancelled")
                         .await
                         .map_err(journal_failure)?;
                 }
+                if let Some(session_id) = session_id.as_deref() {
+                    self.state.record_js_cancel_ack(session_id);
+                }
             }
             ProviderCallMethod::Shutdown if reply.ok => {
                 if let Some(session_id) = session_id.as_deref() {
-                    self.state.forget_js_session(session_id);
+                    // Delete the durable mirror BEFORE forgetting the session
+                    // (LIFE-3): a failed delete leaves the session tracked and
+                    // its release retryable, never forgotten-without-mirror.
                     self.state
                         .forget_journal_session(session_id)
                         .await
                         .map_err(journal_failure)?;
+                    self.state.forget_js_session(session_id);
                 }
             }
             _ => {}
@@ -217,15 +227,20 @@ impl ProviderPort for AdmittingProviderPort {
             .next(operation_id.clone(), max_events, max_bytes)
             .await?;
         // Terminal truth comes from the actual delivered events, never a label.
-        let terminal = self
+        // Detect without mutating, mirror the derived terminal durably (it must
+        // survive a restart), and only then apply it in memory (LIFE-3): a
+        // failed journal write leaves the operation retryable — the caller
+        // re-pulls the batch instead of consuming a terminal without mirror.
+        if let Some((status, session_id)) = self
             .state
-            .apply_js_batch_terminals(&operation_id, batch.events.as_slice());
-        // Mirror the observed terminal durably so it survives a restart.
-        if let Some(status) = terminal {
+            .detect_js_batch_terminal(&operation_id, batch.events.as_slice())
+        {
             self.state
-                .journal_operation_status(&operation_id, status)
+                .journal_operation_status(&operation_id, status.wire())
                 .await
                 .map_err(journal_failure)?;
+            self.state
+                .apply_js_batch_terminal(&session_id, &operation_id, status);
         }
         Ok(batch)
     }
@@ -234,7 +249,7 @@ impl ProviderPort for AdmittingProviderPort {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::env_state::EnvState;
+    use crate::env_state::{EnvState, JsOperationStatus};
     use async_trait::async_trait;
     use nexus_contracts::provider_call::ProviderCallMethod;
     use nexus_contracts::{CoreError, CoreErrorCode, ProviderReply};
@@ -396,13 +411,15 @@ mod tests {
 
     /// LIFE-3 write-through is part of the Execute contract: a failed journal
     /// upsert is a typed internal error, never a success reply without its
-    /// durable mirror. The in-memory record still happened first.
+    /// durable mirror. The journal runs BEFORE the in-memory record, so the
+    /// failure leaves no active-operation record: the effect is retryable,
+    /// not half-applied.
     #[tokio::test]
     async fn execute_journal_failure_fails_the_reply() {
         let state = Arc::new(EnvState::new());
         state.set_journal_pool(journalless_pool().await);
-        // Production records the session at Launch; the in-memory operation
-        // record must land before the durable write-through is attempted.
+        // Production records the session at Launch; the journal write-through
+        // resolves the provider id from that session record.
         state.record_js_session("sess-j".to_string(), "mock-acp".to_string());
         let port = AdmittingProviderPort::new(
             Arc::new(HostManager::new()),
@@ -421,11 +438,17 @@ mod tests {
                     .and_then(|r| r.active_operation_id.clone())
             })
             .flatten();
-        assert_eq!(recorded, Some("op-j".to_string()));
+        assert_eq!(
+            recorded, None,
+            "a failed journal write must leave no in-memory active-operation record"
+        );
     }
 
+
     /// An observed terminal is never reported as delivered when its durable
-    /// mirror failed: `next` propagates the journal failure instead.
+    /// mirror failed: `next` propagates the journal failure, and detection
+    /// ran without mutating, so the operation is still active/retryable in
+    /// memory — not a terminal-without-mirror.
     #[tokio::test]
     async fn terminal_journal_failure_on_next_is_propagated() {
         let state = Arc::new(EnvState::new());
@@ -435,7 +458,7 @@ mod tests {
         let port = AdmittingProviderPort::new(
             Arc::new(HostManager::new()),
             Arc::new(ExecuteOkPort),
-            state,
+            state.clone(),
         );
         let err = port
             .next("op-j".to_string(), 10, 64_000)
@@ -443,5 +466,65 @@ mod tests {
             .expect_err("a failed terminal mirror must fail the delivery");
         assert_eq!(err.code, CoreErrorCode::Internal);
         assert!(err.message.contains("journal"));
+        assert_eq!(
+            state
+                .with_js_state(|s| s.operation("op-j").map(|op| op.status))
+                .flatten(),
+            Some(JsOperationStatus::Running),
+            "a failed terminal mirror must leave the operation running in memory"
+        );
+        assert_eq!(
+            state
+                .with_js_state(|s| s.session("sess-j").and_then(|r| r.active_operation_id.clone()))
+                .flatten(),
+            Some("op-j".to_string()),
+            "the session keeps its active op so delivery can be retried"
+        );
+    }
+
+    /// A cancel whose durable `cancelled` mirror fails is a typed error and
+    /// must leave the cancel-ack unapplied: the operation stays active and
+    /// the cancel is retryable, never acknowledged without its durable row.
+    #[tokio::test]
+    async fn cancel_journal_failure_leaves_the_operation_retryable() {
+        let state = Arc::new(EnvState::new());
+        state.record_js_session("sess-j".to_string(), "mock-acp".to_string());
+        state.record_js_session_operation("sess-j", "op-j".to_string());
+        state.set_journal_pool(journalless_pool().await);
+        let port = AdmittingProviderPort::new(
+            Arc::new(HostManager::new()),
+            Arc::new(EchoPort {
+                calls: AtomicUsize::new(0),
+            }),
+            state.clone(),
+        );
+        let request = ProviderCall {
+            method: ProviderCallMethod::Cancel,
+            request_id: "r-cancel".into(),
+            session_id: Some("sess-j".into()),
+            operation_id: Some("op-j".into()),
+            deadline_ms: 5_000,
+            payload: serde_json::Map::new(),
+        };
+        let err = port
+            .call(request)
+            .await
+            .expect_err("a failed cancel mirror must fail the call");
+        assert_eq!(err.code, CoreErrorCode::Internal);
+        assert!(err.message.contains("journal"));
+        assert_eq!(
+            state
+                .with_js_state(|s| s.operation("op-j").map(|op| op.status))
+                .flatten(),
+            Some(JsOperationStatus::Running),
+            "a failed cancel mirror must not settle the operation to cancelled"
+        );
+        assert_eq!(
+            state
+                .with_js_state(|s| s.session("sess-j").and_then(|r| r.active_operation_id.clone()))
+                .flatten(),
+            Some("op-j".to_string()),
+            "the cancel-ack must stay unapplied so the cancel is retryable"
+        );
     }
 }

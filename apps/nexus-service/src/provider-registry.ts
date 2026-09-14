@@ -133,13 +133,17 @@ export class ProviderRegistry {
     this.evictTerminalOperationsIfNeeded();
   }
 
-  finishOperation(operationId: string, terminal: ProviderHostEvent, transcript: string | null): void {
+  /**
+   * Adopt the first terminal event for an operation. Returns whether the
+   * event was accepted: a status settled terminal earlier (e.g. an accepted
+   * cancel, or a native-hydrated terminal) is authoritative, so a later
+   * provider event is refused rather than overwriting the outcome the
+   * durable journal already recorded. Callers must not publish a refused
+   * event as the stream's terminal.
+   */
+  finishOperation(operationId: string, terminal: ProviderHostEvent, transcript: string | null): boolean {
     const op = this.operations.get(operationId);
-    // First terminal wins: a status settled terminal earlier (e.g. an accepted
-    // cancel, or a native-hydrated terminal) must never be overwritten by a
-    // later provider event, or the registry would disagree with the durable
-    // journal about the one terminal outcome.
-    if (!op || op.terminalEvent || isTerminalOperationStatus(op.status)) return;
+    if (!op || op.terminalEvent || isTerminalOperationStatus(op.status)) return false;
     op.terminalEvent = terminal;
     op.terminalTranscript = transcript;
     op.status = terminalEventStatus(terminal);
@@ -150,6 +154,7 @@ export class ProviderRegistry {
     }
     this.trackTerminal(operationId);
     this.evictTerminalOperationsIfNeeded();
+    return true;
   }
 
   removeSession(sessionId: string): void {

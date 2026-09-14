@@ -505,50 +505,58 @@ impl EnvState {
         nexus_local_db::js_provider_journal::settle_orphaned_as_interrupted(&pool).await
     }
 
-    /// Inspect the actual delivered provider events and update JS operation
-    /// truth: `OpFinished` → finished, `OpFailed` → failed, `SessionStopped` →
-    /// interrupted (any active op) and the session leaves the active set. The
-    /// terminal is derived from the real batch, never a caller label. Returns
-    /// the wire status if this batch carried a terminal, for durable mirroring.
-    pub fn apply_js_batch_terminals(
+    /// Inspect the actual delivered provider events WITHOUT mutating state:
+    /// `OpFinished` → `Finished`, `OpFailed` → `Failed`, `SessionStopped` →
+    /// `Interrupted`. The terminal is derived from the real batch, never a
+    /// caller label. Returns the terminal status plus the owning session so
+    /// the caller can journal first (LIFE-3) and only then apply the terminal
+    /// in memory: a failed journal write must leave the operation retryable,
+    /// never terminal-without-mirror.
+    pub fn detect_js_batch_terminal(
         &self,
         operation_id: &str,
         events: &[nexus_contracts::provider_event_batch::NexusProviderHostEvent],
-    ) -> Option<&'static str> {
-        let Some(session_id) = self
+    ) -> Option<(JsOperationStatus, String)> {
+        let session_id = self
             .with_js_state(|state| state.operation(operation_id).map(|op| op.session_id))
-            .flatten()
-        else {
-            return None;
-        };
+            .flatten()?;
         use nexus_contracts::provider_event_batch::NexusProviderHostEvent as BatchEvent;
         let mut terminal = None;
         for event in events {
             match event {
                 BatchEvent::OpFinished { .. } => {
-                    self.record_js_operation_terminal(
-                        &session_id,
-                        operation_id,
-                        JsOperationStatus::Finished,
-                    );
-                    terminal = Some(JsOperationStatus::Finished.wire());
+                    terminal = Some((JsOperationStatus::Finished, session_id.clone()));
                 }
                 BatchEvent::OpFailed { .. } => {
-                    self.record_js_operation_terminal(
-                        &session_id,
-                        operation_id,
-                        JsOperationStatus::Failed,
-                    );
-                    terminal = Some(JsOperationStatus::Failed.wire());
+                    terminal = Some((JsOperationStatus::Failed, session_id.clone()));
                 }
                 BatchEvent::SessionStopped { .. } => {
-                    self.record_js_session_stopped(&session_id);
-                    terminal = Some(JsOperationStatus::Interrupted.wire());
+                    terminal = Some((JsOperationStatus::Interrupted, session_id.clone()));
                 }
                 _ => {}
             }
         }
         terminal
+    }
+
+    /// Apply a previously detected batch terminal to in-memory truth. Called
+    /// only after the durable mirror succeeded, so memory and journal always
+    /// agree on the one terminal outcome.
+    pub fn apply_js_batch_terminal(
+        &self,
+        session_id: &str,
+        operation_id: &str,
+        status: JsOperationStatus,
+    ) {
+        match status {
+            JsOperationStatus::Interrupted => self.record_js_session_stopped(session_id),
+            JsOperationStatus::Finished | JsOperationStatus::Failed => {
+                self.record_js_operation_terminal(session_id, operation_id, status);
+            }
+            // Batch events never derive these; only the cancel path settles
+            // `Cancelled` and `Running` is the pre-terminal state.
+            JsOperationStatus::Running | JsOperationStatus::Cancelled => {}
+        }
     }
 
     /// Journal an operation's terminal status durably (LIFE-3).
@@ -1037,8 +1045,20 @@ mod tests {
         assert_eq!(session.active_operation_id.as_deref(), Some("op-1"));
         let op = state.with_js_state(|s| s.operation("op-1")).flatten().unwrap();
         assert_eq!(op.status.wire(), "running");
-        // A real terminal event clears the active op and retains the terminal.
-        state.apply_js_batch_terminals("op-1", &[op_finished("op-1")]);
+        // A real terminal event clears the active op and retains the terminal:
+        // detected without mutating, then applied — the durable mirror runs
+        // between the two in production (LIFE-3).
+        let (status, session_id) = state
+            .detect_js_batch_terminal("op-1", &[op_finished("op-1")])
+            .expect("the batch carries a terminal");
+        assert_eq!(session_id, "sess-1");
+        assert_eq!(status.wire(), "finished");
+        assert_eq!(
+            state.with_js_state(|s| s.operation("op-1")).flatten().unwrap().status.wire(),
+            "running",
+            "detection alone must not mutate the operation"
+        );
+        state.apply_js_batch_terminal(&session_id, "op-1", status);
         assert_eq!(
             state.with_js_state(|s| s.operation("op-1")).flatten().unwrap().status.wire(),
             "finished"

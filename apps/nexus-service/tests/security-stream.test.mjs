@@ -520,6 +520,70 @@ describe('security-stream (P4-T2)', () => {
     assert.equal(registry.activeOperationCount(), 0);
   });
 
+  test('late OpFinished after an accepted cancel never reaches the stream or its replay', async () => {
+    const { ProviderRegistry } = await import(join(serviceRoot, 'dist/provider-registry.js'));
+    const { OperationEventHub, ingestEvents, streamSessionEvents } = await import(join(serviceRoot, 'dist/sse.js'));
+    const sessionId = '00000000-0000-4000-8000-000000000201';
+    const operationId = '00000000-0000-4000-8000-000000000202';
+    const lateOpFinished = { OpFinished: { session_id: sessionId, op_id: operationId, reason: 'end_turn' } };
+
+    // ── Registry status + hub/replay consistency through the real ingest path.
+    const registry = new ProviderRegistry();
+    const serviceStub = { providerRegistry: registry };
+    registry.registerSession({ sessionId, providerId: 'mock-acp', state: 'Running', activeOpId: operationId });
+    registry.registerOperation({ operationId, sessionId, providerId: 'mock-acp', status: 'started', terminalEvent: null, terminalTranscript: null });
+    registry.settleOperationStatus(operationId, 'cancelled');
+    ingestEvents(serviceStub, operationId, [lateOpFinished]);
+    const record = registry.operationRecord(operationId);
+    assert.equal(record.status, 'cancelled', 'canonical status stays the accepted cancel');
+    assert.equal(record.terminalEvent, null, 'the late terminal is not adopted');
+    const hub = registry.hubForOperation(operationId);
+    assert.ok(hub, 'ingest created the hub');
+    assert.equal(hub.hasTerminal(), false, 'the refused late terminal must not enter the hub');
+    assert.equal(hub.isClosed(), true, 'the stream must end truthfully instead of hanging');
+    const replay = hub.planReplay(undefined);
+    assert.equal(replay.kind, 'all');
+    assert.equal(replay.frames.length, 1, 'replay carries exactly one frame');
+    assert.equal(replay.frames[0].event, 'gap', 'replay ends with the resync gap, never a fabricated terminal');
+    const gapPayload = JSON.parse(replay.frames[0].buffer.toString('utf8').split('\ndata: ')[1]);
+    assert.equal(gapPayload.reason, 'interrupted');
+    assert.equal(gapPayload.resync_required, true, 'the client is told to resync canonical truth');
+    assert.equal(gapPayload.inspect_url, `/v1/daemon/agent-host/operations/${operationId}`);
+    assert.equal(gapPayload.operation_id, operationId);
+
+    // ── Control: an accepted terminal still lands in the hub as a real terminal.
+    const okSession = '00000000-0000-4000-8000-000000000203';
+    const okOperation = '00000000-0000-4000-8000-000000000204';
+    registry.registerSession({ sessionId: okSession, providerId: 'mock-acp', state: 'Running', activeOpId: okOperation });
+    registry.registerOperation({ operationId: okOperation, sessionId: okSession, providerId: 'mock-acp', status: 'started', terminalEvent: null, terminalTranscript: null });
+    ingestEvents(serviceStub, okOperation, [lateOpFinished]);
+    const okHub = registry.hubForOperation(okOperation);
+    assert.equal(okHub.hasTerminal(), true, 'an accepted terminal is still recorded');
+    assert.equal(registry.operationRecord(okOperation).status, 'finished');
+
+    // ── A live SSE loop against the already-cancelled canonical op terminates
+    // with the one bounded resync gap — no hang, no fabricated terminal frame.
+    const written = [];
+    const fakeRes = {
+      socket: null,
+      writableEnded: false,
+      destroyed: false,
+      writeHead() {},
+      write(chunk) { written.push(chunk.toString('utf8')); return true; },
+      once() {},
+      end() { this.writableEnded = true; },
+    };
+    const searchParams = new URLSearchParams({ operation_id: operationId });
+    await Promise.race([
+      streamSessionEvents(serviceStub, sessionId, searchParams, fakeRes),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('SSE loop must not hang on a canonically-cancelled operation')), 2_000)),
+    ]);
+    const streamText = written.join('');
+    assert.equal((streamText.match(/event: provider_event/g) ?? []).length, 0, 'no fabricated terminal frame is delivered');
+    assert.equal((streamText.match(/event: gap/g) ?? []).length, 1, 'exactly one truthful resync gap is delivered');
+    assert.match(streamText, /resync_required":true/);
+  });
+
   test('active provider operation cap returns transport busy before dispatch', async () => {
     await stopSharedService();
     const blockHome = seedHome({ BLOCK_PROMPT: '1' });

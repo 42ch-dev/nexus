@@ -118,8 +118,14 @@ const RETAINED_EXITED_OUTPUT_MAX = 8;
 function trackChild(child, label) {
   child.__label = label;
   trackedChildren.add(child);
+  // Liveness leaves the tracked set at `exit`, but `exit` can fire before
+  // piped stdout/stderr have drained. Retention waits for `close` — emitted
+  // only after stdio is closed — so the captured tail cannot miss output
+  // that arrives after the process itself is gone.
   child.once('exit', () => {
     trackedChildren.delete(child);
+  });
+  child.once('close', () => {
     const text = typeof child.output === 'function' ? child.output() : '';
     if (!text) return;
     const key = child.__label ?? `pid-${child.pid}`;

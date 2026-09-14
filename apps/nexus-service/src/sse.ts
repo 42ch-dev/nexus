@@ -121,8 +121,14 @@ export class OperationEventHub {
     return frame;
   }
 
-  /** Fail closed: stop the stream and expose a bounded, charged interrupted gap. */
-  private failClosed(): StoredFrame | null {
+  /**
+   * Fail closed: stop the stream and expose a bounded, charged interrupted
+   * gap. Used both when a terminal cannot be represented (byte budget) and
+   * when a provider terminal is refused by the registry — canonical truth
+   * (the first terminal) then lives behind the inspect URL, never in a
+   * fabricated stream frame.
+   */
+  failClosed(): StoredFrame | null {
     this.closed = true;
     this.terminalRejected = true;
     this.recordGap({
@@ -513,7 +519,8 @@ async function emitInterruptedGap(
   if (frame) await writer.writeFrame(frame);
 }
 
-function ingestEvents(service: ServiceCore, operationId: string, events: ProviderHostEvent[]): void {
+/** Exported so scoped tests can drive terminal acceptance exactly as the SSE loops do. */
+export function ingestEvents(service: ServiceCore, operationId: string, events: ProviderHostEvent[]): void {
   const op = service.providerRegistry.operationRecord(operationId);
   if (!op) return;
   const hub = service.providerRegistry.ensureHub(
@@ -521,15 +528,28 @@ function ingestEvents(service: ServiceCore, operationId: string, events: Provide
     () => new OperationEventHub(operationId, op.sessionId),
   );
   for (const event of events) {
-    hub.recordEvent(event);
-    if (isTerminalHostEvent(event) && !op.terminalEvent) {
-      const transcript =
-        'OpFinished' in event
-          ? JSON.stringify(event.OpFinished)
-          : 'OpFailed' in event
-            ? JSON.stringify(event.OpFailed)
-            : null;
-      service.providerRegistry.finishOperation(operationId, event, transcript);
+    if (!isTerminalHostEvent(event)) {
+      hub.recordEvent(event);
+      continue;
+    }
+    const transcript =
+      'OpFinished' in event
+        ? JSON.stringify(event.OpFinished)
+        : 'OpFailed' in event
+          ? JSON.stringify(event.OpFailed)
+          : null;
+    // The registry decides acceptance BEFORE recording: a late terminal that
+    // contradicts the canonical first terminal (e.g. an OpFinished arriving
+    // after an accepted cancel) must never enter the hub as the stream's
+    // terminal, or replay and the stream would disagree with the status the
+    // durable journal recorded.
+    if (service.providerRegistry.finishOperation(operationId, event, transcript)) {
+      hub.recordEvent(event);
+    } else if (!hub.isClosed()) {
+      // Refused terminal with no stream terminal yet: fail closed with a
+      // bounded resync gap so the client re-inspects canonical truth instead
+      // of consuming a fabricated terminal.
+      hub.failClosed();
     }
   }
 }
@@ -644,6 +664,26 @@ export async function streamSessionEvents(
   }
 }
 
+/**
+ * A canonical operation that is already terminal (e.g. an accepted cancel)
+ * while the stream still carries no terminal frame: its provider
+ * confirmation was refused as a late terminal, or never arrives. End the
+ * stream truthfully — one bounded resync gap pointing at the inspect URL —
+ * instead of hanging on a stream that may never confirm or fabricating a
+ * terminal that contradicts canonical status. Returns the gap frame when the
+ * stream was closed here.
+ */
+function canonicalTerminalGap(
+  service: ServiceCore,
+  hub: OperationEventHub,
+  operationId: string,
+): StoredFrame | null {
+  if (hub.hasTerminal()) return null;
+  const op = service.providerRegistry.operationRecord(operationId);
+  if (!op || op.terminalEvent || !isTerminalOperationStatus(op.status)) return null;
+  return hub.failClosed();
+}
+
 async function waitForTerminal(
   service: ServiceCore,
   hub: OperationEventHub,
@@ -656,6 +696,17 @@ async function waitForTerminal(
   let sequence = deliveredSequence;
   while (!hub.isClosed()) {
     if (clientDisconnected(res)) return;
+
+    // Canonical truth already terminal with no stream terminal: end the
+    // stream with one truthful resync gap instead of hanging or fabricating.
+    const canonicalGap = canonicalTerminalGap(service, hub, operationId);
+    if (canonicalGap) {
+      const result = await writer.writeFrame(canonicalGap);
+      if (result === 'overflow' || result === 'disconnect') {
+        await emitInterruptedGap(writer, hub, operationId);
+      }
+      return;
+    }
 
     const readyToPull = await gatePullUntilDrain(res, pullGate, writer);
     if (!readyToPull) {
@@ -717,6 +768,17 @@ async function liveEventLoop(
   let sequence = deliveredSequence;
   while (!hub.isClosed()) {
     if (clientDisconnected(res)) return;
+
+    // Canonical truth already terminal with no stream terminal: end the
+    // stream with one truthful resync gap instead of hanging or fabricating.
+    const canonicalGap = canonicalTerminalGap(service, hub, operationId);
+    if (canonicalGap) {
+      const result = await writer.writeFrame(canonicalGap);
+      if (result === 'overflow' || result === 'disconnect') {
+        await emitInterruptedGap(writer, hub, operationId);
+      }
+      return;
+    }
 
     const readyToPull = await gatePullUntilDrain(res, pullGate, writer);
     if (!readyToPull) {
