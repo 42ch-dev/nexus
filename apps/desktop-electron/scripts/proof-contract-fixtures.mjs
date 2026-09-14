@@ -1064,8 +1064,18 @@ const failCases = [
   ['res', (docs) => { docs['electron-arm64/runtime-lifecycle.json'].checks = docs['electron-arm64/runtime-lifecycle.json'].checks.map((c) => (c.id === 'RES-2' ? { ...c, ok: false } : c)); docs['electron-arm64/runtime-lifecycle.json'].status = 'fail'; }],
   ['size', (docs) => { docs['electron-x64/electron-size.json'].sizes.zip_mib = 300; docs['electron-x64/electron-size.json'].status = 'fail'; }],
   ['payload', (docs) => { docs['native-packages/darwin-x64/package-receipt.json'].packages[1].tarball_bytes = 60 * 1048576; docs['native-packages/darwin-x64/package-receipt.json'].status = 'fail'; }],
-  ['install', (docs) => { docs['install-win24/install-proof.json'].status = 'fail'; }],
-  ['maint', (docs) => { docs['maintenance-rebuild.json'].elapsed_seconds = 3600; docs['maintenance-rebuild.json'].status = 'fail'; }],
+  ['install', (docs) => {
+    // A genuine measured install failure names the check that failed.
+    const proof = docs['install-win24/install-proof.json'];
+    proof.status = 'fail';
+    proof.checks.find((c) => c.name === 'empty_project_install').ok = false;
+  }],
+  ['maint', (docs) => {
+    const trace = docs['maintenance-rebuild.json'];
+    trace.status = 'fail';
+    trace.elapsed_seconds = 3600;
+    trace.checks.find((c) => c.name === 'within_thirty_minutes').ok = false;
+  }],
   [
     'gate',
     (docs) => {
@@ -1089,6 +1099,50 @@ for (const [label, mutate] of failCases) {
   check(`measured failure (${label}) yields no-go`, decision.status, 'no-go');
   check(`measured failure (${label}) records a FAIL row`, (decision.doc?.row_counts?.fail ?? 0) > 0, true);
 }
+
+// F-001: a status field alone is not a measurement.
+for (const label of ['status-only-flip-install', 'status-only-flip-package', 'status-only-flip-size', 'status-only-flip-maintenance']) {
+  const root = buildMatrix(`unsupported-${label}`, (docs) => {
+    const map = {
+      'status-only-flip-install': 'install-macarm22/install-proof.json',
+      'status-only-flip-package': 'native-packages/darwin-arm64/package-receipt.json',
+      'status-only-flip-size': 'electron-x64/electron-size.json',
+      'status-only-flip-maintenance': 'maintenance-rebuild.json',
+    };
+    docs[map[label]].status = 'fail';
+  });
+  const decision = runDecisionWithRoot(root);
+  check(`F-001 unsupported failure (${label}) blocks instead of no-go`, decision.status, 'blocked');
+  const failedRows = (decision.doc?.observed_rows ?? []).filter((r) => r.verdict === 'FAIL');
+  check(`F-001 unsupported failure (${label}) records no FAIL row`, failedRows.length, 0);
+}
+
+// --- F-002: missing inputs are derived from the rows -------------------------
+const realMissing = realDecision.doc?.missing_inputs ?? [];
+check(
+  'F-002 arm64 Electron size is not listed as missing while its row passes',
+  realMissing.some((entry) => String(entry.input).includes('PKG2-electron-arm64')),
+  false,
+);
+check(
+  'F-002 x64 Electron size is listed as missing',
+  realMissing.some((entry) => String(entry.input).includes('PKG2-electron-x64')),
+  true,
+);
+check(
+  'F-002 every non-pass row appears in missing_inputs',
+  (realDecision.doc?.observed_rows ?? [])
+    .filter((r) => r.verdict !== 'PASS')
+    .every((r) => realMissing.some((entry) => String(entry.input).startsWith(r.id))),
+  true,
+);
+check(
+  'F-002 no PASS row appears in missing_inputs',
+  (realDecision.doc?.observed_rows ?? [])
+    .filter((r) => r.verdict === 'PASS')
+    .every((r) => !realMissing.some((entry) => String(entry.input).startsWith(r.id))),
+  true,
+);
 
 // --- malformed / inconsistent evidence blocks -------------------------------
 
@@ -1203,6 +1257,203 @@ for (const [label, mutate] of BUNDLE_MUTATIONS) {
   check(`C7 on-disk artifact (${label}) does not pass the SEC row`, row?.verdict !== 'PASS', true);
   check(`C7 on-disk artifact (${label}) blocks`, decision.status, 'blocked');
 }
+
+// --- QC3 W1/S1/S2/S3: driver and utility-environment invariants --------------
+// These are source-level invariants enforced by the driver CLI and the utility
+// environment builder; they are checked here so a regression cannot silently
+// reintroduce the packaged-owner failure.
+
+const SANITIZE_SRC = readFileSync(join(__dirname, '..', 'src', 'env.ts'), 'utf8');
+check(
+  'W1: sanitizeInheritedEnv does not set ELECTRON_RUN_AS_NODE for the utility child',
+  /next\.ELECTRON_RUN_AS_NODE\s*=/.test(SANITIZE_SRC),
+  false,
+);
+check(
+  'W1: the utility environment builder documents why the flag is absent',
+  /ELECTRON_RUN_AS_NODE/.test(SANITIZE_SRC) && /bad option/.test(SANITIZE_SRC),
+  true,
+);
+
+const MAIN_SRC = readFileSync(join(__dirname, '..', 'src', 'main.ts'), 'utf8');
+check(
+  'F-003: before-quit waits for an in-flight close instead of abandoning it',
+  /const pending = closeInFlight \?\? initiateOwnerClose\(\)/.test(MAIN_SRC),
+  true,
+);
+check(
+  'F-003: the old `&& !closeInFlight` abandonment is gone',
+  /lifecycle\.phase !== 'closed' && !closeInFlight/.test(MAIN_SRC),
+  false,
+);
+check(
+  'F-003: the quit handshake is guarded against re-entry',
+  /let quitRequested = false/.test(MAIN_SRC) && /if \(quitRequested\) return/.test(MAIN_SRC),
+  true,
+);
+check(
+  'F-003: the proof window can request a quit',
+  /nexus-proof:quit/.test(MAIN_SRC) && /requestQuit/.test(readFileSync(join(__dirname, '..', 'src', 'preload.ts'), 'utf8')),
+  true,
+);
+
+check(
+  'S2: packaged builds refuse a missing bundled web dist instead of falling back',
+  /app\.isPackaged/.test(MAIN_SRC) && /packaged build is missing its bundled web artifact/.test(MAIN_SRC),
+  true,
+);
+
+const RUNTIME_SRC = readFileSync(join(__dirname, 'proof-runtime.mjs'), 'utf8');
+check(
+  'SEC-renderer derives web_bundle from the asar web-dist entry, not a request count',
+  /evidence\.asar\?\.web_dist_index_present === true/.test(RUNTIME_SRC),
+  true,
+);
+check(
+  'SEC-renderer derives no_native_in_renderer from the unpacked asar entry',
+  /\.every\(\(entry\) => entry\.unpacked === true\)/.test(RUNTIME_SRC),
+  true,
+);
+check(
+  'LIFECYCLE-fault refuses to run without a live native owner to kill',
+  /no live native owner before the fault/.test(RUNTIME_SRC),
+  true,
+);
+check(
+  'LIFECYCLE-fault targets the Node-service utility, not any helper',
+  /function isNativeOwnerProcess/.test(RUNTIME_SRC) && /node\.mojom\.NodeService/.test(RUNTIME_SRC),
+  true,
+);
+check(
+  'RSS is measured over the bundle processes, not a pid tree',
+  /function rssSample\(appPath, rootPid\)/.test(RUNTIME_SRC) && /bundleProcesses\(appPath\)/.test(RUNTIME_SRC),
+  true,
+);
+check(
+  'RES-2 samples the plateau before quitting the app',
+  /const plateau = rssSample\(cyclesApp\.appPath, cyclesApp\.pid\);\s*\n\s*const survivors = await collectSurvivors\(cyclesApp\);\s*\n\s*const cycleExit = await cyclesApp\.quitAndWait\(\);/.test(RUNTIME_SRC),
+  true,
+);
+check(
+  'RES-1 records the per-process RSS composition',
+  /idleSample\.processes\.map/.test(RUNTIME_SRC),
+  true,
+);
+check(
+  'the soak workload uses entities the world actually reports',
+  /soak_seed/.test(RUNTIME_SRC) && /cannot establish a soak workload/.test(RUNTIME_SRC),
+  true,
+);
+check(
+  'the provider terminal reads the wire field op_id',
+  /event\.OpFinished\?\.op_id \?\? event\.OpFailed\?\.op_id/.test(RUNTIME_SRC),
+  true,
+);
+check(
+  'LIFECYCLE-fault waits for recovery instead of a fixed sleep',
+  /function waitForUtilityRecovery/.test(RUNTIME_SRC) && /await waitForUtilityRecovery\(app/.test(RUNTIME_SRC),
+  true,
+);
+check(
+  'provider probe failures record the exact error and reply shape',
+  /error: probe\?\.error\?\.message \?\? null/.test(RUNTIME_SRC),
+  true,
+);
+
+
+check(
+  'F-003: the driver collects survivors only after the close completes',
+  /const closeExited = await app\.closeCleanly\(\);\s*\n\s*const survivalAfterClose = await collectSurvivors\(app\);/.test(RUNTIME_SRC),
+  true,
+);
+check(
+  'F-003: the driver asks the app to quit after closing the owner',
+  /requestQuit\?\.\(\)/.test(RUNTIME_SRC),
+  true,
+);
+// The unpack pattern is a bare glob and must actually match: @electron/asar
+// calls minimatch(filename, unpack, { matchBase: true }), and minimatch treats
+// braces as expansion, so a `{**/*.node}` pattern matches nothing and silently
+// packs the native payload inside the asar.
+const PACKAGE_SRC = readFileSync(join(__dirname, '..', 'scripts', 'package.mjs'), 'utf8');
+check(
+  'W1: the asar unpack pattern is a bare glob for the native payload',
+  /unpack: '\*\*\/\*\.node'/.test(PACKAGE_SRC),
+  true,
+);
+check(
+  'W1: the unpack pattern is not a literal-brace string',
+  /unpack: '\{[^']*\}'/.test(PACKAGE_SRC),
+  false,
+);
+check(
+  'W1: the unpack pattern does not include utility-host.js',
+  /unpack:[^\n]*utility-host/.test(PACKAGE_SRC),
+  false,
+);
+check(
+  'W1: main does not fork the utility from app.asar.unpacked',
+  /app\.asar\.unpacked\/dist\/utility-host\.js/.test(MAIN_SRC) && /existsSync\(unpacked\)/.test(MAIN_SRC),
+  false,
+);
+check(
+  'W1: main forks the asar-resident utility entry',
+  /utilityProcess\.fork\(join\(__dirname, 'utility-host\.js'\)/.test(MAIN_SRC),
+  true,
+);
+check(
+  'W1: the app accepts an explicit proof log path for detached launches',
+  /NEXUS_PROOF_LOG/.test(MAIN_SRC) && /appendFileSync/.test(MAIN_SRC),
+  true,
+);
+check(
+  'W1: the driver routes app diagnostics into the evidence on owner-unavailable',
+  /diagnostics: app\.diagnostics\(\)/.test(RUNTIME_SRC),
+  true,
+);
+check(
+  'W1: the driver redacts absolute home paths out of captured diagnostics',
+  /replace\(\/\\\/\(Users\|home\)\\\/\[\^\\s'"\]\+\/g, '<path>'\)/.test(RUNTIME_SRC),
+  true,
+);
+
+check(
+  'S3: each run materialises a private home from the seeded template',
+  /function prepareRunHome/.test(RUNTIME_SRC) && /run-home/.test(RUNTIME_SRC),
+  true,
+);
+
+// S1 is behaviour, not text: a canonical invocation that asks for a direct
+// launch must be refused before any work starts, so the gating path can never
+// silently produce a confounded document.
+const cliHome = join(TMP, 'cli-home');
+mkdirSync(join(cliHome, 'config'), { recursive: true });
+const cliOut = join(TMP, 'cli-out');
+mkdirSync(cliOut, { recursive: true });
+const directCanonical = spawnSync(
+  'node',
+  [
+    join(__dirname, 'proof-runtime.mjs'),
+    '--app', FIXTURE_APP_REAL,
+    '--out', cliOut,
+    '--home', cliHome,
+    '--launch-method', 'direct',
+  ],
+  { cwd: ROOT, encoding: 'utf8' },
+);
+check('S1: canonical + direct launch is refused', directCanonical.status !== 0, true);
+check(
+  'S1: the refusal explains the launchservices requirement',
+  /canonical \(gating\) runs require --launch-method launchservices/.test(directCanonical.stdout + directCanonical.stderr),
+  true,
+);
+check(
+  'S1: the refused run writes no canonical document',
+  existsSync(join(cliOut, 'runtime-lifecycle.json')),
+  false,
+);
+const helpRes = spawnSync('node', [join(__dirname, 'proof-runtime.mjs'), '--help'], { cwd: ROOT, encoding: 'utf8' });
+check('S1: --help documents the launch-method requirement', /--launch-method direct\|launchservices/.test(helpRes.stdout + helpRes.stderr), true);
 
 // --- C8: path identity, not path markers ------------------------------------
 // Every case here keeps the recorded hashes green (they are copied from the real

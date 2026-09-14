@@ -171,13 +171,27 @@ function deriveRow({ id, row, evidence, schema, target, sourceSha = source.sourc
     if (structural) {
       state = 'stale';
     } else {
-      const { required = [], failures = [], notes = [] } = predicates(doc) ?? {};
+      const { required = [], failures = [], notes = [], measuredFailure = null } = predicates(doc) ?? {};
       const missing = required.filter((name) => !docNamedCheck(doc, name));
       const failedChecks = [...missing.map((name) => `${name} missing`), ...failures];
       const declaredStatus = doc.status;
       if (declaredStatus === 'fail') {
-        state = 'fail';
-        problems.push(...notes, 'document records a measured failure');
+        // A status field is not a measurement. `fail` becomes FAIL — and can
+        // therefore drive the whole decision to no-go — only when the row can
+        // name the predicate that actually failed; otherwise the document is
+        // inconsistent and blocks (F-001).
+        const failureEvidence = typeof measuredFailure === 'function' ? measuredFailure(doc) : measuredFailure;
+        const named = [...failedChecks, ...(Array.isArray(failureEvidence) ? failureEvidence : failureEvidence ? [failureEvidence] : [])];
+        if (named.length > 0) {
+          state = 'fail';
+          problems.push(...notes, `document records a measured failure: ${named.join('; ')}`);
+        } else {
+          state = 'blocked';
+          problems.push(
+            ...notes,
+            'status is fail but no row-specific failed predicate is recorded, so the failure is unsupported',
+          );
+        }
       } else if (declaredStatus !== 'pass') {
         state = 'blocked';
         problems.push(`status ${declaredStatus ?? 'absent'} is neither pass nor fail`);
@@ -270,10 +284,13 @@ for (const arch of ARCHES) {
           if (check.ok !== true) failed.push(`check ${check.name} is not ok`);
         }
         const okCount = (doc.checks ?? []).filter((c) => c.ok).length;
+        const falseChecks = (doc.checks ?? []).filter((c) => c.ok !== true).map((c) => c.name);
         return {
           required: ['package_receipt_pass', 'empty_project_install'],
           failures: failed,
           notes: [`${okCount}/${(doc.checks ?? []).length} checks pass`],
+          // A measured failure for this row is a named install check that is false.
+          measuredFailure: falseChecks,
         };
       },
       describe: (doc) =>
@@ -314,7 +331,11 @@ for (const arch of ARCHES) {
         if (doc.compatibility?.manifest?.[field] === undefined) failed.push(`compatibility.${field} absent`);
       }
       if (doc.compatibility?.manifest?.target_triple !== arch.target) failed.push('compatibility target mismatch');
-      return { failures: failed, notes: [] };
+      return {
+        failures: failed,
+        notes: [],
+        measuredFailure: failed.filter((f) => f.startsWith('compatibility') || f.startsWith('platform tarball')),
+      };
     },
     describe: (doc) => (doc ? `pass; artifact sha256 ${doc.artifact.sha256.slice(0, 16)}…` : null),
   });
@@ -338,7 +359,11 @@ for (const arch of ARCHES) {
         if (check.ok !== true) failed.push(`inspection check ${check.name} not passing`);
       }
       if ((doc.checks ?? []).length === 0) failed.push('no inspection checks recorded');
-      return { failures: failed, notes: [] };
+      return {
+        failures: failed,
+        notes: [],
+        measuredFailure: failed.filter((f) => f.startsWith('inspection check') || f.startsWith('artifact sha256')),
+      };
     },
     describe: (doc) =>
       doc
@@ -372,9 +397,11 @@ for (const arch of ARCHES) {
       const platform = (doc.packages ?? []).find((p) => p.name.includes('native-') && p.name !== '@42ch/nexus-native');
       if (!platform) return { failures: ['no platform tarball recorded'], notes: [] };
       const mib = platform.tarball_bytes / 1048576;
+      const over = mib <= NATIVE_PAYLOAD_LIMIT_MIB ? [] : [`platform tarball ${mib.toFixed(1)} MiB exceeds ${NATIVE_PAYLOAD_LIMIT_MIB} MiB`];
       return {
-        failures: mib <= NATIVE_PAYLOAD_LIMIT_MIB ? [] : [`platform tarball ${mib.toFixed(1)} MiB exceeds ${NATIVE_PAYLOAD_LIMIT_MIB} MiB`],
+        failures: over,
         notes: [`${mib.toFixed(1)} MiB of ${NATIVE_PAYLOAD_LIMIT_MIB} MiB`],
+        measuredFailure: over,
       };
     },
     describe: (doc) => {
@@ -463,6 +490,7 @@ for (const arch of GUI_ARCHES) {
           doc.sizes?.zip_mib != null
             ? [`zip ${doc.sizes.zip_mib} MiB / installed ${doc.sizes.app_bundle_mib} MiB`]
             : [],
+        measuredFailure: failed,
       };
     },
     describe: (doc) =>
@@ -880,7 +908,15 @@ deriveRow({
     for (const check of doc.checks ?? []) {
       if (check.ok !== true) failed.push(`rebuild predicate ${check.name} is not ok`);
     }
-    return { failures: failed, notes: [] };
+    const measured = [];
+    if (typeof doc.elapsed_seconds === 'number' && doc.elapsed_seconds > MAINT_MAX_SECONDS) {
+      measured.push(`elapsed ${doc.elapsed_seconds}s exceeds ${MAINT_MAX_SECONDS}s`);
+    }
+    if (doc.manual_binary_patch === true) measured.push('a manual binary patch was applied');
+    if (doc.packaged_electron_version !== doc.target_electron_version) {
+      measured.push('packaged Electron version does not match the target');
+    }
+    return { failures: failed, notes: [], measuredFailure: measured };
   },
   describe: (doc) =>
     doc
@@ -923,15 +959,61 @@ const MISSING_INPUTS = [
     external_action:
       'Re-run proof-runtime.mjs with --launch-method launchservices and the canonical phase set on each signed package.',
   },
+];
+
+/**
+ * Missing inputs derived from the row array rather than asserted.
+ *
+ * A hardcoded list drifts from the evidence: it once claimed no Electron size
+ * document existed while `PKG2-electron-arm64` was a current PASS (F-002). Every
+ * row that is not PASS is reported here with its own id, verdict, reason and
+ * evidence path, so the handoff can never contradict the rows above it.
+ */
+function deriveMissingRows(rowList) {
+  return rowList
+    .filter((entry) => entry.verdict !== 'PASS')
+    .map((entry) => ({
+      input: `${entry.id}: ${entry.row}`,
+      needed_for: entry.row,
+      observed_state: `${entry.verdict} — ${entry.summary ?? entry.verification?.reason ?? 'no reason recorded'}`,
+      evidence: entry.raw_evidence,
+      external_action:
+        entry.verdict === 'MISSING'
+          ? 'Produce the missing evidence document (runner, credential or size capture as applicable).'
+          : entry.verdict === 'NOT OBSERVED'
+            ? 'Re-run the runtime proof until the criterion is measured and contract-valid.'
+            : entry.verdict === 'STALE'
+              ? 'Regenerate the evidence at the reviewed source/tree identity.'
+              : 'Resolve the recorded predicate failures for this row.',
+    }));
+}
+
+/** External prerequisites that are not rows (credentials, foreign runners). */
+const EXTERNAL_PREREQUISITES = [
   {
-    input: 'A per-architecture Electron size capture (arm64 and x64)',
-    needed_for: 'the PKG-2 Electron size rows',
+    input: 'Apple Developer signing identity (Developer ID Application)',
+    needed_for: 'SEC-1 signed/stapled execution',
+    observed_state: '0 valid code-signing identities in the login keychain; APPLE_SIGNING_IDENTITY unset',
+    external_action: 'Install the Developer ID Application certificate and key on the proof host and re-package with --sign-identity.',
+  },
+  {
+    input: 'Notarization credentials and a notarytool keychain profile',
+    needed_for: 'SEC-1 notary/staple predicates',
     observed_state:
-      'no electron-size.json exists yet; the earlier arm64 measurement predates the per-arch size document and is not ' +
-      'derivable from a contract-valid source',
-    external_action:
-      'Run proof-runtime.mjs once per architecture. Measuring the bundle on disk does not require the app to run or the ' +
-      'package to be signed, so this row can be captured now.',
+      'APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID / APPLE_API_KEY / APPLE_API_KEY_ID / APPLE_API_ISSUER / NOTARY_KEYCHAIN_PROFILE unset; no notarytool profile',
+    external_action: 'Provide notarization credentials, notarize+staple during packaging, then re-run the gate.',
+  },
+  {
+    input: 'Native x86_64 macOS runner with Xcode 16.4',
+    needed_for: 'PKG-1 darwin-x64, PKG-2 x64, SEC-1 x64 execution',
+    observed_state: 'host is arm64; rustup has only aarch64-apple-darwin; no x64 artifact exists',
+    external_action: 'Provide a real Intel macOS runner (CI row is pinned to macos-15-intel).',
+  },
+  {
+    input: 'Windows x64 and Linux x64 GNU runners',
+    needed_for: 'PKG-1 win32-x64-msvc and linux-x64-gnu rows',
+    observed_state: 'no such host available; no artifacts present',
+    external_action: 'Run .github/workflows/rft-native-proof.yml on its pinned runners.',
   },
 ];
 
@@ -1033,7 +1115,8 @@ function main() {
       .filter((row) => row.verdict !== 'PASS')
       .map((row) => ({ id: row.id, row: row.row, verdict: row.verdict, summary: row.summary })),
     observed_rows: rows,
-    missing_inputs: MISSING_INPUTS,
+    missing_inputs: [...deriveMissingRows(rows), ...EXTERNAL_PREREQUISITES],
+    external_prerequisites: EXTERNAL_PREREQUISITES,
     runtime_defects_found_and_fixed_during_proof: RUNTIME_FIXES.map(([id, file, detail]) => ({ id, file, detail })),
     consequences: {
       m1_status: 'NOT complete; P3 cannot GO.',
@@ -1041,7 +1124,10 @@ function main() {
       tauri_default: 'Unchanged. The current Tauri host remains the shipped desktop path.',
       npm_publish: 'Not authorized and not performed.',
     },
-    next_external_actions: MISSING_INPUTS.map((entry) => entry.external_action),
+    next_external_actions: [
+      ...deriveMissingRows(rows).map((entry) => `${entry.input}: ${entry.external_action}`),
+      ...EXTERNAL_PREREQUISITES.map((entry) => entry.external_action),
+    ],
     honesty_notes: [
       'No signed, notarized, stapled, x64, Windows or Linux result is claimed.',
       'Ad-hoc native dylib signing is a development signature and is never SEC-1 evidence.',

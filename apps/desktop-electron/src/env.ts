@@ -63,7 +63,11 @@ export function sanitizeInheritedEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessE
       .join(sep);
   }
   next.NODE_ENV = 'production';
-  next.ELECTRON_RUN_AS_NODE = '1';
+  // NOTE: the utility is an Electron child process, not a Node program. Setting
+  // ELECTRON_RUN_AS_NODE here would make Electron launch the helper in Node mode,
+  // where it rejects its own Chromium switches (`bad option: --type=utility`) and
+  // exits immediately — the packaged utility-owner failure recorded as QC3 W1.
+  // The key is deliberately absent from ALLOWED_ENV_KEYS and never set.
   return next;
 }
 

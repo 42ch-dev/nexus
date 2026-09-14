@@ -276,8 +276,18 @@ async function main() {
     name: productName,
     overwrite: true,
     prune: true,
+    // Unpack only the native payload (plan §P3-T2: "Unpack only .node +
+    // necessary native payload with exact relative loader resolution").
+    //
+    // The pattern must be a bare glob: @electron/asar matches with
+    // `minimatch(filename, unpack, { matchBase: true })`, and minimatch treats
+    // braces as *expansion*, so `'{**/*.node}'` is the literal-brace string and
+    // matches nothing — which silently packed the `.node` payload inside the
+    // asar. Verified against the packaged minmatch: '**/*.node' matches the
+    // native binary and not `dist/utility-host.js` (which must stay inside the
+    // asar alongside its imports and node_modules).
     asar: {
-      unpack: '{**/*.node,**/utility-host.js}',
+      unpack: '**/*.node',
     },
     extraResource: [join(stagingDir, 'web-dist')],
     osxSign: args.signIdentity

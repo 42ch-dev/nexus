@@ -9,7 +9,7 @@ import {
   type UtilityProcess,
 } from 'electron';
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { appendFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -74,6 +74,16 @@ function resolveWebDistRoot(): string {
   if (existsSync(join(packaged, 'index.html'))) {
     return packaged;
   }
+  // A packaged build must serve the bundled web artifact. Falling back to the
+  // monorepo dist would silently mask a broken package with development assets
+  // and make an incomplete proof bundle look functional (QC3 S2).
+  if (app.isPackaged) {
+    throw new Error(
+      `packaged build is missing its bundled web artifact at ${packaged}. ` +
+        'Repackage with the current web dist: pnpm --filter web build, then ' +
+        'node apps/desktop-electron/scripts/package.mjs --arch <arm64|x64>.',
+    );
+  }
   return resolveDistRoot(repoRoot);
 }
 
@@ -95,7 +105,32 @@ let reopenRequired = false;
 let rendererDetached = false;
 let initialWindowBootstrap = true;
 let closeInFlight: Promise<void> | null = null;
+/**
+ * Guards the quit handshake: while a close is being awaited, further
+ * `before-quit` events (which a nested `app.quit()` re-raises) must not queue a
+ * second close or a second `app.quit()`.
+ */
+let quitRequested = false;
 const pendingRequests = new Map<string, PendingEntry>();
+
+/**
+ * Proof-visible logging.
+ *
+ * A LaunchServices-launched app has no parent pipe, so `NEXUS_PROOF_LOG` names a
+ * file the app appends its own diagnostics (including the utility process's
+ * stdout/stderr) to. Without it this behaves exactly as before: stderr only.
+ * Every line is mirrored to stderr so an attached run sees it live.
+ */
+function proofLog(line: string): void {
+  process.stderr.write(line);
+  const target = process.env.NEXUS_PROOF_LOG;
+  if (!target) return;
+  try {
+    appendFileSync(target, line.endsWith('\n') ? line : `${line}\n`);
+  } catch {
+    // a proof log that cannot be written must never break the app
+  }
+}
 
 function syncPendingLifecycle(): void {
   setLifecycle({ pending_operations: [...pendingRequests.keys()] });
@@ -106,12 +141,6 @@ function setLifecycle(next: Partial<LifecycleStatus>): void {
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send('nexus-proof:lifecycle-changed', lifecycle);
   }
-}
-
-function utilityEntryPath(): string {
-  const unpacked = join(process.resourcesPath, 'app.asar.unpacked', 'dist', 'utility-host.js');
-  if (existsSync(unpacked)) return unpacked;
-  return join(__dirname, 'utility-host.js');
 }
 
 function preloadPath(): string {
@@ -187,7 +216,13 @@ function spawnUtilityOwner(): UtilityProcess {
   const env = sanitizeInheritedEnv(process.env);
   env.NEXUS_PROOF_UTILITY_CONFIG = JSON.stringify(config);
 
-  const child = utilityProcess.fork(utilityEntryPath(), [], {
+  // The utility entry lives inside `app.asar` alongside `node_modules` and its
+  // sibling modules, which is what lets its imports resolve; Electron loads
+  // asar members transparently for utility processes too. Do NOT prefer
+  // `app.asar.unpacked/dist/utility-host.js`: that directory holds only the
+  // unpacked `.node` payload, and forking from there strands the entry with no
+  // reachable modules (ERR_MODULE_NOT_FOUND at startup).
+  const child = utilityProcess.fork(join(__dirname, 'utility-host.js'), [], {
     serviceName: 'nexus-proof-native-owner',
     env,
     stdio: 'pipe',
@@ -199,10 +234,10 @@ function spawnUtilityOwner(): UtilityProcess {
   });
 
   child.stdout?.on('data', (chunk) => {
-    process.stderr.write(`[utility stdout] ${chunk.toString()}`);
+    proofLog(`[utility stdout] ${chunk.toString()}`);
   });
   child.stderr?.on('data', (chunk) => {
-    process.stderr.write(`[utility stderr] ${chunk.toString()}`);
+    proofLog(`[utility stderr] ${chunk.toString()}`);
   });
 
   child.on('message', (msg) => onUtilityMessage(msg, generation));
@@ -473,9 +508,16 @@ function createMainWindow(): BrowserWindow {
   win.on('close', () => {
     initiateOwnerClose().catch(() => undefined);
   });
-  win.once('ready-to-show', () => win.show());
+  // A proof run launches the packaged app many times in a row (cold/warm
+  // cohorts). Presenting a window each time is intrusive for the operator and
+  // changes nothing that is being measured — readiness is the renderer reaching
+  // an interactive graph, not the window being on screen. NEXUS_PROOF_HIDDEN
+  // keeps the launch real but screenless; interactive use is unaffected.
+  if (process.env.NEXUS_PROOF_HIDDEN !== '1') {
+    win.once('ready-to-show', () => win.show());
+  }
   win.loadURL(proofIndexUrl()).catch((err) => {
-    console.error(errorMessage(err));
+    proofLog(`[main] web dist failed to load: ${errorMessage(err)}\n`);
     app.exit(1);
   });
   return win;
@@ -485,6 +527,13 @@ function registerIpcHandlers(): void {
   ipcMain.handle('nexus-proof:lifecycle', async (event) => {
     assertProofSender(event);
     return lifecycle;
+  });
+
+  ipcMain.handle('nexus-proof:quit', async (event) => {
+    assertProofSender(event);
+    // Deferred so the IPC reply is delivered before the close handshake begins.
+    setImmediate(() => app.quit());
+    return { ok: true };
   });
 
   ipcMain.handle('nexus-proof:renderer-ready', async (event) => {
@@ -611,10 +660,23 @@ async function bootstrap(): Promise<void> {
   });
 
   app.on('before-quit', (event) => {
-    if (lifecycle.phase !== 'closed' && !closeInFlight) {
-      event.preventDefault();
-      initiateOwnerClose().finally(() => app.quit());
-    }
+    // A close may already be in flight. `preventDefault` must still be called,
+    // and the quit must wait for that close to finish — returning early because
+    // `closeInFlight` is truthy abandons the in-flight join, leaves the utility
+    // owner alive, and lets Electron complete the quit with an orphaned child
+    // (QC2 F-003). Waiting on the same promise also keeps it a single close:
+    // `initiateOwnerClose()` is idempotent, so this can never start a second one.
+    if (lifecycle.phase === 'closed') return;
+    event.preventDefault();
+    if (quitRequested) return;
+    quitRequested = true;
+    const pending = closeInFlight ?? initiateOwnerClose();
+    pending
+      .catch(() => undefined)
+      .finally(() => {
+        quitRequested = false;
+        app.quit();
+      });
   });
 
   app.on('activate', () => {
@@ -625,7 +687,7 @@ async function bootstrap(): Promise<void> {
 }
 
 bootstrap().catch((err) => {
-  console.error(errorMessage(err));
+  proofLog(`[main] bootstrap failed: ${errorMessage(err)}\n`);
   app.exit(1);
 });
 

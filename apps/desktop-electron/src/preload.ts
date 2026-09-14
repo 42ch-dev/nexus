@@ -19,6 +19,17 @@ const api = {
     return () => ipcRenderer.removeListener(channel, handler);
   },
 
+  /**
+   * Proof-only: ask the main process to quit.
+   *
+   * The renderer cannot call `app.quit()`, but the canonical proof needs to
+   * exercise the full close-then-quit handshake (the owner close alone does not
+   * end the process). Restricted to the proof window by `assertProofSender`.
+   */
+  requestQuit(): Promise<unknown> {
+    return ipcRenderer.invoke('nexus-proof:quit');
+  },
+
   /** Writes JSON into the DOM inspection harness for automated proof drivers. */
   publishHarnessResult(label: string, value: unknown): void {
     const root = document.getElementById('nexus-electron-proof-root');

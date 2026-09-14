@@ -94,6 +94,7 @@ export const KNOWN_CONFOUNDERS = {
   utility_owner_unavailable:
     'the packaged Electron utility owner exited or never became ready, so no native work was served',
   run_deadline_exceeded: 'the run exceeded its top-level deadline before completing every phase',
+  run_interrupted: 'the run was interrupted by a signal before completing every phase',
 };
 
 function isPlainObject(value) {

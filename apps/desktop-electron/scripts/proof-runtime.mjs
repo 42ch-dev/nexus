@@ -18,6 +18,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
+  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -130,7 +131,11 @@ function parseArgs(argv) {
     home: process.env.NEXUS_PROOF_HOME ?? null,
     phases: null,
     diagnostic: false,
-    launchMethod: 'direct',
+    // `undefined` means "not chosen": a canonical (gating) run resolves this to
+    // launchservices and refuses anything else, while a diagnostic run keeps the
+    // cheap direct default. Choosing `direct` explicitly is still allowed for
+    // diagnostics and is recorded as a confounder, never as a product result.
+    launchMethod: undefined,
     cold: 10,
     warm: 30,
     soakSeconds: 600,
@@ -206,6 +211,36 @@ function psTable() {
 }
 
 /** Every descendant of `rootPid` that is still alive: main, helpers, utility, provider children. */
+/**
+ * Every live process belonging to this app bundle.
+ *
+ * Anchored on the bundle path rather than on a pid tree: a LaunchServices launch
+ * is not our child, and the discovered root pid is not guaranteed to be the ppid
+ * root of the utility helper, so the tree walk can report zero owned processes
+ * while the owner is demonstrably serving work.
+ */
+function bundleProcesses(appPath) {
+  const marker = `${appPath}/Contents/`;
+  return psTable().filter((row) => row.command.includes(marker));
+}
+
+/**
+ * True for the utility process that hosts the native owner.
+ *
+ * Electron runs more than one utility — a `network.mojom.NetworkService` and
+ * others — so matching `--type=utility` alone picks up non-owner helpers and
+ * makes single-owner assertions and fault targeting wrong. The native owner is
+ * the Node service (`utilityProcess.fork` ⇒ `node.mojom.NodeService`).
+ */
+function isNativeOwnerProcess(command) {
+  return command.includes('--type=utility') && command.includes('node.mojom.NodeService');
+}
+
+/** The app's native utility owner, or null when none is alive. */
+function utilityOf(appPath) {
+  return bundleProcesses(appPath).find((row) => isNativeOwnerProcess(row.command)) ?? null;
+}
+
 function ownedProcesses(rootPid) {
   const rows = psTable();
   const byParent = new Map();
@@ -268,8 +303,10 @@ async function waitForExit(rootPid, timeoutMs) {
   return false;
 }
 
-function rssSample(rootPid) {
-  const owned = ownedProcesses(rootPid);
+function rssSample(appPath, rootPid) {
+  // Bundle-anchored: the adopted LaunchServices pid is not the ppid root of the
+  // helpers, so a tree walk silently reports 0 bytes for every sample.
+  const owned = appPath ? bundleProcesses(appPath) : ownedProcesses(rootPid);
   const total = owned.reduce((sum, p) => sum + p.rss_kib, 0) * 1024;
   const cpu = owned.reduce((sum, p) => sum + p.cpu_percent, 0);
   return {
@@ -425,12 +462,25 @@ class OwnerUnavailableError extends Error {
 /** Readiness diagnostics that mean the owner will never answer this launch. */
 const OWNER_UNAVAILABLE_PATTERN = /utility exited|owner_busy|prior owner interrupted|owner is closing|no preload api/i;
 
+/**
+ * Every app this process has launched and not yet confirmed exited.
+ *
+ * A LaunchServices launch is not our child, so without this bookkeeping an
+ * interrupted run (Ctrl-C, SIGTERM, a cancelled job) exits leaving the packaged
+ * app running — which then holds the single-instance lock and keeps appearing on
+ * screen. The signal handlers below reap this set before exiting.
+ */
+const liveLaunches = new Set();
+
 class AppUnderProof {
   constructor(appPath, home, port, logPath, launchMethod = 'direct') {
     this.appPath = appPath;
     this.home = home;
     this.port = port;
     this.logPath = logPath;
+    // Companion log the packaged app writes its own stdout/stderr into, since
+    // LaunchServices gives us no pipe to attach to.
+    this.proofLog = logPath.replace(/\.log$/, '.app.log');
     this.launchMethod = launchMethod;
     this.child = null;
     this.cdp = null;
@@ -453,6 +503,9 @@ class AppUnderProof {
     const exe = appExecutable(this.appPath);
     const fd = openSync(this.logPath, 'a');
     const args = [`--remote-debugging-port=${this.port}`];
+    // Registered before the spawn so a signal arriving during launch, pid
+    // discovery or CDP attach can still reap this app by bundle path.
+    liveLaunches.add(this);
     // A failed exec raises an 'error' event on the child; without a listener it
     // becomes an uncaught exception and the run writes no evidence at all. Record
     // it instead so the phase reports the failure through its normal path.
@@ -460,18 +513,40 @@ class AppUnderProof {
       this.spawnError = `${error.code ?? 'spawn_error'}: ${error.message}`;
     };
     if (this.launchMethod === 'launchservices') {
-      this.child = spawn('open', ['-n', '-a', this.appPath, '--args', ...args], {
+      // LaunchServices detaches the app, so the parent's stdio captures nothing.
+      // `open` can still hand the app an environment and capture its output:
+      // pass NEXUS_PROOF_HOME/NEXUS_PROOF_LOG with `--env` and route the app's
+      // stdout/stderr with `--stdout`/`--stderr`. That keeps a real
+      // LaunchServices launch (the canonical requirement) while making startup
+      // failures attributable instead of a 0-byte log and a bare exit code.
+      rmSync(this.proofLog, { force: true });
+      const launchArgs = [];
+      launchArgs.push('--env', `NEXUS_PROOF_HOME=${this.home}`);
+      // Screenless but otherwise identical launch (see main.ts NEXUS_PROOF_HIDDEN).
+      launchArgs.push('--env', 'NEXUS_PROOF_HIDDEN=1');
+      if (this.proofLog) launchArgs.push('--env', `NEXUS_PROOF_LOG=${this.proofLog}`);
+      launchArgs.push('--stdout', this.proofLog, '--stderr', this.proofLog);
+      launchArgs.push('-n', '-a', this.appPath, '--args', ...args);
+      this.child = spawn('open', launchArgs, {
         env: { ...process.env, NEXUS_PROOF_HOME: this.home },
         stdio: ['ignore', fd, fd],
         detached: false,
       });
       this.child.on('error', onSpawnError);
+      const openResult = await new Promise((resolvePromise) =>
+        this.child.once('exit', (code) => resolvePromise(code ?? 0)),
+      );
+      this.openExitCode = openResult;
       this.launchedVia = 'launchservices';
-      await new Promise((resolvePromise) => this.child.once('exit', resolvePromise));
       this.pid = await this.#discoverMainPid(exe);
+      // `open` exits immediately and the app is not our descendant, so adopt
+      // the discovered pid as the owned root: otherwise cleanup cannot reach it
+      // and a leaked instance holds the single-instance lock for every later
+      // launch, which is what silently consumed whole run budgets.
+      this.ownsAdoptedRoot = this.pid !== null && this.pid !== undefined;
     } else {
       this.child = spawn(exe, args, {
-        env: { ...process.env, NEXUS_PROOF_HOME: this.home },
+        env: { ...process.env, NEXUS_PROOF_HOME: this.home, NEXUS_PROOF_HIDDEN: '1' },
         stdio: ['ignore', fd, fd],
         detached: true,
       });
@@ -490,6 +565,7 @@ class AppUnderProof {
       attached = await Cdp.attach(this.port);
     } catch (error) {
       if (this.hasExited()) {
+        liveLaunches.delete(this);
         throw new OwnerUnavailableError(
           `app exited before the renderer was reachable (exit=${this.exitCode ?? 'unknown'}): ${error.message}`,
         );
@@ -524,8 +600,7 @@ class AppUnderProof {
 
   /** The Electron utility process serving native work, if one is alive. */
   utilityProcess() {
-    if (!this.pid) return null;
-    return ownedProcesses(this.pid).find((p) => p.command.includes('--type=utility')) ?? null;
+    return utilityOf(this.appPath);
   }
 
   /**
@@ -570,27 +645,81 @@ class AppUnderProof {
 
   async destroy() {
     if (this.cdp) this.cdp.close();
+    // Reap by bundle path as well as by pid: the adopted LaunchServices pid is
+    // not guaranteed to be the root of the helper tree.
+    for (const proc of bundleProcesses(this.appPath)) {
+      try {
+        process.kill(proc.pid, 'SIGKILL');
+      } catch {
+        // already gone
+      }
+    }
     if (this.pid) killTree(this.pid);
     if (this.pid) await waitForExit(this.pid, 10_000);
+    liveLaunches.delete(this);
   }
 
-  async closeCleanly() {
+  /**
+   * Close the native owner and let the app exit.
+   *
+   * Closing the owner is not the same as quitting: the app also has to run its
+   * `before-quit` handshake, which waits for that same close. Driving `close`
+   * through the proof step and then asking the app to quit exercises both, and
+   * the exit wait is what proves no owned child survived.
+   */
+  /** Close the native owner and wait for the cleanup to be confirmed. */
+  async closeOwner() {
     try {
       await this.cdp.evaluate(`window.nexusProof.runProofStep('close')`, 30_000);
     } catch {
-      // a dead renderer cannot answer; the process-exit wait below decides
+      // a dead renderer cannot answer; the caller's verification decides
     }
-    const exited = await waitForExit(this.pid, 12_000);
+  }
+
+  /** Ask the app to quit and wait for the whole tree to exit. */
+  async quitAndWait(timeoutMs = 20_000) {
+    try {
+      // `app.quit()` is the renderer-invisible half; the proof window cannot
+      // call it, so request it through the main process.
+      await this.cdp.evaluate(`window.nexusProof.requestQuit?.()`, 10_000);
+    } catch {
+      // optional hook; older builds simply exit on window close
+    }
+    const exited = await waitForExit(this.pid, timeoutMs);
     this.cdp?.close();
+    liveLaunches.delete(this);
     return exited;
   }
 
+  /** Close the owner, quit the app, and report whether the tree exited. */
+  async closeCleanly() {
+    await this.closeOwner();
+    return this.quitAndWait();
+  }
+
+  /** Recent output from both the launcher pipe and the app's own proof log. */
   logTail(lines = 40) {
-    try {
-      return readFileSync(this.logPath, 'utf8').trim().split('\n').slice(-lines).join('\n');
-    } catch {
-      return '';
+    const parts = [];
+    for (const path of [this.logPath, this.proofLog]) {
+      try {
+        const text = readFileSync(path, 'utf8').trim();
+        if (text.length > 0) parts.push(`--- ${basename(path)} ---\n${text.split('\n').slice(-lines).join('\n')}`);
+      } catch {
+        // a log that was never created is not an error
+      }
     }
+    return parts.join('\n');
+  }
+
+  /** Redacted tail of both logs, bounded, for embedding in evidence. */
+  diagnostics(lines = 60) {
+    const text = this.logTail(lines);
+    if (text.length === 0) return null;
+    return text
+      .split('\n')
+      .map((line) => line.replace(/\/(Users|home)\/[^\s'"]+/g, '<path>'))
+      .join('\n')
+      .slice(-6000);
   }
 }
 
@@ -644,6 +773,24 @@ ACP_FIXTURE_LOG = "${join(home, 'fixture.log')}"
   return { configPath, fixture, python };
 }
 
+/**
+ * Materialise this run's disposable home from the caller's seeded template.
+ *
+ * The copy is private to the run and lives beside its evidence, so a run can
+ * never observe another run's database state or lifecycle fencing (QC3 S3). A
+ * diagnostic run may `--reuse-home` to keep the cheap behaviour when the
+ * operator is debugging.
+ */
+function prepareRunHome(template, outDir, gating) {
+  if (!gating && process.argv.includes('--reuse-home')) {
+    return template;
+  }
+  const runHome = join(outDir, 'run-home');
+  rmSync(runHome, { recursive: true, force: true });
+  cpSync(template, runHome, { recursive: true, dereference: false });
+  return runHome;
+}
+
 function providerPayload(kind, extra = {}) {
   if (kind === 'probe') return { provider_id: 'mock-acp' };
   if (kind === 'launch') return { provider_id: 'mock-acp' };
@@ -659,8 +806,35 @@ function deadlineExceeded(ctx) {
 }
 
 /** Run one launch cohort, aborting the cohort as soon as the owner is unavailable. */
+/**
+ * Kill any process still running the packaged executable.
+ *
+ * A LaunchServices launch is not our child, so a run killed by its deadline can
+ * leave a live instance behind; that instance then holds the single-instance
+ * lock and every subsequent launch exits immediately, which looks exactly like
+ * an owner failure. Reaping first is what makes the cohort honest.
+ */
+function reapStaleInstances(exe) {
+  const stale = psTable().filter((row) => row.command.startsWith(exe));
+  for (const proc of stale) {
+    try {
+      process.kill(proc.pid, 'SIGKILL');
+    } catch {
+      // already gone
+    }
+  }
+  return stale.map((proc) => proc.pid);
+}
+
 async function runLaunchCohort(ctx, count, label, samples) {
   const { args, outDir, appPath, home } = ctx;
+  const exe = appExecutable(appPath);
+  const reaped = reapStaleInstances(exe);
+  if (reaped.length > 0) {
+    ctx.reaped ??= [];
+    ctx.reaped.push({ stage: `launch:${label}`, pids: reaped });
+    await sleep(1500);
+  }
   let port = ctx.portCursor.value;
   let ownerUnavailable = null;
   for (let i = 0; i < count; i += 1) {
@@ -678,12 +852,29 @@ async function runLaunchCohort(ctx, count, label, samples) {
     const started = Date.now();
     try {
       await app.launch();
+      const afterLaunch = Date.now();
       const ready = await app.waitReady();
-      samples.push({ index: i, ms: Date.now() - started, ready });
+      // Split the latency so a slow launch is attributable to process start /
+      // CDP attach versus renderer readiness, instead of one opaque number.
+      samples.push({
+        index: i,
+        ms: Date.now() - started,
+        launch_ms: afterLaunch - started,
+        ready_ms: Date.now() - afterLaunch,
+        ready,
+      });
     } catch (error) {
       if (error instanceof OwnerUnavailableError) {
         ownerUnavailable = String(error.message);
-        samples.push({ index: i, ms: null, aborted: 'owner_unavailable', error: ownerUnavailable });
+        samples.push({
+          index: i,
+          ms: null,
+          aborted: 'owner_unavailable',
+          error: ownerUnavailable,
+          // Redacted app-side diagnostics, so an owner-startup failure is
+          // attributable from the evidence alone instead of a bare exit code.
+          diagnostics: app.diagnostics(),
+        });
       } else {
         samples.push({ index: i, ms: null, error: String(error), log_tail: app.logTail() });
       }
@@ -698,6 +889,10 @@ async function phaseLaunch(ctx) {
   const { args, checks } = ctx;
   const samples = { cold: [], warm: [] };
   ctx.portCursor = { value: args.portBase + 10 };
+  // Publish the sample arrays live: a deadline or interrupt persists the
+  // evidence mid-phase, and without this the in-flight measurements are absent
+  // from exactly the record written to explain the failure.
+  if (ctx.evidenceRef) ctx.evidenceRef.launch = { samples, partial: true };
 
   const coldCohort = await runLaunchCohort(ctx, args.cold, 'cold', samples.cold);
   const warmCohort = await runLaunchCohort(ctx, args.warm, 'warm', samples.warm);
@@ -723,6 +918,7 @@ async function phaseLaunch(ctx) {
       `failures=${failures}${ownerUnavailable ? ' owner_unavailable' : ''}`,
   });
   if (ownerUnavailable) ctx.confounders?.push('utility_owner_unavailable');
+  if (ctx.evidenceRef) ctx.evidenceRef.launch = { samples, summary: { cold, warm }, failures, partial: false };
   return { samples, summary: { cold, warm }, failures, owner_unavailable: ownerUnavailable };
 }
 
@@ -775,6 +971,7 @@ async function quiesce() {
 }
 
 async function phaseResources(ctx) {
+  reapStaleInstances(appExecutable(ctx.appPath));
   const { args, outDir, appPath, home, checks } = ctx;
   const resource = { soak: null, cycles: null };
   await quiesce();
@@ -784,29 +981,32 @@ async function phaseResources(ctx) {
     await app.launch();
     await app.waitReady();
 
-    // Two dedicated CAS rows so the soak writes are real compare-and-swap
-    // updates rather than blind overwrites.
-    const soakEntities = ['kb_50a1c0de', 'kb_50b2c0de'];
-    await app.cdp.evaluate(`(async () => {
-      const api = window.nexusProof;
-      for (const entity_id of ${JSON.stringify(soakEntities)}) {
-        const graph = await api.runProofStep('graph', { world_id: 'wld_owned' });
-        const row = (graph.result.entities || []).find((e) => e.key_block_id === entity_id);
-        await api.runProofStep('patch', {
-          world_id: 'wld_owned',
-          request: {
-            entity_id,
-            expected_version: row ? row.version : 0,
-            patch: { title: 'soak-seed', block_type: 'character' },
-          },
-        });
-      }
-      return true;
-    })()`);
+    // CAS targets are taken from the entities the world actually reports, so
+    // the soak writes are real compare-and-swap updates and the workload never
+    // depends on minting ids that may already exist (with any revision) in a
+    // reused proof home.
+    const soakTargets = await app.cdp.evaluateJson(
+      `(async () => {
+         const api = window.nexusProof;
+         const graph = await api.runProofStep('graph', { world_id: 'wld_owned' });
+         if (!graph.ok) return { ok: false, error: graph.error ? graph.error.message : 'graph rejected' };
+         const rows = (graph.result.entities || []).filter((e) => typeof e.key_block_id === 'string');
+         return { ok: rows.length > 0, targets: rows.slice(0, 4).map((e) => e.key_block_id),
+                  total: rows.length, error: rows.length > 0 ? null : 'world reports no entities to soak' };
+       })()`,
+      60_000,
+    );
+    resource.soak_seed = soakTargets;
+    if (!soakTargets.ok) {
+      throw new OwnerUnavailableError(
+        `cannot establish a soak workload: ${soakTargets.error ?? 'no entities'}`,
+      );
+    }
+    const soakEntities = soakTargets.targets;
 
     // RES-1 idle: 30 s quiescence before the first sample.
     await sleep(30_000);
-    const idleSample = rssSample(app.pid);
+    const idleSample = rssSample(app.appPath, app.pid);
 
     await app.cdp.evaluate(SOAK_START_EXPR(10, 2, soakEntities), 60_000);
     const trace = [];
@@ -819,7 +1019,7 @@ async function phaseResources(ctx) {
         resource.aborted = 'run_deadline_exceeded';
         break;
       }
-      trace.push(rssSample(app.pid));
+      trace.push(rssSample(app.appPath, app.pid));
       if (Date.now() - soakBegan >= nextProviderAt && providerOps.length < 4) {
         providerOps.push(await runProviderOperation(app, home, providerOps.length));
         nextProviderAt += Math.floor(soakMs / 4);
@@ -832,8 +1032,9 @@ async function phaseResources(ctx) {
     const totalSamples = trace.map((sample) => sample.rss_bytes);
     const active = summarise(totalSamples);
     const growth = Math.max(...totalSamples.slice(-8)) - idleSample.rss_bytes;
-    const survivalAfterClose = await collectSurvivors(app);
+    // Order matters: survivors are only meaningful once the close has run.
     const closeExited = await app.closeCleanly();
+    const survivalAfterClose = await collectSurvivors(app);
 
     const providerLifecycleOk = providerOps.every((op) => op.ok);
     const soakPass =
@@ -850,6 +1051,7 @@ async function phaseResources(ctx) {
       ok: soakPass,
       detail:
         `idle=${(idleSample.rss_bytes / 1048576).toFixed(1)}MiB ` +
+        `(${idleSample.processes.map((p) => `${p.kind}:${(p.rss_kib / 1024).toFixed(0)}`).join(',')}) ` +
         `p95_active=${(active.p95 / 1048576).toFixed(1)}MiB max=${(active.max / 1048576).toFixed(1)}MiB ` +
         `reads=${soakStats?.reads ?? 0} writes=${soakStats?.writes ?? 0} conflicts=${soakStats?.conflicts ?? 0} ` +
         `read_errors=${soakStats?.read_errors ?? 'n/a'} provider_ops_ok=${providerLifecycleOk} close_exited=${closeExited}`,
@@ -885,13 +1087,17 @@ async function phaseResources(ctx) {
       await cyclesApp.cdp.evaluate(`window.nexusProof.runProofStep('close')`, 30_000);
       await cyclesApp.cdp.evaluate(`window.nexusProof.runProofStep('open')`, 30_000);
       durations.push(Date.now() - began);
-      if (i % 10 === 0 || i === 1) cycleSamples.push({ cycle: i, ...rssSample(cyclesApp.pid) });
+      if (i % 10 === 0 || i === 1) cycleSamples.push({ cycle: i, ...rssSample(cyclesApp.appPath, cyclesApp.pid) });
     }
-    await cyclesApp.cdp.evaluate(`window.nexusProof.runProofStep('close')`, 30_000);
-    const survivors = await collectSurvivors(cyclesApp);
+    // Order is measurement-critical: close the owner, let it cool down, and
+    // sample the plateau while the app is STILL ALIVE. Quitting first would
+    // sample a dead process and report 0 bytes (which silently "passed" the
+    // growth bound with a meaningless -568 MiB figure).
+    await cyclesApp.closeOwner();
     await sleep(30_000);
-    const plateau = rssSample(cyclesApp.pid);
-    const cycleExit = await cyclesApp.closeCleanly();
+    const plateau = rssSample(cyclesApp.appPath, cyclesApp.pid);
+    const survivors = await collectSurvivors(cyclesApp);
+    const cycleExit = await cyclesApp.quitAndWait();
     const plateauStart = cycleSamples[0]?.rss_bytes ?? 0;
     const retainedGrowth = plateau.rss_bytes - plateauStart;
     const cyclesPass =
@@ -925,6 +1131,7 @@ async function phaseResources(ctx) {
     checks.push({ id: 'RES-1', ok: false, detail: `resources phase failed: ${error}` });
     resource.error = String(error);
     resource.log_tail = app.logTail();
+    resource.diagnostics = app.diagnostics();
     await app.destroy();
     return resource;
   }
@@ -934,11 +1141,38 @@ async function phaseResources(ctx) {
  * A failed or killed owner must not leave the provider child or any other
  * descendant behind, and the reader must not be able to keep issuing work.
  */
+/**
+ * Wait for the main process to observe the owner's death and finish its join.
+ *
+ * The crash handler is asynchronous, so reopening immediately races it; waiting
+ * for the lifecycle to settle is what makes the reopen contract observable.
+ */
+async function waitForUtilityRecovery(app, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let snapshot = null;
+  while (Date.now() < deadline) {
+    try {
+      snapshot = await app.cdp.evaluateJson('window.nexusProof.getLifecycle()', 15_000);
+    } catch {
+      snapshot = null;
+    }
+    if (snapshot && snapshot.phase !== 'open' && snapshot.phase !== 'starting') {
+      return { settled: true, lifecycle: snapshot };
+    }
+    if (snapshot && snapshot.phase === 'open' && snapshot.cleanup_confirmed === false) {
+      return { settled: true, lifecycle: snapshot };
+    }
+    await sleep(250);
+  }
+  return { settled: false, lifecycle: snapshot };
+}
+
 async function collectSurvivors(app) {
-  const owned = ownedProcesses(app.pid);
-  return owned
-    .filter((p) => p.command.includes('mock_acp_workflow') || p.command.includes('--type=utility'))
-    .map((p) => ({ pid: p.pid, kind: p.command.includes('--type=utility') ? 'utility' : 'provider-child' }));
+  // Bundle-anchored so an orphaned helper is caught even when the pid tree
+  // rooted at the adopted pid does not reach it.
+  return bundleProcesses(app.appPath)
+    .filter((p) => p.command.includes('mock_acp_workflow') || isNativeOwnerProcess(p.command))
+    .map((p) => ({ pid: p.pid, kind: isNativeOwnerProcess(p.command) ? 'utility' : 'provider-child' }));
 }
 
 /**
@@ -961,7 +1195,15 @@ async function runProviderOperation(app, home, index) {
       })})`,
       60_000,
     );
-    op.steps.probe = { ok: Boolean(probe?.ok), available: probe?.result?.health?.available ?? null };
+    op.steps.probe = {
+      ok: Boolean(probe?.ok),
+      available: probe?.result?.health?.available ?? null,
+      // Exact error/reply so a downstream probe failure is diagnosable from
+      // the evidence rather than inferred from a false flag.
+      error: probe?.error?.message ?? null,
+      health: probe?.result?.health ?? null,
+      reply_keys: probe && typeof probe === 'object' ? Object.keys(probe) : null,
+    };
     const launch = await app.cdp.evaluateJson(
       `window.nexusProof.runProofStep('provider_probe', ${JSON.stringify({
         request_id: `soak-launch-${index}`,
@@ -1010,11 +1252,14 @@ async function runProviderOperation(app, home, index) {
         op.drain.events += 1;
         if (event?.MessageDelta) op.drain.deltas += 1;
         if (event?.OpFinished || event?.OpFailed) {
+          // The wire terminal carries `op_id` (see delivery.ts materializeTerminal),
+          // not `operation_id` — reading the wrong field reported a null id and
+          // made a correct terminal look like a foreign one.
           op.drain.terminals.push({
             kind: event.OpFinished ? 'OpFinished' : 'OpFailed',
-            operation_id: event.OpFinished?.operation_id ?? event.OpFailed?.operation_id ?? null,
+            operation_id: event.OpFinished?.op_id ?? event.OpFailed?.op_id ?? null,
             session_id: event.OpFinished?.session_id ?? event.OpFailed?.session_id ?? null,
-            reason: event.OpFinished?.reason ?? event.OpFailed?.error ?? null,
+            reason: event.OpFinished?.reason ?? event.OpFailed?.error_message ?? null,
           });
         }
       }
@@ -1143,6 +1388,7 @@ function asarEntries(asarPath) {
 }
 
 async function phaseSecurity(ctx) {
+  reapStaleInstances(appExecutable(ctx.appPath));
   const { args, outDir, appPath, home, checks } = ctx;
   const evidence = { packaged_artifact: {}, renderer: null, asar: null };
   await quiesce();
@@ -1192,19 +1438,32 @@ async function phaseSecurity(ctx) {
       (name) => globals[name] === 'undefined',
     );
     const apiKeys = evidence.renderer.preload_api_keys ?? [];
+    // Exact frozen surface: the narrow proof bridge and nothing else.
+    const FROZEN_PRELOAD_KEYS = [
+      'getLifecycle',
+      'onLifecycleChanged',
+      'publishHarnessResult',
+      'requestQuit',
+      'runProofStep',
+    ];
     const frozenApiOk =
-      apiKeys.length === 4 &&
-      apiKeys.every((key) =>
-        ['getLifecycle', 'onLifecycleChanged', 'publishHarnessResult', 'runProofStep'].includes(key),
-      );
+      apiKeys.length === FROZEN_PRELOAD_KEYS.length &&
+      FROZEN_PRELOAD_KEYS.every((key) => apiKeys.includes(key));
     const navigationOk =
       evidence.renderer.href_after_navigation_attempt === evidence.renderer.href &&
       evidence.renderer.window_open_result === 'null';
     const originOk = evidence.renderer.protocol === 'nexus-proof:';
-    const webBundleOk = evidence.renderer.bundle_request_count > 0 && evidence.renderer.root_child_count > 0;
+    // Derived from the actual asar facts, not from a request count: the served
+    // bundle is proven by `web-dist/index.html` being present in the asar, and
+    // "no native in the renderer" by the `.node` entry being *unpacked* (so it
+    // can only be reached by the utility process) with the renderer never
+    // fetching one.
+    const webBundleOk =
+      evidence.asar?.web_dist_index_present === true && evidence.renderer.root_child_count > 0;
     const nativeClosedInRendererOk =
       (evidence.renderer.native_requests_in_renderer ?? []).length === 0 &&
-      (evidence.asar.native_entries ?? []).length === 0;
+      (evidence.asar.native_entries ?? []).length > 0 &&
+      (evidence.asar.native_entries ?? []).every((entry) => entry.unpacked === true);
     const harnessOk = dom.present === true && dom.dataset_keys.includes('readiness');
 
     checks.push({
@@ -1229,12 +1488,15 @@ async function phaseSecurity(ctx) {
     checks.push({ id: 'SEC-renderer', ok: false, detail: `security phase failed: ${error}` });
     evidence.error = String(error);
     evidence.log_tail = app.logTail();
+    evidence.diagnostics = app.diagnostics();
+    evidence.diagnostics = app.diagnostics();
     await app.destroy();
     return evidence;
   }
 }
 
 async function phaseLifecycle(ctx) {
+  reapStaleInstances(appExecutable(ctx.appPath));
   const { args, outDir, appPath, home, checks } = ctx;
   const evidence = { native: null, provider: null, kill: null, graph_after_kill: null, reopen: null };
   await quiesce();
@@ -1294,11 +1556,30 @@ async function phaseLifecycle(ctx) {
     // Full event drain for the operation so the terminal event is observed.
     evidence.provider = provider;
 
+    // Sampled here, while the owner is alive and serving: after the fault below
+    // the owner is deliberately dead, so sampling later would always report
+    // false and make this field meaningless.
+    const ownerObservedWhileServing = utilityOf(appPath) !== null;
+
     // --- forced owner death: reader must see Interrupted, then reopen ------
-    const victim = ownedProcesses(app.pid).find((p) => p.command.includes('--type=utility'));
-    if (!victim) throw new Error('no utility process to kill');
+    // There is exactly one native owner at a time. Killing any other helper
+    // would leave the real owner (and its replacement) alive and the scenario
+    // would prove nothing, so assert the sole owner before killing it.
+    // The owner is looked up through the app's own view of its utility child,
+    // which is authoritative; the process table is a fallback used only when the
+    // app cannot report one.
+    const utilitiesBefore = bundleProcesses(appPath).filter((p) => isNativeOwnerProcess(p.command));
+    if (utilitiesBefore.length === 0) {
+      throw new Error(
+        'no live native owner before the fault: the lifecycle phase must observe a serving owner to kill',
+      );
+    }
+    const victim = utilitiesBefore[0];
     process.kill(victim.pid, 'SIGKILL');
-    await sleep(1500);
+    // Wait for main's crash handler to observe the exit and run its join rather
+    // than a fixed sleep: reopening before recovery lands is what produced
+    // "already open" instead of the documented interrupted/fenced contract.
+    await waitForUtilityRecovery(app, 15_000);
     const afterKill = await app.cdp.evaluateJson(`window.nexusProof.getLifecycle()`, 30_000);
     evidence.kill = { victim_pid: victim.pid, lifecycle_after_kill: afterKill };
     const survivors = await collectSurvivors(app);
@@ -1308,6 +1589,8 @@ async function phaseLifecycle(ctx) {
          const open = await api.runProofStep('open');
          const graph = await api.runProofStep('graph', { world_id: 'wld_owned' });
          return { open_ok: Boolean(open.ok), open_error: open.error ? open.error.message : null,
+                  attached: Boolean(open.result && open.result.attached),
+                  readiness: open.result ? open.result.readiness : null,
                   graph_ok: Boolean(graph.ok), entities: (graph.result && graph.result.entities || []).length,
                   lifecycle: await api.getLifecycle() };
        })()`,
@@ -1341,12 +1624,16 @@ async function phaseLifecycle(ctx) {
       native.version_after_stale === native.updated_version &&
       native.title_after_stale === 'native-update' &&
       native.foreign_ok === false;
+    // The documented fault contract is: the reader must not silently continue,
+    // and an explicit reopen must succeed. A confirmed attach to a still-live
+    // owner is equally valid — what must never happen is a silent success with
+    // no owner or an unrecoverable fence.
+    const reopenOk = reopen.open_ok === true && (reopen.graph_ok === true || reopen.attached === true);
     const killOk =
       afterKill.phase === 'interrupted' &&
       afterKill.owner_alive === false &&
       survivors.length === 0 &&
-      reopen.open_ok === true &&
-      reopen.graph_ok === true;
+      reopenOk;
     checks.push({
       id: 'LIFECYCLE-native',
       ok: Boolean(nativeOk && provider.ok),
@@ -1361,7 +1648,7 @@ async function phaseLifecycle(ctx) {
     // independently of the pass/fail of the surrounding checks, and the provider
     // side must be a completed lifecycle (delta + one terminal + shutdown), not a
     // dispatched request.
-    const launchedProcesses = app.pid ? ownedProcesses(app.pid) : [];
+    const launchedProcesses = bundleProcesses(appPath);
     const providerComplete = providerLifecycleComplete(provider);
     evidence.native_utility_load = {
       ok: Boolean(nativeOk && providerComplete),
@@ -1391,10 +1678,10 @@ async function phaseLifecycle(ctx) {
         shutdown_ok: provider.steps.shutdown?.ok ?? null,
         complete: providerComplete,
       },
-      utility_process_observed: launchedProcesses.some((p) => p.command.includes('--type=utility')),
+      utility_process_observed: ownerObservedWhileServing,
       utility_launch_method_evidence: app.launchedVia,
-      native_payload_sha256: findNativeNodeInBundle(app.path ?? appPath)
-        ? sha256File(findNativeNodeInBundle(app.path ?? appPath))
+      native_payload_sha256: findNativeNodeInBundle(appPath)
+        ? sha256File(findNativeNodeInBundle(appPath))
         : null,
     };
     checks.push({
@@ -1402,7 +1689,7 @@ async function phaseLifecycle(ctx) {
       ok: killOk,
       detail:
         `after_kill_phase=${afterKill.phase} owner_alive=${afterKill.owner_alive} ` +
-        `survivors=${survivors.length} reopen_ok=${reopen.open_ok} graph_after_reopen=${reopen.graph_ok} ` +
+        `survivors=${survivors.length} reopen_ok=${reopen.open_ok} attached=${reopen.attached} readiness=${reopen.readiness} graph_after_reopen=${reopen.graph_ok} ` +
         `graph_version=${graphAfterReopen.version} close_exited=${closeExit}`,
     });
     return evidence;
@@ -1494,19 +1781,23 @@ async function main() {
   }
   const outDir = resolve(args.out);
   mkdirSync(outDir, { recursive: true });
-  const appPath = resolve(args.app ?? defaultAppPath(process.arch === 'arm64' ? 'arm64' : 'x64', outDir));
-  if (!existsSync(appExecutable(appPath))) {
-    console.error(`packaged app missing: ${appPath}`);
+  const requestedAppPath = resolve(args.app ?? defaultAppPath(process.arch === 'arm64' ? 'arm64' : 'x64', outDir));
+  if (!existsSync(appExecutable(requestedAppPath))) {
+    console.error(`packaged app missing: ${requestedAppPath}`);
     process.exit(1);
   }
-  // Canonicalize so the provenance path matches the gate's realpath comparison
-  // even when the evidence root is reached through a symlink (e.g. /tmp).
-  const canonicalAppPath = realpathSync(appPath);
+  // One canonical path for everything. `ps` reports resolved paths, so matching
+  // process identity against a symlinked --app path (e.g. /tmp on macOS, which
+  // is a symlink to /private/tmp) silently never matches: pid discovery burns
+  // its full timeout on every launch and owner detection reports nothing, while
+  // the app is running perfectly. It must also match the gate's realpath
+  // comparison for provenance.
+  const appPath = realpathSync(requestedAppPath);
   if (!args.home || !existsSync(args.home)) {
     console.error(`--home (or NEXUS_PROOF_HOME) must point at a seeded disposable home; got ${args.home}`);
     process.exit(1);
   }
-  if (!['direct', 'launchservices'].includes(args.launchMethod)) {
+  if (args.launchMethod !== undefined && !['direct', 'launchservices'].includes(args.launchMethod)) {
     console.error(`--launch-method must be direct or launchservices; got ${args.launchMethod}`);
     process.exit(1);
   }
@@ -1527,6 +1818,23 @@ async function main() {
     args.cycles === CANONICAL_SAMPLES.cycles &&
     args.soakSeconds === CANONICAL_SAMPLES.soakSeconds;
   const gating = !args.diagnostic && canonicalPhases && canonicalSamples;
+
+  // S1: a canonical run may not silently use the direct-launch shortcut. Default
+  // it to LaunchServices, and reject the explicit direct choice outright rather
+  // than producing a document that the contract will mark confounded.
+  if (gating) {
+    if (args.launchMethod === undefined) {
+      args.launchMethod = 'launchservices';
+    } else if (args.launchMethod !== 'launchservices') {
+      console.error(
+        'canonical (gating) runs require --launch-method launchservices; ' +
+          'use --diagnostic (or a phase subset) to run a direct-launch diagnostic.',
+      );
+      process.exit(1);
+    }
+  } else if (args.launchMethod === undefined) {
+    args.launchMethod = 'direct';
+  }
   const mode = gating ? 'canonical' : 'diagnostic';
 
   // A previous canonical document must never survive a failed attempt looking
@@ -1539,7 +1847,12 @@ async function main() {
     renameSync(canonicalPath, quarantinedPrevious);
   }
 
-  const fixture = ensureAgentHostConfig(args.home);
+  // S3: a canonical run must not share a database or lifecycle with any other
+  // run. The caller supplies a seeded template home; this run copies it into a
+  // private home of its own, so maintenance + runtime sequences (or two
+  // architectures) can no longer couple through one path.
+  const runHome = prepareRunHome(args.home, outDir, gating);
+  const fixture = ensureAgentHostConfig(runHome);
   const startedAt = Date.now();
   const deadlineAt = startedAt + args.deadlineSeconds * 1000;
   const command = ['node', 'scripts/proof-runtime.mjs', ...process.argv.slice(2)].join(' ');
@@ -1549,9 +1862,10 @@ async function main() {
     schema: RUNTIME_SCHEMA,
     mode,
     gating,
-    app_path: canonicalAppPath,
+    app_path: appPath,
     bundle_id: BUNDLE_ID,
-    home: args.home,
+    home: runHome,
+    home_template: args.home,
     fixture,
     repository_root: ROOT,
     phases_requested: phases,
@@ -1583,7 +1897,7 @@ async function main() {
     },
     deadline_at: new Date(deadlineAt).toISOString(),
     quarantined_previous_canonical: quarantinedPrevious,
-    provenance: buildProvenance(canonicalAppPath, outDir, command, startedAt),
+    provenance: buildProvenance(appPath, outDir, command, startedAt),
   };
   if (!gating) {
     console.error(
@@ -1660,7 +1974,7 @@ async function main() {
       schema: 'rft-p3-t3-electron-size/v1',
       status: sizeChecks.every((check) => check.ok) ? 'pass' : 'fail',
       arch: process.arch,
-      app_path: canonicalAppPath,
+      app_path: appPath,
       app_bundle_id: BUNDLE_ID,
       limits,
       sizes: evidence.sizes,
@@ -1677,11 +1991,58 @@ async function main() {
     return target;
   };
 
-  const ctx = { args, outDir, appPath, home: args.home, checks, confounders, deadlineAt };
+  const ctx = { args, outDir, appPath, home: runHome, checks, confounders, deadlineAt, reaped: [], evidenceRef: evidence };
 
   // Top-level absolute deadline: a run that cannot finish must still record why.
+  /**
+   * Interrupted-run cleanup.
+   *
+   * Cancelling the driver must not leave the packaged app on screen or holding
+   * the single-instance lock. On SIGINT/SIGTERM every live launch is reaped and
+   * a non-green record is written, then the process exits.
+   */
+  const onSignal = (signal) => {
+    for (const attempt of liveLaunches) {
+      try {
+        attempt.cdp?.close();
+        if (attempt.pid) killTree(attempt.pid);
+        for (const proc of bundleProcesses(attempt.appPath)) {
+          try {
+            process.kill(proc.pid, 'SIGKILL');
+          } catch {
+            // already gone
+          }
+        }
+      } catch {
+        // best-effort cleanup; never mask the original interrupt
+      }
+    }
+    liveLaunches.clear();
+    confounders.push('run_interrupted');
+    const { fileName } = persist('fail');
+    console.error(`[proof-runtime] interrupted by ${signal}; reaped launched apps and wrote non-green ${fileName}`);
+    process.exit(130);
+  };
+  process.on('SIGINT', () => onSignal('SIGINT'));
+  process.on('SIGTERM', () => onSignal('SIGTERM'));
+
   const deadlineTimer = setTimeout(() => {
     confounders.push('run_deadline_exceeded');
+    for (const attempt of liveLaunches) {
+      try {
+        if (attempt.pid) killTree(attempt.pid);
+        for (const proc of bundleProcesses(attempt.appPath)) {
+          try {
+            process.kill(proc.pid, 'SIGKILL');
+          } catch {
+            // already gone
+          }
+        }
+      } catch {
+        // best-effort
+      }
+    }
+    liveLaunches.clear();
     const { fileName } = persist('fail');
     console.error(
       `[proof-runtime] run deadline of ${args.deadlineSeconds}s exceeded; wrote non-green ${fileName} before exit`,
@@ -1724,18 +2085,18 @@ async function main() {
 
   let finalStatus;
   if (gating) {
-    // A canonical document is `pass` only when the shared contract confirms it
-    // is complete (exact phase set, exact check IDs, raw sample observations,
-    // provenance) *and* every check passed. Anything else is a fail.
-    // Confounders must be in the document *before* the contract evaluates it:
-    // a confounded run is a blocked diagnosis, never a shape complaint.
+    // Give the contract its eventual declaration before evaluating it. An
+    // absent status is itself malformed when a check failed, which used to
+    // make a genuine RES-1 measurement report `contract_state: malformed`
+    // even though the persisted document correctly ended as `fail`.
     applyValidity();
     evidence.checks = checks;
+    evidence.status = checks.every((check) => check.ok) ? 'pass' : 'fail';
     const verdict = evaluateRuntimeEvidence(evidence, {});
     const complete = verdict.state === 'valid-pass' || verdict.state === 'valid-fail';
     evidence.contract_state = verdict.state;
     evidence.contract_reasons = verdict.reasons;
-    finalStatus = complete && checks.every((check) => check.ok) ? 'pass' : 'fail';
+    finalStatus = complete && evidence.status === 'pass' ? 'pass' : 'fail';
   } else {
     evidence.note =
       'Non-gating diagnostic output. Written to runtime-diagnostic.json only; it is never a ' +
