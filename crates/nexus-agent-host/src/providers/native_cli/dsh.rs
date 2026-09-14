@@ -1038,6 +1038,14 @@ fn remove_lease_at_path(lease: &Path) -> Result<(), String> {
     }
 }
 
+/// Non-unix targets never provision sealed leases (provisioning fails
+/// closed), so no lease path is ever retained and there is never a lease
+/// to reconcile — the path-based counterpart of [`remove_lease_tree`].
+#[cfg(not(unix))]
+fn remove_lease_at_path(_lease: &Path) -> Result<(), String> {
+    Ok(())
+}
+
 /// A sealed start failure (fix wave 3): the error to return, plus the
 /// exact anchored lease path when even the immediate anchored deletion
 /// failed — the caller (recipe switch) associates that path with the

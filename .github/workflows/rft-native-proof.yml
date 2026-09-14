@@ -150,11 +150,12 @@ jobs:
           if [ -d /Applications/Xcode_16.4.app ]; then
             sudo xcode-select -s /Applications/Xcode_16.4.app
           fi
-          xcodebuild -version
-          xcodebuild -version | grep -q 'Xcode 16\.4' || {
+          xcode_version="$(xcodebuild -version)"
+          printf '%s\n' "${xcode_version}"
+          if [[ "${xcode_version}" != *"Xcode 16.4"* ]]; then
             echo "::error::expected Xcode 16.4 (architecture-contracts §9); runner image provides the version above"
             exit 1
-          }
+          fi
           echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
           echo "MACOSX_DEPLOYMENT_TARGET=11.0 (native addon ABI floor)"
 

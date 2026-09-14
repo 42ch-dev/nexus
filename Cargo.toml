@@ -69,7 +69,12 @@ clap = { version = "4.5", features = ["derive"] }
 clap_complete = "4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-reqwest = { version = "0.12", features = ["json"] }
+# TLS via rustls (ring, webpki roots): native packaging must not require
+# system OpenSSL (openssl-sys fails the Linux x86_64 manylinux build); all
+# other default reqwest behavior (charset, http2, system-proxy) is retained.
+reqwest = { version = "0.12", default-features = false, features = [
+    "json", "rustls-tls", "charset", "http2", "system-proxy",
+] }
 sqlx = { version = "0.9", default-features = false, features = [
     "runtime-tokio",
     "sqlite",
