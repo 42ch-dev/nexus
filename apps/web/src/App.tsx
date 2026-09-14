@@ -109,6 +109,20 @@ const CapabilitiesPage = lazy(() =>
   import('@/pages/capabilities-page').then((m) => ({ default: m.CapabilitiesPage })),
 );
 
+// P4-T3 development-only RFT-M1 browser proof route. The dynamic import is
+// guarded by a compile-time `import.meta.env` check, so in a production build
+// (`DEV === false`) the branch folds to `null` and both this `import(...)` and
+// the proof page chunk are excluded from the production route bundle. The
+// module itself also re-checks the gate before rendering.
+const RftNativeProofPage =
+  import.meta.env.DEV && import.meta.env.VITE_RFT_NATIVE_PROOF === '1'
+    ? lazy(() =>
+        import('@/pages/rft-native-proof-page').then((m) => ({
+          default: m.RftNativeProofPage,
+        })),
+      )
+    : null;
+
 /**
  * App routes — Control Room + Setup shell.
  *
@@ -307,7 +321,43 @@ function AppRoutes() {
   );
 }
 
+/**
+ * P4-T3 development-only proof shell. Renders the proof page directly — OUTSIDE
+ * `ActiveCreatorProvider`, `SetupCompletedProvider`, `DaemonLaunchGate`,
+ * `SettingsModalProvider` and `EntranceProvider`, none of which the proof page
+ * needs (it mounts its own real `BrowserClient` and the existing canvas). The
+ * outer `BrowserRouter` from `main.tsx` still provides routing context.
+ * Compile-time gated, so the production build folds this to `null` and excludes
+ * the proof chunk entirely.
+ */
+function RftNativeProofApp() {
+  if (!RftNativeProofPage) return <NotFoundPage />;
+  return (
+    <Suspense fallback={<LoadingState label="Loading RFT native proof…" />}>
+      <RftNativeProofPage />
+    </Suspense>
+  );
+}
+
+/**
+ * True when the current location is the development-only proof route.
+ * `useLocation` requires a Router ancestor, so this is called from inside the
+ * app's `BrowserRouter` (see `main.tsx`).
+ */
+function useIsRftNativeProofRoute(): boolean {
+  const location = useLocation();
+  return location.pathname === '/rft-native-proof';
+}
+
 export function App() {
+  // The proof route must not be wrapped by the product gates. The hook is
+  // always called (stable hook order); the early return still leaves the outer
+  // `BrowserRouter` (main.tsx) as the only Router, and this branch is `false` in
+  // production (`RftNativeProofPage` is null).
+  const isProofRoute = useIsRftNativeProofRoute();
+  if (RftNativeProofPage && isProofRoute) {
+    return <RftNativeProofApp />;
+  }
   return (
     <ActiveCreatorProvider>
       <SetupCompletedProvider>

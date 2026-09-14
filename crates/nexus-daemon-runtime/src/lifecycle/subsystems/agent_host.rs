@@ -103,6 +103,8 @@ impl SubsystemBootstrap for AgentHostSubsystem {
             max_ops_per_session: self.host_config.max_ops_per_session,
             timeouts: self.host_config.timeouts.clone(),
             host_config: Some(self.host_config.clone()),
+            // The daemon has no open-time admitted snapshot: start performs its
+            // own PATH/recipe discovery, which is the pre-existing behavior.
             admitted_catalog: None,
             probe_owner: self.probe_owner.clone(),
         };

@@ -30,6 +30,7 @@ pub mod findings;
 pub mod force_gates_audit;
 pub mod identity;
 pub mod inspiration_items;
+pub mod js_provider_journal;
 pub mod kb_extract_job;
 pub mod kb_relationships;
 pub mod kb_store;

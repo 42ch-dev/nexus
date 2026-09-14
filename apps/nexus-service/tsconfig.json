@@ -1,1 +1,9 @@
-{ "extends": "../../packages/nexus-native/tsconfig.json", "include": [] }
+{
+  "extends": "../../packages/nexus-native/tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src/**/*.ts"]
+}

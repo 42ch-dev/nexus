@@ -6,6 +6,7 @@
  * invalidate the graph so the canvas stays fresh after each successful write;
  * callers handle 409 conflicts via {@link isWorldKbConflictError}.
  */
+import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -129,6 +130,51 @@ export function usePromoteWorldKbCandidate(worldId: string | undefined) {
       }
     },
   });
+}
+
+/**
+ * Poll the durable `core_changes` outbox for one World and refetch the graph
+ * and candidates when a change touches it (P4-T3).
+ *
+ * This is the migrated-slice watermark watch: the service writes one outbox row
+ * per committed mutation, so a direct CLI writer (or another process) becomes
+ * visible without the canvas depending on a process-local cache. A
+ * `resync_required` response (cursor below the retained minimum) is treated as
+ * a gap and refetches unconditionally, then advances the cursor to the
+ * read-time snapshot so the same gap is not reported forever.
+ *
+ * The caller gates `enabled`; the default product UI never mounts this, so
+ * production never depends on the development-only proof route.
+ */
+export function useWorldKbChangesWatch(worldId: string | undefined, enabled: boolean) {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const cursorRef = useRef('0');
+  const query = useQuery({
+    queryKey: queryKeys.worldKb.changes(worldId ?? ''),
+    enabled: enabled && Boolean(worldId),
+    refetchInterval: 500,
+    queryFn: async () => {
+      const response = await client.getCoreChanges({ after_sequence: cursorRef.current });
+      cursorRef.current = response.resync_required
+        ? response.snapshot_sequence
+        : response.next_sequence;
+      return response;
+    },
+  });
+
+  const changeData = query.data;
+  useEffect(() => {
+    if (!changeData || !worldId) return;
+    const touched =
+      changeData.resync_required ||
+      changeData.rows.some((row) => row.world_id === worldId);
+    if (!touched) return;
+    void qc.invalidateQueries({ queryKey: queryKeys.worldKb.graph(worldId) });
+    void qc.invalidateQueries({ queryKey: queryKeys.worldKb.candidates(worldId) });
+  }, [changeData, worldId, qc]);
+
+  return query;
 }
 
 /** `POST .../kb/patch-relationship` — add/update/remove a typed relationship (V1.74). */
