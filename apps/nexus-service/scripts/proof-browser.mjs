@@ -1257,7 +1257,10 @@ async function runInterruptedRestartProof(ctx, serviceHandle) {
       /* already gone */
     }
   }
-  await new Promise((r) => serviceHandle.child.once('exit', r));
+  // `__closed` is registered at spawn time, so it cannot miss an early exit;
+  // the timeout keeps this abrupt-restart proof finite even if inherited stdio
+  // delays `close`. Port release below remains the authoritative stop check.
+  await Promise.race([serviceHandle.child.__closed ?? Promise.resolve(), sleep(5_000)]);
   await waitForPortFree(serviceHandle.port);
   return { sessionId: session.session_id, operationId: operation.operation_id };
 }
@@ -1562,6 +1565,8 @@ function requireRestoredAdapterBuild() {
   const restore = spawnSync('pnpm', ['-F', '@42ch/nexus-provider-acp', 'run', 'build'], {
     cwd: repoRoot,
     encoding: 'utf8',
+    timeout: 60_000,
+    killSignal: 'SIGKILL',
   });
   if (restore.error || restore.status !== 0) {
     const tail = `${restore.stdout ?? ''}${restore.stderr ?? ''}`.slice(-MAX_EVIDENCE_TAIL_CHARS);
@@ -1637,9 +1642,22 @@ async function runAdapterEditSample(ctx, sampleIndex) {
       // (which settles on `error`) keeps a build-launch failure bounded and
       // reportable instead of hanging the sample forever.
       const exitCode = await Promise.race([
-        new Promise((resolveExit) => build.once('exit', resolveExit)),
+        new Promise((resolveExit) => {
+          if (build.exitCode !== null || build.signalCode !== null) {
+            resolveExit(build.exitCode);
+            return;
+          }
+          build.once('exit', resolveExit);
+        }),
         build.__closed.then(() => build.exitCode),
+        sleep(60_000).then(() => 'timeout'),
       ]);
+      if (exitCode === 'timeout') {
+        await stopChild(build, { graceMs: 0, killMs: 2_000, closeMs: 2_000 });
+        throw new Error(
+          `adapter package build timed out after 60000ms: ${build.output().slice(-MAX_EVIDENCE_TAIL_CHARS)}`,
+        );
+      }
       if (exitCode !== 0) {
         throw new Error(
           `adapter package build failed (exit ${exitCode}${build.__error ? `: ${build.__error.message}` : ''}): ${build.output().slice(-MAX_EVIDENCE_TAIL_CHARS)}`,
