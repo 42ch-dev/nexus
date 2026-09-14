@@ -167,16 +167,32 @@ export function createServiceServer(
       const body = parseJsonBody(bodyBuffer, method);
       const result = await handleRoute(service, method, urlObj.pathname, urlObj.searchParams, body);
       if (result.kind === 'sse') {
-        if (route.sessionId && method === 'GET' && urlObj.pathname.endsWith('/events')) {
-          reserveSessionSubscriber(route.sessionId);
-          const sessionId = route.sessionId;
+        const subscriberSessionId =
+          route.sessionId && method === 'GET' && urlObj.pathname.endsWith('/events')
+            ? route.sessionId
+            : null;
+        if (subscriberSessionId) {
+          reserveSessionSubscriber(subscriberSessionId);
           let released = false;
           const release = () => {
             if (released) return;
             released = true;
-            releaseSessionSubscriber(sessionId);
+            releaseSessionSubscriber(subscriberSessionId);
           };
+          // Safety net for a stream that outlives this handler: the socket's
+          // close still releases the admission.
           req.socket?.once('close', release);
+          try {
+            res.setHeader('X-Request-Id', id);
+            writeCors(res, origin, config.allowedOrigins);
+            await result.run(res);
+          } finally {
+            // Primary release: HTTP keep-alive holds the TCP socket open long
+            // after an SSE response completed, so a completed or thrown stream
+            // must free its admission here, not at socket close.
+            release();
+          }
+          return;
         }
         res.setHeader('X-Request-Id', id);
         writeCors(res, origin, config.allowedOrigins);

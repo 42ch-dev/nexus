@@ -179,6 +179,31 @@ function rawSseGet(baseUrl, path, { headers = {}, pauseAfterHeaders = false, pau
   });
 }
 
+/** Minimal SSE GET that resolves with the HTTP status line; caller destroys the socket. */
+function rawHttpStatusLine(baseUrl, path, { headers = {}, timeoutMs = 2_000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(path, baseUrl);
+    const socket = trackSocket(net.connect(Number(url.port), url.hostname));
+    let raw = '';
+    const timer = setTimeout(() => {
+      try { socket.destroy(); } catch {}
+      reject(new Error(`rawHttpStatusLine timed out after ${timeoutMs}ms for ${path}`));
+    }, timeoutMs);
+    socket.setEncoding('utf8');
+    socket.on('error', (err) => { clearTimeout(timer); reject(err); });
+    socket.on('data', (chunk) => {
+      raw += chunk;
+      const match = /^HTTP\/1\.1 (\d{3})/.exec(raw);
+      if (match) {
+        clearTimeout(timer);
+        resolve({ status: Number(match[1]), socket });
+      }
+    });
+    const request = [`GET ${url.pathname}${url.search} HTTP/1.1`, `Host: ${url.host}`, 'Accept: text/event-stream', ...Object.entries(headers).map(([k, v]) => `${k}: ${v}`), '', ''].join('\r\n');
+    socket.write(request);
+  });
+}
+
 async function startProviderService(home, port, apiKey, tlsOpts) {
   if (apiKey) process.env.NEXUS42_DAEMON_API_KEY = apiKey;
   const { startService } = await import(join(serviceRoot, 'dist/index.js'));
@@ -315,30 +340,117 @@ describe('security-stream (P4-T2)', () => {
     assert.equal(wrongEpoch.status, 400);
     assert.equal(wrongEpoch.payload.error.details?.variant, 'history_unavailable');
     const lastId = events.at(-1)?.id;
-    const equal = await fetch(`${baseUrl}/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}&cursor=${encodeURIComponent(lastId)}`, { headers: { Accept: 'text/event-stream' } });
+    // A retry at the exact terminal sequence must settle promptly on its own:
+    // the bounded body read fails if the stream leaks open, and the body must
+    // carry no fabricated event or gap.
+    const equal = await fetch(`${baseUrl}/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}&cursor=${encodeURIComponent(lastId)}`, { headers: { Accept: 'text/event-stream' }, signal: AbortSignal.timeout(5_000) });
     assert.equal(equal.status, 200);
     assert.match(equal.headers.get('content-type') ?? '', /text\/event-stream/);
-    await equal.body?.cancel();
+    const equalBody = await equal.text();
+    assert.equal((equalBody.match(/event: /g) ?? []).length, 0, 'terminal equal-cursor retry must not fabricate an event or gap');
   });
 
   test('subscriber cap returns 409', async () => {
-    const { sessionId, operationId } = await providerFlow(baseUrl);
-    const path = `/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}`;
-    const url = new URL(path, baseUrl);
-    const request = `GET ${url.pathname}${url.search} HTTP/1.1\r\nHost: ${url.host}\r\nAccept: text/event-stream\r\n\r\n`;
+    await stopSharedService();
+    const envHome = seedHome();
     const sockets = [];
+    const prevPullDelay = process.env.NEXUS_SSE_FIRST_PULL_DELAY_MS;
+    process.env.NEXUS_SSE_FIRST_PULL_DELAY_MS = '8000';
+    const local = await startProviderService(envHome.home, 0);
     try {
-      await Promise.all(Array.from({ length: 16 }, async () => {
+      const { sessionId, operationId } = await providerFlow(local.url);
+      const path = `/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}`;
+      const url = new URL(path, local.url);
+      const request = `GET ${url.pathname}${url.search} HTTP/1.1\r\nHost: ${url.host}\r\nAccept: text/event-stream\r\n\r\n`;
+      // Hold 16 genuinely live subscribers inside the first-pull gate.
+      for (let i = 0; i < 16; i += 1) {
         const socket = trackSocket(net.connect(Number(url.port), url.hostname));
         sockets.push(socket);
         socket.setEncoding('utf8');
         socket.on('data', () => socket.pause());
         socket.write(request);
         await new Promise((r) => setTimeout(r, 25));
-      }));
+      }
       await new Promise((r) => setTimeout(r, 500));
-      assert.equal((await fetch(`${baseUrl}${path}`)).status, 409);
-    } finally { for (const s of sockets) { try { s.destroy(); } catch {} } }
+      assert.equal((await fetch(`${local.url}${path}`)).status, 409);
+    } finally {
+      if (prevPullDelay === undefined) delete process.env.NEXUS_SSE_FIRST_PULL_DELAY_MS;
+      else process.env.NEXUS_SSE_FIRST_PULL_DELAY_MS = prevPullDelay;
+      for (const socket of sockets) {
+        try { socket.destroy(); } catch {}
+      }
+      await closeServiceBounded(local);
+      await startSharedService(homeCtx.home, 0);
+    }
+  });
+
+  test('sequential completed SSE requests over keep-alive never exhaust the subscriber cap', async () => {
+    const { sessionId, operationId } = await providerFlow(baseUrl);
+    const eventsUrl = `${baseUrl}/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}`;
+    // The first request rides the still-running operation so the hub retains
+    // the full stream; the rest replay the completed hub. Every response
+    // completes normally while undici keeps the keep-alive socket pooled —
+    // exactly the shape that charged one leaked admission per request before
+    // the completion release existed.
+    const first = await fetch(eventsUrl, { headers: { Accept: 'text/event-stream' }, signal: AbortSignal.timeout(10_000) });
+    assert.equal(first.status, 200);
+    await first.text();
+    for (let i = 0; i < 20; i += 1) {
+      const replay = await fetch(eventsUrl, { headers: { Accept: 'text/event-stream' }, signal: AbortSignal.timeout(10_000) });
+      assert.equal(replay.status, 200, `completed SSE request ${i + 1} must never be refused with 409`);
+      await replay.text();
+    }
+  });
+
+  test('a completed SSE stream frees its admission for the next live subscriber', async () => {
+    await stopSharedService();
+    const envHome = seedHome();
+    const held = [];
+    let probe;
+    const prevPullDelay = process.env.NEXUS_SSE_FIRST_PULL_DELAY_MS;
+    process.env.NEXUS_SSE_FIRST_PULL_DELAY_MS = '8000';
+    const local = await startProviderService(envHome.home, 0);
+    try {
+      const { sessionId, operationId } = await providerFlow(local.url);
+      const completedPath = `/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}`;
+      await rawSseGet(local.url, completedPath);
+      // Start a second operation in the same session. Its subscribers remain
+      // live in the first-pull gate while the completed operation's keep-alive
+      // admission must already have been released.
+      const executed = await jsonFetch(
+        `${local.url}/v1/daemon/agent-host/sessions/${sessionId}/operations`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: { kind: 'prompt', content: 'hello again' },
+        },
+      );
+      assert.equal(executed.status, 200, executed.text);
+      const livePath = `/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${executed.payload.operation_id}`;
+      const url = new URL(livePath, local.url);
+      const request = `GET ${url.pathname}${url.search} HTTP/1.1\r\nHost: ${url.host}\r\nAccept: text/event-stream\r\n\r\n`;
+      for (let i = 0; i < 15; i += 1) {
+        const socket = trackSocket(net.connect(Number(url.port), url.hostname));
+        held.push(socket);
+        socket.setEncoding('utf8');
+        socket.on('data', () => socket.pause());
+        socket.write(request);
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      await new Promise((r) => setTimeout(r, 300));
+      probe = await rawHttpStatusLine(local.url, livePath, { timeoutMs: 9_000 });
+      try { assert.equal(probe.status, 200); } finally {
+        try { probe.socket.destroy(); } catch {}
+      }
+    } finally {
+      if (prevPullDelay === undefined) delete process.env.NEXUS_SSE_FIRST_PULL_DELAY_MS;
+      else process.env.NEXUS_SSE_FIRST_PULL_DELAY_MS = prevPullDelay;
+      for (const socket of held) {
+        try { socket.destroy(); } catch {}
+      }
+      await closeServiceBounded(local);
+      await startSharedService(homeCtx.home, 0);
+    }
   });
 
   test('disconnect yields inspectable terminal without duplicated transcript', async () => {
@@ -639,6 +751,106 @@ describe('security-stream (P4-T2)', () => {
     const gapPayloads = replay.frames.filter((f) => f.event === 'gap').map((f) => JSON.parse(f.buffer.toString('utf8').split('\ndata: ')[1]));
     assert.equal(gapPayloads.length, 1, 'replay carries exactly one gap');
     assert.equal(gapPayloads[0].reason, 'interrupted', 'replay keeps the canonical interrupted marker');
+  });
+
+  test('equal cursor waits on a live hub but ends promptly on a terminal hub', async () => {
+    const { ProviderRegistry } = await import(join(serviceRoot, 'dist/provider-registry.js'));
+    const { OperationEventHub, streamSessionEvents } = await import(join(serviceRoot, 'dist/sse.js'));
+
+    // ── Plan level: a closed hub can never advance, so an equal-cursor retry
+    // must plan an end — never a wait (terminal retained, refused terminal) —
+    // while a live hub, including an empty one, still waits for future truth.
+    const doneHub = new OperationEventHub('00000000-0000-4000-8000-000000000501', '00000000-0000-4000-8000-000000000502');
+    doneHub.recordEvent({ Progress: { message: 'work' } });
+    const doneTerminal = doneHub.recordEvent({ OpFinished: { session_id: doneHub.sessionId, op_id: doneHub.operationId, reason: 'end_turn' } });
+    assert.ok(doneTerminal);
+    assert.equal(doneHub.isClosed(), true);
+    assert.equal(doneHub.planReplay(doneTerminal.id).kind, 'end', 'equal cursor on a terminal hub must end, not wait');
+    const failedHub = new OperationEventHub('00000000-0000-4000-8000-000000000503', '00000000-0000-4000-8000-000000000504');
+    assert.ok(failedHub.failClosed());
+    assert.equal(failedHub.planReplay(`${failedHub.epoch}:1`).kind, 'end', 'equal cursor on a fail-closed hub must end, not wait');
+    const emptyLiveHub = new OperationEventHub('00000000-0000-4000-8000-000000000505', '00000000-0000-4000-8000-000000000506');
+    assert.equal(emptyLiveHub.planReplay(`${emptyLiveHub.epoch}:0`).kind, 'wait', 'an empty open hub is live: cursor 0 waits for future truth');
+
+    // ── Stream level, terminal hub: the retry settles promptly and fabricates
+    // no gap and no event.
+    const registry = new ProviderRegistry();
+    const sessionId = '00000000-0000-4000-8000-000000000507';
+    const operationId = '00000000-0000-4000-8000-000000000508';
+    registry.registerSession({ sessionId, providerId: 'mock-acp', state: 'Running', activeOpId: operationId });
+    registry.registerOperation({ operationId, sessionId, providerId: 'mock-acp', status: 'finished', terminalEvent: null, terminalTranscript: null });
+    const hub = registry.ensureHub(operationId, () => new OperationEventHub(operationId, sessionId));
+    hub.recordEvent({ Progress: { message: 'work' } });
+    const terminal = hub.recordEvent({ OpFinished: { session_id: sessionId, op_id: operationId, reason: 'end_turn' } });
+    const written = [];
+    const fakeRes = {
+      socket: null,
+      writableEnded: false,
+      destroyed: false,
+      writeHead() {},
+      write(chunk) { written.push(chunk.toString('utf8')); return true; },
+      once() {},
+      end() { this.writableEnded = true; },
+    };
+    await Promise.race([
+      streamSessionEvents({ providerRegistry: registry }, sessionId, new URLSearchParams({ operation_id: operationId, cursor: terminal.id }), fakeRes),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('terminal equal-cursor retry must settle promptly')), 2_000)),
+    ]);
+    assert.equal(written.join(''), '', 'terminal equal-cursor retry must end with no fabricated gap or event');
+
+    // ── Stream level, live hub: equal cursor stays open while no future frame
+    // exists yet, then delivers the future truth (and the terminal) when the
+    // provider produces it — normal live follow is preserved.
+    const liveRegistry = new ProviderRegistry();
+    const liveSession = '00000000-0000-4000-8000-000000000509';
+    const liveOperation = '00000000-0000-4000-8000-00000000050a';
+    liveRegistry.registerSession({ sessionId: liveSession, providerId: 'mock-acp', state: 'Running', activeOpId: liveOperation });
+    liveRegistry.registerOperation({ operationId: liveOperation, sessionId: liveSession, providerId: 'mock-acp', status: 'started', terminalEvent: null, terminalTranscript: null });
+    const liveHub = liveRegistry.ensureHub(liveOperation, () => new OperationEventHub(liveOperation, liveSession));
+    const firstFrame = liveHub.recordEvent({ Progress: { message: 'first truth' } });
+    assert.equal(liveHub.planReplay(firstFrame.id).kind, 'wait', 'equal cursor on a live hub must keep waiting');
+    let releasePull;
+    const pullGate = new Promise((resolve) => { releasePull = resolve; });
+    let pulls = 0;
+    const liveStub = {
+      providerRegistry: liveRegistry,
+      core: {
+        nextProviderEvents: async () => {
+          pulls += 1;
+          if (pulls === 1) {
+            await pullGate;
+            return { events: [{ Progress: { message: 'future truth' } }], gap: null, has_more: true };
+          }
+          return { events: [{ OpFinished: { session_id: liveSession, op_id: liveOperation, reason: 'end_turn' } }], gap: null, has_more: false };
+        },
+      },
+    };
+    const liveWritten = [];
+    const liveRes = {
+      socket: null,
+      writableEnded: false,
+      destroyed: false,
+      writeHead() {},
+      write(chunk) { liveWritten.push(chunk.toString('utf8')); return true; },
+      once() {},
+      end() { this.writableEnded = true; },
+    };
+    let settled = false;
+    const liveStream = streamSessionEvents(liveStub, liveSession, new URLSearchParams({ operation_id: liveOperation, cursor: firstFrame.id }), liveRes).then(() => { settled = true; });
+    // Outlast the default 450ms first-pull delay: the loop is now parked on
+    // the gated first pull, proving the wait belongs to the live hub, not to
+    // startup lag.
+    await new Promise((r) => setTimeout(r, 600));
+    assert.equal(settled, false, 'equal cursor on a live hub must stay open waiting for future truth');
+    assert.equal(liveWritten.join(''), '', 'nothing may be delivered while the live hub has no future frames');
+    releasePull();
+    await Promise.race([
+      liveStream,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('live equal-cursor stream must deliver future truth and settle')), 2_000)),
+    ]);
+    const liveText = liveWritten.join('');
+    assert.match(liveText, /future truth/, 'the frame recorded after the retry must be delivered');
+    assert.match(liveText, /OpFinished/, 'the terminal must be delivered after the wait');
   });
 
   test('active provider operation cap returns transport busy before dispatch', async () => {

@@ -45,7 +45,8 @@ export type ReplayPlan =
   | { kind: 'all'; frames: StoredFrame[] }
   | { kind: 'frames'; frames: StoredFrame[] }
   | { kind: 'wait' }
-  | { kind: 'stale'; gap: CoreStreamGap };
+  | { kind: 'stale'; gap: CoreStreamGap }
+  | { kind: 'end' };
 
 const sessionSubscriberCounts = new Map<string, number>();
 
@@ -199,7 +200,12 @@ export class OperationEventHub {
       };
     }
     if (parsed.sequence === this.sequence) {
-      return { kind: 'wait' };
+      // Equal cursor: waiting is meaningful only while the hub is live and
+      // future events are still possible. A closed hub (terminal retained,
+      // terminal refused, or disposed) can never advance — the retry must end
+      // promptly instead of holding a subscriber on a stream with no future,
+      // and it must not fabricate a gap or event to justify the end.
+      return this.closed ? { kind: 'end' } : { kind: 'wait' };
     }
     return { kind: 'frames', frames: this.framesAfter(parsed.sequence) };
   }
@@ -632,6 +638,12 @@ export async function streamSessionEvents(
         const gapResult = await writer.writeFrame(gapFrame);
         if (gapResult !== 'ok') await emitInterruptedGap(writer, hub, operationId);
       }
+      return;
+    }
+
+    if (plan.kind === 'end') {
+      // Equal cursor on a closed hub: nothing can follow. End the retry
+      // promptly — no fabricated gap, no replayed event.
       return;
     }
 
