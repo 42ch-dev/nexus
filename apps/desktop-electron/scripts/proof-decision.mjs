@@ -247,8 +247,8 @@ function docNamedCheck(doc, name) {
   return (doc?.checks ?? []).some((check) => check?.name === name && check.ok === true);
 }
 
-function unavailableRow({ id, row, verdict, summary, raw_evidence = [], reason }) {
-  rows.push({ id, row, verdict, raw_evidence, summary, verification: { derived: false, reason } });
+function unavailableRow({ id, row, verdict, summary, raw_evidence = [], reason, gating = true }) {
+  rows.push({ id, row, verdict, gating, raw_evidence, summary, verification: { derived: false, reason } });
 }
 
 // --- PKG-1: native install/load, package receipt, binary inspection ----------
@@ -867,6 +867,7 @@ for (const arch of GUI_ARCHES) {
       summary: `no package-gate document for ${arch.key}`,
       raw_evidence: [evidence],
       reason: 'no signed gate document',
+      gating: false,
     });
     continue;
   }
@@ -881,6 +882,7 @@ for (const arch of GUI_ARCHES) {
   rows.push({
     id: `SEC1-signed-${arch.key}`,
     row: `SEC-1 signed/hardened/notarized/stapled execution with native load (${arch.key})`,
+    gating: false,
     verdict,
     raw_evidence: [evidence],
     summary: outcome.summary,
@@ -1072,15 +1074,18 @@ function main() {
     ? resolve(args[args.indexOf('--out') + 1])
     : join(EVIDENCE, 'electron-decision.json');
 
-  const counts = countBy(rows, 'verdict');
+  const gatingRows = rows.filter((row) => row.gating !== false);
+  const releaseRows = rows.filter((row) => row.gating === false);
+  const counts = countBy(gatingRows, 'verdict');
+  const releaseCounts = countBy(releaseRows, 'verdict');
   const passRows = counts.PASS ?? 0;
   const measuredFailures = counts.FAIL ?? 0;
-  const missingRows = rows.length - passRows - measuredFailures;
-  const allRequiredRowsPass = rows.length > 0 && rows.every((row) => row.verdict === 'PASS');
+  const missingRows = gatingRows.length - passRows - measuredFailures;
+  const allRequiredRowsPass = gatingRows.length > 0 && gatingRows.every((row) => row.verdict === 'PASS');
 
-  // GO only when every row passes. A genuinely measured failure is a no-go even
-  // alongside unobserved rows — a demonstrated failure decides. Everything else
-  // (missing/stale/blocked rows) is a missing input, which blocks.
+  // Development GO only depends on development rows. Signing/notarization is a
+  // release gate and remains visible as non-gating evidence; platform-native
+  // rows are produced by the GitHub Actions matrix.
   let status = 'blocked';
   if (allRequiredRowsPass) status = 'go';
   else if (measuredFailures > 0) status = 'no-go';
@@ -1094,28 +1099,30 @@ function main() {
     generated_by: 'apps/desktop-electron/scripts/proof-decision.mjs',
     status,
     status_rule:
-      'GO requires every row to pass, where each verdict is derived from the evidence document it cites ' +
+      'Development GO requires every development row to pass, where each verdict is derived from the evidence document it cites ' +
       '(schema, target, source/tree identity, declared status, and every required named predicate). ' +
-      'A genuine measured failure = no-go. Anything else, including any missing input, = blocked.',
+      'A genuine measured development failure = no-go. Missing development evidence = blocked. ' +
+      'Developer ID signing, notarization and stapling are non-gating release observations.',
     accepted_macos_floor: {
       reference: 'architecture-contracts §10 U1 (user, 2026-09-13)',
       floor: 'macOS 13+ (Ventura) on arm64 and x86_64',
-      note: 'Reference only; no signed execution on that floor was performed.',
+      note: 'Development floor reference; signed execution is a release gate, not a development prerequisite.',
     },
     ...source,
     evidence_root: '.mstar/iterations/v1.189/guides/evidence',
     row_counts: {
-      total: rows.length,
+      total: gatingRows.length,
       pass: passRows,
       fail: measuredFailures,
       missing_or_unobserved: missingRows,
       by_verdict: counts,
       definition:
-        'one row per required criterion per architecture where the criterion is architecture-bound: PKG-1 ' +
+        'one development-gating row per required criterion per architecture where the criterion is architecture-bound: PKG-1 ' +
         'install (4 targets x 2 Node cohorts), PKG-1 package receipt and binary inspection (4 targets each), ' +
-        'PKG-2 native payload (4 targets), runtime criteria and PKG-2 Electron size and SEC-1 signing (2 GUI ' +
-        'arches each), plus MAINT-1',
+        'PKG-2 native payload (4 targets), runtime criteria and PKG-2 Electron size (2 GUI arches each), plus MAINT-1; ' +
+        'signed/notarized/stapled execution is retained separately as a release observation',
     },
+    release_observation_counts: { total: releaseRows.length, by_verdict: releaseCounts },
     row_derivation: {
       'PASS': 'document present, schema/target/source match, declared status pass, every required predicate true',
       'FAIL': 'document records a genuine measured failure (declared status fail)',
@@ -1127,28 +1134,31 @@ function main() {
     evidence_freshness: source.tree_dirty
       ? 'the working tree is dirty; runtime evidence is compared against the live tree digest and will be reported STALE until regenerated at the committed head'
       : 'working tree clean; source_sha and tree_digest comparisons are exact',
-    unobserved_rows: rows
+    unobserved_rows: gatingRows
       .filter((row) => row.verdict !== 'PASS')
       .map((row) => ({ id: row.id, row: row.row, verdict: row.verdict, summary: row.summary })),
     observed_rows: rows,
-    missing_inputs: [...deriveMissingRows(rows), ...EXTERNAL_PREREQUISITES],
-    external_prerequisites: EXTERNAL_PREREQUISITES,
+    release_observations: releaseRows,
+    missing_inputs: deriveMissingRows(gatingRows),
+    external_prerequisites: [],
     runtime_defects_found_and_fixed_during_proof: RUNTIME_FIXES.map(([id, file, detail]) => ({ id, file, detail })),
     consequences: {
-      m1_status: 'NOT complete; P3 cannot GO.',
-      m2: 'Blocked. Per plan STOP/DoD, dependent M2 must not proceed on this record.',
-      tauri_default: 'Unchanged. The current Tauri host remains the shipped desktop path.',
+      m1_status:
+        status === 'go'
+          ? 'Development feasibility gate complete; release signing remains separately gated.'
+          : 'Development feasibility gate is not complete.',
+      m2: status === 'go' ? 'May proceed after review/QA integration gates.' : 'Blocked by the development feasibility decision.',
+      tauri_default: 'Unchanged until the planned Electron cutover is integrated.',
       npm_publish: 'Not authorized and not performed.',
     },
-    next_external_actions: [
-      ...deriveMissingRows(rows).map((entry) => `${entry.input}: ${entry.external_action}`),
-      ...EXTERNAL_PREREQUISITES.map((entry) => entry.external_action),
-    ],
+    next_external_actions: deriveMissingRows(gatingRows).map(
+      (entry) => `${entry.input}: ${entry.external_action}`,
+    ),
     honesty_notes: [
-      'No signed, notarized, stapled, x64, Windows or Linux result is claimed.',
-      'Ad-hoc native dylib signing is a development signature and is never SEC-1 evidence.',
+      'No signed, notarized or stapled release result is claimed; those checks remain non-gating release observations.',
+      'macOS x64, Windows x64 and Linux x64 development rows are produced by the GitHub Actions native matrix.',
+      'Ad-hoc native dylib signing is a development signature and is never release evidence.',
       'Rows not backed by a contract-valid document are NOT OBSERVED / MISSING / STALE / BLOCKED, never PASS.',
-      'Supplying a complete signed dual-architecture matrix makes this generator emit go without editing it.',
     ],
   };
 

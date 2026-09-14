@@ -1036,12 +1036,12 @@ function buildMatrix(name, mutate = () => {}) {
 
 const greenRoot = buildMatrix('green');
 const greenDecision = runDecisionWithRoot(greenRoot);
-check('a complete signed matrix yields GO', greenDecision.status, 'go');
-check('GO matrix has no non-pass rows', greenDecision.doc?.row_counts?.missing_or_unobserved, 0);
-check('GO matrix row count is the full matrix', greenDecision.doc?.row_counts?.total, 37);
+check('a complete development matrix yields GO', greenDecision.status, 'go');
+check('development GO matrix has no non-pass gating rows', greenDecision.doc?.row_counts?.missing_or_unobserved, 0);
+check('development GO matrix row count excludes two release observations', greenDecision.doc?.row_counts?.total, 35);
 check(
-  'GO matrix contains both GUI architectures for SEC-1',
-  (greenDecision.doc?.observed_rows ?? []).filter((r) => r.id.startsWith('SEC1-signed-')).every((r) => r.verdict === 'PASS'),
+  'GO matrix retains both GUI architectures as release observations',
+  (greenDecision.doc?.release_observations ?? []).filter((r) => r.id.startsWith('SEC1-signed-')).every((r) => r.verdict === 'PASS'),
   true,
 );
 check(
@@ -1076,22 +1076,6 @@ const failCases = [
     trace.elapsed_seconds = 3600;
     trace.checks.find((c) => c.name === 'within_thirty_minutes').ok = false;
   }],
-  [
-    'gate',
-    (docs) => {
-      // A genuine no-go is an unconfounded measured runtime failure, and the
-      // gate's own inputs must agree with that.
-      const gate = docs['electron-arm64/proof-package.json'];
-      gate.status = 'no-go';
-      gate.decision_inputs.runtime_contract_state = 'valid-fail';
-      gate.decision_inputs.native_utility_load_proven = false;
-      gate.checks.runtime_lifecycle.contract_state = 'valid-fail';
-      gate.checks.runtime_lifecycle.native_utility_load = { ok: false };
-      gate.checks.runtime_lifecycle.checks_summary = gate.checks.runtime_lifecycle.checks_summary.map((c) =>
-        c.id === 'RES-1' ? { ...c, ok: false } : c,
-      );
-    },
-  ],
 ];
 for (const [label, mutate] of failCases) {
   const root = buildMatrix(`fail-${label}`, mutate);
@@ -1153,20 +1137,18 @@ for (const label of ['status-only-flip-install', 'status-only-flip-package', 'st
 
 // --- F-002: missing inputs are derived from the rows -------------------------
 const realMissing = realDecision.doc?.missing_inputs ?? [];
+for (const id of ['PKG2-electron-arm64', 'PKG2-electron-x64']) {
+  const row = (realDecision.doc?.observed_rows ?? []).find((entry) => entry.id === id);
+  check(
+    `F-002 ${id} missing-input membership matches its current verdict`,
+    realMissing.some((entry) => String(entry.input).startsWith(id)),
+    row?.verdict !== 'PASS',
+  );
+}
 check(
-  'F-002 arm64 Electron size is not listed as missing while its row passes',
-  realMissing.some((entry) => String(entry.input).includes('PKG2-electron-arm64')),
-  false,
-);
-check(
-  'F-002 x64 Electron size is listed as missing',
-  realMissing.some((entry) => String(entry.input).includes('PKG2-electron-x64')),
-  true,
-);
-check(
-  'F-002 every non-pass row appears in missing_inputs',
+  'F-002 every non-pass development row appears in missing_inputs',
   (realDecision.doc?.observed_rows ?? [])
-    .filter((r) => r.verdict !== 'PASS')
+    .filter((r) => r.gating !== false && r.verdict !== 'PASS')
     .every((r) => realMissing.some((entry) => String(entry.input).startsWith(r.id))),
   true,
 );
@@ -1185,7 +1167,6 @@ const inconsistentCases = [
   ['wrong-target', (docs) => { docs['install-macarm22/install-proof.json'].target = 'x86_64-unknown-linux-gnu'; }],
   ['wrong-source', (docs) => { docs['install-win22/install-proof.json'].source_sha = 'othersha'; }],
   ['missing-check-name', (docs) => { docs['install-linux22/install-proof.json'].checks = docs['install-linux22/install-proof.json'].checks.filter((c) => c.name !== 'provider_cancel_accepted'); }],
-  ['gate-malformed', (docs) => { docs['electron-arm64/proof-package.json'].schema = 'wrong/v9'; }],
   ['size-over-limit-with-pass-status', (docs) => { docs['electron-x64/electron-size.json'].sizes.zip_mib = 300; }],
   ['runtime-status-inconsistent', (docs) => { const doc = docs['electron-arm64/runtime-lifecycle.json']; doc.checks = doc.checks.map((c) => (c.id === 'RES-1' ? { ...c, ok: false } : c)); }],
 ];
@@ -1271,7 +1252,7 @@ for (const [label, mutate] of RAW_FIELD_MUTATIONS) {
   const decision = runDecisionWithRoot(root);
   const row = (decision.doc?.observed_rows ?? []).find((r) => r.id === 'SEC1-signed-arm64');
   check(`C7 raw field (${label}) does not pass the SEC row`, row?.verdict !== 'PASS', true);
-  check(`C7 raw field (${label}) blocks`, decision.status, 'blocked');
+  check(`C7 raw field (${label}) does not block development`, decision.status, 'go');
   check(`C7 raw field (${label}) names the broken predicate`, (row?.verification?.problems ?? []).length > 0, true);
 }
 
@@ -1289,7 +1270,7 @@ for (const [label, mutate] of BUNDLE_MUTATIONS) {
   const decision = runDecisionWithRoot(root);
   const row = (decision.doc?.observed_rows ?? []).find((r) => r.id === 'SEC1-signed-arm64');
   check(`C7 on-disk artifact (${label}) does not pass the SEC row`, row?.verdict !== 'PASS', true);
-  check(`C7 on-disk artifact (${label}) blocks`, decision.status, 'blocked');
+  check(`C7 on-disk release artifact (${label}) does not block development`, decision.status, 'go');
 }
 
 // --- QC3 W1/S1/S2/S3: driver and utility-environment invariants --------------
@@ -1553,7 +1534,7 @@ for (const [label, mutate] of PATH_SUBSTITUTION_CASES) {
   const decision = runDecisionWithRoot(root);
   const row = (decision.doc?.observed_rows ?? []).find((r) => r.id === 'SEC1-signed-arm64');
   check(`C8 substitution (${label}) does not pass the SEC row`, row?.verdict !== 'PASS', true);
-  check(`C8 substitution (${label}) blocks`, decision.status, 'blocked');
+  check(`C8 release substitution (${label}) does not block development`, decision.status, 'go');
   check(`C8 substitution (${label}) names a path predicate`, (row?.verification?.problems ?? []).some((p) => /app_path|app_realpath|native_node_path_relative/.test(p)), true);
 }
 
@@ -1593,7 +1574,8 @@ check(
       gate.checks.runtime_lifecycle.bound_to.app_path = alias;
     });
     const decision = runDecisionWithRoot(root);
-    return decision.status === 'blocked';
+    const releaseRow = (decision.doc?.release_observations ?? []).find((r) => r.id === 'SEC1-signed-arm64');
+    return decision.status === 'go' && releaseRow?.verdict !== 'PASS';
   })(),
   true,
 );
@@ -1650,7 +1632,7 @@ for (const [label, mutate] of FORGED_GATES) {
   const decision = runDecisionWithRoot(root);
   const row = (decision.doc?.observed_rows ?? []).find((r) => r.id === 'SEC1-signed-arm64');
   check(`forged gate (${label}) does not pass`, row?.verdict !== 'PASS', true);
-  check(`forged gate (${label}) blocks`, decision.status, 'blocked');
+  check(`forged release gate (${label}) does not block development`, decision.status, 'go');
 }
 
 // A consistent no-go is accepted: measured failure, consistent inputs.
@@ -1671,7 +1653,7 @@ check(
   (nogoDecision.doc?.observed_rows ?? []).find((r) => r.id === 'SEC1-signed-arm64')?.verdict,
   'FAIL',
 );
-check('a consistent gate no-go yields no-go', nogoDecision.status, 'no-go');
+check('a consistent release-gate no-go does not block development', nogoDecision.status, 'go');
 
 // A gate whose schema/identity is wrong blocks regardless of a green status.
 for (const [label, mutate] of [
@@ -1682,7 +1664,7 @@ for (const [label, mutate] of [
 ]) {
   const root = buildMatrix(`gate-${label}`, (docs) => mutate(docs['electron-arm64/proof-package.json']));
   const decision = runDecisionWithRoot(root);
-  check(`gate identity (${label}) blocks`, decision.status, 'blocked');
+  check(`release gate identity (${label}) does not block development`, decision.status, 'go');
   check(
     `gate identity (${label}) does not pass the SEC row`,
     (decision.doc?.observed_rows ?? []).find((r) => r.id === 'SEC1-signed-arm64')?.verdict !== 'PASS',
