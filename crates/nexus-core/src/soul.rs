@@ -178,11 +178,12 @@ pub(crate) async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer>(
 
     let top_keywords = input.top_keywords.clone();
 
-    let synth = synthesizer()
-        .as_ref()
-        .ok_or_else(|| {
-            CoreError::ServiceUnavailable("capability registry not available".to_string())
-        })?;
+    // Bind the owned Option first so the constructed provider lives across
+    // the synthesis await and its consumption below.
+    let synth = synthesizer();
+    let synth = synth.as_ref().ok_or_else(|| {
+        CoreError::ServiceUnavailable("capability registry not available".to_string())
+    })?;
     let draft = synth
         .synthesize(ctx.bearer_ref(), input, ctx.scope())
         .await
@@ -275,10 +276,13 @@ async fn bearer_fragment_stats(
 )> {
     match ctx.bearer_ref() {
         MemoryBearerRef::Creator(creator_id) => {
-            let (stats, cached) =
-                nexus_local_db::soul_narrative_fragment_stats_readonly(pool, creator_id, ctx.scope())
-                    .await
-                    .map_err(map_local_db_error)?;
+            let (stats, cached) = nexus_local_db::soul_narrative_fragment_stats_readonly(
+                pool,
+                creator_id,
+                ctx.scope(),
+            )
+            .await
+            .map_err(map_local_db_error)?;
             Ok((stats, cached))
         }
         MemoryBearerRef::Character {
