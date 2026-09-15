@@ -306,7 +306,9 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
         0
     );
     pool.close().await;
-    let creator_dir = MemoryBearerRef::Creator(CREATOR).long_term_memory_dir(&env.user_home);
+    let creator_dir =
+        MemoryBearerRef::Creator(CREATOR)
+            .long_term_memory_dir(nexus_home_layout::nexus_root_from_home(&env.user_home));
     assert!(
         !creator_dir.exists(),
         "Creator memory dir must not be created by Character promotion"
@@ -428,12 +430,15 @@ async fn review_both_arms_share_classification_and_isolate_storage() {
     );
     pool.close().await;
 
-    let cdir = MemoryBearerRef::Creator(CREATOR).long_term_memory_dir(&env.user_home);
+    // The pipeline composes bearer paths off the nexus root (the same
+    // `state.nexus_home()` the daemon passed), not the raw user home.
+    let nexus_root = nexus_home_layout::nexus_root_from_home(&env.user_home);
+    let cdir = MemoryBearerRef::Creator(CREATOR).long_term_memory_dir(&nexus_root);
     let hdir = MemoryBearerRef::Character {
         owner_creator_id: CREATOR,
         character_id: &chr,
     }
-    .long_term_memory_dir(&env.user_home);
+    .long_term_memory_dir(&nexus_root);
     assert_ne!(cdir, hdir);
     assert_eq!(
         std::fs::read_dir(&cdir).unwrap().count(),
