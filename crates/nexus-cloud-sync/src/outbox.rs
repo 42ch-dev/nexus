@@ -530,8 +530,10 @@ impl Outbox {
 
     /// Re-queue a stuck (`conflicted` / `failed`) entry for delivery.
     ///
-    /// The entry moves back to `ready` with its retry accounting cleared, so
-    /// the next [`Self::replay`]/push cycle re-delivers the local bundle.
+    /// The entry moves back to `ready` with its retry accounting cleared
+    /// (`retry_count` reset to 0), so a requeued max-retry entry receives a
+    /// fresh explicit retry budget instead of hitting the max-retry path on
+    /// its next [`Self::replay`]/push failure.
     /// Resolution stays local: this never sends by itself. Non-stuck entries
     /// do not match and surface as [`SyncError::OutboxEntryNotFound`]
     /// (v1.190 P2-T0 core `resolve_outbox` retry action).
@@ -545,7 +547,7 @@ impl Outbox {
 
         let result = sqlx::query!(
             "UPDATE outbox_entries
-             SET delivery_state = 'ready', last_error = NULL, next_retry_at = NULL, updated_at = ?
+             SET delivery_state = 'ready', retry_count = 0, last_error = NULL, next_retry_at = NULL, updated_at = ?
              WHERE outbox_entry_id = ? AND delivery_state IN ('conflicted', 'failed')",
             now,
             outbox_entry_id
@@ -608,8 +610,17 @@ impl Outbox {
     /// error. Read-only: never mutates the queue.
     ///
     /// # Errors
-    /// Returns the specific error type if the operation fails.
+    /// Returns [`SyncError::InvalidInput`] when `limit` is not positive (a
+    /// page must be bounded), and the specific error type if the operation
+    /// fails.
     pub async fn list_page(&self, limit: i64) -> SyncResult<Vec<OutboxEntry>> {
+        // A page must be bounded: SQLite treats a negative LIMIT as
+        // unbounded, so non-positive limits are rejected up front.
+        if limit <= 0 {
+            return Err(SyncError::InvalidInput(format!(
+                "outbox page limit must be positive: {limit}"
+            )));
+        }
         // sqlx R2: Uses module-level OutboxRow struct.
         let rows = sqlx::query_as!(
             OutboxRow,
@@ -1032,6 +1043,57 @@ mod tests {
             result,
             Err(SyncError::OutboxMaxRetriesExceeded { .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn requeue_stuck_grants_a_fresh_retry_budget() {
+        let outbox = Outbox::new_in_memory().await.expect("create outbox");
+        let cmd = make_test_command();
+        let entry_id = outbox.append(&cmd).await.expect("append");
+        outbox.mark_sent(&entry_id).await.expect("mark_sent");
+
+        // Burn the whole budget: the next failure takes the max-retry path.
+        for _ in 0..MAX_RETRIES {
+            outbox.mark_failed(&entry_id, "persistent error").await.ok();
+        }
+        assert!(matches!(
+            outbox.mark_failed(&entry_id, "persistent error").await,
+            Err(SyncError::OutboxMaxRetriesExceeded { .. })
+        ));
+
+        // Requeue clears the retry accounting ...
+        outbox.requeue_stuck(&entry_id).await.expect("requeue");
+        let entry = outbox.get(&entry_id).await.expect("get");
+        assert_eq!(entry.delivery_state, DeliveryState::Ready);
+        assert_eq!(entry.retry_count, Some(0));
+
+        // ... so the next failure gets a fresh explicit budget instead of
+        // instantly exceeding max retries again.
+        outbox
+            .mark_failed(&entry_id, "persistent error")
+            .await
+            .expect("fresh retry budget after requeue");
+        let entry = outbox.get(&entry_id).await.expect("get");
+        assert_eq!(entry.retry_count, Some(1));
+    }
+
+    #[tokio::test]
+    async fn list_page_rejects_non_positive_limits() {
+        let outbox = Outbox::new_in_memory().await.expect("create outbox");
+        let cmd = make_test_command();
+        outbox.append(&cmd).await.expect("append");
+
+        // SQLite treats a negative LIMIT as unbounded; the primitive must
+        // guarantee a bounded page by rejecting non-positive limits.
+        for limit in [0, -1, -100] {
+            assert!(
+                matches!(outbox.list_page(limit).await, Err(SyncError::InvalidInput(_))),
+                "limit {limit} must be rejected"
+            );
+        }
+
+        let page = outbox.list_page(1).await.expect("bounded page");
+        assert_eq!(page.len(), 1);
     }
 
     #[tokio::test]

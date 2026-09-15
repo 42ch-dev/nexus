@@ -162,29 +162,36 @@ impl CoreHomeService {
         )
         .await;
         if let Err(err) = inserted {
-            pool.close().await;
             // The unique partial index on persistent display_name rejects a
             // name minted concurrently between our 0-match read and this
-            // INSERT (TOCTOU): surface the same honest collision.
+            // INSERT (TOCTOU): surface the same honest collision. The
+            // collision read must run on the still-open pool — reading after
+            // the close would turn a concurrent same-name registration into
+            // an internal closed-pool failure instead of the collision error.
             if let nexus_local_db::LocalDbError::Sqlx(sqlx::Error::Database(db_err)) = &err {
                 if db_err.is_unique_violation() {
-                    let rows = nexus_local_db::list_local_identities(&pool)
-                        .await
-                        .map_err(local_db_err)?;
-                    let display = display_name.unwrap_or_else(|| creator_id.clone());
-                    let matches = persistent_rows_with_name(&rows, &display);
-                    return Err(if matches.len() > 1 {
-                        collision_error(&display, &matches)
-                    } else {
-                        CoreError::InvalidInput {
-                            field: "display_name".to_string(),
-                            reason: format!(
-                                "creator name collision: {display} is already used by a persistent identity"
-                            ),
+                    let collision = match nexus_local_db::list_local_identities(&pool).await {
+                        Ok(rows) => {
+                            let display = display_name.unwrap_or_else(|| creator_id.clone());
+                            let matches = persistent_rows_with_name(&rows, &display);
+                            if matches.len() > 1 {
+                                collision_error(&display, &matches)
+                            } else {
+                                CoreError::InvalidInput {
+                                    field: "display_name".to_string(),
+                                    reason: format!(
+                                        "creator name collision: {display} is already used by a persistent identity"
+                                    ),
+                                }
+                            }
                         }
-                    });
+                        Err(read_err) => local_db_err(read_err),
+                    };
+                    pool.close().await;
+                    return Err(collision);
                 }
             }
+            pool.close().await;
             return Err(local_db_err(err));
         }
         if let Some(platform_id) = request.platform_creator_id.as_deref() {
@@ -262,10 +269,13 @@ impl CoreHomeService {
     /// Extracted from the daemon `set_active_workspace` handler: the request
     /// creator defaults to the currently active one, the workspace must exist
     /// on disk, and a registered `meta.json` naming a different creator or
-    /// slug is a foreign-workspace denial. The selection is persisted to
-    /// `config.toml` (unknown keys preserved); a successful change invalidates
-    /// the previous selection for any open [`crate::CoreService`] on its next
-    /// disk re-read.
+    /// slug is a foreign-workspace denial. The chosen workspace is initialized
+    /// first (guarded state DB + `creators` row) and the selection is
+    /// committed to `config.toml` (unknown keys preserved) only after that
+    /// succeeds, so a failed initialization leaves the previous selection —
+    /// and the principals minted under it — intact. A successful change
+    /// invalidates the previous selection for any open
+    /// [`crate::CoreService`] on its next disk re-read.
     ///
     /// # Errors
     /// Returns [`CoreError::Uninitialized`] when no creator can be resolved,
@@ -300,12 +310,11 @@ impl CoreHomeService {
         }
         deny_foreign_workspace(&op_dir, &creator_id, &request.workspace_slug)?;
 
-        write_active_selection(&self.nexus_home, &creator_id, Some(&request.workspace_slug))?;
-
-        // Initialize only the chosen workspace: guarded initialization factory
-        // (Direct-writer admission + migrations + seed versions) and the
-        // workspace `creators` row the FK-prechecks rely on. The pool is
-        // closed before returning — the home entry holds no workspace pool.
+        // Initialize only the chosen workspace BEFORE committing the
+        // selection: guarded initialization factory (Direct-writer admission
+        // + migrations + seed versions) and the workspace `creators` row the
+        // FK-prechecks rely on. The pool is closed before returning — the
+        // home entry holds no workspace pool.
         let db_path =
             workspace_state_db_path(&self.user_home, &creator_id, &request.workspace_slug);
         let row_display_name = self.resolved_display_name(&creator_id).await;
@@ -314,6 +323,11 @@ impl CoreHomeService {
             nexus_local_db::ensure_creator_row(&pool, &creator_id, &row_display_name).await;
         pool.close().await;
         materialized.map_err(local_db_err)?;
+
+        // Failure-atomic selection commit: the config write happens only
+        // after initialization fully succeeded, so an initialization failure
+        // preserves the previous selection instead of committing a broken one.
+        write_active_selection(&self.nexus_home, &creator_id, Some(&request.workspace_slug))?;
 
         Ok(SetActiveWorkspaceResponse {
             creator_id,
