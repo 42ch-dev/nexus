@@ -61,7 +61,7 @@ use nexus_local_db::{work_chapters, works};
 
 /// Embedded volume-outline template (spec §4.1 / AC §6.5).
 const VOLUME_OUTLINE_TMPL: &str =
-    include_str!("../embedded-presets/novel-writing/templates/volume-outline.md.tmpl");
+    include_str!("../../nexus-preset/embedded-presets/novel-writing/templates/volume-outline.md.tmpl");
 
 /// Errors raised by the auto-chronology advance engine.
 #[derive(Debug, Error)]

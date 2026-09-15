@@ -1891,6 +1891,7 @@ pub fn validate_preset_for_stage(stage: &str, preset_id: &str) -> std::result::R
 #[cfg(test)]
 mod stage_tests {
     use super::*;
+    use crate::capability_catalog::BuiltinCapabilityCatalog;
 
     #[test]
     fn default_preset_for_known_stages() {

@@ -361,7 +361,7 @@ mod tests {
 
         // V1.36 P3: inner graphs removed; chapter-scoped states instead.
         assert!(
-            loaded.manifest.inner_graphs.as_ref().is_none_or(std::collections::HashMap::is_empty),
+            loaded.manifest.inner_graphs.as_ref().is_none_or(std::collections::BTreeMap::is_empty),
             "P3 novel-writing should not have inner graphs"
         );
 

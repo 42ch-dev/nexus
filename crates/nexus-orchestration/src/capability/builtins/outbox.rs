@@ -72,9 +72,9 @@ async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
         // so we use a subquery to select the IDs to update.
         let rows = sqlx::query_scalar!(
             "SELECT outbox_entry_id as \"outbox_entry_id!\" FROM outbox_entries
-             WHERE delivery_state IN ('staged', 'ready')
-             ORDER BY created_at ASC
-             LIMIT ?",
+                 WHERE delivery_state IN ('staged', 'ready')
+                 ORDER BY created_at ASC
+                 LIMIT ?",
             limit
         )
         .fetch_all(pool)
@@ -109,8 +109,8 @@ async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
         // No limit: flush ALL pending entries.
         let result = sqlx::query!(
             "UPDATE outbox_entries
-             SET delivery_state = 'acked', updated_at = ?
-             WHERE delivery_state IN ('staged', 'ready')",
+                 SET delivery_state = 'acked', updated_at = ?
+                 WHERE delivery_state IN ('staged', 'ready')",
             now
         )
         .execute(pool)
@@ -190,8 +190,8 @@ async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
     // Delete old acked entries.
     let removed = sqlx::query!(
         "DELETE FROM outbox_entries
-         WHERE delivery_state = 'acked'
-           AND (updated_at IS NULL OR updated_at < ?)",
+             WHERE delivery_state = 'acked'
+               AND (updated_at IS NULL OR updated_at < ?)",
         cutoff_str
     )
     .execute(pool)

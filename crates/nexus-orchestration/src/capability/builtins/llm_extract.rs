@@ -88,7 +88,12 @@ impl Capability for LlmExtract { fn name(&self) -> &'static str {
 // Identity fields ("_creator_id", "_session_id") are injected by
 // orchestration context, NOT accepted from user input (security:
 // prevents cross-creator routing — SEC-V131-01, same rule as
-// judge.llm). fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::NEXUS_LLM_EXTRACT_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
+// judge.llm).
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::NEXUS_LLM_EXTRACT_INPUT_SCHEMA
+    }
+
+    fn output_schema(&self) -> &'static str {
     r#"{
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",

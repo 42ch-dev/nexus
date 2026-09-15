@@ -84,7 +84,12 @@ impl Capability for ContextSummarize { fn name(&self) -> &'static str {
 
 // Identity fields ("_creator_id", "_session_id") are injected by
 // orchestration context, NOT accepted from user input (security:
-// prevents cross-creator routing — SEC-V131-01). fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::CONTEXT_SUMMARIZE_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
+// prevents cross-creator routing — SEC-V131-01).
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::CONTEXT_SUMMARIZE_INPUT_SCHEMA
+    }
+
+    fn output_schema(&self) -> &'static str {
     r#"{
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
