@@ -274,7 +274,7 @@ impl ExecutionHandle {
                 .bind(schedule_id)
                 .fetch_optional(pool.as_ref())
                 .await
-                .map_err(crate::error::db_err)?;
+                .map_err(|e| crate::error::db_err(&e))?;
         if owner.as_deref() == Some(principal.creator_id()) {
             return Ok(());
         }
@@ -391,7 +391,7 @@ impl ExecutionHandle {
         .bind(&request.creator_id)
         .fetch_optional(pool.as_ref())
         .await
-        .map_err(crate::error::db_err)?;
+        .map_err(|e| crate::error::db_err(&e))?;
 
         let Some(row) = row else {
             return Err(gate_failure(
