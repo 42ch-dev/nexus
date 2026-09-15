@@ -34,7 +34,7 @@ use nexus_contracts::CertFingerprintResponse;
 use nexus_orchestration::{
     engine::OrchestrationEngine, run_state::WorkflowStateStore,
     schedule::supervisor::ScheduleSupervisor, storage::sqlite::SqliteSessionStorage,
-    CapabilityRegistry, CapabilityRegistryHolder, GraphFlowEngine,
+    CapabilityRegistry, CapabilityRegistryHolder,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

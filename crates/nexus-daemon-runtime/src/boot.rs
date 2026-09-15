@@ -796,7 +796,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     };
     let engine: Arc<dyn OrchestrationEngine> = concrete_engine.clone();
 
-    if let Some(handle) = &execution_handle {
+    if execution_handle.is_some() {
         // `set_execution_handle` already published the coordinator view; the
         // remaining slots are the ones the runtime bundle reads.
         state.set_engine(Arc::clone(&engine));

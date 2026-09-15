@@ -248,6 +248,27 @@ impl CoreService {
             return Err(ExecutionOpenError::NotEngineOwner(self.inner.access));
         }
         // Single owner: the first successful start wins; a duplicate refuses.
+        //
+        // The claim is made in a scoped borrow. `build_execution` awaits, and a
+        // `std::sync::MutexGuard` is NOT `Send` — holding it across that await
+        // would make this future non-`Send` and therefore un-usable from the
+        // transport's axum handlers (whose `Handler` bound requires it). The
+        // guard is therefore released before the await and re-taken after, with
+        // the slot re-checked so the single-owner guarantee is unchanged: two
+        // concurrent starts can both pass the first check, but only the first
+        // to re-take the lock installs; the loser sees `AlreadyOwned`.
+        if let Some(existing) = self
+            .inner
+            .execution
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+        {
+            if !existing.is_closed() {
+                return Err(ExecutionOpenError::AlreadyOwned);
+            }
+        }
+        let handle = self.build_execution(deps).await?;
         let mut slot = self
             .inner
             .execution
@@ -255,10 +276,11 @@ impl CoreService {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(existing) = slot.as_ref() {
             if !existing.is_closed() {
+                // Lost the race while building: the established owner wins and
+                // the engine we just built is dropped, never installed.
                 return Err(ExecutionOpenError::AlreadyOwned);
             }
         }
-        let handle = self.build_execution(deps).await?;
         *slot = Some(Arc::clone(&handle));
         Ok(handle)
     }
