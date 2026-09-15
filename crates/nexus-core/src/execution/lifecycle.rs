@@ -158,6 +158,13 @@ pub struct ExecutionHandle {
     /// Bound at establishment so `commit_workspace` cannot be routed to a
     /// root the owner was not admitted for.
     workspace_commit: Option<crate::execution::workspace::WorkspaceCommitAuthority>,
+    /// The nexus home this owner resolves presets against.
+    ///
+    /// Retained so a schedule insert can freeze the preset's content-addressed
+    /// source identity at insertion (the same identity admission later
+    /// validates against); a `driven_v1` row must never be published without
+    /// one.
+    nexus_home: Option<PathBuf>,
     /// The engine epoch this owner was admitted with, read from the durable
     /// workspace gate at establishment. It identifies the ownership
     /// generation of every run this handle drives.
@@ -600,6 +607,7 @@ impl CoreService {
         }
 
         let workspace_commit = deps.workspace_commit;
+        let nexus_home = deps.nexus_home;
         let engine_epoch = read_engine_epoch(&pool).await;
 
         Ok(Arc::new(ExecutionHandle {
@@ -608,6 +616,7 @@ impl CoreService {
             capability_holder,
             session_cancels,
             workspace_commit,
+            nexus_home,
             engine_epoch,
             closing: AtomicBool::new(false),
             settled: AtomicBool::new(false),

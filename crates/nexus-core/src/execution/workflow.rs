@@ -1459,6 +1459,15 @@ impl WorkflowRunCoordinator {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(supervisor);
     }
 
+    /// The configured default binding provider (C-3), if any.
+    ///
+    /// The same config source the supervisor's internal insertion paths use,
+    /// so a schedule insert derives sanctioned agent bindings from ONE place.
+    #[must_use]
+    pub fn binding_provider(&self) -> Option<&str> {
+        self.binding_provider.as_deref()
+    }
+
     /// The run-event port this coordinator was built with, if any.
     ///
     /// `None` for a core-only or test coordinator that supplied no ring

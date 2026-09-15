@@ -60,9 +60,15 @@ impl ExecutionHandle {
         let supervisor = self.schedule_supervisor()?;
         let schedule_id = new_schedule_id();
         let schedule = build_schedule(&schedule_id, &request);
+        // C-2/I-5: a `driven_v1` row must never be published without its
+        // frozen admission payload. Freeze the preset's content-addressed
+        // source identity, structured input and role bindings HERE, in the
+        // same transaction as the row, so a concurrent tick can never observe
+        // a drive-enabled row whose payload is missing.
+        let descriptor = self.freeze_descriptor(&request)?;
         let seed = request.seed.clone().unwrap_or_default();
         supervisor
-            .insert_pending_with_descriptor_and_seed(schedule, None, &seed)
+            .insert_pending_with_descriptor_and_seed(schedule, descriptor.as_deref(), &seed)
             .await
             .map_err(map_supervisor_error)?;
         Ok(AddScheduleResponse {
@@ -254,6 +260,115 @@ fn parse_frame_sequence(id: &str) -> u64 {
 }
 
 impl ExecutionHandle {
+    /// Freeze a new row's admission payload (source identity + input +
+    /// bindings) at insertion.
+    ///
+    /// `_system.*` presets are never admitted, so they carry no descriptor.
+    /// Every other preset must resolve; a preset with prompt roles but no
+    /// configured default binding provider is refused rather than published
+    /// drive-enabled with an empty binding map.
+    fn freeze_descriptor(
+        &self,
+        request: &AddScheduleRequest,
+    ) -> CoreResult<Option<Vec<u8>>> {
+        use nexus_orchestration::run_state::{AgentBinding, RunDescriptorV1};
+
+        if request.preset_id.starts_with("_system.") {
+            return Ok(None);
+        }
+        let home = self.nexus_home.as_deref().ok_or_else(|| CoreError::Internal {
+            category: "schedule insert requires a nexus home to resolve the preset".into(),
+        })?;
+        let registry = self
+            .capability_holder()
+            .get()
+            .ok_or_else(|| CoreError::Internal {
+                category: "capability registry unavailable; cannot freeze preset identity".into(),
+            })?;
+        let loaded = nexus_preset::resolve_preset(&request.preset_id, home, &registry).map_err(
+            |e| CoreError::Internal {
+                category: format!("failed to resolve preset '{}': {e}", request.preset_id),
+            },
+        )?;
+        let source = loaded.source_identity.clone().ok_or_else(|| CoreError::Internal {
+            category: format!(
+                "preset '{}' has no content-addressed source identity",
+                request.preset_id
+            ),
+        })?;
+        // N-9: derive bindings ONLY from the coordinator's configured default
+        // provider, never from request-supplied catalog order.
+        let roles = nexus_preset::required_prompt_roles(&loaded);
+        let agent_bindings = if roles.is_empty() {
+            std::collections::HashMap::new()
+        } else {
+            let Some(provider_id) = self.coordinator().binding_provider() else {
+                return Err(CoreError::Internal {
+                    category: format!(
+                        "preset '{}' requires {} prompt role binding(s) but no configured \
+                         default binding provider exists",
+                        request.preset_id,
+                        roles.len()
+                    ),
+                });
+            };
+            roles
+                .into_iter()
+                .map(|role| {
+                    (
+                        role,
+                        AgentBinding {
+                            provider_id: provider_id.to_string(),
+                            model: None,
+                        },
+                    )
+                })
+                .collect()
+        };
+        let input = request
+            .input
+            .as_ref()
+            .and_then(|v| v.as_object().cloned())
+            .unwrap_or_default();
+        // work_id resolves from the structured input OR a JSON seed, matching
+        // the retained add path: a gated preset whose Work is only named in the
+        // seed must still freeze that Work into the row/descriptor.
+        let work_id = input
+            .get("work_id")
+            .and_then(|w| w.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                request
+                    .seed
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                    .and_then(|v| {
+                        v.get("work_id")
+                            .and_then(|w| w.as_str())
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_string)
+                    })
+            });
+        let descriptor = RunDescriptorV1 {
+            creator_id: request.creator_id.clone(),
+            work_id,
+            workspace_root: std::path::PathBuf::new(),
+            preset_id: request.preset_id.clone(),
+            preset_version: 1,
+            source,
+            input,
+            agent_bindings,
+            parent_session_id: None,
+            graph_name: None,
+        };
+        serde_json::to_vec(&descriptor)
+            .map(Some)
+            .map_err(|e| CoreError::Internal {
+                category: format!("failed to serialize execution descriptor: {e}"),
+            })
+    }
+
     /// The bound workspace commit authority, or a typed `NotFound`.
     fn workspace_commit_authority(
         &self,

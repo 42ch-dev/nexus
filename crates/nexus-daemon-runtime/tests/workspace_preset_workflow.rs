@@ -3,11 +3,11 @@
 //! Exercises the REAL daemon path end to end: the `workspace.open` /
 //! `workspace.commit` capabilities are invoked through a capability registry
 //! built from production runtime deps, so they route through
-//! `DaemonWorkspaceExecutor` -> the daemon's shared `WorkspaceSessionManager`
+//! `WorkspaceCommitExecutor` -> the shared `WorkspaceSessionManager`
 //! -> the workspace state DB and the real workspace files. A real preset graph,
 //! wired by the engine from a preset manifest, then branches on
 //! `_context.workspace.committed` resolved live from
-//! `DaemonWorkspaceStateProvider` over that same shared manager.
+//! `CoreWorkspaceStateProvider` over that same shared manager.
 //!
 //! Nothing here stubs the provider or calls a task directly.
 
@@ -150,7 +150,7 @@ async fn production_preset_workflow_branches_on_live_workspace_state() {
     );
 
     // Phase 2: commit through the PRODUCTION capability path (registry ->
-    // DaemonWorkspaceExecutor -> shared manager -> DB + files).
+    // WorkspaceCommitExecutor -> shared manager -> DB + files).
     let opened = registry
         .get("workspace.open")
         .expect("workspace.open registered")
