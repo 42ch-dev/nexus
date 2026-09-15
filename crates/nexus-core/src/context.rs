@@ -71,6 +71,35 @@ fn database_error(e: &LocalDbError) -> CoreError {
     }
 }
 
+/// Map a `narrative_write` domain error onto the matching core category: a
+/// genuine storage fault stays the database class, an id-format rejection is
+/// invalid input, a missing FK reference is not-found, and a sequence
+/// conflict is the retained plain 409. (The world-ownership probes never
+/// produce the write-specific arms in practice, but the mapping keeps the
+/// classification honest instead of collapsing everything into 500.)
+fn map_narrative_write_error(e: nexus_local_db::narrative_write::NarrativeWriteError) -> CoreError {
+    match &e {
+        nexus_local_db::narrative_write::NarrativeWriteError::Database(_) => {
+            internal_err("database_error", e)
+        }
+        nexus_local_db::narrative_write::NarrativeWriteError::InvalidId { field, value, reason } => {
+            invalid_input(field, &format!("invalid {field} '{value}': {reason}"))
+        }
+        nexus_local_db::narrative_write::NarrativeWriteError::FkNotFound { table, id } => {
+            CoreError::NotFound {
+                resource: format!("referenced {table} '{id}' not found"),
+            }
+        }
+        nexus_local_db::narrative_write::NarrativeWriteError::SequenceConflict {
+            world_id,
+            branch_id,
+            sequence_no,
+        } => CoreError::Conflict(format!(
+            "sequence conflict: event already exists at ({world_id}, {branch_id}, {sequence_no})"
+        )),
+    }
+}
+
 // ── DirectiveStore adapters (composition root) ──────────────────────────
 
 /// Composition-root [`DirectiveStore`] over `nexus-local-db`, consumed by
@@ -419,7 +448,7 @@ impl CoreService {
             MomentDirectiveRequestScopeKind::World => {
                 narrative_write::is_world_owned(pool, creator_id, scope_id)
                     .await
-                    .map_err(|e| database_error(&e))?
+                    .map_err(map_narrative_write_error)?
             }
         };
         if !owned {
@@ -654,7 +683,7 @@ impl CoreService {
         // unobservable to other creators.
         let owned = narrative_write::is_world_owned(pool, creator_id, req.world_id.as_str())
             .await
-            .map_err(|e| database_error(&e))?;
+            .map_err(map_narrative_write_error)?;
         if !owned {
             return Err(CoreError::ForbiddenReason {
                 resource: format!("world {}", req.world_id.as_str()),
