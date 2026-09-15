@@ -275,7 +275,7 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
     .await
     .unwrap()
     .into_iter()
-    .map(|row| row.0)
+    .map(|row: (std::option::Option<String>,)| row.0)
     .collect();
     pool.close().await;
     assert_eq!(caches, vec![Some("bnd_other".to_string())]);
