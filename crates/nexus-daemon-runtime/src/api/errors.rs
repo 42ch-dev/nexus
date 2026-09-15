@@ -767,6 +767,15 @@ impl From<nexus_core::CoreError> for NexusApiError {
             nexus_core::CoreError::InvalidInput { field, reason } => {
                 Self::InvalidInput { field, reason }
             }
+            nexus_core::CoreError::OutlineConflict(details) => Self::OutlineConflict {
+                current_revision: details.current_revision,
+                node_id: details.node_id,
+                conflicting_path: details.conflicting_path,
+                recovery_hint: details.recovery_hint,
+            },
+            nexus_core::CoreError::OutlineValidation(summary) => {
+                Self::outline_validation_failed(&summary.errors, &summary.warnings)
+            }
             nexus_core::CoreError::WorldKbConflict(details) => Self::world_kb_conflict(
                 details.current_version,
                 details.entity_id,

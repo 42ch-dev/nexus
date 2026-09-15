@@ -437,14 +437,14 @@ impl CoreService {
         Ok(work)
     }
 
-    fn require_work_write(&self) -> CoreResult<()> {
+    pub(crate) fn require_work_write(&self) -> CoreResult<()> {
         if self.inner.access == CoreAccess::ReadOnly {
             return Err(CoreError::Forbidden { resource: "work: read-only core access".into() });
         }
         Ok(())
     }
 
-    fn work_workspace_path(&self, principal: &Principal) -> CoreResult<Option<String>> {
+    pub(crate) fn work_workspace_path(&self, principal: &Principal) -> CoreResult<Option<String>> {
         self.verify_principal(principal)?;
         let meta = self.inner.nexus_home.join("creators").join(principal.creator_id())
             .join("workspaces").join(principal.workspace_slug()).join("meta.json");

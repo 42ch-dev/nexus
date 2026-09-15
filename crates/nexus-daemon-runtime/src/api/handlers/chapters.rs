@@ -1,348 +1,68 @@
-//! Chapter content Daemon API handlers (V1.65 P0).
+//! Thin chapter-content HTTP adapters over the guarded core authoring service.
 //!
-//! Endpoints under `/v1/daemon/works/{work_id}/chapters/*` expose the
-//! `work_chapters` metadata table and the file-backed outline/body markdown.
+//! Endpoints under `/v1/daemon/works/{work_id}/chapters/*` translate the wire
+//! envelope to `nexus_core` chapter-content operations and back; protection
+//! rules, per-Work locks, path guards and storage semantics live in the core.
 
 #![allow(clippy::missing_errors_doc)]
 
-use super::wire_cast;
 use crate::api::errors::NexusApiError;
-use crate::api::path_guard::{resolve_guarded_path, resolve_guarded_path_async};
-use crate::api::runtime_lock::RuntimeLockGuard;
-use crate::config::{read_active_creator_id, read_active_workspace_slug};
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use nexus_contracts::{
-    ChapterBody, ChapterContentQuery, ChapterDetail, ChapterOutline, ChapterProtection,
-    ChapterStatus, ChapterSummary, ListChaptersQuery, ListChaptersResponse, PaginationInfo,
-    PatchChapterRequest,
+    ChapterBody, ChapterContentQuery, ChapterDetail, ChapterOutline, ListChaptersQuery,
+    ListChaptersResponse, PatchChapterRequest,
 };
-use nexus_local_db::work_chapters::{self, PatchChapterParams, WorkChapterRecord};
-use nexus_local_db::works;
-use std::path::{Path as StdPath, PathBuf};
 
-// ─── Helpers ───────────────────────────────────────────────────────────────
-
-/// Parse a chapter number path parameter.
-fn parse_chapter(n: &str) -> Result<i32, NexusApiError> {
-    n.parse::<i32>()
-        .map_err(|_| NexusApiError::BadRequest {
-            code: "invalid_chapter_number".to_string(),
-            message: format!("chapter number must be a positive integer, got '{n}'"),
-        })
-        .and_then(|v| {
-            if v < 1 {
-                Err(NexusApiError::BadRequest {
-                    code: "invalid_chapter_number".to_string(),
-                    message: format!("chapter number must be >= 1, got {v}"),
-                })
-            } else {
-                Ok(v)
-            }
-        })
-}
-
-/// Prefix for chapter keyset cursors.
-const CHAPTER_CURSOR_PREFIX: &str = "v2:";
-
-/// Decode an opaque chapter-list cursor into the `(volume, chapter)` tuple
-/// that the next page must start after.
+/// Map a core content/outline fault onto the legacy HTTP classification.
 ///
-/// `None` decodes to `(1, 0)` so the first page includes all chapters.
-fn decode_chapter_cursor(cursor: Option<&String>) -> Result<(i32, i32), NexusApiError> {
-    match cursor {
-        None => Ok((1, 0)),
-        Some(raw) => {
-            let stripped = raw.strip_prefix(CHAPTER_CURSOR_PREFIX).ok_or_else(|| {
-                NexusApiError::BadRequest {
-                    code: "invalid_input".to_string(),
-                    message: "invalid chapter_cursor; pass the next_cursor value unchanged"
-                        .to_string(),
-                }
-            })?;
-            let mut parts = stripped.splitn(2, ':');
-            let volume = parts
-                .next()
-                .and_then(|s| s.parse::<i32>().ok())
-                .filter(|v| *v >= 1)
-                .ok_or_else(|| NexusApiError::BadRequest {
-                    code: "invalid_input".to_string(),
-                    message: "invalid chapter_cursor volume".to_string(),
-                })?;
-            let chapter = parts
-                .next()
-                .and_then(|s| s.parse::<i32>().ok())
-                .filter(|v| *v >= 1)
-                .ok_or_else(|| NexusApiError::BadRequest {
-                    code: "invalid_input".to_string(),
-                    message: "invalid chapter_cursor chapter".to_string(),
-                })?;
-            Ok((volume, chapter))
+/// `BadRequest` codes and `NotFound` resources round-trip verbatim; the
+/// legacy internal codes (DATABASE_ERROR, CONTRACT_ERROR, FILE_READ_ERROR,
+/// DIRECTORY_CREATE_ERROR, OUTLINE_WRITE_ERROR, OUTLINE_SERIALIZE_ERROR,
+/// OUTLINE_REVISION_NEGATIVE, WORK_REF_MISSING, PATH_GUARD_PANIC) are carried
+/// verbatim as `<CODE>: <message>` and re-emitted with the original code;
+/// every other internal category keeps the shared `CORE_ERROR` shape.
+pub(crate) fn content_error(error: nexus_core::CoreError) -> NexusApiError {
+    match error {
+        nexus_core::CoreError::InvalidInput { field, reason } => {
+            NexusApiError::BadRequest { code: field, message: reason }
         }
-    }
-}
-
-/// Encode a `(volume, chapter)` tuple into an opaque cursor token.
-fn encode_chapter_cursor(volume: i32, chapter: i32) -> String {
-    format!("{CHAPTER_CURSOR_PREFIX}{volume}:{chapter}")
-}
-
-/// Compute `(next_cursor, has_more)` for a keyset-paginated chapter page.
-fn chapter_page_meta(records: &[WorkChapterRecord], limit: u32) -> (Option<String>, bool) {
-    let limit_us = usize::try_from(limit).unwrap_or(usize::MAX);
-    if records.len() > limit_us {
-        let last = records.get(limit_us - 1).expect("limit > 0");
-        let next_volume = last.volume.unwrap_or(1);
-        let next_cursor = encode_chapter_cursor(next_volume, last.chapter);
-        (Some(next_cursor), true)
-    } else {
-        (None, false)
-    }
-}
-
-/// Resolve the active workspace root.
-fn workspace_root(state: &WorkspaceState) -> Result<PathBuf, NexusApiError> {
-    let path_str = state.workspace_path().ok_or(NexusApiError::Uninitialized)?;
-    if path_str.is_empty() {
-        return Err(NexusApiError::Uninitialized);
-    }
-    Ok(PathBuf::from(path_str))
-}
-
-/// Load the Work row and verify active creator ownership.
-async fn load_work(
-    state: &WorkspaceState,
-    creator_id: &str,
-    work_id: &str,
-) -> Result<works::WorkRecord, NexusApiError> {
-    works::get_work(state.pool_or_uninit()?, creator_id, work_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))
-}
-
-/// Compute protection metadata for a chapter based on its status.
-fn chapter_protection(status: &str) -> ChapterProtection {
-    match status {
-        "finalized" => ChapterProtection {
-            level: wire_cast("confirm_structure_edit".to_string()),
-            reason: "Chapter is finalized; structural edits require confirmation.".to_string(),
+        nexus_core::CoreError::NotFound { resource } => NexusApiError::NotFound(resource),
+        nexus_core::CoreError::Forbidden { resource } if resource.starts_with("work_locked:") => {
+            NexusApiError::Locked { resource: "work".into(), reason: resource[12..].to_owned() }
+        }
+        nexus_core::CoreError::OutlineConflict(details) => NexusApiError::OutlineConflict {
+            current_revision: details.current_revision,
+            node_id: details.node_id,
+            conflicting_path: details.conflicting_path,
+            recovery_hint: details.recovery_hint,
         },
-        "published" => ChapterProtection {
-            level: wire_cast("hard_block_delete".to_string()),
-            reason: "Chapter is published; structural edits are blocked.".to_string(),
-        },
-        _ => ChapterProtection {
-            level: wire_cast("none".to_string()),
-            reason: "No protection.".to_string(),
-        },
-    }
-}
-
-/// Map a DB record to a `ChapterSummary` contract DTO.
-fn to_summary(r: &WorkChapterRecord) -> ChapterSummary {
-    ChapterSummary {
-        work_id: r.work_id.clone(),
-        chapter: std::num::NonZeroU64::new(u64::try_from(r.chapter).unwrap_or(1))
-            .unwrap_or(std::num::NonZeroU64::MIN),
-        volume: std::num::NonZeroU64::new(u64::try_from(r.volume.unwrap_or(1)).unwrap_or(1))
-            .unwrap_or(std::num::NonZeroU64::MIN),
-        title: None,
-        slug: r.slug.clone(),
-        planned_word_count: u64::try_from(r.planned_word_count).unwrap_or(0),
-        actual_word_count: r.actual_word_count.map(|v| u64::try_from(v).unwrap_or(0)),
-        status: wire_cast(r.status.parse().ok().unwrap_or(ChapterStatus::NotStarted)),
-        outline_path: r.outline_path.clone(),
-        body_path: r.body_path.clone(),
-        created_at: r.created_at.clone(),
-        updated_at: r.updated_at.clone(),
-    }
-}
-
-/// Map a DB record to a `ChapterDetail` contract DTO.
-///
-/// `workspace_root` is used to probe whether the stored `outline_path` is still
-/// inside the active workspace; if the root is unavailable (uninitialized
-/// daemon), the outline is reported as non-editable rather than failing the
-/// whole detail request.
-fn to_detail(r: &WorkChapterRecord, workspace_root: Option<&StdPath>) -> ChapterDetail {
-    let can_edit_outline = r
-        .outline_path
-        .as_deref()
-        .filter(|s| !s.is_empty())
-        .and_then(|path| workspace_root.map(|root| resolve_guarded_path(root, path, false).is_ok()))
-        .unwrap_or(false);
-
-    ChapterDetail {
-        work_id: r.work_id.clone(),
-        chapter: std::num::NonZeroU64::new(u64::try_from(r.chapter).unwrap_or(1))
-            .unwrap_or(std::num::NonZeroU64::MIN),
-        volume: std::num::NonZeroU64::new(u64::try_from(r.volume.unwrap_or(1)).unwrap_or(1))
-            .unwrap_or(std::num::NonZeroU64::MIN),
-        title: None,
-        slug: r.slug.clone(),
-        planned_word_count: u64::try_from(r.planned_word_count).unwrap_or(0),
-        actual_word_count: r.actual_word_count.map(|v| u64::try_from(v).unwrap_or(0)),
-        status: wire_cast(r.status.parse().ok().unwrap_or(ChapterStatus::NotStarted)),
-        outline_path: r.outline_path.clone(),
-        body_path: r.body_path.clone(),
-        created_at: r.created_at.clone(),
-        updated_at: r.updated_at.clone(),
-        can_edit_outline,
-        can_edit_structure: true,
-        body_read_only: true,
-        protection: wire_cast(chapter_protection(&r.status)),
-    }
-}
-
-/// Read a text file after path-guard verification.
-///
-/// Enforces a 10 MiB size cap to prevent unbounded memory reads on
-/// unexpectedly large chapter bodies.
-async fn read_guarded_file(
-    workspace_root: &StdPath,
-    rel_path: &str,
-    forbidden_code: &str,
-    not_found_code: &str,
-) -> Result<String, NexusApiError> {
-    const CHAPTER_BODY_MAX_BYTES: usize = 10 * 1024 * 1024;
-
-    let path = resolve_guarded_path_async(
-        workspace_root.to_path_buf(),
-        rel_path.to_string(),
-        true,
-    )
-    .await
-    .map_err(|e| {
-        if matches!(e, NexusApiError::BadRequest { ref code, .. } if code == "chapter_path_forbidden")
-        {
-            NexusApiError::BadRequest {
-                code: forbidden_code.to_string(),
-                message: format!("chapter path '{rel_path}' escapes workspace root"),
+        nexus_core::CoreError::OutlineValidation(summary) => {
+            NexusApiError::outline_validation_failed(&summary.errors, &summary.warnings)
+        }
+        nexus_core::CoreError::Internal { category } => match category.split_once(": ") {
+            Some((code, message))
+                if matches!(
+                    code,
+                    "DATABASE_ERROR"
+                        | "CONTRACT_ERROR"
+                        | "FILE_READ_ERROR"
+                        | "DIRECTORY_CREATE_ERROR"
+                        | "OUTLINE_WRITE_ERROR"
+                        | "OUTLINE_SERIALIZE_ERROR"
+                        | "OUTLINE_REVISION_NEGATIVE"
+                        | "WORK_REF_MISSING"
+                        | "PATH_GUARD_PANIC"
+                ) =>
+            {
+                NexusApiError::Internal { code: code.to_owned(), message: message.to_owned() }
             }
-        } else {
-            e
-        }
-    })?;
-
-    let metadata = tokio::fs::metadata(&path).await.map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            NexusApiError::NotFound(format!("{not_found_code}: file not found at '{rel_path}'"))
-        } else {
-            NexusApiError::Internal {
-                code: "FILE_READ_ERROR".to_string(),
-                message: format!("failed to read metadata for '{rel_path}': {e}"),
-            }
-        }
-    })?;
-
-    let max_bytes = u64::try_from(CHAPTER_BODY_MAX_BYTES).unwrap_or(u64::MAX);
-    if metadata.len() > max_bytes {
-        return Err(NexusApiError::BadRequest {
-            code: "chapter_body_too_large".to_string(),
-            message: format!(
-                "chapter body at '{rel_path}' is {size} bytes, exceeding the maximum of {max} bytes",
-                size = metadata.len(),
-                max = CHAPTER_BODY_MAX_BYTES
-            ),
-        });
-    }
-
-    match tokio::fs::read_to_string(&path).await {
-        Ok(content) => Ok(content),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(NexusApiError::NotFound(
-            format!("{not_found_code}: file not found at '{rel_path}'"),
-        )),
-        Err(e) => Err(NexusApiError::Internal {
-            code: "FILE_READ_ERROR".to_string(),
-            message: format!("failed to read '{rel_path}': {e}"),
-        }),
+            _ => nexus_core::CoreError::Internal { category }.into(),
+        },
+        other => other.into(),
     }
 }
-
-/// Atomically write `content` to `rel_path` under `workspace_root`, creating
-/// parent directories as needed. Mirrors `work_chapters::sync_frontmatter_status`.
-///
-/// Reused by the outline canvas `patch_chapter` handler (V1.75 A2) to persist
-/// per-chapter outline prose to the `outline_path` markdown file, so the
-/// temp+rename+file fsync+dir fsync durability pattern stays identical for
-/// every chapter-file write path.
-pub(crate) async fn atomic_write_outline(
-    workspace_root: &StdPath,
-    rel_path: &str,
-    content: &str,
-) -> Result<(), NexusApiError> {
-    let target =
-        resolve_guarded_path_async(workspace_root.to_path_buf(), rel_path.to_string(), false)
-            .await?;
-
-    if let Some(parent) = target.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DIRECTORY_CREATE_ERROR".to_string(),
-                message: format!("failed to create parent directories for '{rel_path}': {e}"),
-            })?;
-    }
-
-    let tmp_extension = format!(
-        "md.tmp.{}.{}",
-        std::process::id(),
-        chrono::Utc::now().timestamp_millis()
-    );
-    let temp_path = target.with_extension(&tmp_extension);
-
-    let write_result = async {
-        tokio::fs::write(&temp_path, content).await?;
-        let file = tokio::fs::File::open(&temp_path).await?;
-        file.sync_all().await?;
-        tokio::fs::rename(&temp_path, &target).await?;
-        // Durability: fsync the final file after the atomic rename so a crash
-        // after rename() returns does not leave the rename unflushed.
-        let final_file = tokio::fs::File::open(&target).await?;
-        final_file.sync_all().await?;
-        // Durability: fsync the parent directory so the renamed entry is
-        // committed to disk (QC3-S3).
-        if let Some(parent) = target.parent() {
-            let dir = tokio::fs::File::open(parent).await?;
-            dir.sync_all().await?;
-        }
-        Ok::<(), std::io::Error>(())
-    }
-    .await;
-
-    if let Err(e) = write_result {
-        let _ = tokio::fs::remove_file(&temp_path).await;
-        return Err(NexusApiError::Internal {
-            code: "OUTLINE_WRITE_ERROR".to_string(),
-            message: format!("failed to write outline to '{rel_path}': {e}"),
-        });
-    }
-
-    Ok(())
-}
-
-/// Validate that a requested chapter status transition is allowed.
-fn validate_status_transition(from: &str, to: &str) -> Result<(), NexusApiError> {
-    if from == to {
-        return Ok(());
-    }
-    match (from, to) {
-        ("not_started", "outlined") => Ok(()),
-        _ => Err(NexusApiError::BadRequest {
-            code: "chapter_status_transition_invalid".to_string(),
-            message: format!(
-                "status transition '{from}' -> '{to}' is not allowed through this endpoint"
-            ),
-        }),
-    }
-}
-
-// ─── Handlers ───────────────────────────────────────────────────────────────
 
 /// `GET /v1/daemon/works/{work_id}/chapters` — cursor-paginated chapter summaries.
 pub async fn list_chapters(
@@ -350,56 +70,10 @@ pub async fn list_chapters(
     Path(work_id): Path<String>,
     Query(query): Query<ListChaptersQuery>,
 ) -> Result<Json<ListChaptersResponse>, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let _workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
-        .ok_or(NexusApiError::AuthRequired)?;
-
-    // Verify work exists and belongs to active creator.
-    let _work = load_work(&state, &creator_id, &work_id).await?;
-
-    let (cursor_volume, cursor_chapter) = decode_chapter_cursor(query.cursor.as_ref())?;
-    // Clamp to [1, 100]: the generated `NonZeroU64` limit type enforces the
-    // schema `minimum: 1` at deserialization (`?limit=0` now rejects as 400
-    // instead of reaching `chapter_page_meta`), so only the upper bound is
-    // clamped here. Default 50 when absent.
-    let limit = u32::try_from(query.limit.map_or(50, |l| l.get().min(100))).unwrap_or(50);
-    let fetch_limit = i64::from(limit.saturating_add(1));
-
-    let status_filter = query
-        .status
-        .as_ref()
-        .map(nexus_contracts::list_chapters_query::NexusChapterStatus::as_str);
-
-    let records = work_chapters::list_chapters_paginated(
-        state.pool_or_uninit()?,
-        &work_id,
-        status_filter,
-        fetch_limit,
-        cursor_volume,
-        cursor_chapter,
-    )
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".to_string(),
-        message: e.to_string(),
-    })?;
-
-    let (next_cursor, has_more) = chapter_page_meta(&records, limit);
-    let items: Vec<ChapterSummary> = records
-        .into_iter()
-        .take(usize::try_from(limit).unwrap_or(usize::MAX))
-        .map(|r| to_summary(&r))
-        .collect();
-
-    Ok(Json(ListChaptersResponse {
-        items: wire_cast(items),
-        pagination: wire_cast(PaginationInfo {
-            limit: i64::from(limit),
-            next_cursor,
-            has_more,
-        }),
-    }))
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let response = core.list_chapters(&principal, work_id, query).await.map_err(content_error)?;
+    Ok(Json(response))
 }
 
 /// `GET /v1/daemon/works/{work_id}/chapters/{n}` — chapter detail.
@@ -408,32 +82,13 @@ pub async fn get_chapter(
     Path((work_id, n)): Path<(String, String)>,
     Query(query): Query<ChapterContentQuery>,
 ) -> Result<Json<ChapterDetail>, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let _workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
-        .ok_or(NexusApiError::AuthRequired)?;
-
-    let _work = load_work(&state, &creator_id, &work_id).await?;
-    let chapter = parse_chapter(&n)?;
-    let volume = query
-        .volume
-        .and_then(|v| i32::try_from(u64::from(v)).ok())
-        .unwrap_or(1);
-
-    let record = work_chapters::get_chapter(state.pool_or_uninit()?, &work_id, chapter, volume)
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let detail = core
+        .chapter_detail(&principal, work_id, n, nexus_core::CoreChapterContentQuery::from(query))
         .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::NotFound(format!("chapter {chapter} volume {volume}")))?;
-
-    let root = state
-        .workspace_path()
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from);
-
-    Ok(Json(to_detail(&record, root.as_deref())))
+        .map_err(content_error)?;
+    Ok(Json(detail))
 }
 
 /// `GET /v1/daemon/works/{work_id}/chapters/{n}/outline` — read outline markdown.
@@ -442,55 +97,13 @@ pub async fn get_chapter_outline(
     Path((work_id, n)): Path<(String, String)>,
     Query(query): Query<ChapterContentQuery>,
 ) -> Result<Json<ChapterOutline>, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let _workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
-        .ok_or(NexusApiError::AuthRequired)?;
-
-    let _work = load_work(&state, &creator_id, &work_id).await?;
-    let chapter = parse_chapter(&n)?;
-    let volume = query
-        .volume
-        .and_then(|v| i32::try_from(u64::from(v)).ok())
-        .unwrap_or(1);
-
-    let record = work_chapters::get_chapter(state.pool_or_uninit()?, &work_id, chapter, volume)
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let outline = core
+        .chapter_outline(&principal, work_id, n, nexus_core::CoreChapterContentQuery::from(query))
         .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::NotFound(format!("chapter {chapter} volume {volume}")))?;
-
-    let outline_path = record
-        .outline_path
-        .as_deref()
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            NexusApiError::NotFound(format!(
-                "chapter {chapter} volume {volume} has no outline_path"
-            ))
-        })?;
-
-    let workspace_root = workspace_root(&state)?;
-    let content = read_guarded_file(
-        &workspace_root,
-        outline_path,
-        "chapter_outline_path_forbidden",
-        "chapter_outline_not_found",
-    )
-    .await?;
-
-    Ok(Json(ChapterOutline {
-        work_id: record.work_id,
-        chapter: std::num::NonZeroU64::new(u64::try_from(record.chapter).unwrap_or(1))
-            .unwrap_or(std::num::NonZeroU64::MIN),
-        volume: std::num::NonZeroU64::new(u64::try_from(record.volume.unwrap_or(1)).unwrap_or(1))
-            .unwrap_or(std::num::NonZeroU64::MIN),
-        outline_path: outline_path.to_string(),
-        content,
-        updated_at: record.updated_at,
-    }))
+        .map_err(content_error)?;
+    Ok(Json(outline))
 }
 
 /// `PATCH /v1/daemon/works/{work_id}/chapters/{n}` — partial structure update.
@@ -500,122 +113,19 @@ pub async fn patch_chapter(
     Query(query): Query<ChapterContentQuery>,
     Json(req): Json<PatchChapterRequest>,
 ) -> Result<Json<ChapterDetail>, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let _workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
-        .ok_or(NexusApiError::AuthRequired)?;
-
-    let _work = load_work(&state, &creator_id, &work_id).await?;
-    let chapter = parse_chapter(&n)?;
-    let volume = query
-        .volume
-        .and_then(|v| i32::try_from(u64::from(v)).ok())
-        .unwrap_or(1);
-
-    let record = work_chapters::get_chapter(state.pool_or_uninit()?, &work_id, chapter, volume)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::NotFound(format!("chapter {chapter} volume {volume}")))?;
-
-    // Reject display-only title writes in V1.65. This is field validation, not
-    // a preset gate, so use BadRequest (HTTP 400, code `bad_request`) rather
-    // than PresetGatesFailed (HTTP 422, `preset_gates_failed`) — the previous
-    // observable contract and the semantic meaning of both error categories.
-    if req.title.is_some() {
-        return Err(NexusApiError::BadRequest {
-            code: "chapter_title_unsupported".to_string(),
-            message: "title is display-only in V1.65; use outline frontmatter or slug instead"
-                .to_string(),
-        });
-    }
-
-    // Validate status transition before acquiring lock.
-    if let Some(ref target_status) = req.status {
-        let target = target_status.as_str();
-        validate_status_transition(&record.status, target)?;
-    }
-
-    // Structural edit protection for finalized/published chapters.
-    let has_structural_edit = req.slug.is_some()
-        || req.planned_word_count.is_some()
-        || req.volume.is_some()
-        || req.status.is_some();
-
-    if has_structural_edit {
-        match record.status.as_str() {
-            "published" => {
-                return Err(NexusApiError::BadRequest {
-                    code: "chapter_structure_edit_blocked".to_string(),
-                    message: "structural edits to published chapters are blocked".to_string(),
-                });
-            }
-            "finalized" if !req.confirm_structural_edit.unwrap_or(false) => {
-                return Err(NexusApiError::BadRequest {
-                    code: "chapter_structure_confirmation_required".to_string(),
-                    message: "set confirm_structural_edit=true to edit a finalized chapter"
-                        .to_string(),
-                });
-            }
-            _ => {}
-        }
-    }
-
-    // Acquire runtime lock before mutating DB metadata.
-    let lock = RuntimeLockGuard::acquire(state.pool_or_uninit()?, &creator_id, &work_id).await?;
-
-    let updated: Result<WorkChapterRecord, NexusApiError> = async {
-        let patch = PatchChapterParams {
-            slug: req.slug.map(|s| s.to_string()),
-            planned_word_count: req
-                .planned_word_count
-                .map(|v| i32::try_from(v).unwrap_or(i32::MAX)),
-            volume: req.volume.map(|v| i32::try_from(u64::from(v)).unwrap_or(1)),
-            status: req.status.as_ref().map(ToString::to_string),
-        };
-
-        let now = chrono::Utc::now().to_rfc3339();
-        work_chapters::patch_chapter(
-            state.pool_or_uninit()?,
-            &work_id,
-            chapter,
-            volume,
-            &patch,
-            &now,
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let detail = core
+        .patch_chapter(
+            &principal,
+            work_id,
+            n,
+            nexus_core::CoreChapterContentQuery::from(query),
+            req,
         )
         .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .then_some(())
-        .ok_or_else(|| NexusApiError::NotFound(format!("chapter {chapter} volume {volume}")))?;
-
-        // Re-fetch using the POST-patch volume. If `req.volume` changed it, the
-        // row now lives at the new volume; re-fetching with the original query
-        // `volume` would miss it and return 404 on a fully-committed write.
-        let fetch_volume = patch.volume.unwrap_or(volume);
-        work_chapters::get_chapter(state.pool_or_uninit()?, &work_id, chapter, fetch_volume)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            })?
-            .ok_or_else(|| {
-                NexusApiError::NotFound(format!("chapter {chapter} volume {fetch_volume}"))
-            })
-    }
-    .await;
-
-    lock.release().await;
-    let record = updated?;
-    let root = state
-        .workspace_path()
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from);
-    Ok(Json(to_detail(&record, root.as_deref())))
+        .map_err(content_error)?;
+    Ok(Json(detail))
 }
 
 /// `GET /v1/daemon/works/{work_id}/chapters/{n}/body` — read body markdown (read-only).
@@ -624,500 +134,103 @@ pub async fn get_chapter_body(
     Path((work_id, n)): Path<(String, String)>,
     Query(query): Query<ChapterContentQuery>,
 ) -> Result<Json<ChapterBody>, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let _workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
-        .ok_or(NexusApiError::AuthRequired)?;
-
-    let _work = load_work(&state, &creator_id, &work_id).await?;
-    let chapter = parse_chapter(&n)?;
-    let volume = query
-        .volume
-        .and_then(|v| i32::try_from(u64::from(v)).ok())
-        .unwrap_or(1);
-
-    let record = work_chapters::get_chapter(state.pool_or_uninit()?, &work_id, chapter, volume)
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let body = core
+        .chapter_body(&principal, work_id, n, nexus_core::CoreChapterContentQuery::from(query))
         .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::NotFound(format!("chapter {chapter} volume {volume}")))?;
-
-    let body_path = record
-        .body_path
-        .as_deref()
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            NexusApiError::NotFound(format!(
-                "chapter {chapter} volume {volume} has no body_path"
-            ))
-        })?;
-
-    let workspace_root = workspace_root(&state)?;
-    let content = read_guarded_file(
-        &workspace_root,
-        body_path,
-        "chapter_body_path_forbidden",
-        "chapter_body_not_found",
-    )
-    .await?;
-
-    Ok(Json(ChapterBody {
-        work_id: record.work_id,
-        chapter: std::num::NonZeroU64::new(u64::try_from(record.chapter).unwrap_or(1))
-            .unwrap_or(std::num::NonZeroU64::MIN),
-        volume: std::num::NonZeroU64::new(u64::try_from(record.volume.unwrap_or(1)).unwrap_or(1))
-            .unwrap_or(std::num::NonZeroU64::MIN),
-        body_path: body_path.to_string(),
-        content,
-        frontmatter: serde_json::Map::new(),
-        read_only: true,
-        updated_at: record.updated_at,
-    }))
+        .map_err(content_error)?;
+    Ok(Json(body))
 }
-
-// ─── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::handlers::works::{create_work, CreateWorkRequest};
-    use axum::extract::{Path as AxumPath, Query as AxumQuery, State as AxumState};
+    use axum::http::StatusCode;
 
-    async fn setup_chapter_work() -> (
-        crate::workspace::WorkspaceState,
-        crate::test_utils::TestTempRoot,
-        String,
-    ) {
-        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
-        let local_root = tmp.path().join("creative");
-        std::fs::create_dir_all(&local_root).expect("create local root");
-        let state = crate::workspace::WorkspaceState::new_for_testing(
-            nexus_home,
-            db_path,
-            Some(local_root.to_string_lossy().to_string()),
-        )
-        .await;
-        crate::test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
-
-        let req = CreateWorkRequest {
-            title: "Test Novel".into(),
-            long_term_goal: "Write".into(),
-            initial_idea: "Idea".into(),
-            world_id: Some("wld_test_world".to_string()),
-            story_ref: None,
-            primary_preset_id: None,
-            client_request_id: None,
-            lineage_from_work_id: None,
-            set_pool_active: None,
-            work_profile: Some("novel".to_string()),
-        };
-        let (_, resp) = create_work(AxumState(state.clone()), axum::Json(req))
-            .await
-            .expect("create work");
-        let work_id = resp.work_id.clone();
-
-        let patch = nexus_local_db::works::WorkPatch {
-            work_ref: Some(Some("test-novel".to_string())),
-            ..Default::default()
-        };
-        let now = chrono::Utc::now().to_rfc3339();
-        nexus_local_db::works::patch_work(
-            state.pool().unwrap(),
-            "test_creator",
-            &work_id,
-            &patch,
-            &now,
-        )
-        .await
-        .expect("patch work_ref");
-
-        let now = chrono::Utc::now().to_rfc3339();
-        nexus_local_db::work_chapters::seed_chapters(
-            state.pool().unwrap(),
-            &work_id,
-            "test-novel",
-            3,
-            &now,
-        )
-        .await
-        .expect("seed chapters");
-
-        (state, tmp, work_id)
-    }
-
+    /// Adapter parity: the legacy error classification (400 codes, 404
+    /// resources, 409 outline conflict, 422 validation, 423 locked and the
+    /// verbatim legacy internal codes) survives the core carrier unchanged.
     #[test]
-    fn resolve_guarded_path_accepts_inside_and_rejects_escape() {
-        let root = tempfile::tempdir().unwrap().path().to_path_buf();
-        let nested = root.join("Works/test/Outlines");
-        std::fs::create_dir_all(&nested).unwrap();
-        let file = nested.join("ch01.md");
-        std::fs::write(&file, "x").unwrap();
-
-        assert!(
-            resolve_guarded_path(&root, "Works/test/Outlines/ch01.md", true).is_ok(),
-            "inside path should be accepted"
-        );
-        assert!(
-            resolve_guarded_path(&root, "../escape.md", true).is_err(),
-            "escape path should be rejected: {:?}",
-            resolve_guarded_path(&root, "../escape.md", true)
-        );
-    }
-
-    /// Regression: a sibling directory whose name extends the workspace-root
-    /// name (e.g. root `…/creative`, sibling `…/creative-evil`) must NOT pass
-    /// the guard via a `..` traversal. A plain string `starts_with` would accept
-    /// `…/creative-evil/evil.md` because the string starts with `…/creative`;
-    /// `Path::starts_with` compares components and rejects it. Covers both the
-    /// read path (`must_exist = true`) and the write path (`must_exist = false`).
-    #[test]
-    fn resolve_guarded_path_rejects_prefix_confusion_sibling() {
-        let base = tempfile::tempdir().unwrap().path().to_path_buf();
-        let root = base.join("creative");
-        std::fs::create_dir_all(&root).unwrap();
-        // Sibling whose name extends the root name.
-        let evil_dir = base.join("creative-evil");
-        std::fs::create_dir_all(&evil_dir).unwrap();
-        std::fs::write(evil_dir.join("evil.md"), "stolen").unwrap();
-
-        // Read path: target resolves into the sibling via `..`.
-        assert!(
-            resolve_guarded_path(&root, "../creative-evil/evil.md", true).is_err(),
-            "prefix-confusion sibling must be rejected on the read path: {:?}",
-            resolve_guarded_path(&root, "../creative-evil/evil.md", true)
-        );
-        // Write path: a creatable target whose nearest-existing parent is the
-        // sibling must also be rejected.
-        assert!(
-            resolve_guarded_path(&root, "../creative-evil/newfile.md", false).is_err(),
-            "prefix-confusion sibling must be rejected on the write path: {:?}",
-            resolve_guarded_path(&root, "../creative-evil/newfile.md", false)
-        );
-        // Sanity: a genuine inside-root path still passes (write path, creatable).
-        assert!(
-            resolve_guarded_path(&root, "Outlines/ch01.md", false).is_ok(),
-            "inside-root creatable path should be accepted"
-        );
-    }
-
-    #[tokio::test]
-    async fn list_chapters_returns_summaries() {
-        let (state, _tmp, work_id) = setup_chapter_work().await;
-        let query = ListChaptersQuery {
-            cursor: None,
-            limit: None,
-            status: None,
-        };
-        let resp = list_chapters(AxumState(state), AxumPath(work_id), AxumQuery(query))
-            .await
-            .expect("list chapters");
-        assert_eq!(resp.items.len(), 3);
-        assert_eq!(resp.pagination.limit, 50);
-    }
-
-    /// Regression: `?limit=0` used to reach `chapter_page_meta` and underflow
-    /// `limit_us - 1` (panic -> 500). The generated `NonZeroU64` limit type now
-    /// rejects 0 at deserialization, so the underflow is impossible by
-    /// construction; this pins that rejection at the wire boundary.
-    #[tokio::test]
-    async fn list_chapters_limit_zero_is_rejected_not_panicked() {
-        // Schema minimum: 1 — `limit=0` can no longer be constructed or
-        // deserialized, so the old `limit_us - 1` underflow is unreachable.
-        let rejected = serde_json::from_value::<ListChaptersQuery>(serde_json::json!({
-            "limit": 0
-        }));
-        assert!(
-            rejected.is_err(),
-            "limit=0 must fail NonZeroU64 deserialization"
-        );
-        // The lower boundary value still deserializes and reaches the handler.
-        let accepted = serde_json::from_value::<ListChaptersQuery>(serde_json::json!({
-            "limit": 1
-        }))
-        .expect("limit=1 is the schema minimum and must deserialize");
-        assert_eq!(accepted.limit, std::num::NonZeroU64::new(1));
-    }
-
-    #[tokio::test]
-    async fn list_chapters_keyset_pagination() {
-        let (state, _tmp, work_id) = setup_chapter_work().await;
-
-        // First page: limit 2 should return 2 items and a next cursor.
-        let first = list_chapters(
-            AxumState(state.clone()),
-            AxumPath(work_id.clone()),
-            AxumQuery(ListChaptersQuery {
-                cursor: None,
-                limit: std::num::NonZeroU64::new(2),
-                status: None,
-            }),
-        )
-        .await
-        .expect("list first page");
-        assert_eq!(first.items.len(), 2);
-        assert!(first.pagination.has_more);
-        let cursor = first
-            .pagination
-            .next_cursor
-            .clone()
-            .expect("first page should have next_cursor");
-        assert!(
-            cursor.starts_with("v2:"),
-            "cursor should use v2 keyset encoding"
-        );
-
-        // Second page: should return the remaining chapter and no cursor.
-        let second = list_chapters(
-            AxumState(state),
-            AxumPath(work_id),
-            AxumQuery(ListChaptersQuery {
-                cursor: Some(cursor),
-                limit: std::num::NonZeroU64::new(2),
-                status: None,
-            }),
-        )
-        .await
-        .expect("list second page");
-        assert_eq!(second.items.len(), 1);
-        assert!(!second.pagination.has_more);
-        assert!(second.pagination.next_cursor.is_none());
-    }
-
-    #[tokio::test]
-    async fn get_chapter_returns_detail() {
-        let (state, _tmp, work_id) = setup_chapter_work().await;
-        let resp = get_chapter(
-            AxumState(state),
-            AxumPath((work_id, "1".to_string())),
-            AxumQuery(ChapterContentQuery { volume: None }),
-        )
-        .await
-        .expect("get chapter");
-        assert_eq!(resp.chapter, std::num::NonZeroU64::new(1).unwrap());
-        assert_eq!(resp.volume, std::num::NonZeroU64::new(1).unwrap());
-        assert!(resp.slug.as_deref().is_some_and(|s| s.starts_with("ch01")));
-    }
-
-    /// Regression: a stored `outline_path` that escapes the workspace root must
-    /// be reported as non-editable so the UI cannot attempt a write through it.
-    /// Covers the V1.65 UI cluster residual on `can_edit_outline` path-guard
-    /// probing.
-    #[tokio::test]
-    async fn get_chapter_can_edit_outline_rejects_escape_path() {
-        let (state, _tmp, work_id) = setup_chapter_work().await;
-        let now = chrono::Utc::now().to_rfc3339();
-        work_chapters::update_outline_path(
-            state.pool().unwrap(),
-            &work_id,
-            1,
-            1,
-            Some("../evil-escape.md"),
-            &now,
-        )
-        .await
-        .expect("update outline path");
-
-        let resp = get_chapter(
-            AxumState(state),
-            AxumPath((work_id, "1".to_string())),
-            AxumQuery(ChapterContentQuery { volume: None }),
-        )
-        .await
-        .expect("get chapter");
-
-        assert!(
-            !resp.can_edit_outline,
-            "an outline_path that escapes the workspace root must not be editable"
-        );
-    }
-
-    #[tokio::test]
-    async fn patch_chapter_updates_slug() {
-        let (state, _tmp, work_id) = setup_chapter_work().await;
-        let req = PatchChapterRequest {
-            title: None,
-            slug: Some("new-slug".parse().unwrap()),
-            planned_word_count: None,
-            volume: None,
-            status: None,
-            confirm_structural_edit: None,
-            transition_reason: None,
-        };
-        let resp = patch_chapter(
-            AxumState(state),
-            AxumPath((work_id, "1".to_string())),
-            AxumQuery(ChapterContentQuery { volume: None }),
-            axum::Json(req),
-        )
-        .await
-        .expect("patch chapter");
-        assert_eq!(resp.slug, Some("new-slug".to_string()));
-    }
-
-    /// Regression: `patch_chapter` used to re-fetch the row using the ORIGINAL
-    /// query volume after a volume change. The UPDATE committed (row moved to
-    /// the new volume) but the re-fetch `WHERE volume = <old>` found nothing and
-    /// the handler returned 404 on a successful write. The re-fetch must use the
-    /// patched volume.
-    #[tokio::test]
-    async fn patch_chapter_volume_change_returns_updated_row() {
-        let (state, _tmp, work_id) = setup_chapter_work().await;
-        let req = PatchChapterRequest {
-            title: None,
-            slug: None,
-            planned_word_count: None,
-            volume: Some(std::num::NonZeroU64::new(2).unwrap()),
-            status: None,
-            confirm_structural_edit: None,
-            transition_reason: None,
-        };
-        let resp = patch_chapter(
-            AxumState(state),
-            AxumPath((work_id, "1".to_string())),
-            AxumQuery(ChapterContentQuery { volume: None }),
-            axum::Json(req),
-        )
-        .await
-        .expect("patch with volume change must not 404 after the write");
-        assert_eq!(resp.volume, std::num::NonZeroU64::new(2).unwrap());
-    }
-
-    /// Regression: writing `title` must return `BadRequest` (HTTP 400,
-    /// `bad_request`) with code `chapter_title_unsupported`. This is field
-    /// validation, not a preset gate, so `PresetGatesFailed` (HTTP 422,
-    /// `preset_gates_failed`) would be both semantically wrong and an
-    /// observable contract change.
-    #[tokio::test]
-    async fn patch_chapter_title_returns_bad_request() {
-        let (state, _tmp, work_id) = setup_chapter_work().await;
-        let req = PatchChapterRequest {
-            title: Some("New Title".to_string()),
-            slug: None,
-            planned_word_count: None,
-            volume: None,
-            status: None,
-            confirm_structural_edit: None,
-            transition_reason: None,
-        };
-
-        let result = patch_chapter(
-            AxumState(state),
-            AxumPath((work_id, "1".to_string())),
-            AxumQuery(ChapterContentQuery { volume: None }),
-            axum::Json(req),
-        )
-        .await;
-
-        let err = result.expect_err("title patch should fail");
-        match err {
-            NexusApiError::BadRequest { code, message } => {
-                assert_eq!(code, "chapter_title_unsupported");
-                assert!(message.contains("display-only"));
-            }
-            other => panic!("expected BadRequest, got {other:?}"),
+    fn content_error_retains_status_and_body() {
+        let cases = [
+            (
+                nexus_core::CoreError::InvalidInput {
+                    field: "chapter_title_unsupported".into(),
+                    reason: "title is display-only in V1.65; use outline frontmatter or slug instead".into(),
+                },
+                NexusApiError::BadRequest {
+                    code: "chapter_title_unsupported".into(),
+                    message: "title is display-only in V1.65; use outline frontmatter or slug instead".into(),
+                },
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                nexus_core::CoreError::NotFound { resource: "chapter 1 volume 1".into() },
+                NexusApiError::NotFound("chapter 1 volume 1".into()),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                nexus_core::CoreError::Forbidden {
+                    resource: "work_locked:work wrk_x is locked by 'driver'; wait for release or check 'creator works status'".into(),
+                },
+                NexusApiError::Locked {
+                    resource: "work".into(),
+                    reason: "work wrk_x is locked by 'driver'; wait for release or check 'creator works status'".into(),
+                },
+                StatusCode::LOCKED,
+            ),
+            (
+                nexus_core::CoreError::outline_conflict(5, "3", "outline_revision", "refetch the work outline and reapply"),
+                NexusApiError::outline_conflict(5, "3", "outline_revision", "refetch the work outline and reapply"),
+                StatusCode::CONFLICT,
+            ),
+        ];
+        for (core_error, old_error, status) in cases {
+            let migrated = content_error(core_error);
+            assert_eq!(migrated.status_code(), status);
+            assert_eq!(
+                serde_json::to_string(&migrated.to_response_body()).unwrap(),
+                serde_json::to_string(&old_error.to_response_body()).unwrap(),
+                "legacy error body must round-trip verbatim"
+            );
         }
-    }
 
-    #[tokio::test]
-    async fn get_chapter_body_reads_file() {
-        let (state, _tmp, work_id) = setup_chapter_work().await;
-        let root = state.workspace_path().expect("workspace path");
-        let body_path =
-            std::path::PathBuf::from(&root).join("Works/test-novel/Stories/ch01-ch01.md");
-        std::fs::create_dir_all(body_path.parent().unwrap()).unwrap();
-        std::fs::write(&body_path, "body content").unwrap();
+        let validation =
+            content_error(nexus_core::CoreError::outline_validation_failed(
+                &["slug 'X' must be kebab-case".into()],
+                &[],
+            ));
+        assert_eq!(validation.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(validation.error_code(), "outline_validation_failed");
 
-        let resp = get_chapter_body(
-            AxumState(state),
-            AxumPath((work_id, "1".to_string())),
-            AxumQuery(ChapterContentQuery { volume: None }),
-        )
-        .await
-        .expect("get body");
-        assert_eq!(resp.content, "body content");
-        assert!(resp.read_only);
-    }
-
-    #[tokio::test]
-    async fn get_chapter_body_rejects_oversized_file() {
-        // The constant is private to the parent module; access it via the
-        // helper below which is also private and uses the same value.
-        const TEST_MAX_BYTES: usize = 10 * 1024 * 1024;
-
-        let (state, _tmp, work_id) = setup_chapter_work().await;
-        let root = state.workspace_path().expect("workspace path");
-        let body_path =
-            std::path::PathBuf::from(&root).join("Works/test-novel/Stories/ch01-ch01.md");
-        std::fs::create_dir_all(body_path.parent().unwrap()).unwrap();
-        let oversized = "x".repeat(TEST_MAX_BYTES + 1);
-        std::fs::write(&body_path, oversized).unwrap();
-
-        let result = get_chapter_body(
-            AxumState(state),
-            AxumPath((work_id, "1".to_string())),
-            AxumQuery(ChapterContentQuery { volume: None }),
-        )
-        .await;
-
-        assert!(result.is_err(), "expected error for oversized body");
-        match result {
-            Err(NexusApiError::BadRequest { code, .. }) => {
-                assert_eq!(code, "chapter_body_too_large");
-            }
-            Err(other) => panic!("unexpected error: {other:?}"),
-            Ok(_) => panic!("expected error"),
+        for category in [
+            "DATABASE_ERROR: locked",
+            "CONTRACT_ERROR: shape",
+            "FILE_READ_ERROR: gone",
+            "DIRECTORY_CREATE_ERROR: no dir",
+            "OUTLINE_WRITE_ERROR: disk",
+            "OUTLINE_SERIALIZE_ERROR: yaml",
+            "OUTLINE_REVISION_NEGATIVE: bug",
+            "WORK_REF_MISSING: no ref",
+            "PATH_GUARD_PANIC: panic",
+        ] {
+            let migrated =
+                content_error(nexus_core::CoreError::Internal { category: category.into() });
+            let NexusApiError::Internal { code, message } = &migrated else {
+                panic!("internal category must stay Internal, got {migrated:?}");
+            };
+            let (expected_code, expected_message) = category.split_once(": ").unwrap();
+            assert_eq!(code, expected_code);
+            assert_eq!(message, expected_message);
         }
-    }
 
-    /// V1.88 T3 (R-V187-QC3-P001): async path guard accepts an in-bounds
-    /// chapter file and returns its contents.
-    #[tokio::test]
-    async fn read_guarded_file_accepts_in_bounds_path() {
-        let tmp = tempfile::tempdir().unwrap();
-        let workspace_root = tmp.path();
-        let rel_path = "Works/test-novel/Stories/ch01-ch01.md";
-        let file_path = workspace_root.join(rel_path);
-        std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
-        std::fs::write(&file_path, "chapter body").unwrap();
-
-        let content = read_guarded_file(
-            workspace_root,
-            rel_path,
-            "chapter_body_path_forbidden",
-            "chapter_body_not_found",
-        )
-        .await
-        .expect("in-bounds file should read successfully");
-        assert_eq!(content, "chapter body");
-    }
-
-    /// V1.88 T3 (R-V187-QC3-P001): async path guard rejects a relative path
-    /// that escapes the workspace root before any FS access.
-    #[tokio::test]
-    async fn read_guarded_file_rejects_escape_path() {
-        let tmp = tempfile::tempdir().unwrap();
-        let workspace_root = tmp.path().join("creative");
-        std::fs::create_dir_all(&workspace_root).unwrap();
-        let evil_dir = tmp.path().join("creative-evil");
-        std::fs::create_dir_all(&evil_dir).unwrap();
-        std::fs::write(evil_dir.join("evil.md"), "stolen").unwrap();
-
-        let result = read_guarded_file(
-            &workspace_root,
-            "../creative-evil/evil.md",
-            "chapter_body_path_forbidden",
-            "chapter_body_not_found",
-        )
-        .await;
-        assert!(result.is_err(), "escape path should be rejected");
-        match result {
-            Err(NexusApiError::BadRequest { code, .. }) => {
-                assert_eq!(code, "chapter_body_path_forbidden");
-            }
-            Err(other) => panic!("expected chapter_body_path_forbidden BadRequest, got {other:?}"),
-            Ok(_) => panic!("expected error"),
-        }
+        // Non-legacy internal categories keep the shared CORE_ERROR fallback.
+        let fallback =
+            content_error(nexus_core::CoreError::Internal { category: "workspace metadata: boom".into() });
+        let NexusApiError::Internal { code, .. } = &fallback else {
+            panic!("fallback must stay Internal");
+        };
+        assert_eq!(code, "CORE_ERROR");
     }
 }
