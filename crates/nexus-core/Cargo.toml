@@ -52,7 +52,11 @@ nexus-agent-host = { path = "../nexus-agent-host", optional = true }
 nexus-acp-host = { path = "../nexus-acp-host", optional = true }
 nexus-wasm-host = { path = "../nexus-wasm-host", optional = true }
 rmcp = { version = "=3.2.0", default-features = false, optional = true }
-async-trait.workspace = true
+# async-trait is used ONLY by the execution cohort's port traits and the
+# module's test doubles. Nothing outside `execution` uses the macro (the
+# `#![allow(clippy::unused_async_trait_impl)]` in knowledge.rs is a lint name,
+# not a crate use), so the edge is optional and enabled by `execution`.
+async-trait = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
@@ -66,13 +70,10 @@ serde_yaml = { workspace = true }
 [dev-dependencies]
 tempfile = "3"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-# The execution acceptance target builds the provider port and the
-# engine-owner fixture directly, so both edges are needed even when the
-# `execution` feature is off (a test target that fails to resolve its imports
-# must not be silently skipped).
-nexus-provider-ports = { path = "../nexus-provider-ports" }
-nexus-local-db = { path = "../nexus-local-db" }
-# The moved execution regression module still builds one scripted engine
-# fixture with interior mutability; parking_lot::Mutex is the same choice the
-# daemon's copy used.
+# Only `parking_lot` needs a dev-dep: the relocated execution regression module
+# builds one scripted engine fixture with interior mutability, and parking_lot
+# is not otherwise a `nexus-core` dependency. The integration target's other
+# imports (`nexus-provider-ports`, `nexus-local-db`, `async-trait`) come from
+# `[dependencies]` — that target is `#![cfg(feature = "execution")]`, and the
+# feature enables those optional edges.
 parking_lot = "0.12"
