@@ -70,7 +70,6 @@ impl ProviderPort for NullProvider {
 
 struct Fixture {
     tmp: TempDir,
-    home: std::path::PathBuf,
     db_path: std::path::PathBuf,
 }
 
@@ -102,7 +101,6 @@ async fn fixture() -> Fixture {
 
     Fixture {
         tmp,
-        home: user_home,
         db_path,
     }
 }
@@ -120,62 +118,74 @@ async fn open_engine_owner(f: &Fixture) -> CoreService {
         .expect("engine-owner core open")
 }
 
-/// Seed a committed, non-terminal v1 run row directly (simulating a run that
-/// was durably committed by a previous owner before a restart).
-async fn seed_committed_run(db_path: &Path, session_id: &str, creator: &str) {
-    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db_path.display()))
+/// Insert one v1 run row through the admitted engine pool — the same seam the
+/// engine owner itself uses.
+///
+/// A bare `SqlitePool::connect` installs none of the five `nexus_writer_*`
+/// scalar functions, so the `orchestration_sessions` guard trigger aborts with
+/// `no such function: nexus_writer_protocol` before it can even evaluate the
+/// writer mode. Opening the pool through the guarded seam installs them via the
+/// connection hook, and the engine-mode registration it records is exactly the
+/// credential the guard checks for.
+async fn seed_run_row(
+    db_path: &Path,
+    session_id: &str,
+    creator: &str,
+    state_revision: i64,
+    run_state: serde_json::Value,
+) {
+    let guarded = nexus_local_db::init_engine_pool(db_path)
         .await
-        .unwrap();
+        .expect("seed engine pool init");
     let now = chrono::Utc::now().timestamp();
     let ctx = serde_json::json!({ "_session_id": session_id }).to_string();
     sqlx::query(
         "INSERT INTO orchestration_sessions \
          (session_id, creator_id, preset_id, preset_version, current_task_id, status, context_json, \
           created_at, updated_at, execution_version, state_revision, run_state_json) \
-         VALUES (?, ?, 'test-preset', 1, 'start', 'running', ?, ?, ?, 1, 3, ?)",
+         VALUES (?, ?, 'test-preset', 1, 'start', 'running', ?, ?, ?, 1, ?, ?)",
     )
     .bind(session_id)
     .bind(creator)
     .bind(ctx)
     .bind(now)
     .bind(now)
-    .bind(serde_json::json!({"in_flight": null, "step_in_flight": null, "failure": null}).to_string())
-    .execute(&pool)
+    .bind(state_revision)
+    .bind(run_state.to_string())
+    .execute(guarded.pool())
     .await
-    .unwrap();
-    pool.close().await;
+    .expect("seed run row");
+    guarded.pool().close().await;
+    nexus_local_db::writer_protocol::release_retained_writer_guards(db_path);
+}
+
+/// Seed a committed, non-terminal v1 run row directly (simulating a run that
+/// was durably committed by a previous owner before a restart).
+async fn seed_committed_run(db_path: &Path, session_id: &str, creator: &str) {
+    seed_run_row(
+        db_path,
+        session_id,
+        creator,
+        3,
+        serde_json::json!({"in_flight": null, "step_in_flight": null, "failure": null}),
+    )
+    .await;
 }
 
 /// Mark an in-flight step so A7 classifies the run `Interrupted`.
 async fn seed_in_flight_run(db_path: &Path, session_id: &str, creator: &str) {
-    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db_path.display()))
-        .await
-        .unwrap();
-    let now = chrono::Utc::now().timestamp();
-    let ctx = serde_json::json!({ "_session_id": session_id }).to_string();
-    sqlx::query(
-        "INSERT INTO orchestration_sessions \
-         (session_id, creator_id, preset_id, preset_version, current_task_id, status, context_json, \
-          created_at, updated_at, execution_version, state_revision, run_state_json) \
-         VALUES (?, ?, 'test-preset', 1, 'start', 'running', ?, ?, ?, 1, 5, ?)",
-    )
-    .bind(session_id)
-    .bind(creator)
-    .bind(ctx)
-    .bind(now)
-    .bind(now)
-    .bind(
+    seed_run_row(
+        db_path,
+        session_id,
+        creator,
+        5,
         serde_json::json!({
             "in_flight": {"step_id": "s1", "attempt_id": "a1"},
             "step_in_flight": {"step_id": "s1", "attempt_id": "a1"},
             "failure": null
-        })
-        .to_string(),
+        }),
     )
-    .execute(&pool)
-    .await
-    .unwrap();
-    pool.close().await;
+    .await;
 }
 
 /// AC-P3-T1: a competing `EngineOwner` is refused, a committed run is
@@ -204,10 +214,13 @@ async fn second_owner_and_restart_are_fenced() {
 
     // Recovery classified both rows: the committed run is re-driven (its
     // runner is reconstructed), the in-flight run is NOT (Interrupted).
+    //
+    // Read back through the live owner's OWN admitted pool. A bare second
+    // `SqlitePool` beside a live engine owner is exactly what the writer
+    // protocol fences, and it also carries none of the installed
+    // `nexus_writer_*` functions; the owner's pool has both by construction.
     let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(Arc::new(
-        sqlx::SqlitePool::connect(&format!("sqlite://{}", f.db_path.display()))
-            .await
-            .unwrap(),
+        owner_a.pool().clone(),
     ));
     let uncertain = store
         .load_run(&nexus_orchestration::SessionId("test-preset:uncertain".into()))
