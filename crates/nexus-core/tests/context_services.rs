@@ -7,9 +7,12 @@
 
 use nexus_contracts::daemon_api::inspector::moment_directive_request::MomentDirectiveRequest;
 use nexus_contracts::generated::daemon_api::inspector::moment_inspect_request::MomentInspectRequest;
-use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
+use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, LocalDirectiveStore, ReadOnlyDirectiveStore};
+use nexus_moment_context_assembly::directive::DirectiveStore;
 use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
-use nexus_local_db::{ensure_creator_row, WorkRecord};
+use nexus_local_db::{
+    create_character_with_initial_binding, ensure_creator_row, CreateCharacterParams, WorkRecord,
+};
 use std::path::PathBuf;
 use tempfile::TempDir;
 
@@ -25,6 +28,9 @@ const WORLD_DIRECTIVE_BODY: &str = "Never break the world's one-magic rule.";
 struct Env {
     _tmp: TempDir,
     user_home: PathBuf,
+    db_path: PathBuf,
+    character_id: String,
+    binding_id: String,
 }
 
 async fn seed_world(pool: &sqlx::SqlitePool, world_id: &str, owner: &str) {
@@ -100,6 +106,7 @@ async fn seed_env() -> Env {
     )
     .unwrap();
     let db_path = nexus_home_layout::workspace_state_db_path(&user_home, CREATOR, "default");
+    let created;
     {
         let guarded = init_engine_pool(&db_path, CREATOR, GuardedPoolOptions::default())
             .await
@@ -112,8 +119,64 @@ async fn seed_env() -> Env {
         nexus_local_db::create_work(&pool, &work_record(WORK_IN_B, Some(WORLD_B)))
             .await
             .unwrap();
+        created = Some(
+            create_character_with_initial_binding(
+                &pool,
+                CreateCharacterParams {
+                    owner_creator_id: CREATOR,
+                    display_name: "Ada",
+                    image_uri: None,
+                    persona_json: "{}",
+                    world_id: WORLD_A,
+                    world_sheet_entry_id: None,
+                },
+            )
+            .await
+            .unwrap(),
+        );
     }
-    Env { _tmp: tmp, user_home }
+    let created = created.expect("character seeded");
+    Env {
+        _tmp: tmp,
+        user_home,
+        db_path,
+        character_id: created.character.character_id,
+        binding_id: created.binding.binding_id,
+    }
+}
+
+/// A plain pool for DB-state assertions.
+async fn plain_pool(env: &Env) -> sqlx::SqlitePool {
+    nexus_local_db::open_pool(&env.db_path).await.unwrap()
+}
+
+/// `(ttl_remaining, last_focused_event_id, status)` of the active row for a
+/// scope — the read-only invariant columns.
+async fn directive_row_state(
+    env: &Env,
+    world_id: &str,
+) -> Option<(String, i64, Option<String>, String)> {
+    let pool = plain_pool(env).await;
+    let row: Option<(String, i64, Option<String>, String)> = sqlx::query_as(
+        "SELECT directive_id, ttl_remaining, last_focused_event_id, status FROM moment_directives \
+         WHERE scope_kind = 'world' AND scope_id = ? AND status = 'active'",
+    )
+    .bind(world_id)
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+    row
+}
+
+async fn chapter_anchor_count(env: &Env) -> i64 {
+    let pool = plain_pool(env).await;
+    let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM moment_directive_chapter_anchors")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    n
 }
 
 async fn open_core(env: &Env) -> (CoreService, nexus_core::Principal) {
@@ -299,4 +362,192 @@ async fn inspect_and_directives_stay_owner_scoped() {
         .await
         .expect_err("unowned scope show");
     assert!(matches!(err, CoreError::ForbiddenReason { .. }), "got {err:?}");
+}
+
+/// Read-only inspect invariant: with an active directive in scope, the packet
+/// carries its status/metadata (scope_id + ttl_remaining) but **never** the
+/// body (AC-I3), and inspecting leaves TTL, the scene anchor and the chapter
+/// anchors untouched (the inspector is an observation surface).
+#[tokio::test]
+async fn inspect_is_read_only_and_never_renders_the_directive_body() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+
+    // Distinctive TTL so the metadata assertion is unambiguous.
+    core.moment_directive(
+        &principal,
+        dto(serde_json::json!({
+            "action": "set",
+            "scope": { "kind": "world", "id": WORLD_A },
+            "body": WORLD_DIRECTIVE_BODY,
+            "insert_depth": "head",
+            "ttl_kind": "generations",
+            "ttl_remaining": 4242,
+            "clear_on_scene_change": true,
+            "replace": true,
+        })),
+    )
+    .await
+    .expect("world directive");
+
+    let before = directive_row_state(&env, WORLD_A)
+        .await
+        .expect("active directive row");
+    let packet = core
+        .inspect_moment(
+            &principal,
+            dto(serde_json::json!({ "world_id": WORLD_A })),
+        )
+        .await
+        .expect("inspect owned world");
+    let packet = serde_json::to_string(&packet).unwrap();
+
+    assert!(
+        packet.contains(WORLD_A),
+        "the active directive's scope is visible: {packet}"
+    );
+    assert!(
+        packet.contains("4242"),
+        "ttl_remaining metadata is visible: {packet}"
+    );
+    assert!(
+        !packet.contains(WORLD_DIRECTIVE_BODY),
+        "the directive body must never be on the wire: {packet}"
+    );
+
+    let after = directive_row_state(&env, WORLD_A)
+        .await
+        .expect("active directive row after inspect");
+    assert_eq!(before, after, "inspection must not mutate directive state");
+    assert_eq!(
+        chapter_anchor_count(&env).await,
+        0,
+        "inspection must not write chapter anchors"
+    );
+}
+
+/// The read-only store's write half is a no-op while the lifecycle store's is
+/// not: identical `after_injection` input leaves the row untouched through
+/// `ReadOnlyDirectiveStore` and burns TTL + re-anchors through
+/// `LocalDirectiveStore` (differential regression for the inspector's
+/// "no writes" contract).
+#[tokio::test]
+async fn read_only_directive_store_after_injection_is_a_noop() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+
+    core.moment_directive(
+        &principal,
+        dto(serde_json::json!({
+            "action": "set",
+            "scope": { "kind": "world", "id": WORLD_A },
+            "body": WORLD_DIRECTIVE_BODY,
+            "insert_depth": "head",
+            "ttl_kind": "generations",
+            "ttl_remaining": 7,
+            "clear_on_scene_change": false,
+            "replace": true,
+        })),
+    )
+    .await
+    .expect("world directive");
+
+    let before = directive_row_state(&env, WORLD_A)
+        .await
+        .expect("active directive row");
+    let directive_id = before.0.clone();
+
+    let pool = plain_pool(&env).await;
+    let read_only = ReadOnlyDirectiveStore::new(pool.clone());
+
+    // A read still resolves the active directive …
+    let loaded = read_only
+        .load_active(Some(CREATOR), None, Some(WORLD_A))
+        .await
+        .expect("read-only store resolves the active directive");
+    assert_eq!(loaded.directive_id, directive_id);
+
+    // … while the write half changes nothing.
+    read_only
+        .after_injection(&directive_id, Some("evt_new_scene"), Some(WORK_IN_B))
+        .await;
+    let after_noop = directive_row_state(&env, WORLD_A)
+        .await
+        .expect("active directive row after the read-only write half");
+    assert_eq!(
+        before, after_noop,
+        "ReadOnlyDirectiveStore::after_injection must not mutate the row"
+    );
+
+    // Differential: the lifecycle store DOES burn TTL through the same call.
+    LocalDirectiveStore::new(pool.clone())
+        .after_injection(&directive_id, Some("evt_new_scene"), Some(WORK_IN_B))
+        .await;
+    let after_lifecycle = directive_row_state(&env, WORLD_A)
+        .await
+        .expect("active directive row after the lifecycle write half");
+    pool.close().await;
+    assert_eq!(
+        after_lifecycle.1,
+        before.1 - 1,
+        "the lifecycle store burns TTL (proving the read-only no-op is meaningful)"
+    );
+    assert_ne!(after_noop, after_lifecycle);
+}
+
+/// The admitted-Actor projection carries the viewpoint anchors and the stored
+/// Character epoch for a Character admission, and the null anchors for a
+/// Creator admission.
+#[tokio::test]
+async fn actor_context_projects_viewpoint_and_epoch() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let chr = env.character_id.clone();
+    let binding = env.binding_id.clone();
+
+    let context = core
+        .actor_context(
+            &principal,
+            &nexus_core::AdmittedActor::Character {
+                character_id: chr.clone(),
+            },
+            &nexus_core::ActorViewpoint {
+                world_id: WORLD_A.to_string(),
+                binding_id: Some(binding.clone()),
+                branch_id: None,
+                event_id: None,
+            },
+        )
+        .await
+        .expect("character admission");
+    let value = serde_json::to_value(&context).unwrap();
+    assert_eq!(value["owner_creator_id"], CREATOR);
+    assert_eq!(value["world_id"], WORLD_A);
+    assert_eq!(value["binding_id"], binding);
+    assert_eq!(value["branch_id"], serde_json::Value::Null);
+    assert_eq!(value["event_id"], serde_json::Value::Null);
+    assert_eq!(value["character_epoch"], 0);
+    assert_eq!(value["actor_ref"]["actor_kind"], "character");
+    assert_eq!(value["actor_ref"]["character_id"], chr);
+
+    let creator_context = core
+        .actor_context(
+            &principal,
+            &nexus_core::AdmittedActor::Creator {
+                creator_id: CREATOR.to_string(),
+            },
+            &nexus_core::ActorViewpoint {
+                world_id: WORLD_A.to_string(),
+                binding_id: None,
+                branch_id: None,
+                event_id: None,
+            },
+        )
+        .await
+        .expect("creator admission");
+    let value = serde_json::to_value(&creator_context).unwrap();
+    assert_eq!(value["actor_ref"]["actor_kind"], "creator");
+    assert_eq!(value["actor_ref"]["creator_id"], CREATOR);
+    assert_eq!(value["binding_id"], serde_json::Value::Null);
+    assert_eq!(value["character_epoch"], serde_json::Value::Null);
 }
