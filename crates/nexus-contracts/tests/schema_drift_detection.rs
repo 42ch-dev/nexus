@@ -1741,7 +1741,7 @@ fn build_test_json(
         .and_then(|p| p.to_str())
         .unwrap_or("");
     for (name, prop_def) in properties {
-        let dummy = make_dummy_value(prop_def, schema_cache, current_dir);
+        let dummy = make_dummy_value(prop_def, schema_cache, current_dir, current_schema_path);
         map.insert(name.clone(), dummy);
     }
     Value::Object(map)
@@ -1807,10 +1807,11 @@ fn make_dummy_value(
     prop_def: &Value,
     schema_cache: &HashMap<String, Value>,
     current_dir: &str,
+    current_schema_path: &str,
 ) -> Value {
     // Handle $ref (must be first to resolve enum references)
     if let Some(ref_path) = prop_def.get("$ref").and_then(|r| r.as_str()) {
-        return make_dummy_from_ref(ref_path, schema_cache, current_dir);
+        return make_dummy_from_ref(ref_path, schema_cache, current_dir, current_schema_path);
     }
 
     // Handle const value (e.g., "const": 1)
@@ -1855,7 +1856,7 @@ fn make_dummy_value(
                 || Value::Array(vec![]),
                 |items| {
                     // Generate a single dummy item
-                    let item_val = make_dummy_value(items, schema_cache, current_dir);
+                    let item_val = make_dummy_value(items, schema_cache, current_dir, current_schema_path);
                     Value::Array(vec![item_val])
                 },
             )
@@ -1879,11 +1880,11 @@ fn make_dummy_value(
                             .and_then(|a| a.as_array())
                             .and_then(|a| a.first())
                         {
-                            return make_dummy_value(first_arm, schema_cache, current_dir);
+                            return make_dummy_value(first_arm, schema_cache, current_dir, current_schema_path);
                         }
                         let val = prop_def.get("additionalProperties").map_or_else(
                             || Value::String("_".to_string()),
-                            |ap| make_dummy_value(ap, schema_cache, current_dir),
+                            |ap| make_dummy_value(ap, schema_cache, current_dir, current_schema_path),
                         );
                         let mut m = serde_json::Map::new();
                         // `propertyNames.pattern` constrains the map keys:
@@ -1912,7 +1913,7 @@ fn make_dummy_value(
                         for (sub_name, sub_def) in sub_props {
                             map.insert(
                                 sub_name.clone(),
-                                make_dummy_value(sub_def, schema_cache, current_dir),
+                                make_dummy_value(sub_def, schema_cache, current_dir, current_schema_path),
                             );
                         }
                         Value::Object(map)
@@ -1924,7 +1925,7 @@ fn make_dummy_value(
             for key in &["allOf", "oneOf", "anyOf"] {
                 if let Some(subs) = prop_def.get(*key).and_then(|a| a.as_array()) {
                     if let Some(first) = subs.first() {
-                        return make_dummy_value(first, schema_cache, current_dir);
+                        return make_dummy_value(first, schema_cache, current_dir, current_schema_path);
                     }
                 }
             }
@@ -1939,6 +1940,7 @@ fn make_dummy_from_ref(
     ref_path: &str,
     schema_cache: &HashMap<String, Value>,
     current_dir: &str,
+    current_schema_path: &str,
 ) -> Value {
     // Split on # to separate file part from fragment
     let (file_part, fragment) = ref_path.find('#').map_or_else(
@@ -1955,7 +1957,15 @@ fn make_dummy_from_ref(
     );
 
     // Resolve the file path
-    let resolved_path = resolve_ref_file(file_part, current_dir);
+    // Same-file ref (`#/definitions/...`): the cache key IS the current
+    // schema's relative path, so use it directly instead of letting
+    // `resolve_ref_file` return "" (which made every cache lookup miss and
+    // hit the silent "dummy" fallback — e.g. StaleFindingsResponse.items).
+    let resolved_path = if file_part.is_empty() {
+        current_schema_path.to_string()
+    } else {
+        resolve_ref_file(file_part, current_dir)
+    };
 
     // Use the referenced file's directory for resolving nested relative refs
     let ref_dir = Path::new(&resolved_path)
@@ -1982,10 +1992,10 @@ fn make_dummy_from_ref(
                 }
             }
             // Now 'current' is the referenced definition
-            make_dummy_value(current, schema_cache, ref_dir)
+            make_dummy_value(current, schema_cache, ref_dir, &resolved_path)
         } else {
             // No fragment: the entire schema is the referenced value
-            make_dummy_value(s, schema_cache, ref_dir)
+            make_dummy_value(s, schema_cache, ref_dir, &resolved_path)
         }
     } else {
         // If we can't resolve, try using the raw property definition as a fallback
