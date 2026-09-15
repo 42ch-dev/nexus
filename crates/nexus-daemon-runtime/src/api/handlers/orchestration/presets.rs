@@ -4,10 +4,14 @@ use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
 use axum::{extract::Path, extract::State, http::StatusCode, Json};
 use nexus_contracts::local::orchestration::http::ReloadPresetResponse;
-use nexus_contracts::{
-    OrchestrationPresetListResponse, PresetProfileConditionalRule, PresetProfileEnterAction,
-    PresetProfileExitWhen, PresetProfileLabeledNext, PresetProfileLanes, PresetProfileNext,
-    PresetProfileResponse, PresetProfileRole, PresetProfileSignal, PresetProfileState,
+// The profile family types live scoped inside `preset_profile_response`
+// (typify emits the response's nested definitions per-module); the barrel
+// top-level duplicates are not the field types of `PresetProfileResponse`.
+use nexus_contracts::{OrchestrationPresetListResponse};
+use nexus_contracts::orchestration_presets::preset_profile_response::{
+    PresetProfileConditionalRule, PresetProfileEnterAction, PresetProfileExitWhen,
+    PresetProfileLabeledNext, PresetProfileLanes, PresetProfileNext, PresetProfileResponse,
+    PresetProfileRole, PresetProfileSignal, PresetProfileState,
 };
 use nexus_contracts::local::orchestration::preset::{
     EnterAction, ExitWhen, NextTarget, PresetRoleDefinition, SignalActionKind, SignalBinding,
@@ -279,13 +283,24 @@ fn profile_next(next: &NextTarget) -> PresetProfileNext {
         NextTarget::Linear(target) => PresetProfileNext {
             kind: "linear".to_string(),
             target: Some(target.clone()),
-            ..Default::default()
+            // The response-scoped generated type carries no Default derive;
+            // unused arms of the shape are spelled out.
+            branches: Vec::new(),
+            default: None,
+            go: None,
+            labeled: Vec::new(),
+            nogo: None,
+            rules: Vec::new(),
         },
         NextTarget::GoNogo(go_nogo) => PresetProfileNext {
             kind: "goNogo".to_string(),
             go: Some(go_nogo.go.clone()),
             nogo: Some(go_nogo.nogo.clone()),
-            ..Default::default()
+            branches: Vec::new(),
+            default: None,
+            labeled: Vec::new(),
+            rules: Vec::new(),
+            target: None,
         },
         NextTarget::Labeled(edges) => PresetProfileNext {
             kind: "labeled".to_string(),
@@ -296,7 +311,12 @@ fn profile_next(next: &NextTarget) -> PresetProfileNext {
                     target: e.target.clone(),
                 })
                 .collect(),
-            ..Default::default()
+            branches: Vec::new(),
+            default: None,
+            go: None,
+            nogo: None,
+            rules: Vec::new(),
+            target: None,
         },
         NextTarget::Conditional(cond) => PresetProfileNext {
             kind: "conditional".to_string(),
@@ -309,7 +329,11 @@ fn profile_next(next: &NextTarget) -> PresetProfileNext {
                 })
                 .collect(),
             default: Some(cond.default.clone()),
-            ..Default::default()
+            branches: Vec::new(),
+            go: None,
+            labeled: Vec::new(),
+            nogo: None,
+            target: None,
         },
         NextTarget::Branches(branches) => PresetProfileNext {
             kind: "branches".to_string(),
@@ -322,7 +346,11 @@ fn profile_next(next: &NextTarget) -> PresetProfileNext {
                 })
                 .collect(),
             default: Some(branches.default.clone()),
-            ..Default::default()
+            go: None,
+            labeled: Vec::new(),
+            nogo: None,
+            rules: Vec::new(),
+            target: None,
         },
     }
 }

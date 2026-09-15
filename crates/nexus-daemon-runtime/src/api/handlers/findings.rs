@@ -112,32 +112,34 @@ impl CreateFindingRequest {
 /// `Option<Option<String>>` domain carrier and rejects any non-string value
 /// before any stored effect. The handwritten duplicate struct is retired —
 /// the schema is the single wire definition (R-V1190-FINDINGS-TRISTATE-DUP).
-impl UpdateFindingRequest {
-    fn into_core(self) -> Result<nexus_core::UpdateFindingRequest, NexusApiError> {
-        let rule_suggestion = match self.rule_suggestion {
-            None => None,
-            Some(serde_json::Value::Null) => Some(None),
-            Some(serde_json::Value::String(text)) => Some(Some(text)),
-            Some(other) => {
-                return Err(NexusApiError::BadRequest {
-                    code: "invalid_input".into(),
-                    message: format!(
-                        "invalid rule_suggestion: expected a string, null, or omission, got {}",
-                        if other.is_null() { "null" } else { "a non-string JSON value" }
-                    ),
-                });
-            }
-        };
-        Ok(nexus_core::UpdateFindingRequest {
-            severity: self.severity,
-            status: self.status,
-            title: self.title,
-            description: self.description,
-            target_executor: self.target_executor,
-            kind: self.kind,
-            rule_suggestion,
-        })
-    }
+/// Free function: the carrier type is generated (E0116 forbids a local
+/// inherent impl on it), unlike the file's local-struct `into_core` methods.
+fn update_finding_request_into_core(
+    request: UpdateFindingRequest,
+) -> Result<nexus_core::UpdateFindingRequest, NexusApiError> {
+    let rule_suggestion = match request.rule_suggestion {
+        None => None,
+        Some(serde_json::Value::Null) => Some(None),
+        Some(serde_json::Value::String(text)) => Some(Some(text)),
+        Some(other) => {
+            return Err(NexusApiError::BadRequest {
+                code: "invalid_input".into(),
+                message: format!(
+                    "invalid rule_suggestion: expected a string, null, or omission, got {}",
+                    if other.is_null() { "null" } else { "a non-string JSON value" }
+                ),
+            });
+        }
+    };
+    Ok(nexus_core::UpdateFindingRequest {
+        severity: request.severity,
+        status: request.status,
+        title: request.title,
+        description: request.description,
+        target_executor: request.target_executor,
+        kind: request.kind,
+        rule_suggestion,
+    })
 }
 
 /// List findings query parameters.
@@ -300,7 +302,7 @@ pub async fn update_finding_handler(
     // Work-ownership precheck stays on the `{work_id}` route; the core update
     // itself is creator-scoped.
     core.get_work(&principal, work_id).await.map_err(findings_error)?;
-    let update = body.into_core()?;
+    let update = update_finding_request_into_core(body)?;
     let f = core
         .update_finding(&principal, finding_id, update)
         .await
