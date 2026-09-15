@@ -111,7 +111,7 @@ pub async fn commit_workspace(
     let changes = request
         .changes
         .into_iter()
-        .map(WorkspaceChangeEntry::from)
+        .map(changes_item_to_entry)
         .collect::<Vec<_>>();
     let outcome: CommitOutcome = WorkspaceSessionManager::commit_session_durable_owned(
         Arc::clone(manager),
@@ -181,18 +181,20 @@ fn map_commit_error(err: SessionError) -> CoreError {
 /// `content_base64`/`expected_hash` fields carry identical wire semantics, and
 /// the op enum is the same three-way `create|modify|delete`. This is the single
 /// conversion seam, so the commit authority keeps naming ONE manifest type.
-impl From<CoreWorkspaceCommitRequestChangesItem> for WorkspaceChangeEntry {
-    fn from(item: CoreWorkspaceCommitRequestChangesItem) -> Self {
-        let op = match item.op {
-            CoreWorkspaceCommitRequestChangesItemOp::Create => WorkspaceChangeOp::Create,
-            CoreWorkspaceCommitRequestChangesItemOp::Modify => WorkspaceChangeOp::Modify,
-            CoreWorkspaceCommitRequestChangesItemOp::Delete => WorkspaceChangeOp::Delete,
-        };
-        Self {
-            path: String::from(item.path),
-            op,
-            expected_hash: item.expected_hash,
-            content_base64: item.content_base64,
-        }
+///
+/// It is a FREE FUNCTION rather than a `From` impl because both sides are
+/// external types (both are owned by `nexus-contracts`), and the orphan rule
+/// forbids a foreign-trait foreign-type impl here.
+fn changes_item_to_entry(item: CoreWorkspaceCommitRequestChangesItem) -> WorkspaceChangeEntry {
+    let op = match item.op {
+        CoreWorkspaceCommitRequestChangesItemOp::Create => WorkspaceChangeOp::Create,
+        CoreWorkspaceCommitRequestChangesItemOp::Modify => WorkspaceChangeOp::Modify,
+        CoreWorkspaceCommitRequestChangesItemOp::Delete => WorkspaceChangeOp::Delete,
+    };
+    WorkspaceChangeEntry {
+        path: String::from(item.path),
+        op,
+        expected_hash: item.expected_hash,
+        content_base64: item.content_base64,
     }
 }
