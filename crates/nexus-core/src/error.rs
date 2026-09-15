@@ -15,6 +15,12 @@ pub enum CoreError {
     AuthRequired,
     #[error("forbidden: {resource}")]
     Forbidden { resource: String },
+    /// World-ownership guard denial (`narrative_worlds.owner_creator_id`).
+    /// The world id and refusal reason stay split so each transport family
+    /// renders its retained 403 envelope verbatim (`resource: "world {id}"`
+    /// plus the family reason) at the adapter boundary.
+    #[error("forbidden: world {world_id} — {reason}")]
+    WorldOwnerDenied { world_id: String, reason: String },
     #[error("not found: {resource}")]
     NotFound { resource: String },
     #[error("invalid input: {field} — {reason}")]
@@ -89,5 +95,19 @@ pub(crate) fn local_db_err(e: LocalDbError) -> CoreError {
         other => CoreError::Internal {
             category: format!("database_error: {other}"),
         },
+    }
+}
+
+/// Map a raw SQLite driver error onto the core taxonomy (M1 precedent:
+/// lock contention → `Busy`, pool timeout → `OwnerBusy`).
+pub(crate) fn db_err(e: &sqlx::Error) -> CoreError {
+    if is_sqlite_busy(e) {
+        CoreError::Busy
+    } else if matches!(e, sqlx::Error::PoolTimedOut) {
+        CoreError::OwnerBusy
+    } else {
+        CoreError::Internal {
+            category: format!("database_error: {e}"),
+        }
     }
 }

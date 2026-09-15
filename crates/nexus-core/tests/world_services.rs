@@ -221,7 +221,7 @@ async fn promote_relate_preserves_owner_and_cas() {
         )
         .await
         .unwrap_err();
-    assert!(matches!(err, CoreError::Forbidden { .. }));
+    assert!(matches!(err, CoreError::WorldOwnerDenied { .. }));
     let err = fx
         .core
         .patch_world_kb_relationship(
@@ -231,7 +231,7 @@ async fn promote_relate_preserves_owner_and_cas() {
         )
         .await
         .unwrap_err();
-    assert!(matches!(err, CoreError::Forbidden { .. }));
+    assert!(matches!(err, CoreError::WorldOwnerDenied { .. }));
     assert_eq!(change_sequence_head(&reader_pool).await, before);
 
     // ── Stale promote leaves the candidate row and outbox untouched ────────
@@ -542,6 +542,15 @@ async fn world_lifecycle_create_delete_and_binding_guard() {
         .unwrap_err();
     assert!(matches!(err, CoreError::NotFound { .. }));
 
+    // The hard delete is reflected in the workspace-wide lifecycle read
+    // (coverage migrated from the retired daemon gateway-only handler tests).
+    let worlds = fx.core.list_worlds(&fx.principal).await.unwrap();
+    assert!(
+        worlds.iter().all(|w| w.world_id != created.world_id),
+        "deleted world must not appear in list_worlds: {:?}",
+        worlds.iter().map(|w| &w.world_id).collect::<Vec<_>>()
+    );
+
     second.close().await.unwrap();
     let _ = pool.close().await;
 }
@@ -584,5 +593,5 @@ async fn key_block_state_read_guards() {
         .world_kb_key_block_state(&fx.principal, FOREIGN_WORLD.to_string(), "kb_comp".to_string())
         .await
         .unwrap_err();
-    assert!(matches!(err, CoreError::Forbidden { .. }));
+    assert!(matches!(err, CoreError::WorldOwnerDenied { .. }));
 }

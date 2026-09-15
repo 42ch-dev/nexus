@@ -217,7 +217,7 @@ async fn world_kb_contract() {
         .world_kb_graph(&fx.principal, FOREIGN_WORLD.to_string(), false)
         .await
         .unwrap_err();
-    assert!(matches!(err, CoreError::Forbidden { .. }));
+    assert!(matches!(err, CoreError::WorldOwnerDenied { .. }));
 
     let err = fx
         .core
@@ -372,7 +372,7 @@ async fn assert_candidates_contract(fx: &Fixture) {
         )
         .await
         .unwrap_err();
-    assert!(matches!(err, CoreError::Forbidden { .. }));
+    assert!(matches!(err, CoreError::WorldOwnerDenied { .. }));
 }
 #[tokio::test]
 async fn world_kb_contract_merged_terminal_and_modules() {

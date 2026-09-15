@@ -15,7 +15,6 @@ use axum::http::StatusCode;
 use axum_test::TestServer;
 use nexus_daemon_runtime::api;
 use nexus_daemon_runtime::api::auth_middleware::DaemonApiConfig;
-use nexus_daemon_runtime::pack_import::IMPORT_PROVENANCE;
 use nexus_daemon_runtime::test_utils::{self, TestTempRoot};
 use nexus_daemon_runtime::workspace::WorkspaceState;
 use serde_json::{json, Value};
@@ -274,7 +273,7 @@ async fn assert_entry_provenance(pool: &sqlx::SqlitePool, world_id: &str, canoni
     .flatten();
     assert_eq!(
         provenance.as_deref(),
-        Some(IMPORT_PROVENANCE),
+        Some("pack_import"),
         "entry {canonical_name} in {world_id} must have pack_import provenance"
     );
 }
@@ -332,36 +331,18 @@ async fn pack_export_foreign_world_returns_403() {
     assert_eq!(body["error"]["code"], "forbidden", "body={body}");
 }
 
+/// Domain counters/provenance/idempotency live in nexus-core's named service
+/// regression. Keep this route-level check for both retained 200 responses.
 #[tokio::test(flavor = "multi_thread")]
-async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
+async fn pack_import_skip_reimport_http_status() {
     let ctx = ctx().await;
     seed_export_source_world(&ctx.pool).await;
-
     let mut pack = export_pack(&ctx.server, OWNED_WORLD).await;
     fresh_entry_ids_in_pack(&mut pack);
-
     let (status, body) = import_pack_http(&ctx.server, TARGET_WORLD, &pack, "skip").await;
     assert_eq!(status, StatusCode::OK, "body={body}");
-    assert!(
-        body["entries"]["created"].as_u64().unwrap_or(0) >= 2,
-        "expected created entries >= 2: {body}"
-    );
-    assert!(
-        body["relations"]["created"].as_u64().unwrap_or(0) >= 1,
-        "expected created relations >= 1: {body}"
-    );
-
-    let (status2, body2) = import_pack_http(&ctx.server, TARGET_WORLD, &pack, "skip").await;
-    assert_eq!(status2, StatusCode::OK, "body={body2}");
-    assert_eq!(
-        body2["entries"]["created"].as_u64().unwrap_or(0),
-        0,
-        "re-import must be idempotent: {body2}"
-    );
-
-    assert_entry_provenance(&ctx.pool, TARGET_WORLD, "Aria").await;
-    assert_entry_provenance(&ctx.pool, TARGET_WORLD, "Kael").await;
-    assert_entry_provenance(&ctx.pool, TARGET_WORLD, "Mira").await;
+    let (status, body) = import_pack_http(&ctx.server, TARGET_WORLD, &pack, "skip").await;
+    assert_eq!(status, StatusCode::OK, "body={body}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -438,7 +419,7 @@ async fn pack_import_rename_creates_disambiguated_entry() {
     .flatten();
     assert_ne!(
         preexisting.as_deref(),
-        Some(IMPORT_PROVENANCE),
+        Some("pack_import"),
         "pre-seeded collision row must not be stamped"
     );
 }
