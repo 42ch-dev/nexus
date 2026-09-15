@@ -75,10 +75,10 @@ async-trait = { workspace = true, optional = true }
 #   hex    — lowercase-hex rendering of those digests
 #   base64 — manifest `contentBase64` body decode
 #   nix    — renameat/linkat + flock for the atomic file apply and the
-#            workspace-authority lease (same pin/features as the daemon)
+#            workspace-authority lease. Unix-only, so it is declared under
+#            `cfg(unix)` and its `dep:nix` edge only resolves there.
 hex = { version = "0.4", optional = true }
 base64 = { version = "0.22", optional = true }
-nix = { version = "0.28", features = ["fs"], optional = true }
 sha2 = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
@@ -89,6 +89,12 @@ tracing.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 serde_yaml = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+# Descriptor-relative atomic mutation (openat/renameat/linkat/unlinkat) and the
+# advisory workspace-authority lease. Every use site is `cfg(unix)`-gated, so
+# the edge is scoped to Unix rather than linked on every target.
+nix = { version = "0.28", features = ["fs"], optional = true }
 
 [dev-dependencies]
 # Enable the gated execution test seams for this package's own tests without
