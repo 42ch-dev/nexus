@@ -27,6 +27,9 @@ import type {
   WorkPoolPromoteRequest,
   WorkPoolSetActiveRequest,
   WorkReconcileReport,
+  AppendInspirationRequest,
+  AppendInspirationResponse,
+  ReleaseCompletionLockRequest,
   WorldKbPatchEntityRequest,
   WorldKbPatchEntityResponse,
   WorldKbKeyBlockStateResponse,
@@ -36,6 +39,8 @@ import type {
   WorldKbPromoteCandidateResponse,
   CreateWorldRequest,
   CreateWorldResponse,
+  CreateWorkRequest,
+  CreateWorkResponse,
   CreateForkRequest,
   CreateForkResponse,
   PackExportRequest,
@@ -49,10 +54,14 @@ import type {
   WorldRulesListResponse,
   CoreTimelineOverviewQuery,
   CoreTimelineEventsQuery,
+  TimelineOverviewResponse,
   CoreWorkSelection,
   CoreChapterContentQuery,
   ListChaptersQuery,
   ListChaptersResponse,
+  ListWorksQuery,
+  ListWorksResponse,
+  PatchWorkRequest,
   ListTimelineEventsResponse,
   ChapterDetail,
   ChapterOutline,
@@ -455,16 +464,87 @@ function wrapCore(inner: NativeCoreBinding): NativeCore {
  * stays the single shape authority. Duplicating ~60 shapes here would be the
  * second handwritten shape set the plan forbids.
  */
-// Return type is inferred: this is the domain-method subset of `NativeCore`,
-// spread into the facade object that carries the pre-existing methods.
-function wrapDomainSurface(inner: NativeCoreBinding) {
+/**
+ * The domain-method subset of `NativeCore`, spread into the facade object
+ * that carries the pre-existing methods. The `Pick` gives every wrapper
+ * method its parameter types from the one interface declaration — no second
+ * signature table.
+ */
+type DomainSurface = Pick<
+  NativeCore,
+  | 'narrativeListWorlds'
+  | 'narrativeGetWorld'
+  | 'createWorld'
+  | 'deleteWorld'
+  | 'promoteWorldKbCandidate'
+  | 'patchWorldKbRelationship'
+  | 'worldKbKeyBlockState'
+  | 'createWorldFork'
+  | 'exportWorldPack'
+  | 'importWorldPack'
+  | 'listWorldRules'
+  | 'createWorldRule'
+  | 'updateWorldRule'
+  | 'listWorldFindings'
+  | 'timelineOverview'
+  | 'listTimelineEvents'
+  | 'listWorks'
+  | 'getWork'
+  | 'createWork'
+  | 'patchWork'
+  | 'deleteWork'
+  | 'appendWorkInspiration'
+  | 'setWorkPoolActive'
+  | 'releaseWorkCompletionLock'
+  | 'reconcileWorkChapters'
+  | 'selectWork'
+  | 'listWorkPool'
+  | 'promoteWorkPoolEntry'
+  | 'archiveWorkPoolEntry'
+  | 'addWorkInspiration'
+  | 'listWorkInspiration'
+  | 'promoteWorkInspiration'
+  | 'archiveWorkInspiration'
+  | 'listChapters'
+  | 'chapterDetail'
+  | 'chapterOutline'
+  | 'chapterBody'
+  | 'patchChapter'
+  | 'getWorkOutline'
+  | 'patchOutlineStructure'
+  | 'patchOutlineChapter'
+  | 'patchTimelineEvent'
+  | 'listKbEntries'
+  | 'addKbEntry'
+  | 'getKbEntry'
+  | 'deleteKbEntry'
+  | 'createFinding'
+  | 'createFindingFromReview'
+  | 'listFindings'
+  | 'getWorkFinding'
+  | 'getFinding'
+  | 'updateFinding'
+  | 'deleteFinding'
+  | 'batchUpdateFindings'
+  | 'listStaleFindings'
+  | 'pruneFindings'
+  | 'getReadingProgress'
+  | 'putReadingProgress'
+  | 'deleteReadingProgress'
+  | 'listAnnotations'
+  | 'createAnnotation'
+  | 'patchAnnotation'
+  | 'deleteAnnotation'
+  | 'listReferences'
+  | 'getReference'
+>;
+
+function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
   const wire = (value: unknown, label: string): Uint8Array =>
     encodeWireBuffer(value, undefined, label);
-  const json = async <T>(payload: Promise<Uint8Array>): Promise<T> => parseJsonBuffer<T>(await payload);
+  const json = async <T>(payload: Uint8Array | Promise<Uint8Array>): Promise<T> =>
+    parseJsonBuffer<T>(await payload);
   return {
-    async activePrincipal() {
-      return (await inner.activePrincipal()) as PrincipalHandle;
-    },
     async narrativeListWorlds(principal) {
       return json(await inner.narrativeListWorlds(principal));
     },
