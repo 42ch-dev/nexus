@@ -121,6 +121,7 @@ fn host_start_config(ws: &TestWorkspace) -> HostStartConfig {
             shutdown_ms: 2_000,
         },
         host_config: None,
+        admitted_catalog: None,
         // Verified probe owner bound to this fixture's workspace root. The
         // ready-path tests below create real sessions; without an owner every
         // registered entry stays unavailable and admission would refuse.
@@ -159,6 +160,7 @@ async fn build_host_with_owner(
         nexus_agent_host::HostPermissionResolver::new_native_only(
             &AgentHostConfig::default().policy,
         ),
+        nexus_acp_host::LocalSetBridge::new(),
     )
     .expect("valid ACP recipe");
     let launch = LaunchStrategy::Acp {
@@ -448,6 +450,7 @@ async fn missing_and_disabled_providers_refuse() {
         nexus_agent_host::HostPermissionResolver::new_native_only(
             &AgentHostConfig::default().policy,
         ),
+        nexus_acp_host::LocalSetBridge::new(),
     )
     .err()
     .expect("disabled provider must refuse");

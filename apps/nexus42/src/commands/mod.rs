@@ -11,101 +11,114 @@
     test,
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
+pub mod creator;
+
+#[cfg(feature = "legacy-cli")]
+#[deny(clippy::unwrap_used)]
+#[cfg_attr(
+    test,
+    allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
+)]
 pub mod acp;
+#[cfg(feature = "legacy-cli")]
 #[deny(clippy::unwrap_used)]
 #[cfg_attr(
     test,
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
 pub mod acp_trace;
+#[cfg(feature = "legacy-cli")]
 #[deny(clippy::unwrap_used)]
 #[cfg_attr(
     test,
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
 pub mod capability;
-// V1.148 P3 N-C0 (DF-72): Connect Host facade — compiled only with the
-// opt-in `connect-host` feature (`nexus42 connect start`).
+#[cfg(feature = "legacy-cli")]
 #[deny(clippy::unwrap_used)]
 #[cfg_attr(
     test,
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
 pub mod compute;
-#[cfg(feature = "connect-host")]
+#[cfg(all(feature = "legacy-cli", feature = "connect-host"))]
 #[deny(clippy::unwrap_used)]
 #[cfg_attr(
     test,
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
 pub mod connect;
-#[deny(clippy::unwrap_used)]
-#[cfg_attr(
-    test,
-    allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
-)]
-pub mod creator;
+#[cfg(feature = "legacy-cli")]
 #[deny(clippy::unwrap_used)]
 #[cfg_attr(
     test,
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
 pub mod daemon;
+#[cfg(feature = "legacy-cli")]
 #[deny(clippy::unwrap_used)]
 #[cfg_attr(
     test,
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
 pub mod daemon_run;
+#[cfg(feature = "legacy-cli")]
 #[deny(clippy::unwrap_used)]
 #[cfg_attr(
     test,
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
 pub mod desktop;
+#[cfg(feature = "legacy-cli")]
 #[deny(clippy::unwrap_used)]
 #[cfg_attr(
     test,
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
 pub mod host_call;
+#[cfg(feature = "legacy-cli")]
 #[deny(clippy::unwrap_used)]
 #[cfg_attr(
     test,
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
 pub mod local_creator_bootstrap;
-#[cfg(feature = "connect-client")]
+#[cfg(all(feature = "legacy-cli", feature = "connect-client"))]
 #[deny(clippy::unwrap_used)]
 #[cfg_attr(
     test,
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
 pub mod mcp;
+#[cfg(feature = "legacy-cli")]
 #[deny(clippy::unwrap_used)]
 #[cfg_attr(
     test,
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
 pub mod ops;
+#[cfg(feature = "legacy-cli")]
 #[deny(clippy::unwrap_used)]
 #[cfg_attr(
     test,
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
 pub mod platform;
+#[cfg(feature = "legacy-cli")]
 #[deny(clippy::unwrap_used)]
 #[cfg_attr(
     test,
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
 pub mod preset;
+#[cfg(feature = "legacy-cli")]
 #[deny(clippy::unwrap_used)]
 #[cfg_attr(
     test,
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
 pub mod sync;
+#[cfg(feature = "legacy-cli")]
 #[deny(clippy::unwrap_used)]
 #[cfg_attr(
     test,

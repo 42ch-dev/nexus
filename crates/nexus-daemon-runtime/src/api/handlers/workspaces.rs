@@ -6,6 +6,7 @@
 #![allow(clippy::missing_errors_doc)]
 
 use crate::api::errors::NexusApiError;
+use crate::config::{read_active_creator_id, read_active_workspace_slug};
 use crate::workspace::WorkspaceState;
 use axum::extract::{Query, State};
 use axum::Json;
@@ -242,29 +243,6 @@ fn scan_workspaces(
     });
 
     items
-}
-
-/// Read active `creator_id` from CLI config (config.toml in `nexus_home`).
-fn read_active_creator_id(nexus_home: &std::path::Path) -> Option<String> {
-    let config_path = nexus_home.join("config.toml");
-    let content = std::fs::read_to_string(&config_path).ok()?;
-    let config: toml::Value = toml::from_str(&content).ok()?;
-    config
-        .get("active_creator_id")
-        .and_then(|v| v.as_str())
-        .map(std::string::ToString::to_string)
-}
-
-/// Read active workspace slug for a creator from CLI config.
-fn read_active_workspace_slug(nexus_home: &std::path::Path, creator_id: &str) -> Option<String> {
-    let config_path = nexus_home.join("config.toml");
-    let content = std::fs::read_to_string(&config_path).ok()?;
-    let config: toml::Value = toml::from_str(&content).ok()?;
-    config
-        .get("active_workspace_slug_by_creator")
-        .and_then(|v| v.get(creator_id))
-        .and_then(|v| v.as_str())
-        .map(std::string::ToString::to_string)
 }
 
 /// Write active `creator_id` and workspace slug to CLI config (config.toml).

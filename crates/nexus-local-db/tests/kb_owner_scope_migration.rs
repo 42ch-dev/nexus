@@ -106,9 +106,15 @@ async fn run_migrator(pool: &SqlitePool, migrator: Migrator) {
 }
 
 /// Pool migrated to the full current schema (including the owner migration).
+///
+/// Uses the production admitted factory: post-upgrade fixture writes target
+/// guarded tables, which a raw pool cannot mutate (the protocol scalar
+/// functions are connection-local).
 async fn migrated_pool() -> (SqlitePool, tempfile::TempDir) {
-    let (pool, dir) = fresh_pool().await;
-    nexus_local_db::run_migrations(&pool).await.unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = nexus_local_db::init_pool(&dir.path().join("test.db"))
+        .await
+        .unwrap();
     (pool, dir)
 }
 
@@ -369,8 +375,9 @@ fn expect_unique_violation(result: Result<(), sqlx::Error>, case: &str) {
 #[tokio::test]
 #[allow(clippy::too_many_lines)] // single end-to-end byte-fidelity proof
 async fn pre_v1184_upgrade_preserves_bytes_children_and_schema_objects() {
-    let (pool, _dir) = fresh_pool().await;
+    let (pool, dir) = fresh_pool().await;
     run_migrator(&pool, pre_upgrade_migrator()).await;
+    let db_path = dir.path().join("test.db");
 
     // Sanity: owner columns do not exist pre-upgrade.
     let column_names: Vec<String> =
@@ -601,8 +608,11 @@ async fn pre_v1184_upgrade_preserves_bytes_children_and_schema_objects() {
 
     // ── Apply the owner-scope migration through the real production path ─
     // `run_migrations` scopes an FK-off window to the rebuild migration so
-    // the DROP/recreate does not cascade into child tables.
-    nexus_local_db::run_migrations(&pool).await.unwrap();
+    // the DROP/recreate does not cascade into child tables. The post-upgrade
+    // phase then continues on the admitted factory, because the remaining
+    // fixture mutations (cascade delete) target guarded tables.
+    drop(pool);
+    let pool = nexus_local_db::init_pool(&db_path).await.unwrap();
 
     // ── Byte/identity fidelity of legacy rows ───────────────────────────
     let post_rows = dump(&pool, LEGACY_ROW_DUMP_SQL).await;

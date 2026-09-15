@@ -112,8 +112,10 @@ async fn test_ctx() -> TestCtx {
 /// Seed a minimal Work row so gated presets can load a Work snapshot during
 /// gate evaluation. Returns the pool for further seeding if needed.
 async fn seed_work(db_path: &Path, work_id: &str, creator_id: &str) {
-    let db_url = format!("sqlite:{}?mode=rw", db_path.display());
-    let pool = sqlx::SqlitePool::connect(&db_url).await.unwrap();
+    let pool = nexus_local_db::init_engine_pool(db_path)
+        .await
+        .expect("seed_work: writer-protocol engine admission")
+        .clone_pool();
     let record = WorkRecord {
         work_id: work_id.to_string(),
         creator_id: creator_id.to_string(),
@@ -155,7 +157,10 @@ async fn seed_work(db_path: &Path, work_id: &str, creator_id: &str) {
 #[tokio::test]
 async fn schedule_delete_rolls_back_session_and_schedule_on_database_failure() {
     let ctx = test_ctx().await;
-    let pool = nexus_local_db::open_pool(&ctx.db_path).await.unwrap();
+    let pool = nexus_local_db::init_engine_pool(&ctx.db_path)
+        .await
+        .expect("fixture: writer-protocol engine admission")
+        .clone_pool();
     let context = serde_json::to_vec(&graph_flow::Context::new()).unwrap();
     sqlx::query(
         "INSERT INTO orchestration_sessions
@@ -749,11 +754,11 @@ async fn force_gates_writes_audit_row() {
         "Schedule should be created: {body}"
     );
 
-    // Query the audit table directly via a separate pool to the same DB
-    let audit_pool =
-        sqlx::SqlitePool::connect(&format!("sqlite:{}?mode=rw", ctx.db_path.display()))
-            .await
-            .unwrap();
+    // Query the audit table directly through an admitted engine pool.
+    let audit_pool = nexus_local_db::init_engine_pool(&ctx.db_path)
+        .await
+        .expect("audit: writer-protocol engine admission")
+        .clone_pool();
 
     let rows = list_force_gates_audit(&audit_pool, "ctr_audit")
         .await
@@ -807,8 +812,10 @@ async fn gate_failure_returns_422_with_structured_body() {
 
     // Create a Work with novel profile but WITHOUT running novel-project-init
     // and without the required directory scaffold.
-    let db_url = format!("sqlite:{}?mode=rw", ctx.db_path.display());
-    let pool = sqlx::SqlitePool::connect(&db_url).await.unwrap();
+    let pool = nexus_local_db::init_engine_pool(&ctx.db_path)
+        .await
+        .expect("gate fixture: writer-protocol engine admission")
+        .clone_pool();
 
     // Insert a work row directly with all required fields
     sqlx::query(

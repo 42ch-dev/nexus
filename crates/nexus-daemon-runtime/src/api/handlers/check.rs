@@ -37,7 +37,7 @@
 //!    parity (and the handler round-trips any future `error`-branch value into
 //!    the generated DTO defensively).
 //!
-//! Mapping table (mirrors `world_kb::map_upsert_reject` for the reachable set):
+//! Mapping table (mirrors the world-kb reject mappers for the reachable set):
 //!
 //! | `SpokeRejectCode` | `NexusApiError` |
 //! |-------------------|-----------------|
@@ -154,7 +154,7 @@ pub async fn run_check(
     }
 
     // Map the daemon DTO onto the spoke `CheckRequest` wire shape via JSON
-    // round-trip (mirrors `world_kb::build_spoke_upsert_request`; the adapter
+    // round-trip (mirrors the world-kb spoke-request builders; the adapter
     // is the only import boundary — no direct spoke-operations /
     // spoke-schemas dependency in this crate). `world_id` is intentionally not
     // carried: spoke's scope.scope_id is the world selector (already validated
@@ -196,7 +196,7 @@ pub async fn run_check(
 
     match result {
         // Success branch: findings (possibly empty). Round-trip through JSON
-        // into the generated daemon DTO (mirrors map_upsert_response's wire
+        // into the generated daemon DTO (mirrors the world-kb response mappers' wire
         // round-trip; validates the spoke payload against the wire contract
         // at the boundary).
         SpokeResult::Ok(spoke_resp) => {

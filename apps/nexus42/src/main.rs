@@ -16,6 +16,7 @@ fn main() {
     // R-V146P2-QC1-S1: the library entry returns the rendered help rather
     // than calling `std::process::exit` itself; the binary owns the exit so
     // the library call is unit-testable and never terminates a consumer.
+    #[cfg(feature = "legacy-cli")]
     if let Some(help) = nexus42::commands::creator::run::maybe_render_preset_run_help() {
         // R-V146P2-QC3-S1: flush stdout before exit so the buffered `print!`
         // text is not dropped when the process terminates. Without the flush,
@@ -36,6 +37,7 @@ fn main() {
     // sidecars inherit a minimal macOS PATH; `setenv` must not race concurrent
     // `getenv` on a live multi-threaded runtime (Greptile P2 on run_daemon).
     // Logging is already initialized so join_paths failures surface as warnings.
+    #[cfg(feature = "legacy-cli")]
     nexus_daemon_runtime::path_enrichment::apply_process_path_enrichment();
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -52,9 +54,16 @@ fn main() {
         // - All other errors:                   exit 1
         let code = if matches!(e, nexus42::errors::CliError::Locked { .. }) {
             75
-        } else if matches!(e, nexus42::errors::CliError::LockIo(_)) {
+        } else if matches!(
+            e,
+            nexus42::errors::CliError::LockIo(_) | nexus42::errors::CliError::Config(_)
+        ) {
             78
-        } else if matches!(e, nexus42::errors::CliError::VersionConflict { .. }) {
+        } else if matches!(
+            e,
+            nexus42::errors::CliError::VersionConflict { .. }
+                | nexus42::errors::CliError::WorldKbConflict { .. }
+        ) {
             76
         } else if let nexus42::errors::CliError::ComputeExit { code, .. } = e {
             // V1.170 P0 (AR-9): the compute group owns its exit-code
@@ -78,10 +87,7 @@ async fn async_main(cli: Cli) -> Result<()> {
     let mut config = CliConfig::load().unwrap_or_default();
 
     // Resolve persistent device ID (UUID v4) for platform HTTP requests.
-    // Only create the device-id file if the nexus home already exists
-    // (i.e., the user has already run `init workspace` or equivalent).
-    // `get_or_create_device_id` takes the RAW home and joins `.nexus42`
-    // itself (canonical `~/.nexus42/device-id`; device_id_path contract).
+    #[cfg(feature = "legacy-cli")]
     if let (Ok(nexus_home), Some(raw_home)) = (nexus42::config::nexus_home(), dirs::home_dir()) {
         if nexus_home.exists() {
             match nexus_cloud_sync::device_id::get_or_create_device_id(&raw_home) {
@@ -101,11 +107,16 @@ async fn async_main(cli: Cli) -> Result<()> {
     // Execute command
     let output_format = cli.output_format().to_string();
     match cli.into_command() {
+        Some(Commands::Creator { command }) => {
+            nexus42::commands::creator::run(command, &config).await
+        }
+        #[cfg(feature = "legacy-cli")]
         Some(Commands::Daemon { command }) => {
             nexus42::commands::daemon::run(command, &config).await
         }
-        #[cfg(feature = "connect-host")]
+        #[cfg(all(feature = "legacy-cli", feature = "connect-host"))]
         Some(Commands::Connect { command }) => nexus42::commands::connect::run(command).await,
+        #[cfg(feature = "legacy-cli")]
         Some(Commands::Sync { command }) => {
             eprintln!(
                 "Warning: `nexus42 sync` is deprecated. Use `nexus42 platform sync` instead. \
@@ -113,30 +124,37 @@ async fn async_main(cli: Cli) -> Result<()> {
             );
             nexus42::commands::sync::run(command, &config).await
         }
-        Some(Commands::Creator { command }) => {
-            nexus42::commands::creator::run(command, &config).await
-        }
+        #[cfg(feature = "legacy-cli")]
         Some(Commands::Acp { command }) => nexus42::commands::acp::run(command, &config).await,
+        #[cfg(feature = "legacy-cli")]
         Some(Commands::Compute { command }) => {
             nexus42::commands::compute::run(command, &config, &output_format).await
         }
+        #[cfg(feature = "legacy-cli")]
         Some(Commands::Capability { command }) => {
             nexus42::commands::capability::run(command, &config, &output_format).await
         }
+        #[cfg(feature = "legacy-cli")]
         Some(Commands::DaemonRun(args)) => nexus42::commands::daemon_run::run(args).await,
-        #[cfg(feature = "connect-client")]
+        #[cfg(all(feature = "legacy-cli", feature = "connect-client"))]
         Some(Commands::Mcp { command }) => nexus42::commands::mcp::run(command, &config).await,
+        #[cfg(feature = "legacy-cli")]
         Some(Commands::System { command }) => {
             nexus42::commands::system::run(command, &config).await
         }
+        #[cfg(feature = "legacy-cli")]
         Some(Commands::Preset { command }) => {
             nexus42::commands::preset::run(command, &config).await
         }
+        #[cfg(feature = "legacy-cli")]
         Some(Commands::Desktop { command }) => nexus42::commands::desktop::run(command).await,
+        #[cfg(feature = "legacy-cli")]
         Some(Commands::Platform { command }) => {
             nexus42::commands::platform::run(command, &config, &output_format).await
         }
+        #[cfg(feature = "legacy-cli")]
         Some(Commands::HostCall(args)) => nexus42::commands::host_call::run(args, &config).await,
+        #[cfg(feature = "legacy-cli")]
         Some(Commands::Ops { command }) => nexus42::commands::ops::run(command, &config).await,
         None => {
             Cli::parse_from(["nexus42", "--help"]);

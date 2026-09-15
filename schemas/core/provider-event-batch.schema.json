@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/provider-event-batch.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ProviderEventBatch",
+  "description": "Bounded pull batch for provider events (max 16 events / 256KiB per architecture §7).",
+  "type": "object",
+  "required": ["operation_id", "events", "has_more"],
+  "additionalProperties": false,
+  "properties": {
+    "operation_id": { "type": "string" },
+    "events": {
+      "type": "array",
+      "maxItems": 16,
+      "items": { "$ref": "provider-host-event.schema.json" }
+    },
+    "has_more": { "type": "boolean" },
+    "gap": { "$ref": "#/$defs/CoreStreamGap" }
+  },
+  "$defs": {
+    "CoreStreamGap": {
+      "type": "object",
+      "required": ["reason", "operation_id", "resync_required", "inspect_url"],
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": "string",
+          "enum": ["lagging", "oversized", "history_unavailable", "interrupted"]
+        },
+        "operation_id": { "type": ["string", "null"] },
+        "resync_required": { "type": "boolean", "const": true },
+        "inspect_url": { "type": "string" }
+      }
+    }
+  }
+}

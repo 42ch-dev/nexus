@@ -180,13 +180,10 @@ async fn two_serial_schedules_hand_off_after_first_completes() {
 async fn test_supervisor_with_inmemory_db() -> Arc<ScheduleSupervisor> {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
-    let pool = nexus_local_db::open_pool(&db_path)
+    let guarded = nexus_local_db::init_engine_pool(&db_path)
         .await
         .expect("open pool");
-    nexus_local_db::run_migrations(&pool)
-        .await
-        .expect("run migrations");
     // Keep dir alive by leaking it — fine for tests
     std::mem::forget(dir);
-    Arc::new(ScheduleSupervisor::new(Arc::new(pool)))
+    Arc::new(ScheduleSupervisor::new(Arc::new(guarded.clone_pool())))
 }

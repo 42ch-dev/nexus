@@ -103,12 +103,14 @@ pub use adapter::knowledge_entry_port::is_world_conflict_reject;
 // on `resolve_module_id`'s InvalidInput) — the Connect compute gate
 // classifies the defined `module_not_found` denial by marker, never by
 // message sniffing.
+#[cfg(feature = "compute")]
 pub use adapter::computable_port::is_module_identity_missing_reject;
 
 // V1.154 P2 (P2 QC fix wave FW-4): shared single-component module-id
 // path-safety check — the Connect gate's host-store check and the adapter's
 // user-module loader route through it so gate and execution guard cannot
 // drift.
+#[cfg(feature = "compute")]
 pub use adapter::computable_port::is_safe_module_id;
 
 // V1.145 P2 — `SpokeBackedKbStore` (the `KbStore` impl injected at the MCA
@@ -179,4 +181,5 @@ pub use spoke_operations::{
 // foreign-world refs before delegating to spoke `orchestrate_check`. Both
 // production callers (daemon `check.rs`, Connect `invoke.rs` Route::Check)
 // cross this single choke point.
+pub use adapter::knowledge_entry_port::put_knowledge_entry_in_tx;
 pub use adapter::rule_query_port::orchestrate_check_world_scoped;

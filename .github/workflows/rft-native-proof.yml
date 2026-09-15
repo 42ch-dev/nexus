@@ -1,0 +1,508 @@
+name: RFT Native Package Proof
+
+# V1.189 P3-T1 (RFT-03): four-platform native package/install/inspection proof.
+#
+# Architecture-contracts §9 pins are asserted per row and recorded per run:
+#   Node   22.22.0 (service floor) and 24.20.0 (test cohort)
+#   Rust   1.98.1
+#   macOS  Xcode 16.4, MACOSX_DEPLOYMENT_TARGET=11.0 (native addon ABI floor)
+#   Win    VS 2022 17.14 / MSVC v143 / Windows SDK 10.0.26100
+#   Linux  glibc 2.28 sysroot + GCC >= 10.1 (manylinux_2_28 image)
+#
+# Honesty rules encoded here:
+#   - every row executes its own binaries natively; there is no emulation,
+#     cross-loading, install-only or unsigned-substitute pass;
+#   - a missing runner, missing image or mismatched toolchain fails the row
+#     with the measured value recorded in the evidence — never a green pass;
+#   - `native-package-matrix.json` reports `unavailable` for a row whose
+#     evidence file is absent, and the job fails: a missing row blocks P3
+#     (plan: "Missing row blocks P3; missing input = blocked").
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, iteration/v1.189]
+    paths: &proof-paths
+      - 'packages/nexus-native/**'
+      - 'packages/nexus-native-*/**'
+      - 'crates/nexus-core-node/**'
+      - 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py'
+      - '.github/workflows/rft-native-proof.yml'
+  pull_request:
+    branches: [main, iteration/v1.189]
+    paths: *proof-paths
+
+concurrency:
+  group: rft-native-proof-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  # Cargo needs the committed sqlx metadata (same convention as ci.yml).
+  SQLX_OFFLINE: "true"
+  CARGO_INCREMENTAL: "0"
+  RUST_TOOLCHAIN: "1.98.1"
+  PNPM_VERSION: "11.25.0"
+  NODE_FLOOR: "22.22.0"
+  NODE_COHORT: "24.20.0"
+  EVIDENCE: .mstar/iterations/v1.189/guides/evidence
+  # --- immutable build inputs (architecture-contracts §9) -------------------
+  # Every row used to consume at least one mutable input: a moving container
+  # tag on the Linux row and an at-execution-time installer download. Both are
+  # now addressed by immutable identity and the identifiers are written into
+  # the evidence (`proof-build-inputs-*.json`).
+  # Hosted rows: the toolchain installer is the SHA-pinned action below; the
+  # runner label is the pinned image identity for that OS.
+  RUST_INSTALLER_ACTION: "dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8"
+  # Linux row: manylinux_2_28_x86_64:latest resolved 2026-09-13 (linux/amd64).
+  # The digest is the schema-2 manifest digest and equals the SHA-256 of the
+  # manifest body; the runner pulls by digest, so the tag can never be repointed.
+  MANYLINUX_IMAGE: "quay.io/pypa/manylinux_2_28_x86_64"
+  MANYLINUX_TAG: "latest"
+  MANYLINUX_RESOLVED_AT: "2026-09-13"
+  MANYLINUX_IMAGE_DIGEST: "sha256:53390351aeb4688114b02c36a23b3e6ce1166ee9b7afc5df1a4f776354fc764c"
+  # rustup-init from the version-addressed archive (not the sh.rustup.rs
+  # redirector, whose content changes per release). The downloaded binary is
+  # verified against this digest before execution; the same value is published
+  # in the artifact's own `.sha256` sidecar at that immutable URL.
+  RUSTUP_INIT_VERSION: "1.28.2"
+  RUSTUP_INIT_TARGET: "x86_64-unknown-linux-gnu"
+  RUSTUP_INIT_SHA256: "20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c"
+
+jobs:
+  native-package-proof:
+    name: ${{ matrix.slug }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - slug: win32-x64-msvc
+            os: windows-2022
+            short: win
+            target: x86_64-pc-windows-msvc
+          - slug: darwin-arm64
+            os: macos-15
+            short: macarm
+            target: aarch64-apple-darwin
+          # The x64 macOS row needs an Intel runner: the artifact must be
+          # executed by the architecture it ships, and Rosetta would be a
+          # translated run, not a native one.
+          - slug: darwin-x64
+            os: macos-15-intel
+            short: macx64
+            target: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Record immutable build inputs
+        shell: bash
+        env:
+          ROW_SLUG: ${{ matrix.slug }}
+          RUNNER_LABEL: ${{ matrix.os }}
+          RUST_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${EVIDENCE}"
+          cat > "${EVIDENCE}/proof-build-inputs-${ROW_SLUG}.json" <<JSON
+          {
+            "schema": "rft-p3-t1-build-inputs/v1",
+            "row": "${ROW_SLUG}",
+            "source_sha": "${GITHUB_SHA}",
+            "runner_label": "${RUNNER_LABEL}",
+            "rust": {
+              "toolchain": "${RUST_TOOLCHAIN}",
+              "target": "${RUST_TARGET}",
+              "installer_action": "${RUST_INSTALLER_ACTION}"
+            },
+            "node": { "floor": "${NODE_FLOOR}", "cohort": "${NODE_COHORT}" },
+            "pnpm": "${PNPM_VERSION}",
+            "container": null,
+            "note": "hosted row: the pinned toolchain installer action plus the pinned runner label are the immutable inputs; measured toolchain versions are recorded by inspect-binary.mjs"
+          }
+          JSON
+          cat "${EVIDENCE}/proof-build-inputs-${ROW_SLUG}.json"
+
+      - uses: ./.github/actions/setup-monorepo
+        with:
+          node-version: ${{ env.NODE_FLOOR }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          rust-toolchain: ${{ env.RUST_TOOLCHAIN }}
+          # wasm32-unknown-unknown: nexus-core-node's graph pulls
+          # nexus-wasm-host, whose build.rs compiles the embedded modules.
+          rust-targets: ${{ matrix.target }},wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
+        with:
+          shared-key: nexus-rust-rft-native-${{ matrix.slug }}
+          workspaces: .
+          cache-all-crates: false
+          cache-on-failure: false
+
+      - name: Assert macOS toolchain contract (Xcode 16.4, deployment target 11.0)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -d /Applications/Xcode_16.4.app ]; then
+            sudo xcode-select -s /Applications/Xcode_16.4.app
+          fi
+          xcode_version="$(xcodebuild -version)"
+          printf '%s\n' "${xcode_version}"
+          if [[ "${xcode_version}" != *"Xcode 16.4"* ]]; then
+            echo "::error::expected Xcode 16.4 (architecture-contracts §9); runner image provides the version above"
+            exit 1
+          fi
+          echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+          echo "MACOSX_DEPLOYMENT_TARGET=11.0 (native addon ABI floor)"
+
+      - name: Assert Windows toolchain contract (VS 2022 17.14, SDK 10.0.26100)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path $vswhere)) { Write-Error "vswhere not found at $vswhere"; exit 1 }
+          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationVersion
+          Write-Output "Visual Studio $vs"
+          if (-not $vs.StartsWith('17.14')) {
+            Write-Error "expected VS 2022 17.14 (architecture-contracts §9); runner image provides $vs"
+            exit 1
+          }
+          $sdkRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Include'
+          $sdks = @(Get-ChildItem $sdkRoot -Directory | Select-Object -ExpandProperty Name)
+          Write-Output "Windows SDKs: $($sdks -join ', ')"
+          if ($sdks -notcontains '10.0.26100.0') {
+            Write-Error "expected Windows SDK 10.0.26100 (architecture-contracts §9); runner image provides $($sdks -join ', ')"
+            exit 1
+          }
+      - name: Set up Python 3.12.10 for Windows ACP fixture
+        id: setup-python
+        if: runner.os == 'Windows'
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c  # v6.0.0
+        with:
+          python-version: '3.12.10'
+          architecture: x64
+
+      - name: Build contracts and loader facade
+        run: |
+          pnpm --filter @42ch/nexus-contracts run build
+          pnpm --filter @42ch/nexus-native run build
+
+      - name: Package target tarballs
+        run: node packages/nexus-native/scripts/package.mjs --target ${{ matrix.target }} --out ${{ env.EVIDENCE }}/native-packages/${{ matrix.slug }}
+
+      - name: Inspect the real artifact
+        run: node packages/nexus-native/scripts/inspect-binary.mjs --target ${{ matrix.target }} --artifact packages/nexus-native-${{ matrix.slug }}/native/nexus_core_node.node --out ${{ env.EVIDENCE }}/native-binary-${{ matrix.slug }}
+
+      - name: Install proof under Node ${{ env.NODE_FLOOR }}
+        env:
+          PYTHON: ${{ steps.setup-python.outputs.python-path }}
+        run: node packages/nexus-native/scripts/proof-install.mjs --target ${{ matrix.target }} --node-version ${{ env.NODE_FLOOR }} --pack-dir ${{ env.EVIDENCE }}/native-packages/${{ matrix.slug }} --out ${{ env.EVIDENCE }}/install-${{ matrix.short }}22
+
+      # Second Node cohort: swap the runtime only. Dependencies are already
+      # installed and the Rust toolchain is not re-fetched.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: ${{ env.NODE_COHORT }}
+
+      - name: Install proof under Node ${{ env.NODE_COHORT }}
+        env:
+          PYTHON: ${{ steps.setup-python.outputs.python-path }}
+        run: node packages/nexus-native/scripts/proof-install.mjs --target ${{ matrix.target }} --node-version ${{ env.NODE_COHORT }} --pack-dir ${{ env.EVIDENCE }}/native-packages/${{ matrix.slug }} --out ${{ env.EVIDENCE }}/install-${{ matrix.short }}24
+
+      - name: Upload row evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: rft-native-evidence-${{ matrix.slug }}
+          # Tarballs stay on the runner (large and reproducible); the evidence
+          # JSONs are what the matrix summary consumes.
+          path: |
+            ${{ env.EVIDENCE }}/proof-build-inputs-${{ matrix.slug }}.json
+            ${{ env.EVIDENCE }}/native-packages/${{ matrix.slug }}/package-receipt.json
+            ${{ env.EVIDENCE }}/native-binary-${{ matrix.slug }}/binary-inspection.json
+            ${{ env.EVIDENCE }}/install-${{ matrix.short }}22/install-proof.json
+            ${{ env.EVIDENCE }}/install-${{ matrix.short }}24/install-proof.json
+          if-no-files-found: warn
+
+  # The glibc 2.28 floor cannot be produced by a modern host toolchain: the
+  # artifact must be linked against the declared sysroot, so this row builds and
+  # runs inside the manylinux_2_28 image (glibc 2.28 + gcc-toolset) and its
+  # install proof executes inside that same runtime.
+  linux-gnu-proof:
+    name: linux-x64-gnu
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    container:
+      # Pinned by immutable digest (see MANYLINUX_IMAGE_DIGEST). A tag, even a
+      # version-looking one, can be repointed; a digest cannot.
+      image: quay.io/pypa/manylinux_2_28_x86_64@sha256:53390351aeb4688114b02c36a23b3e6ce1166ee9b7afc5df1a4f776354fc764c
+    env:
+      TARGET: x86_64-unknown-linux-gnu
+      SHORT: linux
+      RUSTUP_HOME: /root/.rustup
+      CARGO_HOME: /root/.cargo
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Record immutable build inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${EVIDENCE}"
+          cat > "${EVIDENCE}/proof-build-inputs-linux-x64-gnu.json" <<JSON
+          {
+            "schema": "rft-p3-t1-build-inputs/v1",
+            "row": "linux-x64-gnu",
+            "source_sha": "${GITHUB_SHA}",
+            "runner_label": "ubuntu-24.04",
+            "rust": {
+              "toolchain": "${RUST_TOOLCHAIN}",
+              "target": "${TARGET}",
+              "installer_url": "https://static.rust-lang.org/rustup/archive/${RUSTUP_INIT_VERSION}/${RUSTUP_INIT_TARGET}/rustup-init",
+              "installer_version": "${RUSTUP_INIT_VERSION}",
+              "installer_sha256": "${RUSTUP_INIT_SHA256}"
+            },
+            "node": { "floor": "${NODE_FLOOR}", "cohort": "${NODE_COHORT}" },
+            "pnpm": "${PNPM_VERSION}",
+            "container": {
+              "image": "${MANYLINUX_IMAGE}",
+              "tag_at_resolution": "${MANYLINUX_TAG}",
+              "resolved_at": "${MANYLINUX_RESOLVED_AT}",
+              "digest": "${MANYLINUX_IMAGE_DIGEST}",
+              "reference": "${MANYLINUX_IMAGE}@${MANYLINUX_IMAGE_DIGEST}"
+            },
+            "note": "container and rustup-init are addressed by immutable identity; the artifact is built and executed against the image's glibc 2.28 runtime"
+          }
+          JSON
+          cat "${EVIDENCE}/proof-build-inputs-linux-x64-gnu.json"
+
+      - name: Assert glibc 2.28 sysroot and GCC >= 10.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -n '1,2p' /etc/os-release
+          glibc_line="$(ldd --version 2>&1 | sed -n '1p')"
+          cc_line="$(cc --version 2>&1 | sed -n '1p')"
+          echo "${glibc_line}"
+          echo "${cc_line}"
+          printf '%s\n' "${glibc_line}" | grep -qE ' 2\.28(\.|$)' || {
+            echo "::error::expected a glibc 2.28 sysroot (architecture-contracts §9)"
+            exit 1
+          }
+          gcc_major="$(cc -dumpversion | cut -d. -f1)"
+          [ "${gcc_major}" -ge 10 ] || {
+            echo "::error::expected GCC >= 10.1 (found ${gcc_major})"
+            exit 1
+          }
+
+      # rustup is the one tool this image does not ship. The installer comes
+      # from the version-addressed archive (immutable URL) and is verified
+      # against RUSTUP_INIT_SHA256 before anything executes it; dtolnay/
+      # rust-toolchain is not usable on a bare image.
+      - name: Install pinned Rust toolchain (integrity-checked rustup-init)
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup_url="https://static.rust-lang.org/rustup/archive/${RUSTUP_INIT_VERSION}/${RUSTUP_INIT_TARGET}/rustup-init"
+          rustup_init="/tmp/rustup-init-${RUSTUP_INIT_VERSION}"
+          curl --proto '=https' --tlsv1.2 -sSf "${rustup_url}" -o "${rustup_init}"
+          sidecar="$(curl --proto '=https' --tlsv1.2 -sSf "${rustup_url}.sha256" | awk '{print $1}')"
+          measured="$(sha256sum "${rustup_init}" | awk '{print $1}')"
+          if [ "${sidecar}" != "${RUSTUP_INIT_SHA256}" ]; then
+            echo "::error::published rustup-init sidecar ${sidecar} does not match the pinned ${RUSTUP_INIT_SHA256}"
+            exit 1
+          fi
+          if [ "${measured}" != "${RUSTUP_INIT_SHA256}" ]; then
+            echo "::error::rustup-init integrity mismatch: pinned ${RUSTUP_INIT_SHA256}, measured ${measured}"
+            exit 1
+          fi
+          chmod +x "${rustup_init}"
+          "${rustup_init}" -y --no-modify-path --profile minimal \
+            --default-toolchain "${RUST_TOOLCHAIN}" \
+            --target x86_64-unknown-linux-gnu --target wasm32-unknown-unknown
+          mkdir -p "${EVIDENCE}"
+          printf '%s  rustup-init-%s\n' "${measured}" "${RUSTUP_INIT_VERSION}" \
+            > "${EVIDENCE}/proof-rustup-init-${RUSTUP_INIT_VERSION}.sha256.txt"
+          echo "${CARGO_HOME}/bin" >> "$GITHUB_PATH"
+          "${CARGO_HOME}/bin/rustc" -Vv
+
+      - uses: ./.github/actions/setup-monorepo
+        with:
+          node-version: ${{ env.NODE_FLOOR }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          rust-toolchain: ""
+
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
+        with:
+          shared-key: nexus-rust-rft-native-linux-x64-gnu
+          workspaces: .
+          cache-all-crates: false
+          cache-on-failure: false
+
+      - name: Build contracts and loader facade
+        run: |
+          pnpm --filter @42ch/nexus-contracts run build
+          pnpm --filter @42ch/nexus-native run build
+
+      - name: Package target tarballs
+        run: node packages/nexus-native/scripts/package.mjs --target ${TARGET} --out ${EVIDENCE}/native-packages/linux-x64-gnu
+
+      - name: Inspect the real artifact
+        run: node packages/nexus-native/scripts/inspect-binary.mjs --target ${TARGET} --artifact packages/nexus-native-linux-x64-gnu/native/nexus_core_node.node --out ${EVIDENCE}/native-binary-linux-x64-gnu
+
+      - name: Install proof under Node ${{ env.NODE_FLOOR }}
+        run: node packages/nexus-native/scripts/proof-install.mjs --target ${TARGET} --node-version ${NODE_FLOOR} --pack-dir ${EVIDENCE}/native-packages/linux-x64-gnu --out ${EVIDENCE}/install-${SHORT}22
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: ${{ env.NODE_COHORT }}
+
+      - name: Install proof under Node ${{ env.NODE_COHORT }}
+        run: node packages/nexus-native/scripts/proof-install.mjs --target ${TARGET} --node-version ${NODE_COHORT} --pack-dir ${EVIDENCE}/native-packages/linux-x64-gnu --out ${EVIDENCE}/install-${SHORT}24
+
+      - name: Upload row evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: rft-native-evidence-linux-x64-gnu
+          path: |
+            ${{ env.EVIDENCE }}/proof-build-inputs-linux-x64-gnu.json
+            ${{ env.EVIDENCE }}/proof-rustup-init-${{ env.RUSTUP_INIT_VERSION }}.sha256.txt
+            ${{ env.EVIDENCE }}/native-packages/linux-x64-gnu/package-receipt.json
+            ${{ env.EVIDENCE }}/native-binary-linux-x64-gnu/binary-inspection.json
+            ${{ env.EVIDENCE }}/install-linux22/install-proof.json
+            ${{ env.EVIDENCE }}/install-linux24/install-proof.json
+          if-no-files-found: warn
+
+  native-package-matrix-summary:
+    name: Matrix summary (all four rows)
+    runs-on: ubuntu-latest
+    needs: [native-package-proof, linux-gnu-proof]
+    if: always()
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: rft-native-evidence-*
+          merge-multiple: true
+          path: rft-native-evidence
+
+      - name: Consolidate matrix evidence
+        shell: bash
+        env:
+          MATRIX_JOB_RESULT: ${{ needs.native-package-proof.result }}
+          LINUX_JOB_RESULT: ${{ needs.linux-gnu-proof.result }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${EVIDENCE}"
+          node --input-type=module -e "$(cat <<'JS'
+          import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          const root = 'rft-native-evidence';
+          const rows = [
+            { suffix: 'linux-x64-gnu', short: 'linux', job_result: process.env.LINUX_JOB_RESULT },
+            { suffix: 'win32-x64-msvc', short: 'win', job_result: process.env.MATRIX_JOB_RESULT },
+            { suffix: 'darwin-arm64', short: 'macarm', job_result: process.env.MATRIX_JOB_RESULT },
+            { suffix: 'darwin-x64', short: 'macx64', job_result: process.env.MATRIX_JOB_RESULT },
+          ];
+          const out = [];
+          const buildInputs = [];
+          for (const row of rows) {
+            const files = {
+              package_receipt: join(root, 'native-packages', row.suffix, 'package-receipt.json'),
+              binary_inspection: join(root, 'native-binary-' + row.suffix, 'binary-inspection.json'),
+              install_node_floor: join(root, 'install-' + row.short + '22', 'install-proof.json'),
+              install_node_cohort: join(root, 'install-' + row.short + '24', 'install-proof.json'),
+            };
+            const immutableInputsPath = join(root, 'proof-build-inputs-' + row.suffix + '.json');
+            const immutableInputs = existsSync(immutableInputsPath)
+              ? JSON.parse(readFileSync(immutableInputsPath, 'utf8'))
+              : null;
+            if (immutableInputs) buildInputs.push(immutableInputs);
+            const states = {};
+            const missing = [];
+            for (const [key, path] of Object.entries(files)) {
+              if (existsSync(path)) {
+                states[key] = JSON.parse(readFileSync(path, 'utf8')).status;
+              } else {
+                states[key] = 'unavailable';
+                missing.push(path);
+              }
+            }
+            // A row must carry its immutable build-input record too, or its
+            // provenance is unverifiable and the row cannot be a pass.
+            if (!immutableInputs) {
+              states.build_inputs = 'unavailable';
+              missing.push(immutableInputsPath);
+            } else {
+              states.build_inputs = 'recorded';
+            }
+            const values = Object.values(states);
+            const status = values.includes('fail')
+              ? 'fail'
+              : values.every((value) => value === 'pass' || value === 'recorded')
+                ? 'pass'
+                : 'unavailable';
+            out.push({
+              suffix: row.suffix,
+              job_result: row.job_result,
+              states,
+              missing_evidence: missing,
+              build_inputs: immutableInputs,
+              status,
+            });
+          }
+          const jobFailure = [process.env.MATRIX_JOB_RESULT, process.env.LINUX_JOB_RESULT].some(
+            (result) => result !== 'success',
+          );
+          const decision = jobFailure
+            ? 'fail'
+            : out.every((row) => row.status === 'pass')
+              ? 'pass'
+              : out.some((row) => row.status === 'fail')
+                ? 'fail'
+                : 'unavailable';
+          const payload = {
+            schema: 'rft-p3-t1-native-package-matrix/v1',
+            source_sha: process.env.GITHUB_SHA ?? null,
+            run_id: process.env.GITHUB_RUN_ID ?? null,
+            utc: new Date().toISOString(),
+            jobs: { native_package_proof: process.env.MATRIX_JOB_RESULT, linux_gnu_proof: process.env.LINUX_JOB_RESULT },
+            build_inputs: buildInputs,
+            pinned: {
+              rust_toolchain: process.env.RUST_TOOLCHAIN,
+              node_floor: process.env.NODE_FLOOR,
+              node_cohort: process.env.NODE_COHORT,
+              pnpm: process.env.PNPM_VERSION,
+              manylinux_image: process.env.MANYLINUX_IMAGE,
+              manylinux_digest: process.env.MANYLINUX_IMAGE_DIGEST,
+              rustup_init_version: process.env.RUSTUP_INIT_VERSION,
+              rustup_init_sha256: process.env.RUSTUP_INIT_SHA256,
+            },
+            rows: out,
+            decision,
+            note: 'unavailable means the evidence file was never produced (runner, image or toolchain contract missing) — it blocks P3 and is never a pass',
+          };
+          mkdirSync(process.env.EVIDENCE, { recursive: true });
+          writeFileSync(join(process.env.EVIDENCE, 'native-package-matrix.json'), JSON.stringify(payload, null, 2) + '\n');
+          console.log(JSON.stringify(out, null, 2));
+          if (decision !== 'pass') {
+            console.error('::error::P3-T1 native package matrix is ' + decision + ' — a missing row blocks P3');
+            process.exit(1);
+          }
+          JS
+          )"
+
+      - name: Upload matrix evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: rft-native-package-matrix
+          path: .mstar/iterations/v1.189/guides/evidence/native-package-matrix.json
+          if-no-files-found: warn

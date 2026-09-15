@@ -20,7 +20,10 @@
 //! no longer captures a runtime handle and can be constructed anywhere.
 
 pub mod activation;
+#[cfg(feature = "compute")]
 pub mod computable_port;
+#[cfg(not(feature = "compute"))]
+pub mod computable_port_stub;
 pub mod finding_port;
 pub mod fork_port;
 pub mod host_manifest_port;
@@ -32,6 +35,7 @@ pub mod relation_port;
 pub mod rule_query_port;
 pub mod scope_query_port;
 
+#[cfg(feature = "compute")]
 use nexus_wasm_host::ModuleCache;
 use sqlx::SqlitePool;
 use std::path::{Path, PathBuf};
@@ -71,6 +75,7 @@ pub struct NexusAdapter<'a> {
     /// (per-process singleton), so the cache is process-wide there; a
     /// changed module file (new bytes hash) recompiles and overwrites the
     /// entry (the cache's only eviction).
+    #[cfg(feature = "compute")]
     module_cache: ModuleCache,
     /// When set (via [`Self::with_tx_cell`]), `put_knowledge_entry` joins this
     /// transaction instead of opening its own. The handler moves the
@@ -92,6 +97,7 @@ impl NexusAdapter<'static> {
             pool,
             host_id: None,
             user_modules_dir: None,
+            #[cfg(feature = "compute")]
             module_cache: ModuleCache::new(),
             bound_tx_cell: None,
         }
@@ -136,7 +142,7 @@ impl<'a> NexusAdapter<'a> {
 
     /// The per-adapter compiled-module cache (P2 QC fix wave FW-2). Test
     /// seam: in-crate tests observe cache hits / recompiles through it.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "compute"))]
     #[must_use]
     pub(crate) const fn module_cache(&self) -> &ModuleCache {
         &self.module_cache

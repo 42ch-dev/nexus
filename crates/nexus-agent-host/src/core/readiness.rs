@@ -132,20 +132,20 @@ pub fn fingerprint_launch(launch: &LaunchStrategy) -> u64 {
     hasher.finish()
 }
 
-/// Discover catalog candidates and construct adapters (no probe).
+/// Discover and admit the provider catalog (PATH scan + recipe validation).
+///
+/// Does not construct adapters. Callers that need live rows should pass the
+/// returned entries to [`build_provider_entries_from_catalog`] with their own
+/// `LocalSetBridge`.
 ///
 /// # Errors
 ///
 /// Returns a [`HostError`] when the configured provider set is invalid, when
 /// the PATH scan cannot read the process `PATH`, or when the catalog merge
-/// rejects an entry. Adapter construction failures are NOT errors: that
-/// provider is admitted as an unavailable candidate so the catalog can still
-/// explain why it is not ready.
-pub fn discover_provider_entries(
+/// rejects an entry.
+pub fn discover_provider_catalog(
     host_config: &crate::config::AgentHostConfig,
-    timeouts: &TimeoutConfig,
-    permission_resolver: &HostPermissionResolver,
-) -> HostResult<std::collections::HashMap<ProviderId, ProviderEntry>> {
+) -> HostResult<Vec<ProviderCatalogEntry>> {
     use crate::discovery::{catalog::ProviderCatalog, config, path_scan};
 
     crate::providers::validate_agent_host_config_providers(host_config)?;
@@ -153,13 +153,34 @@ pub fn discover_provider_entries(
     let suppressed = config::suppressed_ids(host_config);
     let path_entries = path_scan::scan_path(host_config, &suppressed)?;
     let catalog = ProviderCatalog::build_from_sources(host_config, path_entries, Vec::new())?;
+    Ok(catalog.entries)
+}
 
+/// Materialize manager-owned provider rows from a pre-admitted catalog snapshot.
+///
+/// Adapter construction failures are NOT errors: that provider is admitted as an
+/// unavailable candidate so the catalog can still explain why it is not ready.
+///
+/// # Errors
+///
+/// Infallible in practice: every per-provider adapter construction failure is
+/// downgraded to an unavailable catalog entry (warned, never propagated), so
+/// the catalog can always explain why a candidate is not ready. The
+/// [`HostResult`] signature is shared with [`discover_provider_entries`] to
+/// keep the two discovery paths interchangeable.
+pub fn build_provider_entries_from_catalog(
+    catalog: &[ProviderCatalogEntry],
+    timeouts: &TimeoutConfig,
+    permission_resolver: &HostPermissionResolver,
+    localset_bridge: &nexus_acp_host::LocalSetBridge,
+) -> HostResult<std::collections::HashMap<ProviderId, ProviderEntry>> {
     let mut providers = std::collections::HashMap::new();
-    for metadata in catalog.entries {
+    for metadata in catalog {
         let adapter = match adapter_from_catalog_entry(
-            &metadata,
+            metadata,
             timeouts.clone(),
             permission_resolver.clone(),
+            localset_bridge.clone(),
         ) {
             Ok(adapter) => Some(adapter),
             Err(error) => {
@@ -176,10 +197,29 @@ pub fn discover_provider_entries(
         } else {
             "candidate adapter construction failed"
         };
-        let entry = ProviderEntry::from_metadata(metadata, adapter, message);
+        let entry = ProviderEntry::from_metadata(metadata.clone(), adapter, message);
         providers.insert(entry.metadata.provider_id.clone(), entry);
     }
     Ok(providers)
+}
+
+/// Discover catalog candidates and construct adapters (no probe).
+///
+/// # Errors
+///
+/// Returns a [`HostError`] when the configured provider set is invalid, when
+/// the PATH scan cannot read the process `PATH`, or when the catalog merge
+/// rejects an entry. Adapter construction failures are NOT errors: that
+/// provider is admitted as an unavailable candidate so the catalog can still
+/// explain why it is not ready.
+pub fn discover_provider_entries(
+    host_config: &crate::config::AgentHostConfig,
+    timeouts: &TimeoutConfig,
+    permission_resolver: &HostPermissionResolver,
+    localset_bridge: &nexus_acp_host::LocalSetBridge,
+) -> HostResult<std::collections::HashMap<ProviderId, ProviderEntry>> {
+    let catalog = discover_provider_catalog(host_config)?;
+    build_provider_entries_from_catalog(&catalog, timeouts, permission_resolver, localset_bridge)
 }
 
 /// Build a probe request from verified owner context and timeout budget.

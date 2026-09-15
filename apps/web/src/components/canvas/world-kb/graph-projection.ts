@@ -112,9 +112,11 @@ export function layoutNodes(
   /** Per-lane row counter so each lane stacks downward. */
   const rowByLane = new Map<number, number>();
   const nodes: Node<WorldKbNodeData>[] = [];
+  let maxEntityLane = -1;
 
   for (const entity of entities) {
     const lane = laneIndexOf(entity.block_type);
+    maxEntityLane = Math.max(maxEntityLane, lane);
     const row = rowByLane.get(lane) ?? 0;
     rowByLane.set(lane, row + 1);
     nodes.push({
@@ -125,9 +127,12 @@ export function layoutNodes(
     });
   }
 
-  // Pending candidates stack in a dedicated trailing lane so reviewers can find
-  // them without hunting across entity lanes.
-  const pendingLane = LANE_ORDER.length + 1;
+  // Pending candidates stack in one dedicated lane AFTER the furthest entity
+  // lane actually occupied (lane 0 when no entities). Basing this on the
+  // maximum occupied lane — not on all 18 possible BlockTypes — keeps the graph
+  // compact: a world with a few entity kinds must not leave ~17 empty lanes of
+  // horizontal gap that force `fitView` to zoom out and push entities offscreen.
+  const pendingLane = maxEntityLane + 1;
   candidates.forEach((candidate, row) => {
     nodes.push({
       id: `candidate:${candidate.candidate_id}`,

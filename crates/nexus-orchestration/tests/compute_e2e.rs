@@ -27,7 +27,7 @@ use nexus_knowledge::world_kb::knowledge_entry::{
 };
 use nexus_knowledge::world_kb::{KbQuery, KbStore};
 use nexus_local_db::kb_store::SqliteKbStore;
-use nexus_local_db::{narrative_write, open_pool, run_migrations};
+use nexus_local_db::{init_engine_pool, narrative_write};
 use nexus_orchestration::capability::CapabilityRegistry;
 use nexus_orchestration::preset::load_embedded_preset;
 use serde_json::{json, Value};
@@ -36,8 +36,7 @@ use serde_json::{json, Value};
 async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("compute_e2e.db");
-    let pool = open_pool(&db_path).await.unwrap();
-    run_migrations(&pool).await.unwrap();
+    let pool = init_engine_pool(&db_path).await.unwrap().clone_pool();
     (pool, dir)
 }
 

@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/validated-provider-recipe.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ValidatedProviderRecipe",
+  "description": "Rust-admitted provider launch recipe; never accepted from HTTP or JS callers.",
+  "type": "object",
+  "required": ["provider_id", "recipe_generation", "executable", "args", "env", "cwd"],
+  "additionalProperties": false,
+  "properties": {
+    "provider_id": { "type": "string" },
+    "recipe_generation": { "type": "string" },
+    "executable": { "type": "string" },
+    "args": { "type": "array", "items": { "type": "string" } },
+    "env": { "type": "object", "additionalProperties": { "type": "string" } },
+    "cwd": { "type": "string" },
+    "permissions_ref": { "type": ["string", "null"] },
+    "config_ref": { "type": ["string", "null"] },
+    "process_identity": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "pid": { "type": "integer", "minimum": 0 },
+        "process_birth": { "type": ["string", "null"] },
+        "group_id": { "type": ["string", "null"] }
+      },
+      "required": ["pid"]
+    }
+  }
+}

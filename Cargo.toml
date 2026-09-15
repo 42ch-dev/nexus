@@ -3,6 +3,7 @@ members = [
     "crates/nexus-acp-host",
     "crates/nexus-agent-host",
     "crates/nexus-contracts",
+    "crates/nexus-core",
     "crates/nexus-creator",
     "crates/nexus-creator-memory",
     "crates/nexus-daemon-runtime",
@@ -19,6 +20,9 @@ members = [
     "crates/nexus-cloud-sync",
     "crates/nexus-cloud-domain",
     "crates/nexus-local-db",
+    "crates/nexus-storage-guard",
+    "crates/nexus-provider-ports",
+    "crates/nexus-core-node",
 ]
 # V1.170 P0 (AR-1): `nexus-module-manifest` is a standalone non-workspace crate
 # (own empty `[workspace]` table) that workspace members path-depend on
@@ -65,7 +69,12 @@ clap = { version = "4.5", features = ["derive"] }
 clap_complete = "4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-reqwest = { version = "0.12", features = ["json"] }
+# TLS via rustls (ring, webpki roots): native packaging must not require
+# system OpenSSL (openssl-sys fails the Linux x86_64 manylinux build); all
+# other default reqwest behavior (charset, http2, system-proxy) is retained.
+reqwest = { version = "0.12", default-features = false, features = [
+    "json", "rustls-tls", "charset", "http2", "system-proxy",
+] }
 sqlx = { version = "0.9", default-features = false, features = [
     "runtime-tokio",
     "sqlite",
@@ -216,6 +225,15 @@ codex-codes = { version = "=0.146.4", default-features = false, features = ["asy
 # dep. Consumed by `nexus-agent-host`. Version must never be mirrored in
 # `docs/` (PD-6).
 deepseek-harness-sdk = "=0.2.0"
+napi = { version = "=3.12.4", default-features = false, features = [
+    "napi8",
+    "tokio_rt",
+    "serde-json",
+    "dyn-symbols",
+] }
+napi-derive = "=3.6.5"
+napi-build = "=2.4.2"
+futures-core = "0.3"
 
 # --- Dev profile: keep local `target/` smaller ---
 # Default `debug = true` (full) inflates deps/rlibs and test binaries. Line-limited
@@ -230,3 +248,6 @@ split-debuginfo = "unpacked"
 
 [profile.dev.package."*"]
 debug = false
+
+[profile.release.package.nexus-core-node]
+strip = true

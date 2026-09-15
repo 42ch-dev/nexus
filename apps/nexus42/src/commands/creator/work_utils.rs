@@ -10,7 +10,7 @@ use crate::errors::{CliError, Result};
 /// Build a daemon path with URL-encoded query pairs.
 ///
 /// Shared house pattern (previously hand-rolled in `reading/mod.rs`,
-/// `world/fork.rs`, `world/kb/daemon.rs`, and `rules_runtime.rs` — F-5):
+/// `world/fork.rs`, and `rules_runtime.rs` — F-5):
 /// parse a dummy base, set the real path, append query pairs, and splice
 /// the encoded query back onto the path.
 ///

@@ -25,6 +25,7 @@ use crate::ids::{HostOperationId, HostSessionId, ProviderId};
 use crate::policy::admission::AdmissionPolicy;
 use crate::policy::permission::HostPermissionResolver;
 use crate::ProviderAdapter;
+use nexus_acp_host::LocalSetBridge;
 
 /// Broadcast channel capacity for host events.
 ///
@@ -57,6 +58,8 @@ pub struct HostManager {
     workspace_root: RwLock<Option<std::path::PathBuf>>,
     /// Broadcast sender for host events — SSE subscribers consume via `subscribe()`.
     event_tx: tokio::sync::broadcast::Sender<HostEvent>,
+    /// One environment-scoped `LocalSet` bridge shared by all ACP adapters.
+    localset_bridge: Arc<LocalSetBridge>,
 }
 
 // HashMap import for providers/session_providers
@@ -80,7 +83,31 @@ impl HostManager {
             running: RwLock::new(false),
             workspace_root: RwLock::new(None),
             event_tx,
+            localset_bridge: Arc::new(LocalSetBridge::new()),
         }
+    }
+
+    /// Snapshot active session/operation IDs for native close reports.
+    pub async fn pending_lifecycle_snapshot(&self) -> Vec<String> {
+        let sessions = self.sessions.read().await;
+        let mut pending = Vec::new();
+        for session in sessions.iter() {
+            pending.push(format!("session:{}", session.id));
+            if let Some(op_id) = &session.active_op_id {
+                pending.push(format!("op:{op_id}"));
+            }
+            if session.state.is_busy() {
+                pending.push(format!("session-busy:{}", session.id));
+            }
+        }
+        drop(sessions);
+        pending
+    }
+
+    /// Shared `LocalSet` bridge for all ACP SDK adapters in this environment.
+    #[must_use]
+    pub fn localset_bridge(&self) -> LocalSetBridge {
+        self.localset_bridge.as_ref().clone()
     }
 
     /// Create a host manager with a specific admission policy.
@@ -105,6 +132,79 @@ impl HostManager {
         _session_id: &HostSessionId,
     ) -> tokio::sync::broadcast::Receiver<HostEvent> {
         self.event_tx.subscribe()
+    }
+
+    /// Snapshot of the loaded agent-host configuration (defaults when absent).
+    pub async fn agent_config(&self) -> AgentHostConfig {
+        self.config.read().await.clone().unwrap_or_default()
+    }
+
+    /// Admit the catalog-owned launch recipe for JS provider callbacks.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HostError::ProviderUnavailable`] when the provider is not
+    /// registered, [`HostError::InternalHostError`] when the workspace root
+    /// has not been set (host not started), and the policy-denied variants
+    /// surfaced by [`crate::providers::recipe_admission::build_validated_recipe`]
+    /// when the workspace boundary or the executable resolution rejects the
+    /// launch recipe.
+    pub async fn admit_validated_provider_recipe(
+        &self,
+        provider_id: &crate::ids::ProviderId,
+    ) -> crate::error::HostResult<nexus_contracts::ValidatedProviderRecipe> {
+        let (command, args, env, recipe_generation) = {
+            let providers = self.providers.read().await;
+            let extracted = providers.get(provider_id).map(|entry| {
+                let (command, args, env) = match &entry.metadata.launch {
+                    crate::LaunchStrategy::Acp { command, args, env }
+                    | crate::LaunchStrategy::NativeCli { command, args, env } => {
+                        (command.clone(), args.clone(), env.clone())
+                    }
+                };
+                (
+                    command,
+                    args,
+                    env,
+                    entry.identity.launch_fingerprint.to_string(),
+                )
+            });
+            drop(providers);
+            extracted.ok_or_else(|| {
+                crate::error::HostError::provider_unavailable(
+                    provider_id.clone(),
+                    "provider not registered",
+                )
+            })?
+        };
+        let boundary = {
+            let ws = self.workspace_root.read().await;
+            ws.clone()
+                .ok_or_else(|| crate::error::HostError::internal("workspace root not set"))?
+        };
+        crate::providers::recipe_admission::build_validated_recipe(
+            provider_id,
+            &command,
+            &args,
+            &env,
+            recipe_generation,
+            &boundary,
+        )
+    }
+
+    /// Build a [`ProviderPortAdapter`] wired to this host and registered providers.
+    pub async fn build_provider_port(
+        self: &Arc<Self>,
+    ) -> crate::providers::port::ProviderPortAdapter {
+        let mut port = crate::providers::port::ProviderPortAdapter::with_manager(self.clone());
+        let providers = self.providers.read().await;
+        for (id, entry) in providers.iter() {
+            if let Some(adapter) = entry.adapter.clone() {
+                port.register_provider(id.clone(), adapter);
+            }
+        }
+        drop(providers);
+        port
     }
 
     /// Register a provider adapter.
@@ -172,6 +272,25 @@ impl HostManager {
             entry.health.available = false;
             entry.health.latency_ms = None;
             entry.health.message = Some("probe_context_unavailable".to_string());
+        }
+    }
+
+    /// Publish a bounded probe result into the manager catalog (used by provider port).
+    pub async fn record_provider_probe(
+        &self,
+        provider_id: &ProviderId,
+        health: crate::capability::model::ProviderHealth,
+        latency_ms: u64,
+    ) {
+        let identity = {
+            let providers = self.providers.read().await;
+            providers
+                .get(provider_id)
+                .map(|entry| entry.identity.clone())
+        };
+        if let Some(identity) = identity {
+            self.publish_probe_result(&identity, health, latency_ms)
+                .await;
         }
     }
 
@@ -351,8 +470,21 @@ impl crate::HostFacade for HostManager {
         // Discovery replaces ambient boot registration unless tests pre-registered.
         let pre_registered = !self.providers.read().await.is_empty();
         if !pre_registered {
-            let discovered =
-                discover_provider_entries(&host_config, &config.timeouts, &permission_resolver)?;
+            let discovered = if let Some(catalog) = config.admitted_catalog.as_ref() {
+                crate::core::readiness::build_provider_entries_from_catalog(
+                    catalog,
+                    &host_config.timeouts,
+                    &permission_resolver,
+                    &self.localset_bridge(),
+                )?
+            } else {
+                discover_provider_entries(
+                    &host_config,
+                    &host_config.timeouts,
+                    &permission_resolver,
+                    &self.localset_bridge(),
+                )?
+            };
             *self.providers.write().await = discovered;
         }
 
@@ -1252,6 +1384,7 @@ mod tests {
             max_ops_per_session: 1,
             timeouts: crate::config::TimeoutConfig::default(),
             host_config: None,
+            admitted_catalog: None,
             probe_owner: Some(test_owner()),
         }
     }
@@ -1277,6 +1410,63 @@ mod tests {
             env: std::collections::HashMap::new(),
         }
     }
+
+    /// RAII guard replacing `PATH` with a single directory and restoring on drop.
+    struct PathGuard {
+        previous: Option<String>,
+    }
+
+    impl PathGuard {
+        fn isolate(dir: &std::path::Path) -> Self {
+            let previous = std::env::var("PATH").ok();
+            let new_path = std::env::join_paths([dir.to_path_buf()]).expect("valid PATH");
+            std::env::set_var("PATH", new_path);
+            Self { previous }
+        }
+    }
+
+    impl Drop for PathGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn start_uses_admitted_catalog_without_path_rescan() {
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let host_config = crate::config::AgentHostConfig::default();
+        let catalog = crate::core::readiness::discover_provider_catalog(&host_config)
+            .expect("discover catalog");
+        let manager = HostManager::new();
+        manager
+            .register_provider(
+                Arc::new(MockProvider {
+                    provider_id: ProviderId::new("mock"),
+                }),
+                mock_launch(),
+            )
+            .await;
+        let empty_path = temp_dir.path().join("no-such-dir");
+        let _path_guard = PathGuard::isolate(&empty_path);
+        manager
+            .start(HostStartConfig {
+                config_path: temp_dir.path().join("absent-config.toml"),
+                workspace_root: temp_dir.path().to_path_buf(),
+                max_sessions: 4,
+                max_ops_per_session: 1,
+                timeouts: crate::config::TimeoutConfig::default(),
+                host_config: Some(host_config),
+                admitted_catalog: Some(catalog),
+                probe_owner: Some(test_owner_for(temp_dir.path().to_path_buf())),
+            })
+            .await
+            .expect("admitted catalog must not require PATH rescan");
+    }
+
     #[tokio::test]
     async fn absent_optional_config_path_returns_defaults() {
         // An absent optional config whose parent exists is tolerated and

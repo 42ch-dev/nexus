@@ -125,6 +125,7 @@ async fn build_host(
         nexus_agent_host::HostPermissionResolver::new_native_only(
             &AgentHostConfig::default().policy,
         ),
+        nexus_acp_host::LocalSetBridge::new(),
     )
     .expect("valid ACP recipe");
     let launch = LaunchStrategy::Acp {
@@ -141,6 +142,7 @@ async fn build_host(
             max_ops_per_session: 1,
             timeouts: timeouts(),
             host_config: None,
+            admitted_catalog: None,
             // Verified probe owner bound to the fixture workspace boundary:
             // the ready-path journeys below admit real sessions, which require
             // a probed-available provider. Without an owner every entry stays
@@ -224,14 +226,20 @@ async fn build_stack(
     Arc<std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>>,
 ) {
     let (_manager, host) = build_host(ws, provider_cfg).await;
+    // The workflow store writes engine-owned tables (`orchestration_sessions`),
+    // whose writer-protocol guards admit only the single engine owner. Open the
+    // same admitted engine pool production uses (`DbPool::new`), not a Direct
+    // `open_pool`, or the write is correctly fenced as `WRITER_FENCED`.
     let pool = Arc::new(
-        nexus_local_db::open_pool(ws.db_file.path())
-            .await
-            .expect("open pool"),
-    );
-    nexus_local_db::run_migrations(&pool)
+        nexus_local_db::writer_protocol::init_engine_pool(
+            ws.db_file.path(),
+            nexus_local_db::writer_protocol::BOOTSTRAP_CREATOR_ID,
+            nexus_local_db::writer_protocol::GuardedPoolOptions::default(),
+        )
         .await
-        .expect("run migrations");
+        .expect("open engine pool")
+        .clone_pool(),
+    );
     let storage = Arc::new(SqliteSessionStorage::new(pool));
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
     let executor = Arc::new(HostPromptExecutor::new(

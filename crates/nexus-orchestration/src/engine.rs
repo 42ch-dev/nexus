@@ -5696,12 +5696,10 @@ mod tests {
     #[tokio::test]
     async fn cancel_fence_reloads_after_mark_step_in_flight_wins() {
         let db = tempfile::NamedTempFile::new().unwrap();
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -5825,12 +5823,10 @@ mod tests {
     #[tokio::test]
     async fn cancel_fence_terminal_observation_is_conflict() {
         let db = tempfile::NamedTempFile::new().unwrap();
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -5950,12 +5946,10 @@ mod tests {
                 SessionStatus::Cancelled
             };
             let db = tempfile::NamedTempFile::new().unwrap();
-            let pool = nexus_local_db::open_pool(db.path())
+            let guarded = nexus_local_db::init_engine_pool(db.path())
                 .await
                 .expect("open pool");
-            nexus_local_db::run_migrations(&pool)
-                .await
-                .expect("run migrations");
+            let pool = guarded.clone_pool();
             let pool = Arc::new(pool);
             let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
             let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -6095,12 +6089,10 @@ mod tests {
     #[tokio::test]
     async fn interrupted_cancel_retry_retains_on_repeated_failure() {
         let db = tempfile::NamedTempFile::new().unwrap();
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -6171,12 +6163,10 @@ mod tests {
     #[tokio::test]
     async fn continue_after_cancel_fence_is_state_conflict() {
         let db = tempfile::NamedTempFile::new().unwrap();
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -6318,12 +6308,10 @@ mod tests {
     #[tokio::test]
     async fn cancel_settlement_keeps_continue_winner_root() {
         let db = tempfile::NamedTempFile::new().unwrap();
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -6474,12 +6462,10 @@ mod tests {
     #[tokio::test]
     async fn cancel_fence_loses_to_continue_and_settlement_keeps_winner() {
         let db = tempfile::NamedTempFile::new().unwrap();
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -6607,12 +6593,10 @@ mod tests {
     #[tokio::test]
     async fn cancel_finalizes_recursive_descendant_closure() {
         let db = tempfile::NamedTempFile::new().unwrap();
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -6793,12 +6777,10 @@ mod tests {
     #[tokio::test]
     async fn cancel_reconciles_persisted_late_child_into_closure() {
         let db = tempfile::NamedTempFile::new().unwrap();
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -6961,12 +6943,10 @@ mod tests {
     #[tokio::test]
     async fn child_admission_after_parent_cancel_fence_is_rolled_back() {
         let db = tempfile::NamedTempFile::new().unwrap();
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -7125,12 +7105,10 @@ mod tests {
     #[tokio::test]
     async fn child_rollback_settle_cas_loss_reloads_and_retries() {
         let db = tempfile::NamedTempFile::new().unwrap();
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -7295,12 +7273,10 @@ mod tests {
     #[tokio::test]
     async fn cancel_descendant_retry_retains_failed_entries() {
         let db = tempfile::NamedTempFile::new().unwrap();
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -7469,12 +7445,10 @@ mod tests {
     #[tokio::test]
     async fn recovered_root_cancel_reaches_persisted_grandchild() {
         let db = tempfile::NamedTempFile::new().unwrap();
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -7678,12 +7652,10 @@ mod tests {
     #[tokio::test]
     async fn recovered_root_cancel_retry_retains_failed_grandchild() {
         let db = tempfile::NamedTempFile::new().unwrap();
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -7864,12 +7836,10 @@ mod tests {
     #[tokio::test]
     async fn interrupted_write_cas_loss_retries_and_persists() {
         let db = tempfile::NamedTempFile::new().unwrap();
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let real_store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -7970,12 +7940,10 @@ mod tests {
     #[tokio::test]
     async fn cancel_finalizes_child_host_sessions() {
         let db = tempfile::NamedTempFile::new().unwrap();
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -8119,12 +8087,10 @@ mod tests {
     #[tokio::test]
     async fn cached_child_checkpoint_tracks_persisted_graph_version() {
         let db = tempfile::NamedTempFile::new().unwrap();
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -8361,12 +8327,10 @@ mod tests {
         }
 
         let db = tempfile::NamedTempFile::new().unwrap();
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();

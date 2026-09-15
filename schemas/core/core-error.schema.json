@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-error.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreError",
+  "description": "Wire error envelope for nexus-core / native / service adapters (NexusApiError-compatible categories).",
+  "type": "object",
+  "required": ["code", "message"],
+  "additionalProperties": false,
+  "properties": {
+    "code": {
+      "type": "string",
+      "enum": [
+        "uninitialized",
+        "auth_required",
+        "invalid_input",
+        "forbidden",
+        "not_found",
+        "world_kb_conflict",
+        "world_kb_validation",
+        "writer_fenced",
+        "owner_busy",
+        "schema_mismatch",
+        "busy",
+        "closing",
+        "interrupted",
+        "internal"
+      ]
+    },
+    "message": { "type": "string" },
+    "details": { "type": "object" },
+    "http_status": { "type": "integer", "minimum": 400, "maximum": 599 }
+  }
+}

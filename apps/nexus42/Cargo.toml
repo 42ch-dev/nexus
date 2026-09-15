@@ -72,30 +72,23 @@ required-features = ["connect-host"]
 
 [dependencies]
 nexus-contracts = { path = "../../crates/nexus-contracts" }
-nexus-orchestration = { path = "../../crates/nexus-orchestration" }
-nexus-moment-context-assembly = { path = "../../crates/nexus-moment-context-assembly", features = ["cloud-stage"] }
-nexus-creator-memory = { path = "../../crates/nexus-creator-memory" }
-nexus-creator = { path = "../../crates/nexus-creator" }
-nexus-cloud-sync = { path = "../../crates/nexus-cloud-sync", features = ["legacy-sync"] }
 nexus-home-layout = { path = "../../crates/nexus-home-layout" }
-nexus-local-db = { path = "../../crates/nexus-local-db" }
-nexus-acp-host = { path = "../../crates/nexus-acp-host" }
-nexus-agent-host = { path = "../../crates/nexus-agent-host" }
-# V1.153 P2 (DF-73): `default-features = false` + explicit `web-embed`
-# forwarding (see [features]) — the slim `nexus-runtime` artifact
-# (`--no-default-features --features connect-host`) compiles the embedded
-# SPA out while the default `nexus42` build keeps it ON.
-nexus-daemon-runtime = { path = "../../crates/nexus-daemon-runtime", default-features = false }
-nexus-narrative = { path = "../../crates/nexus-narrative" }
-nexus-knowledge = { path = "../../crates/nexus-knowledge" }
-# V1.145 P2 — MCA WorldKB read routes through the spoke-adapter boundary
-# (`SpokeBackedKbStore`), injected at the `assemble_moment` wiring site.
-nexus-spoke-adapter = { path = "../../crates/nexus-spoke-adapter" }
-# V1.170 P0 (AR-9): shared compute-module manifest contract + wasm_sha256
-# injection for the `nexus42 compute` group. Non-workspace path dep — legal
-# because the root workspace `exclude`s the crate (AR-1). No `connect-host`
-# feature: the compute group never pulls libp2p into the default graph.
-nexus-module-manifest = { path = "../../modules/nexus-module-manifest" }
+# §2.1 basic allowlist: available to BOTH cohorts as a normal dependency —
+# the `basic-cli` feature must not be a dependency switch (it is `[]`).
+nexus-core = { path = "../../crates/nexus-core" }
+nexus-orchestration = { path = "../../crates/nexus-orchestration", optional = true }
+nexus-moment-context-assembly = { path = "../../crates/nexus-moment-context-assembly", optional = true, features = ["cloud-stage"] }
+nexus-creator-memory = { path = "../../crates/nexus-creator-memory", optional = true }
+nexus-creator = { path = "../../crates/nexus-creator", optional = true }
+nexus-cloud-sync = { path = "../../crates/nexus-cloud-sync", optional = true, features = ["legacy-sync"] }
+nexus-local-db = { path = "../../crates/nexus-local-db", optional = true }
+nexus-acp-host = { path = "../../crates/nexus-acp-host", optional = true }
+nexus-agent-host = { path = "../../crates/nexus-agent-host", optional = true }
+nexus-daemon-runtime = { path = "../../crates/nexus-daemon-runtime", default-features = false, optional = true }
+nexus-narrative = { path = "../../crates/nexus-narrative", optional = true }
+nexus-knowledge = { path = "../../crates/nexus-knowledge", optional = true }
+nexus-spoke-adapter = { path = "../../crates/nexus-spoke-adapter", optional = true }
+nexus-module-manifest = { path = "../../modules/nexus-module-manifest", optional = true }
 # V1.148 P3 N-C0 (DF-72): Connect Host facade, opt-in via feature
 # `connect-host` below. spoke-connect pulls libp2p 0.56 transitively — the
 # default build (and `daemon start`) must stay libp2p-free, so this dep is
@@ -126,43 +119,37 @@ libp2p = { workspace = true, optional = true }
 # tooling/check-graph-pins.sh matrix).
 rmcp = { version = "=3.2.0", default-features = false, features = ["server", "transport-io"], optional = true }
 clap = { workspace = true }
-clap_complete = { workspace = true }
+clap_complete = { workspace = true, optional = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 toml = "0.9"
-toml_edit = "0.25"
-reqwest = { workspace = true }
-sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"] }
+toml_edit = { version = "0.25", optional = true }
+reqwest = { workspace = true, optional = true }
+sqlx = { workspace = true, optional = true, features = ["runtime-tokio", "sqlite"] }
 dirs = { workspace = true }
-uuid = { workspace = true }
-chrono = { workspace = true }
+uuid = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
-sha2 = { workspace = true }
-hex = "0.4"
-# V1.153 P2 T2: these six were previously declared after `nix` inside
-# `[target.'cfg(unix)'.dependencies]` (missing section header), which broke
-# every Windows build with E0433 "cannot find crate" in lib code using them
-# on all platforms (works/cron.rs cron validation, auth/user_auth.rs base64,
-# creator/memory.rs tempfile, rules_runtime.rs dialoguer). Moved here.
-dialoguer = "0.12"
-tempfile = "3"
-regex = "1"
-base64 = "0.22"
-# V1.50 T-A P0 T2: cron validation + IANA TZ parsing (novel-writing staggering)
-cron = { workspace = true }
-chrono-tz = { workspace = true }
+sha2 = { workspace = true, optional = true }
+hex = { version = "0.4", optional = true }
+dialoguer = { version = "0.12", optional = true }
+tempfile = { version = "3", optional = true }
+regex = { version = "1", optional = true }
+base64 = { version = "0.22", optional = true }
+cron = { workspace = true, optional = true }
+chrono-tz = { workspace = true, optional = true }
 # ACP SDK consumed via nexus-acp-host (worker-only linkage — see spec §11.3)
 # agent-client-protocol = "=0.10.4"  — REMOVED: consumed through nexus-acp-host
 # tokio-util, async-trait, async-broadcast — consumed through nexus-acp-host
 # nix — also used directly by daemon.rs for process management
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.28", features = ["signal", "process"] }
+nix = { version = "0.28", features = ["signal", "process"], optional = true }
 
 [dev-dependencies]
 assert_cmd = "2.0"
@@ -230,21 +217,44 @@ tokio-tungstenite = { workspace = true }
 # upstream); hickory/libp2p-mdns stay lockfile-only via libp2p 0.56 optional
 # deps, never compiled.
 [features]
-connect-host = ["dep:spoke-connect", "dep:spoke-schemas", "dep:libp2p"]
-# V1.174 P0 (AR-61 #1): forwarded gate for the peer-tools client stack on
-# nexus-daemon-runtime. OFF by default — the default nexus42 graph stays
-# libp2p-free; `--features connect-client` links the peer-tools transport +
-# session subsystem into the daemon build.
-connect-client = ["nexus-daemon-runtime/connect-client", "nexus-acp-host/connect-client", "dep:rmcp"]
-# V1.179 P0 T1 (DF-88): forwarded gate for the embedded MCP server (Model B)
-# on nexus-daemon-runtime. Nested under connect-client: `--features
-# connect-client` compiles the shared bridge core but NOT the embedded
-# server; `--features connect-client,embedded-mcp` compiles both.
+# v1.189 P1-T3 (RFT-01 §2.1): daemon-free graph/patch cohort — same binary/parser.
+#
+# EXACT empty declaration per the locked contract: the feature selects the
+# cohort via `cfg`, it does not switch dependencies on. `nexus-core` is a
+# normal dependency (basic allowlist) and `chrono` is legacy-only.
+basic-cli = []
+legacy-cli = [
+  "dep:nexus-orchestration",
+  "dep:nexus-moment-context-assembly",
+  "dep:nexus-creator-memory",
+  "dep:nexus-creator",
+  "dep:nexus-cloud-sync",
+  "dep:nexus-local-db",
+  "dep:nexus-acp-host",
+  "dep:nexus-agent-host",
+  "dep:nexus-daemon-runtime",
+  "dep:nexus-narrative",
+  "dep:nexus-knowledge",
+  "dep:nexus-spoke-adapter",
+  "dep:nexus-module-manifest",
+  "dep:clap_complete",
+  "dep:toml_edit",
+  "dep:reqwest",
+  "dep:sqlx",
+  "dep:uuid",
+  "dep:chrono",
+  "dep:sha2",
+  "dep:hex",
+  "dep:dialoguer",
+  "dep:tempfile",
+  "dep:regex",
+  "dep:base64",
+  "dep:cron",
+  "dep:chrono-tz",
+  "dep:nix",
+]
+connect-host = ["legacy-cli", "dep:spoke-connect", "dep:spoke-schemas", "dep:libp2p"]
+connect-client = ["legacy-cli", "nexus-daemon-runtime/connect-client", "nexus-acp-host/connect-client", "dep:rmcp"]
 embedded-mcp = ["connect-client", "nexus-daemon-runtime/embedded-mcp"]
-# V1.153 P2 (DF-73): forwarded gate for the embedded Web UI — ON by default
-# (the `nexus42` bin is unchanged); OFF for the `nexus-runtime` artifact via
-# `--no-default-features --features connect-host` (compile-time exclusion of
-# `apps/web/dist` bytes + the SPA fallback route, per the P2 spec
-# § Subsystem profile).
-web-embed = ["nexus-daemon-runtime/web-embed"]
-default = ["web-embed"]
+web-embed = ["legacy-cli", "nexus-daemon-runtime/web-embed"]
+default = ["legacy-cli", "web-embed"]

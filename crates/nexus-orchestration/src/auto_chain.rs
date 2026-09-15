@@ -2253,8 +2253,10 @@ mod tests {
         let db_path = db.path().to_path_buf();
         std::mem::forget(db);
 
-        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
-        nexus_local_db::run_migrations(&pool).await.unwrap();
+        let pool = nexus_local_db::init_engine_pool(&db_path)
+            .await
+            .unwrap()
+            .clone_pool();
 
         let work = work_at("intake", "complete", 0, 3);
         nexus_local_db::works::create_work(&pool, &work)
@@ -2314,8 +2316,10 @@ mod tests {
         let db_path = db.path().to_path_buf();
         std::mem::forget(db);
 
-        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
-        nexus_local_db::run_migrations(&pool).await.unwrap();
+        let pool = nexus_local_db::init_engine_pool(&db_path)
+            .await
+            .unwrap()
+            .clone_pool();
 
         let mut work = work_at("intake", "complete", 0, 3);
         work.primary_preset_id = "nonexistent-preset".to_string();
@@ -2364,8 +2368,10 @@ mod tests {
         let db_path = db.path().to_path_buf();
         std::mem::forget(db);
 
-        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
-        nexus_local_db::run_migrations(&pool).await.unwrap();
+        let pool = nexus_local_db::init_engine_pool(&db_path)
+            .await
+            .unwrap()
+            .clone_pool();
 
         let work = work_at("review", "active", 1, 3);
         nexus_local_db::works::create_work(&pool, &work)

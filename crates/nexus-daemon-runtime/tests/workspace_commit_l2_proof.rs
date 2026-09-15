@@ -17,18 +17,27 @@ use nexus_daemon_runtime::workspace::test_hooks::{
 use nexus_local_db as db;
 use nexus_orchestration::capability::WorkspaceExecutor;
 use serial_test::serial;
-use sqlx::sqlite::SqlitePoolOptions;
 use std::sync::Arc;
 
 async fn fresh_pool() -> (Arc<sqlx::SqlitePool>, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("tempdir");
     let db_path = dir.path().join("state.db");
-    let pool = SqlitePoolOptions::new()
-        .max_connections(2)
-        .connect(&format!("sqlite:{}?mode=rwc", db_path.display()))
-        .await
-        .expect("connect");
-    db::run_migrations(&pool).await.expect("migrate");
+    // Engine admission is REQUIRED on every connection that touches the
+    // guarded workspace tables: `install_writer_functions` registers the
+    // `nexus_writer_protocol` SQL function the manager's statements call.
+    // The explicit 2-connection budget from the original proof is kept via
+    // `GuardedPoolOptions`; crash points and startup recovery are unchanged.
+    let pool = nexus_local_db::writer_protocol::init_engine_pool(
+        &db_path,
+        nexus_local_db::BOOTSTRAP_CREATOR_ID,
+        nexus_local_db::GuardedPoolOptions {
+            max_connections: 2,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("engine-admitted pool")
+    .clone_pool();
     (Arc::new(pool), dir)
 }
 
@@ -499,13 +508,18 @@ async fn multi_file_commit_survives_new_manager_restart() {
     let db_dir = tempfile::tempdir().unwrap();
     let db_path = db_dir.path().join("state.db");
     let pool = Arc::new(
-        SqlitePoolOptions::new()
-            .max_connections(2)
-            .connect(&format!("sqlite:{}?mode=rwc", db_path.display()))
-            .await
-            .expect("connect"),
+        nexus_local_db::writer_protocol::init_engine_pool(
+            &db_path,
+            nexus_local_db::BOOTSTRAP_CREATOR_ID,
+            nexus_local_db::GuardedPoolOptions {
+                max_connections: 2,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("engine-admitted pool")
+        .clone_pool(),
     );
-    db::run_migrations(&pool).await.expect("migrate");
     let ws = tempfile::tempdir().unwrap();
     let root = ws.path().to_string_lossy().to_string();
 

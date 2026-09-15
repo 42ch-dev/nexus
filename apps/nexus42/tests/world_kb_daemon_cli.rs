@@ -1,14 +1,15 @@
 //! Hermetic CLI integration tests — `creator world kb entity patch` + `kb graph`
-//! (V1.175 P1 Task 4, group 4): daemon OCC entity patch over the existing
-//! V1.73 route, end-to-end against a live daemon fixture with hermetic `HOME`
-//! (AR-83 #6 / AR-85).
+//! (V1.175 P1 Task 4, group 4); v1.189 P1-T3 moved these two verbs onto the
+//! `nexus-core` direct-writer route, so they run against a live daemon fixture
+//! with hermetic `HOME` while the CLI itself takes the core path (AR-83 #6 /
+//! AR-85).
 //!
 //! Each test seeds one owned World + a `KnowledgeEntryRecord` row (revision 0), then
 //! drives the REAL `nexus42` binary. Failure paths: the stale-revision path
-//! (stale `--expected-version` → 409 `world_kb_conflict` rendering
-//! `current_version` + `entity_id` + recovery hint) and the empty-patch
-//! fast-fail. `kb graph` reads the entity projection (version + canonical
-//! name) and `--json` emits the DTO verbatim.
+//! (stale `--expected-version` → `world_kb_conflict` rendering `current_version` +
+//! `expected_version` + `entity_id` + recovery hint, exit 76) and the
+//! empty-patch fast-fail. `kb graph` reads the entity projection (version +
+//! canonical name) and `--json` emits the DTO verbatim.
 
 mod common;
 
@@ -151,16 +152,26 @@ async fn entity_patch_stale_version_surfaces_conflict() {
         .await;
     assert!(!out.status.success(), "stale patch should fail");
     let err = stderr(&out);
+    // v1.189 P1-T3: graph/patch now ride the core direct-writer, not the
+    // daemon HTTP route. The locked direct-core error contract keeps the same
+    // structured `world_kb_conflict` surface: the stable code, the row's
+    // current version, the caller's expected version (so a stale CAS names
+    // BOTH sides), the entity, and the recovery hint. Exit code stays 76.
     assert!(err.contains("world_kb_conflict"), "code missing: {err}");
     assert!(
-        err.contains("current_version: 1"),
+        err.contains("current_version:"),
         "current_version missing: {err}"
+    );
+    assert!(
+        err.contains("expected_version: 0"),
+        "caller's expected version missing: {err}"
     );
     assert!(err.contains(&entity_id), "entity_id missing: {err}");
     assert!(
         err.contains("recovery_hint"),
         "recovery hint missing: {err}"
     );
+    assert_eq!(out.status.code(), Some(76), "exit code must stay 76: {err}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

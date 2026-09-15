@@ -6,7 +6,7 @@
 //! Lifecycle: `queued` → `running` → `done` | `failed`.
 //! SSOT in `nexus-local-db`; no second in-memory queue.
 
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool};
 
 use crate::error::LocalDbError;
 
@@ -937,13 +937,16 @@ pub async fn list_pending_for_world(
 /// # Errors
 ///
 /// Returns `sqlx::Error` on database failure.
-pub async fn list_pending_for_world_after(
-    pool: &SqlitePool,
+pub async fn list_pending_for_world_after<'e, E>(
+    executor: E,
     world_id: &str,
     cursor_created_at: Option<&str>,
     cursor_job_id: Option<&str>,
     limit: i64,
-) -> Result<Vec<KbExtractPromotion>, sqlx::Error> {
+) -> Result<Vec<KbExtractPromotion>, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = Sqlite>,
+{
     let limit = limit.clamp(1, 500);
     let has_cursor = cursor_created_at.is_some() && cursor_job_id.is_some();
     // SAFETY: dynamic WHERE clause gated on cursor presence; every value is a
@@ -968,7 +971,7 @@ pub async fn list_pending_for_world_after(
         query = query.bind(cursor_created_at).bind(cursor_job_id);
     }
     query = query.bind(limit);
-    query.fetch_all(pool).await
+    query.fetch_all(executor).await
 }
 
 /// Idempotency pre-check: returns `true` if a `pending` or `confirmed` row
@@ -1259,13 +1262,14 @@ async fn fetch_promotion_optional_by_id(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{open_pool, run_migrations};
 
     async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let pool = open_pool(&db_path).await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        let pool = crate::init_engine_pool(&db_path)
+            .await
+            .unwrap()
+            .clone_pool();
         (pool, dir)
     }
 

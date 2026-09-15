@@ -40,8 +40,12 @@ Prerequisites and the full pre-PR checklist: [`docs/CONTRIBUTING.md`](docs/CONTR
 
 | Command | What it does |
 |---------|----------------|
-| `pnpm run dev` | CLI + web local dev — builds `nexus42`, ensures daemon on 127.0.0.1:8420 (starts detached if not), then Vite dev server in the foreground (desktop excluded; `scripts/dev-cli-web.sh`) |
-| `pnpm run dev:desktop` | Tauri desktop dev — starts web dev automatically via `tauri.conf.json` |
+| `pnpm run dev` | CLI + web local dev — reuses a compatible `nexus42` artifact when manifest/hash/protocol match, ensures daemon on the selected loopback endpoint (default 127.0.0.1:8420; starts detached if not), validates health, then runs Vite in the foreground (`scripts/dev-cli-web.sh`). Incompatible or missing artifacts fail fast with `pnpm dev:backend:refresh`. |
+| `pnpm run dev:backend:refresh` | Explicit backend refresh — the only ordinary DX path that may run Cargo build/codegen after Rust/contract edits (`scripts/refresh-dev-backend.mjs`). |
+| `pnpm run dev:desktop:web` | Desktop web-only dev — sidecar + Vite web dev without launching Tauri/Cargo in the foreground loop. |
+| `pnpm run dev:desktop` | Full Tauri desktop dev — starts web dev automatically via `tauri.conf.json` (unchanged). |
+
+Warm Vite HMR for web/Studio/shared UI predates the stable-artifact path; P0 records it as baseline rather than a new speedup claim.
 
 ### Build
 

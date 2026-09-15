@@ -1,0 +1,16 @@
+[package]
+name = "nexus-provider-ports"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Port-only provider contracts (v1.189 P2-T1)"
+
+[lints]
+workspace = true
+
+[dependencies]
+nexus-contracts = { path = "../nexus-contracts" }
+async-trait.workspace = true
+futures-core = "0.3"

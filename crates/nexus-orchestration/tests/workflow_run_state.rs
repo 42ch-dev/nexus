@@ -34,12 +34,10 @@ use std::sync::Arc;
 /// Open a fresh on-disk temp SQLite pool with migrations applied.
 async fn fresh_pool() -> (Arc<sqlx::SqlitePool>, tempfile::NamedTempFile) {
     let db = tempfile::NamedTempFile::new().unwrap();
-    let pool = nexus_local_db::open_pool(db.path())
+    let guarded = nexus_local_db::init_engine_pool(db.path())
         .await
         .expect("open pool");
-    nexus_local_db::run_migrations(&pool)
-        .await
-        .expect("run migrations");
+    let pool = guarded.clone_pool();
     (Arc::new(pool), db)
 }
 
@@ -105,12 +103,10 @@ async fn terminal_status_survives_reopen_not_disguised_as_running() {
     let session_id = SessionId("sess-reopen".to_string());
 
     {
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool (first)");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations (first)");
+        let pool = guarded.clone_pool();
         let storage = SqliteSessionStorage::new(Arc::new(pool));
 
         // Start a v1 run.
@@ -148,12 +144,10 @@ async fn terminal_status_survives_reopen_not_disguised_as_running() {
     } // pool drops — simulates daemon shutdown
 
     {
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool (second)");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations (second) — idempotent");
+        let pool = guarded.clone_pool();
         let storage = SqliteSessionStorage::new(Arc::new(pool));
 
         let record = storage
@@ -178,12 +172,10 @@ async fn wait_status_survives_reopen() {
     let session_id = SessionId("sess-wait-reopen".to_string());
 
     {
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool (first)");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations (first)");
+        let pool = guarded.clone_pool();
         let storage = SqliteSessionStorage::new(Arc::new(pool));
 
         let root = root_session(&session_id.0, "wait_task");
@@ -230,12 +222,10 @@ async fn wait_status_survives_reopen() {
     }
 
     {
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool (second)");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations (second)");
+        let pool = guarded.clone_pool();
         let storage = SqliteSessionStorage::new(Arc::new(pool));
 
         let record = storage
@@ -607,9 +597,12 @@ async fn old_migrated_db_upgrades_cleanly() {
     // workflow_execution_state migration), then run the full migration set
     // to verify the upgrade path is clean and idempotent.
     let db = tempfile::NamedTempFile::new().unwrap();
-    let pool = nexus_local_db::open_pool(db.path())
+    // Raw pool: the old schema must be built WITHOUT the writer protocol's
+    // automatic migration pass, so the guarded upgrade below is what is
+    // actually under test.
+    let raw = sqlx::SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db.path().display()))
         .await
-        .expect("open pool");
+        .expect("raw pool");
 
     // Copy all migrations except the new one into a temp dir and apply them
     // as the "old" schema.
@@ -627,23 +620,26 @@ async fn old_migrated_db_upgrades_cleanly() {
     let old_migrator = sqlx::migrate::Migrator::new(old_migrations_dir.path())
         .await
         .expect("build old migrator");
-    old_migrator.run(&pool).await.expect("apply old migrations");
+    old_migrator.run(&raw).await.expect("apply old migrations");
 
     // The new columns must NOT exist yet.
     let has_new_col: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM pragma_table_info('orchestration_sessions')
          WHERE name = 'execution_version'",
     )
-    .fetch_one(&pool)
+    .fetch_one(&raw)
     .await
     .expect("check column");
     assert_eq!(has_new_col, 0, "old DB must lack the new column");
+    raw.close().await;
 
-    // Upgrade: run the full migration set (idempotent — the new migration
-    // applies, already-applied ones are skipped).
-    nexus_local_db::run_migrations(&pool)
+    // Upgrade through the guarded writer-protocol path: the pending
+    // migration applies in migration mode, the protocol epoch activates,
+    // and the admitted engine pool may then write the upgraded tables.
+    let guarded = nexus_local_db::init_engine_pool(db.path())
         .await
-        .expect("upgrade migrations");
+        .expect("open pool");
+    let pool = guarded.clone_pool();
 
     // The new columns must now be present and usable.
     let storage = SqliteSessionStorage::new(Arc::new(pool));
@@ -682,12 +678,10 @@ async fn paused_status_survives_reopen() {
     let session_id = SessionId("sess-paused-reopen".to_string());
 
     {
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool (first)");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations (first)");
+        let pool = guarded.clone_pool();
         let storage = SqliteSessionStorage::new(Arc::new(pool));
 
         let root = root_session(&session_id.0, "task_a");
@@ -724,12 +718,10 @@ async fn paused_status_survives_reopen() {
     } // pool drops — simulates daemon shutdown
 
     {
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool (second)");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations (second)");
+        let pool = guarded.clone_pool();
         let storage = SqliteSessionStorage::new(Arc::new(pool));
 
         let record = storage
@@ -2691,12 +2683,10 @@ async fn restart_hydrates_child_checkpoints() {
     let child_sid;
 
     {
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool (first)");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations (first)");
+        let pool = guarded.clone_pool();
         let (storage, engine) = fresh_engine(Arc::new(pool));
 
         let inner_graph = Arc::new(
@@ -2734,12 +2724,10 @@ async fn restart_hydrates_child_checkpoints() {
     } // pool drops — simulates daemon shutdown
 
     {
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool (second)");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations (second)");
+        let pool = guarded.clone_pool();
         let (_storage, engine) = fresh_engine(Arc::new(pool));
 
         // Recover the parent session — this must hydrate the children map.
@@ -3507,12 +3495,10 @@ async fn recovered_parent_drives_existing_inner_child() {
     let existing_child_sid;
 
     {
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool (first)");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations (first)");
+        let pool = guarded.clone_pool();
         let (_storage, engine) = fresh_engine(Arc::new(pool));
 
         let inner_graph = Arc::new(
@@ -3563,12 +3549,10 @@ async fn recovered_parent_drives_existing_inner_child() {
     } // pool drops — simulates daemon shutdown
 
     {
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool (second)");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations (second)");
+        let pool = guarded.clone_pool();
         let (storage, engine) = fresh_engine(Arc::new(pool));
 
         // Hydrate the children map from persisted child rows (the recovery
@@ -3677,12 +3661,10 @@ states:
     fs::write(bundle_dir.join("preset.yaml"), initial_yaml).unwrap();
 
     {
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool (first)");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations (first)");
+        let pool = guarded.clone_pool();
         let storage = Arc::new(SqliteSessionStorage::new(Arc::new(pool.clone())));
         let storage_arc: Arc<dyn SessionStorage> = storage.clone();
         let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
@@ -3726,12 +3708,10 @@ states:
         // Second engine: recover the parent. Frozen-source reconstruction must
         // resolve the directory preset at the persisted root, verify the
         // hash/version, and reconstruct a runner.
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool (second)");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations (second)");
+        let pool = guarded.clone_pool();
         let storage = Arc::new(SqliteSessionStorage::new(Arc::new(pool.clone())));
         let storage_arc: Arc<dyn SessionStorage> = storage.clone();
         let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
@@ -3769,12 +3749,10 @@ states:
         let changed_yaml = initial_yaml.replace("version: 11", "version: 99");
         fs::write(bundle_dir.join("preset.yaml"), changed_yaml).unwrap();
 
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool (third)");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations (third)");
+        let pool = guarded.clone_pool();
         let storage = Arc::new(SqliteSessionStorage::new(Arc::new(pool.clone())));
         let storage_arc: Arc<dyn SessionStorage> = storage.clone();
         let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
@@ -3928,12 +3906,10 @@ async fn terminal_child_is_reattached_not_respawned() {
     let child_sid;
 
     {
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool (first)");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations (first)");
+        let pool = guarded.clone_pool();
         let (storage, engine) = fresh_engine(Arc::new(pool));
 
         let inner_graph = Arc::new(
@@ -3977,12 +3953,10 @@ async fn terminal_child_is_reattached_not_respawned() {
       // but BEFORE the parent commits past this inner graph.
 
     {
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool (second)");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations (second)");
+        let pool = guarded.clone_pool();
         let (storage, engine) = fresh_engine(Arc::new(pool));
 
         // Hydrate the children map (recovery) — the terminal child is present.
@@ -5319,9 +5293,10 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
     // classifier must see the exact engine gate marker and classify the park
     // as a converge/merge chain, never a human wait.
     pool.close().await;
-    let pool_b = nexus_local_db::open_pool(db.path())
+    let guarded = nexus_local_db::init_engine_pool(db.path())
         .await
         .expect("reopen pool");
+    let pool_b = guarded.clone_pool();
     let storage_b = Arc::new(SqliteSessionStorage::new(pool_b.clone().into()));
     let record_after_reopen = storage_b
         .load_run(&sid)
@@ -5417,9 +5392,10 @@ async fn engine_manual_wait_persists_waiting_for_input_fresh_retained_token() {
     // survive byte-identical (A4 retention until a successful CAS consumes
     // it) and the status must remain waiting_for_input.
     pool.close().await;
-    let pool_b = nexus_local_db::open_pool(db.path())
+    let guarded = nexus_local_db::init_engine_pool(db.path())
         .await
         .expect("reopen pool");
+    let pool_b = guarded.clone_pool();
     let storage_b = Arc::new(SqliteSessionStorage::new(pool_b.into()));
     let record_after = storage_b
         .load_run(&sid)
@@ -5697,9 +5673,10 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
     // Reopen the SAME DB file: the canonical classifier must see HumanWait
     // (rule 4 — fresh token beats old join keys), never ConvergeMerge.
     pool.close().await;
-    let pool_b = nexus_local_db::open_pool(db.path())
+    let guarded = nexus_local_db::init_engine_pool(db.path())
         .await
         .expect("reopen pool");
+    let pool_b = guarded.clone_pool();
     let storage_b = Arc::new(SqliteSessionStorage::new(pool_b.clone().into()));
     let record_after = storage_b
         .load_run(&sid)
@@ -5873,9 +5850,10 @@ states:
 
     // Reopen: HumanWait (rule 4 token beats join keys), token retained.
     pool.close().await;
-    let pool_b = nexus_local_db::open_pool(db.path())
+    let guarded = nexus_local_db::init_engine_pool(db.path())
         .await
         .expect("reopen pool");
+    let pool_b = guarded.clone_pool();
     let storage_b = Arc::new(SqliteSessionStorage::new(pool_b.clone().into()));
     let record_after = storage_b
         .load_run(&sid)
@@ -6033,9 +6011,10 @@ async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume(
     // identity/token survive; the row classifies HumanWait — never stepped
     // at boot.
     pool.close().await;
-    let pool_b = nexus_local_db::open_pool(db.path())
+    let guarded = nexus_local_db::init_engine_pool(db.path())
         .await
         .expect("reopen pool");
+    let pool_b = guarded.clone_pool();
     let storage_b = Arc::new(SqliteSessionStorage::new(pool_b.into()));
     let parent_after = storage_b
         .load_run(&parent_sid)

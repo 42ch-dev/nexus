@@ -14,6 +14,10 @@
 
 set -euo pipefail
 
+if [ "${SIDECAR_ENSURE_ONLY:-}" = "1" ]; then
+  exec node "$(dirname "$0")/dev-backend-manifest.mjs" --ensure-sidecar
+fi
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="${REPO_ROOT}/apps/desktop/src-tauri/binaries"
 
@@ -51,14 +55,18 @@ CARGO_TARGET="${CARGO_TARGET_DIR:-${REPO_ROOT}/target}"
 for target in "${TARGETS[@]}"; do
   echo "==> Building nexus42 (${PROFILE}) for ${target}..."
   rustup target add "${target}" 2>/dev/null || true
+  SIDECAR_SRC="${CARGO_TARGET}/${target}/${PROFILE}/nexus42"
+  SIDECAR_DEST="${DEST}/nexus42-${target}"
+  echo "    artifact source: ${SIDECAR_SRC}"
+  echo "    artifact dest:   ${SIDECAR_DEST}"
   if [ "${PROFILE}" = "release" ]; then
     cargo build --release -p nexus42 --target "${target}"
   else
     cargo build -p nexus42 --target "${target}"
   fi
-  cp "${CARGO_TARGET}/${target}/${PROFILE}/nexus42" "${DEST}/nexus42-${target}"
-  chmod +x "${DEST}/nexus42-${target}"
-  echo "    -> ${DEST}/nexus42-${target}"
+  cp "${SIDECAR_SRC}" "${SIDECAR_DEST}"
+  chmod +x "${SIDECAR_DEST}"
+  echo "    -> ${SIDECAR_DEST}"
 done
 
 echo "==> Sidecar binaries ready (${PROFILE}):"

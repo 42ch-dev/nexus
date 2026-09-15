@@ -3835,9 +3835,10 @@ mod tests {
         }
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -4441,7 +4442,10 @@ mod tests {
     async fn a7_storage(
         db_path: &std::path::Path,
     ) -> (Arc<dyn SessionStorage>, Arc<SqliteSessionStorage>) {
-        let pool = nexus_local_db::open_pool(db_path).await.expect("open pool");
+        let pool = nexus_local_db::init_engine_pool(db_path)
+            .await
+            .expect("open pool")
+            .clone_pool();
         // The create_test_workspace fixture already ran migrations; opening
         // the pool again is idempotent. The same adapter implements both
         // SessionStorage and WorkflowStateStore (A2).
@@ -4455,9 +4459,10 @@ mod tests {
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
         {
-            let pool = nexus_local_db::open_pool(&db_path)
+            let guarded = nexus_local_db::init_engine_pool(&db_path)
                 .await
                 .expect("open pool");
+            let pool = guarded.clone_pool();
             seed_v1_row(
                 &pool,
                 "v1:crashed",
@@ -4509,9 +4514,10 @@ mod tests {
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
         {
-            let pool = nexus_local_db::open_pool(&db_path)
+            let guarded = nexus_local_db::init_engine_pool(&db_path)
                 .await
                 .expect("open pool");
+            let pool = guarded.clone_pool();
             seed_v1_row(
                 &pool,
                 "v1:wait",
@@ -4601,9 +4607,10 @@ mod tests {
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
         {
-            let pool = nexus_local_db::open_pool(&db_path)
+            let guarded = nexus_local_db::init_engine_pool(&db_path)
                 .await
                 .expect("open pool");
+            let pool = guarded.clone_pool();
             // v1 row with a corrupt state blob — non-replayable, never
             // silently reinterpreted (A7 rule 2).
             sqlx::query(
@@ -4665,9 +4672,10 @@ mod tests {
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
         {
-            let pool = nexus_local_db::open_pool(&db_path)
+            let guarded = nexus_local_db::init_engine_pool(&db_path)
                 .await
                 .expect("open pool");
+            let pool = guarded.clone_pool();
             seed_v1_row(
                 &pool,
                 "v1:stale-terminal",
@@ -4727,9 +4735,10 @@ mod tests {
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
         {
-            let pool = nexus_local_db::open_pool(&db_path)
+            let guarded = nexus_local_db::init_engine_pool(&db_path)
                 .await
                 .expect("open pool");
+            let pool = guarded.clone_pool();
             // v1 row with structurally invalid run state (string where bool
             // required) → `load_run` errors (non-replayable). Context is
             // byte-valid with `data` so the failure is definitively in the
@@ -4805,9 +4814,10 @@ mod tests {
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
         {
-            let pool = nexus_local_db::open_pool(&db_path)
+            let guarded = nexus_local_db::init_engine_pool(&db_path)
                 .await
                 .expect("open pool");
+            let pool = guarded.clone_pool();
             // v1 running row at a live converge/merge chain, context carrying
             // STALE typed-failure keys (v0-era leftovers) alongside the live
             // join keys.
@@ -5638,9 +5648,10 @@ mod tests {
     async fn signal_continue_loses_cas_to_cancel_returns_state_conflict() {
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -5837,9 +5848,10 @@ mod tests {
 
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -5994,9 +6006,10 @@ mod tests {
 
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -6146,9 +6159,10 @@ mod tests {
 
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -6266,9 +6280,10 @@ mod tests {
             }
         }
         let (_tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -6311,22 +6326,15 @@ mod tests {
             .await
             .expect("start coordinator drive");
 
-        tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            loop {
-                let finished = coordinator
-                    .drives
-                    .lock()
-                    .await
-                    .get(&session_id.0)
-                    .is_none_or(|owner| owner.join.is_finished());
-                if finished {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
+        wait_until("coordinator drive finished", || async {
+            coordinator
+                .drives
+                .lock()
+                .await
+                .get(&session_id.0)
+                .is_none_or(|owner| owner.join.is_finished())
         })
-        .await
-        .expect("coordinator drive finished");
+        .await;
 
         assert!(
             !coordinator.is_fenced(&session_id).await,
@@ -6382,9 +6390,10 @@ mod tests {
         }
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -6464,9 +6473,10 @@ mod tests {
         }
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -6582,9 +6592,10 @@ mod tests {
 
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -6689,9 +6700,10 @@ mod tests {
         }
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -6796,9 +6808,10 @@ mod tests {
         }
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -6917,9 +6930,10 @@ mod tests {
         }
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -7042,9 +7056,10 @@ mod tests {
         }
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -7159,9 +7174,10 @@ mod tests {
         }
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -7286,9 +7302,10 @@ mod tests {
         }
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -7379,9 +7396,10 @@ mod tests {
     async fn v0_drive_with_store_handle_is_context_only_and_recovery_skips() {
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -7555,9 +7573,10 @@ mod tests {
 
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let real_storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -7705,9 +7724,10 @@ mod tests {
         }
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -7832,9 +7852,10 @@ mod tests {
 
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -7961,9 +7982,10 @@ mod tests {
         }
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -8085,9 +8107,10 @@ mod tests {
         }
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -8187,9 +8210,10 @@ mod tests {
     async fn recovery_skips_v0_typed_failed_row_without_mutation() {
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
+        let pool = guarded.clone_pool();
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -8476,7 +8500,12 @@ mod tests {
             }
         }
         let (_tmp, _home, db_path) = crate::test_utils::create_test_workspace().await;
-        let pool = Arc::new(nexus_local_db::open_pool(&db_path).await.expect("pool"));
+        let pool = Arc::new(
+            nexus_local_db::init_engine_pool(&db_path)
+                .await
+                .expect("pool")
+                .clone_pool(),
+        );
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
         let real_store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -8598,7 +8627,12 @@ mod tests {
             }
         }
         let (_tmp, _home, db_path) = crate::test_utils::create_test_workspace().await;
-        let pool = Arc::new(nexus_local_db::open_pool(&db_path).await.expect("pool"));
+        let pool = Arc::new(
+            nexus_local_db::init_engine_pool(&db_path)
+                .await
+                .expect("pool")
+                .clone_pool(),
+        );
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -8699,7 +8733,12 @@ mod tests {
             }
         }
         let (_tmp, _home, db_path) = crate::test_utils::create_test_workspace().await;
-        let pool = Arc::new(nexus_local_db::open_pool(&db_path).await.expect("pool"));
+        let pool = Arc::new(
+            nexus_local_db::init_engine_pool(&db_path)
+                .await
+                .expect("pool")
+                .clone_pool(),
+        );
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
         let real_store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -8967,7 +9006,12 @@ mod tests {
             }
         }
         let (_tmp, _home, db_path) = crate::test_utils::create_test_workspace().await;
-        let pool = Arc::new(nexus_local_db::open_pool(&db_path).await.expect("pool"));
+        let pool = Arc::new(
+            nexus_local_db::init_engine_pool(&db_path)
+                .await
+                .expect("pool")
+                .clone_pool(),
+        );
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
         let real_store: Arc<dyn WorkflowStateStore> = sqlite.clone();
@@ -9130,9 +9174,10 @@ mod tests {
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
         let pool = Arc::new(
-            nexus_local_db::open_pool(&db_path)
+            nexus_local_db::init_engine_pool(&db_path)
                 .await
-                .expect("open pool"),
+                .expect("open pool")
+                .clone_pool(),
         );
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -9323,9 +9368,10 @@ mod tests {
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
         let pool = Arc::new(
-            nexus_local_db::open_pool(&db_path)
+            nexus_local_db::init_engine_pool(&db_path)
                 .await
-                .expect("open pool"),
+                .expect("open pool")
+                .clone_pool(),
         );
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();

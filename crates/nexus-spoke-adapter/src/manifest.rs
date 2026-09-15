@@ -88,6 +88,24 @@ pub const LOCAL_TOOL_OPS: [&str; 2] = [
     "tools.nexus.list_modules",
 ];
 
+/// Wire names owned by the `compute` feature (roles / capabilities / ops).
+///
+/// The `compute` feature (default on) owns the WASM engine, the module cache
+/// and `ComputablePort`. With the feature off this crate is genuinely
+/// no-compute, so the local manifest must not advertise a compute role, the
+/// `l2-computable` capability, or the `compute` served op: a host without an
+/// engine that claims them lies to its peers.
+#[cfg(feature = "compute")]
+const COMPUTE_OWNED_NAMES: [&str; 3] = ["l2-computable", "computable-engine", "compute"];
+#[cfg(not(feature = "compute"))]
+const COMPUTE_OWNED_NAMES: [&str; 0] = [];
+
+/// Whether `name` is advertised by this build.
+#[must_use]
+fn advertised(name: &str) -> bool {
+    COMPUTE_OWNED_NAMES.iter().all(|owned| owned != &name)
+}
+
 /// The locked `ToolDescriptor` set ([`LOCAL_TOOL_OPS`] in declaration
 /// order) — the `tools[]` member of the local manifest.
 ///
@@ -270,7 +288,11 @@ pub fn build_local_host_manifest(host_id: &str) -> SpokeResult<HostCapabilityMan
             // authoritative (`served_ops`); the marker is the ladder
             // position, not a capability list.
             "connect_host_slice": "n-c2",
-            "served_ops": LOCAL_SERVED_OPS,
+            "served_ops": LOCAL_SERVED_OPS
+                .iter()
+                .copied()
+                .filter(|op| advertised(op))
+                .collect::<Vec<_>>(),
             "daemon_http_coexists": true,
         })
         .as_object()
@@ -280,8 +302,16 @@ pub fn build_local_host_manifest(host_id: &str) -> SpokeResult<HostCapabilityMan
     SpokeResult::Ok(HostCapabilityManifest {
         schema_version: MANIFEST_SCHEMA_VERSION,
         host_id,
-        roles: LOCAL_ROLES.iter().map(ToString::to_string).collect(),
-        capabilities: LOCAL_CAPABILITIES.iter().map(ToString::to_string).collect(),
+        roles: LOCAL_ROLES
+            .iter()
+            .filter(|role| advertised(role))
+            .map(ToString::to_string)
+            .collect(),
+        capabilities: LOCAL_CAPABILITIES
+            .iter()
+            .filter(|capability| advertised(capability))
+            .map(ToString::to_string)
+            .collect(),
         namespaces,
         authority: None,
         // V1.173 (DF-84, T1): the user-locked tool set `S` is served — the
@@ -487,10 +517,15 @@ mod tests {
                 let _: &dyn crate::ScopeQueryPort = adapter;
                 let _: &dyn crate::RuleQueryPort = adapter;
             }
-            // l2-computable — production ComputablePort (V1.146).
+            // l2-computable — production ComputablePort (V1.146). Only
+            // advertised when the `compute` feature (which owns the WASM
+            // engine and the module cache) is on.
+            #[cfg(feature = "compute")]
             "l2-computable" => {
                 let _: &dyn crate::ComputablePorts = adapter;
             }
+            #[cfg(not(feature = "compute"))]
+            "l2-computable" => {}
             // l5-fork — production ForkTimelineQueryPort (V1.146).
             "l5-fork" => {
                 let _: &dyn crate::ForkPorts = adapter;

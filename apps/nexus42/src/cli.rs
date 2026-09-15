@@ -6,13 +6,14 @@
 
 #[cfg(feature = "connect-host")]
 use crate::commands::connect::ConnectCommand;
+use crate::commands::creator::CreatorCommand;
 #[cfg(feature = "connect-client")]
 use crate::commands::mcp::McpCommand;
+#[cfg(feature = "legacy-cli")]
 use crate::commands::{
-    acp::AcpCommand, capability::CapabilityCommand, compute::ComputeCommand,
-    creator::CreatorCommand, daemon::DaemonCommand, daemon_run::DaemonRunArgs,
-    desktop::DesktopCommand, host_call::HostCallArgs, ops::OpsCommand, platform::PlatformCommand,
-    preset::PresetCommand, sync::SyncCommand, system::SystemCommand,
+    acp::AcpCommand, capability::CapabilityCommand, compute::ComputeCommand, daemon::DaemonCommand,
+    daemon_run::DaemonRunArgs, desktop::DesktopCommand, host_call::HostCallArgs, ops::OpsCommand,
+    platform::PlatformCommand, preset::PresetCommand, sync::SyncCommand, system::SystemCommand,
 };
 use clap::{Parser, Subcommand};
 
@@ -101,7 +102,13 @@ impl Cli {
     /// tracing must be routed to stderr so diagnostics never corrupt it.
     #[must_use]
     pub const fn is_data_output(&self) -> bool {
-        matches!(&self.command, Some(Commands::Ops { .. })) || self.is_mcp_serve()
+        #[cfg(feature = "legacy-cli")]
+        {
+            if matches!(&self.command, Some(Commands::Ops { .. })) {
+                return true;
+            }
+        }
+        self.is_mcp_serve()
     }
 }
 
@@ -115,6 +122,7 @@ pub enum Commands {
     },
 
     /// Manage the daemon runtime
+    #[cfg(feature = "legacy-cli")]
     Daemon {
         #[command(subcommand)]
         command: DaemonCommand,
@@ -136,6 +144,7 @@ pub enum Commands {
     },
 
     /// ACP capability plane (agents, registry, connectivity)
+    #[cfg(feature = "legacy-cli")]
     Acp {
         #[command(subcommand)]
         command: AcpCommand,
@@ -149,6 +158,7 @@ pub enum Commands {
     /// `POST /v1/daemon/compute/run` (+ `--accept`). The group carries no
     /// `connect-host` feature dependency — the default daemon graph stays
     /// libp2p-free.
+    #[cfg(feature = "legacy-cli")]
     Compute {
         #[command(subcommand)]
         command: ComputeCommand,
@@ -168,24 +178,28 @@ pub enum Commands {
     /// top-level groups to `creator|daemon|acp|platform|system` — same
     /// posture as `preset` (V1.35 lock resolution, AR-41).
     #[command(hide = true)]
+    #[cfg(feature = "legacy-cli")]
     Capability {
         #[command(subcommand)]
         command: CapabilityCommand,
     },
 
     /// Manage the Tauri desktop shell (build, sign, diagnostics)
+    #[cfg(feature = "legacy-cli")]
     Desktop {
         #[command(subcommand)]
         command: DesktopCommand,
     },
 
     /// Platform interaction (auth, explore, context, publish, **sync**)
+    #[cfg(feature = "legacy-cli")]
     Platform {
         #[command(subcommand)]
         command: PlatformCommand,
     },
 
     /// System management (presets, diagnostics, config, identity, etc.)
+    #[cfg(feature = "legacy-cli")]
     System {
         #[command(subcommand)]
         command: SystemCommand,
@@ -203,6 +217,7 @@ pub enum Commands {
     /// canonical group) vs that lock: callable but not yet advertised, same
     /// posture as the deprecated `sync` alias (S-001).
     #[command(hide = true)]
+    #[cfg(feature = "legacy-cli")]
     Preset {
         #[command(subcommand)]
         command: PresetCommand,
@@ -211,6 +226,7 @@ pub enum Commands {
     /// Hidden: deprecated top-level sync alias — use `platform sync` instead.
     /// Kept callable for ≥1 iteration (V1.35) per cli-command-ia.md §5.
     #[command(hide = true)]
+    #[cfg(feature = "legacy-cli")]
     Sync {
         #[command(subcommand)]
         command: SyncCommand,
@@ -218,6 +234,7 @@ pub enum Commands {
 
     /// Hidden: Internal daemon-run entry point (self-spawned by daemon start)
     #[command(hide = true)]
+    #[cfg(feature = "legacy-cli")]
     DaemonRun(DaemonRunArgs),
     /// MCP server bridge (V1.174 P0 T5, AR-70/71/72) — tools-only stdio
     /// server; a client spawns `nexus42 mcp serve` as its own stateless
@@ -241,12 +258,14 @@ pub enum Commands {
     ///
     /// --args accepts a `JSON` string (e.g. `'{"work_id":"wrk_abc"}'`).
     /// Exit codes: 0=success, 1=admission denied, 2=tool error/failure.
+    #[cfg(feature = "legacy-cli")]
     HostCall(HostCallArgs),
 
     /// Hidden: operator daemon-free inspection (V1.182 P1 BL-04) — `ops inspect`
     /// reads the workspace checkpoint store read-only; the V1.35 cli-spec §6
     /// visible-group lock forces hiding (same posture as `preset`).
     #[command(hide = true)]
+    #[cfg(feature = "legacy-cli")]
     Ops {
         #[command(subcommand)]
         command: OpsCommand,

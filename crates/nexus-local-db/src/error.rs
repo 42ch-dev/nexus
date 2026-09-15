@@ -84,6 +84,12 @@ pub enum LocalDbError {
     ActorNotFound { resource: &'static str, id: String },
     /// Stable actor-contract product conflict (HTTP 409 at the Daemon).
     ActorContractConflict { code: ActorContractConflict },
+    /// Writer / engine lock or epoch could not be acquired within the bounded window.
+    OwnerBusy { resource: String },
+    /// Writer registration or protocol epoch rejected the connection.
+    WriterFenced { reason: String },
+    /// Durable workspace protocol or schema version is newer than this binary supports.
+    SchemaMismatch { reason: String },
     /// Malformed durable workspace commit intent row.
     CorruptIntent {
         revision: String,
@@ -353,6 +359,15 @@ impl fmt::Display for LocalDbError {
             Self::ActorContractConflict { code } => {
                 write!(f, "{}", code.message())
             }
+            Self::OwnerBusy { resource } => {
+                write!(f, "workspace writer busy: {resource}")
+            }
+            Self::WriterFenced { reason } => {
+                write!(f, "workspace writer fenced: {reason}")
+            }
+            Self::SchemaMismatch { reason } => {
+                write!(f, "workspace schema mismatch: {reason}")
+            }
             Self::CorruptIntent {
                 revision,
                 workspace_root,
@@ -379,7 +394,13 @@ impl std::error::Error for LocalDbError {
 
 impl From<sqlx::Error> for LocalDbError {
     fn from(err: sqlx::Error) -> Self {
-        Self::Sqlx(err)
+        if matches!(err, sqlx::Error::PoolTimedOut) {
+            Self::OwnerBusy {
+                resource: "writer pool acquire timeout".to_string(),
+            }
+        } else {
+            Self::Sqlx(err)
+        }
     }
 }
 

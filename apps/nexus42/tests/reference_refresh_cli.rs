@@ -7,7 +7,6 @@
 
 use assert_cmd::Command;
 use nexus42::config::CliConfig;
-use nexus42::db::Schema;
 
 /// Build a testable `CliConfig` with a mock daemon URL and a temp home.
 #[allow(dead_code)]
@@ -27,7 +26,10 @@ fn test_config(_home: &std::path::Path, creator_id: &str) -> CliConfig {
 /// Seed a fresh pool with two reference sources: one refreshable, one offline.
 async fn fresh_pool_with_refs(dir: &tempfile::TempDir) -> (sqlx::SqlitePool, String, String) {
     let db_path = dir.path().join("state.db");
-    let pool = Schema::init(&db_path).await.unwrap();
+    let pool = nexus_local_db::init_engine_pool(&db_path)
+        .await
+        .unwrap()
+        .clone_pool();
 
     let home = dir.path().to_path_buf();
 

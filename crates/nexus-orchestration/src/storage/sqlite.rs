@@ -2873,12 +2873,10 @@ mod tests {
     /// Helper: open a fresh on-disk temp `SQLite` pool with migrations applied.
     async fn fresh_pool() -> (Arc<sqlx::SqlitePool>, tempfile::NamedTempFile) {
         let db = tempfile::NamedTempFile::new().unwrap();
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations");
+        let pool = guarded.clone_pool();
         (Arc::new(pool), db)
     }
 
@@ -2904,23 +2902,19 @@ mod tests {
     async fn restart_resume_smoke() {
         let db = tempfile::NamedTempFile::new().unwrap();
         {
-            let pool = nexus_local_db::open_pool(db.path())
+            let guarded = nexus_local_db::init_engine_pool(db.path())
                 .await
                 .expect("open pool (first)");
-            nexus_local_db::run_migrations(&pool)
-                .await
-                .expect("run migrations (first)");
+            let pool = guarded.clone_pool();
             let storage = SqliteSessionStorage::new(std::sync::Arc::new(pool));
             let session = Session::new_from_task("sess-restart".into(), "dummy-task");
             storage.save(session).await.unwrap();
         } // pool drops — simulates daemon shutdown
         {
-            let pool = nexus_local_db::open_pool(db.path())
+            let guarded = nexus_local_db::init_engine_pool(db.path())
                 .await
                 .expect("open pool (second)");
-            nexus_local_db::run_migrations(&pool)
-                .await
-                .expect("run migrations (second) — idempotent");
+            let pool = guarded.clone_pool();
             let storage = SqliteSessionStorage::new(std::sync::Arc::new(pool));
             assert!(storage.get("sess-restart").await.unwrap().is_some());
         }

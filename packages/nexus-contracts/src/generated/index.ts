@@ -5,6 +5,7 @@
  */
 
 export * from './common';
+export * from './core';
 export * from './daemon-api/actor-knowledge';
 export * from './daemon-api/agent-host';
 export * from './daemon-api/canvas/outline';
@@ -41,6 +42,21 @@ export * from './platform/sync';
 // Schema version constants
 export const SCHEMA_VERSIONS: Record<string, number> = {
   VersionRef: 1,
+  CoreChangeRow: 1,
+  CoreChangesRequest: 1,
+  CoreChangesResponse: 1,
+  CoreCloseReport: 1,
+  CoreError: 1,
+  CoreHostQueryResponse: 1,
+  CoreHostQuery: 1,
+  CoreServiceOperations: 1,
+  NativeCompatibility: 1,
+  NativeOpenOptions: 1,
+  ProviderCall: 1,
+  ProviderEventBatch: 1,
+  ProviderHostEvent: 1,
+  ProviderReply: 1,
+  ValidatedProviderRecipe: 1,
   AddKnowledgeEntryRequest: 1,
   AddKnowledgeEntryResponse: 1,
   DeleteKnowledgeEntryQuery: 1,

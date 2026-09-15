@@ -26,13 +26,10 @@ use tokio_util::sync::CancellationToken;
 async fn setup_test_db() -> (tempfile::TempDir, Arc<SqlitePool>) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
-    let pool = nexus_local_db::open_pool(&db_path)
+    let guarded = nexus_local_db::init_engine_pool(&db_path)
         .await
         .expect("open pool");
-    nexus_local_db::run_migrations(&pool)
-        .await
-        .expect("run migrations");
-    (dir, Arc::new(pool))
+    (dir, Arc::new(guarded.clone_pool()))
 }
 
 fn make_schedule(id: &str, creator: &str, scheduled_at: Option<i64>) -> Schedule {

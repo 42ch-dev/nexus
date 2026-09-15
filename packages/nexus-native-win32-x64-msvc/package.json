@@ -1,0 +1,15 @@
+{
+  "name": "@42ch/nexus-native-win32-x64-msvc",
+  "version": "0.1.0",
+  "private": true,
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "native/",
+    "AGENTS.md"
+  ]
+}

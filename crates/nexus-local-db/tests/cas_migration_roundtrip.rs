@@ -12,9 +12,8 @@ use sqlx::SqlitePool;
 async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
-    let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
-    nexus_local_db::run_migrations(&pool).await.unwrap();
-    (pool, dir)
+    let guarded = nexus_local_db::init_engine_pool(&db_path).await.unwrap();
+    (guarded.clone_pool(), dir)
 }
 
 #[tokio::test]

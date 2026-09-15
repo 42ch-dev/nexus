@@ -21,14 +21,11 @@ use std::sync::Arc;
 /// Create a fresh test DB with migrations.
 async fn fresh_pool() -> Arc<SqlitePool> {
     let db = tempfile::NamedTempFile::new().unwrap();
-    let pool = nexus_local_db::open_pool(db.path())
+    let guarded = nexus_local_db::init_engine_pool(db.path())
         .await
         .expect("open pool");
-    nexus_local_db::run_migrations(&pool)
-        .await
-        .expect("run migrations");
     std::mem::forget(db);
-    Arc::new(pool)
+    Arc::new(guarded.clone_pool())
 }
 
 fn make_schedule(

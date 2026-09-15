@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/native-open-options.schema.json",
+  "schema_version": 1,
+  "title": "Nexus NativeOpenOptions",
+  "description": "Native core open options. allow_uninitialized is service-only and denies domain/provider effects until explicit reopen.",
+  "type": "object",
+  "required": ["user_home", "access"],
+  "additionalProperties": false,
+  "properties": {
+    "user_home": {
+      "type": "string",
+      "description": "Raw user home directory; home-layout adds .nexus42 exactly once."
+    },
+    "access": {
+      "type": "string",
+      "enum": ["read_only", "direct_writer", "engine_owner"]
+    },
+    "allow_uninitialized": {
+      "type": "boolean",
+      "default": false,
+      "description": "Service-only: open with readiness uninitialized, no DB/Host/engine owner; effects denied until reopen."
+    }
+  }
+}

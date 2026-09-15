@@ -32,20 +32,14 @@ const BINDING: &str = "awb_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 // ── Pool / seed helpers (same shapes as kb_owner_scope_migration.rs) ──────
 
+/// Fully migrated, protocol-admitted pool. The KB tables carry writer
+/// guards whose scalar functions are connection-local, so fixture writes must
+/// go through the production factory rather than a raw pool.
 async fn migrated_pool() -> (SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
-    let url = format!("sqlite://{}?mode=rwc", dir.path().join("test.db").display());
-    let pool = sqlx::sqlite::SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect(&url)
+    let pool = nexus_local_db::init_pool(&dir.path().join("test.db"))
         .await
         .unwrap();
-    // SAFETY: PRAGMA statement — no table schema to validate against.
-    sqlx::query("PRAGMA foreign_keys = ON")
-        .execute(&pool)
-        .await
-        .unwrap();
-    nexus_local_db::run_migrations(&pool).await.unwrap();
     nexus_local_db::ensure_creator_row(&pool, CREATOR, "Owner")
         .await
         .unwrap();

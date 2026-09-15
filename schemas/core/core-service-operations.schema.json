@@ -1,0 +1,118 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-service-operations.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreServiceOperations",
+  "description": "Metadata for CoreSliceClient method declaration codegen (P2).",
+  "type": "object",
+  "required": ["operations"],
+  "additionalProperties": false,
+  "properties": {
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "returns"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "type"],
+              "additionalProperties": false,
+              "properties": {
+                "name": { "type": "string" },
+                "type": { "type": "string" },
+                "optional": { "type": "boolean" }
+              }
+            }
+          },
+          "returns": { "type": "string" },
+          "async_iterable": { "type": "boolean" }
+        }
+      },
+      "default": [
+        {
+          "name": "getWorldKbGraph",
+          "args": [
+            { "name": "worldId", "type": "string" },
+            { "name": "query", "type": "{ includeSuggested?: boolean }", "optional": true }
+          ],
+          "returns": "WorldKbGraphResponse"
+        },
+        {
+          "name": "worldKbPatchEntity",
+          "args": [
+            { "name": "worldId", "type": "string" },
+            { "name": "request", "type": "WorldKbPatchEntityRequest" }
+          ],
+          "returns": "WorldKbPatchEntityResponse"
+        },
+        {
+          "name": "getWorldKbCandidates",
+          "args": [
+            { "name": "worldId", "type": "string" },
+            { "name": "query", "type": "{ limit?: number; cursor?: string }", "optional": true }
+          ],
+          "returns": "WorldKbCandidatesResponse"
+        },
+        {
+          "name": "getCoreChanges",
+          "args": [{ "name": "request", "type": "CoreChangesRequest" }],
+          "returns": "CoreChangesResponse"
+        },
+        {
+          "name": "createAgentHostSession",
+          "args": [{ "name": "request", "type": "CreateSessionRequest" }],
+          "returns": "SessionResponse"
+        },
+        {
+          "name": "listAgentHostSessions",
+          "args": [
+            { "name": "query", "type": "AgentHostListSessionsQuery", "optional": true }
+          ],
+          "returns": "SessionListResponse"
+        },
+        {
+          "name": "getAgentHostSession",
+          "args": [{ "name": "sessionId", "type": "string" }],
+          "returns": "SessionResponse"
+        },
+        {
+          "name": "shutdownAgentHostSession",
+          "args": [{ "name": "sessionId", "type": "string" }],
+          "returns": "ShutdownSessionResponse"
+        },
+        {
+          "name": "executeAgentHostOperation",
+          "args": [
+            { "name": "sessionId", "type": "string" },
+            { "name": "request", "type": "ExecuteOperationRequest" }
+          ],
+          "returns": "OperationResponse"
+        },
+        {
+          "name": "getAgentHostOperation",
+          "args": [{ "name": "operationId", "type": "string" }],
+          "returns": "OperationResponse"
+        },
+        {
+          "name": "cancelAgentHostOperation",
+          "args": [{ "name": "operationId", "type": "string" }],
+          "returns": "CancelOperationResponse"
+        },
+        {
+          "name": "subscribeAgentHostEvents",
+          "args": [
+            { "name": "sessionId", "type": "string" },
+            { "name": "signal", "type": "AbortSignal" }
+          ],
+          "returns": "ProviderHostEvent | CoreStreamGap",
+          "async_iterable": true
+        }
+      ]
+    }
+  }
+}

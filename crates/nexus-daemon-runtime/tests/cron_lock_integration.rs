@@ -7,6 +7,7 @@
 // flock is unix-only; the file_lock module is `#[cfg(unix)]` (V1.153 P2 T2).
 #![cfg(unix)]
 
+use chrono::TimeZone;
 use nexus_local_db::works::{self, WorkRecord};
 use sqlx::SqlitePool;
 
@@ -18,9 +19,17 @@ async fn test_pool() -> SqlitePool {
         .unwrap();
     let db_path = db.path().to_path_buf();
     std::mem::forget(db);
-    let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
-    nexus_local_db::run_migrations(&pool).await.unwrap();
-    pool
+    nexus_local_db::init_engine_pool(&db_path)
+        .await
+        .unwrap()
+        .clone_pool()
+}
+
+fn matching_minute() -> chrono::DateTime<chrono::Utc> {
+    chrono::Utc
+        .with_ymd_and_hms(2026, 6, 19, 3, 7, 0)
+        .single()
+        .expect("valid fixed UTC minute")
 }
 
 /// Create a Work that would fire cron at every minute.
@@ -80,7 +89,7 @@ async fn cron_fires_without_workspace_dir_gracefully_skips_file_lock() {
     let summary = nexus_orchestration::schedule::cron_supervisor::evaluate_cron_fires(
         &pool,
         Some(&ws_dir),
-        chrono::Utc::now(),
+        matching_minute(),
         Some("test-provider"),
     )
     .await;
@@ -117,7 +126,7 @@ async fn run_one_tick_with_workspace_dir_handles_file_lock() {
     let summary = nexus_orchestration::schedule::cron_supervisor::evaluate_cron_fires(
         &pool,
         Some(&ws_dir),
-        chrono::Utc::now(),
+        matching_minute(),
         Some("test-provider"),
     )
     .await;
@@ -156,7 +165,7 @@ async fn file_lock_blocks_cron_fire_when_held() {
     let summary = nexus_orchestration::schedule::cron_supervisor::evaluate_cron_fires(
         &pool,
         Some(&ws_dir),
-        chrono::Utc::now(),
+        matching_minute(),
         Some("test-provider"),
     )
     .await;

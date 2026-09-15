@@ -519,6 +519,11 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     let mut state = WorkspaceState::initialize().await?;
     tracing::info!("Workspace state initialized");
 
+    // v1.189 P1 fix round 1: attach the single engine-owner World KB core now,
+    // while the workspace DB is known to be open, so handlers reuse one core
+    // for the host lifetime instead of racing an open per request.
+    state.attach_core_service().await;
+
     // --- Section 2.5: Agent Host subsystem (constructed BEFORE the
     // capability registry so the production HostPromptExecutor can be
     // injected into `CapabilityRuntimeDeps::prompt_executor` — A1) ---

@@ -12,7 +12,6 @@
 #![allow(clippy::unwrap_used)]
 
 use nexus42::commands::creator::world::kb::kb_adopt;
-use nexus42::db::Schema;
 use nexus42::errors::CliError;
 use nexus_local_db::kb_extract_job::insert_pending_with_llm;
 
@@ -23,7 +22,10 @@ const WORK_ID: &str = "wrk_cas_v151";
 async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");
-    let pool = Schema::init(&db_path).await.unwrap();
+    let pool = nexus_local_db::init_engine_pool(&db_path)
+        .await
+        .unwrap()
+        .clone_pool();
     nexus_local_db::kb_store::seed::world(
         &pool,
         WORLD,

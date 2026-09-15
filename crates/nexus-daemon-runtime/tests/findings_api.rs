@@ -420,9 +420,9 @@ async fn findings_creator_isolation_cross_creator_404() {
     .unwrap();
 
     let db_path = nexus_home_layout::workspace_state_db_path(user_home, other_creator, "default");
-    let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
-    nexus_local_db::run_migrations(&pool).await.unwrap();
-    nexus_local_db::seed_versions(&pool).await.unwrap();
+    nexus_local_db::init_engine_pool(&db_path)
+        .await
+        .expect("fixture: writer-protocol engine admission");
 
     let other_state =
         WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;

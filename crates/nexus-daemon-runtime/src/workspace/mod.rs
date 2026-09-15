@@ -234,6 +234,13 @@ pub struct WorkspaceState {
     /// makes each invocation's watchdog observe only its own budget; it also
     /// caps W-1's worst case (one CPU-bound compute at a time).
     compute_serializer: Arc<tokio::sync::Semaphore>,
+    /// v1.189 P1-T2: transport-neutral World KB core bound to the engine pool.
+    ///
+    /// v1.189 P1 fix round 1: created once, eagerly at daemon boot while the
+    /// workspace DB is known, and reused by every handler. The async cell
+    /// serializes the open so concurrent first-requests can never race a
+    /// second engine-owner open.
+    core_service: Arc<tokio::sync::OnceCell<Arc<nexus_core::CoreService>>>,
     /// V1.179 P0 T1 (DF-88): boot-scoped embedded MCP server (Model B).
     /// Stored at daemon boot (`boot.rs` §8.5) so in-daemon consumers can
     /// `establish()` on the ONE boot instance (GC #9 enablement gate: the
@@ -317,6 +324,7 @@ impl WorkspaceState {
             wasm_engine: Arc::new(None),
             module_cache: Arc::new(None),
             compute_serializer: Arc::new(tokio::sync::Semaphore::new(1)),
+            core_service: Arc::new(tokio::sync::OnceCell::new()),
             #[cfg(feature = "embedded-mcp")]
             embedded_mcp_server: Arc::new(None),
         }
@@ -437,6 +445,7 @@ impl WorkspaceState {
             wasm_engine: Arc::new(None),
             module_cache: Arc::new(None),
             compute_serializer: Arc::new(tokio::sync::Semaphore::new(1)),
+            core_service: Arc::new(tokio::sync::OnceCell::new()),
             #[cfg(feature = "embedded-mcp")]
             embedded_mcp_server: Arc::new(None),
         })
@@ -1189,6 +1198,61 @@ impl WorkspaceState {
         })
     }
 
+    /// Resolve the attached [`nexus_core::CoreService`] or initialize it once.
+    ///
+    /// v1.189 P1 fix round 1: the daemon owns exactly ONE engine-owner core for
+    /// its whole lifetime. Boot calls this eagerly (see [`Self::attach_core_service`])
+    /// so the first request never pays — or races — the open; the async cell
+    /// makes any leftover lazy caller join the same single open instead of
+    /// starting a second engine owner.
+    ///
+    /// # Errors
+    /// Returns [`crate::api::errors::NexusApiError::Internal`] with code
+    /// `NEXUS_HOME_INVALID` when the workspace nexus home has no parent
+    /// directory, and the mapped core-open error when the engine-owner
+    /// [`nexus_core::CoreService`] cannot be opened or joined.
+    pub async fn core_or_uninit(
+        &self,
+    ) -> Result<Arc<nexus_core::CoreService>, crate::api::errors::NexusApiError> {
+        self.core_service
+            .get_or_try_init(|| async {
+                let user_home = self
+                    .nexus_home()
+                    .parent()
+                    .ok_or_else(|| crate::api::errors::NexusApiError::Internal {
+                        code: "NEXUS_HOME_INVALID".to_string(),
+                        message: "Workspace nexus home has no parent directory".to_string(),
+                    })?
+                    .to_path_buf();
+                let core = nexus_core::CoreService::open(nexus_core::CoreOpenOptions {
+                    user_home,
+                    access: nexus_core::CoreAccess::EngineOwner,
+                })
+                .await
+                .map_err(crate::api::errors::NexusApiError::from)?;
+                Ok::<_, crate::api::errors::NexusApiError>(Arc::new(core))
+            })
+            .await
+            .map(Arc::clone)
+    }
+
+    /// Attach the shared engine-owner core at boot, while the workspace DB is
+    /// known to be open.
+    ///
+    /// Best-effort by design: a Tier-0 boot (no active creator) legitimately
+    /// has no core to attach, and the lazy path above still serves a creator
+    /// attached later. A hard failure here would regress boot for a condition
+    /// the daemon has always tolerated.
+    pub async fn attach_core_service(&self) {
+        match self.core_or_uninit().await {
+            Ok(_) => tracing::info!("World KB core service attached (engine owner)"),
+            Err(error) => tracing::warn!(
+                %error,
+                "World KB core service not attached at boot; the first request will retry"
+            ),
+        }
+    }
+
     /// The state-level provenance resolver shared by public admission and the
     /// probe owner: an active creator ID together with a valid active
     /// workspace selection for that creator.
@@ -1903,9 +1967,10 @@ mod tests {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).expect("db parent");
         }
-        let pool = nexus_local_db::init_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("init existing creator DB");
+        let pool = guarded.clone_pool();
 
         // Seed the checkpoint-before-settlement row: a `driven_v1` schedule
         // PAUSED by an earlier recovery boot whose durable v1 session is

@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-host-query.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreHostQuery",
+  "description": "Native hostQuery discriminator over existing HostFacade registry.",
+  "type": "object",
+  "required": ["query"],
+  "additionalProperties": false,
+  "properties": {
+    "query": {
+      "type": "string",
+      "enum": ["health", "catalog", "list_sessions", "get_session", "get_operation"]
+    },
+    "session_id": { "type": "string" },
+    "operation_id": { "type": "string" },
+    "limit": { "type": "integer", "minimum": 1 },
+    "cursor": { "type": "string" },
+    "format": { "type": "string", "enum": ["catalog", "scan"] }
+  }
+}

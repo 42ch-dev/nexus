@@ -14,8 +14,8 @@ use nexus_knowledge::world_kb::knowledge_entry::{
     KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef,
 };
 use nexus_knowledge::world_kb::KbStore;
+use nexus_local_db::init_engine_pool;
 use nexus_local_db::kb_store::SqliteKbStore;
-use nexus_local_db::{open_pool, run_migrations};
 use nexus_orchestration::compute_input_builder::{ComputeBuildError, ComputeInputBuilder};
 use nexus_wasm_host::ModuleManifest;
 use serde_json::{json, Map, Value};
@@ -25,8 +25,7 @@ use serde_json::{json, Map, Value};
 async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("compute_input_builder_test.db");
-    let pool = open_pool(&db_path).await.unwrap();
-    run_migrations(&pool).await.unwrap();
+    let pool = init_engine_pool(&db_path).await.unwrap().clone_pool();
     (pool, dir)
 }
 

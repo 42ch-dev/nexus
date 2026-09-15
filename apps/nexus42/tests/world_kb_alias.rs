@@ -17,7 +17,6 @@
 
 use assert_cmd::Command;
 use nexus42::commands::creator::world::kb::{kb_delete, kb_list, kb_show};
-use nexus42::db::Schema;
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
 use nexus_knowledge::world_kb::KbStore;
@@ -31,7 +30,10 @@ const CANON_NAME: &str = "char_test_alias";
 async fn fresh_pool_with_block() -> (sqlx::SqlitePool, String, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");
-    let pool = Schema::init(&db_path).await.unwrap();
+    let pool = nexus_local_db::init_engine_pool(&db_path)
+        .await
+        .unwrap()
+        .clone_pool();
 
     nexus_local_db::kb_store::seed::world(
         &pool,
@@ -242,6 +244,10 @@ active_workspace_slug_by_creator = { ctr_alias_test = "default" }
             },
         );
         let _result = store.insert_knowledge_entry(kb).await.unwrap();
+        // Hand the writer lock back before the spawned CLI binary opens the
+        // same DB via its own direct-writer admission.
+        pool.close().await;
+        nexus_local_db::writer_protocol::release_retained_writer_guards(&db_path);
     });
 
     (dir, "wld_alias_cmd".to_string())

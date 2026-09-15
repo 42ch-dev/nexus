@@ -80,6 +80,21 @@ use tokio::sync::RwLock;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use crate::error::AcpResult;
+
+use tokio_util::sync::CancellationToken;
+
+struct SdkSpawnCancel(CancellationToken);
+
+impl Drop for SdkSpawnCancel {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
+
+const fn sdk_op_charge(label: &str) -> usize {
+    label.len()
+}
+
 use crate::localset_bridge::LocalSetBridge;
 use nexus_contracts::local::acp::{
     NexusAgentCapabilities, NexusAgentInfo, NexusAuthMethod, NexusCancelResult, NexusConfigKind,
@@ -601,8 +616,9 @@ pub struct AcpSdkAdapter {
     /// Kept outside `connection` so cancellation cannot deadlock behind a
     /// streaming prompt that mutably owns the active SDK session.
     control_connection: Arc<RwLock<Option<ConnectionTo<Agent>>>>,
-    /// Handle to the connection setup task (must be joined during cleanup).
-    setup_task: Option<tokio::task::JoinHandle<()>>,
+    /// Handle to the tracked connection-loop task on the bridge's `LocalSet`
+    /// thread (aborted on session cleanup).
+    setup_owned: Option<crate::localset_bridge::OwnedTaskHandle>,
     /// Permission evaluation callback, set by the host layer.
     ///
     /// When an ACP agent sends a `session/request_permission` request, the
@@ -649,15 +665,15 @@ impl AcpSdkAdapter {
     ///
     /// Use [`with_connection()`] to establish the actual SDK connection.
     #[must_use]
-    pub fn new(agent_id: &str, agent_path: PathBuf) -> Self {
+    pub fn new(agent_id: &str, agent_path: PathBuf, bridge: LocalSetBridge) -> Self {
         let (permission_events_tx, _) = tokio::sync::broadcast::channel(64);
         Self {
             agent_path,
             agent_id: agent_id.to_string(),
-            bridge: LocalSetBridge::new(),
+            bridge,
             connection: Arc::new(RwLock::new(None)),
             control_connection: Arc::new(RwLock::new(None)),
-            setup_task: None,
+            setup_owned: None,
             permission_handler: Arc::new(RwLock::new(None)),
             permission_events_tx: Arc::new(permission_events_tx),
         }
@@ -677,8 +693,8 @@ impl AcpSdkAdapter {
         agent_path: PathBuf,
         stdin: tokio::process::ChildStdin,
         stdout: tokio::process::ChildStdout,
+        bridge: LocalSetBridge,
     ) -> Self {
-        let bridge = LocalSetBridge::new();
         let connection = Arc::new(RwLock::new(None));
         let control_connection = Arc::new(RwLock::new(None));
         let permission_handler: Arc<RwLock<Option<PermissionHandlerFn>>> =
@@ -697,127 +713,125 @@ impl AcpSdkAdapter {
         let permission_events_for_handler = permission_events_tx.clone();
 
         let bridge_clone = bridge.clone();
-        let setup_task = tokio::spawn(async move {
-            let result = bridge_clone
-                .execute(move || {
-                    let connection_clone = connection_clone.clone();
-                    let agent_id = agent_id_for_log;
-                    let perm_handler = permission_handler_clone;
-                    let perm_events = permission_events_for_handler;
+        // The connection loop is a tracked session-ownership future on the
+        // bridge's LocalSet thread: registered by task id/abort handle and
+        // aborted by bridge shutdown, but not charged against the bounded
+        // request budget (it lives as long as the owned child transport).
+        let owned = bridge_clone.spawn_owned(move || {
+            let connection_clone = connection_clone.clone();
+            let agent_id = agent_id_for_log;
+            let perm_handler = permission_handler_clone;
+            let perm_events = permission_events_for_handler;
 
-                    // Convert tokio pipes to futures-compatible traits inside the LocalSet
-                    let stdin_compat = stdin.compat_write(); // ChildStdin → AsyncWrite (outgoing)
-                    let stdout_compat = stdout.compat(); // ChildStdout → AsyncRead (incoming)
+            // Convert tokio pipes to futures-compatible traits inside the LocalSet
+            let stdin_compat = stdin.compat_write(); // ChildStdin → AsyncWrite (outgoing)
+            let stdout_compat = stdout.compat(); // ChildStdout → AsyncRead (incoming)
 
-                    Box::pin(async move {
-                        // Create the transport using SDK ByteStreams.
-                        let transport = ByteStreams::new(stdin_compat, stdout_compat);
+            Box::pin(async move {
+                // Create the transport using SDK ByteStreams.
+                let transport = ByteStreams::new(stdin_compat, stdout_compat);
 
-                        // Build the Client with permission request handler
-                        let builder = acp::Client.builder().name(&agent_id);
+                // Build the Client with permission request handler
+                let builder = acp::Client.builder().name(&agent_id);
 
-                        // Register permission request handler via on_receive_request.
-                        // The agent sends `session/request_permission` when it needs
-                        // approval for a tool operation. The handler evaluates using
-                        // the host-level permission callback and responds.
-                        let builder = builder.on_receive_request(
-                            async move |request: RequestPermissionRequest,
-                                        responder,
-                                        _connection| {
-                                let tool_name =
-                                    request.tool_call.fields.title.clone().unwrap_or_default();
+                // Register permission request handler via on_receive_request.
+                // The agent sends `session/request_permission` when it needs
+                // approval for a tool operation. The handler evaluates using
+                // the host-level permission callback and responds.
+                let builder = builder.on_receive_request(
+                    async move |request: RequestPermissionRequest, responder, _connection| {
+                        let tool_name = request.tool_call.fields.title.clone().unwrap_or_default();
 
-                                tracing::info!(
+                        tracing::info!(
                                     session_id = %request.session_id,
                                     tool_name = %tool_name,
                                     option_count = request.options.len(),
                                     "ACP permission request received"
-                                );
-
-                                let outcome = {
-                                    let handler_guard = perm_handler.read().await;
-                                    handler_guard.as_ref().map_or_else(
-                                        || {
-                                            tracing::warn!(
-                                                tool_name = %tool_name,
-                                                "No permission handler registered, denying"
-                                            );
-                                            AcpPermissionOutcome::Deny
-                                        },
-                                        |handler| handler(&tool_name),
-                                    )
-                                };
-
-                                let response =
-                                    Self::build_permission_response(&request.options, outcome);
-
-                                tracing::info!(
-                                    session_id = %request.session_id,
-                                    tool_name = %tool_name,
-                                    approved = matches!(outcome, AcpPermissionOutcome::Approve),
-                                    "Permission response sent"
-                                );
-
-                                let _ = perm_events.send(AcpStreamUpdate::PermissionResult {
-                                    session_id: request.session_id.to_string(),
-                                    tool_name: tool_name.clone(),
-                                    approved: matches!(outcome, AcpPermissionOutcome::Approve),
-                                });
-
-                                let _ = responder.respond(response);
-                                Ok(())
-                            },
-                            acp::on_receive_request!(),
                         );
 
-                        let connection_for_callback = connection_clone.clone();
-                        let control_connection_for_callback = control_connection_clone.clone();
-                        let agent_id_for_connect = agent_id.clone();
-                        let connect_result = builder
-                            .connect_with(transport, async move |cx| {
-                                {
-                                    let mut control = control_connection_for_callback.write().await;
-                                    *control = Some(cx.clone());
-                                }
-                                let mut guard = connection_for_callback.write().await;
-                                *guard = Some(SdkConnection {
-                                    connection: cx,
-                                    init_response: None,
-                                    sessions: HashMap::new(),
-                                });
-                                drop(guard);
+                        let outcome = {
+                            let handler_guard = perm_handler.read().await;
+                            handler_guard.as_ref().map_or_else(
+                                || {
+                                    tracing::warn!(
+                                        tool_name = %tool_name,
+                                        "No permission handler registered, denying"
+                                    );
+                                    AcpPermissionOutcome::Deny
+                                },
+                                |handler| handler(&tool_name),
+                            )
+                        };
 
-                                tracing::info!(
-                                    agent_id = %agent_id_for_connect,
-                                    "ACP SDK connection established, ConnectionTo<Agent> stored"
-                                );
+                        let response = Self::build_permission_response(&request.options, outcome);
 
-                                std::future::pending::<()>().await;
-                                Ok(())
-                            })
-                            .await;
+                        tracing::info!(
+                        session_id = %request.session_id,
+                        tool_name = %tool_name,
+                        approved = matches!(outcome, AcpPermissionOutcome::Approve),
+                        "Permission response sent"
+                        );
 
-                        if let Err(e) = connect_result {
-                            tracing::error!(
-                                agent_id = %agent_id,
-                                error = %e,
-                                "ACP SDK connection failed"
-                            );
-                            return Err(crate::AcpError::sdk(&e));
-                        }
+                        let _ = perm_events.send(AcpStreamUpdate::PermissionResult {
+                            session_id: request.session_id.to_string(),
+                            tool_name: tool_name.clone(),
+                            approved: matches!(outcome, AcpPermissionOutcome::Approve),
+                        });
 
-                        Ok::<(), crate::AcpError>(())
-                    })
-                })
-                .await;
-
-            if let Err(e) = result {
-                tracing::error!(
-                    error = %e,
-                    "Failed to establish ACP connection"
+                        let _ = responder.respond(response);
+                        Ok(())
+                    },
+                    acp::on_receive_request!(),
                 );
-            }
+
+                let connection_for_callback = connection_clone.clone();
+                let control_connection_for_callback = control_connection_clone.clone();
+                let agent_id_for_connect = agent_id.clone();
+                let connect_result = builder
+                    .connect_with(transport, async move |cx| {
+                        {
+                            let mut control = control_connection_for_callback.write().await;
+                            *control = Some(cx.clone());
+                        }
+                        let mut guard = connection_for_callback.write().await;
+                        *guard = Some(SdkConnection {
+                            connection: cx,
+                            init_response: None,
+                            sessions: HashMap::new(),
+                        });
+                        drop(guard);
+
+                        tracing::info!(
+                            agent_id = %agent_id_for_connect,
+                            "ACP SDK connection established, ConnectionTo<Agent> stored"
+                        );
+
+                        std::future::pending::<()>().await;
+                        Ok(())
+                    })
+                    .await;
+
+                if let Err(e) = connect_result {
+                    tracing::error!(
+                        agent_id = %agent_id,
+                        error = %e,
+                        "ACP SDK connection failed"
+                    );
+                }
+            })
         });
+
+        let setup_owned = match owned {
+            Ok(handle) => Some(handle),
+            Err(e) => {
+                tracing::error!(
+                    agent_id = %agent_id,
+                    error = %e,
+                    "Failed to register ACP connection loop on the LocalSet bridge"
+                );
+                None
+            }
+        };
 
         Self {
             agent_path,
@@ -825,7 +839,7 @@ impl AcpSdkAdapter {
             bridge,
             connection,
             control_connection,
-            setup_task: Some(setup_task),
+            setup_owned,
             permission_handler,
             permission_events_tx: Arc::new(permission_events_tx),
         }
@@ -844,6 +858,12 @@ impl AcpSdkAdapter {
     /// this with a bounded deadline before issuing requests.
     pub async fn is_connected(&self) -> bool {
         self.connection.read().await.is_some()
+    }
+    /// Abort the long-lived SDK connection loop so owned transport pipes close.
+    pub fn abort_connection_loop(&self) {
+        if let Some(handle) = &self.setup_owned {
+            handle.abort();
+        }
     }
 
     /// Return the agent ID.
@@ -1134,17 +1154,10 @@ impl AcpSdkAdapter {
 
 impl Drop for AcpSdkAdapter {
     fn drop(&mut self) {
-        // Join the setup task if it exists (fire-and-forget cleanup)
-        if let Some(setup_task) = self.setup_task.take() {
-            // Use tokio::spawn to join in an async context
-            // We can't block in Drop, so we spawn a cleanup task
-            // Check if a tokio runtime is available to avoid panic during shutdown
-            if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                handle.spawn(async move {
-                    let _ = setup_task.await;
-                });
-            }
-            // If no runtime is available, skip — the process is shutting down anyway
+        // The connection loop lives on the bridge's LocalSet thread and is
+        // tracked there; abort it by task id so the owned transport closes.
+        if let Some(handle) = self.setup_owned.take() {
+            handle.abort();
         }
     }
 }
@@ -1160,7 +1173,7 @@ impl NexusAcpClient for AcpSdkAdapter {
 
         async move {
             bridge
-                .execute(move || {
+                .execute(sdk_op_charge("initialize"), move || {
                     let connection = connection.clone();
 
                     Box::pin(async move {
@@ -1182,23 +1195,27 @@ impl NexusAcpClient for AcpSdkAdapter {
 
                         // Get connection handle with minimal lock time
                         let connection_handle = Self::get_connection_handle(&connection).await?;
+                        let cancel = CancellationToken::new();
+                        let cancel_watch = cancel.clone();
                         let connection_for_spawn = connection_handle.clone();
-
-                        // We must use `connection.spawn()` because `block_task()` can only
-                        // be called from within a spawned task on the dispatch loop.
-                        // We use a oneshot channel to relay the response back.
                         let (tx, rx) = tokio::sync::oneshot::channel();
                         connection_handle
                             .spawn(async move {
-                                let result = connection_for_spawn
-                                    .send_request_to(Agent, sdk_req)
-                                    .block_task()
-                                    .await;
-                                let _ = tx.send(result);
+                                tokio::select! {
+                                    () = cancel_watch.cancelled() => {}
+                                    res = async {
+                                        connection_for_spawn
+                                            .send_request_to(Agent, sdk_req)
+                                            .block_task()
+                                            .await
+                                    } => {
+                                        let _ = tx.send(res);
+                                    }
+                                }
                                 Ok(())
                             })
                             .map_err(|e| crate::AcpError::sdk(&e))?;
-
+                        let _sdk_cancel = SdkSpawnCancel(cancel);
                         let init_result = rx
                             .await
                             .map_err(|_| {
@@ -1240,7 +1257,7 @@ impl NexusAcpClient for AcpSdkAdapter {
 
         async move {
             bridge
-                .execute(move || {
+                .execute(sdk_op_charge("create_session"), move || {
                     let connection = connection.clone();
 
                     Box::pin(async move {
@@ -1254,24 +1271,28 @@ impl NexusAcpClient for AcpSdkAdapter {
 
                         // Get connection handle with minimal lock time
                         let connection_handle = Self::get_connection_handle(&connection).await?;
+                        let cancel = CancellationToken::new();
+                        let cancel_watch = cancel.clone();
                         let connection_for_spawn = connection_handle.clone();
-
-                        // Use build_session_from + block_task + start_session.
-                        // Must run inside a spawned task since block_task() requires
-                        // the dispatch loop context.
                         let (tx, rx) = tokio::sync::oneshot::channel();
                         connection_handle
                             .spawn(async move {
-                                let result = connection_for_spawn
-                                    .build_session_from(sdk_req)
-                                    .block_task()
-                                    .start_session()
-                                    .await;
-                                let _ = tx.send(result);
+                                tokio::select! {
+                                    () = cancel_watch.cancelled() => {}
+                                    res = async {
+                                        connection_for_spawn
+                                            .build_session_from(sdk_req)
+                                            .block_task()
+                                            .start_session()
+                                            .await
+                                    } => {
+                                        let _ = tx.send(res);
+                                    }
+                                }
                                 Ok(())
                             })
                             .map_err(|e| crate::AcpError::sdk(&e))?;
-
+                        let _sdk_cancel = SdkSpawnCancel(cancel);
                         let session_result = rx
                             .await
                             .map_err(|_| {
@@ -1352,7 +1373,7 @@ impl NexusAcpClient for AcpSdkAdapter {
                 .join("\n");
 
             bridge
-                .execute(move || {
+                .execute(sdk_op_charge("stream_prompt"), move || {
                     let connection = connection.clone();
 
                     Box::pin(Self::run_prompt(connection, session_id_str, prompt_text))
@@ -1411,7 +1432,7 @@ impl NexusAcpClient for AcpSdkAdapter {
 
             tokio::spawn(async move {
                 let result = bridge
-                    .execute(move || {
+                    .execute(sdk_op_charge("cancel"), move || {
                         let connection = connection.clone();
                         Box::pin(Self::run_stream_prompt(
                             connection,
@@ -1448,8 +1469,11 @@ impl NexusAcpClient for AcpSdkAdapter {
         let agent_id = self.agent_id.clone();
 
         async move {
+            // Cooperative cancel is teardown/control work: it must reach the
+            // peer even when the bounded work queue is saturated, otherwise a
+            // full queue could block the cancellation that drains it.
             bridge
-                .execute(move || {
+                .execute_control(sdk_op_charge("cancel"), move || {
                     let control_connection = control_connection.clone();
 
                     Box::pin(async move {
@@ -1501,7 +1525,7 @@ impl NexusAcpClient for AcpSdkAdapter {
 
         async move {
             bridge
-                .execute(move || {
+                .execute(sdk_op_charge("list_sessions"), move || {
                     let connection = connection.clone();
 
                     Box::pin(async move {
@@ -1517,19 +1541,27 @@ impl NexusAcpClient for AcpSdkAdapter {
 
                         // Get connection handle with minimal lock time
                         let connection_handle = Self::get_connection_handle(&connection).await?;
+                        let cancel = CancellationToken::new();
+                        let cancel_watch = cancel.clone();
                         let connection_for_spawn = connection_handle.clone();
-                        // Send the request via raw JSON-RPC using spawn + block_task
                         let (tx, rx) = tokio::sync::oneshot::channel();
                         connection_handle
                             .spawn(async move {
-                                let result = connection_for_spawn
-                                    .send_request_to(Agent, sdk_req)
-                                    .block_task()
-                                    .await;
-                                let _ = tx.send(result);
+                                tokio::select! {
+                                    () = cancel_watch.cancelled() => {}
+                                    res = async {
+                                        connection_for_spawn
+                                            .send_request_to(Agent, sdk_req)
+                                            .block_task()
+                                            .await
+                                    } => {
+                                        let _ = tx.send(res);
+                                    }
+                                }
                                 Ok(())
                             })
                             .map_err(|e| crate::AcpError::sdk(&e))?;
+                        let _sdk_cancel = SdkSpawnCancel(cancel);
 
                         let list_result = rx
                             .await
@@ -1568,7 +1600,7 @@ impl NexusAcpClient for AcpSdkAdapter {
 
         async move {
             bridge
-                .execute(move || {
+                .execute(sdk_op_charge("set_config_option"), move || {
                     let connection = connection.clone();
 
                     Box::pin(async move {
@@ -1584,20 +1616,27 @@ impl NexusAcpClient for AcpSdkAdapter {
 
                         // Get connection handle with minimal lock time
                         let connection_handle = Self::get_connection_handle(&connection).await?;
+                        let cancel = CancellationToken::new();
+                        let cancel_watch = cancel.clone();
                         let connection_for_spawn = connection_handle.clone();
-
-                        // Send the request via raw JSON-RPC using spawn + block_task
                         let (tx, rx) = tokio::sync::oneshot::channel();
                         connection_handle
                             .spawn(async move {
-                                let result = connection_for_spawn
-                                    .send_request_to(Agent, sdk_req)
-                                    .block_task()
-                                    .await;
-                                let _ = tx.send(result);
+                                tokio::select! {
+                                    () = cancel_watch.cancelled() => {}
+                                    res = async {
+                                        connection_for_spawn
+                                            .send_request_to(Agent, sdk_req)
+                                            .block_task()
+                                            .await
+                                    } => {
+                                        let _ = tx.send(res);
+                                    }
+                                }
                                 Ok(())
                             })
                             .map_err(|e| crate::AcpError::sdk(&e))?;
+                        let _sdk_cancel = SdkSpawnCancel(cancel);
 
                         let set_result = rx
                             .await
@@ -1636,7 +1675,7 @@ impl NexusAcpClient for AcpSdkAdapter {
 
         async move {
             bridge
-                .execute(move || {
+                .execute(sdk_op_charge("load_session"), move || {
                     let connection = connection.clone();
 
                     Box::pin(async move {
@@ -1655,19 +1694,27 @@ impl NexusAcpClient for AcpSdkAdapter {
                         );
 
                         let connection_handle = Self::get_connection_handle(&connection).await?;
+                        let cancel = CancellationToken::new();
+                        let cancel_watch = cancel.clone();
                         let connection_for_spawn = connection_handle.clone();
-
                         let (tx, rx) = tokio::sync::oneshot::channel();
                         connection_handle
                             .spawn(async move {
-                                let result = connection_for_spawn
-                                    .send_request_to(Agent, sdk_req)
-                                    .block_task()
-                                    .await;
-                                let _ = tx.send(result);
+                                tokio::select! {
+                                    () = cancel_watch.cancelled() => {}
+                                    res = async {
+                                        connection_for_spawn
+                                            .send_request_to(Agent, sdk_req)
+                                            .block_task()
+                                            .await
+                                    } => {
+                                        let _ = tx.send(res);
+                                    }
+                                }
                                 Ok(())
                             })
                             .map_err(|e| crate::AcpError::sdk(&e))?;
+                        let _sdk_cancel = SdkSpawnCancel(cancel);
 
                         rx.await
                             .map_err(|_| {
@@ -1971,7 +2018,11 @@ mod tests {
 
     #[tokio::test]
     async fn adapter_new_creates_bridge() {
-        let adapter = AcpSdkAdapter::new("test-agent", PathBuf::from("/usr/bin/test-agent"));
+        let adapter = AcpSdkAdapter::new(
+            "test-agent",
+            PathBuf::from("/usr/bin/test-agent"),
+            LocalSetBridge::new(),
+        );
 
         assert_eq!(adapter.agent_id(), "test-agent");
         assert_eq!(adapter.agent_path(), Path::new("/usr/bin/test-agent"));
@@ -1982,7 +2033,11 @@ mod tests {
 
     #[tokio::test]
     async fn adapter_initialize_without_connection_fails() {
-        let adapter = AcpSdkAdapter::new("test-agent", PathBuf::from("/usr/bin/test-agent"));
+        let adapter = AcpSdkAdapter::new(
+            "test-agent",
+            PathBuf::from("/usr/bin/test-agent"),
+            LocalSetBridge::new(),
+        );
 
         let request = NexusInitializeRequest::new();
 
@@ -1992,7 +2047,11 @@ mod tests {
 
     #[tokio::test]
     async fn adapter_create_session_without_connection_fails() {
-        let adapter = AcpSdkAdapter::new("test-agent", PathBuf::from("/usr/bin/test-agent"));
+        let adapter = AcpSdkAdapter::new(
+            "test-agent",
+            PathBuf::from("/usr/bin/test-agent"),
+            LocalSetBridge::new(),
+        );
 
         let request = NexusNewSessionRequest::new("/tmp/workspace");
         let result = adapter.create_session(request).await;
@@ -2001,7 +2060,11 @@ mod tests {
 
     #[tokio::test]
     async fn adapter_prompt_without_connection_fails() {
-        let adapter = AcpSdkAdapter::new("test-agent", PathBuf::from("/usr/bin/test-agent"));
+        let adapter = AcpSdkAdapter::new(
+            "test-agent",
+            PathBuf::from("/usr/bin/test-agent"),
+            LocalSetBridge::new(),
+        );
 
         let request = NexusPromptRequest::new(NexusSessionId::new("nonexistent"), vec![]);
         let result = adapter.prompt(request).await;
@@ -2010,7 +2073,11 @@ mod tests {
 
     #[tokio::test]
     async fn adapter_cancel_without_connection_fails() {
-        let adapter = AcpSdkAdapter::new("test-agent", PathBuf::from("/usr/bin/test-agent"));
+        let adapter = AcpSdkAdapter::new(
+            "test-agent",
+            PathBuf::from("/usr/bin/test-agent"),
+            LocalSetBridge::new(),
+        );
 
         let result = adapter.cancel(NexusSessionId::new("nonexistent")).await;
         assert!(result.is_err());
@@ -2018,7 +2085,11 @@ mod tests {
 
     #[tokio::test]
     async fn adapter_prompt_nonexistent_session_fails() {
-        let adapter = AcpSdkAdapter::new("test-agent", PathBuf::from("/usr/bin/test-agent"));
+        let adapter = AcpSdkAdapter::new(
+            "test-agent",
+            PathBuf::from("/usr/bin/test-agent"),
+            LocalSetBridge::new(),
+        );
 
         // Manually verify the error path when connection exists but session doesn't.
         // We can't easily create a real ConnectionTo without a transport,
@@ -2042,7 +2113,11 @@ mod tests {
 
     #[tokio::test]
     async fn adapter_list_sessions_without_connection_fails() {
-        let adapter = AcpSdkAdapter::new("test-agent", PathBuf::from("/usr/bin/test-agent"));
+        let adapter = AcpSdkAdapter::new(
+            "test-agent",
+            PathBuf::from("/usr/bin/test-agent"),
+            LocalSetBridge::new(),
+        );
 
         let request = NexusListSessionsRequest::new();
         let result = adapter.list_sessions(request).await;
@@ -2270,7 +2345,11 @@ mod tests {
 
     #[tokio::test]
     async fn adapter_set_config_option_without_connection_fails() {
-        let adapter = AcpSdkAdapter::new("test-agent", PathBuf::from("/usr/bin/test-agent"));
+        let adapter = AcpSdkAdapter::new(
+            "test-agent",
+            PathBuf::from("/usr/bin/test-agent"),
+            LocalSetBridge::new(),
+        );
 
         let request = NexusSetConfigOptionRequest::new(
             NexusSessionId::new("nonexistent"),

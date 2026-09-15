@@ -44,8 +44,10 @@ async fn test_ctx() -> TestCtx {
 /// Open the creator DB read-write (same `?mode=rw` pattern as
 /// `fl_e_schedule_api.rs`).
 async fn open_db(db_path: &std::path::Path) -> SqlitePool {
-    let db_url = format!("sqlite:{}?mode=rw", db_path.display());
-    SqlitePool::connect(&db_url).await.expect("open creator db")
+    nexus_local_db::init_engine_pool(db_path)
+        .await
+        .expect("fixture: writer-protocol engine admission")
+        .clone_pool()
 }
 
 /// Seed a `creator_schedules` row directly (the daemon has no

@@ -1424,12 +1424,18 @@ async fn update_preserves_unknown_extensions_nexus_keys() {
         .execute(state.pool().unwrap())
         .await
         .unwrap();
+    let (pre_update_revision,): (i64,) =
+        sqlx::query_as("SELECT revision FROM kb_relationships WHERE relationship_id = ?")
+            .bind(&rel_id)
+            .fetch_one(state.pool().unwrap())
+            .await
+            .unwrap();
 
     // Update: change only `relation_type`. Unknown keys must survive.
     let req = WorldKbPatchRelationshipRequest {
         relationship_id: Some(rel_id.clone()),
         action: "update".parse().unwrap(),
-        expected_version: Some(1),
+        expected_version: Some(u64::try_from(pre_update_revision).expect("revision fits u64")),
         relationship: Some(NexusWorldKbRelationshipInput {
             source_entity_id: "kb_a".to_string(),
             target_entity_id: "kb_b".to_string(),
@@ -1450,7 +1456,11 @@ async fn update_preserves_unknown_extensions_nexus_keys() {
     .await
     .expect("update should succeed");
 
-    assert_eq!(resp.version, 2, "CAS bump after update");
+    assert_eq!(
+        resp.version,
+        u64::try_from(pre_update_revision + 1).expect("revision fits u64"),
+        "CAS bump after update"
+    );
 
     // Verify unknown keys survived the round-trip.
     let extensions_json: String = sqlx::query_scalar(

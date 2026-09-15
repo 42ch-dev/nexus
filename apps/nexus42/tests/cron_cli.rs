@@ -276,8 +276,10 @@ fn cron_list_help_documents_limit_flag() {
 async fn fresh_seeded_pool() -> sqlx::SqlitePool {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
-    let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
-    nexus_local_db::run_migrations(&pool).await.unwrap();
+    let pool = nexus_local_db::init_engine_pool(&db_path)
+        .await
+        .unwrap()
+        .clone_pool();
     // Keep the tempdir alive for the test by leaking it (test process is short-lived).
     std::mem::forget(dir);
     let record = sample_work_record("wrk_seed", "seed-ref");

@@ -944,6 +944,69 @@ fn validation_err(e: nexus_knowledge::world_kb::KbError) -> KbStoreError {
     }
 }
 
+/// Read a knowledge entry inside a caller-owned transaction.
+///
+/// # Errors
+///
+/// Returns [`KbStoreError::NotFound`] when no row carries `key_block_id`,
+/// [`KbStoreError::Storage`] on database failure, and the validation
+/// variants when the stored row decodes to an invalid record.
+pub async fn get_knowledge_entry_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    key_block_id: &str,
+) -> Result<KnowledgeEntryRecord, KbStoreError> {
+    let row = sqlx::query_as::<_, KeyBlockRow>(
+        r"SELECT
+                key_block_id, owner_kind, world_id, character_id,
+                actor_world_binding_id, creator_only,
+                block_type, canonical_name, status,
+                revision, body_json, source_anchor_json, created_from_command_id,
+                created_at, updated_at, source_work_id, source_chapter,
+                source_provenance_kind, extensions_nexus_json, modules_json
+            FROM kb_key_blocks
+            WHERE key_block_id = ?",
+    )
+    .bind(key_block_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|e| db_err(&e))?
+    .ok_or_else(|| KbStoreError::NotFound(key_block_id.to_string()))?;
+    row.to_record()
+}
+
+/// List active world-owned knowledge entries inside a caller-owned transaction.
+///
+/// # Errors
+///
+/// Returns [`KbStoreError::Storage`] on database failure and the validation
+/// variants when a stored row decodes to an invalid record.
+pub async fn list_by_world_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    world_id: &str,
+    limit: usize,
+) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
+    let rows = sqlx::query_as::<_, KeyBlockRow>(sqlx::AssertSqlSafe(format!(
+        r"SELECT
+                key_block_id, owner_kind, world_id, character_id,
+                actor_world_binding_id, creator_only,
+                block_type, canonical_name, status,
+                revision, body_json, source_anchor_json, created_from_command_id,
+                created_at, updated_at, source_work_id, source_chapter,
+                source_provenance_kind, extensions_nexus_json, modules_json
+            FROM kb_key_blocks
+            WHERE owner_kind = 'world'
+              AND world_id = ?
+              AND status NOT IN ('deleted', 'merged', 'deprecated')
+            ORDER BY created_at ASC
+            LIMIT {limit}"
+    )))
+    .bind(world_id)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|e| db_err(&e))?;
+    rows.iter().map(KeyBlockRow::to_record).collect()
+}
+
 // SAFETY: sqlx SQLite futures borrow the connection pool internally;
 // safe for single-threaded SQLite usage within our tokio runtime.
 #[allow(clippy::future_not_send)]
@@ -1581,6 +1644,32 @@ impl SqliteKbStore {
 
 // ── V1.73 Canvas World KB: per-row OCC CAS entity edit ──────────────────────
 
+/// Column payload for [`cas_update_key_block_fields`]: every column one CAS
+/// patch may rewrite.
+///
+/// `None` leaves the column untouched; `Some` writes the carried value (for
+/// the two `Option<Option<&str>>` columns the inner `None` writes SQL
+/// `NULL`). Folding these into the CAS `UPDATE` avoids a second statement
+/// that would leave `revision` unchanged and re-fire the T1 bump trigger.
+#[derive(Debug, Clone, Default)]
+pub struct CasKeyBlockFieldUpdate<'a> {
+    /// Replacement `canonical_name`.
+    pub canonical_name: Option<&'a str>,
+    /// Replacement `block_type` (`snake_case` wire string).
+    pub block_type: Option<&'a str>,
+    /// Replacement body (JSON string).
+    pub body_json: Option<&'a str>,
+    /// Replacement lifecycle status.
+    pub status: Option<&'a str>,
+    /// Replacement source-anchor JSON; the inner `None` writes SQL `NULL`.
+    pub source_anchor_json: Option<Option<&'a str>>,
+    /// Replacement `extensions.nexus` JSON object.
+    pub extensions_nexus_json: Option<&'a str>,
+    /// Replacement modules JSON; the inner `None` writes SQL `NULL`.
+    pub modules_json: Option<Option<&'a str>>,
+    /// Replacement provenance kind.
+    pub source_provenance_kind: Option<&'a str>,
+}
 /// V1.73 P0: CAS-aware partial update of a `kb_key_blocks` row.
 ///
 /// Mirrors the V1.51 `kb_extract_jobs` CAS pattern
@@ -1593,9 +1682,9 @@ impl SqliteKbStore {
 /// generic version mismatch. On success the `revision` column is bumped to
 /// `expected_revision + 1` and the bumped value is returned.
 ///
-/// Only the fields supplied as `Some(..)` are mutated; `None` fields keep
-/// their current DB value. `revision` is NULL-normalized to 0 by this
-/// function (the architect Phase 2b lock: existing rows may have
+/// Only the fields supplied as `Some(..)` in `fields` are mutated; `None`
+/// fields keep their current DB value. `revision` is NULL-normalized to 0 by
+/// this function (the architect Phase 2b lock: existing rows may have
 /// `revision = NULL`; the first successful patch sets it to 1).
 ///
 /// # Arguments
@@ -1603,49 +1692,60 @@ impl SqliteKbStore {
 /// - `tx` — caller-owned transaction (so the entity edit can be composed
 ///   atomically with sibling writes if needed).
 /// - `key_block_id` — target row PK.
-/// - `canonical_name` / `block_type` / `body_json` — optional replacement
-///   values (JSON strings for `body_json`).
 /// - `expected_revision` — the per-row version the caller observed on read
 ///   (NULL-normalized to 0; this is the OCC precondition).
 /// - `world_id` — the stored-world the caller verified on read (spec §3.1:
 ///   the world bind is the stored-world expected by the request). A row that
 ///   moved to another world fails the predicate and classifies as
 ///   [`LocalDbError::WorldConflict`].
+/// - `fields` — replacement column values; see [`CasKeyBlockFieldUpdate`].
 ///
 /// # Returns
 ///
 /// - `Ok(new_revision)` — row updated, returns the new bumped version.
+///
+/// # Errors
+///
 /// - `Err(LocalDbError::VersionMismatch)` — the row's `revision` changed
 ///   between read and UPDATE (409 caller-side).
 /// - `Err(LocalDbError::VersionMismatch { actual: None })` — row not found.
 /// - `Err(LocalDbError::WorldConflict)` — the row now lives in another
 ///   world (R3: cross-process writers; wire code `world_conflict`).
 /// - `Err(LocalDbError::Sqlx)` — database failure.
-///
-/// # Errors
-///
-/// See above.
 pub async fn cas_update_key_block_fields(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     key_block_id: &str,
-    canonical_name: Option<&str>,
-    block_type: Option<&str>,
-    body_json: Option<&str>,
     expected_revision: i64,
     world_id: &str,
+    fields: &CasKeyBlockFieldUpdate<'_>,
 ) -> Result<u64, LocalDbError> {
     // Build a dynamic SET clause from the supplied fields. revision is always
     // bumped; updated_at always set. SAFETY: dynamic SET built from a fixed
     // field whitelist (not user-controlled SQL); all values are bind params.
     let mut sets = vec!["revision = ?".to_string(), "updated_at = ?".to_string()];
-    if canonical_name.is_some() {
+    if fields.canonical_name.is_some() {
         sets.push("canonical_name = ?".to_string());
     }
-    if block_type.is_some() {
+    if fields.block_type.is_some() {
         sets.push("block_type = ?".to_string());
     }
-    if body_json.is_some() {
+    if fields.body_json.is_some() {
         sets.push("body_json = ?".to_string());
+    }
+    if fields.status.is_some() {
+        sets.push("status = ?".to_string());
+    }
+    if fields.source_anchor_json.is_some() {
+        sets.push("source_anchor_json = ?".to_string());
+    }
+    if fields.extensions_nexus_json.is_some() {
+        sets.push("extensions_nexus_json = ?".to_string());
+    }
+    if fields.modules_json.is_some() {
+        sets.push("modules_json = ?".to_string());
+    }
+    if fields.source_provenance_kind.is_some() {
+        sets.push("source_provenance_kind = ?".to_string());
     }
     let set_clause = sets.join(", ");
     let now = chrono::Utc::now().to_rfc3339();
@@ -1668,13 +1768,28 @@ pub async fn cas_update_key_block_fields(
 
     let mut q = sqlx::query(sqlx::AssertSqlSafe(sql));
     q = q.bind(new_revision).bind(now);
-    if let Some(v) = canonical_name {
+    if let Some(v) = fields.canonical_name {
         q = q.bind(v);
     }
-    if let Some(v) = block_type {
+    if let Some(v) = fields.block_type {
         q = q.bind(v);
     }
-    if let Some(v) = body_json {
+    if let Some(v) = fields.body_json {
+        q = q.bind(v);
+    }
+    if let Some(v) = fields.status {
+        q = q.bind(v);
+    }
+    if let Some(v) = fields.source_anchor_json {
+        q = q.bind(v);
+    }
+    if let Some(v) = fields.extensions_nexus_json {
+        q = q.bind(v);
+    }
+    if let Some(v) = fields.modules_json {
+        q = q.bind(v);
+    }
+    if let Some(v) = fields.source_provenance_kind {
         q = q.bind(v);
     }
     q = q.bind(key_block_id).bind(expected_revision).bind(world_id);
@@ -3099,11 +3214,12 @@ mod tests {
         let new_rev = cas_update_key_block_fields(
             &mut tx,
             &id,
-            Some("CasHappy Renamed"),
-            None,
-            None,
             0,
             "wld_1",
+            &CasKeyBlockFieldUpdate {
+                canonical_name: Some("CasHappy Renamed"),
+                ..CasKeyBlockFieldUpdate::default()
+            },
         )
         .await
         .unwrap();
@@ -3136,10 +3252,18 @@ mod tests {
         .unwrap();
 
         let mut tx = pool.begin().await.unwrap();
-        let err =
-            cas_update_key_block_fields(&mut tx, &id, Some("CasForeign"), None, None, 0, "wld_1")
-                .await
-                .unwrap_err();
+        let err = cas_update_key_block_fields(
+            &mut tx,
+            &id,
+            0,
+            "wld_1",
+            &CasKeyBlockFieldUpdate {
+                canonical_name: Some("CasForeign"),
+                ..CasKeyBlockFieldUpdate::default()
+            },
+        )
+        .await
+        .unwrap_err();
         match err {
             LocalDbError::WorldConflict {
                 table,
@@ -3249,10 +3373,18 @@ mod tests {
         let id = seed_key_block(&pool, "CasStale").await;
 
         let mut tx = pool.begin().await.unwrap();
-        let err =
-            cas_update_key_block_fields(&mut tx, &id, Some("CasStale"), None, None, 5, "wld_1")
-                .await
-                .unwrap_err();
+        let err = cas_update_key_block_fields(
+            &mut tx,
+            &id,
+            5,
+            "wld_1",
+            &CasKeyBlockFieldUpdate {
+                canonical_name: Some("CasStale"),
+                ..CasKeyBlockFieldUpdate::default()
+            },
+        )
+        .await
+        .unwrap_err();
         assert!(
             matches!(err, LocalDbError::VersionMismatch { .. }),
             "same-world stale revision keeps VersionMismatch: {err:?}"

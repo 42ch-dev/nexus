@@ -373,6 +373,7 @@ impl NexusApiError {
                     | "compute_memory_cap_exceeded"
                     | "compute_module_trapped"
                     | "compute_module_error" => StatusCode::UNPROCESSABLE_ENTITY,
+                    "busy" | "closing" | "interrupted" => StatusCode::SERVICE_UNAVAILABLE,
                     // V1.65: chapter bodies above the size cap return 413.
                     "chapter_body_too_large" => StatusCode::PAYLOAD_TOO_LARGE,
                     _ => StatusCode::BAD_REQUEST,
@@ -428,7 +429,10 @@ impl NexusApiError {
                     | "compute_wall_time_exceeded"
                     | "compute_memory_cap_exceeded"
                     | "compute_module_trapped"
-                    | "compute_module_error" => code.as_str(),
+                    | "compute_module_error"
+                    | "busy"
+                    | "closing"
+                    | "interrupted" => code.as_str(),
                     _ if code.ends_with("_sort_invalid") => code.as_str(),
                     _ => "bad_request",
                 }
@@ -750,9 +754,63 @@ pub fn actor_session_stale(session_id: &str) -> NexusApiError {
     }
 }
 
+impl From<nexus_core::CoreError> for NexusApiError {
+    fn from(err: nexus_core::CoreError) -> Self {
+        match err {
+            nexus_core::CoreError::Uninitialized => Self::Uninitialized,
+            nexus_core::CoreError::AuthRequired => Self::AuthRequired,
+            nexus_core::CoreError::Forbidden { resource } => Self::Forbidden {
+                resource,
+                reason: "forbidden".to_string(),
+            },
+            nexus_core::CoreError::NotFound { resource } => Self::NotFound(resource),
+            nexus_core::CoreError::InvalidInput { field, reason } => {
+                Self::InvalidInput { field, reason }
+            }
+            nexus_core::CoreError::WorldKbConflict(details) => Self::world_kb_conflict(
+                details.current_version,
+                details.entity_id,
+                details.conflicting_path,
+                details.recovery_hint,
+            ),
+            nexus_core::CoreError::WorldKbValidation(details) => Self::WorldKbValidationFailed {
+                details: serde_json::to_value(&details.validation_summary).unwrap_or_default(),
+            },
+            nexus_core::CoreError::OwnerBusy => Self::ConflictCoded {
+                code: "owner_busy".to_string(),
+                message: "writer owner busy".to_string(),
+            },
+            nexus_core::CoreError::WriterFenced => Self::ConflictCoded {
+                code: "writer_fenced".to_string(),
+                message: "writer fenced".to_string(),
+            },
+            nexus_core::CoreError::SchemaMismatch => Self::ConflictCoded {
+                code: "schema_mismatch".to_string(),
+                message: "schema mismatch".to_string(),
+            },
+            nexus_core::CoreError::Busy => Self::BadRequest {
+                code: "busy".to_string(),
+                message: "busy".to_string(),
+            },
+            nexus_core::CoreError::Closing => Self::BadRequest {
+                code: "closing".to_string(),
+                message: "closing".to_string(),
+            },
+            nexus_core::CoreError::Interrupted => Self::BadRequest {
+                code: "interrupted".to_string(),
+                message: "interrupted".to_string(),
+            },
+            nexus_core::CoreError::Internal { category } => Self::Internal {
+                code: "CORE_ERROR".to_string(),
+                message: category,
+            },
+        }
+    }
+}
+
 // Note: These tests remain inline because they use `crate::test_utils::create_test_workspace`,
 // which is a private test-only helper. Integration tests in `tests/` cannot access
-// `#[cfg(test)]` modules. Consider extracting the pure unit tests (error mapping logic)
+// `crate::test_utils` modules. Consider extracting the pure unit tests (error mapping logic)
 // to `tests/` once a public test fixture helper is added.
 #[cfg(test)]
 mod tests {
@@ -1184,8 +1242,8 @@ mod tests {
 
     #[test]
     fn internal_error_spoke_reject_maps_to_500() {
-        // Simulate what map_upsert_reject / spoke_reject_to_api_error /
-        // map_relate_reject emit for SpokeRejectCode::InternalError.
+        // Simulate what spoke_reject_to_api_error / map_relate_reject emit
+        // for SpokeRejectCode::InternalError.
         let err = NexusApiError::Internal {
             code: "INTERNAL_ERROR".to_string(),
             message: "orchestrate_upsert internal error: DB connection lost".to_string(),

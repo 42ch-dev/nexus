@@ -3,21 +3,24 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 import { createDaemonProxyRoute } from './src/lib/nexus/daemon-proxy';
+import { resolveDaemonEndpoint } from '../../scripts/dev-backend-manifest.mjs';
 
 // Vite config for the Nexus local Web UI.
 //
 // Dev: the SPA runs on the Vite dev server and proxies Daemon API requests to
-// the running daemon (default http://127.0.0.1:8420, the daemon HTTP transport
-// default — see crates/nexus-daemon-runtime/src/boot.rs). Override the target
-// with VITE_DAEMON_URL, e.g. VITE_DAEMON_URL=http://127.0.0.1:9000 pnpm dev.
+// the running daemon. `dev-cli-web.sh` exports VITE_DAEMON_URL from the same
+// derivation as NEXUS42_DAEMON_PORT; both must agree when set together.
 //
-// Preview (`vite preview`, used by `pnpm dev:desktop`): same proxy — without
+// Preview (`vite preview`, used by desktop web-only flows): same proxy — without
 // it, relative `/v1/daemon/*` hits the SPA fallback HTML and surfaces a false
 // "Cannot reach the local daemon" transport error.
 //
 // Release: the built dist/ is embedded into the nexus42 binary (plan P3,
 // rust-embed); no Node runtime ships. The proxy is dev/preview-only.
-const daemonUrl = process.env.VITE_DAEMON_URL ?? 'http://127.0.0.1:8420';
+const { baseUrl: daemonUrl } = resolveDaemonEndpoint({
+  portEnv: process.env.NEXUS42_DAEMON_PORT,
+  urlEnv: process.env.VITE_DAEMON_URL,
+});
 
 /** Shared Daemon API proxy for `vite dev` and `vite preview`. */
 const daemonProxy = {

@@ -19,9 +19,10 @@ async fn test_pool() -> sqlx::SqlitePool {
         .unwrap();
     let db_path = db.path().to_path_buf();
     std::mem::forget(db);
-    let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
-    nexus_local_db::run_migrations(&pool).await.unwrap();
-    pool
+    nexus_local_db::init_engine_pool(&db_path)
+        .await
+        .unwrap()
+        .clone_pool()
 }
 
 fn test_work(work_id: &str) -> WorkRecord {
@@ -108,12 +109,12 @@ async fn run_one_tick_no_match_is_noop() {
     let pool = Arc::new(test_pool().await);
     let work = test_work("wrk_daemon_idle");
     works::create_work(&pool, &work).await.unwrap();
-    // `0 3 * * *` — fires only at 03:00; unlikely to match the test's `now`.
+    // Seven-field expressions pinned to 2000 can never match a current tick.
     let blob = serde_json::json!({
         "tz": "UTC",
         "roles": {
-            "brainstorm": {"cron": "0 3 * * *", "enabled": true},
-            "write": {"cron": "0 4 * * *", "enabled": true}
+            "brainstorm": {"cron": "0 0 3 * * * 2000", "enabled": true},
+            "write": {"cron": "0 0 4 * * * 2000", "enabled": true}
         }
     })
     .to_string();

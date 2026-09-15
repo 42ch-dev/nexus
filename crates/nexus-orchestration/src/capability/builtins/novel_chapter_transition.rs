@@ -451,12 +451,10 @@ Body text here.";
     async fn fresh_pool() -> sqlx::SqlitePool {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let pool = nexus_local_db::open_pool(&db_path)
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("open pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations");
+        let pool = guarded.clone_pool();
         // Keep the tempdir alive for the test lifetime via leak (test-only).
         std::mem::forget(dir);
         pool

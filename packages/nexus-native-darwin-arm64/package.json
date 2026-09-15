@@ -1,0 +1,15 @@
+{
+  "name": "@42ch/nexus-native-darwin-arm64",
+  "version": "0.1.0",
+  "private": true,
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "native/",
+    "AGENTS.md"
+  ]
+}

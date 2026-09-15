@@ -514,13 +514,12 @@ mod tests {
     use crate::state_delta;
     use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
     use nexus_knowledge::world_kb::KbStore;
-    use nexus_local_db::{open_pool, run_migrations};
+    use nexus_local_db::init_engine_pool;
 
     async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        let pool = open_pool(&db_path).await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        let pool = init_engine_pool(&db_path).await.unwrap().clone_pool();
         (pool, dir)
     }
 

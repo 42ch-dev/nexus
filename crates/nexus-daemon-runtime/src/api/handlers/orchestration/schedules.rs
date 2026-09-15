@@ -2566,12 +2566,10 @@ mod tests {
     #[tokio::test]
     async fn cancel_fence_loses_to_concurrent_admission_without_writing_status() {
         let db = tempfile::NamedTempFile::new().expect("temp db");
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("migrate");
+        let pool = guarded.clone_pool();
         let now = chrono::Utc::now().timestamp();
 
         // Admission-only historical shape: running, no owned session.
@@ -2805,12 +2803,10 @@ mod tests {
     #[tokio::test]
     async fn schedule_delete_session_cancel_advances_graph_version_and_fails_closed() {
         let db = tempfile::NamedTempFile::new().expect("temp db");
-        let pool = nexus_local_db::open_pool(db.path())
+        let guarded = nexus_local_db::init_engine_pool(db.path())
             .await
             .expect("open pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("migrate");
+        let pool = guarded.clone_pool();
         let now = chrono::Utc::now().timestamp();
         let context = serde_json::to_vec(&graph_flow::Context::new()).expect("serialize context");
 

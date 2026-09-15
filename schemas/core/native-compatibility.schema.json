@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/native-compatibility.schema.json",
+  "schema_version": 1,
+  "title": "Nexus NativeCompatibility",
+  "description": "Fixed compatibility manifest returned by nativeCompatibility() before any DB open.",
+  "type": "object",
+  "required": [
+    "native_api_version",
+    "writer_protocol",
+    "target_triple",
+    "package_version",
+    "contract_tree_sha256",
+    "db_schema_min",
+    "db_schema_max",
+    "napi_minimum"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "native_api_version": { "type": "integer", "const": 1 },
+    "writer_protocol": { "type": "integer", "const": 1 },
+    "target_triple": { "type": "string" },
+    "package_version": { "type": "string" },
+    "contract_tree_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "db_schema_min": { "type": "integer", "minimum": 0 },
+    "db_schema_max": { "type": "integer", "minimum": 0 },
+    "napi_minimum": { "type": "integer", "const": 8 }
+  }
+}

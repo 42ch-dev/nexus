@@ -1026,9 +1026,6 @@ mod tests {
         )
     }
 
-    // The held `PROCESS_ENV_LOCK` guard makes the future !Send; test-only
-    // helper, run on tokio's current-thread test runtime (no Send needed).
-    #[allow(clippy::future_not_send)]
     async fn launch_and_execute(
         provider: &CodexNativeProvider,
         text: &str,
@@ -1036,9 +1033,7 @@ mod tests {
         // Serialize with the env-mutating discovery tests: the fixture is
         // spawned via `#!/usr/bin/env python3`, which resolves python3
         // through PATH at execve time (see lib.rs test_support).
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
         let handle = provider.launch(launch_spec()).await.expect("launch");
         let stream = provider
             .execute(
@@ -1081,16 +1076,13 @@ mod tests {
     }
 
     #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // the fixture env is process-global
     async fn probe_failure_diagnostic_never_echoes_sdk_output() {
         // A hostile sentinel standing in for anything secret-bearing the SDK
         // error Display might carry (subprocess stderr, tokens, paths). The
         // fixture fails `initialize` with it, so it genuinely travels the real
         // probe failure path.
         const SENTINEL: &str = "sentinel-secret-do-not-publish-4f2a";
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
 
         // The fixture's own request log is the evidence that this probe really
         // reached it. Without a receipt a probe that never spawned (bad
@@ -1285,9 +1277,7 @@ mod tests {
     async fn second_execute_reuses_thread() {
         // Serialize with env-mutating discovery tests (fixture spawns
         // resolve python3 through PATH; see lib.rs test_support).
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("requests.jsonl");
         let req_log_path = req_log.to_string_lossy().into_owned();
@@ -1432,9 +1422,7 @@ mod tests {
     async fn stale_turn_terminal_from_previous_turn_does_not_end_new_stream() {
         // Serialize with env-mutating discovery tests (fixture spawns
         // resolve python3 through PATH; see lib.rs test_support).
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
         let provider = mock_provider(HashMap::from([(
             "STALE_TURN_COMPLETED".to_string(),
             "1".to_string(),
@@ -1496,9 +1484,7 @@ mod tests {
     async fn decode_error_interrupts_and_drains_turn() {
         // Serialize with env-mutating discovery tests (fixture spawns
         // resolve python3 through PATH; see lib.rs test_support).
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
         let provider = mock_provider(HashMap::from([("BAD_FRAME".to_string(), "1".to_string())]));
 
         let handle = provider.launch(launch_spec()).await.expect("launch");
@@ -1563,9 +1549,7 @@ mod tests {
     async fn session_b_cancel_and_shutdown_do_not_wait_on_session_a_read() {
         // Serialize with env-mutating discovery tests (fixture spawns
         // resolve python3 through PATH; see lib.rs test_support).
-        let _env_lock = crate::test_support::PROCESS_ENV_LOCK
-            .lock()
-            .expect("lock env tests");
+        let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
         let provider = mock_provider(HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]));
 
         let handle_a = provider.launch(launch_spec()).await.expect("launch a");

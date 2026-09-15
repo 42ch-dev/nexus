@@ -50,3 +50,18 @@ pub(crate) async fn require_world_owner(
         }),
     }
 }
+
+/// Resolve core service + stored principal for thin HTTP adapters.
+pub(crate) async fn resolve_core_principal(
+    state: &WorkspaceState,
+) -> Result<
+    (
+        std::sync::Arc<nexus_core::CoreService>,
+        nexus_core::Principal,
+    ),
+    NexusApiError,
+> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await.map_err(NexusApiError::from)?;
+    Ok((core, principal))
+}

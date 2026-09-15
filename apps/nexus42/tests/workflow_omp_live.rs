@@ -274,15 +274,10 @@ XDG_CACHE_HOME = "{omp_home}/.cache"
             Self::CREATOR,
             Self::WORKSPACE_SLUG,
         );
-        let pool = nexus_local_db::open_pool(&db_path)
+        let pool = nexus_local_db::init_engine_pool(&db_path)
             .await
-            .expect("open creator db");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("run migrations");
-        nexus_local_db::seed_versions(&pool)
-            .await
-            .expect("seed versions");
+            .expect("open creator db")
+            .clone_pool();
         // SAFETY: test-only seeding of known schema (FK references).
         sqlx::query(
             "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
@@ -303,6 +298,10 @@ XDG_CACHE_HOME = "{omp_home}/.cache"
         .execute(&pool)
         .await
         .expect("seed world");
+        // Hand the writer lock back before the daemon/CLI open the same DB
+        // with their own engine/direct-writer admission.
+        pool.close().await;
+        nexus_local_db::writer_protocol::release_retained_writer_guards(&db_path);
     }
 
     /// Write an external minimal one-agent-step preset (directory source).
