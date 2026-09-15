@@ -1187,4 +1187,35 @@ describe('security-stream (P4-T2)', () => {
       if (prev === undefined) delete process.env.NEXUS_SSE_SOCKET_HWM; else process.env.NEXUS_SSE_SOCKET_HWM = prev;
     }
   });
+
+  test('CDN validation refuses private IPv4 spellings and IPv6 literals', async () => {
+    const { validateCdnUrl } = await import(join(serviceRoot, 'dist/config.js'));
+    const refused = [
+      'https://[::1]/x',
+      'https://[0:0:0:0:0:0:0:1]/x',
+      'https://[::FFFF:127.0.0.1]/x',
+      'https://[::ffff:7f00:1]/x',
+      'https://[fc00::1]/x',
+      'https://[fd12:3456::abcd]/x',
+      'https://[fe80::1]/x',
+      'https://[FEBF::9]/x',
+      'https://127.0.0.1/x',
+      'https://10.1.2.3/x',
+      'https://192.168.1.1/x',
+      'https://172.16.0.9/x',
+      'https://172.31.255.1/x',
+      'https://169.254.169.254/latest/meta-data/',
+      'https://0177.0.0.1/x',
+      'https://0x7f.1/x',
+      'https://2130706433/x',
+    ];
+    for (const url of refused) {
+      assert.throws(() => validateCdnUrl(url), /public HTTPS CDN URL/, url);
+    }
+    // Public name and literal hosts stay admitted.
+    validateCdnUrl('https://cdn.example.com/registry.json');
+    validateCdnUrl('https://8.8.8.8/x');
+    validateCdnUrl('https://172.32.0.1/x');
+    validateCdnUrl('https://[2606:4700::6810:85e5]/x');
+  });
 });

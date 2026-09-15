@@ -191,35 +191,93 @@ export function validateServiceHome(home: string): void {
   }
 }
 
-function isBlockedCdnIp(ip: string): boolean {
-  const v4 = ip.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  if (v4) {
-    const [a, b] = [Number(v4[1]), Number(v4[2])];
-    if (a > 255 || b > 255) return false;
-    // Private, loopback, link-local ranges plus the 169.254.0.0/16 metadata
-    // endpoint, mirroring the legacy `is_blocked_ip` V4 arm.
-    return (
-      a === 10 ||
-      a === 127 ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 169 && b === 254)
-    );
+/** Blocklist ranges (private/loopback/link-local/metadata) for four IPv4 octets. */
+function isBlockedIpv4Octets(octets: readonly number[]): boolean {
+  const [a, b] = [octets[0], octets[1]];
+  // Private, loopback, link-local ranges plus the 169.254.0.0/16 metadata
+  // endpoint, mirroring the legacy `is_blocked_ip` V4 arm.
+  return (
+    a === 10 ||
+    a === 127 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254)
+  );
+}
+
+/** Parse an IPv6 literal (zone id stripped) into its eight 16-bit groups. */
+function parseIpv6Groups(input: string): number[] | null {
+  const zone = input.indexOf('%');
+  const text = zone === -1 ? input : input.slice(0, zone);
+  // Embedded IPv4 tail: `::ffff:127.0.0.1` and friends become two groups.
+  const v4Tail = text.match(/:(\d+\.\d+\.\d+\.\d+)$/);
+  let head = text;
+  const tailGroups: number[] = [];
+  if (v4Tail) {
+    const octets = v4Tail[1].split('.').map(Number);
+    if (octets.some((octet) => octet > 255)) return null;
+    tailGroups.push((octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]);
+    head = text.slice(0, text.length - v4Tail[1].length);
   }
-  if (ip.includes(':')) {
-    const lowered = ip.toLowerCase();
-    const mapped = lowered.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-    if (mapped) return isBlockedCdnIp(mapped[1]);
-    // Loopback (::1) and unique-local fc00::/7.
-    return lowered === '::1' || lowered.startsWith('fc') || lowered.startsWith('fd');
+  const halves = head.split('::');
+  if (halves.length > 2) return null;
+  const left = halves[0] === '' ? [] : halves[0].split(':');
+  const right = halves.length === 2 && halves[1] !== '' ? halves[1].split(':') : [];
+  if (halves.length === 1 && left.length + tailGroups.length !== 8) return null;
+  if (halves.length === 2 && left.length + right.length + tailGroups.length > 7) return null;
+  const compressed = halves.length === 2 ? 8 - left.length - right.length - tailGroups.length : 0;
+  const hexGroups = [...left, ...Array<string>(compressed).fill('0'), ...right];
+  if (hexGroups.length + tailGroups.length !== 8) return null;
+  const parsedHex = hexGroups.map((group) =>
+    /^[0-9a-fA-F]{1,4}$/.test(group) ? parseInt(group, 16) : Number.NaN,
+  );
+  if (parsedHex.some((value) => Number.isNaN(value))) return null;
+  return [...parsedHex, ...tailGroups];
+}
+
+function isBlockedIpv6(groups: readonly number[]): boolean {
+  // Loopback ::1 (longhand `0:0:0:0:0:0:0:1` included).
+  if (groups.slice(0, 7).every((group) => group === 0) && groups[7] === 1) return true;
+  // IPv4-mapped ::ffff:0:0/96 — decimal or hexadecimal tail alike — and the
+  // deprecated IPv4-compatible ::/96 all judge by the embedded IPv4 address.
+  if (groups.slice(0, 5).every((group) => group === 0) && (groups[5] === 0xffff || groups[5] === 0)) {
+    return isBlockedIpv4Octets([groups[6] >> 8, groups[6] & 0xff, groups[7] >> 8, groups[7] & 0xff]);
+  }
+  // Unique-local fc00::/7 and link-local fe80::/10.
+  const first = groups[0];
+  return (first >= 0xfc00 && first <= 0xfdff) || (first >= 0xfe80 && first <= 0xfebf);
+}
+
+function isBlockedCdnIp(ip: string): boolean {
+  const lowered = ip.trim().toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
+  if (lowered.includes(':')) {
+    const groups = parseIpv6Groups(lowered);
+    return groups !== null && isBlockedIpv6(groups);
+  }
+  // WHATWG normalization: dotted-decimal, octal, hexadecimal, and packed
+  // 32-bit IPv4 spellings all canonicalize here before classification, so
+  // `0177.0.0.1` or `2130706433` can no longer smuggle a loopback past the
+  // decimal-only matcher.
+  try {
+    const hostname = new URL(`https://${lowered}/`).hostname;
+    const v4 = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+    if (v4) {
+      const octets = v4.slice(1).map(Number);
+      if (octets.some((octet) => octet > 255)) return false;
+      return isBlockedIpv4Octets(octets);
+    }
+  } catch {
+    // Not a URL host: nothing address-like to block.
   }
   return false;
 }
 
 /**
  * Legacy CDN validation (registry.rs `validate_cdn_url_static`), preserved
- * verbatim in spirit: public HTTPS URLs only, literal-IP hosts in private,
- * loopback, link-local or metadata ranges are refused.
+ * in spirit: public HTTPS URLs only, literal-IP hosts in private, loopback,
+ * link-local or metadata ranges are refused. Hosts go through real URL/IP
+ * parsing — bracketed IPv6 (`[::1]`, ULA, link-local), both IPv4-mapped
+ * spellings, and exotic IPv4 forms are canonicalized before classification.
  */
 export function validateCdnUrl(url: string): void {
   if (url.trim().length === 0) {
@@ -228,8 +286,13 @@ export function validateCdnUrl(url: string): void {
   if (!url.startsWith('https://')) {
     throw new Error(`--cdn-url must be a public HTTPS CDN URL (https://...); got ${JSON.stringify(url)}`);
   }
-  const hostPart = url.slice('https://'.length).split('/')[0] ?? '';
-  const host = hostPart.split(':')[0] ?? '';
+  let host: string;
+  try {
+    // URL parsing strips IPv6 brackets and canonicalizes exotic IPv4 forms.
+    host = new URL(url).hostname.replace(/^\[/, '').replace(/\]$/, '');
+  } catch {
+    throw new Error(`--cdn-url must be a public HTTPS CDN URL (https://...); got ${JSON.stringify(url)}`);
+  }
   if (host.length === 0 || isBlockedCdnIp(host)) {
     throw new Error(`--cdn-url must be a public HTTPS CDN URL (https://...); got ${JSON.stringify(url)}`);
   }

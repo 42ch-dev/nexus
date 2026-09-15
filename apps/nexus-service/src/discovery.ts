@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   closeSync,
   existsSync,
   lstatSync,
@@ -7,7 +8,6 @@ import {
   readFileSync,
   renameSync,
   rmSync,
-  statSync,
   unlinkSync,
   writeSync,
 } from 'node:fs';
@@ -59,6 +59,7 @@ export interface DiscoveryLockToken {
   token: string;
 }
 
+/** lstat `path` as a real (non-symlink) directory; refuse anything else. */
 function assertRealDirectory(path: string): void {
   let stats;
   try {
@@ -67,15 +68,41 @@ function assertRealDirectory(path: string): void {
     throw new HttpError(500, 'internal', 'service run directory is missing');
   }
   if (!stats.isDirectory()) {
-    throw new HttpError(500, 'internal', 'service run path is not a directory');
+    throw new HttpError(500, 'internal', 'service run path is not a real directory');
+  }
+}
+
+/**
+ * Create `path` as a real private directory: the per-level mkdir never
+ * follows a planted symlink (it fails with EEXIST instead), and an existing
+ * real directory — including a legacy permissive one — is forced back to
+ * `mode` before anything is written beneath it.
+ */
+function ensureRealDir(path: string, mode: number): void {
+  try {
+    mkdirSync(path, { mode });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+      throw new HttpError(500, 'internal', 'service run directory cannot be created');
+    }
+  }
+  assertRealDirectory(path);
+  const stats = lstatSync(path);
+  if ((stats.mode & 0o777) !== mode) {
+    try {
+      chmodSync(path, mode);
+    } catch {
+      throw new HttpError(500, 'internal', 'service run directory permissions cannot be enforced');
+    }
   }
 }
 
 /** Create the private run directory without following a planted symlink. */
 function ensureRunDir(home: string): string {
-  const runDir = join(home, ...RUN_DIR_SEGMENTS);
-  mkdirSync(runDir, { recursive: true, mode: RUN_DIR_MODE });
-  assertRealDirectory(runDir);
+  const nexusDir = join(home, RUN_DIR_SEGMENTS[0]);
+  const runDir = join(nexusDir, RUN_DIR_SEGMENTS[1]);
+  ensureRealDir(nexusDir, RUN_DIR_MODE);
+  ensureRealDir(runDir, RUN_DIR_MODE);
   return runDir;
 }
 
@@ -89,9 +116,19 @@ function pidAlive(pid: number): boolean {
   }
 }
 
-function readLockToken(path: string): DiscoveryLockToken | null {
+/** Raw lock-file bytes, or null when unreadable (treated as stale). */
+function readLockTokenBytes(path: string): string | null {
   try {
-    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    return readFileSync(path, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+function parseLockToken(raw: string | null): DiscoveryLockToken | null {
+  if (raw === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
     if (
       parsed !== null &&
       typeof parsed === 'object' &&
@@ -101,7 +138,7 @@ function readLockToken(path: string): DiscoveryLockToken | null {
       return parsed as DiscoveryLockToken;
     }
   } catch {
-    // Unreadable/corrupt lock: treated as stale by the acquire loop.
+    // Corrupt lock: treated as stale by the acquire loop.
   }
   return null;
 }
@@ -134,7 +171,9 @@ function writeFileSyncExclusive(path: string, data: string, mode: number): void 
 
 /**
  * Serialize one start-publication/remove window per home. Fails with `busy`
- * while another live process holds the lock; clears a lock whose pid is gone.
+ * while another live process holds the lock; clears a stale (dead owner) or
+ * corrupt lock — but only after re-reading it, so a successor's live lock is
+ * never deleted by the clearer.
  */
 export async function withServiceStartLock<T>(home: string, fn: () => Promise<T>): Promise<T> {
   const runDir = ensureRunDir(home);
@@ -152,7 +191,8 @@ export async function withServiceStartLock<T>(home: string, fn: () => Promise<T>
       acquired = true;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      const holder = readLockToken(path);
+      const raw = readLockTokenBytes(path);
+      const holder = parseLockToken(raw);
       if (holder && pidAlive(holder.pid)) {
         if (Date.now() >= deadline) {
           throw new HttpError(
@@ -161,12 +201,12 @@ export async function withServiceStartLock<T>(home: string, fn: () => Promise<T>
             'another service start owns the start lock for this home',
           );
         }
-      } else {
-        // Stale (dead owner) or corrupt: clear it and race the next attempt.
-        // simplify: this clear races a successor's create in a ~25ms window;
-        // the native writer protocol still fences the home, so a colliding
-        // start fails loudly there. Use an O_EXCL re-verify (rename dance) if
-        // multi-starter contention ever matters.
+      } else if (readLockTokenBytes(path) === raw) {
+        // Stale (dead owner) or corrupt. Clear it only when the file still
+        // holds the exact bytes just judged stale: re-reading immediately
+        // before the unlink closes the window where a successor's fresh
+        // O_EXCL lock (a uuid this process never generated) could be deleted
+        // and let two starts proceed concurrently.
         rmSync(path, { force: true });
       }
       await wait(LOCK_RETRY_DELAY_MS);
@@ -176,7 +216,7 @@ export async function withServiceStartLock<T>(home: string, fn: () => Promise<T>
     return await fn();
   } finally {
     // Release only if we still own the lock file (never delete a successor's).
-    const holder = readLockToken(path);
+    const holder = parseLockToken(readLockTokenBytes(path));
     if (holder?.token === token.token) {
       rmSync(path, { force: true });
     }
@@ -249,10 +289,15 @@ export async function removeOwnedDiscovery(instanceId: string): Promise<Discover
 /** Read whatever record is currently published for `home` (null if unreadable). */
 export function readPublishedDiscovery(home: string): CoreServiceDiscovery | null {
   const path = discoveryRecordPath(home);
-  if (!existsSync(path)) return null;
+  let stats;
   try {
-    const stats = statSync(path);
-    if (!stats.isFile()) return null;
+    // lstat, never stat: a planted symlink at the leaf is refused, not read.
+    stats = lstatSync(path);
+  } catch {
+    return null;
+  }
+  if (!stats.isFile()) return null;
+  try {
     return JSON.parse(readFileSync(path, 'utf8')) as CoreServiceDiscovery;
   } catch {
     return null;

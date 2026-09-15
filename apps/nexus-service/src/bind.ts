@@ -21,8 +21,10 @@ export function isLoopbackBindHost(host: string): boolean {
 
 /**
  * Fail closed before native open/listen for non-loopback publication. A unix
- * transport performs no TCP bind: access is guarded by the 0700 run directory
- * holding the socket, so the remote-bind/TLS policy does not apply to it.
+ * transport performs no TCP bind: access is guarded at bind time — the
+ * socket's parent directory is enforced to be a real 0700 directory and the
+ * socket file is chmod'ed 0600 — so the remote-bind/TLS policy does not apply
+ * to it.
  */
 export function validateStartupBind(config: ResolvedServiceConfig): void {
   if (config.transport === 'unix') {

@@ -1,6 +1,17 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import http from 'node:http';
 import { dirname, join } from 'node:path';
@@ -51,13 +62,15 @@ async function closeServiceBounded(service) {
 }
 
 /** `target` is an absolute URL for TCP requests, an absolute path for unix. */
-function jsonRequest(target, { method = 'GET', body, socketPath } = {}) {
+function jsonRequest(target, { method = 'GET', body, socketPath, headers: extraHeaders } = {}) {
   return new Promise((resolveRequest, rejectRequest) => {
     const payload = body === undefined ? null : JSON.stringify(body);
-    const headers =
-      payload === null
+    const headers = {
+      ...extraHeaders,
+      ...(payload === null
         ? {}
-        : { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) };
+        : { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }),
+    };
     const onResponse = (response) => {
       const chunks = [];
       response.on('data', (chunk) => chunks.push(chunk));
@@ -180,15 +193,16 @@ describe('discovery-lifecycle (P5-T4)', () => {
   });
 
   test('failed open never publishes ready', async () => {
-    // A regular file blocks the socket path: the core opens, the listener bind
-    // fails after it, and nothing may be published or left behind.
+    // A regular file in place of the socket's parent directory: the core
+    // opens, the listener bind is then refused (unsafe parent), and nothing
+    // may be published or left behind.
     const home = seedHome();
     const blocker = join(home, 'blocker');
     writeFileSync(blocker, 'not a directory');
     const socketPath = join(blocker, 'service.sock');
     await assert.rejects(
       () => startServiceAt(home, { transport: 'unix', socketPath }),
-      /ENOTDIR/,
+      /not a real directory/,
     );
     assert.equal(readRecord(home), null, 'failed start published no record');
     const lockPath = join(home, '.nexus42', 'run', 'service.start.lock');
@@ -316,5 +330,179 @@ describe('discovery-lifecycle (P5-T4)', () => {
     const distIndex = readFileSync(join(serviceRoot, 'dist', 'index.js'), 'utf8');
     assert.equal(/electron/i.test(distMain), false, 'no Electron references in the entry');
     assert.equal(/electron/i.test(distIndex), false, 'no Electron references in the service');
+  });
+
+  test('a planted .nexus42 symlink is refused, never followed', async () => {
+    const home = emptyHome();
+    const outside = track(mkdtempSync(join(tmpdir(), 'nexus-outside-')));
+    symlinkSync(outside, join(home, '.nexus42'), 'dir');
+    await assert.rejects(() => startServiceAt(home), /not a real directory/);
+    assert.equal(
+      existsSync(join(outside, 'run')),
+      false,
+      'nothing may be created through the planted parent symlink',
+    );
+  });
+
+  test('a legacy permissive run directory is forced back to 0700', async () => {
+    const home = emptyHome();
+    const nexusDir = join(home, '.nexus42');
+    const runDir = join(nexusDir, 'run');
+    mkdirSync(nexusDir, { mode: 0o755 });
+    mkdirSync(runDir, { mode: 0o755 });
+    const service = await startServiceAt(home);
+    try {
+      assert.equal(statSync(nexusDir).mode & 0o777, 0o700, 'parent chain is private');
+      assert.equal(statSync(runDir).mode & 0o777, 0o700, 'existing run dir is repaired to 0700');
+      assert.ok(service.discovery.instance_id.length > 0, 'start succeeds after repair');
+    } finally {
+      await closeServiceBounded(service);
+    }
+  });
+
+  test('a symlinked discovery record is refused and replaced on republish', async () => {
+    const { readPublishedDiscovery } = await import(join(serviceRoot, 'dist', 'discovery.js'));
+    const home = emptyHome();
+    const outside = track(mkdtempSync(join(tmpdir(), 'nexus-outside-')));
+    const recordPath = join(home, '.nexus42', 'run', 'service.json');
+    const first = await startServiceAt(home);
+    try {
+      assert.equal(first.discovery.instance_id.length > 0, true);
+    } finally {
+      await closeServiceBounded(first);
+    }
+    // Plant a leaf symlink whose target holds an attacker-chosen record.
+    const planted = join(outside, 'fake-record.json');
+    writeFileSync(planted, JSON.stringify({ instance_id: 'inst-attacker' }), { mode: 0o600 });
+    symlinkSync(planted, recordPath);
+    assert.equal(readPublishedDiscovery(home), null, 'a symlinked record is not read');
+    const again = await startServiceAt(home);
+    try {
+      assert.equal(lstatSync(recordPath).isSymbolicLink(), false, 'publish replaced the leaf symlink');
+      assert.equal(readPublishedDiscovery(home).instance_id, again.discovery.instance_id);
+    } finally {
+      await closeServiceBounded(again);
+    }
+  });
+
+  function writeLockFile(path, token, pid) {
+    writeFileSync(
+      path,
+      JSON.stringify({ pid, acquired_at: new Date().toISOString(), token }),
+      { mode: 0o600 },
+    );
+  }
+
+  test('a stale lock with a dead owner is still taken over', async () => {
+    const home = emptyHome();
+    const runDir = join(home, '.nexus42', 'run');
+    mkdirSync(join(home, '.nexus42'), { mode: 0o700 });
+    mkdirSync(runDir, { mode: 0o700 });
+    const lockPath = join(runDir, 'service.start.lock');
+    const dead = spawnSync('true');
+    assert.ok(Number.isInteger(dead.pid), 'dead-owner pid fixture spawned');
+    writeLockFile(lockPath, 'stale-token-0001', dead.pid);
+    const service = await startServiceAt(home);
+    try {
+      assert.ok(service.discovery.instance_id.length > 0, 'dead-owner lock does not block the start');
+    } finally {
+      await closeServiceBounded(service);
+    }
+  });
+
+  test('a live lock planted during stale recovery is never deleted', async () => {
+    const home = emptyHome();
+    const runDir = join(home, '.nexus42', 'run');
+    mkdirSync(join(home, '.nexus42'), { mode: 0o700 });
+    mkdirSync(runDir, { mode: 0o700 });
+    const lockPath = join(runDir, 'service.start.lock');
+    const dead = spawnSync('true');
+    writeLockFile(lockPath, 'stale-token-0002', dead.pid);
+    const attempt = startServiceAt(home);
+    const successorBytes = JSON.stringify({
+      pid: process.pid,
+      acquired_at: new Date().toISOString(),
+      token: 'successor-live-token',
+    });
+    // The clearer removes the stale lock between retry attempts; plant a
+    // live lock the moment the stale one disappears — exactly what a racing
+    // successor does in the read-then-unlink window this suite pins.
+    let planted = false;
+    for (let i = 0; i < 4_000 && !planted; i += 1) {
+      if (!existsSync(lockPath)) {
+        writeFileSync(lockPath, successorBytes, { mode: 0o600 });
+        planted = true;
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+    }
+    if (!planted) {
+      // Event-loop stall swallowed the 25ms clear window: nothing about the
+      // guarantee is exercised on this run; the start proceeds legitimately.
+      await closeServiceBounded(await attempt);
+      return;
+    }
+    await assert.rejects(attempt, (error) => {
+      assert.equal(error.status, 503, 'the planted live lock holds the start off');
+      return true;
+    });
+    assert.equal(
+      readFileSync(lockPath, 'utf8'),
+      successorBytes,
+      'the successor lock survives stale recovery byte-for-byte',
+    );
+  });
+
+  test('unix socket refuses unsafe parents and locks down the socket file', async () => {
+    const home = emptyHome();
+    // A shared-mode parent (0755) is refused before anything is bound.
+    const openDir = track(mkdtempSync(join(tmpdir(), 'nexus-open-sock-')));
+    chmodSync(openDir, 0o755);
+    await assert.rejects(
+      () => startServiceAt(home, { transport: 'unix', socketPath: join(openDir, 's.sock') }),
+      /must be private \(0700\)/,
+    );
+    assert.equal(existsSync(join(openDir, 's.sock')), false, 'no socket in a shared parent');
+    assert.equal(readRecord(home), null, 'refused binds publish no record');
+    // A symlinked parent is a redirect, not a private directory.
+    const realDir = track(mkdtempSync(join(tmpdir(), 'nexus-real-sock-')));
+    const linkPath = join(track(mkdtempSync(join(tmpdir(), 'nexus-linkparent-'))), 'link');
+    symlinkSync(realDir, linkPath, 'dir');
+    await assert.rejects(
+      () => startServiceAt(home, { transport: 'unix', socketPath: join(linkPath, 's.sock') }),
+      /not a real directory/,
+    );
+    // A real 0700 parent binds, and the socket file itself is 0600.
+    const safeDir = track(mkdtempSync(join(tmpdir(), 'nexus-safe-sock-')));
+    const socketPath = join(safeDir, 'service.sock');
+    const service = await startServiceAt(home, { transport: 'unix', socketPath });
+    try {
+      const socketStats = statSync(socketPath);
+      assert.ok(socketStats.isSocket(), 'a filesystem socket was bound');
+      assert.equal(socketStats.mode & 0o777, 0o600, 'socket file is owner-only');
+      const health = await jsonRequest('/v1/daemon/runtime/health', { socketPath });
+      assert.equal(health.payload.status, 'ok');
+    } finally {
+      await closeServiceBounded(service);
+    }
+  });
+
+  test('port 0 admits requests via its actually-bound origin', async () => {
+    const home = emptyHome();
+    const service = await startServiceAt(home);
+    try {
+      const boundPort = new URL(service.url).port;
+      assert.notEqual(boundPort, '0', 'the endpoint reports the real bound port');
+      const admitted = await jsonRequest(`${service.url}/v1/daemon/runtime/health`, {
+        headers: { Origin: `http://127.0.0.1:${boundPort}` },
+      });
+      assert.equal(admitted.status, 200, 'the actually-bound origin is admitted');
+      const denied = await jsonRequest(`${service.url}/v1/daemon/runtime/health`, {
+        headers: { Origin: 'http://evil.example:9931' },
+      });
+      assert.equal(denied.status, 403, 'foreign origins stay denied');
+    } finally {
+      await closeServiceBounded(service);
+    }
   });
 });

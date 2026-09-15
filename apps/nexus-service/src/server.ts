@@ -8,7 +8,8 @@ import {
 import {
   createServer as createHttpsServer,
 } from 'node:https';
-import { existsSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, rmSync } from 'node:fs';
+import { dirname } from 'node:path';
 import net from 'node:net';
 import { randomUUID } from 'node:crypto';
 import type { CoreCloseReport, CoreServiceDiscovery, CoreServiceStopRequest } from '@42ch/nexus-contracts';
@@ -18,6 +19,7 @@ import {
   HEADER_READ_TIMEOUT_MS,
   MAX_REQUEST_BYTES,
   REQUEST_READ_TIMEOUT_MS,
+  resolveAllowedOrigins,
   resolveSseSocketHighWaterMark,
   type ResolvedServiceConfig,
 } from './config.js';
@@ -93,6 +95,35 @@ async function clearStaleUnixSocket(path: string): Promise<void> {
     throw new HttpError(503, 'busy', 'another service is listening on this socket path');
   }
   rmSync(path, { force: true });
+}
+
+/** The socket file itself is locked down to owner-only after a successful bind. */
+const SOCKET_MODE = 0o600;
+
+/**
+ * The unix transport's only access guard is its parent directory (bind.ts):
+ * the socket must live in a real 0700 directory, so a shared parent such as
+ * `/tmp` can never host a keyless service socket.
+ */
+function assertPrivateSocketParent(socketPath: string): void {
+  const parent = dirname(socketPath);
+  let stats;
+  try {
+    // lstat: a symlinked parent is not a private directory, it is a redirect.
+    stats = lstatSync(parent);
+  } catch {
+    throw new HttpError(403, 'forbidden', `unix socket parent directory does not exist: ${parent}`);
+  }
+  if (!stats.isDirectory()) {
+    throw new HttpError(403, 'forbidden', `unix socket parent is not a real directory: ${parent}`);
+  }
+  if ((stats.mode & 0o777) !== 0o700) {
+    throw new HttpError(
+      403,
+      'forbidden',
+      `unix socket parent directory must be private (0700): ${parent}`,
+    );
+  }
 }
 
 function requestId(req: IncomingMessage): string {
@@ -371,11 +402,17 @@ export async function listenServer(
     if (!socketPath) {
       throw new HttpError(500, 'internal', 'unix transport requires a socket path');
     }
+    assertPrivateSocketParent(socketPath);
     await clearStaleUnixSocket(socketPath);
     await new Promise<void>((resolveListen, rejectListen) => {
       server.once('error', rejectListen);
       server.listen(socketPath, () => resolveListen());
     });
+    try {
+      chmodSync(socketPath, SOCKET_MODE);
+    } catch {
+      throw new HttpError(500, 'internal', 'unix socket permissions cannot be enforced');
+    }
     return { transport: 'unix', path: socketPath };
   }
   await new Promise<void>((resolveListen, rejectListen) => {
@@ -384,6 +421,16 @@ export async function listenServer(
   });
   const bound = server.address();
   const port = bound && typeof bound === 'object' ? bound.port : config.port;
+  if (port !== config.port) {
+    // The allowlist was frozen from the *requested* port; with port 0 the
+    // kernel picked the real one. Extend it with the actually-served origin
+    // before the first request can run: the listening callback resolves into
+    // this synchronous continuation ahead of any connection event, and the
+    // handler reads `config.allowedOrigins` per request.
+    config.allowedOrigins = [
+      ...new Set([...config.allowedOrigins, ...resolveAllowedOrigins(port, config.host)]),
+    ];
+  }
   const protocol = config.tlsCert && config.tlsKey ? 'https' : 'http';
   return {
     transport: 'http',
