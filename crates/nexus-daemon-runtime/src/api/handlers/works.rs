@@ -360,6 +360,16 @@ fn work_error(error: nexus_core::CoreError) -> NexusApiError {
         nexus_core::CoreError::Forbidden { resource } if resource.starts_with("work_conflict:") => NexusApiError::Conflict(resource[14..].to_owned()),
         nexus_core::CoreError::Forbidden { resource } if resource.starts_with("work_locked:") => NexusApiError::Locked { resource: "work".into(), reason: resource[12..].to_owned() },
         nexus_core::CoreError::Forbidden { resource } if resource.starts_with("work_pool_forbidden:") => NexusApiError::Forbidden { resource: "pool".into(), reason: resource[20..].to_owned() },
+        // Core works carries the legacy internal classification verbatim as
+        // `<CODE>: <message>` (DATABASE_ERROR, CONTRACT_ERROR — the codes the
+        // pre-extraction handlers emitted). Re-emit the code unchanged; every
+        // other internal category keeps the shared CORE_ERROR shape.
+        nexus_core::CoreError::Internal { category } => match category.split_once(": ") {
+            Some((code, message)) if code == "DATABASE_ERROR" || code == "CONTRACT_ERROR" => {
+                NexusApiError::Internal { code: code.to_owned(), message: message.to_owned() }
+            }
+            _ => nexus_core::CoreError::Internal { category }.into(),
+        },
         other => other.into(),
     }
 }
@@ -838,6 +848,16 @@ mod tests_fix_d {
                 NexusApiError::Locked { resource: "work".into(), reason: "work wrk_locked is locked by 'driver'; wait for release or check 'creator works status'".into() },
                 StatusCode::LOCKED,
             ),
+            (
+                nexus_core::CoreError::NotFound { resource: "work wrk_missing".into() },
+                NexusApiError::NotFound("work wrk_missing".into()),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                nexus_core::CoreError::Forbidden { resource: "work_pool_forbidden:work wrk_x is not in the authoring pool".into() },
+                NexusApiError::Forbidden { resource: "pool".into(), reason: "work wrk_x is not in the authoring pool".into() },
+                StatusCode::FORBIDDEN,
+            ),
         ];
         for (core_error, old_error, status) in cases {
             let migrated = work_error(core_error);
@@ -847,6 +867,33 @@ mod tests_fix_d {
                 serde_json::to_string(&old_error.to_response_body()).unwrap(),
             );
         }
+        // The legacy internal classifications (emitted directly by the pre-extraction
+        // handlers) ride the `<CODE>: <message>` carrier and are re-emitted verbatim.
+        // Body JSON alone cannot distinguish them — the body always reports
+        // `error.code = "internal"` — so the carrier `code` field is asserted too.
+        for (category, legacy_code, legacy_message) in [
+            ("DATABASE_ERROR: INSERT failed: no such table: works", "DATABASE_ERROR", "INSERT failed: no such table: works"),
+            ("CONTRACT_ERROR: invalid type: string, expected u32 at line 1 column 5", "CONTRACT_ERROR", "invalid type: string, expected u32 at line 1 column 5"),
+        ] {
+            let migrated = work_error(nexus_core::CoreError::Internal { category: category.into() });
+            let NexusApiError::Internal { code, message } = &migrated else {
+                panic!("internal category must stay Internal, got {:?}", migrated);
+            };
+            assert_eq!((code.as_str(), message.as_str()), (legacy_code, legacy_message));
+            assert_eq!(migrated.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+            let old_error = NexusApiError::Internal { code: legacy_code.into(), message: legacy_message.into() };
+            assert_eq!(
+                serde_json::to_string(&migrated.to_response_body()).unwrap(),
+                serde_json::to_string(&old_error.to_response_body()).unwrap(),
+            );
+        }
+        // Non-legacy internal categories keep the shared CORE_ERROR fallback.
+        let fallback = work_error(nexus_core::CoreError::Internal { category: "workspace metadata: boom".into() });
+        let NexusApiError::Internal { code, .. } = &fallback else {
+            panic!("fallback must stay Internal, got {:?}", fallback);
+        };
+        assert_eq!(code, "CORE_ERROR");
+        assert_eq!(fallback.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[test]
@@ -889,5 +936,25 @@ mod tests_fix_d {
         let record = works::get_work(pool, "test_creator", &created.work_id).await.unwrap().unwrap();
         assert_eq!(record.completion_locked_at.as_deref(), Some("2026-09-15"));
         assert_eq!(record.total_planned_chapters, Some(3));
+    }
+    #[tokio::test]
+    async fn internal_database_fault_reaches_handler_with_legacy_code() {
+        let (_tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let pool = state.pool_or_uninit().unwrap();
+        crate::test_utils::seed_test_creator_and_world(pool).await;
+        sqlx::query("DROP TABLE works").execute(pool).await.unwrap();
+        let request = serde_json::from_value(serde_json::json!({
+            "title": "Broken", "long_term_goal": "write", "initial_idea": "idea",
+            "world_id": "wld_test_world",
+        })).unwrap();
+        let error = create_work(State(state), Json(request)).await.unwrap_err();
+        let NexusApiError::Internal { code, message } = &error else {
+            panic!("dropped works table must surface as Internal, got {:?}", error);
+        };
+        assert_eq!(code, "DATABASE_ERROR");
+        assert!(message.contains("works"), "message must carry the sqlite failure, got: {message}");
+        assert_eq!(error.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(error.to_response_body().error.code, "internal");
     }
 }

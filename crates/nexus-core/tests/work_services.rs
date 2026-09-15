@@ -153,3 +153,88 @@ async fn work_selection_invalidates_foreign_context() {
     pool.close().await;
     core.close().await.unwrap();
 }
+
+/// Equivalence with the pre-extraction daemon `api::pagination` / `api::sort` grammar,
+/// exercised through the public Work list path. Mirrors the daemon helpers' own unit
+/// tables (`pagination.rs`, `sort.rs`): absent cursor → offset 0, `v1:`-prefixed
+/// non-negative u32 accepted, anything else rejected with the verbatim `invalid_input`
+/// message; absent/empty/whitespace sort → default ordering, trimming and empty comma
+/// terms ignored, `-key` descending, unknown keys rejected with the verbatim
+/// `<resource>_sort_invalid` message.
+#[tokio::test]
+async fn work_list_grammar_matches_legacy_daemon_contract() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path();
+    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(home, "author", "default")).unwrap();
+    select_creator(home, "author", "default");
+    {
+        let db = nexus_home_layout::workspace_state_db_path(home, "author", "default");
+        let seed = init_guarded_pool(&db, "author").await.unwrap();
+        let pool = seed.clone_pool();
+        nexus_local_db::creators::ensure_creator_row(&pool, "author", "Author").await.unwrap();
+        pool.close().await;
+    }
+    let core = CoreService::open(CoreOpenOptions { user_home: home.into(), access: CoreAccess::DirectWriter }).await.unwrap();
+    let principal = core.active_principal().await.unwrap();
+
+    // Cursor parity: absent and `v1:0` decode to offset 0.
+    assert_eq!(core.list_works(&principal, query(serde_json::json!({}))).await.unwrap().pagination.limit, 100);
+    assert_eq!(core.list_works(&principal, query(serde_json::json!({"cursor": "v1:0"}))).await.unwrap().pagination.limit, 100);
+    let cursor_message = "invalid pagination cursor; pass the `next_cursor` value returned by the previous response unchanged";
+    for cursor in ["invalid", "v1:", "v1:x", "v1:-1", "v1:4294967296"] {
+        let Err(CoreError::InvalidInput { field, reason }) = core.list_works(&principal, query(serde_json::json!({"cursor": cursor}))).await else {
+            panic!("cursor '{cursor}' must be rejected");
+        };
+        assert_eq!((field.as_str(), reason.as_str()), ("invalid_input", cursor_message));
+    }
+
+    // Sort parity: unknown keys carry the resource-specific code and verbatim message.
+    let Err(CoreError::InvalidInput { field, reason }) = core.list_works(&principal, query(serde_json::json!({"sort": "bad"}))).await else {
+        panic!("unknown sort key must be rejected");
+    };
+    assert_eq!((field.as_str(), reason.as_str()), ("work_sort_invalid", "unsupported sort key 'bad'; allowed: updated_at, title, status, intake_status"));
+    let Err(CoreError::InvalidInput { field, reason }) = core.list_works(&principal, query(serde_json::json!({"sort": "-"}))).await else {
+        panic!("lone '-' must be rejected");
+    };
+    assert_eq!((field.as_str(), reason.as_str()), ("work_sort_invalid", "unsupported sort key ''; allowed: updated_at, title, status, intake_status"));
+    // Empty, whitespace-only, and well-formed multi-key inputs fall back to the
+    // default ordering instead of erroring.
+    for sort in ["", "   ", ",,status,,-title,,"] {
+        assert!(core.list_works(&principal, query(serde_json::json!({"sort": sort}))).await.is_ok(), "sort '{sort}' must be accepted");
+    }
+    core.close().await.unwrap();
+}
+
+/// The legacy `DATABASE_ERROR` classification must survive the core error carrier
+/// instead of collapsing into an uncoded internal error (fix-round 1, finding 3).
+#[tokio::test]
+async fn internal_database_fault_carries_legacy_code() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path();
+    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(home, "author", "default")).unwrap();
+    select_creator(home, "author", "default");
+    let db = nexus_home_layout::workspace_state_db_path(home, "author", "default");
+    let seed = init_guarded_pool(&db, "author").await.unwrap();
+    let pool = seed.clone_pool();
+    nexus_local_db::creators::ensure_creator_row(&pool, "author", "Author").await.unwrap();
+    let core = CoreService::open(CoreOpenOptions { user_home: home.into(), access: CoreAccess::DirectWriter }).await.unwrap();
+    let principal = core.active_principal().await.unwrap();
+    let world = core.create_world(&principal, serde_json::from_value::<CreateWorldRequest>(serde_json::json!({"title": "World"})).unwrap()).await.unwrap().world_id;
+    pool.close().await;
+    // Idempotent migrations only create missing versions — a dropped table stays gone.
+    // Drop only `works` while the core is open so the world check passes and the
+    // INSERT is what fails, surfacing the legacy DATABASE_ERROR classification.
+    let dropper = init_guarded_pool(&db, "author").await.unwrap();
+    let drop_pool = dropper.clone_pool();
+    sqlx::query("DROP TABLE works").execute(&drop_pool).await.unwrap();
+    drop(drop_pool);
+    drop(dropper);
+    let request: CreateWorkRequest = serde_json::from_value(serde_json::json!({
+        "title": "Broken", "long_term_goal": "write", "initial_idea": "idea", "world_id": world
+    })).unwrap();
+    let Err(CoreError::Internal { category }) = core.create_work(&principal, request).await else {
+        panic!("dropped storage tables must surface as CoreError::Internal");
+    };
+    assert!(category.starts_with("DATABASE_ERROR: "), "legacy classification must ride the carrier, got: {category}");
+    core.close().await.unwrap();
+}

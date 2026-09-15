@@ -303,7 +303,10 @@ impl From<WorkFault> for CoreError {
     fn from(error: WorkFault) -> Self {
         match error {
             WorkFault::BadRequest { code, message } => Self::InvalidInput { field: code, reason: message },
-            WorkFault::Internal { message, .. } => Self::Internal { category: message },
+            // The legacy internal classification (DATABASE_ERROR, CONTRACT_ERROR) rides
+            // verbatim as `<CODE>: <message>`; the daemon `work_error` adapter re-emits
+            // the code instead of collapsing it to the shared `CORE_ERROR` shape.
+            WorkFault::Internal { code, message } => Self::Internal { category: format!("{code}: {message}") },
             WorkFault::Conflict(message) => Self::Forbidden { resource: format!("work_conflict:{message}") },
             WorkFault::Locked { reason, .. } => Self::Forbidden { resource: format!("work_locked:{reason}") },
             WorkFault::Forbidden { reason, .. } => Self::Forbidden { resource: format!("work_pool_forbidden:{reason}") },
@@ -2034,6 +2037,12 @@ impl RuntimeLockGuard {
     }
 }
 
+// Single authority for the Work list cursor/sort grammar: the offset-backed `v1:` cursor
+// and `-key,key` sort terms (defaults, bounds, trimming, empty comma terms, descending
+// terms, `<resource>_sort_invalid` / `invalid_input` errors) match the pre-extraction
+// daemon `list_works` behavior exactly. Consumed only by `list_works` here; the daemon
+// Work route forwards the query unchanged and never re-parses. Daemon `api::pagination`
+// / `api::sort` remain separate helpers for other handler families — not for Work.
 fn decode_offset_cursor(cursor: &Option<String>) -> Result<u32, WorkFault> {
     let Some(raw) = cursor else { return Ok(0); };
     raw.strip_prefix("v1:").and_then(|offset| offset.parse::<u32>().ok()).ok_or_else(|| WorkFault::BadRequest {
