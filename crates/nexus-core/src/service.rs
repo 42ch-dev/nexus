@@ -20,6 +20,7 @@ use nexus_local_db::writer_protocol::{
 };
 use sqlx::SqlitePool;
 
+use crate::actor_fence::ActorFenceTable;
 use crate::changes::read_changes;
 use crate::error::{local_db_err, CoreError, CoreResult};
 use crate::principal::Principal;
@@ -54,6 +55,9 @@ pub(crate) struct CoreInner {
     generation: AtomicU64,
     pub(crate) access: CoreAccess,
     closing: AtomicBool,
+    /// Per-Character activity/transition fences (v1.190 P2-T1), Host-free
+    /// and separate from any process session registry.
+    pub(crate) character_fences: ActorFenceTable,
 }
 
 pub struct CoreService {
@@ -126,7 +130,7 @@ impl CoreService {
         Ok(Self {
             inner: Arc::new(CoreInner {
                 pool,
-                db_path,
+                db_path: db_path.clone(),
                 _guarded: guarded,
                 nexus_home,
                 creator_id,
@@ -134,6 +138,7 @@ impl CoreService {
                 generation: AtomicU64::new(1),
                 access: options.access,
                 closing: AtomicBool::new(false),
+                character_fences: ActorFenceTable::new(&db_path),
             }),
         })
     }

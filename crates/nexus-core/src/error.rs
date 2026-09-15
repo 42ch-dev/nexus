@@ -41,6 +41,18 @@ pub enum CoreError {
     Closing,
     #[error("interrupted")]
     Interrupted,
+    /// Stable actor-family wire conflict (409 at HTTP adapters) with its
+    /// retained code and message (`character_busy`, `character_inactive`,
+    /// `world_inactive`, `last_active_actor_world_binding`, …). The code is
+    /// the contract (durable spec §11.1 stable codes); adapters re-render it
+    /// verbatim.
+    #[error("actor conflict: {code}")]
+    ActorConflict { code: String, message: String },
+    /// Stable actor-family wire rejection (400 `invalid_input` at HTTP
+    /// adapters) carrying only the retained message — the family never
+    /// attached structured `field` details to these rejections.
+    #[error("{0}")]
+    ActorInput(String),
     #[error("internal: {category}")]
     Internal { category: String },
 }
@@ -109,5 +121,39 @@ pub(crate) fn db_err(e: &sqlx::Error) -> CoreError {
         CoreError::Internal {
             category: format!("database_error: {e}"),
         }
+    }
+}
+
+/// Map a storage error onto the neutral actor-family taxonomy, preserving
+/// the retained wire meaning per variant: stable contract conflicts keep
+/// their code + message, not-found keeps the daemon `"{resource} {id} not
+/// found"` message, and validation keeps the plain `invalid_input` message.
+pub(crate) fn actor_db_err(e: LocalDbError) -> CoreError {
+    match e {
+        LocalDbError::ActorNotFound { resource, id } => CoreError::NotFound {
+            resource: format!("{resource} {id} not found"),
+        },
+        LocalDbError::ActorContractConflict { code } => CoreError::ActorConflict {
+            code: code.as_str().to_string(),
+            message: code.message().to_string(),
+        },
+        LocalDbError::ValidationError(msg) => CoreError::ActorInput(msg),
+        other => local_db_err(other),
+    }
+}
+
+/// Map a storage error from a guarded actor-owned insert (knowledge entries):
+/// the insert path renders not-found WITHOUT the ` not found` suffix and
+/// treats constraint violations as plain `invalid_input` (retained daemon
+/// `map_local_db_insert_err` texture).
+pub(crate) fn actor_insert_db_err(e: LocalDbError) -> CoreError {
+    if matches!(e, LocalDbError::ConstraintViolation { .. }) {
+        return CoreError::ActorInput(e.to_string());
+    }
+    match e {
+        LocalDbError::ActorNotFound { resource, id } => CoreError::NotFound {
+            resource: format!("{resource} {id}"),
+        },
+        other => actor_db_err(other),
     }
 }

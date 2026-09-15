@@ -1,5 +1,8 @@
-//! Transport-neutral World KB core service (v1.189 P1-T2).
+//! Transport-neutral core service (v1.189 P1 → v1.190 P2).
 
+mod actor_fence;
+mod actor_knowledge;
+mod actors;
 mod changes;
 mod error;
 mod home;
@@ -10,11 +13,17 @@ mod storage_status;
 mod sync;
 mod worlds;
 mod world_kb;
+mod creators;
 mod timeline;
 mod forks;
 mod world_pack;
 mod world_rules;
 
+pub use actor_fence::{ActorActivityLease, CharacterTransitionLease};
+pub use actor_knowledge::{ActorKnowledgePage, ActorKnowledgeViewQuery, ActorKnowledgeViewService};
+pub use actors::{
+    classify_pair, AdmittedActor, AdmittedActorContext, ActorPairMode, ActorViewpoint,
+};
 pub use error::{CoreError, CoreResult};
 pub use home::CoreHomeService;
 pub use principal::Principal;
