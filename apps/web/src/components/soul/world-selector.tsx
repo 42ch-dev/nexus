@@ -1,4 +1,4 @@
-import type { World } from '@42ch/nexus-contracts';
+import type { NarrativeWorldState } from '@42ch/nexus-contracts';
 import { useTranslation } from 'react-i18next';
 
 export const ALL_WORLDS = null;
@@ -13,9 +13,15 @@ export function countFragmentsByWorld(fragments: { world_id?: string | null }[])
   return counts;
 }
 
-export function worldOptionLabel(world: World, fragmentCount: number, t: (key: string, options?: Record<string, unknown>) => string): string {
-  const countText = fragmentCount > 0 ? t('soul.fragmentCount', { count: fragmentCount, keyword: world.title ?? world.world_id }) : t('soul.noFragments');
-  return `${world.title ?? world.world_id} (${countText})`;
+export function worldOptionLabel(
+  world: NarrativeWorldState,
+  fragmentCount: number,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string {
+  // NarrativeWorldState.title is a required wire field; fall back to the id
+  // only for the degenerate empty-string case.
+  const countText = fragmentCount > 0 ? t('soul.fragmentCount', { count: fragmentCount, keyword: world.title || world.world_id }) : t('soul.noFragments');
+  return `${world.title || world.world_id} (${countText})`;
 }
 
 export function WorldSelector({
@@ -25,7 +31,7 @@ export function WorldSelector({
   onSelect,
   disabled,
 }: {
-  worlds: World[];
+  worlds: NarrativeWorldState[];
   fragmentCounts: Record<string, number>;
   selectedWorld: string | null;
   onSelect: (worldId: string | null) => void;

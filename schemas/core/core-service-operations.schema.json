@@ -104,6 +104,11 @@
           "returns": "CancelOperationResponse"
         },
         {
+          "name": "stopService",
+          "args": [{ "name": "request", "type": "CoreServiceStopRequest" }],
+          "returns": "RuntimeApi"
+        },
+        {
           "name": "subscribeAgentHostEvents",
           "args": [
             { "name": "sessionId", "type": "string" },
@@ -111,6 +116,433 @@
           ],
           "returns": "ProviderHostEvent | CoreStreamGap",
           "async_iterable": true
+        },
+        {
+          "name": "listNarrativeWorlds",
+          "args": [],
+          "returns": "NarrativeWorldsListResponse"
+        },
+        {
+          "name": "getWorld",
+          "args": [{ "name": "worldId", "type": "string" }],
+          "returns": "NarrativeWorldResponse"
+        },
+        {
+          "name": "createWorld",
+          "args": [{ "name": "request", "type": "CreateWorldRequest" }],
+          "returns": "CreateWorldResponse"
+        },
+        {
+          "name": "deleteWorld",
+          "args": [{ "name": "worldId", "type": "string" }],
+          "returns": "void"
+        },
+        {
+          "name": "createFork",
+          "args": [
+            { "name": "worldId", "type": "string" },
+            { "name": "request", "type": "CreateForkRequest" }
+          ],
+          "returns": "CreateForkResponse"
+        },
+        {
+          "name": "exportPack",
+          "args": [
+            { "name": "worldId", "type": "string" },
+            { "name": "request", "type": "PackExportRequest", "optional": true }
+          ],
+          "returns": "PackExportResponse"
+        },
+        {
+          "name": "importPack",
+          "args": [
+            { "name": "worldId", "type": "string" },
+            { "name": "request", "type": "PackImportRequest" }
+          ],
+          "returns": "PackImportResponse"
+        },
+        {
+          "name": "listWorldRules",
+          "args": [{ "name": "worldId", "type": "string" }],
+          "returns": "WorldRulesListResponse"
+        },
+        {
+          "name": "createWorldRule",
+          "args": [
+            { "name": "worldId", "type": "string" },
+            { "name": "body", "type": "WorldRuleCreateRequest" }
+          ],
+          "returns": "WorldRuleResponse"
+        },
+        {
+          "name": "updateWorldRule",
+          "args": [
+            { "name": "worldId", "type": "string" },
+            { "name": "ruleId", "type": "string" },
+            { "name": "body", "type": "WorldRuleUpdateRequest" }
+          ],
+          "returns": "WorldRuleResponse"
+        },
+        {
+          "name": "listWorldFindings",
+          "args": [{ "name": "worldId", "type": "string" }],
+          "returns": "WorldFindingsListResponse"
+        },
+        {
+          "name": "getTimelineOverview",
+          "args": [{ "name": "cursor", "type": "string", "optional": true }],
+          "returns": "TimelineOverviewResponse"
+        },
+        {
+          "name": "getTimelineEvents",
+          "args": [
+            { "name": "worldId", "type": "string" },
+            { "name": "query", "type": "CoreTimelineEventsQuery", "optional": true }
+          ],
+          "returns": "ListTimelineEventsResponse"
+        },
+        {
+          "name": "listWorks",
+          "args": [{ "name": "query", "type": "ListWorksQuery", "optional": true }],
+          "returns": "ListWorksResponse"
+        },
+        {
+          "name": "createWork",
+          "args": [{ "name": "request", "type": "CreateWorkRequest" }],
+          "returns": "CreateWorkResponse"
+        },
+        {
+          "name": "getWork",
+          "args": [{ "name": "workId", "type": "string" }],
+          "returns": "WorkDetailResponse"
+        },
+        {
+          "name": "patchWork",
+          "args": [
+            { "name": "workId", "type": "string" },
+            { "name": "request", "type": "PatchWorkRequest" }
+          ],
+          "returns": "WorkDetailResponse"
+        },
+        {
+          "name": "deleteWork",
+          "args": [{ "name": "workId", "type": "string" }],
+          "returns": "void"
+        },
+        {
+          "name": "listWorkPool",
+          "args": [{ "name": "query", "type": "WorkPoolListQuery", "optional": true }],
+          "returns": "WorkPoolListResponse"
+        },
+        {
+          "name": "setWorkPoolActive",
+          "args": [{ "name": "request", "type": "WorkPoolSetActiveRequest" }],
+          "returns": "WorkPoolEntry"
+        },
+        {
+          "name": "promoteWorkPoolEntry",
+          "args": [{ "name": "request", "type": "WorkPoolPromoteRequest" }],
+          "returns": "WorkPoolEntry"
+        },
+        {
+          "name": "archiveWorkPoolEntry",
+          "args": [{ "name": "request", "type": "WorkPoolArchiveRequest" }],
+          "returns": "WorkPoolEntry"
+        },
+        {
+          "name": "listWorkInspiration",
+          "args": [{ "name": "query", "type": "WorkInspirationListQuery", "optional": true }],
+          "returns": "WorkInspirationListResponse"
+        },
+        {
+          "name": "addWorkInspiration",
+          "args": [{ "name": "request", "type": "WorkInspirationAddRequest" }],
+          "returns": "WorkInspirationAddResponse"
+        },
+        {
+          "name": "promoteWorkInspiration",
+          "args": [{ "name": "request", "type": "WorkInspirationPromoteRequest" }],
+          "returns": "WorkInspirationPromoteResponse"
+        },
+        {
+          "name": "archiveWorkInspiration",
+          "args": [{ "name": "request", "type": "WorkInspirationArchiveRequest" }],
+          "returns": "WorkInspirationItem"
+        },
+        {
+          "name": "appendWorkInspiration",
+          "args": [
+            { "name": "workId", "type": "string" },
+            { "name": "request", "type": "AppendInspirationRequest" }
+          ],
+          "returns": "AppendInspirationResponse"
+        },
+        {
+          "name": "releaseWorkCompletionLock",
+          "args": [
+            { "name": "workId", "type": "string" },
+            { "name": "request", "type": "ReleaseCompletionLockRequest" }
+          ],
+          "returns": "WorkDetailResponse"
+        },
+        {
+          "name": "reconcileWorkChapters",
+          "args": [
+            { "name": "workId", "type": "string" },
+            { "name": "query", "type": "{ dry_run?: boolean }", "optional": true }
+          ],
+          "returns": "WorkReconcileReport"
+        },
+        {
+          "name": "listChapters",
+          "args": [
+            { "name": "workId", "type": "string" },
+            { "name": "query", "type": "ListChaptersQuery", "optional": true }
+          ],
+          "returns": "ListChaptersResponse"
+        },
+        {
+          "name": "getChapter",
+          "args": [
+            { "name": "workId", "type": "string" },
+            { "name": "chapter", "type": "number" },
+            { "name": "query", "type": "ChapterContentQuery", "optional": true }
+          ],
+          "returns": "ChapterDetail"
+        },
+        {
+          "name": "getChapterOutline",
+          "args": [
+            { "name": "workId", "type": "string" },
+            { "name": "chapter", "type": "number" },
+            { "name": "query", "type": "ChapterContentQuery", "optional": true }
+          ],
+          "returns": "ChapterOutline"
+        },
+        {
+          "name": "getChapterBody",
+          "args": [
+            { "name": "workId", "type": "string" },
+            { "name": "chapter", "type": "number" },
+            { "name": "query", "type": "ChapterContentQuery", "optional": true }
+          ],
+          "returns": "ChapterBody"
+        },
+        {
+          "name": "patchChapter",
+          "args": [
+            { "name": "workId", "type": "string" },
+            { "name": "chapter", "type": "number" },
+            { "name": "request", "type": "PatchChapterRequest" },
+            { "name": "query", "type": "ChapterContentQuery", "optional": true }
+          ],
+          "returns": "ChapterDetail"
+        },
+        {
+          "name": "getWorkOutline",
+          "args": [{ "name": "workId", "type": "string" }],
+          "returns": "WorkOutline"
+        },
+        {
+          "name": "patchOutlineStructure",
+          "args": [
+            { "name": "workId", "type": "string" },
+            { "name": "request", "type": "OutlinePatchStructureRequest" }
+          ],
+          "returns": "OutlinePatchResponse"
+        },
+        {
+          "name": "patchOutlineChapter",
+          "args": [
+            { "name": "workId", "type": "string" },
+            { "name": "chapter", "type": "number" },
+            { "name": "request", "type": "OutlinePatchChapterRequest" }
+          ],
+          "returns": "OutlinePatchResponse"
+        },
+        {
+          "name": "patchTimelineEvent",
+          "args": [
+            { "name": "workId", "type": "string" },
+            { "name": "request", "type": "TimelinePatchEventRequest" }
+          ],
+          "returns": "OutlinePatchResponse"
+        },
+        {
+          "name": "listKbEntries",
+          "args": [{ "name": "query", "type": "ListKbEntriesQuery", "optional": true }],
+          "returns": "ListKbEntriesResponse"
+        },
+        {
+          "name": "addKbEntry",
+          "args": [{ "name": "request", "type": "AddKbEntryRequest" }],
+          "returns": "AddKbEntryResponse"
+        },
+        {
+          "name": "getKbEntry",
+          "args": [{ "name": "entryId", "type": "string" }],
+          "returns": "GetKbEntryResponse"
+        },
+        {
+          "name": "deleteKbEntry",
+          "args": [{ "name": "entryId", "type": "string" }],
+          "returns": "DeleteKbEntryResponse"
+        },
+        {
+          "name": "listFindings",
+          "args": [
+            { "name": "workId", "type": "string" },
+            { "name": "query", "type": "ListFindingsQuery", "optional": true }
+          ],
+          "returns": "ListFindingsResponse"
+        },
+        {
+          "name": "createFinding",
+          "args": [
+            { "name": "workId", "type": "string" },
+            { "name": "request", "type": "CreateFindingRequest" }
+          ],
+          "returns": "FindingDetailResponse"
+        },
+        {
+          "name": "createFindingFromReview",
+          "args": [
+            { "name": "workId", "type": "string" },
+            { "name": "request", "type": "CreateFindingRequest" }
+          ],
+          "returns": "FindingDetailResponse"
+        },
+        {
+          "name": "getWorkFinding",
+          "args": [
+            { "name": "workId", "type": "string" },
+            { "name": "findingId", "type": "string" }
+          ],
+          "returns": "FindingDetailResponse"
+        },
+        {
+          "name": "updateFinding",
+          "args": [
+            { "name": "workId", "type": "string" },
+            { "name": "findingId", "type": "string" },
+            { "name": "patch", "type": "UpdateFindingRequest" }
+          ],
+          "returns": "FindingDetailResponse"
+        },
+        {
+          "name": "deleteFinding",
+          "args": [
+            { "name": "workId", "type": "string" },
+            { "name": "findingId", "type": "string" }
+          ],
+          "returns": "void"
+        },
+        {
+          "name": "listStaleFindings",
+          "args": [],
+          "returns": "StaleFindingsResponse"
+        },
+        {
+          "name": "batchUpdateFindings",
+          "args": [{ "name": "request", "type": "BatchUpdateFindingsRequest" }],
+          "returns": "BatchUpdateFindingsResponse"
+        },
+        {
+          "name": "pruneFindings",
+          "args": [
+            {
+              "name": "query",
+              "type": "{ older_than_days?: number; dry_run?: boolean }",
+              "optional": true
+            }
+          ],
+          "returns": "FindingsPruneResponse"
+        },
+        {
+          "name": "getFinding",
+          "args": [{ "name": "findingId", "type": "string" }],
+          "returns": "FindingDetailResponse"
+        },
+        {
+          "name": "getReadingProgress",
+          "args": [
+            { "name": "workId", "type": "string" },
+            { "name": "chapter", "type": "number" }
+          ],
+          "returns": "ReadingProgressResponse"
+        },
+        {
+          "name": "putReadingProgress",
+          "args": [{ "name": "request", "type": "ReadingProgressRequest" }],
+          "returns": "ReadingProgressResponse"
+        },
+        {
+          "name": "deleteReadingProgress",
+          "args": [
+            { "name": "workId", "type": "string" },
+            { "name": "chapter", "type": "number" }
+          ],
+          "returns": "void"
+        },
+        {
+          "name": "listReadingAnnotations",
+          "args": [
+            { "name": "workId", "type": "string" },
+            { "name": "chapter", "type": "number" }
+          ],
+          "returns": "ReadingAnnotationListResponse"
+        },
+        {
+          "name": "createReadingAnnotation",
+          "args": [{ "name": "request", "type": "ReadingAnnotationCreateRequest" }],
+          "returns": "ReadingAnnotation"
+        },
+        {
+          "name": "patchReadingAnnotation",
+          "args": [
+            { "name": "annotationId", "type": "string" },
+            { "name": "request", "type": "ReadingAnnotationPatchRequest" }
+          ],
+          "returns": "ReadingAnnotation"
+        },
+        {
+          "name": "deleteReadingAnnotation",
+          "args": [{ "name": "annotationId", "type": "string" }],
+          "returns": "void"
+        },
+        {
+          "name": "listReferences",
+          "args": [],
+          "returns": "ReferenceListResponse"
+        },
+        {
+          "name": "getReference",
+          "args": [{ "name": "referenceId", "type": "string" }],
+          "returns": "ReferenceGetResponse"
+        },
+        {
+          "name": "worldKbPromoteCandidate",
+          "args": [
+            { "name": "worldId", "type": "string" },
+            { "name": "request", "type": "WorldKbPromoteCandidateRequest" }
+          ],
+          "returns": "WorldKbPromoteCandidateResponse"
+        },
+        {
+          "name": "worldKbPatchRelationship",
+          "args": [
+            { "name": "worldId", "type": "string" },
+            { "name": "request", "type": "WorldKbPatchRelationshipRequest" }
+          ],
+          "returns": "WorldKbPatchRelationshipResponse"
+        },
+        {
+          "name": "getKeyBlockState",
+          "args": [
+            { "name": "worldId", "type": "string" },
+            { "name": "keyBlockId", "type": "string" }
+          ],
+          "returns": "WorldKbKeyBlockStateResponse"
         }
       ]
     }

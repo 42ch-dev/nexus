@@ -1,0 +1,18 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/works/work-pool-archive-request.schema.json",
+ "schema_version": 1,
+ "title": "WorkPoolArchiveRequest",
+ "description": "Body for `POST /v1/daemon/works/pool/archive`.",
+ "type": "object",
+ "required": [
+  "entry_id"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "entry_id": {
+   "type": "string",
+   "minLength": 1
+  }
+ }
+}

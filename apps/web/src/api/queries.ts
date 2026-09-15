@@ -20,6 +20,7 @@ import {
 } from '@tanstack/react-query';
 import type {
   BatchUpdateFindingsRequest,
+  NarrativeWorldsListResponse,
   ChapterContentQuery,
   ChapterSummary,
   CountPendingReviewsResponse,
@@ -68,7 +69,6 @@ import type {
   UpdateFindingRequest,
   ValidatePresetRequest,
   WorkSummary,
-  World,
   WorldRuleCreateRequest,
   WorldRuleUpdateRequest,
 } from '@42ch/nexus-contracts';
@@ -1382,16 +1382,20 @@ export const SOUL_REFETCH_MS = 30_000;
  * `GET /v1/daemon/narrative/worlds` returns every Work-backed world (including
  * zero-fragment worlds) so the selector can surface honest subset-empty states.
  * The list is workspace-scoped in the single-creator local model; P1 does not
- * client-filter by owner. V1.82 mocks the response shape against the generated
- * `World` domain contract until P0 lands the generated list-response type.
+ * client-filter by owner. v1.190 P5-T1: the hook reads the canonical generated
+ * `NarrativeWorldsListResponse` envelope and selects `.worlds`
+ * (`NarrativeWorldState[]`) — the retired app-side `World[]` mock is gone.
  */
 export function useNarrativeWorlds(options?: { limit?: number }) {
   const client = useNexusClient();
   const limit = options?.limit;
   return useQuery({
     queryKey: queryKeys.memory.worlds(),
-    queryFn: (): Promise<World[]> => client.listNarrativeWorlds(),
-    select: (data) => (limit != null ? data.slice(0, limit) : data),
+    queryFn: (): Promise<NarrativeWorldsListResponse> => client.listNarrativeWorlds(),
+    select: (data) => {
+      const worlds = data.worlds;
+      return limit != null ? worlds.slice(0, limit) : worlds;
+    },
   });
 }
 

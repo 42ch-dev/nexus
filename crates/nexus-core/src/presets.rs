@@ -8,10 +8,10 @@ use nexus_contracts::{
     StrategyPatchTransitionRequest, ValidatePresetRequest, ValidatePresetResponse,
 };
 use nexus_contracts::{UpdatePresetRequest, UpdatePresetResponse};
-use nexus_contracts::local::orchestration::http::{
-    PresetProfileConditionalRule, PresetProfileEnterAction, PresetProfileExitWhen,
-    PresetProfileLabeledNext, PresetProfileLanes, PresetProfileNext, PresetProfileResponse,
-    PresetProfileRole, PresetProfileSignal, PresetProfileState,
+use nexus_contracts::{
+    OrchestrationPresetListResponse, PresetProfileConditionalRule, PresetProfileEnterAction,
+    PresetProfileExitWhen, PresetProfileLabeledNext, PresetProfileLanes, PresetProfileNext,
+    PresetProfileResponse, PresetProfileRole, PresetProfileSignal, PresetProfileState,
 };
 use nexus_contracts::local::orchestration::preset::{
     EnterAction, ExitWhen, NextTarget, PresetRoleDefinition, SignalActionKind,
@@ -244,7 +244,7 @@ impl CoreService {
     /// Retained orchestration listing: embedded IDs followed by unique system IDs.
     pub async fn list_orchestration_presets(
         &self, principal: &Principal,
-    ) -> CoreResult<nexus_contracts::local::orchestration::http::ListPresetsResponse> {
+    ) -> CoreResult<OrchestrationPresetListResponse> {
         self.verify_principal(principal)?;
         let mut presets = nexus_preset::list_embedded_presets();
         let scan = nexus_preset::system_preset_dir::scan_system_presets(
@@ -253,7 +253,7 @@ impl CoreService {
         for id in nexus_preset::system_preset_dir::list_system_preset_ids(&scan) {
             if !presets.contains(&id) { presets.push(id); }
         }
-        Ok(nexus_contracts::local::orchestration::http::ListPresetsResponse { presets })
+        Ok(OrchestrationPresetListResponse { presets })
     }
 
     /// Read the profile using the retained user/system/embedded resolution order.
@@ -1920,16 +1920,28 @@ fn profile_next(next: &NextTarget) -> PresetProfileNext {
         NextTarget::Linear(target) => PresetProfileNext {
             kind: "linear".to_string(),
             target: Some(target.clone()),
-            ..Default::default()
+            go: None,
+            nogo: None,
+            labeled: Vec::new(),
+            rules: Vec::new(),
+            branches: Vec::new(),
+            default: None,
         },
         NextTarget::GoNogo(go_nogo) => PresetProfileNext {
             kind: "goNogo".to_string(),
+            target: None,
             go: Some(go_nogo.go.clone()),
             nogo: Some(go_nogo.nogo.clone()),
-            ..Default::default()
+            labeled: Vec::new(),
+            rules: Vec::new(),
+            branches: Vec::new(),
+            default: None,
         },
         NextTarget::Labeled(edges) => PresetProfileNext {
             kind: "labeled".to_string(),
+            target: None,
+            go: None,
+            nogo: None,
             labeled: edges
                 .iter()
                 .map(|e| PresetProfileLabeledNext {
@@ -1937,10 +1949,16 @@ fn profile_next(next: &NextTarget) -> PresetProfileNext {
                     target: e.target.clone(),
                 })
                 .collect(),
-            ..Default::default()
+            rules: Vec::new(),
+            branches: Vec::new(),
+            default: None,
         },
         NextTarget::Conditional(cond) => PresetProfileNext {
             kind: "conditional".to_string(),
+            target: None,
+            go: None,
+            nogo: None,
+            labeled: Vec::new(),
             rules: cond
                 .rules
                 .iter()
@@ -1949,11 +1967,16 @@ fn profile_next(next: &NextTarget) -> PresetProfileNext {
                     target: r.target.clone(),
                 })
                 .collect(),
+            branches: Vec::new(),
             default: Some(cond.default.clone()),
-            ..Default::default()
         },
         NextTarget::Branches(branches) => PresetProfileNext {
             kind: "branches".to_string(),
+            target: None,
+            go: None,
+            nogo: None,
+            labeled: Vec::new(),
+            rules: Vec::new(),
             branches: branches
                 .branches
                 .iter()
@@ -1963,7 +1986,6 @@ fn profile_next(next: &NextTarget) -> PresetProfileNext {
                 })
                 .collect(),
             default: Some(branches.default.clone()),
-            ..Default::default()
         },
     }
 }

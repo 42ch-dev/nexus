@@ -1,0 +1,21 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/orchestration-presets/preset-profile-conditional-rule.schema.json",
+ "schema_version": 1,
+ "title": "PresetProfileConditionalRule",
+ "description": "A conditional rule (expression -> target edge).",
+ "type": "object",
+ "required": [
+  "when",
+  "target"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "when": {
+   "type": "string"
+  },
+  "target": {
+   "type": "string"
+  }
+ }
+}

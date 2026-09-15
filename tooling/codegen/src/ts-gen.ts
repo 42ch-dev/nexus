@@ -125,6 +125,13 @@ const ANNOTATION_KEYWORDS: Record<string, true> = {
   deprecated: true,
   readOnly: true,
   writeOnly: true,
+  // Nexus extension marker (x-nexus-tri-state): boundary-parser metadata,
+  // never a type constraint. Without it the deliberately unrestricted
+  // tri-state carriers (patch-work-request world_id/story_ref,
+  // update-finding-request rule_suggestion) miss the unrestricted rewrite
+  // and compile to an object index signature that rejects the legal
+  // null/string wire values.
+  'x-nexus-tri-state': true,
 };
 
 /** Keywords whose value is a single subschema (or a tuple array of subschemas for `items`). */

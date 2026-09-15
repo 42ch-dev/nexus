@@ -32,6 +32,148 @@ export interface NativeCoreBinding {
   providerCall(requestJson: Uint8Array): Promise<Uint8Array>;
   nextProviderEvents(operationId: string, maxEvents: number, maxBytes: number): Promise<Uint8Array>;
   close(): Promise<Uint8Array>;
+  // ── P5-T1 World / Work / content / knowledge family surface ──────────────
+  // Raw napi signatures; the typed facade lives in `index.ts`.
+  narrativeListWorlds(principal: string): Promise<Uint8Array>;
+  narrativeGetWorld(principal: string, worldId: string): Promise<Uint8Array>;
+  createWorld(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  deleteWorld(principal: string, worldId: string): Promise<Uint8Array>;
+  promoteWorldKbCandidate(
+    principal: string,
+    worldId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  patchWorldKbRelationship(
+    principal: string,
+    worldId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  worldKbKeyBlockState(
+    principal: string,
+    worldId: string,
+    keyBlockId: string,
+  ): Promise<Uint8Array>;
+  createWorldFork(principal: string, worldId: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  exportWorldPack(principal: string, worldId: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  importWorldPack(principal: string, worldId: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  listWorldRules(principal: string, worldId: string): Promise<Uint8Array>;
+  createWorldRule(principal: string, worldId: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  updateWorldRule(
+    principal: string,
+    worldId: string,
+    ruleId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  listWorldFindings(principal: string, worldId: string): Promise<Uint8Array>;
+  timelineOverview(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
+  listTimelineEvents(
+    principal: string,
+    worldId: string,
+    queryJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  listWorks(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
+  getWork(principal: string, workId: string): Promise<Uint8Array>;
+  createWork(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  patchWork(principal: string, workId: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  deleteWork(principal: string, workId: string): Promise<Uint8Array>;
+  appendWorkInspiration(
+    principal: string,
+    workId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  setWorkPoolActive(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  releaseWorkCompletionLock(
+    principal: string,
+    workId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  reconcileWorkChapters(
+    principal: string,
+    workId: string,
+    queryJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  selectWork(principal: string, workId: string): Promise<Uint8Array>;
+  listWorkPool(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
+  promoteWorkPoolEntry(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  archiveWorkPoolEntry(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  addWorkInspiration(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  listWorkInspiration(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
+  promoteWorkInspiration(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  archiveWorkInspiration(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  listChapters(principal: string, workId: string, queryJson: Uint8Array): Promise<Uint8Array>;
+  chapterDetail(
+    principal: string,
+    workId: string,
+    chapterId: string,
+    queryJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  chapterOutline(
+    principal: string,
+    workId: string,
+    chapterId: string,
+    queryJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  chapterBody(
+    principal: string,
+    workId: string,
+    chapterId: string,
+    queryJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  patchChapter(
+    principal: string,
+    workId: string,
+    chapterId: string,
+    queryJson: Uint8Array,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  getWorkOutline(principal: string, workId: string): Promise<Uint8Array>;
+  patchOutlineStructure(principal: string, workId: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  patchOutlineChapter(
+    principal: string,
+    workId: string,
+    chapterId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  patchTimelineEvent(principal: string, workId: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  listKbEntries(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
+  addKbEntry(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  getKbEntry(principal: string, entryId: string): Promise<Uint8Array>;
+  deleteKbEntry(principal: string, entryId: string): Promise<Uint8Array>;
+  createFinding(principal: string, workId: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  createFindingFromReview(
+    principal: string,
+    workId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  listFindings(principal: string, workId: string, queryJson: Uint8Array): Promise<Uint8Array>;
+  getWorkFinding(principal: string, workId: string, findingId: string): Promise<Uint8Array>;
+  getFinding(principal: string, findingId: string): Promise<Uint8Array>;
+  updateFinding(principal: string, findingId: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  deleteFinding(principal: string, findingId: string): Promise<Uint8Array>;
+  batchUpdateFindings(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  listStaleFindings(principal: string, thresholdSeconds: number): Promise<Uint8Array>;
+  pruneFindings(
+    principal: string,
+    olderThanDays: number | null,
+    dryRun: boolean,
+  ): Promise<Uint8Array>;
+  getReadingProgress(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
+  putReadingProgress(
+    principal: string,
+    workId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  deleteReadingProgress(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
+  listAnnotations(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
+  createAnnotation(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  patchAnnotation(
+    principal: string,
+    annotationId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  deleteAnnotation(principal: string, annotationId: string): Promise<Uint8Array>;
+  listReferences(principal: string): Promise<Uint8Array>;
+  getReference(principal: string, referenceId: string): Promise<Uint8Array>;
 }
 
 export interface NativeBinding {

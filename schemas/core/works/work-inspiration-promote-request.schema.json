@@ -1,0 +1,24 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/works/work-inspiration-promote-request.schema.json",
+ "schema_version": 1,
+ "title": "WorkInspirationPromoteRequest",
+ "description": "Body for `POST /v1/daemon/works/pool/inspiration/promote` (atomic create-Work-from-inspiration).",
+ "type": "object",
+ "required": [
+  "item_id"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "item_id": {
+   "type": "string",
+   "minLength": 1
+  },
+  "idea": {
+   "type": "string"
+  },
+  "set_default": {
+   "type": "boolean"
+  }
+ }
+}

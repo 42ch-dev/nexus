@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import { isLoopbackBindHost } from './bind.js';
 
 export interface ServiceOptions {
@@ -10,6 +10,14 @@ export interface ServiceOptions {
   domainOnly?: boolean;
   tlsCert?: string;
   tlsKey?: string;
+  /** Wire transport (architecture §7). Defaults to `http`. */
+  transport?: 'http' | 'unix';
+  /** Absolute Unix domain socket path; required for `unix`, forbidden for `http`. */
+  socketPath?: string;
+  /** ACP registry CDN base; must pass the legacy public-HTTPS validation. */
+  cdnUrl?: string;
+  /** Enable the embedded MCP lane for peers that request it. */
+  embeddedMcp?: boolean;
 }
 
 export interface ResolvedServiceConfig extends ServiceOptions {
@@ -17,8 +25,11 @@ export interface ResolvedServiceConfig extends ServiceOptions {
   apiKey: string | null;
   allowedOrigins: string[];
   tlsCertMtimeMs?: number;
+  transport: 'http' | 'unix';
+  socketPath?: string;
+  cdnUrl?: string;
+  embeddedMcp: boolean;
 }
-
 export const MAX_REQUEST_BYTES = 1024 * 1024;
 export const HEADER_READ_TIMEOUT_MS = 5_000;
 /** Sweep interval that makes the frozen 5s header deadline observable on time. */
@@ -180,12 +191,147 @@ export function validateServiceHome(home: string): void {
   }
 }
 
+/** Blocklist ranges (private/loopback/link-local/metadata) for four IPv4 octets. */
+function isBlockedIpv4Octets(octets: readonly number[]): boolean {
+  const [a, b] = [octets[0], octets[1]];
+  // Private, loopback, link-local ranges plus the 169.254.0.0/16 metadata
+  // endpoint, mirroring the legacy `is_blocked_ip` V4 arm.
+  return (
+    a === 10 ||
+    a === 127 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254)
+  );
+}
+
+/** Parse an IPv6 literal (zone id stripped) into its eight 16-bit groups. */
+function parseIpv6Groups(input: string): number[] | null {
+  const zone = input.indexOf('%');
+  const text = zone === -1 ? input : input.slice(0, zone);
+  // Embedded IPv4 tail: `::ffff:127.0.0.1` and friends become two groups.
+  const v4Tail = text.match(/:(\d+\.\d+\.\d+\.\d+)$/);
+  let head = text;
+  const tailGroups: number[] = [];
+  if (v4Tail) {
+    const octets = v4Tail[1].split('.').map(Number);
+    if (octets.some((octet) => octet > 255)) return null;
+    tailGroups.push((octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]);
+    head = text.slice(0, text.length - v4Tail[1].length);
+  }
+  const halves = head.split('::');
+  if (halves.length > 2) return null;
+  const left = halves[0] === '' ? [] : halves[0].split(':');
+  const right = halves.length === 2 && halves[1] !== '' ? halves[1].split(':') : [];
+  if (halves.length === 1 && left.length + tailGroups.length !== 8) return null;
+  if (halves.length === 2 && left.length + right.length + tailGroups.length > 7) return null;
+  const compressed = halves.length === 2 ? 8 - left.length - right.length - tailGroups.length : 0;
+  const hexGroups = [...left, ...Array<string>(compressed).fill('0'), ...right];
+  if (hexGroups.length + tailGroups.length !== 8) return null;
+  const parsedHex = hexGroups.map((group) =>
+    /^[0-9a-fA-F]{1,4}$/.test(group) ? parseInt(group, 16) : Number.NaN,
+  );
+  if (parsedHex.some((value) => Number.isNaN(value))) return null;
+  return [...parsedHex, ...tailGroups];
+}
+
+function isBlockedIpv6(groups: readonly number[]): boolean {
+  // Loopback ::1 (longhand `0:0:0:0:0:0:0:1` included).
+  if (groups.slice(0, 7).every((group) => group === 0) && groups[7] === 1) return true;
+  // IPv4-mapped ::ffff:0:0/96 — decimal or hexadecimal tail alike — and the
+  // deprecated IPv4-compatible ::/96 all judge by the embedded IPv4 address.
+  if (groups.slice(0, 5).every((group) => group === 0) && (groups[5] === 0xffff || groups[5] === 0)) {
+    return isBlockedIpv4Octets([groups[6] >> 8, groups[6] & 0xff, groups[7] >> 8, groups[7] & 0xff]);
+  }
+  // Unique-local fc00::/7 and link-local fe80::/10.
+  const first = groups[0];
+  return (first >= 0xfc00 && first <= 0xfdff) || (first >= 0xfe80 && first <= 0xfebf);
+}
+
+function isBlockedCdnIp(ip: string): boolean {
+  const lowered = ip.trim().toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
+  if (lowered.includes(':')) {
+    const groups = parseIpv6Groups(lowered);
+    return groups !== null && isBlockedIpv6(groups);
+  }
+  // WHATWG normalization: dotted-decimal, octal, hexadecimal, and packed
+  // 32-bit IPv4 spellings all canonicalize here before classification, so
+  // `0177.0.0.1` or `2130706433` can no longer smuggle a loopback past the
+  // decimal-only matcher.
+  try {
+    const hostname = new URL(`https://${lowered}/`).hostname;
+    const v4 = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+    if (v4) {
+      const octets = v4.slice(1).map(Number);
+      if (octets.some((octet) => octet > 255)) return false;
+      return isBlockedIpv4Octets(octets);
+    }
+  } catch {
+    // Not a URL host: nothing address-like to block.
+  }
+  return false;
+}
+
+/**
+ * Legacy CDN validation (registry.rs `validate_cdn_url_static`), preserved
+ * in spirit: public HTTPS URLs only, literal-IP hosts in private, loopback,
+ * link-local or metadata ranges are refused. Hosts go through real URL/IP
+ * parsing — bracketed IPv6 (`[::1]`, ULA, link-local), both IPv4-mapped
+ * spellings, and exotic IPv4 forms are canonicalized before classification.
+ */
+export function validateCdnUrl(url: string): void {
+  if (url.trim().length === 0) {
+    throw new Error('--cdn-url must be a public HTTPS CDN URL (https://...); got empty value');
+  }
+  if (!url.startsWith('https://')) {
+    throw new Error(`--cdn-url must be a public HTTPS CDN URL (https://...); got ${JSON.stringify(url)}`);
+  }
+  let host: string;
+  try {
+    // URL parsing strips IPv6 brackets and canonicalizes exotic IPv4 forms.
+    host = new URL(url).hostname.replace(/^\[/, '').replace(/\]$/, '');
+  } catch {
+    throw new Error(`--cdn-url must be a public HTTPS CDN URL (https://...); got ${JSON.stringify(url)}`);
+  }
+  if (host.length === 0 || isBlockedCdnIp(host)) {
+    throw new Error(`--cdn-url must be a public HTTPS CDN URL (https://...); got ${JSON.stringify(url)}`);
+  }
+}
+
+/**
+ * Resolve the transport selection (architecture §7): `http` by default; a
+ * unix socket requires an absolute `socketPath`, and the socket path conflicts
+ * with an explicitly selected HTTP bind.
+ */
+function resolveTransport(
+  options: Pick<ServiceOptions, 'transport' | 'socketPath'>,
+): { transport: 'http' | 'unix'; socketPath?: string } {
+  const transport = options.transport ?? 'http';
+  if (transport === 'unix') {
+    const socketPath = options.socketPath;
+    if (!socketPath) {
+      throw new Error('--socket <absolute-path> is required for the unix transport');
+    }
+    if (!isAbsolute(socketPath)) {
+      throw new Error(`--socket must be an absolute path: ${JSON.stringify(socketPath)}`);
+    }
+    return { transport, socketPath };
+  }
+  if (options.socketPath) {
+    throw new Error('--socket conflicts with the http transport; pass --transport unix');
+  }
+  return { transport };
+}
+
 export function resolveServiceConfig(options: ServiceOptions): ResolvedServiceConfig {
   const home = resolve(options.home);
   const host = options.host.trim() || DEFAULT_HOST;
   const port = options.port;
   const rawKey = process.env.NEXUS42_DAEMON_API_KEY?.trim() ?? '';
   const apiKey = rawKey.length > 0 ? rawKey : null;
+  const { transport, socketPath } = resolveTransport(options);
+  if (options.cdnUrl) validateCdnUrl(options.cdnUrl);
+  const cdnUrl = options.cdnUrl;
   return {
     ...options,
     home,
@@ -193,6 +339,10 @@ export function resolveServiceConfig(options: ServiceOptions): ResolvedServiceCo
     port,
     apiKey,
     allowedOrigins: resolveAllowedOrigins(port, host),
+    transport,
+    socketPath,
+    cdnUrl,
+    embeddedMcp: options.embeddedMcp === true,
   };
 }
 
@@ -204,6 +354,10 @@ export interface CliArgs {
   allowRemote: boolean;
   tlsCert?: string;
   tlsKey?: string;
+  transport: 'http' | 'unix';
+  socketPath?: string;
+  cdnUrl?: string;
+  embeddedMcp: boolean;
 }
 
 export function parseCliArgs(argv: string[]): CliArgs {
@@ -215,6 +369,12 @@ export function parseCliArgs(argv: string[]): CliArgs {
   let allowRemote = false;
   let tlsCert: string | undefined;
   let tlsKey: string | undefined;
+  let transport: 'http' | 'unix' = 'http';
+  let socketPath: string | undefined;
+  let cdnUrl: string | undefined;
+  let embeddedMcp = false;
+  let hostGiven = false;
+  let portGiven = false;
 
   for (let i = 0; i < args.length; i += 1) {
     const token = args[i];
@@ -224,9 +384,11 @@ export function parseCliArgs(argv: string[]): CliArgs {
         break;
       case '--host':
         host = args[++i] ?? DEFAULT_HOST;
+        hostGiven = true;
         break;
       case '--port':
         port = Number.parseInt(args[++i] ?? '', 10);
+        portGiven = true;
         break;
       case '--domain-only':
         domainOnly = true;
@@ -239,6 +401,23 @@ export function parseCliArgs(argv: string[]): CliArgs {
         break;
       case '--tls-key':
         tlsKey = resolve(args[++i] ?? '');
+        break;
+      case '--transport': {
+        const value = args[++i] ?? '';
+        if (value !== 'http' && value !== 'unix') {
+          throw new Error(`--transport must be "http" or "unix", got ${JSON.stringify(value)}`);
+        }
+        transport = value;
+        break;
+      }
+      case '--socket':
+        socketPath = args[++i] ?? '';
+        break;
+      case '--cdn-url':
+        cdnUrl = args[++i] ?? '';
+        break;
+      case '--embedded-mcp':
+        embeddedMcp = true;
         break;
       default:
         throw new Error(`unknown argument: ${token}`);
@@ -254,8 +433,37 @@ export function parseCliArgs(argv: string[]): CliArgs {
   if ((tlsCert && !tlsKey) || (!tlsCert && tlsKey)) {
     throw new Error('--tls-cert and --tls-key must be supplied together');
   }
+  // `--socket` is required only for unix and conflicts with an explicitly
+  // selected HTTP bind (architecture §7): an explicit --host/--port on the
+  // unix transport has no meaning, and a socket path on http is ambiguous.
+  if (transport === 'unix') {
+    if (!socketPath) {
+      throw new Error('--socket <absolute-path> is required for --transport unix');
+    }
+    if (hostGiven || portGiven) {
+      throw new Error('--socket conflicts with an explicit --host/--port HTTP bind');
+    }
+  } else if (socketPath) {
+    throw new Error('--socket conflicts with the http transport; pass --transport unix');
+  }
+  if (socketPath && !isAbsolute(socketPath)) {
+    throw new Error(`--socket must be an absolute path: ${JSON.stringify(socketPath)}`);
+  }
+  if (cdnUrl) validateCdnUrl(cdnUrl);
 
-  return { home, host, port, domainOnly, allowRemote, tlsCert, tlsKey };
+  return {
+    home,
+    host,
+    port,
+    domainOnly,
+    allowRemote,
+    tlsCert,
+    tlsKey,
+    transport,
+    socketPath,
+    cdnUrl,
+    embeddedMcp,
+  };
 }
 
 export function loadTlsMaterial(

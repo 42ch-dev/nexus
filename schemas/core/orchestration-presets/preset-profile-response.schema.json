@@ -1,0 +1,56 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/orchestration-presets/preset-profile-response.schema.json",
+ "schema_version": 1,
+ "title": "PresetProfileResponse",
+ "description": "Response body for `GET /v1/daemon/orchestration/presets/{id}/profile` (AR-20..23): manifest-derived profile; manifest fields the preset does not carry serialize absent (AR-21).",
+ "type": "object",
+ "required": [
+  "id",
+  "version",
+  "sourceHash",
+  "lanes",
+  "states"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "id": {
+   "type": "string"
+  },
+  "version": {
+   "type": "integer",
+   "minimum": 0,
+   "maximum": 4294967295
+  },
+  "sourceHash": {
+   "type": "string"
+  },
+  "lanes": {
+   "$ref": "https://nexus42.invalid/schemas/core/orchestration-presets/preset-profile-lanes.schema.json"
+  },
+  "states": {
+   "type": "array",
+   "items": {
+    "$ref": "https://nexus42.invalid/schemas/core/orchestration-presets/preset-profile-state.schema.json"
+   }
+  },
+  "roles": {
+   "type": "array",
+   "items": {
+    "$ref": "https://nexus42.invalid/schemas/core/orchestration-presets/preset-profile-role.schema.json"
+   }
+  },
+  "requiredCapabilities": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   }
+  },
+  "signals": {
+   "type": "array",
+   "items": {
+    "$ref": "https://nexus42.invalid/schemas/core/orchestration-presets/preset-profile-signal.schema.json"
+   }
+  }
+ }
+}

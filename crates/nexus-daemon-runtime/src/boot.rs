@@ -1599,6 +1599,15 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             .await
             .map_err(|e| anyhow::anyhow!("failed to publish boot runtime bundle: {e}"))?;
     }
+    // Launch identity (§7): minted once per boot before serving so the
+    // instance-bound stop endpoint can prove ownership. The epoch is 1 — this
+    // boot's engine generation; a restart is a new instance id entirely.
+    let _ = crate::api::handlers::runtime::init_runtime_identity(
+        crate::api::handlers::runtime::ServiceRuntimeIdentity {
+            instance_id: uuid::Uuid::new_v4().to_string(),
+            engine_epoch: 1,
+        },
+    );
 
     let app = api::create_router(state, auth_config);
 

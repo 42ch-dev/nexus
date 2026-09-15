@@ -3,9 +3,8 @@
 use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
 use axum::{extract::Path, extract::State, http::StatusCode, Json};
-use nexus_contracts::local::orchestration::http::{
-    ListPresetsResponse, PresetProfileResponse, ReloadPresetResponse,
-};
+use nexus_contracts::{OrchestrationPresetListResponse, PresetProfileResponse};
+use nexus_contracts::local::orchestration::http::ReloadPresetResponse;
 
 /// `GET /v1/daemon/orchestration/presets`
 ///
@@ -13,7 +12,7 @@ use nexus_contracts::local::orchestration::http::{
 /// from `~/.nexus42/presets/_system/<name>/`.
 pub async fn list_presets(
     State(state): State<WorkspaceState>,
-) -> Result<(StatusCode, Json<ListPresetsResponse>), NexusApiError> {
+) -> Result<(StatusCode, Json<OrchestrationPresetListResponse>), NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
     let response = core.list_orchestration_presets(&principal).await?;
