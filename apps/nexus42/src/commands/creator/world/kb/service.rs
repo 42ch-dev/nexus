@@ -62,6 +62,20 @@ fn map_core_error(err: CoreError) -> CliError {
                 v.validation_summary.errors.join("; ")
             ),
         },
+        CoreError::OutlineConflict(conflict) => CliError::Api {
+            status: 409,
+            message: format!(
+                "outline_conflict: current_revision {}, node_id {}, conflicting_path {}, recovery_hint {}",
+                conflict.current_revision, conflict.node_id, conflict.conflicting_path, conflict.recovery_hint
+            ),
+        },
+        CoreError::OutlineValidation(v) => CliError::Api {
+            status: 422,
+            message: format!(
+                "outline_validation_failed: {}",
+                v.errors.join("; ")
+            ),
+        },
         CoreError::OwnerBusy | CoreError::Busy => CliError::Locked {
             holder_pid: 0,
             holder_name: "workspace writer".to_string(),

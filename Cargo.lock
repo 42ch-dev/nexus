@@ -3927,18 +3927,28 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "nexus-acp-host",
+ "nexus-agent-host",
  "nexus-contracts",
+ "nexus-creator-memory",
  "nexus-home-layout",
  "nexus-knowledge",
  "nexus-local-db",
+ "nexus-moment-context-assembly",
+ "nexus-narrative",
+ "nexus-orchestration",
  "nexus-spoke-adapter",
+ "nexus-wasm-host",
+ "rmcp",
  "serde",
  "serde_json",
+ "serde_yaml",
  "sqlx",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

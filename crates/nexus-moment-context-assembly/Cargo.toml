@@ -15,7 +15,7 @@ nexus-contracts = { path = "../nexus-contracts" }
 nexus-creator-memory = { path = "../nexus-creator-memory" }
 nexus-narrative = { path = "../nexus-narrative" }
 nexus-knowledge = { path = "../nexus-knowledge" }
-nexus-spoke-adapter = { path = "../nexus-spoke-adapter" }
+nexus-spoke-adapter = { path = "../nexus-spoke-adapter", default-features = false }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -1,6 +1,9 @@
 //! P1-T2 `world_kb` contract tests (core service semantics).
 
-use nexus_contracts::WorldKbPatchEntityRequest;
+use nexus_contracts::{
+    CoreProviderJournalWrite, CoreProviderJournalWriteStatus, CoreProviderOperationStatus,
+    WorldKbPatchEntityRequest,
+};
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
 use nexus_local_db::open_pool_read_only;
 use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
@@ -214,7 +217,7 @@ async fn world_kb_contract() {
         .world_kb_graph(&fx.principal, FOREIGN_WORLD.to_string(), false)
         .await
         .unwrap_err();
-    assert!(matches!(err, CoreError::Forbidden { .. }));
+    assert!(matches!(err, CoreError::WorldOwnerDenied { .. }));
 
     let err = fx
         .core
@@ -369,7 +372,7 @@ async fn assert_candidates_contract(fx: &Fixture) {
         )
         .await
         .unwrap_err();
-    assert!(matches!(err, CoreError::Forbidden { .. }));
+    assert!(matches!(err, CoreError::WorldOwnerDenied { .. }));
 }
 #[tokio::test]
 async fn world_kb_contract_merged_terminal_and_modules() {
@@ -594,4 +597,170 @@ async fn direct_writer_close_allows_reopen() {
         .await
         .expect("graph after reopen");
     core2.close().await.expect("second close must succeed");
+}
+
+fn journal_write(
+    operation_id: &str,
+    session_id: &str,
+    provider_id: &str,
+    status: CoreProviderJournalWriteStatus,
+) -> CoreProviderJournalWrite {
+    CoreProviderJournalWrite {
+        operation_id: operation_id.parse().unwrap(),
+        session_id: session_id.parse().unwrap(),
+        provider_id: provider_id.parse().unwrap(),
+        status,
+    }
+}
+
+/// Provider journal contract (LIFE-3): owned write/read/settle seam on the
+/// service — monotonic sequences, settlement that never downgrades a terminal
+/// row, and read-only access that may read but never write the journal.
+#[tokio::test]
+async fn provider_journal_contract_write_read_settle() {
+    let fx = setup().await;
+
+    fx.core
+        .journal_provider_operation(
+            &fx.principal,
+            journal_write("op_a", "sess_a", "mock-acp", CoreProviderJournalWriteStatus::Running),
+        )
+        .await
+        .unwrap();
+    fx.core
+        .journal_provider_operation(
+            &fx.principal,
+            journal_write("op_b", "sess_b", "mock-acp", CoreProviderJournalWriteStatus::Running),
+        )
+        .await
+        .unwrap();
+
+    let a = fx
+        .core
+        .provider_operation(&fx.principal, "op_a".to_string())
+        .await
+        .unwrap()
+        .expect("journaled op_a is readable");
+    assert_eq!(a.operation_id.as_str(), "op_a");
+    assert_eq!(a.session_id.as_str(), "sess_a");
+    assert_eq!(a.provider_id.as_str(), "mock-acp");
+    assert!(matches!(a.status, CoreProviderOperationStatus::Running));
+
+    let b = fx
+        .core
+        .provider_operation(&fx.principal, "op_b".to_string())
+        .await
+        .unwrap()
+        .expect("journaled op_b is readable");
+    assert!(b.sequence > a.sequence, "journal sequences are monotonic");
+
+    assert!(
+        fx.core
+            .provider_operation(&fx.principal, "op_missing".to_string())
+            .await
+            .unwrap()
+            .is_none(),
+        "unknown ids stay None, never a fabricated record"
+    );
+
+    // op_b reaches a terminal state; settlement must not downgrade it.
+    fx.core
+        .journal_provider_operation(
+            &fx.principal,
+            journal_write("op_b", "sess_b", "mock-acp", CoreProviderJournalWriteStatus::Cancelled),
+        )
+        .await
+        .unwrap();
+    let settled = fx.core.settle_provider_orphans().await.unwrap();
+    assert_eq!(settled, 1, "only the non-terminal op_a is settled");
+    let a = fx
+        .core
+        .provider_operation(&fx.principal, "op_a".to_string())
+        .await
+        .unwrap()
+        .expect("op_a survives settlement");
+    assert!(matches!(a.status, CoreProviderOperationStatus::Interrupted));
+    let b = fx
+        .core
+        .provider_operation(&fx.principal, "op_b".to_string())
+        .await
+        .unwrap()
+        .expect("op_b survives settlement");
+    assert!(matches!(b.status, CoreProviderOperationStatus::Cancelled));
+    assert_eq!(
+        fx.core.settle_provider_orphans().await.unwrap(),
+        0,
+        "settlement is idempotent"
+    );
+
+    // Read-only access may read the journal but never write or settle it.
+    let ro = CoreService::open(CoreOpenOptions {
+        user_home: fx.tmp.path().to_path_buf(),
+        access: CoreAccess::ReadOnly,
+    })
+    .await
+    .unwrap();
+    let ro_principal = ro.active_principal().await.unwrap();
+    let ro_a = ro
+        .provider_operation(&ro_principal, "op_a".to_string())
+        .await
+        .unwrap()
+        .expect("read-only access reads the durable journal");
+    assert!(matches!(ro_a.status, CoreProviderOperationStatus::Interrupted));
+    let err = ro
+        .journal_provider_operation(
+            &ro_principal,
+            journal_write("op_ro", "sess_a", "mock-acp", CoreProviderJournalWriteStatus::Running),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, CoreError::Forbidden { .. }));
+    let err = ro.settle_provider_orphans().await.unwrap_err();
+    assert!(matches!(err, CoreError::Forbidden { .. }));
+}
+
+/// Settlement admission contract: a service that stayed open across an
+/// on-disk Creator/workspace selection change must refuse to settle and must
+/// leave the stale workspace's journal untouched.
+#[tokio::test]
+async fn provider_journal_contract_settle_rejects_stale_selection() {
+    let fx = setup().await;
+
+    fx.core
+        .journal_provider_operation(
+            &fx.principal,
+            journal_write(
+                "op_stale",
+                "sess_a",
+                "mock-acp",
+                CoreProviderJournalWriteStatus::Running,
+            ),
+        )
+        .await
+        .unwrap();
+
+    // Active selection moves to another creator on disk; the service is not
+    // reopened, so its bound context is stale for every domain write.
+    let nexus_home = fx.tmp.path().join(".nexus42");
+    std::fs::write(
+        nexus_home.join("config.toml"),
+        "active_creator_id = \"other_creator\"\n[active_workspace_slug_by_creator]\n\"other_creator\" = \"default\"\n",
+    )
+    .unwrap();
+
+    let err = fx.core.settle_provider_orphans().await.unwrap_err();
+    assert!(
+        matches!(err, CoreError::AuthRequired),
+        "settlement after a selection change must be rejected"
+    );
+
+    // No side effects: the stale workspace's orphan is still running.
+    let pool = read_only_pool(fx.tmp.path()).await;
+    let status: String = sqlx::query_scalar(
+        "SELECT status FROM js_provider_operation_journal WHERE operation_id = 'op_stale'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(status, "running", "stale workspace journal is untouched");
 }

@@ -19,6 +19,7 @@
 V1.42 P0 shipped the DB-level `works.runtime_lock_holder` column + `RuntimeLockGuard` RAII in `nexus_local_db::runtime_lock` — a single-process concurrency guard using SQLite's transactional semantics. V1.49 chose a single-writer daemon model with atomic temp+rename as the safe default (single `nexus42 daemon start` instance).
 
 V1.50 introduced cron staggering (three-role per-Work automated scheduling), which creates **real multi-writer contention**:
+
 - The daemon cron evaluator fires `novel-brainstorm` / `novel-write` / `novel-review-master` on a 1-minute tick.
 - The author concurrently runs CLI commands like `creator works cron set` or `creator run outline-chapter`.
 
@@ -31,6 +32,13 @@ The DB-level lock (`runtime_lock_holder`) is process-local — it cannot protect
 | `works` row mutation | CLI `creator run` vs daemon auto-chain | Inconsistent state |
 
 A **hard cross-process advisory lock** (`flock` on `Works/<work_ref>/.lock`) is the V1.51 fix.
+
+V1.190 P1 moves the reading/annotations, findings, work-scope KB index and
+reference-source read authorities into the guarded `nexus-core` service (one
+engine-owner `CoreService` per daemon; CLI composition follows in P6). The
+concurrency rules in this document are unchanged by that extraction: the core
+joins the same writer-protocol pools and file locks, takes the same per-Work
+runtime locks, and adds no new mutation path.
 
 ---
 

@@ -13,12 +13,33 @@ workspace = true
 [lib]
 path = "src/lib.rs"
 
+[features]
+default = []
+# v1.190 architecture §Cohorts — optional edges. The default/domain cohort
+# pulls none of these; each `dep:` edge stays inert until its feature is
+# requested. `compute` is never enabled by default/domain/Connect-host.
+execution = ["dep:nexus-orchestration"]
+provider-host = ["dep:nexus-agent-host", "dep:nexus-acp-host"]
+compute = ["execution", "dep:nexus-wasm-host", "nexus-spoke-adapter/compute"]
+# Reverse-invoke/peer-control edge attaches with its owning cohort task; the
+# bounded rmcp protocol adapter is the embedded-mcp edge (§Cohorts).
+connect-client = []
+embedded-mcp = ["dep:rmcp"]
+
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-local-db = { path = "../nexus-local-db" }
 nexus-knowledge = { path = "../nexus-knowledge" }
 nexus-spoke-adapter = { path = "../nexus-spoke-adapter", default-features = false }
+nexus-narrative = { path = "../nexus-narrative" }
+nexus-creator-memory = { path = "../nexus-creator-memory" }
+nexus-moment-context-assembly = { path = "../nexus-moment-context-assembly" }
+nexus-orchestration = { path = "../nexus-orchestration", optional = true }
+nexus-agent-host = { path = "../nexus-agent-host", optional = true }
+nexus-acp-host = { path = "../nexus-acp-host", optional = true }
+nexus-wasm-host = { path = "../nexus-wasm-host", optional = true }
+rmcp = { version = "=3.2.0", default-features = false, optional = true }
 async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -27,6 +48,8 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 chrono.workspace = true
+uuid.workspace = true
+serde_yaml = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

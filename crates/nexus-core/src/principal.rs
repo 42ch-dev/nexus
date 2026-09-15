@@ -1,9 +1,14 @@
 //! Opaque stored-authorized principal bound to a service generation.
-
+//!
+//! `generation` is open-scoped: it equals the minting service's generation
+//! (always `1` today — see `CoreInner::generation`) and never invalidates a
+//! principal by itself. Stale selections are rejected by the service's disk
+//! re-read (`verify_selected_context`), not by generation comparison.
 #[derive(Debug, Clone)]
 pub struct Principal {
     creator_id: String,
     workspace_slug: String,
+    /// Open-scoped minting generation; see module docs. Never bumped.
     generation: u64,
 }
 

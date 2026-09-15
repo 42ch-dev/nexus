@@ -167,6 +167,14 @@ Local persistence is an implementation boundary and does not add new canonical s
 - `workspace_slug` is unique under `creator_id` and is managed by CLI/daemon local state.
 - A workspace may stage or bind multiple `world_id` values; requests that touch a World MUST carry `world_id` explicitly.
 
+### 2.2 Workspace single-owner reads, creator admission and selection invalidation (v1.190 normative)
+
+The v1.190 P0 core cutover makes the §2.1 workspace boundary enforceable at every read and write. Three current-behavior rules apply:
+
+1. **Workspace single-owner read invariant.** A workspace state DB holds one owner's workspace. Lifecycle reads (World list/get) intentionally return workspace-wide rows with no per-row `owner_creator_id` filter — owner isolation is a workspace boundary property, not a per-read filter; every mutation path stays ownership-guarded against `narrative_worlds.owner_creator_id`.
+2. **Creator registration admission.** Admission requires the caller to exist in stored creator state. The core service mints its active principal only from a configured active creator + workspace selection, and the retained pack-import bridge additionally verifies the caller against the stored `creators` table before running — forged or unknown creator ids are rejected with `AuthRequired`, and the supplied pool must be non-query-only with a live registered writer or the write stays fenced.
+3. **Selection invalidation is a disk re-read.** A `CoreService` is opened against the then-active creator/workspace, and every principal verification re-reads the on-disk active creator id and workspace slug — a selection change after open fails with `AuthRequired`. The principal's minting generation is open-scoped and never bumps: it proves only mint-from-this-open, so staleness is enforced solely by the disk re-read, never by generation comparison.
+
 ---
 
 ## 3. Uniqueness constraints

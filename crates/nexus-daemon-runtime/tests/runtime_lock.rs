@@ -296,13 +296,17 @@ async fn test_inspiration_acquires_and_releases_lock() {
 /// release the lock on the way out.
 #[tokio::test]
 async fn test_reconcile_chapters_releases_lock_on_error() {
-    let (_tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
-    let workspace_tmp = tempfile::TempDir::new().unwrap();
-    let workspace_path = workspace_tmp.path().to_string_lossy().to_string();
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    // Stage the Works tree under the registered creative root: the core
+    // authority resolves the workspace from the operational meta.json
+    // `local_root` (`create_test_workspace` writes `<user_home>/creative`),
+    // matching the production workspace registration layout.
+    let creative_root = tmp.path().join("creative");
+    std::fs::create_dir_all(&creative_root).unwrap();
     let state = WorkspaceState::new_for_testing(
         nexus_home.clone(),
         db_path.clone(),
-        Some(workspace_path.clone()),
+        Some(creative_root.to_string_lossy().to_string()),
     )
     .await;
     test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
@@ -339,8 +343,7 @@ async fn test_reconcile_chapters_releases_lock_on_error() {
     // status (`finalized`) CONFLICTS with the DB row (`not_started`). This
     // makes compute emit a `ResyncFileStatus` op, which apply will attempt to
     // execute.
-    let stories_dir = workspace_tmp
-        .path()
+    let stories_dir = creative_root
         .join("Works")
         .join(work_ref)
         .join("Stories");
@@ -403,13 +406,17 @@ async fn test_reconcile_chapters_releases_lock_on_error() {
 /// `runtime_lock_holder` stays `None`.
 #[tokio::test]
 async fn test_reconcile_chapters_read_phase_runs_unlocked() {
-    let (_tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
-    let workspace_tmp = tempfile::TempDir::new().unwrap();
-    let workspace_path = workspace_tmp.path().to_string_lossy().to_string();
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    // Stage the Works tree under the registered creative root: the core
+    // authority resolves the workspace from the operational meta.json
+    // `local_root` (`create_test_workspace` writes `<user_home>/creative`),
+    // matching the production workspace registration layout.
+    let creative_root = tmp.path().join("creative");
+    std::fs::create_dir_all(&creative_root).unwrap();
     let state = WorkspaceState::new_for_testing(
         nexus_home.clone(),
         db_path.clone(),
-        Some(workspace_path.clone()),
+        Some(creative_root.to_string_lossy().to_string()),
     )
     .await;
     test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
@@ -424,8 +431,7 @@ async fn test_reconcile_chapters_read_phase_runs_unlocked() {
         .unwrap();
 
     // Stories/ exists with one chapter (no DB row) — would be a CreateChapter.
-    let stories_dir = workspace_tmp
-        .path()
+    let stories_dir = creative_root
         .join("Works")
         .join(work_ref)
         .join("Stories");
@@ -489,13 +495,17 @@ async fn test_reconcile_chapters_dry_run_makes_zero_mutations() {
     use nexus_daemon_runtime::api::handlers::works::ReconcileDryRunQuery;
     use nexus_local_db::work_chapters;
 
-    let (_tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
-    let workspace_tmp = tempfile::TempDir::new().unwrap();
-    let workspace_path = workspace_tmp.path().to_string_lossy().to_string();
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    // Stage the Works tree under the registered creative root: the core
+    // authority resolves the workspace from the operational meta.json
+    // `local_root` (`create_test_workspace` writes `<user_home>/creative`),
+    // matching the production workspace registration layout.
+    let creative_root = tmp.path().join("creative");
+    std::fs::create_dir_all(&creative_root).unwrap();
     let state = WorkspaceState::new_for_testing(
         nexus_home.clone(),
         db_path.clone(),
-        Some(workspace_path.clone()),
+        Some(creative_root.to_string_lossy().to_string()),
     )
     .await;
     test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
@@ -512,8 +522,7 @@ async fn test_reconcile_chapters_dry_run_makes_zero_mutations() {
 
     // One chapter file whose frontmatter would create a new DB row in the
     // mutating path (no existing row for chapter 1).
-    let stories_dir = workspace_tmp
-        .path()
+    let stories_dir = creative_root
         .join("Works")
         .join(work_ref)
         .join("Stories");
