@@ -107,6 +107,19 @@ async fn fixture() -> Fixture {
     let guarded = nexus_local_db::init_engine_pool(&db_path)
         .await
         .expect("engine pool init");
+    // P0 verified-admission: `create_world` validates the caller's creator
+    // against the stored `creators` row (`narrative_write::create_world` →
+    // `FkNotFound`), so the fixture must seed it exactly as production does —
+    // through an ADMITTED pool, because `guard_creators_insert` aborts any
+    // write whose connection carries no engine/direct writer registration.
+    sqlx::query(
+        "INSERT OR IGNORE INTO creators (creator_id, display_name, status, \
+         cached_at, data) VALUES (?, 'Test', 'active', datetime('now'), '{}')",
+    )
+    .bind(CREATOR)
+    .execute(guarded.pool())
+    .await
+    .expect("seed the admitted creator row");
     guarded.pool().close().await;
     nexus_local_db::writer_protocol::release_retained_writer_guards(&db_path);
 
