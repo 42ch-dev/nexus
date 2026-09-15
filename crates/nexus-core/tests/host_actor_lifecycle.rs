@@ -70,7 +70,7 @@ async fn seed_env_as(creator: &str) -> Env {
              VALUES (?, 'wrk', ?, ?, ?, 'active', 'private', 'manual', '{}', datetime('now'))",
         )
         .bind(WORLD)
-        .bind(CREATOR)
+        .bind(creator)
         .bind(WORLD)
         .bind(WORLD)
         .execute(&pool)
@@ -79,7 +79,7 @@ async fn seed_env_as(creator: &str) -> Env {
         let created = nexus_local_db::create_character_with_initial_binding(
             &pool,
             CreateCharacterParams {
-                owner_creator_id: CREATOR,
+                owner_creator_id: creator,
                 display_name: "Ada",
                 image_uri: None,
                 persona_json: "{}",
