@@ -86,6 +86,9 @@ pub(crate) struct CoreInner {
     pub(crate) character_fences: ActorFenceTable,
 }
 
+/// Cloneable handle: `inner` is already shared, so a clone is the same open
+/// service (P4-T2: `open_host` hands a clone to the `HostHandle`).
+#[derive(Clone)]
 pub struct CoreService {
     pub(crate) inner: Arc<CoreInner>,
 }
