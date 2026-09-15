@@ -480,7 +480,7 @@ async fn reflect_states_follow_the_gate_cache_and_provider_presence() {
             &principal,
             chr.clone(),
             dto(serde_json::json!({ "force_regenerate": false })),
-            None,
+            || None::<MockSynth>,
         )
         .await
         .unwrap();
@@ -489,7 +489,7 @@ async fn reflect_states_follow_the_gate_cache_and_provider_presence() {
         .reflect_creator_soul::<MockSynth>(
             &principal,
             dto(serde_json::json!({ "creator_id": CREATOR, "force_regenerate": false })),
-            None,
+            || None::<MockSynth>,
         )
         .await
         .unwrap();
@@ -516,7 +516,7 @@ async fn reflect_states_follow_the_gate_cache_and_provider_presence() {
             &principal,
             chr.clone(),
             dto(serde_json::json!({ "force_regenerate": false })),
-            None,
+            || None::<MockSynth>,
         )
         .await
         .unwrap();
@@ -542,7 +542,7 @@ async fn reflect_states_follow_the_gate_cache_and_provider_presence() {
             &principal,
             chr.clone(),
             dto(serde_json::json!({ "force_regenerate": true })),
-            None,
+            || None::<MockSynth>,
         )
         .await
         .expect_err("forced reflect without a provider is a truthful error");
@@ -556,7 +556,7 @@ async fn reflect_states_follow_the_gate_cache_and_provider_presence() {
             &principal,
             chr.clone(),
             dto(serde_json::json!({ "force_regenerate": false })),
-            None,
+            || None::<MockSynth>,
         )
         .await
         .unwrap();
@@ -564,14 +564,14 @@ async fn reflect_states_follow_the_gate_cache_and_provider_presence() {
     assert!(still.narrative.is_none());
 
     // Authorization precedes provider resolution: a forced reflect on a
-    // foreign Character without any provider returns the retained 404, never
-    // the provider 503.
+    // foreign Character must return the retained 404 with the provider
+    // factory NEVER invoked — the panicking factory is the proof.
     let err = core
         .reflect_character_soul::<MockSynth>(
             &principal,
             "chr_0000000000000000000000000000ffff".to_string(),
             dto(serde_json::json!({ "force_regenerate": true })),
-            None,
+            || panic!("provider factory must not run before authorization"),
         )
         .await
         .expect_err("foreign character must 404 before provider handling");
@@ -583,7 +583,7 @@ async fn reflect_states_follow_the_gate_cache_and_provider_presence() {
             &principal,
             chr.clone(),
             dto(serde_json::json!({ "force_regenerate": true })),
-            Some(&MockSynth),
+            || Some(MockSynth),
         )
         .await
         .unwrap();
@@ -593,7 +593,7 @@ async fn reflect_states_follow_the_gate_cache_and_provider_presence() {
         .reflect_creator_soul(
             &principal,
             dto(serde_json::json!({ "creator_id": CREATOR, "force_regenerate": true })),
-            Some(&MockSynth),
+            || Some(MockSynth),
         )
         .await
         .unwrap();

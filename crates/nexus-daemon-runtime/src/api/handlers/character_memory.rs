@@ -191,14 +191,16 @@ pub async fn reflect_soul(
 ) -> Result<Json<CharacterSoulNarrativeResponse>, NexusApiError> {
     let req: CharacterSoulNarrativeRequest = parse_canonical_json(&body)?;
     let (core, principal) = resolve_core_principal(&state).await?;
-    // The provider effect is resolved only as an argument to the already
-    // core-authorized call: ownership/admission errors (404/403) always win
-    // over a missing registry, and the core's own retained 503
-    // ("capability registry not available") fires only after authorization
-    // succeeds. No provider state is touched before auth.
-    let synthesizer = state.capability_registry().map(AcpSoulNarrativeSynthesizer::new);
+    // The provider effect is a lazy factory evaluated by the core only after
+    // principal/resource admission (and only when synthesis is actually
+    // demanded): ownership/admission errors (404/403) always win over a
+    // missing registry, and no provider state is touched before auth. The
+    // core's retained 503 ("capability registry not available") fires only
+    // after authorization succeeds.
     let response = core
-        .reflect_character_soul(&principal, character_id, req, synthesizer.as_ref())
+        .reflect_character_soul(&principal, character_id, req, || {
+            state.capability_registry().map(AcpSoulNarrativeSynthesizer::new)
+        })
         .await?;
     Ok(Json(response))
 }

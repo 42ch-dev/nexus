@@ -108,11 +108,11 @@ fn map_soul_narrative_memory_error(err: MemoryError) -> CoreError {
 /// 4. read/poll path (force=false) returns current/stale/ungenerated without
 ///    calling the synthesizer;
 /// 5. force=true synthesizes (on-demand only), validates/caps, persists.
-pub(crate) async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer + ?Sized>(
+pub(crate) async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer>(
     pool: &SqlitePool,
     ctx: &MemoryPipelineCtx,
     force: bool,
-    synthesizer: Option<&S>,
+    synthesizer: impl FnOnce() -> Option<S>,
 ) -> CoreResult<ReflectOutcome> {
     // A forced reflect is a mutation request (persist a synthesized
     // narrative), so a read-only context is rejected up-front — before the
@@ -167,18 +167,22 @@ pub(crate) async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer + ?Sized>(
     }
 
     // 5. force=true → synthesize (explicit CTA, on-demand only). The write
-    //    gate was taken up-front (a read-only context never reaches here).
+    //    gate was taken up-front (a read-only context never reaches here) and
+    //    the provider factory is invoked only NOW — after the ownership /
+    //    activity admission and the insufficient-data gate — so an
+    //    unauthorized or under-gate request never touches provider state.
     //    A missing provider is the retained truthful 503 — no background
     //    synthesis and no empty success.
-    let synth = synthesizer.ok_or_else(|| {
-        CoreError::ServiceUnavailable("capability registry not available".to_string())
-    })?;
-
     let signals = bearer_recent_fragment_signals(pool, ctx).await?;
     let input = build_soul_narrative_synthesis_input(&signals, &fragment_stats);
 
     let top_keywords = input.top_keywords.clone();
 
+    let synth = synthesizer()
+        .as_ref()
+        .ok_or_else(|| {
+            CoreError::ServiceUnavailable("capability registry not available".to_string())
+        })?;
     let draft = synth
         .synthesize(ctx.bearer_ref(), input, ctx.scope())
         .await
@@ -893,7 +897,10 @@ impl CoreService {
     /// persists a synthesized narrative and holds the per-Character activity
     /// lease across every DB/file/provider effect. An explicitly requested
     /// synthesis consumes the optional provider effect supplied by the
-    /// execution host; a missing provider yields the retained truthful
+    /// execution host through a lazily evaluated factory — invoked only after
+    /// principal verification, stored-ownership admission and the
+    /// insufficient-data gate, so an unauthorized request never constructs or
+    /// probes a provider. A missing provider yields the retained truthful
     /// `ServiceUnavailable` error — never background synthesis.
     ///
     /// # Errors
@@ -903,12 +910,12 @@ impl CoreService {
     /// the activity fence on a forced reflect, the retained 503 when a forced
     /// reflect has no provider, and the mapped synthesis/storage errors
     /// otherwise.
-    pub async fn reflect_character_soul<S: SoulNarrativeSynthesizer + ?Sized>(
+    pub async fn reflect_character_soul<S: SoulNarrativeSynthesizer>(
         &self,
         principal: &Principal,
         character_id: String,
         request: CharacterSoulNarrativeRequest,
-        synthesizer: Option<&S>,
+        synthesizer: impl FnOnce() -> Option<S>,
     ) -> CoreResult<CharacterSoulNarrativeResponse> {
         self.verify_principal(principal)?;
         let binding_id = request.binding_id.as_ref().map(|id| id.as_str());
@@ -957,11 +964,11 @@ impl CoreService {
     /// # Errors
     /// As [`Self::reflect_character_soul`], plus [`CoreError::ForbiddenReason`]
     /// for a foreign world scope.
-    pub async fn reflect_creator_soul<S: SoulNarrativeSynthesizer + ?Sized>(
+    pub async fn reflect_creator_soul<S: SoulNarrativeSynthesizer>(
         &self,
         principal: &Principal,
         request: SoulNarrativeRequest,
-        synthesizer: Option<&S>,
+        synthesizer: impl FnOnce() -> Option<S>,
     ) -> CoreResult<SoulNarrativeResponse> {
         self.verify_principal(principal)?;
         let world_id = request.world_id.as_deref();

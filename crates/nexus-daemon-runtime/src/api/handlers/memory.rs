@@ -306,15 +306,16 @@ pub async fn reflect_soul(
     );
 
     // The world-ownership gate (retained `soul_narrative` 403) lives in the
-    // core reflect command; the provider effect is resolved only as an
-    // argument to the already core-authorized call, so a missing registry
-    // yields the core's retained 503 after authorization, never before it
-    // (no provider state is touched pre-auth).
-    let synthesizer = state.capability_registry().map(AcpSoulNarrativeSynthesizer::new);
-
+    // core reflect command; the provider effect is a lazy factory evaluated
+    // by the core only after authorization (and only when synthesis is
+    // actually demanded), so a missing registry yields the core's retained
+    // 503 after authorization, never before it (no provider state is touched
+    // pre-auth).
     let (core, principal) = resolve_core_principal(&state).await?;
     let response = core
-        .reflect_creator_soul(&principal, req, synthesizer.as_ref())
+        .reflect_creator_soul(&principal, req, || {
+            state.capability_registry().map(AcpSoulNarrativeSynthesizer::new)
+        })
         .await?;
     Ok(Json(response))
 }
