@@ -75,37 +75,20 @@ pub trait RunEventPort: Send + Sync {
     /// The ring's item/byte caps and the explicit-gap semantics are the
     /// owner's, so the read is a port operation rather than a core one: the
     /// execution layer asks for a page without naming the ring type. A
-    /// retention-trimmed cursor sets [`RunEventPage::resync_required`].
+    /// retention-trimmed cursor sets `resync_required` on the returned page.
     ///
     /// # Errors
-    /// Returns [`RunEventReadError::UnknownRun`] when no live or terminal
-    /// ring is retained for `run_id`.
+    /// Returns [`crate::execution::run_events::PageError::UnknownRun`] when no
+    /// live or terminal ring is retained for `run_id`.
     fn read_page(
         &self,
         run_id: &str,
         after_sequence: Option<u64>,
         limit: usize,
-    ) -> Result<RunEventPage, RunEventReadError>;
-}
-
-/// One bounded page of a run's retained frames (transport-neutral).
-#[derive(Debug, Clone)]
-pub struct RunEventPage {
-    /// `(event kind, payload)` pairs strictly after the requested cursor.
-    pub frames: Vec<(String, serde_json::Value)>,
-    /// Watermark to pass as the next `after_sequence`.
-    pub next_sequence: u64,
-    /// The run reached an authoritative terminal state.
-    pub terminal: bool,
-    /// The requested tail was retention-trimmed; the caller must resynchronize.
-    pub resync_required: bool,
-}
-
-/// Why a bounded run-event read could not be served.
-#[derive(Debug, Clone)]
-pub enum RunEventReadError {
-    /// No live or terminal ring is retained for the run.
-    UnknownRun(String),
+    ) -> Result<
+        crate::execution::run_events::RunPage,
+        crate::execution::run_events::PageError,
+    >;
 }
 
 /// Provider catalog used to validate agent-binding provider references

@@ -25,7 +25,8 @@ use nexus_contracts::{
 
 use crate::error::{CoreError, CoreResult};
 use crate::execution::lifecycle::ExecutionHandle;
-use crate::execution::workflow::{RunEventPort, RunEventReadError};
+use crate::execution::run_events::PageError;
+use crate::execution::workflow::RunEventPort;
 use crate::principal::Principal;
 
 /// First sequence for a cursorless read.
@@ -207,7 +208,7 @@ pub fn run_event_page(
     let page = port
         .read_page(request.run_id.as_str(), after, limit)
         .map_err(|err| match err {
-            RunEventReadError::UnknownRun(run_id) => CoreError::NotFound {
+            PageError::UnknownRun(run_id) => CoreError::NotFound {
                 resource: format!("run event ring {run_id}"),
             },
         })?;
@@ -215,11 +216,14 @@ pub fn run_event_page(
     let events = page
         .frames
         .into_iter()
-        .map(|(kind, payload)| CoreRunEventsResponseEventsItem {
-            sequence: 0,
-            kind: CoreRunEventsResponseEventsItemKind::try_from(kind)
+        .map(|frame| CoreRunEventsResponseEventsItem {
+            sequence: frame.sequence,
+            kind: CoreRunEventsResponseEventsItemKind::try_from(frame.kind)
                 .unwrap_or_else(|_| CoreRunEventsResponseEventsItemKind("event".to_string())),
-            payload: payload.as_object().cloned().unwrap_or_default(),
+            payload: serde_json::from_str::<serde_json::Value>(&frame.data)
+                .ok()
+                .and_then(|v| v.as_object().cloned())
+                .unwrap_or_default(),
         })
         .collect();
     Ok(CoreRunEventsResponse {
@@ -259,13 +263,6 @@ impl ExecutionHandle {
         })?;
         run_event_page(&port, request)
     }
-}
-
-/// The numeric sequence carried by a frame id (`<epoch>:<sequence>`).
-fn parse_frame_sequence(id: &str) -> u64 {
-    id.rsplit_once(':')
-        .and_then(|(_, seq)| seq.parse().ok())
-        .unwrap_or(0)
 }
 
 impl ExecutionHandle {

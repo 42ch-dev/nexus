@@ -147,11 +147,35 @@ struct QueuedFrame {
     wire_bytes: usize,
 }
 
+/// One retained frame with its parsed sequence.
+///
+/// The sequence is parsed once, here, so a consumer paging on it never
+/// re-derives it from the frame id.
+#[derive(Debug, Clone)]
+pub struct RunEventFrame {
+    /// Monotonic per-run sequence (the frame id's trailing segment).
+    pub sequence: u64,
+    /// Event kind discriminant (`run_state`, `host_event`, `gap`, …).
+    pub kind: String,
+    /// Encoded frame payload.
+    pub data: String,
+}
+
+impl RunEventFrame {
+    fn from_frame(frame: &SseFrame) -> Self {
+        Self {
+            sequence: parse_frame_sequence(frame),
+            kind: frame.event.clone(),
+            data: frame.data.clone(),
+        }
+    }
+}
+
 /// One bounded page of a run's retained frames.
 #[derive(Debug, Clone)]
 pub struct RunPage {
     /// Frames strictly after the requested cursor, capped by `limit`.
-    pub frames: Vec<SseFrame>,
+    pub frames: Vec<RunEventFrame>,
     /// Watermark to pass as the next `after_sequence`.
     pub next_sequence: u64,
     /// The run reached an authoritative terminal state.
@@ -521,13 +545,13 @@ impl RunEventRegistry {
         // retention-trimmed: the reader must resynchronize rather than
         // silently receive a non-contiguous page.
         let resync_required = after_sequence.is_some_and(|seq| seq + 1 < first_retained);
-        let mut frames = collect_from(ring, run_id, after_sequence);
-        frames.truncate(limit.max(1));
-        let next_sequence = frames
+        let mut raw = collect_from(ring, run_id, after_sequence);
+        raw.truncate(limit.max(1));
+        let next_sequence = raw
             .last()
-            .map_or_else(|| after_sequence.unwrap_or(0), |f| parse_frame_sequence(f));
+            .map_or_else(|| after_sequence.unwrap_or(0), parse_frame_sequence);
         Ok(RunPage {
-            frames,
+            frames: raw.iter().map(RunEventFrame::from_frame).collect(),
             next_sequence,
             terminal,
             resync_required,

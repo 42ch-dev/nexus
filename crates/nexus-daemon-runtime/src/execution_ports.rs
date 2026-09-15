@@ -9,9 +9,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use nexus_core::execution::workflow::{
-    ProviderCatalogPort, RunEventPage, RunEventReadError, RunEventPort,
-};
+use nexus_core::execution::workflow::{ProviderCatalogPort, RunEventPort};
 use nexus_orchestration::run_state::RunRecord;
 
 use nexus_core::execution::run_events::{RunEventRegistry, RunEventSinkMap};
@@ -62,31 +60,16 @@ impl RunEventPort for DaemonRunEventPort {
         run_id: &str,
         after_sequence: Option<u64>,
         limit: usize,
-    ) -> Result<RunEventPage, RunEventReadError> {
+    ) -> Result<
+        nexus_core::execution::run_events::RunPage,
+        nexus_core::execution::run_events::PageError,
+    > {
         // Forwards to the same bounded ring the SSE surface reads, so caps and
         // explicit-gap semantics stay identical across both readers.
-        let page = self
-            .registry
-            .read_page(run_id, after_sequence, limit)
-            .map_err(|err| match err {
-                nexus_core::execution::run_events::PageError::UnknownRun(run_id) => {
-                    RunEventReadError::UnknownRun(run_id)
-                }
-            })?;
-        Ok(RunEventPage {
-            frames: page
-                .frames
-                .into_iter()
-                .map(|frame| {
-                    let payload = serde_json::from_str(&frame.data)
-                        .unwrap_or(serde_json::Value::Null);
-                    (frame.event, payload)
-                })
-                .collect(),
-            next_sequence: page.next_sequence,
-            terminal: page.terminal,
-            resync_required: page.resync_required,
-        })
+        // The ring owns the page shape; the port forwards it verbatim so the
+        // item/byte caps, the parsed sequences and the explicit-gap frames
+        // cannot drift between the SSE reader and the typed reader.
+        self.registry.read_page(run_id, after_sequence, limit)
     }
 }
 
