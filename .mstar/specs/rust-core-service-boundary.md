@@ -1,6 +1,6 @@
 # Rust Core Service Boundary
 
-**Status:** Accepted target — V1.189, locked 2026-09-13 (not shipped). Activation is gated by exercised family migration. This document does **not** replace shipped Masters for current behavior until those gates fire.
+**Status:** Accepted target — locked 2026-09-13. The **M1 subset is exercised** (v1.189 PR #306, merge `71e01cf9`, 2026-09-15): World KB graph/patch through one Rust core, daemon-free basic-cli slice, thin napi ACP port, standalone TS M1 vertical, and Electron **development** GO. Remaining RFT-05–11 families are **not** fully migrated. This document does **not** replace shipped Masters for unmigrated families until those family gates fire.
 **Document class:** Master
 **Pillar (V1.122):** Cross-cutting — Harness, Canvas, and Computable consumption ends keep their product identities; this spec only locks the service-boundary target those pillars run on.
 **Coordinates with:** [local-runtime-boundary.md](local-runtime-boundary.md), [daemon-runtime.md](daemon-runtime.md), [cli-spec.md](cli-spec.md), [desktop-shell.md](desktop-shell.md), [web-ui.md](web-ui.md), [agent-host.md](agent-host.md), [concurrency.md](concurrency.md), [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md), [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md), [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md), [schemas-directory-layout.md](schemas-directory-layout.md)
@@ -9,14 +9,15 @@
 
 | Layer | Authority | Honest claim |
 | --- | --- | --- |
-| **Shipped current policy** | Shipped Masters above (`local-runtime-boundary`, `daemon-runtime`, `cli-spec`, `desktop-shell`, `agent-host`, `concurrency`) | Integrated `nexus42` daemon, Daemon API HTTP, Tauri sidecar shell, CLI `DaemonClient` for many leaves |
-| **Accepted target** | This document | Transport-neutral Rust authority, independent Rust CLI/runtime, TS service composition, proof-gated Electron |
+| **Shipped current policy** | Shipped Masters above (`local-runtime-boundary`, `daemon-runtime`, `cli-spec`, `desktop-shell`, `agent-host`, `concurrency`) | Unmigrated families still use the integrated `nexus42` daemon, Daemon API HTTP, Tauri sidecar shell, and CLI `DaemonClient` |
+| **Exercised M1 subset** | This document + merged v1.189 on `main` (`71e01cf9`) | World KB graph/patch, candidates read-only projection, napi/provider ACP vertical, standalone TS M1 routes, Cargo-free stable-interface DX, Electron development GO. Not full API/CLI cutover |
+| **Accepted target** | This document | Transport-neutral Rust authority for every retained family, independent Rust CLI/runtime, complete TS service composition, proof-gated Electron desktop |
 | **Wire DTOs** | `schemas/` → generated Rust + `@42ch/nexus-contracts` | Unchanged by this lock |
 | **Product names** | Root `AGENTS.md` | `Nexus`, `nexus42`, integrated daemon runtime, `nexus-runtime`, `@42ch` |
 
-**Activation rule:** a family uses the target topology only after the extracted Rust service is the single effect owner **and** the old mixed-handler path for that family has an explicit deletion owner and proof. Until then, shipped Masters remain the implementable SSOT. Do not describe current code as already migrated.
+**Activation rule:** a family uses the target topology only after the extracted Rust service is the single effect owner **and** the old mixed-handler path for that family has an explicit deletion owner and proof. The M1 World KB graph/patch + native ACP + TS M1 vertical families have fired that gate. Until other families fire it, shipped Masters remain the implementable SSOT for those families. Do not describe unmigrated code as already on the target, and do not describe the M1 subset as the complete program.
 
-Historical 2026-09-12 research (source baseline `3bb262b`) is advisory structure only. It is not runtime proof, a measurement, or this spec's authority. Current integrated baseline for planning is merged v1.188 on `main` at `bbaae32d422b673576d683859b474da6bd787743`.
+Historical 2026-09-12 research (source baseline `3bb262b`) is advisory structure only. It is not runtime proof, a measurement, or this spec's authority. Current integrated baseline for planning is merged v1.189 on `main` at `71e01cf9e1a8c64cb68062ac9a08762e2156a925` (PR #306). Inherited v1.188 reliability remains `bbaae32d422b673576d683859b474da6bd787743`.
 
 ## 1. Problem
 
@@ -36,8 +37,8 @@ These names and roles stay. The refactor does not invent a second CLI, a second 
 | Identity | Role that stays |
 | --- | --- |
 | **Nexus** | Product |
-| **`nexus42`** | User-facing CLI executable. Daemon remains an *internal process mode* of this binary until RFT-11 retires obsolete composition. |
-| **Daemon runtime** | Integrated into `nexus42` (`nexus42 daemon start` → `nexus-daemon-runtime`). No separate `nexus42d` product binary. |
+| **`nexus42`** | User-facing CLI executable. In M2, ordinary basic commands call Rust directly and public operator commands control the standalone TS service. An explicitly selected internal legacy mode may remain solely for the current desktop until RFT-11. |
+| **Daemon runtime** | Current integrated host for unmigrated families, not the M2 default service destination. Keep public `nexus42 daemon …` names; do not introduce a separate `nexus42d` product binary. |
 | **`nexus-runtime`** | Headless integrator executable. Connect-only profile. Must not boot a hidden full scheduler/Host/SPA. |
 | **`@42ch/nexus-contracts`** | Published TypeScript contracts package |
 | **`nexus-contracts` crate** | Monorepo-internal generated Rust types |
@@ -46,22 +47,22 @@ These names and roles stay. The refactor does not invent a second CLI, a second 
 
 | End | Surface | Target change |
 | --- | --- | --- |
-| Developers | `nexus42` CLI + local HTTP/API | Basic authoring/storage CLI calls Rust directly. Operator HTTP remains a TS composition over the same Rust authority. |
+| Developers | `nexus42` CLI + local HTTP/API | M1: graph/patch basic-cli slice is daemon-free. M2: remaining basic authoring/storage (including Works list/status/use) calls Rust directly with no Node/daemon; operator HTTP remains a TS composition over the same Rust authority and becomes the default service entry. |
 | Content creators | `apps/web` + desktop shell wrapping the same SPA | No visual redesign. Browser uses generated `NexusClient`. Desktop host may change only after an accepted P3 go. |
 | Third-party users | `nexus-runtime` + Connect | Keep the existing Connect-only served-op profile. No first-party player. |
 
-## 3. Currently shipped topology (not the target)
+## 3. Currently shipped topology (honest mix; not the complete target)
 
-Do not rewrite these as if they had already moved.
+Do not rewrite **unmigrated** families as if they had already moved. Do not hide the M1 subset that **has** moved.
 
-1. **`nexus42`** default graph embeds `apps/web` and starts `nexus_daemon_runtime::boot::run_daemon` (foreground or hidden `daemon-run`).
-2. **Daemon API** is loopback HTTP under `/v1/daemon/*`, with unguarded health/status/cert routes, API-key Tier-1, and API-key + active-Creator Tier-2.
-3. **Most creator workflow/control CLI leaves** call `DaemonClient`. Several world/KB/memory/SOUL/cron/chronology/directive paths still own local SQLite/filesystem directly.
-4. **World KB graph + entity patch** are daemon HTTP today: `GET /v1/daemon/worlds/{world_id}/kb/graph` and `POST /v1/daemon/worlds/{world_id}/kb/patch-entity` with `--expected-version` CAS. They are distinct from local-DB `creator world kb edit` (direct SQLite, no OCC).
-5. **`nexus-runtime`** parses `--listen` / `--allow-peer` / `--home`, starts Connect, and **never** calls `run_daemon`.
-6. **Desktop** is a shipped Tauri v2 shell (`apps/desktop`) wrapping `apps/web/dist` plus a target-suffixed `nexus42` sidecar. Support floor: macOS arm64 and x86_64. There is **no** Electron product lane in current source/CI.
+1. **`nexus42`** default graph still embeds `apps/web` and can start `nexus_daemon_runtime::boot::run_daemon` (foreground or hidden `daemon-run`). Ordinary default **development/runtime entry cutover** to standalone TS + daemon-free basic CLI is an M2 product decision (RFT-07/RFT-08), not M3.
+2. **Daemon API** remains loopback HTTP under `/v1/daemon/*` for unmigrated families, with unguarded health/status/cert routes, API-key Tier-1, and API-key + active-Creator Tier-2. The M1 World KB graph/patch/candidates-read and provider-session slice also exist on standalone `apps/nexus-service`. Completing M2 requires every retained family on that TS service with a real Rust owner — not a 501, sample, or old-daemon proxy.
+3. **Most creator workflow/control CLI leaves** still call `DaemonClient`. Several world/KB/memory/SOUL/cron/chronology/directive paths still own local SQLite/filesystem directly. The M1 **basic-cli** cohort already calls Rust for World KB graph/patch without Node/daemon. Remaining basic authoring/storage, including Works `list|status|use`, stays assigned to RFT-08.
+4. **World KB graph + entity patch** now have one Rust owner (`nexus-core`) with old HTTP translation **and** daemon-free CLI. They remain distinct from local-DB `creator world kb edit` (direct SQLite, no OCC). Candidate **promotion/merge/relationship writes**, packs, forks, rules, findings, and remaining World/Work families are **not** in the M1 subset.
+5. **`nexus-runtime`** parses `--listen` / `--allow-peer` / `--home`, starts Connect, and **never** calls `run_daemon`. M2 must drop `legacy-cli` coupling while staying Connect-only and Node-free. Do not fold full Host/scheduler/SPA into this binary.
+6. **Desktop** ships as Tauri v2 (`apps/desktop`) wrapping `apps/web/dist` plus a target-suffixed `nexus42` sidecar. Support floor: macOS arm64 and x86_64. Electron development GO exists from M1; it is **not** a shipped product lane. Formal desktop switch, production signing, and Tauri retirement are M3 (RFT-09–11).
 7. **Design Studio** is a daemon-free Vite gallery on port 5174. `pnpm run dev:web` / `dev:design-studio` already exist as direct entries.
-8. **Providers** live in `nexus-agent-host`: ACP (`streaming=true`, `cancellation=true`), Claude native (both true), Codex (turn interrupt), DSH (`streaming=true`, `cancellation=false`). ACP LocalSet is a dedicated OS-thread bridge with bounded Drop join; it is not a transparent restart fabric.
+8. **Providers:** Rust ACP/Claude/Codex/DSH remain. TS currently exposes the M1 ACP vertical; M2 must keep **all four** families available in the TS service through stable ports. DSH stays `cancellation:false` and is never the cancel proof. Independent Rust consumers must not require Node.
 
 `WorkspaceState` is the current daemon aggregate, not the target facade. `nexus-local-db` `runtime_lock` read-then-update without an expected-holder predicate is **not** the target cross-process writer protocol.
 
@@ -96,24 +97,51 @@ Rules:
 
 ### 4.1 Selected library/package boundaries
 
-- `crates/nexus-core`: owned `CoreService`, `CoreOpenOptions`, opaque stored-authorized `Principal`, neutral `CoreError`; `open`, `active_principal`, `world_kb_graph`, `patch_world_kb_entity`, `changes`, `close`. No daemon, Host, orchestration, Axum, napi or SQL pool/borrow in the public API.
+- `crates/nexus-core`: owned `CoreService`, `CoreOpenOptions`, opaque stored-authorized `Principal`, neutral `CoreError`. The M1 commands `open`, `active_principal`, `world_kb_graph`, `patch_world_kb_entity`, `changes`, `close` are **shipped**. M2 extends the same authority through family-named methods in private sibling modules. A narrow `CoreHomeService` handles pre-selection registration/configuration without holding a workspace pool. SQL pools/borrowed transactions/WorkspaceState and Host/SDK implementation types are not public service contracts. The current M1 `CoreService::pool` journal escape hatch must be removed through owned journal commands, with every native caller migrated; it is not a target extension seam.
 - `crates/nexus-provider-ports`: schema-derived `ProviderCall`, `ProviderReply`, `ProviderEventBatch` and Send+Sync async `call`/bounded pull `next`; no engine or SDK implementation.
 - `crates/nexus-core-node` + `packages/nexus-native`: environment-local thin ABI/facade; compose existing Host/ACP and core once. `packages/nexus-provider-acp` uses the actual stable-v1 ACP TypeScript SDK behind the Rust port.
 - `nexus-spoke-adapter` keeps one conversion/upsert seam; default-on `compute` owns WASM/module-cache capability. Core disables that feature rather than importing orchestration for helpers.
 - `crates/nexus-storage-guard` is the narrow audited SQLite FFI connection-function boundary; all business/domain crates retain unsafe-code prohibition.
 - Products stay in `apps`: standalone `apps/nexus-service`, existing `apps/nexus42`, current `apps/desktop`, and private non-published `apps/desktop-electron` feasibility host. The proof host is not a permanent second desktop.
-- Same `nexus42` binary/parser: `basic-cli` selected build uses `--no-default-features --features basic-cli`; `legacy-cli` preserves default unported features and Connect until RFT-08. A new helper CLI or a default feature loss is prohibited.
+- Same `nexus42` binary/parser: `basic-cli` selected build uses `--no-default-features --features basic-cli`; `legacy-cli` preserves default unported features and Connect until RFT-08 **completes the default cutover**. A new helper CLI, a second product name, or a default feature loss is prohibited.
+
+### 4.2 Selective authority graph
+
+These are target dependency cohorts, not claims that the current graph already satisfies them:
+
+| Cohort | Selected edges | Forbidden accidental edges |
+| --- | --- | --- |
+| Core domain/default | contracts, home-layout, guarded local-db, knowledge/narrative, Creator memory, MCA, pure preset; spoke-adapter with defaults disabled | daemon-runtime, orchestration engine, Host/ACP host, graph-flow, WASM, Axum, napi, Connect |
+| Core `execution` | optional existing orchestration, coordinator/scheduler/capability/workspace commit; injected ProviderPort | transport host, unconditional WASM |
+| Core `provider-host` | optional existing Host/ACP adapters and one admitted session registry | implicit scheduler/execution startup |
+| Core `compute` | explicit execution plus WASM/spoke compute, including optional orchestration compute edges | default/domain/Connect-host activation |
+| Peer-control operator | optional reverse-invoke/Connect-client/MCP adapters | activation by Connect-host product |
+| CLI `cloud-client` | existing explicit cloud HTTP/auth/sync clients, retained in the ordinary default; core separately reuses the existing guarded Outbox implementation for local operations | daemon/Host/engine/Node |
+| Ordinary CLI | `basic-cli,operator-client,cloud-client`; direct local commands plus lightweight HTTP/process-launch and existing cloud clients | default legacy-cli/web-embed or Node spawn for basic commands |
+| Connect-only runtime | core canonical invoke and selected spoke-connect/libp2p | legacy-cli, daemon, full Host/scheduler/WASM/SPA/Node |
+| TS native service | selected execution/provider-host/compute and peer-control authority through thin napi | old-daemon proxy/dependency, Electron |
+
+Disable spoke defaults throughout the domain closure, including MCA. Offline preset parsing/validation cannot import the current graph-flow-backed loader wholesale: extract the pure grammar, assets/source hash, expression and validation closure into a leaf `nexus-preset`; retain graph builders and AgentBinding construction in orchestration. Validators consume non-executable capability metadata shared with the existing registry, not a second executable catalog. Move the one serialized PresetSourceIdentity definition without changing durable bytes; migrate all imports and remove obsolete re-exports. Preserve the existing basic-CLI direct allowlist and prove normal/build dependency closure separately for basic-only, ordinary default and Connect-host.
+
+`CoreService::start_execution(Arc<dyn ProviderPort>)` returns an opaque ExecutionHandle only with EngineOwner. Domain open starts no scheduler or Host. CoreService remains bound to the selected Creator/workspace generation; switching selection invalidates the old Principal and requires reopen, never in-place pool retargeting. No generic string-method/JSON domain dispatcher substitutes for family-typed commands.
+
+### 4.3 Stored Actor and process-session separation
+
+Core admission validates stored ownership, World/binding/viewpoint and Character lifecycle_epoch, returning a non-deserializable Rust AdmittedActor. An owned context projection may cross napi but grants no authority. Separate Host-free activity/transition fences from the process Host session registry. Every Character DB/file/provider/terminal effect holds a shared activity lease; lifecycle/binding transitions require the corresponding exclusive lease and re-read stored state after acquisition. Extend the existing resource-lock discipline across processes with a stable per-Character OS lock; an in-process mutex alone cannot fence authorized direct CLI transitions against a live service. Busy is observable, no heartbeat takeover or long SQL transaction across SDK awaits.
+
+Host owns one session/operation/tombstone registry and consumes core admission/leases. No-op transitions do not retire sessions; stale epoch or removed binding denies before effects. Memory/SOUL/ToM remain bearer/revision/cache scoped; context assembly has one implementation for Host, CLI, API and capabilities. Workspace durable content commits retain the existing intent/digest/recovery protocol in optional execution, not an engine requirement for basic file authoring.
 
 ## 5. Host and lifetime matrix
 
-| Host | Product job | Lifetime | M1 obligation |
-| --- | --- | --- | --- |
-| Integrated `nexus42` daemon + Daemon API | Current shipped operator/HTTP host | Process owned by `daemon start` / sidecar | Remains the public operator surface until RFT-07/RFT-11 replacement. May translate M1's extracted family to the one Rust service. |
-| Standalone Node TS service | Independent daemon/API for browser and (later) desktop utility | Process owned by the service; no Electron import | RFT-04. Must load host config before runtimes, expose truthful readiness, and close with bounded teardown. |
-| `nexus-runtime` | Integrator Connect host | Connect node lifetime; Ctrl-C shutdown | Preserve Connect-only profile. Shared DB uses the same guarded writer/migration protocol and one workspace effect owner; WAL alone is insufficient and does not authorize a hidden Host/scheduler. |
-| Electron utility (preferred candidate) | App-managed TS-service + native host | Stops with the app | RFT-03 proof only. Not a sandbox, not task recovery, not an independent daemon. |
-| Independent service/daemon | Durable-after-app-exit attach target | Independent of the GUI | Stopping the app must not kill an unowned service. |
-| Tauri sidecar (shipped) | Current desktop packaging | Sidecar child of the Tauri app | Stay until RFT-09/RFT-11 after an accepted P3 decision. P3 no-go does not silently delete Tauri. |
+| Host | Product job | Lifetime | M1 (shipped) | M2 product obligation |
+| --- | --- | --- | --- | --- |
+| Integrated `nexus42` daemon + Daemon API | Current shipped operator/HTTP host for unmigrated families | Process owned by `daemon start` / sidecar | May translate M1's extracted family to the one Rust service | Public operator **commands keep their names and meanings** and explicitly launch/attach to the standalone TS service. Old daemon composition is a temporary adapter, not a second engine and not Done. Final crate/host deletion is M3/RFT-11 |
+| Standalone Node TS service | Independent daemon/API for browser and (later) desktop utility | Process owned by the service; no Electron import | RFT-04 M1 vertical shipped | Every retained M2 HTTP/middleware/stream family and generated client uses the real Rust owner. No old-daemon proxy, no 501 on a supported migrated family, no Electron import |
+| `nexus42` basic CLI | Local authoring/storage | Process owned by the CLI | Graph/patch slice shipped Node/daemon/engine-free | Remaining retained basic leaves, including Works `list\|status\|use`, call Rust with the same constraint. Default authoring entry is this cohort, not an experimental extra binary |
+| `nexus-runtime` | Integrator Connect host | Connect node lifetime; Ctrl-C shutdown | Connect-only preserved | Stay Node-free Connect-only; lose `legacy-cli` coupling; no hidden Host/scheduler/SPA |
+| Electron utility (preferred candidate) | App-managed TS-service + native host | Stops with the app | RFT-03 development GO | Not M2. Formal desktop switch is RFT-09 |
+| Independent service/daemon | Durable-after-app-exit attach target | Independent of the GUI | Stopping the app must not kill an unowned service | Unchanged |
+| Tauri sidecar (shipped) | Current desktop packaging | Sidecar child of the Tauri app | Unchanged | Stay until RFT-09/RFT-11 after the already-accepted development GO. M2 must not silently delete Tauri or invent a second desktop UI |
 
 ## 6. Provider matrix
 
@@ -123,17 +151,19 @@ Rules:
 | Independent Rust CLI/runtime | Only the ports those products actually use | **No** accidental Node requirement |
 | Cancel proof in M1 | Both actual Rust ACP through LocalSet and a real stable-v1 TS ACP SDK adapter behind the Rust port | Same deterministic no-model protocol peer; exactly one selected adapter/owner. DSH remains `cancellation:false` and is never the cancel proof. |
 
-Preserve verified v1.188 readiness, complete-message streaming, recoverable workspace commit, cancel/settlement/replay, and sealed denial. Public first-run / Quick Start / live request stay deferred (RFT-11 / retained P5). No paid or live model calls in M1 planning or Execute unless a later user authorization names them.
+Preserve verified v1.188 readiness, complete-message streaming, recoverable workspace commit, cancel/settlement/replay, and sealed denial. Public first-run / Quick Start / live request stay deferred (RFT-11 / retained P5). No paid or live model calls in M2 planning or Execute unless a later user authorization names them. M1 cancel proof already exercised both actual Rust ACP through LocalSet and a real stable-v1 TS ACP SDK adapter; M2 must not drop Claude/Codex/DSH from the TS service.
+
+Selected M2 composition reuses actual maintained adapters: TS ACP uses `packages/nexus-provider-acp`; Claude/Codex/DSH use their existing Rust SDK-backed providers through the native ProviderPortAdapter. Independent Rust ACP keeps LocalSet. No unresearched replacement TS SDKs are required. Replace the native-open all-JS-or-all-native choice with one admitted provider multiplexer: choose at launch, retain owning port per session/operation, never fallback/re-dispatch through another adapter after effect admission. DSH cancel stays a truthful unsupported capability, not a migration error or success. Provider journal read/write/orphan settlement belongs to core; native environment state has no SQL pool. After-effect journal failure must preserve retained terminal delivery and prohibit redispatch.
 
 ## 7. CLI and operator disposition
 
-**Product rule:** no supported command is removed because it currently talks to the daemon. Classification is destination, not deletion.
+**Product keep rule:** no supported command, HTTP family, or provider capability is removed because it currently talks to the daemon. Classification is **destination**, not deletion. A sample binding, an opt-in experimental entry, a proxy to the old daemon, or a fake-success fallback is not completion.
 
 ### 7.1 Independent Rust CLI (basic local authoring/storage)
 
-**Destination:** daemon-free, Node-free, full-engine-free product cohort completed in RFT-08. M1 delivers **one real slice**, not the whole basic CLI.
+**Destination:** daemon-free, Node-free, full-engine-free product cohort completed in **RFT-08 (M2)**. Ordinary default authoring/storage entry points switch in M2. M1 delivered **one real slice**, now shipped; it is not the whole basic CLI.
 
-**M1 first slice (RFT-01) — locked product choice, technical fit confirmed from canonical handler/store/spoke paths:**
+**M1 first slice (RFT-01) — delivered in v1.189:**
 
 | Operator action | Current public command | Current transport | Target |
 | --- | --- | --- | --- |
@@ -146,21 +176,15 @@ Patch preserves create-or-update: absent entity + expected_version 0 + valid tit
 
 The existing canvas unconditionally requests the read-only candidates list, so that existing projection/cursor/auth path is an ancillary M1 core/native/HTTP dependency. It must return real pending rows, not treat an unported error as an empty list. Candidate promotion/merge/relationship writes stay RFT-05. Existing canvas has no create-entity button: browser-context client creation followed by canvas observation proves the create branch without inventing UI.
 
-**Works reads stay assigned to the final basic CLI.** `creator works list|status|use` are currently Daemon API-owned. They are **not** the M1 slice and **must not** be reclassified as operator-only or dropped because they are daemon-mediated today. Destination: RFT-08 (with domain family work in RFT-05). M1 inventory must keep them as retained basic reads.
+**Works reads stay assigned to the complete basic CLI (RFT-08), with domain work in RFT-05.** `creator works list|status|use` are currently Daemon API-owned. They are **not** the M1 slice and **must not** be reclassified as operator-only or dropped because they are daemon-mediated today. M2 default-entry cutover does **not** move them to “wait for M3”.
 
 Do **not** claim that all basic commands already work as direct library calls. Static inventory: 252 feature-on clap terminal leaves (247 default features). Many authoring leaves still require the daemon. Local SQLite/filesystem owners that already exist stay local; they are not a new architecture gain.
 
 ### 7.2 Operator / service lifecycle
 
-These stay on the **current public surface** until an explicit public replacement in RFT-07 / RFT-11:
+Public command names and help/error meanings stay. **M2 (RFT-07/RFT-08) switches their destination** from the integrated daemon process to **explicit control of the standalone TS service** (`apps/nexus-service`): start/stop/restart/status/logs/doctor/ui (visible alias `web`), `nexus42 daemon schedule …`, Host/ACP session supervision, provider scan, `host-call`, and feature-gated `mcp serve`. Hidden `daemon-run` is not a user-facing default.
 
-- `nexus42 daemon start|stop|restart|status|logs|doctor|ui` (visible alias `web`)
-- `nexus42 daemon schedule …` (13 leaves)
-- hidden `daemon-run`
-- Host/ACP session supervision, provider scan, `host-call`
-- feature-gated `mcp serve`
-
-Moving them requires a named replacement product, not a silent CLI-only rewrite.
+Missing TS runtime is an **explicit error**, never a silent spawn of the old mixed daemon and never a successful no-op. M2 may keep a thin translation adapter that calls the same Rust authority; it must not keep a second writable engine. **RFT-11** owns deleting the obsolete daemon/SPA/Tauri composition after replacements exist. Do not park any retained M2 family in M3 by calling it “operator leftover”.
 
 ### 7.3 Headless / Connect
 
@@ -179,20 +203,22 @@ Removal only at RFT-11 with help/docs/parity proof. Never a quiet cleanup.
 
 ### 7.5 Family destinations (program keys, not extra iterations)
 
-| Destination | What moves there |
-| --- | --- |
-| RFT-00 | Inventory, decision/proof matrix, Cargo-free stable-backend UI loops |
-| RFT-01 | Neutral Rust service + M1 World KB graph/patch slice + concurrent writer protocol |
-| RFT-02 | napi adapter, provider ports, ACP LocalSet lifecycle |
-| RFT-03 | Native npm + packaged Electron feasibility go/no-go |
-| RFT-04 | Standalone TS service + browser vertical of the M1 slice |
-| RFT-05 | Remaining World/Work/KB/narrative/fork families, including Works reads/writes beyond the M1 slice |
-| RFT-06 | Actor/Character/admission/memory/context |
-| RFT-07 | Execution/scheduler/Host/providers/capabilities/MCP/Connect control plane |
-| RFT-08 | Complete independent Rust CLI + headless product cutover |
-| RFT-09 | Desktop cutover (only after P3 go, or after an explicit alternative decision) |
-| RFT-10 | Production distribution |
-| RFT-11 | Obsolete-host retirement **and** retained v1.188 P5 public first-run / Quick Start / live request |
+RFT-00–04 shipped together as milestone **RFT-M1** (v1.189). RFT-05–08 are one milestone **RFT-M2** (v1.190), including default product-entry cutover. RFT-09–11 are **RFT-M3**. Do not split M2 into extra milestone iterations, and do not hide any retained M2 family in M3.
+
+| Destination | What moves there | Milestone status |
+| --- | --- | --- |
+| RFT-00 | Inventory, decision/proof matrix, Cargo-free stable-backend UI loops | Shipped (v1.189) |
+| RFT-01 | Neutral Rust service + M1 World KB graph/patch slice + concurrent writer protocol | Shipped (v1.189) |
+| RFT-02 | napi adapter, provider ports, ACP LocalSet lifecycle | Shipped (v1.189) |
+| RFT-03 | Native npm + packaged Electron **development** feasibility go/no-go | Shipped development GO (v1.189). Production signing is RFT-10 |
+| RFT-04 | Standalone TS service + browser vertical of the M1 slice | Shipped (v1.189). Complete TS API is RFT-07 |
+| RFT-05 | Remaining World/Work/KB/narrative/fork families, including Works reads/writes beyond the M1 slice | M2 / not started |
+| RFT-06 | Actor/Character/admission/memory/context | M2 / not started |
+| RFT-07 | Execution/scheduler/Host/providers/capabilities/MCP/Connect control plane **and** complete TS API/default service entry | M2 / not started |
+| RFT-08 | Complete independent Rust CLI + headless product cutover (default authoring entry; operator commands control TS; Connect-only runtime) | M2 / not started |
+| RFT-09 | Formal desktop cutover (Electron preferred after the M1 development GO; reuse web/Studio; no visual redesign) | M3 |
+| RFT-10 | Production distribution / Developer ID signing / notarization / stapling | M3 |
+| RFT-11 | Obsolete-host retirement **and** retained v1.188 P5 public first-run / Quick Start / live request | M3 |
 
 ## 8. Concurrent writes (user-locked)
 
@@ -208,6 +234,14 @@ While a TS service **or** the current integrated host is active, **authorized di
 8. Same-transaction row revisions and bounded durable change records make cross-process updates visible. Reads use a fresh consistent snapshot; consumers checkpoint/poll and explicitly gap/resync when history is evicted. Before an engine effect, durable version/epoch is checked; polling is not a correctness fence.
 
 Exclusive-owner refusal (reject all CLI writes while a service holds the workspace) is **not** the selected UX.
+
+### 8.1 Independent service launch and attach
+
+Schema-owned discovery/stop contracts precede both CLI launcher and TS host implementations; neither consumer requires the other's implementation to define the protocol. Discovery is a closed version 1 record containing random instance ID, diagnostic PID, canonical raw user home, nullable selected Creator/workspace/engine epoch for an explicitly uninitialized shell, tagged HTTP URL or Unix-socket endpoint, nullable TLS fingerprint, readiness and protocol version. No secrets are published.
+
+Publish `<user_home>/.nexus42/run/service.json` atomically under a stable service-start lock, with current-user-only permissions and no symlink traversal. Publication and the `NEXUS_SERVICE_READY <json>` stdout line happen only after bind/open/recovery/provider readiness, or an explicitly uninitialized shell. CLI startup has a 15s deadline; it may terminate only the child it owns on failure. Foreground mode owns/signals the child; detached start confirms readiness before release. Basic commands never launch Node. Only explicit start/restart launches the installed/built TS entry; status and ordinary operator calls attach or report a concrete missing-runtime/service error. No auto-install/build or old-daemon fallback.
+
+Authenticated status must match instance/home/endpoint before attach. Stop requires the expected instance ID and engine epoch; mismatches conflict without stopping. PID alone grants no ownership. A service removes discovery only if it still owns that instance record; unconfirmed close retains resources and diagnostic state. Preserve current port/home/logs/cert/TLS, Unix transport, remote-bind and opt-in peer-control behavior. Ordinary service/development startup switches to the TS host in M2; stable-interface TS/UI edits do not invoke Cargo. The explicit current-desktop legacy mode is not that default.
 
 ## 9. Native embedding and interruption (user-locked)
 
@@ -226,7 +260,7 @@ Current LocalSet Drop join (~5s then detach) is implementation evidence, not a s
 - Preserve schema/storage compatibility. No destructive reset, wipe, or dual-generation rollback in M1.
 - Future rollback **stops the current owner first**, then selects a known-compatible whole release with validated backup/restore.
 - If any required step needs data loss, **stop and escalate** — this spec does not authorize it.
-- Each migrated family owns deletion of its old mixed-handler path. RFT-11 owns obsolete daemon/SPA/Tauri composition **after** accepted replacements. P5 first-run remains RFT-11.
+- Each migrated family owns deletion of its old mixed-handler path. RFT-11 owns obsolete daemon/SPA/Tauri composition **after** accepted replacements. P5 first-run remains RFT-11. A thin current-desktop adapter may call migrated services in M2/M3 without a duplicate business engine; that adapter is not permission to defer M2 families.
 
 ## 11. Platforms and support (product cohorts)
 
@@ -251,7 +285,7 @@ Electron is the **preferred** future desktop host **subject to a real package / 
 
 - Reuse `apps/web`, Design Studio, and `packages/nexus-ui`. No visual redesign and no second desktop UI.
 - P3 is feasibility, not production distribution (RFT-10) and not Tauri retirement (RFT-11).
-- **No-go does not complete M1.** It blocks RFT-M2 consumers that assumed Electron until an explicit alternative (for example Tauri + packaged Node, or typed IPC) is accepted. Product does not silently pick the alternative.
+- **No-go does not complete M1.** M1 recorded a **development GO**. That GO is not a shipped desktop migration, not production signing, and not permission to drop Tauri in M2. RFT-09 is the formal product switch; RFT-10 is production distribution; RFT-11 retires the obsolete host. Product does not silently pick an alternative desktop.
 - Current Tauri sidecar/IPC/path-guard behavior stays until that later decision.
 
 ## 13. Frontend DX (hard product goal)
@@ -269,6 +303,8 @@ This is early loop restoration, not a rewrite of Tauri/desktop packaging:
 Do not credit already Cargo-free warm HMR as a new architecture gain. Cold and warm feedback are measured separately **after** a locked protocol; no historical speedup percentage is a product target.
 
 ## 14. M1 agreed flow, failures, and close
+
+This vertical **shipped in v1.189**. Keep it as the behavior-preservation baseline. M2 extends the same flow to remaining families; it does not replace this slice with a demo or an experimental second entry.
 
 One agreed vertical (not a demo stub):
 
@@ -302,19 +338,23 @@ Measurement protocol: same candidate hardware and seeded real DB (500 entities,1
 
 ## 16. Non-goals (this target document)
 
-- Claiming current daemon/Tauri/CLI HTTP clients are already the target architecture
-- Full public API migration (RFT-M2) or production Electron release (RFT-M3)
+- Claiming unmigrated daemon/Tauri/CLI HTTP clients are already the target architecture
+- Claiming the exercised M1 subset is complete RFT-M2 or a production Electron release (RFT-M3)
+- Parking any retained RFT-05–08 family in M3
 - UI redesign, new provider capabilities, second engine, permanent old-server fallback
 - Removing Works reads or any supported leaf by classification
 - Uninterrupted native continuation across TS restart
 - New ARM Linux / musl / Windows ARM / Windows-or-Linux GUI support
 - Paid/live model requests; P5 public first-run
 - Destructive data reset
+- Browser/device/installed-deployment E2E as a development acceptance gate
 
 ## 17. Conflict with shipped Masters
 
 Until a family migration is exercised:
 
 1. Implement current behavior against the shipped Master for that domain.
-2. Use this document for destination, host/lifetime, CLI disposition, and M1 vertical identity.
+2. Use this document for destination, host/lifetime, CLI disposition, the delivered M1 vertical identity, and M2/M3 keep/cutover rules.
 3. When a family lands on the target, fold the shipped Master section or record the deletion gate in the family plan. Do not leave two contradictory implementable topologies for the same family.
+
+The M1 World KB graph/patch, napi ACP, and TS M1 vertical families have landed. Remaining families still follow this conflict rule until their gates fire.
