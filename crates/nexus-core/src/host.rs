@@ -678,8 +678,17 @@ impl HostHandle {
                 if let Ok(uuid) = Uuid::parse_str(raw) {
                     let op_id = HostOperationId(uuid);
                     let native = self.sorted_sessions().await?;
-                    if let Some(session) =
-                        native.iter().find(|s| s.state.active_op_id() == Some(&op_id))
+                    if let Some(session) = native
+                        .iter()
+                        .find(|s| {
+                            s.state.active_op_id() == Some(&op_id)
+                                && self
+                                    .registry
+                                    .stored_session_owner(&s.id)
+                                    .map_or(true, |(owner, _, _)| {
+                                        owner == principal.creator_id()
+                                    })
+                        })
                     {
                         return Ok(CoreHostQueryResponse {
                             operation: Some(NexusAgentHostOperationResponse {

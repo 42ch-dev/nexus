@@ -341,6 +341,16 @@ async fn host_authority_admits_only_verified_principals() {
             .await
             .unwrap_err(),
     );
+    // A foreign principal querying an operation owned by the open's creator
+    // is denied, never leaked through the live Host branch.
+    denials.push(
+        handle
+            .query(&foreign_principal, serde_json::from_value(
+                serde_json::json!({ "query": "get_operation", "operation_id": Uuid::new_v4().to_string() }),
+            ).unwrap())
+            .await
+            .unwrap_err(),
+    );
     for err in denials {
         assert!(
             matches!(err, CoreError::AuthRequired),
