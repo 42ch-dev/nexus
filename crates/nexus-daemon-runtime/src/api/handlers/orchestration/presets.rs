@@ -6,6 +6,7 @@ use axum::{extract::Path, extract::State, http::StatusCode, Json};
 use nexus_contracts::{OrchestrationPresetListResponse, PresetProfileResponse};
 use nexus_contracts::local::orchestration::http::ReloadPresetResponse;
 
+
 /// `GET /v1/daemon/orchestration/presets`
 ///
 /// Returns all available embedded preset IDs plus system presets discovered
@@ -96,6 +97,7 @@ pub async fn get_preset_profile(
     let response = core.get_preset_profile(&principal, preset_id).await?;
     Ok(Json(response))
 }
+
 
 
 // ---------------------------------------------------------------------------

@@ -154,6 +154,20 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             details: serde_json::Map::from_iter([("resource".into(), Value::String(resource))]),
             http_status: Some(403),
         },
+        // World-owner scoping denial: mirrors the daemon adapter's
+        // `Forbidden { resource: "world {world_id}", reason }` (403).
+        DomainError::WorldOwnerDenied { world_id, reason } => CoreError {
+            code: CoreErrorCode::Forbidden,
+            message: format!("forbidden: world {world_id} — {reason}"),
+            details: serde_json::Map::from_iter([
+                (
+                    "resource".into(),
+                    Value::String(format!("world {world_id}")),
+                ),
+                ("reason".into(), Value::String(reason)),
+            ]),
+            http_status: Some(403),
+        },
         DomainError::NotFound { resource } => CoreError {
             code: CoreErrorCode::NotFound,
             message: format!("not found: {resource}"),
@@ -168,6 +182,44 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
                 ("reason".into(), Value::String(reason)),
             ]),
             http_status: Some(400),
+        },
+        // Outline-canvas OCC conflict: the daemon adapter forwards
+        // current_revision/node_id/conflicting_path/recovery_hint as the 409
+        // payload; the structs carry no Serialize, so the fields are mapped
+        // one by one (same as the daemon's field-wise mapping). The generated
+        // code vocabulary has no outline_conflict arm yet, so the generic
+        // client-fault code carries the envelope.
+        DomainError::OutlineConflict(details) => CoreError {
+            code: CoreErrorCode::InvalidInput,
+            message: "outline conflict".into(),
+            details: serde_json::Map::from_iter([
+                (
+                    "current_revision".into(),
+                    Value::Number(serde_json::Number::from(details.current_revision)),
+                ),
+                ("node_id".into(), Value::String(details.node_id)),
+                (
+                    "conflicting_path".into(),
+                    Value::String(details.conflicting_path),
+                ),
+                ("recovery_hint".into(), Value::String(details.recovery_hint)),
+            ]),
+            http_status: Some(409),
+        },
+        // Outline-canvas validation failure: the summary lands under
+        // `validation_summary` with the daemon's 422 (same vocabulary gap;
+        // OutlineValidationError also maps field-wise).
+        DomainError::OutlineValidation(summary) => CoreError {
+            code: CoreErrorCode::InvalidInput,
+            message: "outline validation failed".into(),
+            details: serde_json::Map::from_iter([(
+                "validation_summary".into(),
+                serde_json::json!({
+                    "errors": summary.errors,
+                    "warnings": summary.warnings,
+                }),
+            )]),
+            http_status: Some(422),
         },
         DomainError::WorldKbConflict(details) => {
             let detail_value = serde_json::to_value(&details).unwrap_or(Value::Null);

@@ -9,9 +9,10 @@
 //! projection/carrier work only; no SQL, no second engine, no policy.
 
 use napi::bindgen_prelude::*;
+use napi_derive::napi;
 use nexus_contracts::{
     AddKbEntryRequest, AddKbEntryResponse, AppendInspirationRequest, AppendInspirationResponse,
-    ArchivePoolRequest as WirePoolArchiveRequest, BatchUpdateFindingsRequest,
+    WorkPoolArchiveRequest as WirePoolArchiveRequest, BatchUpdateFindingsRequest,
     BatchUpdateFindingsResponse, ChapterBody, ChapterDetail, ChapterOutline,
     CoreChapterContentQuery as WireChapterContentQuery, CoreTimelineEventsQuery as WireTimelineEventsQuery,
     CoreTimelineOverviewQuery as WireTimelineOverviewQuery, CoreWorkSelection,
@@ -51,6 +52,22 @@ const HTTP_HOLDER: &str = "http";
 fn decode<T: serde::de::DeserializeOwned>(payload: Buffer, label: &str) -> Result<T> {
     serde_json::from_slice(payload.as_ref())
         .map_err(|error| Error::from_reason(format!("invalid {label}: {error}")))
+}
+
+/// Optional bounded query parameter. Overflow/out-of-range is a client error
+/// (400 `invalid_input` via the "invalid …" rejection convention), never a
+/// silently-absent filter.
+fn query_u32_bounded<T>(value: Option<T>, field: &str) -> Result<Option<u32>>
+where
+    T: Copy + TryInto<u32>,
+    T::Error: std::fmt::Display,
+{
+    value
+        .map(|v| {
+            v.try_into()
+                .map_err(|e| Error::from_reason(format!("invalid {field}: {e}")))
+        })
+        .transpose()
 }
 
 fn json_kind(value: &serde_json::Value) -> &'static str {
@@ -447,7 +464,7 @@ impl NativeCore {
                 .await?;
             let response: AppendInspirationResponse = AppendInspirationResponse {
                 work_id: result.work_id,
-                inspiration_count: u64::try_from(result.inspiration_count).unwrap_or(u64::MAX),
+                inspiration_count: result.inspiration_count.max(0),
             };
             Ok(response)
         })
@@ -528,13 +545,21 @@ impl NativeCore {
         let query: WorkPoolListQuery = decode(query_json, "query")?;
         let domain = ListPoolQuery {
             status: query.status,
-            limit: query.limit.and_then(|limit| u32::try_from(limit).ok()),
-            offset: query.offset.and_then(|offset| u32::try_from(offset).ok()),
+            limit: query_u32_bounded(query.limit, "limit")?,
+            offset: query_u32_bounded(query.offset, "offset")?,
         };
         self.json_call(principal_handle, async move |core, principal| {
             let page = core.list_work_pool(&principal, domain).await?;
-            let entries: Vec<WorkPoolEntry> =
-                page.entries.into_iter().map(pool_entry_wire).collect();
+            let entries: Vec<nexus_contracts::generated::core::works::work_pool_list_response::WorkPoolEntry> =
+                page.entries.into_iter().map(|e| nexus_contracts::generated::core::works::work_pool_list_response::WorkPoolEntry {
+                    entry_id: e.entry_id,
+                    work_id: e.work_id,
+                    status: e.status,
+                    title: e.title,
+                    promoted_at: e.promoted_at,
+                    note: e.note,
+                })
+                .collect();
             let wire: WorkPoolListResponse = WorkPoolListResponse {
                 entries,
                 total: u64::from(page.total),
@@ -556,7 +581,7 @@ impl NativeCore {
         let request: WorkPoolSetActiveRequest = decode(request_json, "request")?;
         let domain = SetPoolActiveRequest {
             action: request.action,
-            work_id: request.work_id,
+            work_id: request.work_id.to_string(),
             creator_id: request.creator_id,
         };
         self.json_call(principal_handle, async move |core, principal| {
@@ -575,7 +600,7 @@ impl NativeCore {
     ) -> Result<Buffer> {
         let request: WorkPoolPromoteRequest = decode(request_json, "request")?;
         let domain = PromotePoolRequest {
-            work_id: request.work_id,
+            work_id: request.work_id.to_string(),
             set_default: request.set_default,
         };
         self.json_call(principal_handle, async move |core, principal| {
@@ -594,7 +619,7 @@ impl NativeCore {
     ) -> Result<Buffer> {
         let request: WirePoolArchiveRequest = decode(request_json, "request")?;
         let domain = ArchivePoolRequest {
-            entry_id: request.entry_id,
+            entry_id: request.entry_id.to_string(),
         };
         self.json_call(principal_handle, async move |core, principal| {
             let entry = core.archive_work_pool_entry(&principal, domain).await?;
@@ -612,7 +637,7 @@ impl NativeCore {
     ) -> Result<Buffer> {
         let request: WorkInspirationAddRequest = decode(request_json, "request")?;
         let domain = AddInspirationRequest {
-            title: request.title,
+            title: request.title.to_string(),
         };
         self.json_call(principal_handle, async move |core, principal| {
             let added = core.add_work_inspiration(&principal, domain).await?;
@@ -635,15 +660,15 @@ impl NativeCore {
         let query: WorkInspirationListQuery = decode(query_json, "query")?;
         let domain = ListInspirationQuery {
             status: query.status,
-            limit: query.limit.and_then(|limit| u32::try_from(limit).ok()),
-            offset: query.offset.and_then(|offset| u32::try_from(offset).ok()),
+            limit: query_u32_bounded(query.limit, "limit")?,
+            offset: query_u32_bounded(query.offset, "offset")?,
         };
         self.json_call(principal_handle, async move |core, principal| {
             let page = core.list_work_inspiration(&principal, domain).await?;
-            let items: Vec<WorkInspirationItem> = page
+            let items: Vec<nexus_contracts::generated::core::works::work_inspiration_list_response::WorkInspirationItem> = page
                 .items
                 .into_iter()
-                .map(|item| WorkInspirationItem {
+                .map(|item| nexus_contracts::generated::core::works::work_inspiration_list_response::WorkInspirationItem {
                     item_id: item.item_id,
                     rel_path: item.rel_path,
                     title: item.title,
@@ -674,7 +699,7 @@ impl NativeCore {
     ) -> Result<Buffer> {
         let request: WorkInspirationPromoteRequest = decode(request_json, "request")?;
         let domain = PromoteInspirationRequest {
-            item_id: request.item_id,
+            item_id: request.item_id.to_string(),
             idea: request.idea,
             set_default: request.set_default,
         };
@@ -698,7 +723,7 @@ impl NativeCore {
     ) -> Result<Buffer> {
         let request: WorkInspirationArchiveRequest = decode(request_json, "request")?;
         let domain = ArchiveInspirationRequest {
-            item_id: request.item_id,
+            item_id: request.item_id.to_string(),
         };
         self.json_call(principal_handle, async move |core, principal| {
             let item = core.archive_work_inspiration(&principal, domain).await?;
@@ -1002,7 +1027,7 @@ impl NativeCore {
             chapter: query.chapter,
             status: query.status,
             severity: query.severity,
-            limit: query.limit.and_then(|limit| u32::try_from(limit).ok()),
+            limit: query_u32_bounded(query.limit, "limit")?,
             cursor: query.cursor,
         };
         self.json_call(principal_handle, async move |core, principal| {
@@ -1112,11 +1137,25 @@ impl NativeCore {
     ) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
             let report = core.list_stale_findings(&principal, threshold_seconds).await?;
+            // StaleFindingEntry carries no Serialize: map field-wise.
+            let findings: Vec<serde_json::Value> = report
+                .findings
+                .iter()
+                .map(|f| {
+                    serde_json::json!({
+                        "finding_id": f.finding_id,
+                        "work_id": f.work_id,
+                        "severity": f.severity,
+                        "created_at": f.created_at,
+                        "age_seconds": f.age_seconds,
+                    })
+                })
+                .collect();
             Ok(serde_json::json!({
                 "stale_count": report.stale_count,
                 "threshold_seconds": report.threshold_seconds,
                 "now_epoch": report.now_epoch,
-                "findings": report.findings,
+                "findings": findings,
             }))
         })
         .await

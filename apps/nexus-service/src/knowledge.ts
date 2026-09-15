@@ -16,12 +16,12 @@ import type {
   FindingDetailResponse,
   FindingsPruneResponse,
   GetKbEntryResponse,
-  GetReferenceResponse,
+  ReferenceGetResponse,
   ListFindingsQuery,
   ListFindingsResponse,
   ListKbEntriesQuery,
   ListKbEntriesResponse,
-  ListReferencesResponse,
+  ReferenceListResponse,
   ReadingAnnotation,
   ReadingAnnotationCreateRequest,
   ReadingAnnotationListQuery,
@@ -298,7 +298,7 @@ export async function deleteAnnotation(
 // ── Reference registry ─────────────────────────────────────────────────────
 
 /** `GET /v1/daemon/references`. */
-export function listReferences(service: ServiceCore): Promise<ListReferencesResponse> {
+export function listReferences(service: ServiceCore): Promise<ReferenceListResponse> {
   return withPrincipal(service, (principal) => service.core.listReferences(principal));
 }
 
@@ -306,7 +306,7 @@ export function listReferences(service: ServiceCore): Promise<ListReferencesResp
 export function getReference(
   service: ServiceCore,
   referenceId: string,
-): Promise<GetReferenceResponse> {
+): Promise<ReferenceGetResponse> {
   return withPrincipal(service, (principal) =>
     service.core.getReference(principal, referenceId),
   );

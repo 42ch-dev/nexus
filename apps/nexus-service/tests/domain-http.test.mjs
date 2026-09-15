@@ -122,7 +122,7 @@ describe('domain-http (P5-T1)', () => {
       ['POST', '/v1/daemon/works/([^/]+)/inspiration'],
       ['POST', '/v1/daemon/works/([^/]+)/completion-lock/release'],
       ['POST', '/v1/daemon/works/([^/]+)/reconcile-chapters'],
-      ['GET', '/v1/daemon/works/([^/]+)/chapters/'],
+      ['GET', '/v1/daemon/works/([^/]+)/chapters'],
       ['GET', '/v1/daemon/works/([^/]+)/chapters/([^/]+)'],
       ['PATCH', '/v1/daemon/works/([^/]+)/chapters/([^/]+)'],
       ['GET', '/v1/daemon/works/([^/]+)/chapters/([^/]+)/outline'],
@@ -181,7 +181,9 @@ describe('domain-http (P5-T1)', () => {
     // echo: it returns the active pool entry and survives a full close.
     const selected = await jsonFetch(`${baseUrl}/v1/daemon/works/pool`, {
       method: 'POST',
-      body: { action: 'set', work_id: workId },
+      // The P1-T1 authority (works.rs set_pool_active) accepts exactly this
+      // action token; anything else is an invalid_action 400.
+      body: { action: 'set_pool_active', work_id: workId },
     });
     assert.equal(selected.status, 200, selected.text);
     assert.equal(selected.payload.work_id, workId);

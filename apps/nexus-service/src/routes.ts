@@ -1,8 +1,6 @@
 import type { ServerResponse } from 'node:http';
 import type {
   WorldKbPatchEntityRequest,
-  WorldKbPatchRelationshipRequest,
-  WorldKbPromoteCandidateRequest,
 } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
 import { HttpError, mapNativeError, routeNotMigrated } from './errors.js';
@@ -23,14 +21,11 @@ import {
   getCoreChanges,
   getWorldKbCandidates,
   getWorldKbGraph,
-  getWorldKbKeyBlockState,
   hostQuery,
   parseBoundedLimit,
   parseClampedLimit,
   parseIncludeSuggested,
   patchWorldKbEntity,
-  patchWorldKbRelationship,
-  promoteWorldKbCandidate,
 } from './world-kb.js';
 
 /**
@@ -87,9 +82,6 @@ export interface RouteMatch {
 }
 
 const WORLD_KB_GRAPH = /^\/v1\/daemon\/worlds\/([^/]+)\/kb\/graph$/;
-const WORLD_KB_PROMOTE = /^\/v1\/daemon\/worlds\/([^/]+)\/kb\/promote-candidate$/;
-const WORLD_KB_RELATIONSHIP = /^\/v1\/daemon\/worlds\/([^/]+)\/kb\/patch-relationship$/;
-const WORLD_KB_KEY_BLOCK_STATE = /^\/v1\/daemon\/worlds\/([^/]+)\/kb\/key-blocks\/([^/]+)\/state$/;
 const WORLD_KB_PATCH = /^\/v1\/daemon\/worlds\/([^/]+)\/kb\/patch-entity$/;
 const WORLD_KB_CANDIDATES = /^\/v1\/daemon\/worlds\/([^/]+)\/kb\/candidates$/;
 const CORE_CHANGES = /^\/v1\/daemon\/core\/changes$/;
@@ -137,18 +129,6 @@ export function matchRoute(method: string, pathname: string): RouteMatch | null 
   const graph = pathname.match(WORLD_KB_GRAPH);
   if (method === 'GET' && graph) {
     return { tier: 'tier2', worldId: graph[1] };
-  }
-  const promote = pathname.match(WORLD_KB_PROMOTE);
-  if (method === 'POST' && promote) {
-    return { tier: 'tier2', worldId: promote[1] };
-  }
-  const relationship = pathname.match(WORLD_KB_RELATIONSHIP);
-  if (method === 'POST' && relationship) {
-    return { tier: 'tier2', worldId: relationship[1] };
-  }
-  const keyBlockState = pathname.match(WORLD_KB_KEY_BLOCK_STATE);
-  if (method === 'GET' && keyBlockState) {
-    return { tier: 'tier2', worldId: keyBlockState[1] };
   }
   const patch = pathname.match(WORLD_KB_PATCH);
   if (method === 'POST' && patch) {
@@ -361,24 +341,6 @@ async function handleTier2(
   }
   if (method === 'POST' && route.worldId && pathname.endsWith('/kb/patch-entity')) {
     return patchWorldKbEntity(service, route.worldId, body as WorldKbPatchEntityRequest);
-  }
-  if (method === 'POST' && route.worldId && pathname.endsWith('/kb/promote-candidate')) {
-    return promoteWorldKbCandidate(
-      service,
-      route.worldId,
-      body as WorldKbPromoteCandidateRequest,
-    );
-  }
-  if (method === 'POST' && route.worldId && pathname.endsWith('/kb/patch-relationship')) {
-    return patchWorldKbRelationship(
-      service,
-      route.worldId,
-      body as WorldKbPatchRelationshipRequest,
-    );
-  }
-  if (method === 'GET' && route.worldId && pathname.includes('/kb/key-blocks/')) {
-    const keyBlockState = pathname.match(WORLD_KB_KEY_BLOCK_STATE);
-    return getWorldKbKeyBlockState(service, route.worldId, keyBlockState[2]);
   }
   if (method === 'GET' && route.worldId && pathname.endsWith('/kb/candidates')) {
     const limit = parseClampedLimit(searchParams.get('limit'), 'limit');
