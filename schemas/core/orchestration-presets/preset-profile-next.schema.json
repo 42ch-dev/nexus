@@ -1,0 +1,47 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/orchestration-presets/preset-profile-next.schema.json",
+ "schema_version": 1,
+ "title": "PresetProfileNext",
+ "description": "Next transition form (`linear` / `goNogo` / `labeled` / `conditional` / `branches`).",
+ "type": "object",
+ "required": [
+  "kind"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "kind": {
+   "type": "string"
+  },
+  "target": {
+   "type": "string"
+  },
+  "go": {
+   "type": "string"
+  },
+  "nogo": {
+   "type": "string"
+  },
+  "labeled": {
+   "type": "array",
+   "items": {
+    "$ref": "https://nexus42.invalid/schemas/core/orchestration-presets/preset-profile-labeled-next.schema.json"
+   }
+  },
+  "rules": {
+   "type": "array",
+   "items": {
+    "$ref": "https://nexus42.invalid/schemas/core/orchestration-presets/preset-profile-conditional-rule.schema.json"
+   }
+  },
+  "branches": {
+   "type": "array",
+   "items": {
+    "$ref": "https://nexus42.invalid/schemas/core/orchestration-presets/preset-profile-conditional-rule.schema.json"
+   }
+  },
+  "default": {
+   "type": "string"
+  }
+ }
+}

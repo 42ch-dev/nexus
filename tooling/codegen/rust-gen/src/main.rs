@@ -233,6 +233,88 @@ fn inject_character_display_name_trim(rust: &str) -> String {
     out
 }
 
+/// Schema extension marker (`x-nexus-tri-state: true`) for nullable PATCH
+/// properties whose three wire states — omitted (keep), `null` (clear),
+/// value (set) — must survive serde. A plain optional property deserializes
+/// explicit `null` to `None`, which erases the clear state, so the generated
+/// field additionally carries a presence-preserving deserializer.
+const TRI_STATE_MARKER: &str = "x-nexus-tri-state";
+
+/// Collect the marked property names of a source schema, in declaration order.
+fn tri_state_fields(src_schema_path: &Path) -> Vec<String> {
+    let Ok(content) = fs::read_to_string(src_schema_path) else {
+        return Vec::new();
+    };
+    let Ok(raw) = serde_json::from_str::<Value>(&content) else {
+        return Vec::new();
+    };
+    raw.get("properties")
+        .and_then(Value::as_object)
+        .map(|props| {
+            props
+                .iter()
+                .filter(|(_, schema)| {
+                    schema.get(TRI_STATE_MARKER).and_then(Value::as_bool) == Some(true)
+                })
+                .map(|(name, _)| name.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Inject `#[serde(default, deserialize_with = …)]` into the marked fields of
+/// the emitted root struct. The generated field type is already
+/// `Option<serde_json::Value>` (the schema keeps the property unrestricted);
+/// only the attribute is added, so every unmarked optional field keeps the
+/// stock typify semantics. `default` covers absence (`None`); the helper maps
+/// a present `null` to `Some(Value::Null)` instead of collapsing it.
+fn inject_tri_state_deserializers(rust: &str, type_name: &str, fields: &[String]) -> String {
+    if fields.is_empty() {
+        return rust.to_string();
+    }
+    let struct_header = format!("pub struct {type_name} ");
+    let Some(start) = rust.find(&struct_header) else {
+        return rust.to_string();
+    };
+    let Some(open) = rust[start..].find('{') else {
+        return rust.to_string();
+    };
+    let open = start + open;
+    // Walk to the matching close brace of the root struct.
+    let mut depth = 0i32;
+    let mut close = open;
+    for (offset, ch) in rust[open..].char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    close = open + offset;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let (head, body, tail) = (rust[..open].to_string(), rust[open..close].to_string(), rust[close..].to_string());
+    let mut body = body;
+    for field in fields {
+        let needle = format!("pub {field} :");
+        let Some(at) = body.find(&needle) else {
+            continue;
+        };
+        let Some(attr_at) = body[..at].rfind("# [") else {
+            continue;
+        };
+        // `default` stays typify's own attribute (absence -> None); we only add
+        // the presence-preserving deserializer, so serde sees one `default`.
+        let attribute =
+            "# [serde (deserialize_with = \"crate :: tristate :: deserialize_presence\")] ";
+        body.insert_str(attr_at, attribute);
+    }
+    format!("{head}{body}{tail}")
+}
+
 fn rewrite_unicode_scalar_length_checks(rust: &str) -> String {
     inject_character_display_name_trim(
         &rust.replace("value . len ()", "value . chars () . count ()"),
@@ -545,6 +627,11 @@ fn generate_schema_rust(
         }
     }
     rust = apply_nested_session_viewpoint_order(&rust, src_schema_path);
+
+    let marked = tri_state_fields(src_schema_path);
+    if !marked.is_empty() {
+        rust = inject_tri_state_deserializers(&rust, &type_name, &marked);
+    }
 
     if let Some(parent) = out_path.parent() {
         fs::create_dir_all(parent).map_err(|err| {

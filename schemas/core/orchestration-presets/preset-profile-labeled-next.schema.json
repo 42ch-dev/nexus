@@ -1,0 +1,21 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/orchestration-presets/preset-profile-labeled-next.schema.json",
+ "schema_version": 1,
+ "title": "PresetProfileLabeledNext",
+ "description": "A labeled next edge (`labeled` form).",
+ "type": "object",
+ "required": [
+  "label",
+  "target"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "label": {
+   "type": "string"
+  },
+  "target": {
+   "type": "string"
+  }
+ }
+}

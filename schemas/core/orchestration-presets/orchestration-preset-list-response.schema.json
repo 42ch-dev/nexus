@@ -1,0 +1,20 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/orchestration-presets/orchestration-preset-list-response.schema.json",
+ "schema_version": 1,
+ "title": "OrchestrationPresetListResponse",
+ "description": "Response body for `GET /v1/daemon/orchestration/presets` (loadable preset ids). Named `OrchestrationPresetListResponse` because `preset-management` owns the canonical `ListPresetsResponse` wire shape and the two are not interchangeable.",
+ "type": "object",
+ "required": [
+  "presets"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "presets": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   }
+  }
+ }
+}

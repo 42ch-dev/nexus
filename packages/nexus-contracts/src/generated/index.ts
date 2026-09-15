@@ -6,6 +6,11 @@
 
 export * from './common';
 export * from './core';
+export * from './core/findings';
+export * from './core/narrative';
+export * from './core/orchestration-presets';
+export * from './core/references';
+export * from './core/works';
 export * from './daemon-api/actor-knowledge';
 export * from './daemon-api/agent-host';
 export * from './daemon-api/canvas/outline';
@@ -79,19 +84,47 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   CoreWorkflowRunResponse: 1,
   CoreWorkspaceCommitRequest: 1,
   CoreWorkspaceCommitResponse: 1,
-  FindingsApi: 1,
-  NarrativeApi: 1,
+  FindingsPruneResponse: 1,
+  NarrativeWorldResponse: 1,
+  NarrativeWorldState: 1,
+  NarrativeWorldsListResponse: 1,
   NativeCompatibility: 1,
   NativeOpenOptions: 1,
-  OrchestrationPresetsApi: 1,
+  OrchestrationPresetListResponse: 1,
+  PresetProfileConditionalRule: 1,
+  PresetProfileEnterAction: 1,
+  PresetProfileExitWhen: 1,
+  PresetProfileLabeledNext: 1,
+  PresetProfileLanes: 1,
+  PresetProfileNext: 1,
+  PresetProfileResponse: 1,
+  PresetProfileRole: 1,
+  PresetProfileSignal: 1,
+  PresetProfileState: 1,
   ProviderCall: 1,
   ProviderEventBatch: 1,
   ProviderHostEvent: 1,
   ProviderReply: 1,
-  ReferencesApi: 1,
+  ReferenceGetResponse: 1,
+  ReferenceListResponse: 1,
+  ReferenceSourceInfo: 1,
   RuntimeApi: 1,
   ValidatedProviderRecipe: 1,
-  WorksApi: 1,
+  WorkInspirationAddRequest: 1,
+  WorkInspirationAddResponse: 1,
+  WorkInspirationArchiveRequest: 1,
+  WorkInspirationItem: 1,
+  WorkInspirationListQuery: 1,
+  WorkInspirationListResponse: 1,
+  WorkInspirationPromoteRequest: 1,
+  WorkInspirationPromoteResponse: 1,
+  WorkPoolArchiveRequest: 1,
+  WorkPoolEntry: 1,
+  WorkPoolListQuery: 1,
+  WorkPoolListResponse: 1,
+  WorkPoolPromoteRequest: 1,
+  WorkPoolSetActiveRequest: 1,
+  WorkReconcileReport: 1,
   AddKnowledgeEntryRequest: 1,
   AddKnowledgeEntryResponse: 1,
   DeleteKnowledgeEntryQuery: 1,

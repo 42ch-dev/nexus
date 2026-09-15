@@ -22,10 +22,12 @@
    "type": "string"
   },
   "world_id": {
-   "description": "Tri-state World binding patch: omitted = keep the stored binding, null = clear it to SQL NULL, string = set it. Deliberately unrestricted so the generated carrier cannot flatten omission and null; the Rust/TS boundary parser owns the three-state grammar and rejects every other value before any stored effect."
+   "description": "Tri-state World binding patch: omitted = keep the stored binding, null = clear it to SQL NULL, string = set it. Deliberately unrestricted so the generated carrier cannot flatten omission and null; the Rust/TS boundary parser owns the three-state grammar and rejects every other value before any stored effect.",
+   "x-nexus-tri-state": true
   },
   "story_ref": {
-   "description": "Tri-state story reference patch: omitted = keep the stored reference, null = clear it to SQL NULL, string = set it. Deliberately unrestricted so the generated carrier cannot flatten omission and null; the Rust/TS boundary parser owns the three-state grammar and rejects every other value before any stored effect."
+   "description": "Tri-state story reference patch: omitted = keep the stored reference, null = clear it to SQL NULL, string = set it. Deliberately unrestricted so the generated carrier cannot flatten omission and null; the Rust/TS boundary parser owns the three-state grammar and rejects every other value before any stored effect.",
+   "x-nexus-tri-state": true
   },
   "primary_preset_id": {
    "type": "string"

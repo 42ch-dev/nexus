@@ -66,13 +66,13 @@ fn json_kind(value: &serde_json::Value) -> &'static str {
 
 /// Decode a tri-state nullable patch field out of the generated carrier.
 ///
-/// The wire schemas keep `world_id` / `story_ref` / `rule_suggestion`
-/// unrestricted on purpose: a typed nullable string collapses omission and
-/// `null` in the generated carrier (typify resolves `anyOf` [null, T] to
-/// `Option<T>`), which would lose the "clear the stored binding" state.
-/// Here the three states survive: absent → `None` (keep), `null` →
-/// `Some(None)` (clear), string → `Some(Some(_))` (set). Anything else is a
-/// 400 before any stored effect.
+/// The wire schemas mark these fields `x-nexus-tri-state`; the generator adds
+/// a presence-preserving deserializer, so an explicit `null` arrives as
+/// `Some(Value::Null)` instead of collapsing into `None`. The three states
+/// therefore survive the single generated-DTO parse: absent → `None` (keep),
+/// `null` → `Some(None)` (clear), string → `Some(Some(_))` (set). Anything
+/// else is a 400 before any stored effect. Regression:
+/// `crates/nexus-contracts/tests/tri_state_presence.rs`.
 fn tri_state_string(
     value: Option<serde_json::Value>,
     field: &str,

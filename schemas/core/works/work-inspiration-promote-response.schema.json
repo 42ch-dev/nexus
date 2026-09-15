@@ -1,0 +1,21 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/works/work-inspiration-promote-response.schema.json",
+ "schema_version": 1,
+ "title": "WorkInspirationPromoteResponse",
+ "description": "Response for the atomic inspiration promotion (legacy three-write transaction).",
+ "type": "object",
+ "required": [
+  "work_id",
+  "pool_entry_id"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "work_id": {
+   "type": "string"
+  },
+  "pool_entry_id": {
+   "type": "string"
+  }
+ }
+}

@@ -1,0 +1,25 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/works/work-pool-set-active-request.schema.json",
+ "schema_version": 1,
+ "title": "WorkPoolSetActiveRequest",
+ "description": "Body for `POST /v1/daemon/works/pool` (durable pool-active Work selection). `creator_id` is legacy parity only and never authorizes: the stored Principal is minted natively.",
+ "type": "object",
+ "required": [
+  "action",
+  "work_id"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "action": {
+   "type": "string"
+  },
+  "work_id": {
+   "type": "string",
+   "minLength": 1
+  },
+  "creator_id": {
+   "type": "string"
+  }
+ }
+}

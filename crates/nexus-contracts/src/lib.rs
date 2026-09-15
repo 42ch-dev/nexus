@@ -6,6 +6,7 @@
 //! Hand-written local types live in `local/` — see `schemas-boundary.md` §3.
 
 pub mod common_types;
+pub mod tristate;
 pub mod enum_conversions;
 pub mod generated;
 pub mod local;

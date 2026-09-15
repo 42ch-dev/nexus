@@ -1,0 +1,21 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/works/work-inspiration-add-response.schema.json",
+ "schema_version": 1,
+ "title": "WorkInspirationAddResponse",
+ "description": "201 response for the inspiration scaffold.",
+ "type": "object",
+ "required": [
+  "item_id",
+  "rel_path"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "item_id": {
+   "type": "string"
+  },
+  "rel_path": {
+   "type": "string"
+  }
+ }
+}

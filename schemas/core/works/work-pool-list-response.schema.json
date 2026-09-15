@@ -1,0 +1,35 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/works/work-pool-list-response.schema.json",
+ "schema_version": 1,
+ "title": "WorkPoolListResponse",
+ "description": "Offset-paginated authoring-pool page for `GET /v1/daemon/works/pool` (legacy `list_pool` envelope).",
+ "type": "object",
+ "required": [
+  "entries",
+  "total",
+  "limit",
+  "offset"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "entries": {
+   "type": "array",
+   "items": {
+    "$ref": "https://nexus42.invalid/schemas/core/works/work-pool-entry.schema.json"
+   }
+  },
+  "total": {
+   "type": "integer",
+   "minimum": 0
+  },
+  "limit": {
+   "type": "integer",
+   "minimum": 0
+  },
+  "offset": {
+   "type": "integer",
+   "minimum": 0
+  }
+ }
+}
