@@ -13,18 +13,8 @@ export interface PatchWorkRequest {
   creative_brief?: string;
   intake_status?: string;
   status?: string;
-  /**
-   * Tri-state World binding patch: omitted = keep the stored binding, null = clear it to SQL NULL, string = set it. Deliberately unrestricted so the generated carrier cannot flatten omission and null; the Rust/TS boundary parser owns the three-state grammar and rejects every other value before any stored effect.
-   */
-  world_id?: {
-    [k: string]: unknown | undefined;
-  };
-  /**
-   * Tri-state story reference patch: omitted = keep the stored reference, null = clear it to SQL NULL, string = set it. Deliberately unrestricted so the generated carrier cannot flatten omission and null; the Rust/TS boundary parser owns the three-state grammar and rejects every other value before any stored effect.
-   */
-  story_ref?: {
-    [k: string]: unknown | undefined;
-  };
+  world_id?: unknown;
+  story_ref?: unknown;
   primary_preset_id?: string;
   current_stage?: string;
   stage_status?: string;
