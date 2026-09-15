@@ -3927,6 +3927,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "graph-flow",
  "nexus-acp-host",
  "nexus-agent-host",
  "nexus-contracts",
@@ -3938,6 +3939,7 @@ dependencies = [
  "nexus-narrative",
  "nexus-orchestration",
  "nexus-preset",
+ "nexus-provider-ports",
  "nexus-spoke-adapter",
  "nexus-wasm-host",
  "rmcp",
@@ -3948,6 +3950,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-util",
  "tracing",
  "uuid",
 ]

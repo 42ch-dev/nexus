@@ -4,6 +4,8 @@ mod changes;
 mod chronology;
 mod content;
 mod error;
+#[cfg(feature = "execution")]
+pub mod execution;
 mod findings;
 mod knowledge;
 mod outline;
@@ -25,6 +27,12 @@ pub use error::{CoreError, CoreResult};
 pub use presets::PresetError;
 pub use principal::Principal;
 pub use service::{CoreAccess, CoreOpenOptions, CoreService};
+#[cfg(feature = "execution")]
+pub use execution::{
+    CancelOutcome, DriveDisposition, ExecutionHandle, ExecutionOpenError, PresetRunConfig,
+    PresetRunOutcome, ResumeDecision, RunControlError, RunControlResult, RunSignal, RunnerDeps,
+    WorkflowRunCoordinator,
+};
 pub use worlds::DELETE_WORLD_BLOCKED_BY_BINDINGS;
 pub use timeline::{CoreTimelineEventsQuery, CoreTimelineOverviewQuery};
 pub use works::{

@@ -30,6 +30,7 @@ pub mod cron_supervisor;
 pub mod db;
 pub mod directive_store;
 pub mod execution_projection;
+pub mod execution_ports;
 pub mod lifecycle;
 pub mod pack_import;
 pub mod path_enrichment;

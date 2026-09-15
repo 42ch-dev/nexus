@@ -54,6 +54,13 @@ pub(crate) struct CoreInner {
     generation: AtomicU64,
     pub(crate) access: CoreAccess,
     closing: AtomicBool,
+    /// The single execution owner slot (v1.190 P3-T1). Empty until
+    /// `start_execution` succeeds; the set-once guard is what makes a second
+    /// start refuse instead of building a second engine.
+    #[cfg(feature = "execution")]
+    pub(crate) execution: std::sync::Mutex<
+        Option<Arc<crate::execution::ExecutionHandle>>,
+    >,
 }
 
 pub struct CoreService {
@@ -134,6 +141,8 @@ impl CoreService {
                 generation: AtomicU64::new(1),
                 access: options.access,
                 closing: AtomicBool::new(false),
+                #[cfg(feature = "execution")]
+                execution: std::sync::Mutex::new(None),
             }),
         })
     }
@@ -328,6 +337,18 @@ impl CoreService {
         self.inner.pool.close().await;
         if self.inner.access == CoreAccess::DirectWriter {
             release_retained_writer_guards(&self.inner.db_path);
+        }
+        #[cfg(feature = "execution")]
+        {
+            let handle = self
+                .inner
+                .execution
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            if let Some(handle) = handle {
+                handle.shutdown().await;
+            }
         }
         Ok(CoreCloseReport {
             state: nexus_contracts::CoreCloseReportState::Closed,

@@ -18,7 +18,13 @@ default = []
 # v1.190 architecture §Cohorts — optional edges. The default/domain cohort
 # pulls none of these; each `dep:` edge stays inert until its feature is
 # requested. `compute` is never enabled by default/domain/Connect-host.
-execution = ["dep:nexus-orchestration"]
+execution = [
+    "dep:nexus-orchestration",
+    "dep:nexus-provider-ports",
+    "dep:graph-flow",
+    "dep:tokio-util",
+    "dep:async-trait",
+]
 provider-host = ["dep:nexus-agent-host", "dep:nexus-acp-host"]
 compute = ["execution", "dep:nexus-wasm-host", "nexus-spoke-adapter/compute"]
 # Reverse-invoke/peer-control edge attaches with its owning cohort task; the
@@ -37,6 +43,11 @@ nexus-narrative = { path = "../nexus-narrative" }
 nexus-creator-memory = { path = "../nexus-creator-memory" }
 nexus-moment-context-assembly = { path = "../nexus-moment-context-assembly" }
 nexus-orchestration = { path = "../nexus-orchestration", optional = true }
+nexus-provider-ports = { path = "../nexus-provider-ports", optional = true }
+# graph-flow is the engine's session backend: the execution layer names
+# `SessionStorage` directly (the engine trait surface does not re-export it).
+graph-flow = { version = "=0.8.0", default-features = false, optional = true }
+tokio-util = { workspace = true, optional = true }
 nexus-agent-host = { path = "../nexus-agent-host", optional = true }
 nexus-acp-host = { path = "../nexus-acp-host", optional = true }
 nexus-wasm-host = { path = "../nexus-wasm-host", optional = true }
@@ -55,3 +66,9 @@ serde_yaml = { workspace = true }
 [dev-dependencies]
 tempfile = "3"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+# The execution acceptance target builds the provider port and the
+# engine-owner fixture directly, so both edges are needed even when the
+# `execution` feature is off (a test target that fails to resolve its imports
+# must not be silently skipped).
+nexus-provider-ports = { path = "../nexus-provider-ports" }
+nexus-local-db = { path = "../nexus-local-db" }

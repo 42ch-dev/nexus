@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 nexus-home-layout = { path = "../nexus-home-layout" }
-nexus-core = { path = "../nexus-core" }
+nexus-core = { path = "../nexus-core", features = ["execution"] }
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-creator = { path = "../nexus-creator" }
 nexus-local-db = { path = "../nexus-local-db" }
