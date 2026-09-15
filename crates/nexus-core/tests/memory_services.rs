@@ -306,9 +306,8 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
         0
     );
     pool.close().await;
-    let creator_dir =
-        MemoryBearerRef::Creator(CREATOR)
-            .long_term_memory_dir(nexus_home_layout::nexus_root_from_home(&env.user_home));
+    let nexus_root = nexus_home_layout::nexus_root_from_home(&env.user_home);
+    let creator_dir = MemoryBearerRef::Creator(CREATOR).long_term_memory_dir(&nexus_root);
     assert!(
         !creator_dir.exists(),
         "Creator memory dir must not be created by Character promotion"
