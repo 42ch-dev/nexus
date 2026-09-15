@@ -215,14 +215,19 @@ export class AcpProviderEngine {
   private livePayloadOrder: string[] = [];
   private launchingProviders = new Set<string>();
   private launchingSessions = new Set<string>();
+  private recoveringUnpublishedOwners = false;
 
   async call(request: ProviderCall): Promise<ProviderReply> {
+    const deadline = handlerDeadlineMs(request.deadline_ms);
     try {
+      if (request.method === 'probe' || request.method === 'launch' || request.method === 'execute') {
+        await this.recoverUnpublishedOwners(deadline);
+      }
       switch (request.method) {
         case 'probe':
-          return await this.handleProbe(request);
+          return await this.handleProbe(request, deadline);
         case 'launch':
-          return await this.handleLaunch(request);
+          return await this.handleLaunch(request, deadline);
         case 'execute':
           return await this.handleExecute(request);
         case 'cancel':
@@ -327,6 +332,43 @@ export class AcpProviderEngine {
     if (this.cleanupFences.size > 0) throw new Error('cleanup_fence_active');
   }
 
+  private async recoverUnpublishedOwners(deadline: number): Promise<void> {
+    // Do not queue or race a second reap against the currently owned attempt.
+    if (this.recoveringUnpublishedOwners) {
+      throw new CleanupUnconfirmedError('cleanup_recovery_in_flight');
+    }
+    if (this.cleanupFences.size === 0) return;
+    this.recoveringUnpublishedOwners = true;
+    try {
+      for (const [key, owned] of this.cleanupFences) {
+        const identity = this.ownerIdentityKey(owned);
+        let published = false;
+        for (const session of this.sessions.values()) {
+          if (this.ownerIdentityKey(session.owned) === identity) {
+            published = true;
+            break;
+          }
+        }
+        // Published sessions retain their original cancel/shutdown route.
+        if (published) continue;
+        const remaining = remainingBudgetMs(deadline);
+        if (remaining <= 0) throw new CleanupUnconfirmedError('cleanup_fence_active');
+        await this.requireConfirmedCleanup(owned, key, 'unpublished_child_not_reaped', remaining);
+        // Only confirmed reaping releases recipe ownership.
+        for (const [ownerKey, candidate] of this.recipeOwners) {
+          if (this.ownerIdentityKey(candidate) === identity) this.recipeOwners.delete(ownerKey);
+        }
+      }
+      this.assertNoCleanupFence();
+      if (remainingBudgetMs(deadline) <= 0) {
+        throw new OperationError('interrupted', 'cleanup_recovery_deadline_exhausted');
+      }
+    } finally {
+      // No detached timeout race: keep admission locked until reap returns.
+      this.recoveringUnpublishedOwners = false;
+    }
+  }
+
   private ownerIdentityKey(owned: OwnedConnection): string {
     const id = owned.boundIdentity;
     return `${id.pid}:${id.process_birth ?? ''}:${id.group_id ?? ''}`;
@@ -428,7 +470,7 @@ export class AcpProviderEngine {
     if (mapped) op.delivery.enqueue(mapped);
   }
 
-  private async handleProbe(request: ProviderCall): Promise<ProviderReply> {
+  private async handleProbe(request: ProviderCall, deadline: number): Promise<ProviderReply> {
     this.assertNoCleanupFence();
     const started = Date.now();
     const recipe = parseAdmittedRecipe(request.payload);
@@ -459,7 +501,10 @@ export class AcpProviderEngine {
       throw error;
     }
     try {
-      await this.requireConfirmedCleanup(owned, `probe:${recipe.recipe_generation}`, 'probe_child_not_reaped');
+      await this.requireConfirmedCleanup(
+        owned, `probe:${recipe.recipe_generation}`, 'probe_child_not_reaped',
+        remainingBudgetMs(deadline),
+      );
     } catch (error) {
       if (error instanceof CleanupUnconfirmedError) {
         return this.fenceCleanupError(
@@ -480,7 +525,7 @@ export class AcpProviderEngine {
     });
   }
 
-  private async handleLaunch(request: ProviderCall): Promise<ProviderReply> {
+  private async handleLaunch(request: ProviderCall, deadline: number): Promise<ProviderReply> {
     this.assertNoCleanupFence();
     const recipe = parseAdmittedRecipe(request.payload);
     if (this.launchingProviders.has(recipe.provider_id)) throw new Error('session_busy');
@@ -518,6 +563,7 @@ export class AcpProviderEngine {
         owned,
         ownerKey,
         request.request_id,
+        deadline,
       );
     } finally {
       this.launchingProviders.delete(recipe.provider_id);
@@ -531,13 +577,17 @@ export class AcpProviderEngine {
     owned: OwnedConnection | null,
     ownerKey: string,
     requestId: string,
+    deadline?: number,
   ): Promise<ProviderReply> {
     const cleanupTarget =
       owned ??
       (error instanceof CleanupUnconfirmedError ? error.owner : null);
     if (cleanupTarget) {
       try {
-        await this.requireConfirmedCleanup(cleanupTarget, ownerKey, 'launch_child_not_reaped');
+        await this.requireConfirmedCleanup(
+          cleanupTarget, ownerKey, 'launch_child_not_reaped',
+          deadline === undefined ? undefined : remainingBudgetMs(deadline),
+        );
         this.recipeOwners.delete(ownerKey);
         this.clearFencesForOwner(cleanupTarget);
       } catch (cleanupError) {
