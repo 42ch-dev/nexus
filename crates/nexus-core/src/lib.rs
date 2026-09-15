@@ -7,11 +7,20 @@ mod provider_journal;
 mod service;
 mod worlds;
 mod world_kb;
+mod works;
 
 pub use error::{CoreError, CoreResult};
 pub use principal::Principal;
 pub use service::{CoreAccess, CoreOpenOptions, CoreService};
 pub use worlds::DELETE_WORLD_BLOCKED_BY_BINDINGS;
+pub use works::{
+    WorkDetails, WorkPatchRequest, WorkPoolEntry, WorkInspirationItem,
+    SetPoolActiveRequest, ReconcileDryRunQuery, ListPoolQuery, ListPoolResponse,
+    PromotePoolRequest, ArchivePoolRequest, AddInspirationRequest, AddInspirationResponse,
+    ListInspirationQuery, ListInspirationResponse, PromoteInspirationRequest,
+    PromoteInspirationResponse, ArchiveInspirationRequest,
+    WorkReconcileReport,
+};
 
 /// Internal-purpose projection seam for promote/relationship consumers.
 pub mod projection {

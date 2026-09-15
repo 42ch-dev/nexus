@@ -42,7 +42,7 @@ pub(crate) struct CoreInner {
     pub(crate) pool: SqlitePool,
     db_path: PathBuf,
     _guarded: Option<GuardedPool>,
-    nexus_home: PathBuf,
+    pub(crate) nexus_home: PathBuf,
     creator_id: String,
     workspace_slug: String,
     generation: AtomicU64,

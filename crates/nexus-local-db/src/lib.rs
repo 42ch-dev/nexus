@@ -51,6 +51,7 @@ pub mod soul_meta;
 pub mod soul_narrative;
 pub mod spoke_rules;
 pub mod work_chapters;
+pub mod work_stage;
 pub mod works;
 pub mod workspace_commit_intent;
 

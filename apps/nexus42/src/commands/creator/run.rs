@@ -16,7 +16,8 @@ use nexus_contracts::local::orchestration::preset::{PresetCliArg, PresetCliArgTy
 use nexus_contracts::local::orchestration::stage_index;
 use nexus_contracts::local::schedule::http::AddScheduleRequest;
 use nexus_orchestration::preset::validation::stage_for_preset;
-use nexus_orchestration::stage_gates::{self, WorkFields, WorkStageState};
+use nexus_orchestration::stage_gates::{self, WorkFields};
+use nexus_local_db::work_stage::{check_stage_advance, WorkStageState};
 
 // ── V1.45 generic RunCommand struct ─────────────────────────────────────────
 
@@ -788,7 +789,7 @@ async fn stage_advance(
         stage_status: current_status.to_string(),
         intake_status: intake_status.to_string(),
     };
-    stage_gates::check_stage_advance(&work_state, target_stage, force)
+    check_stage_advance(&work_state, target_stage, force)
         .map_err(|e| crate::errors::CliError::Other(format!("{}: {}", e.code, e.message)))?;
 
     // PATCH the work with new stage

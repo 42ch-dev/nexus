@@ -240,7 +240,7 @@ async fn execute_work_get(
             }
         })?;
 
-    let dto = WorkApiDto::from(record);
+    let dto = WorkApiDto::from(nexus_core::WorkDetails::from(record));
     Ok(serde_json::to_value(dto).unwrap_or_else(|_| serde_json::json!({})))
 }
 
@@ -460,7 +460,7 @@ async fn execute_work_patch(
             reason: "work not found after patch".into(),
         })?;
 
-    let dto = WorkApiDto::from(updated);
+    let dto = WorkApiDto::from(nexus_core::WorkDetails::from(updated));
     Ok(serde_json::to_value(dto).unwrap_or_else(|_| serde_json::json!({})))
 }
 

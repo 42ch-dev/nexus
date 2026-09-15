@@ -604,7 +604,7 @@ fn t7e_stage_advance_produce_passes_when_intake_complete() {
     // passes when the Work is at intake complete with intake_status complete.
     // This is a synchronous gate check (stage_gates.rs) — not the full
     // preset gate evaluator.
-    use nexus_orchestration::stage_gates::{check_stage_advance, WorkStageState};
+    use nexus_local_db::work_stage::{check_stage_advance, WorkStageState};
 
     let work = WorkStageState {
         current_stage: "intake".to_string(),
