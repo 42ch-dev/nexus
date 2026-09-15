@@ -54,6 +54,22 @@ fn decode<T: serde::de::DeserializeOwned>(payload: Buffer, label: &str) -> Resul
         .map_err(|error| Error::from_reason(format!("invalid {label}: {error}")))
 }
 
+/// Optional bounded query parameter. Overflow/out-of-range is a client error
+/// (400 `invalid_input` via the "invalid …" rejection convention), never a
+/// silently-absent filter.
+fn query_u32_bounded<T>(value: Option<T>, field: &str) -> Result<Option<u32>>
+where
+    T: Copy + TryInto<u32>,
+    T::Error: std::fmt::Display,
+{
+    value
+        .map(|v| {
+            v.try_into()
+                .map_err(|e| Error::from_reason(format!("invalid {field}: {e}")))
+        })
+        .transpose()
+}
+
 fn json_kind(value: &serde_json::Value) -> &'static str {
     match value {
         serde_json::Value::Null => "null",
@@ -529,8 +545,8 @@ impl NativeCore {
         let query: WorkPoolListQuery = decode(query_json, "query")?;
         let domain = ListPoolQuery {
             status: query.status,
-            limit: query.limit.and_then(|limit| u32::try_from(limit).ok()),
-            offset: query.offset.and_then(|offset| u32::try_from(offset).ok()),
+            limit: query_u32_bounded(query.limit, "limit")?,
+            offset: query_u32_bounded(query.offset, "offset")?,
         };
         self.json_call(principal_handle, async move |core, principal| {
             let page = core.list_work_pool(&principal, domain).await?;
@@ -644,8 +660,8 @@ impl NativeCore {
         let query: WorkInspirationListQuery = decode(query_json, "query")?;
         let domain = ListInspirationQuery {
             status: query.status,
-            limit: query.limit.and_then(|limit| u32::try_from(limit).ok()),
-            offset: query.offset.and_then(|offset| u32::try_from(offset).ok()),
+            limit: query_u32_bounded(query.limit, "limit")?,
+            offset: query_u32_bounded(query.offset, "offset")?,
         };
         self.json_call(principal_handle, async move |core, principal| {
             let page = core.list_work_inspiration(&principal, domain).await?;
@@ -1011,7 +1027,7 @@ impl NativeCore {
             chapter: query.chapter,
             status: query.status,
             severity: query.severity,
-            limit: query.limit.and_then(|limit| u32::try_from(limit).ok()),
+            limit: query_u32_bounded(query.limit, "limit")?,
             cursor: query.cursor,
         };
         self.json_call(principal_handle, async move |core, principal| {
