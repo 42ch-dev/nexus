@@ -37,7 +37,7 @@
 
 use assert_cmd::Command;
 use async_trait::async_trait;
-use nexus_daemon_runtime::preset_run::{
+use nexus_core::execution::{
     drive_preset_run, resume_driven_sessions, PresetRunConfig, PresetRunOutcome, ResumeDecision,
 };
 use nexus_daemon_runtime::test_utils;

@@ -24,5 +24,5 @@ pub use lifecycle::{ExecutionHandle, ExecutionOpenError, RunnerDeps};
 pub use workflow::{
     CancelOutcome, DriveDisposition, PresetRunConfig, PresetRunOutcome, ResumeDecision,
     RunControlError, RunControlResult, RunSignal, WorkflowRunCoordinator, drive_preset_run,
-    resume_driven_sessions,
+    resume_driven_sessions, run_boot_recovery,
 };

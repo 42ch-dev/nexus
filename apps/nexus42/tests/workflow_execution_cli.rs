@@ -2518,7 +2518,7 @@ async fn admission_failed_driver_transition_refuses_reentry() {
         .expect("ensure_driving must not error");
     assert_eq!(
         disposition,
-        nexus_daemon_runtime::preset_run::DriveDisposition::NotDriving,
+        nexus_core::execution::DriveDisposition::NotDriving,
         "a terminal failed run must refuse re-entry"
     );
 

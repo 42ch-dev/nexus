@@ -3942,6 +3942,7 @@ dependencies = [
  "nexus-provider-ports",
  "nexus-spoke-adapter",
  "nexus-wasm-host",
+ "parking_lot",
  "rmcp",
  "serde",
  "serde_json",

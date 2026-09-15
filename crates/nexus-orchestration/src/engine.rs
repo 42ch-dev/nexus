@@ -8265,7 +8265,7 @@ mod tests {
     /// is never re-invoked, and the winner's row/revision/context are
     /// untouched (no cancel signal, no failure-context mutation — the daemon
     /// arm behavior is covered by
-    /// `preset_run::tests::session_conflict_stops_losing_drive_without_winner_mutation`).
+    /// `nexus_core::execution::workflow::tests::session_conflict_stops_losing_drive_without_winner_mutation`).
     #[tokio::test]
     async fn losing_drive_conflict_leaves_sqlite_winner_untouched() {
         use graph_flow::{NextAction, Task, TaskResult};

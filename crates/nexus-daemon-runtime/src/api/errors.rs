@@ -260,7 +260,7 @@ pub enum NexusApiError {
     InputValidationFailed { details: serde_json::Value },
 }
 
-impl From<crate::preset_run::RunControlError> for NexusApiError {
+impl From<nexus_core::execution::RunControlError> for NexusApiError {
     /// The SINGLE projection of a coordinator control failure onto the
     /// public error surface (QC2 F-002).
     ///
@@ -268,8 +268,8 @@ impl From<crate::preset_run::RunControlError> for NexusApiError {
     /// other coordinator-routed signal share this mapping, so an identical
     /// durable outcome can never project two different envelopes — and a
     /// capacity refusal is a typed retryable 503, never a 500.
-    fn from(err: crate::preset_run::RunControlError) -> Self {
-        use crate::preset_run::RunControlError as E;
+    fn from(err: nexus_core::execution::RunControlError) -> Self {
+        use nexus_core::execution::RunControlError as E;
         match err {
             E::WaitConflict {
                 session_id,
@@ -1098,7 +1098,7 @@ mod tests {
         // QC2 F-002: both cancel surfaces share this projection — a durable
         // wait conflict carries the A4 details, and a state conflict is the
         // 409 conflict code (never a 500 derived from an error string).
-        let wait = NexusApiError::from(crate::preset_run::RunControlError::WaitConflict {
+        let wait = NexusApiError::from(nexus_core::execution::RunControlError::WaitConflict {
             session_id: "s1".into(),
             status: "waiting_for_input".into(),
             current_wait_id: Some("w1".into()),
@@ -1109,7 +1109,7 @@ mod tests {
         assert_eq!(details["session_id"], "s1");
         assert_eq!(details["current_wait_id"], "w1");
 
-        let state = NexusApiError::from(crate::preset_run::RunControlError::StateConflict(
+        let state = NexusApiError::from(nexus_core::execution::RunControlError::StateConflict(
             "s1".into(),
             "revision moved".into(),
         ));
@@ -1118,7 +1118,7 @@ mod tests {
 
         // QC2 F-004: exhausting the per-run live-ring quota is a TYPED,
         // retryable capacity refusal — never a 500.
-        let capacity = NexusApiError::from(crate::preset_run::RunControlError::RunEventCapacity(
+        let capacity = NexusApiError::from(nexus_core::execution::RunControlError::RunEventCapacity(
             "s1".into(),
         ));
         assert_eq!(capacity.status_code(), StatusCode::SERVICE_UNAVAILABLE);

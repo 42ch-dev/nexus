@@ -6,7 +6,7 @@
 //! process: a live HTTP router over the daemon `WorkspaceState`, a real
 //! `orchestration_sessions` SQLite persistence, and the daemon engine the
 //! routes serve. The preset-run driver
-//! ([`nexus_daemon_runtime::preset_run`]) steps the session; the failure
+//! ([`nexus_core::execution`]) steps the session; the failure
 //! record asserts the typed `converge_timeout:` discriminator, the
 //! `on_timeout` reroute (`_join_timeout_note` + reroute target), and the
 //! absent-`on_timeout` typed-failure (never `WaitForInput` forever).
@@ -29,7 +29,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use common::LiveDaemon;
-use nexus_daemon_runtime::preset_run::{drive_preset_run, PresetRunConfig, PresetRunOutcome};
+use nexus_core::execution::{drive_preset_run, PresetRunConfig, PresetRunOutcome};
 use nexus_orchestration::engine::{SessionId, SessionStatus};
 use nexus_orchestration::CapabilityRegistry;
 

@@ -248,7 +248,7 @@ impl LiveDaemon {
                 self.pool.clone(),
             )),
         );
-        nexus_daemon_runtime::boot::run_boot_recovery(
+        nexus_core::execution::run_boot_recovery(
             &engine,
             &sqlite,
             self.state.run_coordinator().as_ref(),
@@ -439,7 +439,7 @@ impl LiveDaemon {
         state.set_capability_registry(holder.clone());
 
         let coordinator = Arc::new(
-            nexus_daemon_runtime::preset_run::WorkflowRunCoordinator::new(
+            nexus_core::execution::WorkflowRunCoordinator::new(
                 engine_arc.clone(),
                 storage.clone(),
                 pool_arc.clone(),

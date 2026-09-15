@@ -48,7 +48,7 @@ use nexus_agent_host::{
     DiscoverySource, HostError, HostOperationId, HostResult, HostSession, HostSessionId,
     LaunchStrategy, ProviderCatalog, ProviderCatalogEntry, SessionState, TrustLevel,
 };
-use nexus_daemon_runtime::preset_run::{
+use nexus_core::execution::{
     resume_driven_sessions, PresetRunConfig, PresetRunOutcome, ResumeDecision,
 };
 use nexus_daemon_runtime::test_utils;

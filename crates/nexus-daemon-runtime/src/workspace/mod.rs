@@ -28,7 +28,6 @@ use crate::db::SqliteNarrativeGateway;
 use crate::lifecycle::{Lifecycle, LifecycleState, StatigLifecycle};
 use crate::workspace::actor_sessions::ActorSessionRegistry;
 use crate::workspace::session::WorkspaceSessionManager;
-use graph_flow::SessionStorage as GraphFlowSessionStorage;
 use nexus_agent_host::config::AgentHostConfig;
 use nexus_contracts::local::domain::RuntimeMode;
 use nexus_contracts::CertFingerprintResponse;
@@ -88,7 +87,7 @@ pub struct RuntimeBundle {
     /// The production prompt executor (A1), when a Host facade is wired.
     prompt_executor: Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
     /// The single public run coordinator (A3).
-    coordinator: Arc<crate::preset_run::WorkflowRunCoordinator>,
+    coordinator: Arc<nexus_core::execution::WorkflowRunCoordinator>,
     /// The schedule supervisor with the daemon admission starter.
     supervisor: Arc<ScheduleSupervisor>,
 }
@@ -146,7 +145,18 @@ pub struct WorkspaceState {
     /// join owner per (Creator DB, session) around the bounded
     /// `drive_preset_run` loop. Set at daemon boot when a creator DB is
     /// present; `None` on Tier-0 boot (deferred until Profile attach).
-    run_coordinator: Arc<RwLock<Option<Arc<crate::preset_run::WorkflowRunCoordinator>>>>,
+    ///
+    /// P3-T1: this is a VIEW of [`Self::execution_handle`]'s coordinator, so
+    /// the transport and the execution owner can never hold different
+    /// coordinators. The handle itself is retained for the engine epoch and
+    /// the single close path.
+    run_coordinator: Arc<RwLock<Option<Arc<nexus_core::execution::WorkflowRunCoordinator>>>>,
+    /// The single execution owner established at boot (P3-T1).
+    ///
+    /// `None` on Tier-0 boot (no creator DB) — a domain-only daemon starts no
+    /// execution task. Dropped with the state; the daemon shutdown path calls
+    /// [`nexus_core::execution::ExecutionHandle::close`] explicitly.
+    execution_handle: Arc<RwLock<Option<Arc<nexus_core::execution::ExecutionHandle>>>>,
     /// Production prompt executor (A1, v1.186 P1 T2) — the daemon-owned
     /// `HostPromptExecutor` over the Host facade. Set at daemon boot when a
     /// creator DB is present; `None` on Tier-0 boot. Schedule admission
@@ -305,6 +315,7 @@ impl WorkspaceState {
             capability_registry: Arc::new(RwLock::new(None)),
             schedule_supervisor: Arc::new(RwLock::new(None)),
             run_coordinator: Arc::new(RwLock::new(None)),
+            execution_handle: Arc::new(RwLock::new(None)),
             prompt_executor: Arc::new(RwLock::new(None)),
             session_cancels: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             run_event_registry: Arc::new(crate::run_events::RunEventRegistry::new()),
@@ -427,6 +438,7 @@ impl WorkspaceState {
             capability_registry: Arc::new(RwLock::new(None)),
             schedule_supervisor: Arc::new(RwLock::new(None)),
             run_coordinator: Arc::new(RwLock::new(None)),
+            execution_handle: Arc::new(RwLock::new(None)),
             prompt_executor: Arc::new(RwLock::new(None)),
             session_cancels: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             run_event_registry: Arc::new(crate::run_events::RunEventRegistry::new()),
@@ -792,9 +804,10 @@ impl WorkspaceState {
             .ok_or_else(|| anyhow::anyhow!("creator pool not published after attach"))?;
         let pool_arc = Arc::new(pool.clone());
 
-        // Durable storage + workflow store (the SQLite adapter implements both).
+        // Durable workflow store for the prompt executor below; the engine's
+        // own storage/workflow store are constructed inside the execution
+        // owner over the core service's pool (same DB, same file).
         let sqlite_storage = Arc::new(SqliteSessionStorage::new(pool_arc.clone()));
-        let storage: Arc<dyn GraphFlowSessionStorage> = sqlite_storage.clone();
         let workflow_store: Arc<dyn WorkflowStateStore> = sqlite_storage.clone();
 
         // Prompt executor: the daemon-owned HostPromptExecutor over the
@@ -862,63 +875,69 @@ impl WorkspaceState {
             CapabilityRegistryHolder::with_registry(Arc::new(registry))
         };
 
-        // Engine over the durable store.
-        let workspace_root = self
-            .workspace_path()
-            .map(std::path::PathBuf::from)
-            .unwrap_or_default();
-        let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store_and_workspace(
-            storage.clone(),
-            workflow_store.clone(),
-            holder.clone(),
-            workspace_root,
-        );
-        if let Some(dispatch) = self.daemon_tool_dispatch() {
-            engine.set_daemon_tool_dispatch(dispatch);
-        }
-        if let Some(executor) = &prompt_executor {
-            engine.set_prompt_executor(executor.clone(), self.session_cancels());
-        }
-        engine.set_nexus_home(self.nexus_home().clone());
-        // v1.188 P3: resolve `_context.workspace.*` from the SAME shared
-        // workspace authority the commit executor writes through, so preset
-        // conditional edges observe real durable state.
-        if let (Some(mgr), Some(root)) = (self.session_manager(), self.workspace_path()) {
-            engine.set_workspace_state_provider(Arc::new(
+        // Engine + coordinator + A7 recovery come from the single execution
+        // owner (P3-T1). Lazy attach is the SECOND place a creator DB becomes
+        // available (Tier-0 boot, then Profile attach), so it must go through
+        // the same `start_execution` seam — otherwise the daemon would have
+        // two engines. The slot is necessarily empty here: the boot path only
+        // skips execution when there was no creator DB, and this function is
+        // reached only in that case.
+        //
+        // The holder built above (rebuilt with the newly opened pool +
+        // executor, preserving WASM/user capabilities) is handed to the core
+        // so the engine reads the SAME live registry the watcher swaps.
+        let core = self
+            .core_or_uninit()
+            .await
+            .map_err(|e| anyhow::anyhow!("lazy attach: core service unavailable: {e}"))?;
+        let workspace_state_provider = match (self.session_manager(), self.workspace_path()) {
+            (Some(mgr), Some(root)) => Some(Arc::new(
                 crate::workspace::state_provider::DaemonWorkspaceStateProvider::new(mgr, root),
-            ));
-        }
-
-        let engine_arc = Arc::new(engine);
-
-        // Coordinator over the same engine/storage/pool. When a Host facade
-        // is wired, attach it so admission validates provider references in
-        // agent bindings before enqueue (N-4).
-        let mut coordinator_builder = crate::preset_run::WorkflowRunCoordinator::new(
-            engine_arc.clone(),
-            storage.clone(),
-            pool_arc.clone(),
-            self.session_cancels(),
-        );
-        if let Some(host) = self.agent_host() {
-            coordinator_builder = coordinator_builder.with_agent_host(host);
-        }
-        // C-3: the sanctioned default binding provider for explicit legacy
-        // starts — the same config source the supervisor's internal
-        // insertion paths use.
-        if let Some(provider_id) = self
+            ) as Arc<dyn nexus_orchestration::capability::WorkspaceStateProvider>),
+            _ => None,
+        };
+        let provider_catalog = self.agent_host().map(|host| {
+            Arc::new(crate::execution_ports::DaemonProviderCatalogPort::new(host))
+                as Arc<dyn nexus_core::execution::workflow::ProviderCatalogPort>
+        });
+        let binding_provider = self
             .agent_host_config()
             .providers
             .iter()
             .find(|p| p.enabled)
-            .map(|p| p.id.clone())
-        {
-            coordinator_builder = coordinator_builder.with_binding_provider(provider_id);
-        }
-        coordinator_builder = coordinator_builder
-            .with_run_events(self.run_event_registry())
-            .with_run_event_sinks(self.run_event_sinks());
-        let coordinator = Arc::new(coordinator_builder);
+            .map(|p| p.id.clone());
+        let run_events = Arc::new(crate::execution_ports::DaemonRunEventPort::new(
+            self.run_event_registry(),
+            self.run_event_sinks(),
+        )) as Arc<dyn nexus_core::execution::workflow::RunEventPort>;
+        let providers: Arc<dyn nexus_provider_ports::ProviderPort> =
+            Arc::new(nexus_agent_host::providers::port::ProviderPortAdapter::new(
+                self.agent_host()
+                    .ok_or_else(|| anyhow::anyhow!("lazy attach: no Host facade"))?,
+            ));
+        let handle = core
+            .start_execution(
+                providers,
+                nexus_core::execution::RunnerDeps {
+                    prompt_executor: prompt_executor.clone(),
+                    daemon_tool_dispatch: self.daemon_tool_dispatch(),
+                    workspace_executor: None,
+                    capability_holder: Some(holder.clone()),
+                    session_cancels: Some(self.session_cancels()),
+                    workspace_state_provider,
+                    provider_catalog,
+                    binding_provider,
+                    run_events: Some(run_events),
+                    workspace_root: self.workspace_path().map(std::path::PathBuf::from),
+                    nexus_home: Some(self.nexus_home().clone()),
+                    shutdown_notify: Some(self.shutdown_notify()),
+                },
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("lazy attach: failed to establish the execution owner: {e}"))?;
+        self.set_execution_handle(Arc::clone(&handle));
+        let engine_arc = handle.engine_concrete();
+        let coordinator = handle.coordinator();
 
         // Schedule supervisor with the daemon admission callback.
         let mut supervisor_builder = ScheduleSupervisor::new_with_workspace(
@@ -1078,11 +1097,37 @@ impl WorkspaceState {
     /// owns one cancellation/join handle per (Creator DB, session) around
     /// the bounded `drive_preset_run` loop; schedule admission and session
     /// POST route through it.
-    pub fn set_run_coordinator(&self, coordinator: Arc<crate::preset_run::WorkflowRunCoordinator>) {
+    pub fn set_run_coordinator(&self, coordinator: Arc<nexus_core::execution::WorkflowRunCoordinator>) {
         *self
             .run_coordinator
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(coordinator);
+    }
+
+    /// Publish the single execution owner established at boot (P3-T1).
+    ///
+    /// Also installs the coordinator view so existing transport callers keep
+    /// reading ONE coordinator: the one the handle (and therefore the engine,
+    /// the schedule supervisor and the cancel path) actually uses.
+    pub fn set_execution_handle(&self, handle: Arc<nexus_core::execution::ExecutionHandle>) {
+        *self
+            .run_coordinator
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(handle.coordinator());
+        *self
+            .execution_handle
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(handle);
+    }
+
+    /// The execution owner established at boot, if any (P3-T1).
+    #[must_use]
+    pub fn execution_handle(&self) -> Option<Arc<nexus_core::execution::ExecutionHandle>> {
+        self.execution_handle
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Set the production prompt executor (A1, v1.186 P1 T2).
@@ -1119,7 +1164,7 @@ impl WorkspaceState {
     /// Returns `None` on Tier-0 boot (no creator DB) or before Profile
     /// attach publishes the matching bundle.
     #[must_use]
-    pub fn run_coordinator(&self) -> Option<Arc<crate::preset_run::WorkflowRunCoordinator>> {
+    pub fn run_coordinator(&self) -> Option<Arc<nexus_core::execution::WorkflowRunCoordinator>> {
         if let Some(bundle) = self.runtime_bundle() {
             return Some(bundle.coordinator.clone());
         }
