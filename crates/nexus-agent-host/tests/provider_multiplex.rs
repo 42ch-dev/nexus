@@ -26,7 +26,7 @@ use tokio::sync::Mutex;
 
 struct CallbackPeer {
     child: Child,
-    stdin: ChildStdin,
+    stdin: Option<ChildStdin>,
     stdout: BufReader<ChildStdout>,
 }
 
@@ -58,14 +58,14 @@ for await (const line of createInterface({{ input: process.stdin }})) {{
             .stderr(std::process::Stdio::inherit()).kill_on_drop(true).spawn().expect("Node callback peer");
         let stdin = child.stdin.take().expect("stdin");
         let stdout = BufReader::new(child.stdout.take().expect("stdout"));
-        Self(Mutex::new(CallbackPeer { child, stdin, stdout }))
+        Self(Mutex::new(CallbackPeer { child, stdin: Some(stdin), stdout }))
     }
 
     async fn exchange(&self, value: Value) -> ProviderResult<Value> {
         let mut peer = self.0.lock().await;
         let mut bytes = serde_json::to_vec(&value).expect("peer request");
         bytes.push(b'\n');
-        peer.stdin.write_all(&bytes).await.expect("peer write");
+        peer.stdin.as_mut().expect("open peer stdin").write_all(&bytes).await.expect("peer write");
         let mut line = String::new();
         let count = tokio::time::timeout(Duration::from_secs(30), peer.stdout.read_line(&mut line))
             .await.expect("bounded callback response").expect("peer read");
@@ -80,7 +80,8 @@ for await (const line of createInterface({{ input: process.stdin }})) {{
 
     async fn close(&self) {
         let mut peer = self.0.lock().await;
-        peer.stdin.shutdown().await.expect("close peer stdin");
+        // Drop the pipe writer to deliver EOF; shutdown alone retains the handle.
+        drop(peer.stdin.take());
         let status = tokio::time::timeout(Duration::from_secs(5), peer.child.wait())
             .await.expect("callback peer exits after sessions close").expect("peer exit");
         assert!(status.success());
@@ -205,10 +206,20 @@ async fn session_keeps_selected_provider_and_truthful_cancel() {
         ("configured-acp", vec!["transformed:hello"]),
     ] {
         let session = launch(port.as_ref(), &root, provider).await;
-        let op = HostOperation::Prompt {
+        let mut op = HostOperation::Prompt {
             op_id: HostOperationId::new(), content: vec![HostContentBlock::Text { text: "hello".into() }],
             permission_scope: Some(PromptPermissionScope { allow_read: false, allow_write: false, allow_destructive: false }),
         };
+        if matches!(provider, "claude-native" | "codex-native") {
+            // These native adapters cannot enforce workflow scopes. Refuse the
+            // constrained request before testing their ordinary prompt path.
+            let error = port.call(call(ProviderCallMethod::Execute, Some(&session), None, serde_json::to_value(&op).expect("scoped operation")))
+                .await.expect_err("native workflow scope must remain unsupported");
+            assert_eq!(error.code, CoreErrorCode::NotSupported, "{provider}: {error:?}");
+            if let HostOperation::Prompt { permission_scope, .. } = &mut op {
+                *permission_scope = None;
+            }
+        }
         let reply = port.call(call(ProviderCallMethod::Execute, Some(&session), None, serde_json::to_value(op).expect("operation")))
             .await.expect("execute");
         assert!(reply.ok, "{provider}: {reply:?}");
