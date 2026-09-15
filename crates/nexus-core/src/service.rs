@@ -40,7 +40,10 @@ pub struct CoreOpenOptions {
 
 pub(crate) struct CoreInner {
     pub(crate) pool: SqlitePool,
-    db_path: PathBuf,
+    /// The workspace `state.db` this service serves. The execution owner
+    /// registry is keyed by it, so the single-owner fence spans every
+    /// `CoreService` opened over the same file in this process.
+    pub(crate) db_path: PathBuf,
     _guarded: Option<GuardedPool>,
     /// Active creator this service was opened against (open-scoped).
     pub(crate) nexus_home: PathBuf,
@@ -54,9 +57,14 @@ pub(crate) struct CoreInner {
     generation: AtomicU64,
     pub(crate) access: CoreAccess,
     closing: AtomicBool,
-    /// The single execution owner slot (v1.190 P3-T1). Empty until
-    /// `start_execution` succeeds; the set-once guard is what makes a second
-    /// start refuse instead of building a second engine.
+    /// The execution owner slot for THIS service (v1.190 P3-T1). Empty until
+    /// `start_execution` succeeds.
+    ///
+    /// The authoritative single-owner fence is NOT this slot — it is the
+    /// process-wide registry in `execution::lifecycle`, keyed by the
+    /// workspace DB, because `CoreService::open` under `EngineOwner` joins
+    /// this process's retained engine admission and would otherwise let a
+    /// second core over the same file build a second engine.
     #[cfg(feature = "execution")]
     pub(crate) execution: std::sync::Mutex<
         Option<Arc<crate::execution::ExecutionHandle>>,
@@ -345,9 +353,12 @@ impl CoreService {
                 .execution
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .clone();
+                .take();
             if let Some(handle) = handle {
                 handle.shutdown().await;
+                // `take` returned the handle, so ownership is settled; release
+                // the per-DB fence so a later open of the same DB can claim it.
+                crate::execution::lifecycle::release_owner_slot(&self.inner.db_path, &handle);
             }
         }
         Ok(CoreCloseReport {

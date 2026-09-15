@@ -3,16 +3,18 @@
 //! [`CoreService::start_execution`] builds the one engine/effect owner for an
 //! engine-owner core and returns an [`ExecutionHandle`]. The handle owns the
 //! task set, the engine epoch and every cleanup path; a second
-//! `start_execution` on the same service refuses rather than building a
-//! second engine.
+//! `start_execution` for the SAME workspace DB refuses rather than building a
+//! second engine — even from a different [`CoreService`] in this process.
 //!
 //! This module deliberately excludes logging, HTTP binding, OS signals and
 //! the SPA. A domain-only [`CoreService`] open starts none of these tasks —
 //! execution requires an explicit `start_execution` under
 //! [`CoreAccess::EngineOwner`].
 
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex, PoisonError, Weak};
 
 use nexus_contracts::{CoreCloseReport, CoreCloseReportState};
 use nexus_orchestration::capability::{
@@ -38,11 +40,13 @@ pub enum ExecutionOpenError {
     /// would create a second effect owner beside the live one.
     #[error("execution requires an engine-owner core (opened as {0:?})")]
     NotEngineOwner(CoreAccess),
-    /// An execution owner already exists for this service.
+    /// An execution owner already exists for this workspace DB.
     ///
-    /// The handle is single-owner per service: a duplicate start must return
-    /// the established owner (or refuse) and never construct a second engine.
-    #[error("an execution owner is already established for this core")]
+    /// The handle is single-owner per workspace DB, process-wide: a duplicate
+    /// start must refuse (or return the established owner) and never construct
+    /// a second engine — including a start from a different [`CoreService`]
+    /// opened over the same file.
+    #[error("an execution owner is already established for this workspace")]
     AlreadyOwned,
     /// The service is closing.
     #[error("core service is closing")]
@@ -224,6 +228,113 @@ fn closed_report() -> CoreCloseReport {
     }
 }
 
+/// The registered execution owner for one workspace DB.
+///
+/// The `Building` reservation is what makes the claim race-safe without
+/// holding a lock across the build await: a `std::sync::MutexGuard` is not
+/// `Send`, and `build_execution` awaits engine construction and recovery. A
+/// reservation installed BEFORE the await serializes concurrent starts, so
+/// the loser refuses immediately and never builds a second engine.
+enum OwnerSlot {
+    /// A `start_execution` holds the slot and is building. Transient.
+    Building,
+    /// An established owner. `Weak` so the registry never keeps a dropped
+    /// handle — or its engine — alive.
+    Established(Weak<ExecutionHandle>),
+}
+
+/// The established execution owner per workspace DB, process-wide.
+///
+/// The per-service slot alone cannot fence this: `CoreService::open` under
+/// [`CoreAccess::EngineOwner`] deliberately JOINS this process's retained
+/// engine admission (the daemon's transport pool and its execution core
+/// co-host one DB), so a second core over the same file would find its own
+/// per-service slot empty and build a second engine. The OS `engine.lock`
+/// fences cross-PROCESS owners only — same-process contenders share the
+/// retained guard. This registry is the in-process fence.
+static OWNERS: LazyLock<Mutex<HashMap<PathBuf, OwnerSlot>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Normalize a workspace DB path so two opens of the same file collide.
+///
+/// Canonicalization matters (e.g. macOS `/var` → `/private/var`), but the
+/// resolved path is authoritative even when it cannot be canonicalized.
+fn owner_key(db_path: &Path) -> PathBuf {
+    std::fs::canonicalize(db_path).unwrap_or_else(|_| db_path.to_path_buf())
+}
+
+fn owners_lock() -> std::sync::MutexGuard<'static, HashMap<PathBuf, OwnerSlot>> {
+    OWNERS.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// A held-but-not-yet-installed owner reservation.
+///
+/// RAII: dropping the guard without [`Self::install`] frees the slot, so a
+/// failed — or panicking — build never fences its own workspace DB.
+struct OwnerReservation {
+    key: PathBuf,
+    armed: bool,
+}
+
+impl OwnerReservation {
+    /// Reserve the single owner slot for `db_path`, or refuse when a live
+    /// owner already holds it.
+    fn claim(db_path: &Path) -> Result<Self, ExecutionOpenError> {
+        let key = owner_key(db_path);
+        let mut owners = owners_lock();
+        // A dropped or closed owner no longer fences its DB.
+        owners.retain(|_, slot| match slot {
+            OwnerSlot::Building => true,
+            OwnerSlot::Established(weak) => weak.upgrade().is_some_and(|h| !h.is_closed()),
+        });
+        if owners.contains_key(&key) {
+            return Err(ExecutionOpenError::AlreadyOwned);
+        }
+        owners.insert(key.clone(), OwnerSlot::Building);
+        Ok(Self { key, armed: true })
+    }
+
+    /// Publish `handle` as the established owner and stop owning the slot.
+    fn install(mut self, handle: &Arc<ExecutionHandle>) {
+        let mut owners = owners_lock();
+        owners.insert(
+            self.key.clone(),
+            OwnerSlot::Established(Arc::downgrade(handle)),
+        );
+        self.armed = false;
+    }
+}
+
+impl Drop for OwnerReservation {
+    fn drop(&mut self) {
+        if self.armed {
+            let mut owners = owners_lock();
+            if matches!(owners.get(&self.key), Some(OwnerSlot::Building)) {
+                owners.remove(&self.key);
+            }
+        }
+    }
+}
+
+/// Release the registry slot for `db_path` when it still names `handle`.
+///
+/// `Arc::ptr_eq` guards against a stale release evicting a NEWER owner that
+/// claimed the same DB after this one closed. This is the eager path: the
+/// next [`OwnerReservation::claim`] also prunes a closed handle's slot, so a
+/// missed release can never strand a DB.
+pub(crate) fn release_owner_slot(db_path: &Path, handle: &Arc<ExecutionHandle>) {
+    let key = owner_key(db_path);
+    let mut owners = owners_lock();
+    let names_this_handle = matches!(
+        owners.get(&key),
+        Some(OwnerSlot::Established(weak))
+            if weak.upgrade().is_some_and(|current| Arc::ptr_eq(&current, handle))
+    );
+    if names_this_handle {
+        owners.remove(&key);
+    }
+}
+
 impl CoreService {
     /// Establish the single execution owner for this engine-owner core.
     ///
@@ -247,41 +358,30 @@ impl CoreService {
         if self.inner.access != CoreAccess::EngineOwner {
             return Err(ExecutionOpenError::NotEngineOwner(self.inner.access));
         }
-        // Single owner: the first successful start wins; a duplicate refuses.
+        // Single owner. The fence cannot be the per-service slot alone:
+        // `CoreService::open` under `EngineOwner` deliberately JOINS this
+        // process's retained engine admission (the daemon's transport pool and
+        // its execution core co-host one DB file), so a second core over the
+        // same file would find its OWN slot empty and build a second engine.
+        // The OS `engine.lock` fences cross-PROCESS owners only — same-process
+        // contenders share the retained guard.
         //
-        // The claim is made in a scoped borrow. `build_execution` awaits, and a
-        // `std::sync::MutexGuard` is NOT `Send` — holding it across that await
-        // would make this future non-`Send` and therefore un-usable from the
-        // transport's axum handlers (whose `Handler` bound requires it). The
-        // guard is therefore released before the await and re-taken after, with
-        // the slot re-checked so the single-owner guarantee is unchanged: two
-        // concurrent starts can both pass the first check, but only the first
-        // to re-take the lock installs; the loser sees `AlreadyOwned`.
-        if let Some(existing) = self
-            .inner
-            .execution
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .as_ref()
-        {
-            if !existing.is_closed() {
-                return Err(ExecutionOpenError::AlreadyOwned);
-            }
-        }
+        // The claim is therefore the process-wide, per-DB registry, reserved
+        // BEFORE the build await: `build_execution` awaits engine construction
+        // and recovery, and a `std::sync::MutexGuard` is not `Send`, so the
+        // reservation is a registry entry rather than a held lock. It
+        // serializes competing starts (the loser refuses immediately, never
+        // building a second engine) and is dropped on any failure, so a failed
+        // build cannot fence its own DB. A closed or dropped owner frees its
+        // slot on the next claim.
+        let reservation = OwnerReservation::claim(&self.inner.db_path)?;
         let handle = self.build_execution(deps).await?;
-        let mut slot = self
+        reservation.install(&handle);
+        *self
             .inner
             .execution
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(existing) = slot.as_ref() {
-            if !existing.is_closed() {
-                // Lost the race while building: the established owner wins and
-                // the engine we just built is dropped, never installed.
-                return Err(ExecutionOpenError::AlreadyOwned);
-            }
-        }
-        *slot = Some(Arc::clone(&handle));
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::clone(&handle));
         Ok(handle)
     }
 
@@ -293,6 +393,30 @@ impl CoreService {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
+    }
+
+    /// Retire the established execution owner so a fresh generation can be
+    /// established over the same DB (the daemon-level restart seam, A7).
+    ///
+    /// A restart republishes a FRESH engine/coordinator over the SAME Creator
+    /// DB, so the prior owner must be settled and its per-DB fence released
+    /// before the new generation claims it. The handle is settled FIRST and
+    /// the slot released after, so the fence is never dropped while a build
+    /// that supersedes this owner is still in flight.
+    ///
+    /// A service that never established an owner (domain-only cores) is a
+    /// no-op.
+    pub async fn retire_execution(&self) {
+        let handle = self
+            .inner
+            .execution
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(handle) = handle {
+            handle.shutdown().await;
+            release_owner_slot(&self.inner.db_path, &handle);
+        }
     }
 
     async fn build_execution(

@@ -1347,7 +1347,8 @@ async fn restart_durable_status_nested_child_wait_preserved_and_never_auto_resum
 // ---------------------------------------------------------------------------
 // P3 T1 — daemon-level restart matrix (A7): production boot/attach path over
 // the SAME DB/HOME, driven through `LiveDaemon::restart()` (abort drives →
-// republish bundle → run_boot_recovery). Source-verified reattachment: the
+// republish bundle, which retires the prior execution owner and recovers the
+// durable runs through the new one). Source-verified reattachment: the
 // frozen source identity (manifest + referenced template bytes) is verified
 // at reconstruction; a changed/missing user preset preserves the human wait
 // and makes continue return `reconstruction_unavailable` (cancel-only).

@@ -214,14 +214,17 @@ impl LiveDaemon {
     /// Daemon-level restart over the SAME DB/HOME (P3 A7 restart matrix).
     ///
     /// Quiesces the current generation (aborts in-flight drives via their
-    /// coordinator cancellation tokens, then the HTTP serve task), resets
-    /// the published runtime bundle, and re-runs the PRODUCTION attach/boot
-    /// path: `publish_creator_runtime_bundle` (fresh engine/coordinator/
-    /// supervisor over the same pool + terminal-schedule reconciliation)
-    /// followed by `run_boot_recovery` — the exact A7 recovery order real
-    /// daemon boot uses. A fresh listener/router is bound and `daemon_url`
-    /// in the hermetic `config.toml` is updated so CLI children resolve the
-    /// new daemon.
+    /// coordinator cancellation tokens, then the HTTP serve task), resets the
+    /// published runtime bundle, and re-runs the PRODUCTION attach/boot path:
+    /// `publish_creator_runtime_bundle` — which republishes a fresh
+    /// engine/coordinator/supervisor over the same pool, runs the
+    /// terminal-schedule reconciliation, AND performs A7 recovery, because
+    /// recovery is owned by the execution owner the publish establishes
+    /// (`start_execution`). Production boot (`boot.rs`) recovers the same way
+    /// and never calls `run_boot_recovery` separately, so neither does this
+    /// harness. A fresh listener/router is bound and `daemon_url` in the
+    /// hermetic `config.toml` is updated so CLI children resolve the new
+    /// daemon.
     ///
     /// The bundled Host facade / agent-host config / tool dispatch are kept
     /// (the test owns them); every engine-side handle (runners, coordinator
@@ -236,25 +239,14 @@ impl LiveDaemon {
         // Let the old serve task die so its listener is fully released.
         tokio::task::yield_now().await;
 
-        // Production attach path over the same DB/HOME.
+        // Production attach path over the same DB/HOME. Retires the previous
+        // execution owner (A7), republishes the runtime bundle, and recovers
+        // the durable runs through the new owner — the exact production order.
         self.state.reset_runtime_bundle();
         self.state
             .publish_creator_runtime_bundle()
             .await
             .expect("daemon restart: republish Creator-DB runtime bundle");
-        let engine = self.state.engine().expect("engine after restart");
-        let sqlite = Arc::new(
-            nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(Arc::new(
-                self.pool.clone(),
-            )),
-        );
-        nexus_core::execution::run_boot_recovery(
-            &engine,
-            &sqlite,
-            self.state.run_coordinator().as_ref(),
-            self.state.shutdown_notify(),
-        )
-        .await;
 
         // Rebind a fresh listener + router (the old listener was consumed by
         // the aborted serve task) and point CLI children at the new port.

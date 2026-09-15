@@ -879,9 +879,13 @@ impl WorkspaceState {
         // owner (P3-T1). Lazy attach is the SECOND place a creator DB becomes
         // available (Tier-0 boot, then Profile attach), so it must go through
         // the same `start_execution` seam — otherwise the daemon would have
-        // two engines. The slot is necessarily empty here: the boot path only
-        // skips execution when there was no creator DB, and this function is
-        // reached only in that case.
+        // two engines.
+        //
+        // A daemon-level restart republishes a FRESH generation over the SAME
+        // Creator DB (A7): this very core may still own the previous one, so
+        // retire it first. Retiring the OWN core's owner keeps the single-owner
+        // fence intact — a DIFFERENT core over the same DB is still refused by
+        // `start_execution`.
         //
         // The holder built above (rebuilt with the newly opened pool +
         // executor, preserving WASM/user capabilities) is handed to the core
@@ -890,6 +894,8 @@ impl WorkspaceState {
             .core_or_uninit()
             .await
             .map_err(|e| anyhow::anyhow!("lazy attach: core service unavailable: {e}"))?;
+        // No-op on a first attach (a Tier-0 boot starts no owner).
+        core.retire_execution().await;
         let workspace_state_provider = match (self.session_manager(), self.workspace_path()) {
             (Some(mgr), Some(root)) => Some(Arc::new(
                 crate::workspace::state_provider::DaemonWorkspaceStateProvider::new(mgr, root),
