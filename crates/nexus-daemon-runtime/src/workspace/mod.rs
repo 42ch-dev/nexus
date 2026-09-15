@@ -9,25 +9,13 @@
 //! preferable to a hard crash.
 
 pub mod actor_sessions;
-pub mod authority;
-pub mod bounds;
-pub mod commit_fs;
-pub mod executor;
-pub mod manager;
-pub mod scope;
-pub mod session;
-pub mod session_commit;
-pub mod state_provider;
-/// Test-only seams — absent from production builds.
-#[cfg(any(test, feature = "test-hooks"))]
-pub mod test_hooks;
 
 use crate::api::errors::NexusApiError;
 use crate::db::pool::{DbPool, PoolConfig};
 use crate::db::SqliteNarrativeGateway;
 use crate::lifecycle::{Lifecycle, LifecycleState, StatigLifecycle};
 use crate::workspace::actor_sessions::ActorSessionRegistry;
-use crate::workspace::session::WorkspaceSessionManager;
+use nexus_core::execution::session::WorkspaceSessionManager;
 use nexus_agent_host::config::AgentHostConfig;
 use nexus_contracts::local::domain::RuntimeMode;
 use nexus_contracts::CertFingerprintResponse;
@@ -169,8 +157,8 @@ pub struct WorkspaceState {
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
     /// Bounded workflow-run SSE registry (P4 §6.3).
-    run_event_registry: Arc<crate::run_events::RunEventRegistry>,
-    run_event_sinks: crate::run_events::RunEventSinkMap,
+    run_event_registry: Arc<nexus_core::execution::run_events::RunEventRegistry>,
+    run_event_sinks: nexus_core::execution::run_events::RunEventSinkMap,
     /// One async initialization gate for the lazy-attach runtime bundle
     /// (N-2): concurrent `ensure_creator_pool` callers serialize here and
     /// re-check; only the winner opens the pool and publishes the bundle.
@@ -318,7 +306,7 @@ impl WorkspaceState {
             execution_handle: Arc::new(RwLock::new(None)),
             prompt_executor: Arc::new(RwLock::new(None)),
             session_cancels: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
-            run_event_registry: Arc::new(crate::run_events::RunEventRegistry::new()),
+            run_event_registry: Arc::new(nexus_core::execution::run_events::RunEventRegistry::new()),
             run_event_sinks: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             bundle_gate: Arc::new(tokio::sync::Mutex::new(())),
             runtime_bundle: Arc::new(RwLock::new(None)),
@@ -441,7 +429,7 @@ impl WorkspaceState {
             execution_handle: Arc::new(RwLock::new(None)),
             prompt_executor: Arc::new(RwLock::new(None)),
             session_cancels: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
-            run_event_registry: Arc::new(crate::run_events::RunEventRegistry::new()),
+            run_event_registry: Arc::new(nexus_core::execution::run_events::RunEventRegistry::new()),
             run_event_sinks: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             bundle_gate: Arc::new(tokio::sync::Mutex::new(())),
             runtime_bundle: Arc::new(RwLock::new(None)),
@@ -841,7 +829,7 @@ impl WorkspaceState {
                 Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>,
             > = self.session_manager().and_then(|mgr| {
                 self.workspace_path().map(|root| {
-                    Arc::new(crate::workspace::executor::DaemonWorkspaceExecutor::new(
+                    Arc::new(nexus_core::execution::executor::WorkspaceCommitExecutor::new(
                         mgr, root,
                     ))
                         as Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>
@@ -898,7 +886,7 @@ impl WorkspaceState {
         core.retire_execution().await;
         let workspace_state_provider = match (self.session_manager(), self.workspace_path()) {
             (Some(mgr), Some(root)) => Some(Arc::new(
-                crate::workspace::state_provider::DaemonWorkspaceStateProvider::new(mgr, root),
+                nexus_core::execution::state_provider::CoreWorkspaceStateProvider::new(mgr, root),
             ) as Arc<dyn nexus_orchestration::capability::WorkspaceStateProvider>),
             _ => None,
         };
@@ -928,6 +916,15 @@ impl WorkspaceState {
                     prompt_executor: prompt_executor.clone(),
                     daemon_tool_dispatch: self.daemon_tool_dispatch(),
                     workspace_executor: None,
+                    // P3-T2: same shared manager + canonical root the executor
+                    // adapter is built from, so the handle commits through the
+                    // authority its own workspace surface does.
+                    workspace_commit: self.session_manager().map(|mgr| {
+                        nexus_core::execution::workspace::WorkspaceCommitAuthority::new(
+                            mgr,
+                            self.workspace_path().unwrap_or_default(),
+                        )
+                    }),
                     capability_holder: Some(holder.clone()),
                     session_cancels: Some(self.session_cancels()),
                     workspace_state_provider,
@@ -1380,12 +1377,12 @@ impl WorkspaceState {
 
     /// Get the shared per-run cancellation tokens (A1).
     #[must_use]
-    pub fn run_event_registry(&self) -> Arc<crate::run_events::RunEventRegistry> {
+    pub fn run_event_registry(&self) -> Arc<nexus_core::execution::run_events::RunEventRegistry> {
         Arc::clone(&self.run_event_registry)
     }
 
     #[must_use]
-    pub fn run_event_sinks(&self) -> crate::run_events::RunEventSinkMap {
+    pub fn run_event_sinks(&self) -> nexus_core::execution::run_events::RunEventSinkMap {
         Arc::clone(&self.run_event_sinks)
     }
 

@@ -15,7 +15,6 @@ pub mod actor_knowledge_view;
 pub mod actor_run_capture;
 pub mod api;
 pub mod auth;
-pub mod auto_chronology;
 pub mod boot;
 pub mod capability_registry;
 pub mod character_tom;
@@ -26,7 +25,6 @@ pub mod config;
 // feature (the default daemon graph stays libp2p-free and tungstenite-free).
 #[cfg(feature = "connect-client")]
 pub mod connect;
-pub mod cron_supervisor;
 pub mod db;
 pub mod directive_store;
 pub mod execution_projection;
@@ -35,9 +33,6 @@ pub mod lifecycle;
 pub mod pack_import;
 pub mod path_enrichment;
 pub mod prompt_executor;
-pub mod refresh_scheduler;
-pub mod run_events;
-pub mod stale_findings_watcher;
 // V1.153 P2 (DF-73): embedded `apps/web` SPA — compiled only when the
 // `web-embed` feature is ON (default). The slim `nexus-runtime` artifact
 // builds with `--no-default-features --features connect-host`, so the SPA

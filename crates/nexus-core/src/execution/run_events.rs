@@ -1,6 +1,5 @@
 //! Bounded per-run workflow event rings and live SSE replay (v1.188 P4 §6.3).
 
-use nexus_agent_host::capability::model::HostEvent;
 use nexus_orchestration::run_state::RunRecord;
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
@@ -30,7 +29,7 @@ pub const MAX_PENDING_BYTES_PER_SUB: usize = 1024 * 1024;
 const SUBSCRIBER_CHANNEL_CAPACITY: usize = MAX_PENDING_FRAMES_PER_SUB + 1;
 
 /// Shared map of per-run sinks registered before drive; the coordinator and
-/// [`crate::prompt_executor::HostPromptExecutor`] share this handle.
+/// the daemon's prompt executor share this handle.
 pub type RunEventSinkMap = Arc<tokio::sync::Mutex<std::collections::HashMap<String, RunEventSink>>>;
 
 /// Root run id of any session id.
@@ -71,7 +70,18 @@ pub struct RunEventSink {
 }
 
 impl RunEventSink {
-    pub fn publish_host_event(&self, step_id: &str, attempt_id: &str, host_event: &HostEvent) {
+    /// Publish one host-lifecycle event onto this run's ring.
+    ///
+    /// The payload is any `Serialize` value: the execution cohort owns the
+    /// bounded ring, not the Host event vocabulary, so the daemon passes its
+    /// `HostEvent` and core names no Host type. Encoding is unchanged —
+    /// `host_event` is inlined exactly as the concrete payload serializes.
+    pub fn publish_host_event<T: Serialize + ?Sized>(
+        &self,
+        step_id: &str,
+        attempt_id: &str,
+        host_event: &T,
+    ) {
         let Some(registry) = self.registry.upgrade() else {
             return;
         };
@@ -84,14 +94,17 @@ impl RunEventSink {
     }
 }
 
+/// One host-lifecycle frame. Generic over the payload so the execution
+/// cohort never names the Host event enum; `T = HostEvent` on the daemon side
+/// serializes to the same bytes.
 #[derive(Debug, Clone, Serialize)]
-pub struct HostEventWire<'a> {
+pub struct HostEventWire<'a, T: ?Sized> {
     pub run_id: &'a str,
     pub epoch: Uuid,
     pub sequence: u64,
     pub step_id: &'a str,
     pub attempt_id: &'a str,
-    pub host_event: &'a HostEvent,
+    pub host_event: &'a T,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -132,6 +145,26 @@ pub struct SseFrame {
 struct QueuedFrame {
     frame: SseFrame,
     wire_bytes: usize,
+}
+
+/// One bounded page of a run's retained frames.
+#[derive(Debug, Clone)]
+pub struct RunPage {
+    /// Frames strictly after the requested cursor, capped by `limit`.
+    pub frames: Vec<SseFrame>,
+    /// Watermark to pass as the next `after_sequence`.
+    pub next_sequence: u64,
+    /// The run reached an authoritative terminal state.
+    pub terminal: bool,
+    /// The requested tail was retention-trimmed; the caller must resynchronize.
+    pub resync_required: bool,
+}
+
+/// Why a bounded page read could not be served.
+#[derive(Debug, Clone)]
+pub enum PageError {
+    /// No live or terminal ring is retained for the run.
+    UnknownRun(String),
 }
 
 #[derive(Debug)]
@@ -286,12 +319,12 @@ impl RunEventRegistry {
         })
     }
 
-    pub fn publish_host_event_for_run(
+    pub fn publish_host_event_for_run<T: Serialize + ?Sized>(
         &self,
         run_id: &str,
         step_id: &str,
         attempt_id: &str,
-        host_event: &HostEvent,
+        host_event: &T,
     ) {
         self.inner
             .publish_host_event(run_id, step_id, attempt_id, host_event);
@@ -454,6 +487,53 @@ impl RunEventRegistry {
         })
     }
 
+    /// Read a bounded page of a run's retained frames.
+    ///
+    /// Reads the SAME ring the SSE transport replays from, so the ring's
+    /// item/byte caps and the explicit-gap frames are identical here. The
+    /// page is strictly after `after_sequence`; `next_sequence` is the
+    /// watermark to pass on the next call. Terminal rings are readable and
+    /// report `terminal = true`.
+    ///
+    /// # Errors
+    /// Returns [`PageError::UnknownRun`] when no live or terminal ring is
+    /// retained for `run_id`.
+    pub fn read_page(
+        &self,
+        run_id: &str,
+        after_sequence: Option<u64>,
+        limit: usize,
+    ) -> Result<RunPage, PageError> {
+        let state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (ring, terminal) = if let Some(ring) = state.live.get(run_id) {
+            (ring, false)
+        } else if let Some(ring) = state.terminal.get(run_id) {
+            (ring, true)
+        } else {
+            return Err(PageError::UnknownRun(run_id.to_string()));
+        };
+        let first_retained = ring.records.front().map_or(1, |r| r.sequence);
+        // A cursor below the retained window means the requested tail was
+        // retention-trimmed: the reader must resynchronize rather than
+        // silently receive a non-contiguous page.
+        let resync_required = after_sequence.is_some_and(|seq| seq + 1 < first_retained);
+        let mut frames = collect_from(ring, run_id, after_sequence);
+        frames.truncate(limit.max(1));
+        let next_sequence = frames
+            .last()
+            .map_or_else(|| after_sequence.unwrap_or(0), |f| parse_frame_sequence(f));
+        Ok(RunPage {
+            frames,
+            next_sequence,
+            terminal,
+            resync_required,
+        })
+    }
+
     /// Current live subscriber count for a run (test/diagnostic).
     #[cfg(test)]
     pub fn live_subscriber_count(&self, run_id: &str) -> usize {
@@ -515,12 +595,12 @@ impl RunEventRegistryInner {
         state.terminal.get(run_id).is_some_and(|ring| ring.closed)
     }
 
-    fn publish_host_event(
+    fn publish_host_event<T: Serialize + ?Sized>(
         &self,
         run_id: &str,
         step_id: &str,
         attempt_id: &str,
-        host_event: &HostEvent,
+        host_event: &T,
     ) {
         if self.ring_closed(run_id) {
             return;
@@ -734,6 +814,15 @@ fn gap_frame(run_id: &str, epoch: Uuid, from: u64, to: u64) -> SseFrame {
 
 fn lag_gap_frame(run_id: &str, epoch: Uuid, sequence: u64) -> SseFrame {
     gap_frame(run_id, epoch, sequence, sequence)
+}
+
+/// The numeric sequence carried by a frame id (`<epoch>:<sequence>`).
+fn parse_frame_sequence(frame: &SseFrame) -> u64 {
+    frame
+        .id
+        .rsplit_once(':')
+        .and_then(|(_, seq)| seq.parse().ok())
+        .unwrap_or(0)
 }
 
 fn parse_cursor(cursor: &str) -> Result<(Uuid, u64), SubscribeError> {
@@ -972,17 +1061,9 @@ mod tests {
         let sink = registry.try_register_live("run-1").expect("register");
         registry.publish_run_state("run-1", &mk_record("run-1", SessionStatus::Completed, 1));
         registry.mark_terminal("run-1");
-        sink.publish_host_event(
-            "step",
-            "attempt",
-            &nexus_agent_host::capability::model::HostEvent::MessageDelta(
-                nexus_agent_host::capability::model::TextDeltaEvent {
-                    session_id: nexus_agent_host::HostSessionId::new(),
-                    op_id: nexus_agent_host::HostOperationId::new(),
-                    text: "late".into(),
-                },
-            ),
-        );
+        // Any serializable payload stands in for the daemon's concrete
+        // `HostEvent`; the ring's rejection is payload-independent.
+        sink.publish_host_event("step", "attempt", &serde_json::json!({ "late": true }));
         let mut sub = registry
             .subscribe_live("run-1", None, "/inspect".into())
             .expect("subscribe");

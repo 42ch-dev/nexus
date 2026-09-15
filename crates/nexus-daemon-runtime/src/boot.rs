@@ -608,7 +608,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         std::sync::Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>,
     > = state.session_manager().and_then(|mgr| {
         state.workspace_path().map(|root| {
-            std::sync::Arc::new(crate::workspace::executor::DaemonWorkspaceExecutor::new(
+            std::sync::Arc::new(nexus_core::execution::executor::WorkspaceCommitExecutor::new(
                 mgr, root,
             )) as std::sync::Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>
         })
@@ -735,7 +735,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             )) as Arc<dyn nexus_core::execution::workflow::RunEventPort>;
             let workspace_state_provider = match (state.session_manager(), state.workspace_path()) {
                 (Some(mgr), Some(root)) => Some(Arc::new(
-                    crate::workspace::state_provider::DaemonWorkspaceStateProvider::new(mgr, root),
+                    nexus_core::execution::state_provider::CoreWorkspaceStateProvider::new(mgr, root),
                 ) as Arc<dyn nexus_orchestration::capability::WorkspaceStateProvider>),
                 _ => None,
             };
@@ -745,6 +745,18 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                 Arc::new(nexus_agent_host::providers::port::ProviderPortAdapter::new(
                     Arc::clone(&agent_host_facade),
                 ));
+            // P3-T2: the durable commit authority the handle commits through,
+            // bound to the SAME shared manager and canonical root the executor
+            // adapter uses. When no manager/root is published yet (Tier-0
+            // attach) the handle simply has no commit authority.
+            let workspace_commit = match (state.session_manager(), state.workspace_path()) {
+                (Some(mgr), Some(root)) => {
+                    Some(nexus_core::execution::workspace::WorkspaceCommitAuthority::new(
+                        mgr, root,
+                    ))
+                }
+                _ => None,
+            };
             let deps = nexus_core::execution::RunnerDeps {
                 prompt_executor: prompt_executor.clone(),
                 daemon_tool_dispatch: Some(tool_dispatch.clone()),
@@ -755,6 +767,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                 provider_catalog,
                 binding_provider,
                 run_events: Some(run_events),
+                workspace_commit,
                 workspace_root: state.workspace_path().map(std::path::PathBuf::from),
                 nexus_home: Some(state.nexus_home().clone()),
                 shutdown_notify: Some(state.shutdown_notify()),
@@ -1177,8 +1190,8 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             let watcher_pool = schedule_pool.clone();
             let watcher_shutdown = state.shutdown_notify();
             let watcher_config =
-                crate::stale_findings_watcher::StaleFindingsWatcherConfig::from_env();
-            let _watcher_handle = crate::stale_findings_watcher::spawn_stale_findings_watcher(
+                nexus_core::execution::schedules::stale_findings::StaleFindingsWatcherConfig::from_env();
+            let _watcher_handle = nexus_core::execution::schedules::stale_findings::spawn_stale_findings_watcher(
                 watcher_pool,
                 watcher_shutdown,
                 watcher_config,
@@ -1205,12 +1218,12 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             let cron_workspace = state.workspace_path().map(std::path::PathBuf::from);
             let cron_supervisor = schedule_supervisor.clone();
             let cron_shutdown = state.shutdown_notify();
-            let cron_config = crate::cron_supervisor::CronSupervisorConfig::from_env();
+            let cron_config = nexus_core::execution::schedules::cron::CronSupervisorConfig::from_env();
             // V1.51 T-B P0: pass workspace_dir for file-lock path construction.
             // If workspace_path is unset, use an empty path (defensive — a daemon
             // without a workspace should not have schedule_json-bearing Works).
             let cron_ws_path = cron_workspace.unwrap_or_default();
-            let _cron_handle = crate::cron_supervisor::spawn_cron_supervisor(
+            let _cron_handle = nexus_core::execution::schedules::cron::spawn_cron_supervisor(
                 cron_pool,
                 cron_ws_path,
                 cron_supervisor,
@@ -1231,8 +1244,8 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             let chron_pool = schedule_pool.clone();
             let chron_workspace = state.workspace_path().map(std::path::PathBuf::from);
             let chron_shutdown = state.shutdown_notify();
-            let chron_config = crate::auto_chronology::AutoChronologyConfig::from_env();
-            let _chron_handle = crate::auto_chronology::spawn_auto_chronology_tick(
+            let chron_config = nexus_core::execution::schedules::chronology::AutoChronologyConfig::from_env();
+            let _chron_handle = nexus_core::execution::schedules::chronology::spawn_auto_chronology_tick(
                 chron_pool,
                 chron_workspace,
                 chron_shutdown,
@@ -1250,8 +1263,8 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         {
             let refresh_pool = schedule_pool.clone();
             let refresh_shutdown = state.shutdown_notify();
-            let refresh_config = crate::refresh_scheduler::RefreshSchedulerConfig::from_env();
-            let _refresh_handle = crate::refresh_scheduler::spawn_refresh_scheduler(
+            let refresh_config = nexus_core::execution::schedules::refresh::RefreshSchedulerConfig::from_env();
+            let _refresh_handle = nexus_core::execution::schedules::refresh::spawn_refresh_scheduler(
                 refresh_pool,
                 refresh_shutdown,
                 refresh_config,

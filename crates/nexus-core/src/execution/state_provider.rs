@@ -1,4 +1,5 @@
-//! Live workspace state for preset expression evaluation (v1.188 P3).
+//! Live workspace state for preset expression evaluation (v1.190 P3-T2;
+//! moved from the daemon's `workspace::state_provider`).
 //!
 //! Preset states may branch on `_context.workspace.*`. The wiring here binds
 //! that object to the SAME shared [`WorkspaceSessionManager`] the commit
@@ -12,13 +13,13 @@ use nexus_orchestration::capability::WorkspaceStateProvider;
 
 use super::session::WorkspaceSessionManager;
 
-/// Resolves workspace state from a daemon workspace session authority.
-pub struct DaemonWorkspaceStateProvider {
+/// Resolves workspace state from the core workspace session authority.
+pub struct CoreWorkspaceStateProvider {
     session_manager: Arc<WorkspaceSessionManager>,
     canonical_workspace_root: String,
 }
 
-impl DaemonWorkspaceStateProvider {
+impl CoreWorkspaceStateProvider {
     /// Bind the provider to one shared manager and workspace root.
     #[must_use]
     pub const fn new(
@@ -33,7 +34,7 @@ impl DaemonWorkspaceStateProvider {
 }
 
 #[async_trait]
-impl WorkspaceStateProvider for DaemonWorkspaceStateProvider {
+impl WorkspaceStateProvider for CoreWorkspaceStateProvider {
     async fn workspace_state(&self) -> Option<serde_json::Value> {
         let intent = nexus_local_db::latest_committed_intent_for_root(
             self.session_manager.pool().as_ref(),

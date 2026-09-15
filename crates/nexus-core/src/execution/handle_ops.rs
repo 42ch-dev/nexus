@@ -1,0 +1,332 @@
+//! Family-typed execution operations on [`ExecutionHandle`] (v1.190 P3-T2).
+//!
+//! The four operations the execution authority owns for the transport:
+//! schedule add/signal, durable workspace commit, and the bounded run-event
+//! page. Each is a typed entry point over an authority the handle already
+//! owns — the transport keeps its HTTP envelope, status codes and CLI
+//! composition; this module only removes the transport's need to reach into
+//! scheduler or commit internals directly.
+//!
+//! The schedule operations gate on STORED Actor admission: every transition
+//! re-reads the durable row through the attached supervisor, never a
+//! process-global "active" flag, so a restart cannot leave a live-but-
+//! unadmitted owner.
+
+use std::sync::Arc;
+
+use nexus_contracts::generated::core::{
+    CoreRunEventsResponse, CoreRunEventsResponseEventsItem, CoreRunEventsResponseEventsItemKind,
+    CoreRunEventsResponseNextSequence, CoreRunEventsResponseRunId,
+};
+use nexus_contracts::{
+    AddScheduleRequest, AddScheduleResponse, CoreRunEventsRequest, SignalScheduleRequest,
+    SignalScheduleResponse,
+};
+
+use crate::error::{CoreError, CoreResult};
+use crate::execution::lifecycle::ExecutionHandle;
+use crate::execution::workflow::{RunEventPort, RunEventReadError};
+use crate::principal::Principal;
+
+/// First sequence for a cursorless read.
+const DEFAULT_RUN_EVENT_LIMIT: usize = 64;
+
+impl ExecutionHandle {
+    /// Insert a new schedule for the admitted principal's creator.
+    ///
+    /// The row is inserted through the attached supervisor, which persists the
+    /// durable status/concurrency/dependency/core-context-version fields every
+    /// other insertion path writes. Eligibility is decided later by the tick,
+    /// from the STORED row — this call does not pre-admit.
+    ///
+    /// # Errors
+    /// `Forbidden` when the request names a foreign creator, `NotFound` when
+    /// no supervisor is attached, `Busy` for a duplicate row, and `Internal`
+    /// for a storage fault.
+    pub async fn add_schedule(
+        &self,
+        principal: &Principal,
+        request: AddScheduleRequest,
+    ) -> CoreResult<AddScheduleResponse> {
+        if request.creator_id != principal.creator_id() {
+            return Err(CoreError::Forbidden {
+                resource: format!(
+                    "schedule for creator {} (principal owns {})",
+                    request.creator_id,
+                    principal.creator_id()
+                ),
+            });
+        }
+        let supervisor = self.schedule_supervisor()?;
+        let schedule_id = new_schedule_id();
+        let schedule = build_schedule(&schedule_id, &request);
+        let seed = request.seed.clone().unwrap_or_default();
+        supervisor
+            .insert_pending_with_descriptor_and_seed(schedule, None, &seed)
+            .await
+            .map_err(map_supervisor_error)?;
+        Ok(AddScheduleResponse {
+            schedule_id,
+            status: "pending".to_string(),
+            core_context_version: 0,
+        })
+    }
+
+    /// Commit a validated change manifest through the durable workspace
+    /// authority this owner was bound to.
+    ///
+    /// The manifest crosses the generated contract; the durable commit keeps
+    /// its retained owner, digest idempotence and OCC pre-image checks. The
+    /// principal is verified through the store `Principal` type — this
+    /// operation takes an admitted principal and refuses an empty one.
+    ///
+    /// # Errors
+    /// `Forbidden` for a principal with no creator, `NotFound` when no commit
+    /// authority is bound, and the mapped conflict/validation/storage refusal
+    /// (see [`crate::execution::workspace::commit_workspace`]).
+    pub async fn commit_workspace(
+        &self,
+        principal: &Principal,
+        request: nexus_contracts::CoreWorkspaceCommitRequest,
+    ) -> CoreResult<nexus_contracts::CoreWorkspaceCommitResponse> {
+        if principal.creator_id().trim().is_empty() {
+            return Err(CoreError::Forbidden {
+                resource: "workspace commit requires an admitted principal".into(),
+            });
+        }
+        let authority = self.workspace_commit_authority()?;
+        authority.commit(request).await
+    }
+
+    /// Apply a lifecycle signal to an existing schedule.
+    ///
+    /// `pause`/`resume` flip the durable row through the supervisor, which
+    /// re-reads that row's status; the remaining signals are the transport's
+    /// own admission/cancel orchestration and are refused here rather than
+    /// half-implemented as a second admission path.
+    ///
+    /// # Errors
+    /// `NotFound` when the schedule or an attached authority is absent,
+    /// `Busy` for an ineligible/conflicting transition, `InvalidInput` for a
+    /// signal this seam does not serve, `Internal` for a storage fault.
+    pub async fn signal_schedule(
+        &self,
+        _principal: &Principal,
+        schedule_id: String,
+        request: SignalScheduleRequest,
+    ) -> CoreResult<SignalScheduleResponse> {
+        let supervisor = self.schedule_supervisor()?;
+        let status = match request.signal.as_str() {
+            "pause" => {
+                if !supervisor
+                    .pause_schedule(&schedule_id)
+                    .await
+                    .map_err(map_supervisor_error)?
+                {
+                    return Err(CoreError::Busy);
+                }
+                "paused"
+            }
+            "resume" => {
+                supervisor
+                    .resume_schedule(&schedule_id)
+                    .await
+                    .map_err(map_supervisor_error)?;
+                "running"
+            }
+            "start" | "advance" | "continue" | "cancel" => {
+                return Err(CoreError::InvalidInput {
+                    field: "signal".into(),
+                    reason: format!(
+                        "signal '{}' is served by the transport's schedule \
+                         orchestration, not the core signal seam",
+                        request.signal
+                    ),
+                });
+            }
+            other => {
+                return Err(CoreError::InvalidInput {
+                    field: "signal".into(),
+                    reason: format!("unknown signal '{other}'"),
+                });
+            }
+        };
+        Ok(SignalScheduleResponse {
+            schedule_id,
+            status: status.to_string(),
+            current_wait_id: None,
+        })
+    }
+}
+
+/// Read a bounded page of a run's retained events.
+///
+/// The page comes from the SAME bounded ring the SSE transport replays from
+/// (through the run-event port), so the item/byte caps and the explicit-gap
+/// frames are identical on both surfaces. `resync_required` reports a
+/// retention-trimmed cursor.
+///
+/// # Errors
+/// `NotFound` when no ring is retained for `run_id`; `InvalidInput` for an
+/// unparsable cursor.
+pub fn run_event_page(
+    port: &Arc<dyn RunEventPort>,
+    request: CoreRunEventsRequest,
+) -> CoreResult<CoreRunEventsResponse> {
+    // `after_sequence` is a validated decimal-string newtype and `limit` a
+    // `NonZeroU64`, so both are already shape-checked by the contract.
+    let after = request
+        .after_sequence
+        .as_ref()
+        .map(|cursor| {
+            cursor
+                .as_str()
+                .parse::<u64>()
+                .map_err(|_| CoreError::InvalidInput {
+                    field: "after_sequence".into(),
+                    reason: "must be a non-negative decimal sequence".into(),
+                })
+        })
+        .transpose()?;
+    let limit = usize::try_from(request.limit.get()).unwrap_or(DEFAULT_RUN_EVENT_LIMIT);
+    let page = port
+        .read_page(request.run_id.as_str(), after, limit)
+        .map_err(|err| match err {
+            RunEventReadError::UnknownRun(run_id) => CoreError::NotFound {
+                resource: format!("run event ring {run_id}"),
+            },
+        })?;
+
+    let events = page
+        .frames
+        .into_iter()
+        .map(|(kind, payload)| CoreRunEventsResponseEventsItem {
+            sequence: 0,
+            kind: CoreRunEventsResponseEventsItemKind::try_from(kind)
+                .unwrap_or_else(|_| CoreRunEventsResponseEventsItemKind("event".to_string())),
+            payload: payload.as_object().cloned().unwrap_or_default(),
+        })
+        .collect();
+    Ok(CoreRunEventsResponse {
+        run_id: CoreRunEventsResponseRunId::try_from(request.run_id).map_err(|err| {
+            CoreError::InvalidInput {
+                field: "run_id".into(),
+                reason: err.to_string(),
+            }
+        })?,
+        events,
+        next_sequence: CoreRunEventsResponseNextSequence::try_from(
+            page.next_sequence.to_string(),
+        )
+        .map_err(|err| CoreError::Internal {
+            category: format!("run-event watermark encode: {err}"),
+        })?,
+        terminal: page.terminal,
+        resync_required: page.resync_required,
+    })
+}
+
+impl ExecutionHandle {
+    /// Read a bounded page of a run's retained events.
+    ///
+    /// # Errors
+    /// `NotFound` when this owner has no run-event port (or no ring for the
+    /// run), `InvalidInput` for an unparsable cursor.
+    pub fn run_events(
+        &self,
+        _principal: &Principal,
+        request: CoreRunEventsRequest,
+    ) -> CoreResult<CoreRunEventsResponse> {
+        let port = self.coordinator().run_event_port().ok_or_else(|| {
+            CoreError::NotFound {
+                resource: "run event ring (no execution owner attached)".into(),
+            }
+        })?;
+        run_event_page(&port, request)
+    }
+}
+
+/// The numeric sequence carried by a frame id (`<epoch>:<sequence>`).
+fn parse_frame_sequence(id: &str) -> u64 {
+    id.rsplit_once(':')
+        .and_then(|(_, seq)| seq.parse().ok())
+        .unwrap_or(0)
+}
+
+impl ExecutionHandle {
+    /// The bound workspace commit authority, or a typed `NotFound`.
+    fn workspace_commit_authority(
+        &self,
+    ) -> CoreResult<crate::execution::workspace::WorkspaceCommitAuthority> {
+        self.workspace_commit
+            .clone()
+            .ok_or_else(|| CoreError::NotFound {
+                resource: "workspace commit authority (no execution owner bound)".into(),
+            })
+    }
+
+    /// The attached schedule supervisor, or a typed `NotFound`.
+    fn schedule_supervisor(
+        &self,
+    ) -> CoreResult<Arc<nexus_orchestration::schedule::supervisor::ScheduleSupervisor>> {
+        self.coordinator()
+            .schedule_supervisor()
+            .ok_or_else(|| CoreError::NotFound {
+                resource: "schedule supervisor (no execution owner attached)".into(),
+            })
+    }
+}
+
+/// Build a durable pending row from the generated add request.
+///
+/// `creator_id`/`preset_id`/`label`/`scheduled_at`/dependencies cross
+/// verbatim; the status is `Pending` with a fresh version-0 core context, so
+/// the row is inserted in exactly the shape the tick expects to admit.
+fn build_schedule(
+    schedule_id: &str,
+    request: &AddScheduleRequest,
+) -> nexus_contracts::local::schedule::Schedule {
+    use nexus_contracts::local::schedule::{
+        CoreContextVersion, Schedule, ScheduleConcurrency, ScheduleId, ScheduleStatus,
+    };
+    Schedule {
+        id: ScheduleId(schedule_id.to_string()),
+        creator_id: request.creator_id.clone(),
+        preset_id: request.preset_id.clone(),
+        preset_version: 1,
+        status: ScheduleStatus::Pending,
+        concurrency: ScheduleConcurrency::Serial,
+        depends_on: request
+            .depends_on
+            .iter()
+            .map(|id| ScheduleId(id.clone()))
+            .collect(),
+        current_core_context_version: CoreContextVersion(0),
+        current_session_id: None,
+        scheduled_at: request.scheduled_at.clone(),
+        label: request.label.clone(),
+        created_at: String::new(),
+        updated_at: String::new(),
+        terminated_at: None,
+    }
+}
+
+/// Fresh schedule id in the daemon's retained `SCH<timestamp>` shape.
+fn new_schedule_id() -> String {
+    format!("SCH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"))
+}
+
+/// Map a supervisor refusal onto the neutral taxonomy.
+fn map_supervisor_error(
+    err: nexus_orchestration::schedule::supervisor::SupervisorError,
+) -> CoreError {
+    use nexus_orchestration::schedule::supervisor::SupervisorError as E;
+    match err {
+        E::NotFound(_) => CoreError::NotFound {
+            resource: "schedule".into(),
+        },
+        E::InvalidTransition(..) => CoreError::Busy,
+        E::DuplicateSchedule { .. } => CoreError::Busy,
+        E::Database(e) => crate::error::db_err(&e),
+    }
+}

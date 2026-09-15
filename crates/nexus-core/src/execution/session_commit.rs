@@ -23,13 +23,13 @@ use super::session::{
 ///
 /// Expands to a real check in test/`test-hooks` builds and to nothing at all in
 /// production, so the production path carries neither an always-`Ok` wrapper
-/// nor a dead branch. The gated crash seams live in `workspace::test_hooks`.
+/// nor a dead branch. The gated crash seams live in `execution::test_hooks`.
 macro_rules! test_crash_if {
     ($point:expr) => {
         #[cfg(any(test, feature = "test-hooks"))]
         {
-            if $crate::workspace::test_hooks::crash_point_is($point) {
-                return Err($crate::workspace::session::SessionError::Internal(format!(
+            if $crate::execution::test_hooks::crash_point_is($point) {
+                return Err($crate::execution::session::SessionError::Internal(format!(
                     "test_crash:{}",
                     $point
                 )));

@@ -6,7 +6,7 @@
 //! finish-detection + advance logic is covered by
 //! `nexus-orchestration::auto_chronology_tick`.
 
-use nexus_daemon_runtime::auto_chronology::{
+use nexus_core::execution::schedules::chronology::{
     parse_interval_secs, run_one_tick, DEFAULT_AUTO_CHRONOLOGY_INTERVAL_SECS,
 };
 use nexus_local_db::works::{self, WorkRecord};
@@ -158,7 +158,7 @@ fn parse_interval_secs_handles_env_values() {
 fn from_env_uses_default_when_unset() {
     // Do NOT set/remove the env var here — that would mutate process-global
     // state (R-V150P3AUTOCHRONO-05). We only assert the no-override default.
-    let cfg = nexus_daemon_runtime::auto_chronology::AutoChronologyConfig::from_env();
+    let cfg = nexus_core::execution::schedules::chronology::AutoChronologyConfig::from_env();
     assert!(
         cfg.interval.as_secs() == DEFAULT_AUTO_CHRONOLOGY_INTERVAL_SECS
             || std::env::var("NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN").is_ok(),

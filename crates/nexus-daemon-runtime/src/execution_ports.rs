@@ -9,10 +9,12 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use nexus_core::execution::workflow::{ProviderCatalogPort, RunEventPort};
+use nexus_core::execution::workflow::{
+    ProviderCatalogPort, RunEventPage, RunEventReadError, RunEventPort,
+};
 use nexus_orchestration::run_state::RunRecord;
 
-use crate::run_events::{RunEventRegistry, RunEventSinkMap};
+use nexus_core::execution::run_events::{RunEventRegistry, RunEventSinkMap};
 
 /// Adapts the daemon's bounded per-run SSE registry to the execution port.
 ///
@@ -53,6 +55,38 @@ impl RunEventPort for DaemonRunEventPort {
 
     fn mark_terminal(&self, run_id: &str) {
         self.registry.mark_terminal(run_id);
+    }
+
+    fn read_page(
+        &self,
+        run_id: &str,
+        after_sequence: Option<u64>,
+        limit: usize,
+    ) -> Result<RunEventPage, RunEventReadError> {
+        // Forwards to the same bounded ring the SSE surface reads, so caps and
+        // explicit-gap semantics stay identical across both readers.
+        let page = self
+            .registry
+            .read_page(run_id, after_sequence, limit)
+            .map_err(|err| match err {
+                nexus_core::execution::run_events::PageError::UnknownRun(run_id) => {
+                    RunEventReadError::UnknownRun(run_id)
+                }
+            })?;
+        Ok(RunEventPage {
+            frames: page
+                .frames
+                .into_iter()
+                .map(|frame| {
+                    let payload = serde_json::from_str(&frame.data)
+                        .unwrap_or(serde_json::Value::Null);
+                    (frame.event, payload)
+                })
+                .collect(),
+            next_sequence: page.next_sequence,
+            terminal: page.terminal,
+            resync_required: page.resync_required,
+        })
     }
 }
 

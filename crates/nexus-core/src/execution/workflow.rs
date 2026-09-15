@@ -70,6 +70,42 @@ pub trait RunEventPort: Send + Sync {
     fn publish_run_state(&self, run_id: &str, record: &RunRecord);
     /// Close the run's ring as authoritative-terminal.
     fn mark_terminal(&self, run_id: &str);
+    /// Read a bounded page of the run's retained frames.
+    ///
+    /// The ring's item/byte caps and the explicit-gap semantics are the
+    /// owner's, so the read is a port operation rather than a core one: the
+    /// execution layer asks for a page without naming the ring type. A
+    /// retention-trimmed cursor sets [`RunEventPage::resync_required`].
+    ///
+    /// # Errors
+    /// Returns [`RunEventReadError::UnknownRun`] when no live or terminal
+    /// ring is retained for `run_id`.
+    fn read_page(
+        &self,
+        run_id: &str,
+        after_sequence: Option<u64>,
+        limit: usize,
+    ) -> Result<RunEventPage, RunEventReadError>;
+}
+
+/// One bounded page of a run's retained frames (transport-neutral).
+#[derive(Debug, Clone)]
+pub struct RunEventPage {
+    /// `(event kind, payload)` pairs strictly after the requested cursor.
+    pub frames: Vec<(String, serde_json::Value)>,
+    /// Watermark to pass as the next `after_sequence`.
+    pub next_sequence: u64,
+    /// The run reached an authoritative terminal state.
+    pub terminal: bool,
+    /// The requested tail was retention-trimmed; the caller must resynchronize.
+    pub resync_required: bool,
+}
+
+/// Why a bounded run-event read could not be served.
+#[derive(Debug, Clone)]
+pub enum RunEventReadError {
+    /// No live or terminal ring is retained for the run.
+    UnknownRun(String),
 }
 
 /// Provider catalog used to validate agent-binding provider references
@@ -1421,6 +1457,31 @@ impl WorkflowRunCoordinator {
             .schedule_supervisor
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(supervisor);
+    }
+
+    /// The run-event port this coordinator was built with, if any.
+    ///
+    /// `None` for a core-only or test coordinator that supplied no ring
+    /// registry; the typed run-event read then reports `NotFound` rather than
+    /// fabricating an empty page.
+    #[must_use]
+    pub fn run_event_port(&self) -> Option<Arc<dyn RunEventPort>> {
+        self.run_events.clone()
+    }
+
+    /// The attached schedule supervisor, if one exists.
+    ///
+    /// `None` for a standalone coordinator (tests, core-only callers) — the
+    /// typed schedule operations on [`crate::execution::ExecutionHandle`]
+    /// report `NotFound` rather than fabricating a supervisor.
+    #[must_use]
+    pub fn schedule_supervisor(
+        &self,
+    ) -> Option<Arc<nexus_orchestration::schedule::supervisor::ScheduleSupervisor>> {
+        self.schedule_supervisor
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Attach the daemon's Host plane so admission can validate provider

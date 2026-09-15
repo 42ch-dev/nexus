@@ -1087,7 +1087,7 @@ async fn explicit_legacy_running_without_session_starts() {
         .expect("resume running as paused");
     assert_eq!(paused, 0, "no driven_v1 running rows to pause");
     supervisor.tick().await.expect("tick succeeds");
-    nexus_daemon_runtime::cron_supervisor::run_one_tick(
+    nexus_core::execution::schedules::cron::run_one_tick(
         &daemon.pool,
         std::path::Path::new(""),
         &supervisor,
@@ -1421,7 +1421,7 @@ async fn admission_legacy_rows_inert_across_tick() {
     supervisor.tick().await.expect("tick succeeds");
 
     // Cron admission tick (the cron supervisor's step 2 path).
-    nexus_daemon_runtime::cron_supervisor::run_one_tick(
+    nexus_core::execution::schedules::cron::run_one_tick(
         &daemon.pool,
         std::path::Path::new(""),
         &supervisor,

@@ -16,7 +16,7 @@
 //! All errors are logged and the loop continues — a single failed tick must
 //! never crash the daemon. The task exits cleanly when `shutdown_notify` fires.
 //!
-//! This mirrors the [`crate::stale_findings_watcher`] spawn pattern (V1.39 P4).
+//! This mirrors the [`super::stale_findings`] spawn pattern (V1.39 P4).
 
 use std::path::Path;
 use std::sync::Arc;

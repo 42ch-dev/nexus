@@ -97,6 +97,13 @@ pub struct RunnerDeps {
     pub binding_provider: Option<String>,
     /// Per-run live-ring registry for the run SSE surface.
     pub run_events: Option<Arc<dyn RunEventPort>>,
+    /// The durable workspace commit authority (P3-T2).
+    ///
+    /// Supplied by the transport (or a test) with the shared session manager
+    /// bound to its active canonical root. When absent the handle's
+    /// `commit_workspace` reports `NotFound` rather than committing through an
+    /// unbound root.
+    pub workspace_commit: Option<crate::execution::workspace::WorkspaceCommitAuthority>,
     /// Frozen workspace root written into every v1 run descriptor.
     pub workspace_root: Option<std::path::PathBuf>,
     /// Nexus home used to resolve directory presets for source identity.
@@ -146,6 +153,11 @@ pub struct ExecutionHandle {
     session_cancels: Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
+    /// The durable workspace commit authority this owner commits through.
+    ///
+    /// Bound at establishment so `commit_workspace` cannot be routed to a
+    /// root the owner was not admitted for.
+    workspace_commit: Option<crate::execution::workspace::WorkspaceCommitAuthority>,
     /// The engine epoch this owner was admitted with, read from the durable
     /// workspace gate at establishment. It identifies the ownership
     /// generation of every run this handle drives.
@@ -587,6 +599,7 @@ impl CoreService {
             tracing::info!(decision = ?d, "execution start: recovery re-drive decision");
         }
 
+        let workspace_commit = deps.workspace_commit;
         let engine_epoch = read_engine_epoch(&pool).await;
 
         Ok(Arc::new(ExecutionHandle {
@@ -594,6 +607,7 @@ impl CoreService {
             coordinator,
             capability_holder,
             session_cancels,
+            workspace_commit,
             engine_epoch,
             closing: AtomicBool::new(false),
             settled: AtomicBool::new(false),

@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use base64::Engine;
 use nexus_daemon_runtime::test_utils::create_test_workspace;
-use nexus_daemon_runtime::workspace::executor::DaemonWorkspaceExecutor;
-use nexus_daemon_runtime::workspace::state_provider::DaemonWorkspaceStateProvider;
+use nexus_core::execution::executor::WorkspaceCommitExecutor;
+use nexus_core::execution::state_provider::CoreWorkspaceStateProvider;
 use nexus_daemon_runtime::workspace::WorkspaceState;
 use nexus_orchestration::capability::{CapabilityRegistry, CapabilityRuntimeDeps};
 use nexus_orchestration::engine::{GraphFlowEngine, OrchestrationEngine};
@@ -126,7 +126,7 @@ async fn production_preset_workflow_branches_on_live_workspace_state() {
         session_cancels: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         daemon_tool_dispatch: None,
         cdn_config: None,
-        workspace_executor: Some(Arc::new(DaemonWorkspaceExecutor::new(
+        workspace_executor: Some(Arc::new(WorkspaceCommitExecutor::new(
             Arc::clone(&mgr),
             root.clone(),
         ))),
@@ -137,7 +137,7 @@ async fn production_preset_workflow_branches_on_live_workspace_state() {
         Arc::new(SqliteSessionStorage::new(mgr.pool())),
         CapabilityRegistryHolder::with_registry(Arc::clone(&registry)),
     );
-    engine.set_workspace_state_provider(Arc::new(DaemonWorkspaceStateProvider::new(
+    engine.set_workspace_state_provider(Arc::new(CoreWorkspaceStateProvider::new(
         Arc::clone(&mgr),
         root.clone(),
     )));

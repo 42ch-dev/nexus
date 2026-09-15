@@ -18,7 +18,7 @@
 #![allow(clippy::unwrap_used)]
 use base64::Engine;
 
-use nexus_daemon_runtime::workspace::session::{
+use nexus_core::execution::session::{
     compute_content_hashes, occ_conflict_total, ChangeEntry, ChangeOp, SessionError, SessionId,
     WorkspaceSessionManager,
 };

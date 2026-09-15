@@ -603,21 +603,21 @@ pub async fn session_events(
     let sub = match registry.subscribe_live(&session_id, last_event_id, inspect_url) {
         Ok(rx) => rx,
         Err(
-            crate::run_events::SubscribeError::MalformedCursor
-            | crate::run_events::SubscribeError::FutureCursor,
+            nexus_core::execution::run_events::SubscribeError::MalformedCursor
+            | nexus_core::execution::run_events::SubscribeError::FutureCursor,
         ) => {
             return Err(NexusApiError::BadRequest {
                 code: "invalid_cursor".into(),
                 message: "malformed or future Last-Event-ID".into(),
             });
         }
-        Err(crate::run_events::SubscribeError::TooManySubscribers) => {
+        Err(nexus_core::execution::run_events::SubscribeError::TooManySubscribers) => {
             return Err(NexusApiError::ConflictCoded {
                 code: "sse_subscriber_limit".into(),
                 message: "too many concurrent SSE subscribers for this run".into(),
             });
         }
-        Err(crate::run_events::SubscribeError::HistoryUnavailable(body)) => {
+        Err(nexus_core::execution::run_events::SubscribeError::HistoryUnavailable(body)) => {
             return Err(NexusApiError::BadRequestCodedDetails {
                 code: "history_unavailable".into(),
                 message: "run event history is not available for replay".into(),

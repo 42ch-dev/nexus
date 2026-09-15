@@ -24,7 +24,19 @@ execution = [
     "dep:graph-flow",
     "dep:tokio-util",
     "dep:async-trait",
+    # The durable workspace commit authority moved out of the daemon: the
+    # intent/digest/recovery protocol hashes content (sha2), hex-encodes the
+    # digest, decodes base64 manifest bodies and uses renameat/linkat for the
+    # atomic file apply. All four are execution-only edges.
+    "dep:sha2",
+    "dep:hex",
+    "dep:base64",
+    "dep:nix",
 ]
+# The crash/rendezvous seams the workspace-commit recovery proofs drive. They
+# are compiled out of a production build and enabled by this package's own
+# dev-dependency self-reference, exactly as the daemon did before the move.
+test-hooks = []
 provider-host = ["dep:nexus-agent-host", "dep:nexus-acp-host"]
 compute = ["execution", "dep:nexus-wasm-host", "nexus-spoke-adapter/compute"]
 # Reverse-invoke/peer-control edge attaches with its owning cohort task; the
@@ -57,6 +69,17 @@ rmcp = { version = "=3.2.0", default-features = false, optional = true }
 # `#![allow(clippy::unused_async_trait_impl)]` in knowledge.rs is a lint name,
 # not a crate use), so the edge is optional and enabled by `execution`.
 async-trait = { workspace = true, optional = true }
+# The durable workspace commit authority (v1.190 P3-T2) moved out of the
+# daemon with its module set. These edges are `execution`-only:
+#   sha2   — content-addressed OCC hashes for the snapshot/intent digest
+#   hex    — lowercase-hex rendering of those digests
+#   base64 — manifest `contentBase64` body decode
+#   nix    — renameat/linkat + flock for the atomic file apply and the
+#            workspace-authority lease (same pin/features as the daemon)
+hex = { version = "0.4", optional = true }
+base64 = { version = "0.22", optional = true }
+nix = { version = "0.28", features = ["fs"], optional = true }
+sha2 = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
@@ -68,6 +91,10 @@ uuid.workspace = true
 serde_yaml = { workspace = true }
 
 [dev-dependencies]
+# Enable the gated execution test seams for this package's own tests without
+# exposing them in the production build.
+nexus-core = { path = ".", features = ["execution", "test-hooks"] }
+serial_test = "4"
 tempfile = "3"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 # Only `parking_lot` needs a dev-dep: the relocated execution regression module

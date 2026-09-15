@@ -4,10 +4,10 @@
 //!
 //! ## Role
 //!
-//! Reusable logic layer for per-Work volume auto-advance on finish. The daemon
-//! `nexus_daemon_runtime::auto_chronology` task calls [`run_one_tick`] on a
-//! 5-min interval (auto path); the CLI `creator works chronology advance` calls
-//! [`advance_manual`] directly (manual override path).
+//! Reusable logic layer for per-Work volume auto-advance on finish. The
+//! `nexus_core::execution::schedules::chronology` task calls [`run_one_tick`]
+//! on a 5-min interval (auto path); the CLI `creator works chronology advance`
+//! calls [`advance_manual`] directly (manual override path).
 //!
 //! ## Finish detection — auto path only (spec §3)
 //!
