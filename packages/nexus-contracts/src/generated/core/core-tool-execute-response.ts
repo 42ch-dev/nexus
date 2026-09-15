@@ -9,10 +9,5 @@
  */
 export interface CoreToolExecuteResponse {
   success: boolean;
-  /**
-   * Tool-produced JSON result; any JSON value.
-   */
-  result: {
-    [k: string]: unknown | undefined;
-  };
+  result: unknown;
 }

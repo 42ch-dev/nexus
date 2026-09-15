@@ -25,12 +25,7 @@ export interface NexusCoreContextHistoryEntry {
    * Payload type (text or struct).
    */
   payload_kind: string;
-  /**
-   * Core context content at this version.
-   */
-  content?: {
-    [k: string]: unknown | undefined;
-  };
+  content?: unknown;
   /**
    * How this version was derived.
    */

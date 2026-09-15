@@ -34,18 +34,8 @@ export interface ConflictResponse {
      * Index into the conflicting deltas[] array, if applicable.
      */
     delta_index?: number;
-    /**
-     * Expected value that caused the conflict.
-     */
-    expected?: {
-      [k: string]: unknown | undefined;
-    };
-    /**
-     * Actual value received.
-     */
-    actual?: {
-      [k: string]: unknown | undefined;
-    };
+    expected?: unknown;
+    actual?: unknown;
     /**
      * Suggested resolution strategy.
      */
