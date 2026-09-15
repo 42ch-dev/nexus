@@ -43,8 +43,14 @@ pub(crate) struct CoreInner {
     db_path: PathBuf,
     _guarded: Option<GuardedPool>,
     nexus_home: PathBuf,
+    /// Active creator this service was opened against (open-scoped).
     creator_id: String,
     workspace_slug: String,
+    /// Open-scoped generation: minted as `1` at [`CoreService::open`] and
+    /// never bumped for the service lifetime. It only proves a principal was
+    /// minted from THIS open — staleness of the on-disk selection is
+    /// enforced solely by `verify_selected_context`'s disk re-read.
+    /// Any future check MUST NOT test the generation alone.
     generation: AtomicU64,
     pub(crate) access: CoreAccess,
     closing: AtomicBool,
@@ -139,6 +145,14 @@ impl CoreService {
         Ok(())
     }
 
+    /// Re-read the on-disk active creator/workspace and require it to still
+    /// match the context this service was opened against.
+    ///
+    /// Invariant (QC v1.190 P0): this disk re-read is the ONLY staleness
+    /// enforcement — [`CoreInner::generation`] is open-scoped and never
+    /// bumps, so a principal minted from this open always passes the
+    /// generation check. Selection changes after open are caught here, not
+    /// by generation invalidation.
     pub(crate) fn verify_selected_context(&self) -> CoreResult<()> {
         if read_active_creator_id(&self.inner.nexus_home).as_deref()
             != Some(self.inner.creator_id.as_str())

@@ -90,22 +90,23 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
     assert_eq!(preview.relations.created, 1);
     assert_eq!(atom_counts(&pool, TARGET).await, (0, 0));
 
-    // The service rejects a foreign World before parsing or writing the pack.
+    // The service denies a foreign World before parsing or writing the pack.
     let denied = core.import_world_pack(&principal, FOREIGN.to_string(), request(&pack, "skip")).await.unwrap_err();
-    assert!(matches!(denied, CoreError::Forbidden { .. }));
-    // The old CLI ownership gate accepts this non-bootstrap creator, but its
-    // bootstrap-registered pool cannot authenticate that claim for the bridge.
-    // It is indistinguishable from a forged creator on the same pool: fail closed.
-    assert!(nexus_local_db::narrative_write::is_world_owned(&pool, "other_creator", FOREIGN).await.unwrap());
-    let denied = CoreService::import_legacy_world_pack(&pool, "other_creator", FOREIGN, request(&pack, "skip"), false).await.unwrap_err();
+    assert!(matches!(denied, CoreError::WorldOwnerDenied { .. }));
+    // Bridge admission is verified against core stored state: an unknown
+    // (forged) creator is rejected on identity before ownership is even
+    // consulted, and a known creator on a foreign World is rejected by the
+    // ownership guard.
+    let denied = CoreService::import_legacy_world_pack(&pool, "ctr_forged", FOREIGN, request(&pack, "skip"), false).await.unwrap_err();
     assert!(matches!(denied, CoreError::AuthRequired));
     let denied = CoreService::import_legacy_world_pack(&pool, CREATOR, FOREIGN, request(&pack, "skip"), false).await.unwrap_err();
-    assert!(matches!(denied, CoreError::Forbidden { .. }));
+    assert!(matches!(denied, CoreError::WorldOwnerDenied { .. }));
     assert_eq!(atom_counts(&pool, FOREIGN).await, (0, 0));
 
     let reader = nexus_local_db::open_pool_read_only(&db_path).await.unwrap();
-    // A read-only connection has no registered writer context. Both explicit
-    // query-only pools and SQLite mode=ro pools must fail before any atom write.
+    // A read-only connection must fail before any atom write: the query-only
+    // pool is refused by the bridge's admission, and SQLite mode=ro pools by
+    // the writer-protocol fencing.
     assert!(CoreService::import_legacy_world_pack(&reader, CREATOR, TARGET, request(&pack, "skip"), false).await.is_err());
     assert_eq!(atom_counts(&reader, TARGET).await, (0, 0));
     let readonly = CoreService::open(CoreOpenOptions { user_home: home, access: CoreAccess::ReadOnly }).await.unwrap();
@@ -136,4 +137,67 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
     reader.close().await;
     core.close().await.unwrap();
     pool.close().await;
+}
+
+/// qc1-F-001 regression (v1.190 P0 fix wave): the retained CLI open path
+/// (`nexus_local_db::init_pool`) registers its pool as the `bootstrap`
+/// writer while the configured active creator is a real non-bootstrap
+/// owner. The bridge must admit that owner through verified stored-state
+/// admission (creator exists in the stored creator state + owns the World)
+/// instead of hard-failing `AuthRequired`, and must still reject
+/// forged/unknown creators and foreign Worlds.
+#[tokio::test]
+async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().to_path_buf();
+    let nexus_home = home.join(".nexus42");
+    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(&home, CREATOR, "default")).unwrap();
+    std::fs::write(nexus_home.join("config.toml"), format!("active_creator_id = \"{CREATOR}\"\n[active_workspace_slug_by_creator]\n\"{CREATOR}\" = \"default\"\n")).unwrap();
+    let db_path = nexus_home_layout::workspace_state_db_path(&home, CREATOR, "default");
+    let cli_pool = nexus_local_db::init_pool(&db_path).await.unwrap();
+    seed(&cli_pool).await;
+
+    // The retained CLI pool's registered writer identity is `bootstrap`,
+    // not the configured active creator.
+    let identities: Vec<String> = sqlx::query_scalar("SELECT DISTINCT creator_id FROM core_writer_registration")
+        .fetch_all(&cli_pool).await.unwrap();
+    assert!(!identities.is_empty());
+    assert!(
+        identities.iter().all(|c| c == "bootstrap"),
+        "retained CLI pool must be bootstrap-registered: {identities:?}"
+    );
+
+    // Export through the read-only service (export is a read path) so the
+    // pack bytes come from the real export owner; the bridge then imports
+    // on the bootstrap pool only — no second writer registration.
+    let reader_core = CoreService::open(CoreOpenOptions { user_home: home, access: CoreAccess::ReadOnly }).await.unwrap();
+    let reader_principal = reader_core.active_principal().await.unwrap();
+    let export_request: PackExportRequest = serde_json::from_value(json!({})).unwrap();
+    let exported = reader_core.export_world_pack(&reader_principal, SOURCE.to_string(), export_request).await.unwrap();
+    let mut pack = serde_json::to_value(exported).unwrap();
+    // Atom ids are globally unique PKs; the SOURCE originals would collide
+    // (skip policy) against the same DB's SOURCE rows. Mint fresh target ids.
+    fresh_entry_ids_in_pack(&mut pack);
+    let plan = CoreService::import_legacy_world_pack(&cli_pool, CREATOR, TARGET, request(&pack, "skip"), true).await.unwrap();
+    assert_eq!(plan.entries.created, 3);
+    assert_eq!(plan.relations.created, 1);
+    assert_eq!(atom_counts(&cli_pool, TARGET).await, (0, 0));
+
+    // The real non-bootstrap active creator import succeeds.
+    let summary = CoreService::import_legacy_world_pack(&cli_pool, CREATOR, TARGET, request(&pack, "skip"), false).await.unwrap();
+    assert_eq!(summary.entries.created, 3);
+    assert_eq!(summary.relations.created, 1);
+    assert_eq!(atom_counts(&cli_pool, TARGET).await, (3, 1));
+
+    // Forged/unknown creators are still rejected, before any write.
+    let denied = CoreService::import_legacy_world_pack(&cli_pool, "ctr_forged", TARGET, request(&pack, "skip"), false).await.unwrap_err();
+    assert!(matches!(denied, CoreError::AuthRequired));
+    assert_eq!(atom_counts(&cli_pool, TARGET).await, (3, 1));
+
+    // A known creator on a foreign World is still rejected by ownership.
+    let denied = CoreService::import_legacy_world_pack(&cli_pool, CREATOR, FOREIGN, request(&pack, "skip"), false).await.unwrap_err();
+    assert!(matches!(denied, CoreError::WorldOwnerDenied { .. }));
+    assert_eq!(atom_counts(&cli_pool, FOREIGN).await, (0, 0));
+    reader_core.close().await.unwrap();
+    cli_pool.close().await;
 }

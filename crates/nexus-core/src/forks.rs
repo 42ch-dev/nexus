@@ -5,8 +5,8 @@
 use nexus_contracts::daemon_api::{CreateForkRequest, CreateForkResponse};
 use nexus_local_db::narrative_write;
 use serde_json::json;
-
-use crate::world_kb::{db_err, guards};
+use crate::error::db_err;
+use crate::world_kb::guards;
 use crate::{CoreAccess, CoreError, CoreResult, CoreService, Principal};
 
 impl CoreService {

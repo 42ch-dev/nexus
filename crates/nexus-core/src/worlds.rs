@@ -17,7 +17,7 @@ use sqlx::SqlitePool;
 use crate::error::{local_db_err, CoreError, CoreResult};
 use crate::principal::Principal;
 use crate::service::CoreService;
-use crate::world_kb::db_err;
+use crate::error::db_err;
 use crate::CoreAccess;
 
 /// `CoreError::Forbidden.resource` marker for a World hard-delete blocked by
@@ -28,6 +28,13 @@ pub const DELETE_WORLD_BLOCKED_BY_BINDINGS: &str = "world_has_actor_bindings";
 
 impl CoreService {
     /// List the workspace's worlds, oldest first (shared gateway read).
+    ///
+    /// Read-scope invariant (workspace-single-owner): the workspace state DB
+    /// holds one owner's workspace, so the lifecycle reads intentionally
+    /// return workspace-wide rows with no `owner_creator_id` filter —
+    /// parity with the pre-migration daemon read. Owner isolation is a
+    /// workspace boundary property, not a per-read filter; mutations stay
+    /// ownership-guarded.
     ///
     /// # Errors
     /// Returns [`CoreError::AuthRequired`] when the principal or the on-disk
@@ -43,6 +50,11 @@ impl CoreService {
     }
 
     /// Project one world's state; unknown ids are [`CoreError::NotFound`].
+    ///
+    /// Like [`Self::list_worlds`], this read is workspace-scoped: it returns
+    /// the requested row without an `owner_creator_id` filter (workspace
+    /// single owner; parity with the pre-migration daemon). Deletion is the
+    /// owner-guarded path.
     ///
     /// # Errors
     /// Returns [`CoreError::AuthRequired`] when the principal or the on-disk

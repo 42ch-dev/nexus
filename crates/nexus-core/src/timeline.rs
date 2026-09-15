@@ -17,10 +17,10 @@ use nexus_local_db::narrative_gateway::{list_timeline_events_page, TimelineEvent
 use serde_json::{Map, Value};
 use sqlx::SqlitePool;
 
-use crate::error::{CoreError, CoreResult};
+use crate::error::{db_err, CoreError, CoreResult};
 use crate::principal::Principal;
 use crate::service::CoreService;
-use crate::world_kb::{db_err, guards};
+use crate::world_kb::guards::{check_world_owner, WorldOwnerGuardFailure};
 use crate::worlds::narrative_internal;
 
 /// Overview worlds per page (unchanged wire contract).
@@ -115,6 +115,13 @@ impl CoreService {
     /// its aggregated era/event counts, ordered by `world_id`, keyset
     /// cursor on `world_id`.
     ///
+    /// Read-scope invariant (workspace-single-owner): the workspace state DB
+    /// holds one owner's workspace, so the overview intentionally returns
+    /// workspace-wide rows with no `owner_creator_id` filter — parity with
+    /// the pre-migration daemon read. Owner isolation is a workspace
+    /// boundary property, not a per-read filter; per-World writes stay
+    /// ownership-guarded.
+    ///
     /// # Errors
     /// Returns [`CoreError::AuthRequired`] when the principal or the on-disk
     /// selection fails verification, [`CoreError::InvalidInput`] when the
@@ -152,10 +159,12 @@ impl CoreService {
     ) -> CoreResult<ListTimelineEventsResponse> {
         self.verify_principal(principal)?;
         let pool = &self.inner.pool;
-        // Ownership guard before any read: missing world → NotFound, foreign
-        // world → Forbidden (shared World guard; HTTP adapters keep their
-        // guard-first retained envelopes).
-        guards::require_world_owner(pool, &world_id, principal.creator_id()).await?;
+        // Ownership guard before any read: missing world → NotFound, not
+        // owned → Forbidden. The denial renders with this route's retained
+        // envelopes (`world {id} not found` / `you do not own this world`).
+        check_world_owner(pool, &world_id, principal.creator_id())
+            .await
+            .map_err(WorldOwnerGuardFailure::into_timeline_error)?;
 
         // The guard above proves the row exists; `fetch_optional` still
         // guards the concurrent-delete race. `root_fork_branch_id` unset →

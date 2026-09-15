@@ -4,11 +4,12 @@
 //!
 //! The keyset-cursored `narrative_timeline_events` page read — branch /
 //! status / `event_type` filters, `ev1:` cursor encoding, row mapping with
-//! modules/extensions — lives in `nexus-core`
-//! (`CoreService::list_timeline_events`). This handler keeps the retained
-//! guard-first envelopes (404 `world {id} not found` / 403 `you do not own
-//! this world`) and auth/DTO/status translation. P5-T4 owns HTTP SSE
-//! framing and gap/disconnect on top of the core's bounded pull.
+//! modules/extensions, and the world-ownership guard — lives in
+//! `nexus-core` (`CoreService::list_timeline_events`). The core guard's
+//! typed denial renders this route's retained envelopes verbatim (404
+//! `world {id} not found` / 403 `you do not own this world`); the handler
+//! keeps auth/DTO/status translation only. P5-T4 owns HTTP SSE framing
+//! and gap/disconnect on top of the core's bounded pull.
 
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::world_kb_guards::{require_creator, resolve_core_principal};
@@ -17,7 +18,6 @@ use axum::extract::{Path, Query, State};
 use axum::Json;
 use nexus_contracts::daemon_api::timeline::list_timeline_events_response::ListTimelineEventsResponse;
 use nexus_core::CoreTimelineEventsQuery;
-use nexus_local_db::narrative_write::is_world_owned;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -31,9 +31,8 @@ pub struct TimelineEventsParams {
 
 /// `GET /v1/daemon/worlds/:world_id/timeline/events`
 ///
-/// Ownership guard runs before any read: world must exist (404) and be owned
-/// by the active creator (403). Core independently checks ownership for
-/// non-HTTP callers.
+/// Ownership/existence guard runs inside the core read before any page
+/// query; its typed denial renders the retained envelopes (404/403).
 ///
 /// # Errors
 ///
@@ -48,38 +47,7 @@ pub async fn get_timeline_events(
     Path(world_id): Path<String>,
     Query(params): Query<TimelineEventsParams>,
 ) -> Result<Json<ListTimelineEventsResponse>, NexusApiError> {
-    let pool = state.pool_or_uninit()?;
-    let creator_id = require_creator(&state)?;
-
-    // World existence (404) before any read; retained envelope message.
-    // Compile-time checked query (daemon-runtime AGENTS.md mandatory rule).
-    let _world = sqlx::query!(
-        r#"SELECT root_fork_branch_id as "root_fork_branch_id" FROM narrative_worlds WHERE world_id = ?"#,
-        world_id,
-    )
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".to_string(),
-        message: e.to_string(),
-    })?
-    .ok_or_else(|| NexusApiError::NotFound(format!("world {world_id} not found")))?;
-
-    // Ownership guard (403) before any read; retained envelope reason. Core
-    // independently checks ownership for non-HTTP callers.
-    let owned = is_world_owned(pool, &creator_id, &world_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
-    if !owned {
-        return Err(NexusApiError::Forbidden {
-            resource: format!("world {world_id}"),
-            reason: "you do not own this world".to_string(),
-        });
-    }
-
+    require_creator(&state)?;
     let (core, principal) = resolve_core_principal(&state).await?;
     let response = core
         .list_timeline_events(

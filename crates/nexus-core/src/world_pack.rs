@@ -11,7 +11,8 @@ use nexus_contracts::daemon_api::kb::{
 use nexus_local_db::kb_relationships::list_relationships_for_world;
 use nexus_spoke_adapter::conversion::{kb_relationship_row_to_spoke, knowledge_record_to_spoke};
 use nexus_spoke_adapter::pack::{build_pack, parse_pack};
-use crate::world_kb::{db_err, guards};
+use crate::error::db_err;
+use crate::world_kb::guards;
 use crate::{CoreAccess, CoreError, CoreResult, CoreService, Principal};
 
 const DEFAULT_PACK_VERSION: &str = "0.1.0";
@@ -48,8 +49,8 @@ impl CoreService {
 
     /// Package-import-only bridge for the retained local CLI composition.
     /// # Errors
-    /// Rejects mismatched creator/World ownership, unregistered/read-only or
-    /// fenced writers, malformed packs and fatal storage errors.
+    /// Rejects empty/unknown creators, foreign/missing Worlds, read-only or
+    /// unregistered (fenced) pools, malformed packs and fatal storage errors.
     #[doc(hidden)]
     // transitional: single deletion owner P6-T1; no new callers
     pub async fn import_legacy_world_pack(
@@ -62,10 +63,25 @@ impl CoreService {
         if creator_id.trim().is_empty() {
             return Err(CoreError::AuthRequired);
         }
+        // Verified admission against core stored state (P0 QC fix): the
+        // caller must exist in the stored creator state and own the target
+        // World. The retained CLI open path registers its pool as the
+        // `bootstrap` writer, so the pool's registration identity is no
+        // longer required to equal the caller; forged/unknown creators are
+        // still rejected here. Persistence stays fenced by the writer
+        // protocol triggers.
+        let known_creator: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM creators WHERE creator_id = ?)",
+        )
+        .bind(creator_id)
+        .fetch_one(pool).await.map_err(|e| db_err(&e))?;
+        if known_creator == 0 {
+            return Err(CoreError::AuthRequired);
+        }
         guards::require_world_owner(pool, world_id, creator_id).await?;
         // Admission uses the same connection identity and epochs as the
         // writer protocol triggers. The supplied pool is never re-opened or
-        // promoted to a writer; persistence remains fenced by those triggers.
+        // promoted to a writer.
         let mut connection = pool.acquire().await.map_err(|e| db_err(&e))?;
         let query_only: i64 = sqlx::query_scalar("PRAGMA query_only")
             .fetch_one(&mut *connection).await.map_err(|e| db_err(&e))?;
@@ -74,21 +90,22 @@ impl CoreService {
                 resource: "world_pack_import: read-only legacy pool".to_string(),
             });
         }
-        let registered_creator: Option<String> = sqlx::query_scalar(
-            "SELECT r.creator_id FROM core_writer_registration r \
+        // Fail fast when this connection carries no live registered writer
+        // (protocol inactive, mode/epoch drift): the triggers would fence
+        // every write anyway.
+        let live_writer: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM core_writer_registration r \
              JOIN core_workspace_gate g ON g.pk = 1 \
              WHERE nexus_writer_protocol() = 1 AND r.writer_id = nexus_writer_id() \
              AND r.mode = nexus_writer_mode() AND r.mode IN ('direct', 'engine') \
              AND r.migration_epoch = g.migration_epoch \
              AND r.migration_epoch = nexus_migration_epoch() \
              AND (r.mode = 'direct' OR \
-                  (r.engine_epoch = g.engine_epoch AND r.engine_epoch = nexus_engine_epoch()))",
+                  (r.engine_epoch = g.engine_epoch AND r.engine_epoch = nexus_engine_epoch())))",
         )
-        .fetch_optional(&mut *connection).await.map_err(|e| db_err(&e))?;
-        match registered_creator {
-            None => return Err(CoreError::WriterFenced),
-            Some(owner) if owner != creator_id => return Err(CoreError::AuthRequired),
-            Some(_) => {}
+        .fetch_one(&mut *connection).await.map_err(|e| db_err(&e))?;
+        if live_writer == 0 {
+            return Err(CoreError::WriterFenced);
         }
         drop(connection);
         run_world_pack_import(pool, creator_id, world_id, request, dry_run).await

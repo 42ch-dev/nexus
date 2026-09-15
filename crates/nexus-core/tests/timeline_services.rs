@@ -383,7 +383,7 @@ async fn foreign_world_forbidden_and_missing_world_not_found() {
         )
         .await
         .expect_err("foreign world");
-    assert!(matches!(err, CoreError::Forbidden { .. }));
+    assert!(matches!(err, CoreError::WorldOwnerDenied { .. }));
 
     let err = f
         .core

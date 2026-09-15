@@ -30,7 +30,7 @@ use sqlx::{Sqlite, SqlitePool};
 use std::collections::HashMap;
 use tracing::warn;
 
-use crate::error::{CoreError, CoreResult};
+use crate::error::{db_err, local_db_err, CoreError, CoreResult};
 use crate::principal::Principal;
 use crate::service::CoreService;
 use crate::CoreAccess;
@@ -54,7 +54,7 @@ fn validation_summary(errors: &[String], warnings: &[String]) -> serde_json::Val
     serde_json::json!({ "errors": errors, "warnings": warnings })
 }
 
-pub fn project_entity(kb: &KnowledgeEntryRecord) -> WorldKbEntityProjection {
+pub(crate) fn project_entity(kb: &KnowledgeEntryRecord) -> WorldKbEntityProjection {
     let body_value = kb
         .body
         .as_ref()
@@ -137,29 +137,120 @@ fn project_candidate(
 }
 
 pub(crate) mod guards {
-    use super::{db_err, CoreError, CoreResult, Sqlite};
+    use super::{db_err, Sqlite};
+    use crate::error::{CoreError, CoreResult};
 
-    pub(crate) async fn require_world_owner(
+    /// Failure of the shared world-ownership guard: a storage error already
+    /// mapped onto the core taxonomy, or a typed ownership denial.
+    pub(crate) enum WorldOwnerGuardFailure {
+        Db(CoreError),
+        Denied(WorldOwnerDenial),
+    }
+
+    impl WorldOwnerGuardFailure {
+        /// World-KB family rendering (kb / pack / fork / rules / findings
+        /// routes): retained `world {id}` 404 plus the cross-author and
+        /// unowned 403 reasons.
+        pub(crate) fn into_core_error(self) -> CoreError {
+            match self {
+                Self::Db(e) => e,
+                Self::Denied(d) => d.into_core_error(),
+            }
+        }
+
+        /// Timeline-events family rendering: retained
+        /// `world {id} not found` 404 and `you do not own this world` 403.
+        pub(crate) fn into_timeline_error(self) -> CoreError {
+            match self {
+                Self::Db(e) => e,
+                Self::Denied(d) => d.into_timeline_error(),
+            }
+        }
+    }
+
+    /// Typed world-ownership denial from the shared
+    /// `narrative_worlds.owner_creator_id` guard. The world id and the
+    /// refusal stay split so each transport family renders its retained
+    /// envelope verbatim at the adapter boundary.
+    pub(crate) enum WorldOwnerDenial {
+        /// No `narrative_worlds` row for the id.
+        Missing { world_id: String },
+        /// Row exists; `owner_creator_id` names another creator.
+        Foreign { world_id: String },
+        /// Row exists; `owner_creator_id` is NULL.
+        Unowned { world_id: String },
+    }
+
+    impl WorldOwnerDenial {
+        /// World-KB family rendering of a pure denial.
+        fn into_core_error(self) -> CoreError {
+            match self {
+                Self::Missing { world_id } => {
+                    CoreError::NotFound { resource: format!("world {world_id}") }
+                }
+                Self::Foreign { world_id } => CoreError::WorldOwnerDenied {
+                    world_id,
+                    reason: "active creator does not own this world; cross-author World KB edits are forbidden".to_string(),
+                },
+                Self::Unowned { world_id } => CoreError::WorldOwnerDenied {
+                    world_id,
+                    reason: "world has no owner_creator_id; cannot authorize World KB edit".to_string(),
+                },
+            }
+        }
+
+        /// Timeline-events family rendering of a pure denial.
+        fn into_timeline_error(self) -> CoreError {
+            match self {
+                Self::Missing { world_id } => {
+                    CoreError::NotFound { resource: format!("world {world_id} not found") }
+                }
+                Self::Foreign { world_id } | Self::Unowned { world_id } => {
+                    CoreError::WorldOwnerDenied {
+                        world_id,
+                        reason: "you do not own this world".to_string(),
+                    }
+                }
+            }
+        }
+    }
+
+    /// Shared world-ownership guard: the world must exist and be owned by
+    /// `creator_id`. One SQL authority; callers pick the family rendering.
+    pub(crate) async fn check_world_owner(
         executor: impl sqlx::Executor<'_, Database = Sqlite>,
         world_id: &str,
         creator_id: &str,
-    ) -> CoreResult<()> {
+    ) -> Result<(), WorldOwnerGuardFailure> {
         let owner: Option<Option<String>> =
             sqlx::query_scalar("SELECT owner_creator_id FROM narrative_worlds WHERE world_id = ?")
                 .bind(world_id)
                 .fetch_optional(executor)
                 .await
-                .map_err(|e| db_err(&e))?;
+                .map_err(|e| WorldOwnerGuardFailure::Db(db_err(&e)))?;
         match owner {
-            None => Err(CoreError::NotFound { resource: format!("world {world_id}") }),
+            None => Err(WorldOwnerGuardFailure::Denied(WorldOwnerDenial::Missing {
+                world_id: world_id.to_string(),
+            })),
             Some(Some(owner_id)) if owner_id == creator_id => Ok(()),
-            Some(Some(_)) => Err(CoreError::Forbidden {
-                resource: format!("world {world_id}: active creator does not own this world; cross-author World KB edits are forbidden"),
-            }),
-            Some(None) => Err(CoreError::Forbidden {
-                resource: format!("world {world_id}: world has no owner_creator_id; cannot authorize World KB edit"),
-            }),
+            Some(Some(_)) => Err(WorldOwnerGuardFailure::Denied(WorldOwnerDenial::Foreign {
+                world_id: world_id.to_string(),
+            })),
+            Some(None) => Err(WorldOwnerGuardFailure::Denied(WorldOwnerDenial::Unowned {
+                world_id: world_id.to_string(),
+            })),
         }
+    }
+
+    /// World-KB family convenience wrapper over [`check_world_owner`].
+    pub(crate) async fn require_world_owner(
+        executor: impl sqlx::Executor<'_, Database = Sqlite>,
+        world_id: &str,
+        creator_id: &str,
+    ) -> CoreResult<()> {
+        check_world_owner(executor, world_id, creator_id)
+            .await
+            .map_err(WorldOwnerGuardFailure::into_core_error)
     }
 }
 
@@ -802,42 +893,6 @@ pub mod patch {
 fn store_err(e: &KbStoreError) -> CoreError {
     CoreError::Internal {
         category: format!("kb_store: {e}"),
-    }
-}
-
-fn is_sqlite_busy(err: &sqlx::Error) -> bool {
-    match err {
-        sqlx::Error::Database(db) => {
-            db.code().as_deref() == Some("5")
-                || db.message().contains("database is locked")
-                || db.message().contains("SQLITE_BUSY")
-        }
-        _ => false,
-    }
-}
-
-pub(crate) fn db_err(e: &sqlx::Error) -> CoreError {
-    if is_sqlite_busy(e) {
-        CoreError::Busy
-    } else if matches!(e, sqlx::Error::PoolTimedOut) {
-        CoreError::OwnerBusy
-    } else {
-        CoreError::Internal {
-            category: format!("database_error: {e}"),
-        }
-    }
-}
-
-fn local_db_err(e: nexus_local_db::LocalDbError) -> CoreError {
-    match e {
-        nexus_local_db::LocalDbError::OwnerBusy { .. }
-        | nexus_local_db::LocalDbError::Sqlx(sqlx::Error::PoolTimedOut) => CoreError::OwnerBusy,
-        nexus_local_db::LocalDbError::WriterFenced { .. } => CoreError::WriterFenced,
-        nexus_local_db::LocalDbError::SchemaMismatch { .. } => CoreError::SchemaMismatch,
-        nexus_local_db::LocalDbError::Sqlx(err) if is_sqlite_busy(&err) => CoreError::Busy,
-        other => CoreError::Internal {
-            category: format!("database_error: {other}"),
-        },
     }
 }
 

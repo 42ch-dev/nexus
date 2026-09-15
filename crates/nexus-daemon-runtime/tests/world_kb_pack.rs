@@ -419,7 +419,7 @@ async fn pack_import_rename_creates_disambiguated_entry() {
     .flatten();
     assert_ne!(
         preexisting.as_deref(),
-        Some(IMPORT_PROVENANCE),
+        Some("pack_import"),
         "pre-seeded collision row must not be stamped"
     );
 }

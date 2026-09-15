@@ -763,6 +763,10 @@ impl From<nexus_core::CoreError> for NexusApiError {
                 resource,
                 reason: "forbidden".to_string(),
             },
+            nexus_core::CoreError::WorldOwnerDenied { world_id, reason } => Self::Forbidden {
+                resource: format!("world {world_id}"),
+                reason,
+            },
             nexus_core::CoreError::NotFound { resource } => Self::NotFound(resource),
             nexus_core::CoreError::InvalidInput { field, reason } => {
                 Self::InvalidInput { field, reason }
