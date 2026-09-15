@@ -7,7 +7,10 @@ use std::path::Path;
 use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
 use sqlx::SqlitePool;
 
-const CREATOR: &str = "test_creator";
+/// Creator id must satisfy the wire `CreatorId` pattern
+/// (`^ctr_[a-zA-Z0-9]+$`) so family projections that carry
+/// `owner_creator_id` stay wire-valid on the seeded home.
+const CREATOR: &str = "ctr_testcreator";
 const SLUG: &str = "default";
 const OWNED_WORLD: &str = "wld_owned";
 const FOREIGN_WORLD: &str = "wld_foreign";

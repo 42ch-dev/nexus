@@ -27,13 +27,23 @@ import {
   parseIncludeSuggested,
   patchWorldKbEntity,
 } from './world-kb.js';
+import { ACTOR_ROUTES } from './actors.js';
+import { MEMORY_ROUTES } from './memory.js';
+import { CONTEXT_ROUTES } from './context.js';
 
 /**
  * The World/Work/content/knowledge families self-describe their retained
  * identities (exact path/verb/tier); this composer merges them ahead of the
  * legacy hand-written matcher. P5-T5 owns the final whole-service inventory.
  */
-export type DomainFamily = 'worlds' | 'works' | 'content' | 'knowledge';
+export type DomainFamily =
+  | 'worlds'
+  | 'works'
+  | 'content'
+  | 'knowledge'
+  | 'actors'
+  | 'memory'
+  | 'context';
 
 /** One retained family identity: exact path pattern, verb, tier and handler. */
 export interface DomainRoute {
@@ -61,6 +71,9 @@ export const DOMAIN_ROUTES: readonly DomainRoute[] = [
   ...WORK_ROUTES,
   ...CONTENT_ROUTES,
   ...KNOWLEDGE_ROUTES,
+  ...ACTOR_ROUTES,
+  ...MEMORY_ROUTES,
+  ...CONTEXT_ROUTES,
 ];
 
 export type RouteTier = 'unguarded' | 'tier1' | 'tier2' | 'provider_stream';

@@ -174,6 +174,129 @@ export interface NativeCoreBinding {
   deleteAnnotation(principal: string, annotationId: string): Promise<Uint8Array>;
   listReferences(principal: string): Promise<Uint8Array>;
   getReference(principal: string, referenceId: string): Promise<Uint8Array>;
+  // ── P5-T2 Actor / memory / context family surface ─────────────────────────
+  listCharacters(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
+  createCharacter(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  getCharacter(principal: string, characterId: string): Promise<Uint8Array>;
+  patchCharacter(
+    principal: string,
+    characterId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  archiveCharacter(
+    principal: string,
+    characterId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  restoreCharacter(
+    principal: string,
+    characterId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  addCharacterBinding(
+    principal: string,
+    characterId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  listCharacterBindings(
+    principal: string,
+    characterId: string,
+    queryJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  getCharacterBinding(
+    principal: string,
+    characterId: string,
+    bindingId: string,
+  ): Promise<Uint8Array>;
+  patchCharacterBinding(
+    principal: string,
+    characterId: string,
+    bindingId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  removeCharacterBinding(principal: string, characterId: string, bindingId: string): Promise<void>;
+  actorKnowledgeView(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  addActorKnowledgeEntry(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  listCharacterKnowledge(
+    principal: string,
+    characterId: string,
+    queryJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  getKnowledgeEntry(principal: string, characterId: string, entryId: string): Promise<Uint8Array>;
+  patchKnowledgeEntry(
+    principal: string,
+    characterId: string,
+    entryId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  deleteKnowledgeEntry(
+    principal: string,
+    characterId: string,
+    entryId: string,
+    expectedRevision: number,
+  ): Promise<void>;
+  listCreators(queryJson: Uint8Array): Promise<Uint8Array>;
+  createCreator(displayName: string): Promise<Uint8Array>;
+  getCreator(creatorId: string): Promise<Uint8Array>;
+  patchCreator(creatorId: string, displayName: string | null): Promise<Uint8Array>;
+  setActiveCreator(requestJson: Uint8Array): Promise<Uint8Array>;
+  getActiveCreator(): Promise<Uint8Array>;
+  logoutCreator(creatorId: string): Promise<Uint8Array>;
+  captureCharacterPendingReview(
+    principal: string,
+    characterId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  listCharacterPendingReviews(
+    principal: string,
+    characterId: string,
+    queryJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  countCharacterPendingReviews(
+    principal: string,
+    characterId: string,
+    queryJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  deleteCharacterPendingReview(
+    principal: string,
+    characterId: string,
+    pendingId: string,
+  ): Promise<Uint8Array>;
+  reviewCharacterMemory(
+    principal: string,
+    characterId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  listCharacterMemoryFragments(
+    principal: string,
+    characterId: string,
+    queryJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  promoteCharacterFragment(
+    principal: string,
+    characterId: string,
+    fragmentId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  reflectCharacterSoul(
+    principal: string,
+    characterId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  recordCharacterTom(
+    principal: string,
+    characterId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  listCharacterTom(principal: string, characterId: string, queryJson: Uint8Array): Promise<Uint8Array>;
+  listPendingReviews(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
+  countPendingReviews(principal: string): Promise<Uint8Array>;
+  deletePendingReview(principal: string, pendingId: string): Promise<Uint8Array>;
+  reviewMemory(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  listMemoryFragments(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
+  reflectCreatorSoul(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  inspectMoment(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  momentDirective(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
 }
 
 export interface NativeBinding {
