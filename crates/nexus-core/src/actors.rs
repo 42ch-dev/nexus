@@ -268,6 +268,12 @@ impl CoreService {
     /// lease through every DB/file/provider/terminal-capture effect; drop
     /// releases the fence.
     ///
+    /// Acquisition is non-blocking, so a Character whose exclusive transition
+    /// lease is already held by another core refuses here with `character_busy`
+    /// rather than parking behind it (arch §2 / durable §11.3: "shared effect
+    /// leases/exclusive transition leases are nonblocking — busy is
+    /// observable"). Callers retry once the transition settles.
+    ///
     /// Creator actors hold no activity lease (there is no Character lifecycle
     /// to fence); hosts reproduce the daemon's `Creator → None` shape by not
     /// calling this for a Creator token.
@@ -275,9 +281,10 @@ impl CoreService {
     /// # Errors
     /// Returns [`CoreError::AuthRequired`] when the principal fails
     /// verification, [`CoreError::ActorInput`] for a Creator token,
-    /// [`CoreError::NotFound`] for a missing/foreign Character, and
-    /// [`CoreError::ActorConflict`] `character_inactive` for an owned
-    /// archived Character.
+    /// [`CoreError::NotFound`] for a missing/foreign Character,
+    /// [`CoreError::ActorConflict`] `character_busy` when a transition lease is
+    /// outstanding, and [`CoreError::ActorConflict`] `character_inactive` for
+    /// an owned archived Character.
     pub async fn acquire_actor_activity(
         &self,
         principal: &Principal,
@@ -292,7 +299,10 @@ impl CoreService {
         let pool = &self.inner.pool;
         // Owner-check before allocating a fence (no fence state leaks existence).
         require_character_row(pool, principal.creator_id(), character_id).await?;
-        let parts = self.inner.character_fences.acquire_activity(character_id).await?;
+        let parts = self
+            .inner
+            .character_fences
+            .try_acquire_activity(character_id)?;
         // Re-read under the fence: a transition holds the exclusive write
         // guard, so this status/epoch pair is exact for the lease's lifetime.
         let stored = require_character_row(pool, principal.creator_id(), character_id).await?;
@@ -331,8 +341,7 @@ impl CoreService {
         let parts = self
             .inner
             .character_fences
-            .try_acquire_transition(&character_id)
-            .await?;
+            .try_acquire_transition(&character_id)?;
         // Re-read under the exclusive fence so the pre-transition epoch is
         // exact for material-vs-no-op session retirement (§11.3.2–§11.3.3).
         let stored = require_character_row(pool, principal.creator_id(), &character_id).await?;

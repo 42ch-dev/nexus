@@ -14,7 +14,7 @@
 //!    prohibited, so the table is per-service; sharing across independently
 //!    opened cores (and across processes) is carried by layer 2.
 //! 2. **Stable per-Character OS shared/exclusive resource lock** — a
-//!    shared/exclusive pair acquired with `std::fs::File::lock_shared` /
+//!    shared/exclusive pair acquired with `std::fs::File::try_lock_shared` /
 //!    `try_lock` on
 //!    `<state-db dir>/character_locks/<character_id>.lock`, one descriptor
 //!    per live lease. OS locks ride on the open file description, so
@@ -28,6 +28,13 @@
 //!    caveat that follows: Windows byte-range locks are enforced against
 //!    other handles, so this fence must never be applied to a file that is
 //!    also opened for content — `<character_id>.lock` carries no payload.
+//!
+//! **Both layers are non-blocking** (arch §2 / durable §11.3: "shared effect
+//! leases/exclusive transition leases are nonblocking — busy is observable").
+//! Every acquisition uses the `try_*` form and maps a held lease to the
+//! retained `character_busy` refusal, so a contended admission reports busy
+//! promptly instead of parking behind the holder — a transition never waits
+//! out an in-flight effect and an effect never waits out a transition.
 //!
 //! Stored `lifecycle_epoch` and ownership are re-read after acquiring the
 //! fence (both layers) so the lease witnesses an exact pre-transition epoch
@@ -101,36 +108,52 @@ impl ActorFenceTable {
         )
     }
 
-    /// Acquire the shared activity fence for one Character: process read
-    /// guard first, then the blocking OS shared lock (off the async runtime).
-    pub(crate) async fn acquire_activity(
+    /// Try to take the shared activity fence for one Character: process read
+    /// guard first, then the non-blocking OS shared lock.
+    ///
+    /// Non-blocking by contract (arch §2 / durable §11.3: "shared effect
+    /// leases/exclusive transition leases are nonblocking — busy is
+    /// observable"). An activity admission never waits for an in-flight
+    /// transition to release: it reports the same `character_busy` refusal a
+    /// transition reports for an in-flight activity, so admission and cancel
+    /// stay responsive under contention. No await point — the whole
+    /// acquisition is a pair of `try_*` calls.
+    pub(crate) fn try_acquire_activity(
         &self,
         character_id: &str,
     ) -> CoreResult<ActivityFenceParts> {
-        let read = Arc::clone(&self.fence_for(character_id)).read_owned().await;
-        let os = OsSharedLock::acquire(self.lock_path(character_id)).await?;
+        let read = Arc::clone(&self.fence_for(character_id))
+            .try_read_owned()
+            .map_err(|_| busy_error(character_id))?;
+        let os = OsSharedLock::try_acquire(self.lock_path(character_id))
+            .map_err(|err| lock_error(character_id, err))?;
         Ok(ActivityFenceParts { read, os })
     }
 
     /// Try to take the exclusive transition fence (busy refusal, never
     /// waiting): process write guard, then the non-blocking OS exclusive
     /// lock. Any outstanding activity lease refuses with `character_busy`.
-    pub(crate) async fn try_acquire_transition(
+    pub(crate) fn try_acquire_transition(
         &self,
         character_id: &str,
     ) -> CoreResult<TransitionFenceParts> {
         let write = Arc::clone(&self.fence_for(character_id))
             .try_write_owned()
             .map_err(|_| busy_error(character_id))?;
-        let os = OsExclusiveLock::try_acquire(self.lock_path(character_id)).map_err(|err| {
-            match err {
-                std::fs::TryLockError::WouldBlock => busy_error(character_id),
-                std::fs::TryLockError::Error(io) => CoreError::Internal {
-                    category: format!("character_lock: {io}"),
-                },
-            }
-        })?;
+        let os = OsExclusiveLock::try_acquire(self.lock_path(character_id))
+            .map_err(|err| lock_error(character_id, err))?;
         Ok(TransitionFenceParts { write, os })
+    }
+}
+
+/// Translate a non-blocking lock outcome: a held lease is the retained
+/// `character_busy` refusal; anything else is a real fault.
+fn lock_error(character_id: &str, err: std::fs::TryLockError) -> CoreError {
+    match err {
+        std::fs::TryLockError::WouldBlock => busy_error(character_id),
+        std::fs::TryLockError::Error(io) => CoreError::Internal {
+            category: format!("character_lock: {io}"),
+        },
     }
 }
 
@@ -176,22 +199,15 @@ struct OsSharedLock {
 }
 
 impl OsSharedLock {
-    /// Acquire blocking; runs on the blocking pool so a cross-process
-    /// exclusive holder delays admission without stalling the runtime.
-    async fn acquire(path: PathBuf) -> CoreResult<Self> {
-        tokio::task::spawn_blocking(move || {
-            let file = open_lock_file(&path).map_err(|err| CoreError::Internal {
-                category: format!("character_lock: {err}"),
-            })?;
-            file.lock_shared().map_err(|err| CoreError::Internal {
-                category: format!("character_lock: {err}"),
-            })?;
-            Ok(Self { file })
-        })
-        .await
-        .map_err(|err| CoreError::Internal {
-            category: format!("character_lock: {err}"),
-        })?
+    /// Acquire non-blocking; a held exclusive lease surfaces as
+    /// [`TryLockError::WouldBlock`] and is translated to the retained busy
+    /// refusal by the caller. Never waits on the blocking pool: an admission
+    /// blocked behind an in-flight transition would stall the caller instead
+    /// of reporting busy, which the lease contract forbids.
+    fn try_acquire(path: PathBuf) -> Result<Self, std::fs::TryLockError> {
+        let file = open_lock_file(&path).map_err(std::fs::TryLockError::Error)?;
+        file.try_lock_shared()?;
+        Ok(Self { file })
     }
 }
 

@@ -255,6 +255,56 @@ async fn transition_races_admitted_activity() {
     assert_conflict(err, "character_inactive");
 }
 
+/// The reverse race of [`transition_races_admitted_activity`]: while another
+/// core HOLDS the exclusive transition lease, an activity admission must
+/// report `character_busy` promptly instead of parking behind the holder.
+///
+/// This is the half the forward test cannot see. The forward test proves a
+/// transition refuses an outstanding effect; here the effect is the one that
+/// must not wait. A blocking activity acquisition (e.g. `lock_shared()` on a
+/// blocking pool) would deadlock here until the lease drops, stalling
+/// admission and cancellation — the lease contract forbids that ("shared
+/// effect leases/exclusive transition leases are nonblocking — busy is
+/// observable").
+///
+/// The bounded `timeout` IS the assertion: a waiting implementation trips it
+/// with a clear message rather than hanging the suite.
+#[tokio::test]
+async fn activity_admission_is_busy_while_a_transition_lease_is_held() {
+    let env = seed_env().await;
+    let (core_a, principal_a) = open_core(&env).await;
+    let (core_b, principal_b) = open_core(&env).await;
+    let actor = AdmittedActor::Character {
+        character_id: env.character_id.clone(),
+    };
+
+    // core_b holds the exclusive transition lease — acquired, not yet
+    // committed, and deliberately still held across the next call.
+    let lease = core_b
+        .acquire_character_transition(&principal_b, env.character_id.clone())
+        .await
+        .expect("transition lease acquisition");
+
+    let refused = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        core_a.acquire_actor_activity(&principal_a, &actor),
+    )
+    .await
+    .expect("activity admission must not wait for the held transition lease");
+    let err = refused.expect_err("activity must be refused while a transition is held");
+    assert_conflict(err, "character_busy");
+
+    // Releasing the lease admits the effect on the same core, still at the
+    // pre-transition epoch (nothing was committed).
+    drop(lease);
+    let activity = core_a
+        .acquire_actor_activity(&principal_a, &actor)
+        .await
+        .expect("activity admits once the transition lease drains");
+    assert_eq!(activity.character_id(), env.character_id);
+    assert_eq!(activity.epoch(), 0);
+}
+
 /// Ported from the daemon `characters_api.rs` stable-conflict test at the
 /// planning baseline: duplicate active bindings conflict, and removing the
 /// last active binding is a zero-mutation stable conflict.
