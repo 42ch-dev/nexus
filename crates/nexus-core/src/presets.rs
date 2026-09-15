@@ -8,11 +8,17 @@ use nexus_contracts::{
     StrategyPatchTransitionRequest, ValidatePresetRequest, ValidatePresetResponse,
 };
 use nexus_contracts::{UpdatePresetRequest, UpdatePresetResponse};
-use nexus_contracts::{
-    OrchestrationPresetListResponse, PresetProfileConditionalRule, PresetProfileEnterAction,
-    PresetProfileExitWhen, PresetProfileLabeledNext, PresetProfileLanes, PresetProfileNext,
-    PresetProfileResponse, PresetProfileRole, PresetProfileSignal, PresetProfileState,
+// The canonical preset profile DTOs live in the generated `preset_profile_response`
+// module. Other per-DTO generated files re-declare their own inline copies of the
+// same child types, so the crate-root names resolve to a different (wire-identical
+// but distinct) Rust type than the one `PresetProfileResponse`'s fields actually
+// use. Import the whole family from the response module that owns the composite.
+use nexus_contracts::generated::core::orchestration_presets::preset_profile_response::{
+    PresetProfileConditionalRule, PresetProfileEnterAction, PresetProfileExitWhen,
+    PresetProfileLabeledNext, PresetProfileLanes, PresetProfileNext, PresetProfileResponse,
+    PresetProfileRole, PresetProfileSignal, PresetProfileState,
 };
+use nexus_contracts::OrchestrationPresetListResponse;
 use nexus_contracts::local::orchestration::preset::{
     EnterAction, ExitWhen, NextTarget, PresetRoleDefinition, SignalActionKind,
     SignalBinding, StateDefinition,

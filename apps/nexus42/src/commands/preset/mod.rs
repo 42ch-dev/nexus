@@ -26,7 +26,11 @@ use crate::config::CliConfig;
 use crate::errors::Result;
 use crate::CliError;
 use clap::Subcommand;
-use nexus_contracts::{
+// The canonical preset profile DTOs live in the generated `preset_profile_response`
+// module; the crate-root names resolve to per-DTO duplicates that are wire-identical
+// but distinct Rust types from the ones `PresetProfileResponse` actually holds.
+// Import the family from the owning response module.
+use nexus_contracts::generated::core::orchestration_presets::preset_profile_response::{
     PresetProfileExitWhen, PresetProfileLanes, PresetProfileNext, PresetProfileResponse,
 };
 
@@ -663,7 +667,9 @@ fn format_next(next: &PresetProfileNext) -> String {
 mod tests {
     use super::*;
     use clap::Parser;
-    use nexus_contracts::{PresetProfileSignal, PresetProfileState};
+    use nexus_contracts::generated::core::orchestration_presets::preset_profile_response::{
+        PresetProfileSignal, PresetProfileState,
+    };
 
     /// Wrapper for parsing `PresetCommand` in tests.
     #[derive(Debug, clap::Parser)]
