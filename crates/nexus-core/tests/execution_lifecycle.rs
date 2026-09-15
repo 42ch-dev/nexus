@@ -23,6 +23,7 @@ use nexus_provider_ports::{ProviderPort, ProviderResult};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tempfile::TempDir;
 use tokio::sync::Notify;
 
@@ -387,7 +388,9 @@ impl GatedPromptExecutor {
     }
 
     async fn wait_entered(&self) {
-        self.entered.notified().await;
+        tokio::time::timeout(Duration::from_secs(10), self.entered.notified())
+            .await
+            .expect("the recovery re-drive must reach the gated prompt step");
     }
 
     fn release(&self) {
@@ -583,7 +586,12 @@ async fn concurrent_close_and_start_never_leave_an_owner() {
         let close = tokio::spawn(async move { owner_for_close.close().await });
 
         let (started, closed) = tokio::join!(start, close);
-        closed.await.unwrap().cleanup_confirmed.then_some(()).expect("close confirmed");
+        // `join!` awaits both handles: `closed` is the close RESULT itself.
+        let report = closed.expect("close succeeds");
+        assert!(
+            report.cleanup_confirmed,
+            "round {round}: close must report a confirmed cleanup"
+        );
         // Either the start was refused (closing) or it installed and close
         // took+settled the handle. Both must leave the slot EMPTY.
         let _ = started;
