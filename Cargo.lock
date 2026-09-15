@@ -3927,6 +3927,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "futures-util",
  "nexus-acp-host",
  "nexus-agent-host",
  "nexus-cloud-sync",
@@ -3938,6 +3939,7 @@ dependencies = [
  "nexus-moment-context-assembly",
  "nexus-narrative",
  "nexus-orchestration",
+ "nexus-provider-ports",
  "nexus-spoke-adapter",
  "nexus-wasm-host",
  "rmcp",

@@ -215,13 +215,22 @@ impl HostHandle {
                 &ctx,
             )?;
             let host_req = self.host_create_request(&request, &canonical_root, &ctx.owner_creator_id);
-            let host = self.host.clone();
-            let session = self
-                .registry
-                .resolve_or_create(key, ctx.clone(), host.as_ref(), move || async move {
-                    host.create_session(host_req).await.map_err(host_err)
-                })
-                .await?;
+            let host_for_create = self.host.clone();
+            let session = self.registry.resolve_or_create(
+                key,
+                ctx.clone(),
+                self.host.as_ref(),
+                move || {
+                    let host_for_create = host_for_create;
+                    let host_req = host_req;
+                    async move {
+                        host_for_create
+                            .create_session(host_req)
+                            .await
+                            .map_err(host_err)
+                    }
+                },
+            ).await?;
             drop(lease);
             let (actor_ref, viewpoint) = echo_actor_pair(&ctx)?;
             return Ok(session_wire(
@@ -663,7 +672,11 @@ impl HostHandle {
                 state: CoreCloseReportState::Interrupted,
                 cleanup_confirmed: false,
                 pending_operations: pending,
-                reason: Some("host authority close is unconfirmed".to_string()),
+                // CoreCloseReportReason has no unconfirmed/drain-failure
+                // variant (UserRequested/EngineReplaced/SchemaMismatch/
+                // WriterFenced); omitting `reason` instead of mislabelling
+                // the cause — the gap is reported to PM.
+                reason: None,
             })
         }
     }
@@ -826,7 +839,7 @@ async fn drain_character_operation(
     registry.settle_operation_terminal(
         &snapshot.operation_id,
         CharacterOperationResultRunStatus::Finished,
-        None,
+        Some(nexus_contracts::generated::daemon_api::agent_host::character_operation_result::CharacterOperationResultFinishReason::EndTurn),
     );
 }
 

@@ -18,11 +18,12 @@ use std::sync::{Arc, Mutex};
 
 use nexus_agent_host::{HostFacade, HostOperationId, HostSession, HostSessionId, SessionState};
 use nexus_contracts::generated::daemon_api::agent_host::character_operation_result::{
-    CharacterOperationResult, CharacterOperationResultRunStatus, NexusCharacterRunCaptureOutcome,
-    NexusCharacterRunCaptureOutcomeStatus,
+    CharacterOperationResult, CharacterOperationResultFinishReason, CharacterOperationResultRunStatus,
+    NexusCharacterRunCaptureOutcome, NexusCharacterRunCaptureOutcomeStatus,
 };
 use nexus_contracts::generated::daemon_api::agent_host::session_response::{
-    NexusActorRef, NexusSessionViewpoint,
+    NexusActorRef, NexusSessionViewpoint, NexusSessionViewpointBindingId,
+    NexusSessionViewpointBranchId, NexusSessionViewpointEventId,
 };
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -452,7 +453,7 @@ impl ActorSessionRegistry {
         &self,
         operation_id: &HostOperationId,
         run_status: CharacterOperationResultRunStatus,
-        finish_reason: Option<String>,
+        finish_reason: Option<CharacterOperationResultFinishReason>,
     ) {
         let mut maps = self.maps();
         if let Some(record) = maps.character_operations.get_mut(operation_id) {
@@ -949,16 +950,24 @@ fn viewpoint_from_parts(
     event_id: Option<&str>,
 ) -> CoreResult<NexusSessionViewpoint> {
     use nexus_contracts::generated::daemon_api::agent_host::session_response::error::ConversionError;
-    let parse = |v: Option<&str>| -> CoreResult<Option<_>> {
+    let parse = |v: Option<&str>| -> CoreResult<Option<NexusSessionViewpointBindingId>> {
         v.map(|id| id.parse().map_err(|e: ConversionError| echo_conversion("VIEWPOINT_ECHO", e)))
-        .transpose()
+            .transpose()
+    };
+    let parse_branch = |v: Option<&str>| -> CoreResult<Option<NexusSessionViewpointBranchId>> {
+        v.map(|id| id.parse().map_err(|e: ConversionError| echo_conversion("VIEWPOINT_ECHO", e)))
+            .transpose()
+    };
+    let parse_event = |v: Option<&str>| -> CoreResult<Option<NexusSessionViewpointEventId>> {
+        v.map(|id| id.parse().map_err(|e: ConversionError| echo_conversion("VIEWPOINT_ECHO", e)))
+            .transpose()
     };
     Ok(NexusSessionViewpoint {
         world_id: world_id
             .parse()
             .map_err(|e: ConversionError| echo_conversion("VIEWPOINT_ECHO", e))?,
         binding_id: parse(binding_id)?,
-        branch_id: parse(branch_id)?,
-        event_id: parse(event_id)?,
+        branch_id: parse_branch(branch_id)?,
+        event_id: parse_event(event_id)?,
     })
 }
