@@ -128,6 +128,8 @@ import type {
   AgentHostListSessionsQuery,
   CancelOperationResponse,
   CoreChangesRequest,
+  CoreServiceStopRequest,
+  RuntimeApi,
   CoreChangesResponse,
   CreateSessionRequest,
   ExecuteOperationRequest,
@@ -588,6 +590,16 @@ export class BrowserClient implements NexusClient {
       `/v1/daemon/worlds/${encodeURIComponent(worldId)}/kb/patch-relationship`,
       request,
     );
+  }
+
+  /**
+   * `POST /v1/daemon/runtime/stop` — instance-bound operator stop (§7).
+   * The request carries the instance id and engine epoch the client learned
+   * from the discovery record; a mismatch is the server's 409 conflict and
+   * performs no stop, so this delegation adds no local authorization logic.
+   */
+  stopService(request: CoreServiceStopRequest): Promise<RuntimeApi> {
+    return this.post<RuntimeApi>('/v1/daemon/runtime/stop', request);
   }
 
   // ── P4-T3 generated Core slice (`CoreSliceClient`) ────────────────────────

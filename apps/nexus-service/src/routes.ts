@@ -1,5 +1,9 @@
 import type { ServerResponse } from 'node:http';
-import type { WorldKbPatchEntityRequest } from '@42ch/nexus-contracts';
+import type {
+  WorldKbPatchEntityRequest,
+  WorldKbPatchRelationshipRequest,
+  WorldKbPromoteCandidateRequest,
+} from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
 import { HttpError, mapNativeError, routeNotMigrated } from './errors.js';
 import {
@@ -11,21 +15,63 @@ import {
   shutdownProviderSession,
 } from './provider.js';
 import { streamSessionEvents } from './sse.js';
+import { CONTENT_ROUTES } from './content.js';
+import { KNOWLEDGE_ROUTES } from './knowledge.js';
+import { WORLD_ROUTES } from './worlds.js';
+import { WORK_ROUTES } from './works.js';
 import {
   getCoreChanges,
   getWorldKbCandidates,
   getWorldKbGraph,
+  getWorldKbKeyBlockState,
   hostQuery,
   parseBoundedLimit,
   parseClampedLimit,
   parseIncludeSuggested,
   patchWorldKbEntity,
+  patchWorldKbRelationship,
+  promoteWorldKbCandidate,
 } from './world-kb.js';
+
+/**
+ * The World/Work/content/knowledge families self-describe their retained
+ * identities (exact path/verb/tier); this composer merges them ahead of the
+ * legacy hand-written matcher. P5-T5 owns the final whole-service inventory.
+ */
+export type DomainFamily = 'worlds' | 'works' | 'content' | 'knowledge';
+
+/** One retained family identity: exact path pattern, verb, tier and handler. */
+export interface DomainRoute {
+  readonly method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+  /** Anchored pattern; capture groups are positional params. */
+  readonly pattern: RegExp;
+  readonly tier: Exclude<RouteTier, 'provider_stream' | 'unguarded'>;
+  readonly family: DomainFamily;
+  /** Non-200 success status the retained surface keeps (201/204). */
+  readonly status?: number;
+  readonly handle: (
+    service: ServiceCore,
+    params: string[],
+    searchParams: URLSearchParams,
+    body: unknown,
+  ) => Promise<DomainResult>;
+}
+
+/** A family handler's success payload plus its retained status override. */
+export type DomainResult = { status?: number; body: unknown };
+
+/** Merged family inventory; exported as the bounded route-inventory seam. */
+export const DOMAIN_ROUTES: readonly DomainRoute[] = [
+  ...WORLD_ROUTES,
+  ...WORK_ROUTES,
+  ...CONTENT_ROUTES,
+  ...KNOWLEDGE_ROUTES,
+];
 
 export type RouteTier = 'unguarded' | 'tier1' | 'tier2' | 'provider_stream';
 
 export type RouteHandlerResult =
-  | { kind: 'json'; body: unknown }
+  | { kind: 'json'; body: unknown; status?: number }
   | { kind: 'sse'; run: (res: ServerResponse) => Promise<void> };
 
 export interface RouteMatch {
@@ -33,9 +79,17 @@ export interface RouteMatch {
   worldId?: string;
   sessionId?: string;
   operationId?: string;
+  /** Set when the match came from a self-describing family route. */
+  family?: DomainFamily;
+  params?: string[];
+  /** Retained non-200 success status (201/204) for the family handler. */
+  status?: number;
 }
 
 const WORLD_KB_GRAPH = /^\/v1\/daemon\/worlds\/([^/]+)\/kb\/graph$/;
+const WORLD_KB_PROMOTE = /^\/v1\/daemon\/worlds\/([^/]+)\/kb\/promote-candidate$/;
+const WORLD_KB_RELATIONSHIP = /^\/v1\/daemon\/worlds\/([^/]+)\/kb\/patch-relationship$/;
+const WORLD_KB_KEY_BLOCK_STATE = /^\/v1\/daemon\/worlds\/([^/]+)\/kb\/key-blocks\/([^/]+)\/state$/;
 const WORLD_KB_PATCH = /^\/v1\/daemon\/worlds\/([^/]+)\/kb\/patch-entity$/;
 const WORLD_KB_CANDIDATES = /^\/v1\/daemon\/worlds\/([^/]+)\/kb\/candidates$/;
 const CORE_CHANGES = /^\/v1\/daemon\/core\/changes$/;
@@ -45,6 +99,18 @@ const SESSION_EVENTS = /^\/v1\/daemon\/agent-host\/sessions\/([^/]+)\/events$/;
 const OPERATION = /^\/v1\/daemon\/agent-host\/operations\/([^/]+)$/;
 
 export function matchRoute(method: string, pathname: string): RouteMatch | null {
+  for (const route of DOMAIN_ROUTES) {
+    if (route.method !== method) continue;
+    const match = pathname.match(route.pattern);
+    if (match) {
+      return {
+        tier: route.tier,
+        family: route.family,
+        params: match.slice(1),
+        ...(route.status !== undefined ? { status: route.status } : {}),
+      };
+    }
+  }
   if (method === 'GET' && pathname === '/v1/daemon/runtime/health') {
     return { tier: 'unguarded' };
   }
@@ -71,6 +137,18 @@ export function matchRoute(method: string, pathname: string): RouteMatch | null 
   const graph = pathname.match(WORLD_KB_GRAPH);
   if (method === 'GET' && graph) {
     return { tier: 'tier2', worldId: graph[1] };
+  }
+  const promote = pathname.match(WORLD_KB_PROMOTE);
+  if (method === 'POST' && promote) {
+    return { tier: 'tier2', worldId: promote[1] };
+  }
+  const relationship = pathname.match(WORLD_KB_RELATIONSHIP);
+  if (method === 'POST' && relationship) {
+    return { tier: 'tier2', worldId: relationship[1] };
+  }
+  const keyBlockState = pathname.match(WORLD_KB_KEY_BLOCK_STATE);
+  if (method === 'GET' && keyBlockState) {
+    return { tier: 'tier2', worldId: keyBlockState[1] };
   }
   const patch = pathname.match(WORLD_KB_PATCH);
   if (method === 'POST' && patch) {
@@ -127,6 +205,24 @@ export async function handleRoute(
     throw routeNotMigrated(pathname);
   }
 
+  if (route.family && route.params) {
+    const entry = DOMAIN_ROUTES.find(
+      (candidate) => candidate.family === route.family && candidate.pattern.test(pathname) && candidate.method === method,
+    );
+    if (!entry) {
+      throw routeNotMigrated(pathname);
+    }
+    const result = await entry.handle(service, route.params, searchParams, body);
+    return {
+      kind: 'json',
+      body: result.body,
+      ...(result.status !== undefined
+        ? { status: result.status }
+        : route.status !== undefined
+          ? { status: route.status }
+          : {}),
+    };
+  }
   switch (route.tier) {
     case 'unguarded':
       return { kind: 'json', body: handleUnguarded(service, pathname) };
@@ -265,6 +361,24 @@ async function handleTier2(
   }
   if (method === 'POST' && route.worldId && pathname.endsWith('/kb/patch-entity')) {
     return patchWorldKbEntity(service, route.worldId, body as WorldKbPatchEntityRequest);
+  }
+  if (method === 'POST' && route.worldId && pathname.endsWith('/kb/promote-candidate')) {
+    return promoteWorldKbCandidate(
+      service,
+      route.worldId,
+      body as WorldKbPromoteCandidateRequest,
+    );
+  }
+  if (method === 'POST' && route.worldId && pathname.endsWith('/kb/patch-relationship')) {
+    return patchWorldKbRelationship(
+      service,
+      route.worldId,
+      body as WorldKbPatchRelationshipRequest,
+    );
+  }
+  if (method === 'GET' && route.worldId && pathname.includes('/kb/key-blocks/')) {
+    const keyBlockState = pathname.match(WORLD_KB_KEY_BLOCK_STATE);
+    return getWorldKbKeyBlockState(service, route.worldId, keyBlockState[2]);
   }
   if (method === 'GET' && route.worldId && pathname.endsWith('/kb/candidates')) {
     const limit = parseClampedLimit(searchParams.get('limit'), 'limit');

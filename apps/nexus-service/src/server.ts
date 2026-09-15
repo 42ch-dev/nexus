@@ -194,8 +194,14 @@ function sendJson(
 ): void {
   writeCors(res, origin, allowed);
   res.statusCode = status;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('X-Request-Id', requestIdValue);
+  // Retained 204 handlers carry no body: no JSON Content-Type, no
+  // serialization (the transport would drop it anyway).
+  if (status === 204) {
+    res.end();
+    return;
+  }
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.end(stringifyJsonSafe(payload));
 }
 
@@ -348,7 +354,7 @@ export function createServiceServer(
         await result.run(res);
         return;
       }
-      sendJson(res, 200, result.body, id, origin, config.allowedOrigins);
+      sendJson(res, result.status ?? 200, result.body, id, origin, config.allowedOrigins);
     } catch (error) {
       const mapped = mapNativeError(error);
       if (!res.headersSent) {
