@@ -116,7 +116,12 @@ pub async fn run_boot_recovery(
                     "recovering {} persisted session(s) into in-memory tracker",
                     summaries.len()
                 );
-                engine.recover_sessions_inner(summaries).await;
+                // Trait entry point: `recover_sessions` delegates to the
+                // concrete engine's `recover_sessions_inner` (full A7 runner
+                // reconstruction + owned-descendant closure). This seam holds
+                // a `dyn OrchestrationEngine`, so the trait method is the
+                // only reachable spelling here.
+                engine.recover_sessions(summaries).await;
             }
             Ok(_) => {}
             Err(e) => {
@@ -1282,6 +1287,13 @@ impl WorkflowRunCoordinator {
             "recover_persisted: recovering {} persisted session(s) into in-memory tracker",
             summaries.len()
         );
+        // `_inner` is deliberate, not a trait-vs-concrete slip: the
+        // coordinator holds the CONCRETE `Arc<GraphFlowEngine>`, which has an
+        // inherent tracker-only `recover_sessions` (in-memory sessions map,
+        // no runner reconstruction) AND a trait impl whose
+        // `recover_sessions` delegates here. Inherent methods win on a
+        // concrete type, so naming `recover_sessions` would silently skip
+        // runner reconstruction and break the re-drive below.
         self.engine.recover_sessions_inner(summaries.clone()).await;
         let mut drivable = Vec::new();
         {
