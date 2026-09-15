@@ -1,18 +1,32 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://nexus42.invalid/schemas/daemon-api/findings/update-finding-request.schema.json",
-  "schema_version": 1,
-  "title": "Nexus UpdateFindingRequest",
-  "description": "Request body for PATCH /v1/daemon/works/{work_id}/findings/{finding_id}.",
-  "type": "object",
-  "properties": {
-    "severity": { "type": "string" },
-    "status": { "type": "string" },
-    "title": { "type": "string" },
-    "description": { "type": "string" },
-    "target_executor": { "type": "string" },
-    "kind": { "type": "string" },
-    "rule_suggestion": { "type": "string" }
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/daemon-api/findings/update-finding-request.schema.json",
+ "schema_version": 2,
+ "title": "Nexus UpdateFindingRequest",
+ "description": "Request body for PATCH /v1/daemon/works/{work_id}/findings/{finding_id}. Every field is optional; `rule_suggestion` is tri-state (R-V1190-FINDINGS-TRISTATE-DUP): omitted does not touch the stored column, `null` clears it to SQL NULL, a string sets it.",
+ "type": "object",
+ "properties": {
+  "severity": {
+   "type": "string"
   },
-  "additionalProperties": false
+  "status": {
+   "type": "string"
+  },
+  "title": {
+   "type": "string"
+  },
+  "description": {
+   "type": "string"
+  },
+  "target_executor": {
+   "type": "string"
+  },
+  "kind": {
+   "type": "string"
+  },
+  "rule_suggestion": {
+   "description": "Tri-state prose-rule-suggestion patch (V1.48 P3 T3 / R-V147P0-03): omitted = do not touch the column, null = clear it to SQL NULL, string = set it. Deliberately unrestricted at the JSON-Schema level: a typed nullable string (`anyOf`/`oneOf` [null, string]) collapses omission and null in the generated carrier, because typify resolves `anyOf` [null, T] to `Option<T>` (typify-impl `maybe_option`, enums.rs:27-52) and a non-required nullable property already carries the option (structs.rs:135-160). The Rust/TS boundary parser owns the three-state grammar and rejects every other value before any stored effect."
+  }
+ },
+ "additionalProperties": false
 }

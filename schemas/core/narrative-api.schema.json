@@ -1,0 +1,56 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/narrative-api.schema.json",
+ "schema_version": 1,
+ "title": "Nexus NarrativeApi",
+ "description": "Handler-local wire DTOs for the narrative read surface (`narrative-api` destination): the `WorldState` read-model projection and the list/get envelopes of `GET /v1/daemon/narrative/worlds`. Mirrors `nexus-narrative`'s serialized `WorldState` verbatim (read-only projection, not the authoritative domain aggregate).",
+ "type": "object",
+ "allOf": [
+  {
+   "$ref": "#/definitions/NarrativeWorldsListResponse"
+  }
+ ],
+ "definitions": {
+  "NarrativeWorldState": {
+   "title": "NarrativeWorldState",
+   "type": "object",
+   "description": "Read-model projection of one World (aggregated narrative state; never the stored row).",
+   "required": ["world_id", "title", "slug", "status", "is_fork", "created_at"],
+   "additionalProperties": false,
+   "properties": {
+    "world_id": { "type": "string" },
+    "title": { "type": "string" },
+    "slug": { "type": "string" },
+    "status": { "type": "string", "description": "World status (`active` / `archived` / `paused`)." },
+    "is_fork": { "type": "boolean" },
+    "fork_branch_id": { "type": "string" },
+    "parent_world_id": { "type": "string" },
+    "forked_from_event_id": { "type": "string" },
+    "canon_revision": { "type": "integer", "minimum": 0, "description": "Canon revision counter." },
+    "current_timeline_head_id": { "type": "string" },
+    "current_time_pointer": { "type": "string" },
+    "created_at": { "type": "string", "description": "RFC 3339 creation timestamp." }
+   }
+  },
+  "NarrativeWorldsListResponse": {
+   "title": "NarrativeWorldsListResponse",
+   "type": "object",
+   "description": "Response for `GET /v1/daemon/narrative/worlds` (empty list when no Worlds are seeded).",
+   "required": ["worlds"],
+   "additionalProperties": false,
+   "properties": {
+    "worlds": { "type": "array", "items": { "$ref": "#/definitions/NarrativeWorldState" } }
+   }
+  },
+  "NarrativeWorldResponse": {
+   "title": "NarrativeWorldResponse",
+   "type": "object",
+   "description": "Response for `GET /v1/daemon/narrative/worlds/{world_id}`; 404 for an unknown World id.",
+   "required": ["world"],
+   "additionalProperties": false,
+   "properties": {
+    "world": { "$ref": "#/definitions/NarrativeWorldState" }
+   }
+  }
+ }
+}

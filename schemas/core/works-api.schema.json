@@ -1,0 +1,194 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/works-api.schema.json",
+ "schema_version": 1,
+ "title": "Nexus WorkAuthoringApi",
+ "description": "Handler-local wire DTOs for the Work authoring family (`works-api` destination): authoring pool entries/list, pool set-active/promote/archive, inspiration items/list/add/promote/archive and the chapter reconcile report. `creator_id` never crosses the wire: the surface is local-first and always the active creator (R-V141P1-11). Wire shapes mirror the retired daemon-local envelopes verbatim.",
+ "type": "object",
+ "allOf": [
+  {
+   "$ref": "#/definitions/WorkPoolListResponse"
+  }
+ ],
+ "definitions": {
+  "WorkPoolEntry": {
+   "title": "WorkPoolEntry",
+   "type": "object",
+   "description": "One authoring-pool entry as served on the wire (the stored `creator_id` is intentionally not serialized).",
+   "required": ["entry_id", "work_id", "status", "title", "promoted_at"],
+   "additionalProperties": false,
+   "properties": {
+    "entry_id": { "type": "string", "description": "Authoring-pool entry id." },
+    "work_id": { "type": "string", "description": "Work the entry points at; empty when the entry has no Work yet." },
+    "status": { "type": "string", "description": "Entry status (`active` / `queued` / `archived`)." },
+    "title": { "type": "string" },
+    "promoted_at": { "type": "string", "description": "RFC 3339 promotion timestamp." },
+    "note": { "type": "string", "description": "Optional entry note." }
+   }
+  },
+  "WorkPoolListResponse": {
+   "title": "WorkPoolListResponse",
+   "type": "object",
+   "description": "Offset-paginated authoring-pool page (legacy `list_pool` envelope).",
+   "required": ["entries", "total", "limit", "offset"],
+   "additionalProperties": false,
+   "properties": {
+    "entries": { "type": "array", "items": { "$ref": "#/definitions/WorkPoolEntry" } },
+    "total": { "type": "integer", "minimum": 0 },
+    "limit": { "type": "integer", "minimum": 0 },
+    "offset": { "type": "integer", "minimum": 0 }
+   }
+  },
+  "WorkPoolSetActiveRequest": {
+   "title": "WorkPoolSetActiveRequest",
+   "type": "object",
+   "description": "Body for `POST /v1/daemon/works/pool` (set the pool-active Work). `action` is the legacy action word (`set`); `creator_id` is accepted for legacy parity but the stored Principal stays the only identity.",
+   "required": ["action", "work_id"],
+   "additionalProperties": false,
+   "properties": {
+    "action": { "type": "string", "description": "Legacy action word; values other than the stored `set` action are rejected by the core authority." },
+    "work_id": { "type": "string", "minLength": 1 },
+    "creator_id": { "type": "string", "description": "Legacy optional caller echo; never authorizes — the native Principal is minted from the opened core." }
+   }
+  },
+  "WorkPoolPromoteRequest": {
+   "title": "WorkPoolPromoteRequest",
+   "type": "object",
+   "description": "Body for `POST /v1/daemon/works/pool/promote` (promote a queued Work into the pool and set it active).",
+   "required": ["work_id"],
+   "additionalProperties": false,
+   "properties": {
+    "work_id": { "type": "string", "minLength": 1 },
+    "set_default": { "type": "boolean", "description": "Legacy redundant flag: promotion always sets the entry active." }
+   }
+  },
+  "WorkPoolArchiveRequest": {
+   "title": "WorkPoolArchiveRequest",
+   "type": "object",
+   "description": "Body for `POST /v1/daemon/works/pool/archive`.",
+   "required": ["entry_id"],
+   "additionalProperties": false,
+   "properties": {
+    "entry_id": { "type": "string", "minLength": 1 }
+   }
+  },
+  "WorkInspirationItem": {
+   "title": "WorkInspirationItem",
+   "type": "object",
+   "description": "One inspiration-pool item as served on the wire (the stored `creator_id` is intentionally not serialized).",
+   "required": ["item_id", "rel_path", "title", "status", "created_at"],
+   "additionalProperties": false,
+   "properties": {
+    "item_id": { "type": "string" },
+    "rel_path": { "type": "string", "description": "Workspace-relative file path of the inspiration note." },
+    "title": { "type": "string" },
+    "status": { "type": "string", "description": "`new` / `promoted` / `archived`." },
+    "promoted_work_id": { "type": "string", "description": "Work the item was promoted into, when promoted." },
+    "created_at": { "type": "string" },
+    "promoted_at": { "type": "string" }
+   }
+  },
+  "WorkInspirationListResponse": {
+   "title": "WorkInspirationListResponse",
+   "type": "object",
+   "description": "Offset-paginated inspiration page (legacy `list_inspiration` envelope).",
+   "required": ["items", "total", "limit", "offset"],
+   "additionalProperties": false,
+   "properties": {
+    "items": { "type": "array", "items": { "$ref": "#/definitions/WorkInspirationItem" } },
+    "total": { "type": "integer", "minimum": 0 },
+    "limit": { "type": "integer", "minimum": 0 },
+    "offset": { "type": "integer", "minimum": 0 }
+   }
+  },
+  "WorkInspirationAddRequest": {
+   "title": "WorkInspirationAddRequest",
+   "type": "object",
+   "description": "Body for `POST /v1/daemon/works/pool/inspiration` (scaffold a new inspiration note).",
+   "required": ["title"],
+   "additionalProperties": false,
+   "properties": {
+    "title": { "type": "string", "minLength": 1 }
+   }
+  },
+  "WorkInspirationAddResponse": {
+   "title": "WorkInspirationAddResponse",
+   "type": "object",
+   "description": "201 response for the inspiration scaffold.",
+   "required": ["item_id", "rel_path"],
+   "additionalProperties": false,
+   "properties": {
+    "item_id": { "type": "string" },
+    "rel_path": { "type": "string" }
+   }
+  },
+  "WorkInspirationListQuery": {
+   "title": "WorkInspirationListQuery",
+   "type": "object",
+   "description": "Query for `GET /v1/daemon/works/pool/inspiration`.",
+   "additionalProperties": false,
+   "properties": {
+    "status": { "type": "string" },
+    "limit": { "type": "integer", "minimum": 0 },
+    "offset": { "type": "integer", "minimum": 0 }
+   }
+  },
+  "WorkPoolListQuery": {
+   "title": "WorkPoolListQuery",
+   "type": "object",
+   "description": "Query for `GET /v1/daemon/works/pool`.",
+   "additionalProperties": false,
+   "properties": {
+    "status": { "type": "string" },
+    "limit": { "type": "integer", "minimum": 0 },
+    "offset": { "type": "integer", "minimum": 0 }
+   }
+  },
+  "WorkInspirationPromoteRequest": {
+   "title": "WorkInspirationPromoteRequest",
+   "type": "object",
+   "description": "Body for `POST /v1/daemon/works/pool/inspiration/promote` (atomically create a Work from an inspiration item and mark it promoted).",
+   "required": ["item_id"],
+   "additionalProperties": false,
+   "properties": {
+    "item_id": { "type": "string", "minLength": 1 },
+    "idea": { "type": "string", "description": "Optional `initial_idea` override for the created Work." },
+    "set_default": { "type": "boolean", "description": "Set the new Work pool-active after creation." }
+   }
+  },
+  "WorkInspirationPromoteResponse": {
+   "title": "WorkInspirationPromoteResponse",
+   "type": "object",
+   "description": "Response for the atomic inspiration promotion (legacy three-write transaction).",
+   "required": ["work_id", "pool_entry_id"],
+   "additionalProperties": false,
+   "properties": {
+    "work_id": { "type": "string" },
+    "pool_entry_id": { "type": "string" }
+   }
+  },
+  "WorkInspirationArchiveRequest": {
+   "title": "WorkInspirationArchiveRequest",
+   "type": "object",
+   "description": "Body for `POST /v1/daemon/works/pool/inspiration/archive`.",
+   "required": ["item_id"],
+   "additionalProperties": false,
+   "properties": {
+    "item_id": { "type": "string", "minLength": 1 }
+   }
+  },
+  "WorkReconcileReport": {
+   "title": "WorkReconcileReport",
+   "type": "object",
+   "description": "Chapter reconcile counters (DB-as-SSOT resync); identical for the dry-run preview and the committed run.",
+   "required": ["created", "updated", "resynced", "preserved"],
+   "additionalProperties": false,
+   "properties": {
+    "created": { "type": "integer", "minimum": 0 },
+    "updated": { "type": "integer", "minimum": 0 },
+    "resynced": { "type": "integer", "minimum": 0 },
+    "preserved": { "type": "integer", "minimum": 0 }
+   }
+  }
+ }
+}

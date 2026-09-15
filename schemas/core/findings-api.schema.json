@@ -1,0 +1,28 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/findings-api.schema.json",
+ "schema_version": 1,
+ "title": "Nexus FindingsApi",
+ "description": "Handler-local wire DTOs for the findings family without an existing schema (`findings-api` destination): the retention prune outcome. The PATCH tri-state (`rule_suggestion`) is owned by `schemas/daemon-api/findings/update-finding-request.schema.json` and must never be duplicated here (R-V1190-FINDINGS-TRISTATE-DUP: single wire definition, no parallel handwritten shape).",
+ "type": "object",
+ "allOf": [
+  {
+   "$ref": "#/definitions/FindingsPruneResponse"
+  }
+ ],
+ "definitions": {
+  "FindingsPruneResponse": {
+   "title": "FindingsPruneResponse",
+   "type": "object",
+   "description": "Response for `POST /v1/daemon/findings/prune` (V1.49 P3, quality-loop §9.4). `count` is the number of rows deleted, or that would be deleted under `dry_run`.",
+   "required": ["count", "older_than_days", "dry_run", "now_epoch"],
+   "additionalProperties": false,
+   "properties": {
+    "count": { "type": "integer", "minimum": 0 },
+    "older_than_days": { "type": "integer", "minimum": 0, "description": "Resolved retention threshold in days (bounded server default when the query omits it)." },
+    "dry_run": { "type": "boolean" },
+    "now_epoch": { "type": "integer", "description": "Server-side epoch second used for the cutoff." }
+   }
+  }
+ }
+}

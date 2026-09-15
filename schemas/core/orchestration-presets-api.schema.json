@@ -1,0 +1,154 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/orchestration-presets-api.schema.json",
+ "schema_version": 1,
+ "title": "Nexus OrchestrationPresetsApi",
+ "description": "Canonical wire DTOs for the `/v1/daemon/orchestration/presets*` read surface (`orchestration-presets-api` destination). Migrated verbatim from the retired handwritten `nexus-contracts::local::orchestration::http` preset definitions: wire casing stays camelCase, optional manifest fields stay absent-when-not-carried (AR-21), and the trigger-lane booleans stay the flat PL-3 vocabulary the CLI `preset show --json` output matches verbatim (AR-25). Deliberately NOT part of this contract: an update-request `expected_source_hash` — the existing `UpdatePresetRequest` stays YAML-only and the strategy revision CAS remains the accepted write guard (P3-T4 request declined without evidence of an existing versioned update contract).",
+ "type": "object",
+ "allOf": [
+  {
+   "$ref": "#/definitions/OrchestrationPresetListResponse"
+  }
+ ],
+ "definitions": {
+  "OrchestrationPresetListResponse": {
+   "title": "OrchestrationPresetListResponse",
+   "type": "object",
+   "description": "Response body for `GET /v1/daemon/orchestration/presets` (loadable preset ids). Named `OrchestrationPresetListResponse` because `preset-management` already owns the canonical `ListPresetsResponse` wire shape (`embedded`/`system`/`user`), and the two shapes are not interchangeable.",
+   "required": ["presets"],
+   "additionalProperties": false,
+   "properties": {
+    "presets": { "type": "array", "items": { "type": "string" } }
+   }
+  },
+  "PresetProfileResponse": {
+   "title": "PresetProfileResponse",
+   "type": "object",
+   "description": "Response body for `GET /v1/daemon/orchestration/presets/{id}/profile` (AR-20..23): a manifest-derived profile for any resolvable preset. Pure read of the already-loaded preset; manifest fields the preset does not carry serialize absent.",
+   "required": ["id", "version", "sourceHash", "lanes", "states"],
+   "additionalProperties": false,
+   "properties": {
+    "id": { "type": "string", "description": "Preset identifier from the loaded manifest (`LoadedPreset.id`)." },
+    "version": { "type": "integer", "minimum": 0, "maximum": 4294967295, "description": "Preset schema version (u32)." },
+    "sourceHash": { "type": "string", "description": "blake3 hex hash of the source YAML (identity across restarts)." },
+    "lanes": { "$ref": "#/definitions/PresetProfileLanes" },
+    "states": { "type": "array", "items": { "$ref": "#/definitions/PresetProfileState" } },
+    "roles": { "type": "array", "description": "Role definitions; absent when empty (single-agent mode).", "items": { "$ref": "#/definitions/PresetProfileRole" } },
+    "requiredCapabilities": { "type": "array", "description": "Capabilities this preset requires; absent when empty.", "items": { "type": "string" } },
+    "signals": { "type": "array", "description": "Declared signal bindings (declared, not delivered); absent when empty.", "items": { "$ref": "#/definitions/PresetProfileSignal" } }
+   }
+  },
+  "PresetProfileLanes": {
+   "title": "PresetProfileLanes",
+   "type": "object",
+   "description": "Trigger-lane classification: the four locked PL-3 lanes (cron / wall-clock / session / direct) as a flat wire mirror, not a state machine.",
+   "required": ["cron", "wallClock", "session", "direct"],
+   "additionalProperties": false,
+   "properties": {
+    "cron": { "type": "boolean", "description": "This preset id is one of the works-cron role presets (brainstorm / write / review per `RolesSchedule`)." },
+    "wallClock": { "type": "boolean", "description": "Daemon schedule admission on a wall-clock tick." },
+    "session": { "type": "boolean", "description": "Session start can load it (embedded and system presets only; user presets report false, W-003/F-002)." },
+    "direct": { "type": "boolean", "description": "Schedule start with an explicit run payload." }
+   }
+  },
+  "PresetProfileState": {
+   "title": "PresetProfileState",
+   "type": "object",
+   "description": "One state of the outer state machine.",
+   "required": ["id", "terminal"],
+   "additionalProperties": false,
+   "properties": {
+    "id": { "type": "string" },
+    "description": { "type": "string" },
+    "enter": { "type": "array", "description": "Enter action kinds (`capability` / `inner_graph` / `host_tool`); absent when empty.", "items": { "$ref": "#/definitions/PresetProfileEnterAction" } },
+    "exitWhen": { "$ref": "#/definitions/PresetProfileExitWhen" },
+    "next": { "$ref": "#/definitions/PresetProfileNext" },
+    "terminal": { "type": "boolean", "description": "No outgoing transitions." }
+   }
+  },
+  "PresetProfileEnterAction": {
+   "title": "PresetProfileEnterAction",
+   "type": "object",
+   "required": ["kind", "name"],
+   "additionalProperties": false,
+   "properties": {
+    "kind": { "type": "string", "description": "`capability` / `inner_graph` / `host_tool`." },
+    "name": { "type": "string", "description": "Capability name, inner graph name, or tool name." }
+   }
+  },
+  "PresetProfileExitWhen": {
+   "title": "PresetProfileExitWhen",
+   "type": "object",
+   "description": "Exit condition (`llm_judge` / `rule` / `graph_complete` / `manual` / `timer`); absent for terminal states.",
+   "required": ["kind"],
+   "additionalProperties": false,
+   "properties": {
+    "kind": { "type": "string" },
+    "templateFile": { "type": "string", "description": "Judge prompt template path (`llm_judge`)." },
+    "judgeCapability": { "type": "string", "description": "Judge capability name (`llm_judge`)." },
+    "minInterval": { "type": "string", "description": "Minimum interval between re-evaluations (`llm_judge`)." },
+    "duration": { "type": "string", "description": "ISO-8601 duration to wait (`timer`)." }
+   }
+  },
+  "PresetProfileNext": {
+   "title": "PresetProfileNext",
+   "type": "object",
+   "description": "Next transition form (`linear` / `goNogo` / `labeled` / `conditional` / `branches`); absent for terminal states.",
+   "required": ["kind"],
+   "additionalProperties": false,
+   "properties": {
+    "kind": { "type": "string" },
+    "target": { "type": "string", "description": "Linear target state id (`linear`)." },
+    "go": { "type": "string", "description": "GO target state id (`goNogo`)." },
+    "nogo": { "type": "string", "description": "NOGO target state id (`goNogo`)." },
+    "labeled": { "type": "array", "description": "Labeled edges (`labeled`); absent when empty.", "items": { "$ref": "#/definitions/PresetProfileLabeledNext" } },
+    "rules": { "type": "array", "description": "Conditional rules (`conditional` legacy form); absent when empty.", "items": { "$ref": "#/definitions/PresetProfileConditionalRule" } },
+    "branches": { "type": "array", "description": "Expression branches (`branches` form); absent when empty.", "items": { "$ref": "#/definitions/PresetProfileConditionalRule" } },
+    "default": { "type": "string", "description": "Default target state id (`conditional` / `branches`)." }
+   }
+  },
+  "PresetProfileLabeledNext": {
+   "title": "PresetProfileLabeledNext",
+   "type": "object",
+   "required": ["label", "target"],
+   "additionalProperties": false,
+   "properties": {
+    "label": { "type": "string", "description": "Label the judge returns to select this edge." },
+    "target": { "type": "string", "description": "Target state id." }
+   }
+  },
+  "PresetProfileConditionalRule": {
+   "title": "PresetProfileConditionalRule",
+   "type": "object",
+   "required": ["when", "target"],
+   "additionalProperties": false,
+   "properties": {
+    "when": { "type": "string", "description": "Expression evaluated against context." },
+    "target": { "type": "string", "description": "Target state id when the expression evaluates true." }
+   }
+  },
+  "PresetProfileRole": {
+   "title": "PresetProfileRole",
+   "type": "object",
+   "required": ["id", "description", "systemPromptFile"],
+   "additionalProperties": false,
+   "properties": {
+    "id": { "type": "string" },
+    "description": { "type": "string" },
+    "systemPromptFile": { "type": "string", "description": "System prompt template path relative to the bundle root." },
+    "recommendedSkills": { "type": "array", "description": "Recommended skill slugs, ordered (first = primary); absent when empty.", "items": { "type": "string" } }
+   }
+  },
+  "PresetProfileSignal": {
+   "title": "PresetProfileSignal",
+   "type": "object",
+   "required": ["name", "action"],
+   "additionalProperties": false,
+   "properties": {
+    "name": { "type": "string", "description": "Declared signal name." },
+    "action": { "type": "string", "description": "Action on receive: `pause` / `force_transition`." },
+    "target": { "type": "string", "description": "Target state id (`force_transition`)." }
+   }
+  }
+ }
+}

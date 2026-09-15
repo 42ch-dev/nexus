@@ -26,7 +26,7 @@ use crate::config::CliConfig;
 use crate::errors::Result;
 use crate::CliError;
 use clap::Subcommand;
-use nexus_contracts::local::orchestration::http::{
+use nexus_contracts::{
     PresetProfileExitWhen, PresetProfileLanes, PresetProfileNext, PresetProfileResponse,
 };
 
@@ -663,7 +663,7 @@ fn format_next(next: &PresetProfileNext) -> String {
 mod tests {
     use super::*;
     use clap::Parser;
-    use nexus_contracts::local::orchestration::http::{PresetProfileSignal, PresetProfileState};
+    use nexus_contracts::{PresetProfileSignal, PresetProfileState};
 
     /// Wrapper for parsing `PresetCommand` in tests.
     #[derive(Debug, clap::Parser)]

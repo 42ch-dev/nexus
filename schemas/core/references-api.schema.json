@@ -1,0 +1,60 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/references-api.schema.json",
+ "schema_version": 1,
+ "title": "Nexus ReferencesApi",
+ "description": "Handler-local wire DTOs for the reference-source registry read surface (`references-api` destination). The cloud-backed refresh stays the CLI's explicit external call and is deliberately not owned here.",
+ "type": "object",
+ "allOf": [
+  {
+   "$ref": "#/definitions/ReferenceListResponse"
+  }
+ ],
+ "definitions": {
+  "ReferenceSourceInfo": {
+   "title": "ReferenceSourceInfo",
+   "type": "object",
+   "description": "Registry metadata for one reference source (legacy `reference` envelope; registry reads are global across creators in the local-first single-creator model).",
+   "required": [
+    "reference_source_id",
+    "source_type",
+    "source_mutability",
+    "uri",
+    "title",
+    "scan_status",
+    "created_at"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "reference_source_id": { "type": "string" },
+    "source_type": { "type": "string" },
+    "source_mutability": { "type": "string" },
+    "uri": { "type": "string" },
+    "title": { "type": "string" },
+    "content_path": { "type": "string", "description": "Workspace-relative content path when the source materialised locally." },
+    "scan_status": { "type": "string" },
+    "created_at": { "type": "string" }
+   }
+  },
+  "ReferenceListResponse": {
+   "title": "ReferenceListResponse",
+   "type": "object",
+   "description": "Response for `GET /v1/daemon/references`.",
+   "required": ["references"],
+   "additionalProperties": false,
+   "properties": {
+    "references": { "type": "array", "items": { "$ref": "#/definitions/ReferenceSourceInfo" } }
+   }
+  },
+  "ReferenceGetResponse": {
+   "title": "ReferenceGetResponse",
+   "type": "object",
+   "description": "Response for `GET /v1/daemon/references/{reference_id}`; 404 for an unknown id.",
+   "required": ["reference"],
+   "additionalProperties": false,
+   "properties": {
+    "reference": { "$ref": "#/definitions/ReferenceSourceInfo" }
+   }
+  }
+ }
+}

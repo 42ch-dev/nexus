@@ -3,11 +3,11 @@
 use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
 use axum::{extract::Path, extract::State, http::StatusCode, Json};
-use nexus_contracts::local::orchestration::http::{
-    ListPresetsResponse, PresetProfileConditionalRule, PresetProfileEnterAction,
+use nexus_contracts::local::orchestration::http::ReloadPresetResponse;
+use nexus_contracts::{
+    OrchestrationPresetListResponse, PresetProfileConditionalRule, PresetProfileEnterAction,
     PresetProfileExitWhen, PresetProfileLabeledNext, PresetProfileLanes, PresetProfileNext,
     PresetProfileResponse, PresetProfileRole, PresetProfileSignal, PresetProfileState,
-    ReloadPresetResponse,
 };
 use nexus_contracts::local::orchestration::preset::{
     EnterAction, ExitWhen, NextTarget, PresetRoleDefinition, SignalActionKind, SignalBinding,
@@ -22,7 +22,7 @@ use nexus_orchestration::system_preset_dir;
 /// from `~/.nexus42/presets/_system/<name>/`.
 pub async fn list_presets(
     State(state): State<WorkspaceState>,
-) -> (StatusCode, Json<ListPresetsResponse>) {
+) -> (StatusCode, Json<OrchestrationPresetListResponse>) {
     let mut presets = nexus_orchestration::preset::list_embedded_presets();
 
     // Discover system presets from directory (WS-D).
@@ -34,7 +34,7 @@ pub async fn list_presets(
         }
     }
 
-    (StatusCode::OK, Json(ListPresetsResponse { presets }))
+    (StatusCode::OK, Json(OrchestrationPresetListResponse { presets }))
 }
 
 /// `POST /v1/daemon/orchestration/presets/:id`
