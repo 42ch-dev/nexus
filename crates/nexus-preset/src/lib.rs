@@ -101,7 +101,7 @@ pub fn load_embedded_preset(
 /// root).
 #[must_use]
 pub fn embedded_source_identity(preset_id: &str) -> Option<crate::source_identity::PresetSourceIdentity> {
-    let caps = crate::capability_catalog::BuiltinCapabilityCatalog;
+    let caps = BuiltinCapabilityCatalog;
     load_embedded_preset(preset_id, &caps)
         .ok()
         .and_then(|loaded| loaded.source_identity)

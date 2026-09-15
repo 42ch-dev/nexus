@@ -208,7 +208,7 @@ impl CoreService {
             NexusPresetSummary { id, source: NexusPresetSummarySource::Embedded, run_intents }
         }).collect();
         let system = nexus_preset::system_preset_dir::scan_system_presets(&self.inner.nexus_home, &caps)
-            .presets.into_iter().map(|entry| NexusPresetSummary { id: entry.id, source: NexusPresetSummarySource::System, run_intents: vec![] }).collect();
+            .presets.into_iter().map(|entry| NexusPresetSummary { id: entry.qualified_id, source: NexusPresetSummarySource::System, run_intents: vec![] }).collect();
         let user = nexus_home_layout::list_user_preset_ids(raw_user_home(&self.inner.nexus_home).map_err(CoreError::from)?)
             .into_iter().map(|id| NexusPresetSummary { id, source: NexusPresetSummarySource::User, run_intents: vec![] }).collect();
         Ok(ListPresetsResponse { embedded, system, user })
