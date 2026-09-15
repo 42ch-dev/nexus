@@ -1,32 +1,22 @@
-//! Findings API handlers (V1.39 P1 — novel-quality-loop §2).
+//! Thin findings HTTP adapters over the guarded core findings service.
 //!
-//! Endpoints:
-//! - `POST   /v1/daemon/works/{work_id}/findings` — Create finding
-//! - `GET    /v1/daemon/works/{work_id}/findings` — List findings (filters: status, severity, cursor pagination — F-P2)
-//! - `GET    /v1/daemon/works/{work_id}/findings/{finding_id}` — Get one finding
-//! - `PATCH  /v1/daemon/works/{work_id}/findings/{finding_id}` — Update finding
-//! - `DELETE /v1/daemon/works/{work_id}/findings/{finding_id}` — Delete finding
-//! - `POST   /v1/daemon/works/{work_id}/findings/from-review` — Create from review verdict (T3)
-//! - `GET    /v1/daemon/findings/{finding_id}` — Get one finding, creator-scoped (V1.48 P2 — accept path)
-//! - `GET    /v1/daemon/findings/stale` — Stale open-findings count for active creator (V1.39 P4 T3)
+//! Endpoints translate the wire envelope to `nexus_core` findings operations
+//! and back; lifecycle validation, enum validation, batch triage semantics,
+//! stale reporting and retention prune live in the core (P1-T3). The watcher
+//! schedule itself is P3-T2; only the query surface lives here.
 
 #![allow(clippy::missing_errors_doc)]
 
 use crate::api::errors::NexusApiError;
-use crate::api::pagination::{decode_offset_cursor, offset_page_meta};
 use crate::stale_findings_watcher::{DEFAULT_STALE_THRESHOLD_SECS, ENV_STALE_THRESHOLD_SECS};
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
-use nexus_contracts::{BatchUpdateFindingsRequest, BatchUpdateFindingsResponse, PaginationInfo};
-use nexus_local_db::findings::{
-    self, Finding, FindingListFilters, FindingPatch, ReviewVerdictFinding,
+use nexus_contracts::{
+    BatchUpdateFindingsRequest, BatchUpdateFindingsResponse, FindingDetailResponse, PaginationInfo,
 };
-use nexus_local_db::works;
 use serde::{Deserialize, Serialize};
-
-use crate::config::read_active_creator_id;
 
 // ─── Tri-state serde helper (V1.48 P3 T3 / R-V147P0-03) ────────────────────
 
@@ -39,7 +29,8 @@ use crate::config::read_active_creator_id;
 ///
 /// Combined with `#[serde(default)]` on the field, this is the standard
 /// tri-state pattern for nullable PATCH fields. See
-/// `FindingPatch::rule_suggestion` rustdoc for the full semantics.
+/// `nexus_core::UpdateFindingRequest::rule_suggestion` rustdoc for the full
+/// semantics.
 // V1.48 P3 T3: Option<Option<T>> is the tri-state pattern required by the
 // R-V147P0-03 spec (distinguish absent / null / value). Not a code smell.
 #[allow(clippy::option_option)]
@@ -53,7 +44,8 @@ where
 
 // ─── Request / Response types ──────────────────────────────────────────────
 
-/// API representation of a Finding record.
+/// API representation of a Finding record (wire copy of the core
+/// `FindingDetailResponse` projection).
 #[derive(Debug, Serialize)]
 pub struct FindingApiDto {
     pub finding_id: String,
@@ -76,10 +68,9 @@ pub struct FindingApiDto {
     pub routing_hint: Option<String>,
 }
 
-impl From<Finding> for FindingApiDto {
-    fn from(f: Finding) -> Self {
+impl From<FindingDetailResponse> for FindingApiDto {
+    fn from(f: FindingDetailResponse) -> Self {
         Self {
-            routing_hint: Some(format_routing_hint(&f.target_executor)),
             finding_id: f.finding_id,
             work_id: f.work_id,
             chapter: f.chapter,
@@ -92,6 +83,7 @@ impl From<Finding> for FindingApiDto {
             rule_suggestion: f.rule_suggestion,
             created_at: f.created_at,
             updated_at: f.updated_at,
+            routing_hint: f.routing_hint,
         }
     }
 }
@@ -122,6 +114,20 @@ fn default_kind() -> String {
     "craft".to_string()
 }
 
+impl CreateFindingRequest {
+    fn into_core(self) -> nexus_core::CreateFindingRequest {
+        nexus_core::CreateFindingRequest {
+            chapter: self.chapter,
+            severity: self.severity,
+            title: self.title,
+            description: self.description,
+            target_executor: self.target_executor,
+            kind: self.kind,
+            rule_suggestion: self.rule_suggestion,
+        }
+    }
+}
+
 /// Update finding request body (all fields optional).
 #[derive(Debug, Deserialize)]
 pub struct UpdateFindingRequest {
@@ -142,6 +148,20 @@ pub struct UpdateFindingRequest {
     /// every present value (including `null`) in `Some(...)`.
     #[serde(default, deserialize_with = "deserialize_some")]
     pub rule_suggestion: Option<Option<String>>,
+}
+
+impl UpdateFindingRequest {
+    fn into_core(self) -> nexus_core::UpdateFindingRequest {
+        nexus_core::UpdateFindingRequest {
+            severity: self.severity,
+            status: self.status,
+            title: self.title,
+            description: self.description,
+            target_executor: self.target_executor,
+            kind: self.kind,
+            rule_suggestion: self.rule_suggestion,
+        }
+    }
 }
 
 /// List findings query parameters.
@@ -171,54 +191,42 @@ pub struct ListFindingsResponse {
     pub pagination: PaginationInfo,
 }
 
-/// Findings summary for status endpoint (T5).
-#[derive(Debug, Serialize)]
-pub struct FindingsSummaryDto {
-    /// Total open findings count.
-    pub open_count: i64,
-    /// Severity breakdown.
-    pub by_severity: Vec<SeverityCountDto>,
-    /// Top 3 open findings with routing hints.
-    pub top_findings: Vec<TopFindingDto>,
-}
+// ─── Wire adapters ─────────────────────────────────────────────────────────
 
-/// Severity count in summary.
-#[derive(Debug, Serialize)]
-pub struct SeverityCountDto {
-    pub severity: String,
-    pub count: i64,
-}
-
-/// Top finding in summary (T5 §5.5.6).
-#[derive(Debug, Serialize)]
-pub struct TopFindingDto {
-    pub finding_id: String,
-    pub title: String,
-    pub severity: String,
-    pub target_executor: String,
-    pub routing_hint: String,
-}
-
-// ─── Routing hint (T4) ──────────────────────────────────────────────────────
-
-/// Convert `target_executor` to a human-readable CLI hint.
+/// Map a core findings fault onto the legacy HTTP classification.
 ///
-/// Per novel-quality-loop §2.2:
-/// - `write` → `→ write` (re-run novel-writing)
-/// - `brainstorm` → `→ brainstorm`
-/// - `none` → `→ none` (manual resolution)
-/// - `master` → `→ review-master`
-#[must_use]
-pub fn format_routing_hint(target_executor: &str) -> String {
-    match target_executor {
-        "write" => "→ write".to_string(),
-        "brainstorm" => "→ brainstorm".to_string(),
-        "master" => "→ review-master".to_string(),
-        _ => "→ none".to_string(),
+/// `InvalidInput.field` carries the stable public code (`invalid_input`,
+/// `invalid_transition`, `too_many_findings` — HTTP 422); `NotFound`
+/// resources round-trip verbatim; the legacy internal codes (`DATABASE_ERROR`,
+/// `FINDING_CREATE_FAILED`) ride verbatim as `<CODE>: <message>` and are
+/// re-emitted with the original code; the core `local_db_err` lowercase
+/// `database_error: …` carrier is re-classified as the legacy
+/// `DATABASE_ERROR`; every other internal category keeps the shared
+/// `CORE_ERROR` shape.
+fn findings_error(error: nexus_core::CoreError) -> NexusApiError {
+    match error {
+        nexus_core::CoreError::InvalidInput { field, reason } => {
+            NexusApiError::BadRequest { code: field, message: reason }
+        }
+        nexus_core::CoreError::NotFound { resource } => NexusApiError::NotFound(resource),
+        nexus_core::CoreError::Internal { category } => match category.split_once(": ") {
+            Some((code, message))
+                if matches!(code, "DATABASE_ERROR" | "FINDING_CREATE_FAILED") =>
+            {
+                NexusApiError::Internal { code: code.to_owned(), message: message.to_owned() }
+            }
+            // Work-lookup storage failures ride the core `local_db_err`
+            // lowercase carrier (`database_error: …`); the legacy surface
+            // classified them as `DATABASE_ERROR`, so re-emit that code.
+            Some(("database_error", message)) => NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_owned(),
+                message: message.to_owned(),
+            },
+            _ => nexus_core::CoreError::Internal { category }.into(),
+        },
+        other => other.into(),
     }
 }
-
-// ─── Handlers ───────────────────────────────────────────────────────────────
 
 /// `POST /v1/daemon/works/{work_id}/findings` — create a finding.
 pub async fn create_finding_handler(
@@ -226,101 +234,44 @@ pub async fn create_finding_handler(
     Path(work_id): Path<String>,
     Json(body): Json<CreateFindingRequest>,
 ) -> Result<(StatusCode, Json<FindingApiDto>), NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    // R-V139P1-W-2: delegate ID mint to findings module (single source of truth).
-    let finding_id = findings::mint_finding_id();
-    let now = chrono::Utc::now().timestamp();
-    let f = Finding {
-        finding_id: finding_id.clone(),
-        work_id: work_id.clone(),
-        chapter: body.chapter,
-        severity: body.severity,
-        status: "open".to_string(),
-        title: body.title,
-        description: body.description,
-        target_executor: body.target_executor,
-        creator_id: creator_id.clone(),
-        kind: body.kind,
-        rule_suggestion: body.rule_suggestion,
-        created_at: now,
-        updated_at: now,
-    };
-    findings::create_finding(state.pool_or_uninit()?, &f).await?;
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let f = core
+        .create_finding(&principal, work_id, body.into_core())
+        .await
+        .map_err(findings_error)?;
     Ok((StatusCode::CREATED, Json(f.into())))
 }
 
 /// `GET /v1/daemon/works/{work_id}/findings` — list findings.
 ///
-/// R-V149P0-01 (V1.50): the `status` query parameter now accepts a
-/// comma-separated list (e.g. `?status=open,triaged`) so the produce-prompt
-/// consumer can fetch the V1.49 actionable set in one round trip. Unknown
-/// status tokens surface as `INVALID_INPUT` (422), mirroring the
-/// `update_finding_handler` enum-error mapping.
-///
-/// F-P2 (V1.64): the response is now cursor-paginated (`{ items, pagination }`)
-/// instead of a bare array. Callers that previously deserialized the body as a
-/// `Vec` must read the `items` field. The opaque cursor encodes the row offset;
-/// clients MUST NOT parse it (convention §2).
+/// F-P2 (V1.64): the response is cursor-paginated (`{ items, pagination }`);
+/// the opaque cursor encodes the row offset; clients MUST NOT parse it
+/// (convention §2).
 pub async fn list_findings_handler(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
     Query(query): Query<ListFindingsQuery>,
 ) -> Result<Json<ListFindingsResponse>, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-
-    // F-P2 (V1.64): cursor-based pagination. Decode the opaque cursor into the
-    // underlying offset, fetch `limit + 1` to detect `has_more`.
-    let offset = decode_offset_cursor(&query.cursor)?;
-    let limit = query.limit.unwrap_or(100).min(500);
-    let fetch_limit = limit.saturating_add(1);
-
-    let filters = FindingListFilters {
-        work_id: Some(work_id),
-        chapter: query.chapter,
-        status: query.status,
-        severity: query.severity,
-        limit: Some(fetch_limit),
-        offset: Some(offset),
-    };
-    let mut rows = findings::list_findings(state.pool_or_uninit()?, &creator_id, &filters)
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let result = core
+        .list_findings(
+            &principal,
+            work_id,
+            nexus_core::ListFindingsQuery {
+                chapter: query.chapter,
+                status: query.status,
+                severity: query.severity,
+                limit: query.limit,
+                cursor: query.cursor,
+            },
+        )
         .await
-        .map_err(|err| match err {
-            nexus_local_db::LocalDbError::InvalidEnum {
-                field,
-                value,
-                allowed,
-            } => {
-                tracing::warn!(
-                    creator_id = %creator_id,
-                    work_id = %filters.work_id.as_deref().unwrap_or(""),
-                    field = %field,
-                    value = %value,
-                    "findings LIST: invalid enum value in query filter"
-                );
-                NexusApiError::BadRequest {
-                    code: "invalid_input".to_string(),
-                    message: format!(
-                        "invalid {field} value '{value}'; allowed: {}",
-                        allowed.join(", ")
-                    ),
-                }
-            }
-            other => other.into(),
-        })?;
-
-    let (next_cursor, has_more) = offset_page_meta(rows.len(), limit, offset);
-    rows.truncate(usize::try_from(limit).unwrap_or(rows.len()));
-
-    let items: Vec<FindingApiDto> = rows.into_iter().map(FindingApiDto::from).collect();
+        .map_err(findings_error)?;
     Ok(Json(ListFindingsResponse {
-        items,
-        pagination: PaginationInfo {
-            limit: i64::from(limit),
-            next_cursor,
-            has_more,
-        },
+        items: result.items.into_iter().map(Into::into).collect(),
+        pagination: result.pagination,
     }))
 }
 
@@ -329,15 +280,12 @@ pub async fn get_finding_handler(
     State(state): State<WorkspaceState>,
     Path((work_id, finding_id)): Path<(String, String)>,
 ) -> Result<Json<FindingApiDto>, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    // Verify work_id ownership
-    let _work = works::get_work(state.pool_or_uninit()?, &creator_id, &work_id)
-        .await?
-        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
-    let f = findings::get_finding(state.pool_or_uninit()?, &creator_id, &finding_id)
-        .await?
-        .ok_or_else(|| NexusApiError::NotFound(format!("finding {finding_id}")))?;
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let f = core
+        .get_work_finding(&principal, work_id, finding_id)
+        .await
+        .map_err(findings_error)?;
     Ok(Json(f.into()))
 }
 
@@ -346,130 +294,53 @@ pub async fn get_finding_handler(
 /// V1.48 P2: added so the CLI `creator works findings accept <finding_id>`
 /// command can resolve a finding by ID alone (without the caller knowing
 /// the `work_id` upfront). Mirrors [`get_finding_handler`] but skips the
-/// work-ownership precheck; the DAO lookup is already creator-scoped.
+/// work-ownership precheck; the core lookup is already creator-scoped.
 pub async fn get_finding_creator_scoped_handler(
     State(state): State<WorkspaceState>,
     Path(finding_id): Path<String>,
 ) -> Result<Json<FindingApiDto>, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let f = findings::get_finding(state.pool_or_uninit()?, &creator_id, &finding_id)
-        .await?
-        .ok_or_else(|| NexusApiError::NotFound(format!("finding {finding_id}")))?;
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let f = core.get_finding(&principal, finding_id).await.map_err(findings_error)?;
     Ok(Json(f.into()))
 }
+
 /// `PATCH /v1/daemon/works/{work_id}/findings/{finding_id}` — update a finding.
 ///
 /// V1.49 F6 (`findings-lifecycle.md` §2.1): when the patch moves `status`,
-/// the DAO validates the lifecycle transition. Illegal transitions surface
+/// the core validates the lifecycle transition. Illegal transitions surface
 /// as HTTP `422` with the stable error code `INVALID_TRANSITION`; invalid
-/// PATCH enum values (`severity` / `status` membership / `target_executor`)
-/// surface as `422 INVALID_INPUT`. The DAO emits **typed** variants
-/// (`IllegalTransition` / `InvalidEnum`) for these, so the mapping below
-/// carries no string-prefix sniffing (see [`NexusApiError::BadRequest`] in
-/// `errors.rs`).
+/// PATCH enum values surface as `422 INVALID_INPUT`.
 ///
 /// V1.49 P0 W-1 (qc1 S-1): a self-loop — `status: "<current>"` on a finding
-/// already in that state — is **rejected** as `INVALID_TRANSITION`. Callers
-/// that only want to refresh `updated_at` (without changing status) must
-/// omit `status` from the patch body entirely.
-///
-/// # Panics
-/// Panics if the finding row disappears between successful update and re-fetch
-/// (database invariant violation — should never happen).
+/// already in that state — is **rejected** as `INVALID_TRANSITION`.
 pub async fn update_finding_handler(
     State(state): State<WorkspaceState>,
     Path((work_id, finding_id)): Path<(String, String)>,
     Json(body): Json<UpdateFindingRequest>,
 ) -> Result<Json<FindingApiDto>, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let _work = works::get_work(state.pool_or_uninit()?, &creator_id, &work_id)
-        .await?
-        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
-    let patch = FindingPatch {
-        severity: body.severity,
-        status: body.status,
-        title: body.title,
-        description: body.description,
-        target_executor: body.target_executor,
-        kind: body.kind,
-        rule_suggestion: body.rule_suggestion,
-    };
-    let now = chrono::Utc::now().timestamp();
-    let updated = findings::update_finding(
-        state.pool_or_uninit()?,
-        &creator_id,
-        &finding_id,
-        &patch,
-        now,
-    )
-    .await
-    .map_err(|err| match err {
-        // V1.49 P0 W-1: the DAO now emits typed variants for the PATCH
-        // surface. `IllegalTransition` → INVALID_TRANSITION (422);
-        // `InvalidEnum` → INVALID_INPUT (422). Both are observed with a
-        // structured `tracing::warn!` (qc3 S-2) so repeated illegal PATCH
-        // attempts leave a daemon-side trail. No string-sniffing: each
-        // variant carries its own structured payload.
-        nexus_local_db::LocalDbError::IllegalTransition { from, to } => {
-            tracing::warn!(
-                creator_id = %creator_id,
-                finding_id = %finding_id,
-                from = %from,
-                to = %to,
-                "findings PATCH: illegal lifecycle transition"
-            );
-            NexusApiError::BadRequest {
-                code: "invalid_transition".to_string(),
-                message: format!("invalid status transition '{from}' → '{to}'"),
-            }
-        }
-        nexus_local_db::LocalDbError::InvalidEnum {
-            field,
-            value,
-            allowed,
-        } => {
-            tracing::warn!(
-                creator_id = %creator_id,
-                finding_id = %finding_id,
-                field = %field,
-                value = %value,
-                "findings PATCH: invalid enum value"
-            );
-            NexusApiError::BadRequest {
-                code: "invalid_input".to_string(),
-                message: format!(
-                    "invalid {field} value '{value}'; allowed: {}",
-                    allowed.join(", ")
-                ),
-            }
-        }
-        other => other.into(),
-    })?;
-    if !updated {
-        return Err(NexusApiError::NotFound(format!("finding {finding_id}")));
-    }
-    let f = findings::get_finding(state.pool_or_uninit()?, &creator_id, &finding_id)
-        .await?
-        .expect("finding must exist after successful update");
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    // Work-ownership precheck stays on the `{work_id}` route; the core update
+    // itself is creator-scoped.
+    core.get_work(&principal, work_id).await.map_err(findings_error)?;
+    let f = core
+        .update_finding(&principal, finding_id, body.into_core())
+        .await
+        .map_err(findings_error)?;
     Ok(Json(f.into()))
 }
 
 /// `PATCH /v1/daemon/findings/batch` — bulk update status and/or `target_executor`.
 ///
 /// V1.91 P1: additive helper for power-user triage. Creator-scoped; caps at
-/// 100 IDs; partial success model (each ID updated independently). Reuses the
-/// existing [`findings::update_finding`] DAO per-ID so enum validation and
-/// lifecycle transition enforcement stay identical to the single-finding PATCH.
+/// 100 IDs; partial success model (each ID updated independently).
 pub async fn batch_update_findings_handler(
     State(state): State<WorkspaceState>,
     Json(raw): Json<serde_json::Value>,
 ) -> Result<Json<BatchUpdateFindingsResponse>, NexusApiError> {
-    const BATCH_CAP: usize = 100;
-
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
 
     // V1.92 P-1 T5: body.patch is the generated FindingBatchPatch struct.
     // Codegen does not emit #[serde(deny_unknown_fields)], so a handler-side
@@ -483,89 +354,8 @@ pub async fn batch_update_findings_handler(
             message: format!("invalid request body: {e}"),
         })?;
 
-    let patch = body.patch;
-
-    if body.finding_ids.is_empty() {
-        return Err(NexusApiError::BadRequest {
-            code: "invalid_input".to_string(),
-            message: "finding_ids must not be empty".to_string(),
-        });
-    }
-
-    if body.finding_ids.len() > BATCH_CAP {
-        return Err(NexusApiError::BadRequest {
-            code: "too_many_findings".to_string(),
-            message: format!(
-                "batch update is capped at {BATCH_CAP} findings; received {}",
-                body.finding_ids.len()
-            ),
-        });
-    }
-
-    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
-    if !body.finding_ids.iter().all(|id| seen.insert(id.as_str())) {
-        return Err(NexusApiError::BadRequest {
-            code: "invalid_input".to_string(),
-            message: "finding_ids must not contain duplicates".to_string(),
-        });
-    }
-
-    // If both fields are absent, the contract says return 200 with updated: 0.
-    if patch.status.is_none() && patch.target_executor.is_none() {
-        return Ok(Json(BatchUpdateFindingsResponse {
-            updated: 0,
-            not_found: Vec::new(),
-            conflict: Vec::new(),
-        }));
-    }
-
-    let finding_patch = FindingPatch {
-        severity: None,
-        status: patch.status,
-        title: None,
-        description: None,
-        target_executor: patch.target_executor,
-        kind: None,
-        rule_suggestion: None,
-    };
-    let now = chrono::Utc::now().timestamp();
-
-    let mut updated: i64 = 0;
-    let mut not_found: Vec<String> = Vec::new();
-    let mut conflict: Vec<String> = Vec::new();
-
-    for finding_id in &body.finding_ids {
-        match findings::update_finding(
-            state.pool_or_uninit()?,
-            &creator_id,
-            finding_id,
-            &finding_patch,
-            now,
-        )
-        .await
-        {
-            Ok(true) => updated += 1,
-            Ok(false) => not_found.push(finding_id.clone()),
-            Err(nexus_local_db::LocalDbError::IllegalTransition { .. }) => {
-                conflict.push(finding_id.clone());
-            }
-            Err(other) => {
-                tracing::warn!(
-                    creator_id = %creator_id,
-                    finding_id = %finding_id,
-                    error = %other,
-                    "findings batch PATCH: internal error updating finding"
-                );
-                return Err(other.into());
-            }
-        }
-    }
-
-    Ok(Json(BatchUpdateFindingsResponse {
-        updated,
-        not_found,
-        conflict,
-    }))
+    let response = core.batch_update_findings(&principal, body).await.map_err(findings_error)?;
+    Ok(Json(response))
 }
 
 /// Enforce the `finding-batch-patch.schema.json` contract that only
@@ -608,18 +398,12 @@ pub async fn delete_finding_handler(
     State(state): State<WorkspaceState>,
     Path((work_id, finding_id)): Path<(String, String)>,
 ) -> Result<StatusCode, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let _work = works::get_work(state.pool_or_uninit()?, &creator_id, &work_id)
-        .await?
-        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
-    let deleted =
-        findings::delete_finding(state.pool_or_uninit()?, &creator_id, &finding_id).await?;
-    if deleted {
-        Ok(StatusCode::NO_CONTENT)
-    } else {
-        Err(NexusApiError::NotFound(format!("finding {finding_id}")))
-    }
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    // Work-ownership precheck stays on the `{work_id}` route.
+    core.get_work(&principal, work_id).await.map_err(findings_error)?;
+    core.delete_finding(&principal, finding_id).await.map_err(findings_error)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// `POST /v1/daemon/works/{work_id}/findings/from-review` — create finding from review verdict (T3).
@@ -627,58 +411,24 @@ pub async fn delete_finding_handler(
 /// This endpoint is called by the orchestration layer after a review stage
 /// completes. The request body contains the review verdict fields extracted
 /// from the terminal schedule context.
-///
-/// # Panics
-/// Panics if the finding row disappears between creation and re-fetch
-/// (database invariant violation — should never happen).
 pub async fn create_from_review_handler(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
     Json(body): Json<CreateFindingRequest>,
 ) -> Result<(StatusCode, Json<FindingApiDto>), NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    // Verify work ownership
-    let _work = works::get_work(state.pool_or_uninit()?, &creator_id, &work_id)
-        .await?
-        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
-
-    let verdict = ReviewVerdictFinding {
-        work_id: work_id.clone(),
-        chapter: body.chapter,
-        severity: body.severity,
-        title: body.title,
-        description: body.description,
-        target_executor: body.target_executor,
-        creator_id: creator_id.clone(),
-        kind: body.kind,
-        rule_suggestion: body.rule_suggestion,
-        // Manual API path — no originating schedule; no idempotency guard.
-        source_schedule_id: None,
-    };
-    let finding_id = findings::create_finding_from_review(state.pool_or_uninit()?, &verdict)
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let f = core
+        .create_finding_from_review(&principal, work_id, body.into_core())
         .await
-        .map_err(|e| {
-            // R-V139P1-W-6: explicitly log from-review hook errors for production debugging.
-            tracing::warn!(
-                work_id = %work_id,
-                error = %e,
-                "from-review: failed to create finding"
-            );
-            NexusApiError::Internal {
-                code: "FINDING_CREATE_FAILED".to_string(),
-                message: e.to_string(),
-            }
-        })?;
-    let f = findings::get_finding(state.pool_or_uninit()?, &creator_id, &finding_id)
-        .await?
-        .expect("finding must exist after creation");
+        .map_err(findings_error)?;
     Ok((StatusCode::CREATED, Json(f.into())))
 }
 
 // ─── Stale findings (V1.39 P4 T3) ──────────────────────────────────────────
 
-/// Response shape for `GET /v1/daemon/findings/stale`.
+/// Response shape for `GET /v1/daemon/findings/stale` (wire copy of the core
+/// stale report).
 ///
 /// Lists open findings for the active creator that have aged past the
 /// stale threshold (default 96h, overridable via `NEXUS_DAEMON_STALE_FINDINGS_THRESHOLD_SECS`).
@@ -709,50 +459,42 @@ pub struct StaleFindingDto {
 
 /// `GET /v1/daemon/findings/stale` — list stale open findings for the active creator (V1.39 P4 T3).
 ///
-/// Per-creator scoped (uses `read_active_creator_id`). Returns an empty
-/// `findings` list and `stale_count = 0` when no findings have aged past
-/// the threshold — the CLI suppresses the banner in that case.
-///
 /// The threshold respects `NEXUS_DAEMON_STALE_FINDINGS_THRESHOLD_SECS`
 /// so that operators tuning the watcher get a matching banner without
-/// per-call configuration.
+/// per-call configuration; the env read stays at the adapter because the
+/// watcher schedule (P3-T2) is daemon runtime state.
 pub async fn list_stale_findings_handler(
     State(state): State<WorkspaceState>,
 ) -> Result<Json<StaleFindingsResponse>, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
 
     let threshold_seconds = std::env::var(ENV_STALE_THRESHOLD_SECS)
         .ok()
         .and_then(|s| s.parse::<i64>().ok())
         .filter(|v| *v > 0)
         .unwrap_or(DEFAULT_STALE_THRESHOLD_SECS);
-    let now_epoch = chrono::Utc::now().timestamp();
 
-    let rows = nexus_local_db::findings::list_stale_open_findings(
-        state.pool_or_uninit()?,
-        &creator_id,
-        now_epoch,
-        threshold_seconds,
-    )
-    .await?;
-
-    let findings: Vec<StaleFindingDto> = rows
-        .into_iter()
-        .map(|r| StaleFindingDto {
-            finding_id: r.finding_id,
-            work_id: r.work_id,
-            severity: r.severity,
-            created_at: r.created_at,
-            age_seconds: r.age_seconds,
-        })
-        .collect();
+    let report = core
+        .list_stale_findings(&principal, threshold_seconds)
+        .await
+        .map_err(findings_error)?;
 
     Ok(Json(StaleFindingsResponse {
-        stale_count: findings.len() as u64,
-        threshold_seconds,
-        now_epoch,
-        findings,
+        stale_count: report.stale_count,
+        threshold_seconds: report.threshold_seconds,
+        now_epoch: report.now_epoch,
+        findings: report
+            .findings
+            .into_iter()
+            .map(|r| StaleFindingDto {
+                finding_id: r.finding_id,
+                work_id: r.work_id,
+                severity: r.severity,
+                created_at: r.created_at,
+                age_seconds: r.age_seconds,
+            })
+            .collect(),
     }))
 }
 
@@ -761,8 +503,8 @@ pub async fn list_stale_findings_handler(
 /// Query parameters for `POST /v1/daemon/findings/prune`.
 #[derive(Debug, Default, Deserialize)]
 pub struct PruneFindingsQuery {
-    /// Retention window in days; defaults to [`findings::RETENTION_DEFAULT_DAYS`]
-    /// (90). `resolved` findings whose `updated_at` is older than
+    /// Retention window in days; defaults to 90.
+    /// `resolved` findings whose `updated_at` is older than
     /// `now - older_than_days` are eligible.
     #[serde(default)]
     pub older_than_days: Option<i64>,
@@ -788,54 +530,21 @@ pub struct PruneFindingsResponse {
 /// `POST /v1/daemon/findings/prune` — prune (or preview) `resolved` findings
 /// older than the retention window (V1.49 P3, `novel-writing/quality-loop.md`
 /// §9.4).
-///
-/// Wraps [`findings::prune_resolved_findings_older_than`] (or the read-only
-/// [`findings::count_resolved_findings_older_than`] when `dry_run=true`). The
-/// DAO is global across creators, which matches the local-first single-creator
-/// daemon model (one active creator per workspace). Requires an active creator
-/// for auth consistency with the other Daemon API endpoints.
-///
-/// # Errors
-///
-/// Returns [`NexusApiError::AuthRequired`] when no active creator is set, or
-/// [`NexusApiError::Internal`] on database failure.
 pub async fn prune_findings_handler(
     State(state): State<WorkspaceState>,
     Query(query): Query<PruneFindingsQuery>,
 ) -> Result<Json<PruneFindingsResponse>, NexusApiError> {
-    let _creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let older_than_days = query
-        .older_than_days
-        .unwrap_or(findings::RETENTION_DEFAULT_DAYS);
-    let dry_run = query.dry_run.unwrap_or(false);
-    let retention_seconds = older_than_days.saturating_mul(86_400);
-    let now_epoch = chrono::Utc::now().timestamp();
-
-    let count: u64 = if dry_run {
-        let n = findings::count_resolved_findings_older_than(
-            state.pool_or_uninit()?,
-            now_epoch,
-            retention_seconds,
-        )
-        .await?;
-        u64::try_from(n).unwrap_or(0)
-    } else {
-        u64::from(
-            findings::prune_resolved_findings_older_than(
-                state.pool_or_uninit()?,
-                now_epoch,
-                retention_seconds,
-            )
-            .await?,
-        )
-    };
-
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let outcome = core
+        .prune_findings(&principal, query.older_than_days, query.dry_run.unwrap_or(false))
+        .await
+        .map_err(findings_error)?;
     Ok(Json(PruneFindingsResponse {
-        count,
-        older_than_days,
-        dry_run,
-        now_epoch,
+        count: outcome.count,
+        older_than_days: outcome.older_than_days,
+        dry_run: outcome.dry_run,
+        now_epoch: outcome.now_epoch,
     }))
 }
 

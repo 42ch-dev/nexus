@@ -4,9 +4,13 @@ mod changes;
 mod chronology;
 mod content;
 mod error;
+mod findings;
+mod knowledge;
 mod outline;
 mod principal;
 mod provider_journal;
+mod reading;
+mod references;
 mod service;
 mod worlds;
 mod world_kb;
@@ -26,6 +30,11 @@ pub use works::{
 };
 pub use chronology::CoreWorkChronology;
 pub use content::{CoreChapterContentQuery, resolve_guarded_path, resolve_guarded_path_async};
+pub use findings::{
+    format_routing_hint, CreateFindingRequest, ListFindingsQuery, ListFindingsResponse,
+    PruneFindingsOutcome, StaleFindingEntry, StaleFindingsResponse, UpdateFindingRequest,
+};
+pub use references::{GetReferenceResponse, ListReferencesResponse, ReferenceInfo};
 
 /// Internal-purpose projection seam for promote/relationship consumers.
 pub mod projection {
