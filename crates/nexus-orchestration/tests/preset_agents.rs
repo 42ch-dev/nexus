@@ -7,7 +7,7 @@
 //! - Rejection of invalid configurations
 
 use nexus_contracts::local::orchestration::preset::PresetManifest;
-use nexus_orchestration::preset::loader::load_preset_from_str;
+use nexus_preset::loader::load_preset_from_str;
 
 fn test_capability_registry() -> nexus_orchestration::capability::CapabilityRegistry {
     nexus_orchestration::capability::CapabilityRegistry::with_builtins()
@@ -578,10 +578,9 @@ inner_graphs:
 "#;
     let caps = test_capability_registry();
     let loaded = load_preset_from_str(yaml, &caps).unwrap();
-    let ig = loaded.inner_graphs.get("work").unwrap();
-    // Verify nodes exist (agent field validation already passed)
-    assert!(ig.get_task("task1").is_some());
-    assert!(ig.get_task("task2").is_some());
+    let graph = &loaded.manifest.inner_graphs.as_ref().unwrap()["work"];
+    assert_eq!(graph.nodes[0].agent.as_deref(), Some("writer"));
+    assert_eq!(graph.nodes[1].agent, None);
 }
 
 // ── Roundtrip serialization tests ───────────────────────────────────────────

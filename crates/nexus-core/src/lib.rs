@@ -7,6 +7,7 @@ mod error;
 mod findings;
 mod knowledge;
 mod outline;
+mod presets;
 mod principal;
 mod provider_journal;
 mod reading;
@@ -21,6 +22,7 @@ mod world_rules;
 mod works;
 
 pub use error::{CoreError, CoreResult};
+pub use presets::PresetError;
 pub use principal::Principal;
 pub use service::{CoreAccess, CoreOpenOptions, CoreService};
 pub use worlds::DELETE_WORLD_BLOCKED_BY_BINDINGS;

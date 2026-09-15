@@ -8,8 +8,8 @@
 //! 5. `world_binding` is optional (review works on worldless Works).
 
 use nexus_orchestration::capability::CapabilityRegistry;
-use nexus_orchestration::preset::load_embedded_preset;
-use nexus_orchestration::preset::manifest;
+use nexus_preset::load_embedded_preset;
+use nexus_preset::manifest;
 
 #[test]
 fn review_preset_loads_successfully() {

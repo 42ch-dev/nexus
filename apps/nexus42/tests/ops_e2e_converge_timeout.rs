@@ -139,13 +139,13 @@ const PAST_DEADLINE_SLEEP: Duration = Duration::from_millis(500);
 /// Start a session on the DAEMON engine from a YAML preset string.
 async fn start_preset_session(d: &LiveDaemon, yaml: &str) -> SessionId {
     let caps = Arc::new(CapabilityRegistry::with_builtins());
-    let mut loaded = nexus_orchestration::preset::load_preset_from_str(yaml, &caps)
+    let mut loaded = nexus_preset::load_preset_from_str(yaml, &caps)
         .unwrap_or_else(|e| panic!("test preset must load: {e}"));
     // Raw-YAML loads carry no source identity (the loader cannot know the
     // origin); a v1 run requires one, so freeze an embedded identity over
     // the manifest exactly as `load_embedded_preset` does (A2/A7).
     loaded.source_identity = Some(
-        nexus_orchestration::preset::loader::preset_source_identity(
+        nexus_preset::loader::preset_source_identity(
             &loaded.manifest,
             None,
             Some(loaded.id.as_str()),

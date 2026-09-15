@@ -25,6 +25,8 @@ pub enum CoreError {
     NotFound { resource: String },
     #[error("invalid input: {field} — {reason}")]
     InvalidInput { field: String, reason: String },
+    #[error(transparent)]
+    Preset(#[from] crate::presets::PresetError),
     #[error("outline conflict")]
     OutlineConflict(OutlineConflictError),
     #[error("outline validation failed")]

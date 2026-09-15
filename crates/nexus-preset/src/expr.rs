@@ -632,7 +632,7 @@ impl Parser {
 pub fn evaluate(expr: &Expr, context: &serde_json::Value) -> Result<bool, ExprError> {
     // R-V156P2-L002: debug span capturing input context shape + expression
     // kind + result. Kept at `debug!` so it is no-op by default; enable with
-    // `RUST_LOG=nexus_orchestration::preset::expr=debug` when diagnosing
+    // `RUST_LOG=nexus_preset::expr=debug` when diagnosing
     // conditional-routing misfires.
     let result = evaluate_inner(expr, context);
     tracing::debug!(

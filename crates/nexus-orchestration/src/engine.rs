@@ -25,9 +25,10 @@ use thiserror::Error;
 use crate::capability::CapabilityError;
 use crate::capability::CapabilityRegistry;
 use crate::run_state::{
-    ChildCheckpoint, PresetSourceIdentity, RunCheckpoint, RunDescriptorV1, RunFailure, RunRecord,
+    ChildCheckpoint, RunCheckpoint, RunDescriptorV1, RunFailure, RunRecord,
     RunStateV1, SettlementResult, TerminalSettlementTarget, WorkflowStateStore,
 };
+use nexus_preset::source_identity::PresetSourceIdentity;
 
 /// Context key that effectful tasks set when they perform an external effect
 /// (capability call, ACP/Host prompt dispatch, `HostTool` call, child spawn).
@@ -572,13 +573,13 @@ pub trait OrchestrationEngine: Send + Sync {
     /// Start a session using a loaded preset (outer graph + inner graphs wired).
     async fn start_session_with_preset(
         &self,
-        loaded: &crate::preset::LoadedPreset,
+        loaded: &nexus_preset::LoadedPreset,
     ) -> Result<SessionId, EngineError>;
 
     /// Start a session using a loaded preset and trusted creator identity.
     async fn start_session_with_preset_for_creator(
         &self,
-        loaded: &crate::preset::LoadedPreset,
+        loaded: &nexus_preset::LoadedPreset,
         creator_id: &str,
     ) -> Result<SessionId, EngineError>;
 }
@@ -2878,7 +2879,7 @@ fn validate_descendant_position(
 
 /// The inner graph a manifest state enters, if any.
 fn inner_graph_entered_by_state<'a>(
-    loaded: &'a crate::preset::LoadedPreset,
+    loaded: &'a nexus_preset::LoadedPreset,
     state_id: &str,
 ) -> Option<&'a str> {
     loaded
@@ -2888,7 +2889,7 @@ fn inner_graph_entered_by_state<'a>(
         .find(|state| state.id == state_id)
         .and_then(|state| {
             state.enter.iter().find_map(|action| match action {
-                crate::preset::manifest::EnterAction::InnerGraph { name } => Some(name.as_str()),
+                nexus_preset::manifest::EnterAction::InnerGraph { name } => Some(name.as_str()),
                 _ => None,
             })
         })
@@ -3160,14 +3161,14 @@ impl OrchestrationEngine for EngineProxy {
 
     async fn start_session_with_preset(
         &self,
-        _loaded: &crate::preset::LoadedPreset,
+        _loaded: &nexus_preset::LoadedPreset,
     ) -> Result<SessionId, EngineError> {
         Err(EngineError::NoGraphLoaded)
     }
 
     async fn start_session_with_preset_for_creator(
         &self,
-        _loaded: &crate::preset::LoadedPreset,
+        _loaded: &nexus_preset::LoadedPreset,
         _creator_id: &str,
     ) -> Result<SessionId, EngineError> {
         Err(EngineError::NoGraphLoaded)
@@ -3595,7 +3596,7 @@ impl GraphFlowEngine {
         let caps = self.current_caps();
         let loaded = match &descriptor.source {
             PresetSourceIdentity::Embedded { preset_id, .. } => {
-                match crate::preset::load_embedded_preset(preset_id, &caps) {
+                match nexus_preset::load_embedded_preset(preset_id, &caps) {
                     Ok(loaded) => loaded,
                     Err(e) => {
                         return Err(EngineError::GraphFlow(
@@ -3609,7 +3610,7 @@ impl GraphFlowEngine {
                 }
             }
             PresetSourceIdentity::Directory { root, .. } => {
-                match crate::preset::load_preset(root, &caps) {
+                match nexus_preset::load_preset(root, &caps) {
                     Ok(loaded) => loaded,
                     Err(e) => {
                         return Err(EngineError::GraphFlow(
@@ -3669,7 +3670,7 @@ impl GraphFlowEngine {
         // `InnerGraphTask` spawn a fresh child and replay the work.
         {
             let valid_inner: std::collections::HashSet<&str> =
-                loaded.inner_graphs.keys().map(String::as_str).collect();
+                loaded.manifest.inner_graphs.iter().flat_map(|graphs| graphs.keys()).map(String::as_str).collect();
             // Snapshot the closure first so no children-map lock is held
             // across the storage awaits below.
             let snapshot: Vec<(SessionId, Vec<crate::run_state::ChildCheckpoint>)> = {
@@ -3774,7 +3775,7 @@ impl GraphFlowEngine {
             state: self.state.clone(),
         });
         let engine_proxy: Arc<dyn OrchestrationEngine> = proxy;
-        let wired = crate::preset::loader::build_wired_outer_graph(
+        let wired = crate::preset_runtime::build_wired_outer_graph(
             &loaded,
             &engine_proxy,
             &caps,
@@ -3811,7 +3812,7 @@ impl GraphFlowEngine {
     async fn reconstruct_runner_legacy(&self, summary: &SessionSummary) -> Result<(), EngineError> {
         let caps = self.current_caps();
         let loaded =
-            crate::preset::load_embedded_preset(&summary.preset_id, &caps).map_err(|e| {
+            nexus_preset::load_embedded_preset(&summary.preset_id, &caps).map_err(|e| {
                 EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                     "R6: failed to load embedded preset '{}' for session {}: {}",
                     summary.preset_id, summary.session_id.0, e
@@ -3822,7 +3823,7 @@ impl GraphFlowEngine {
             state: self.state.clone(),
         });
         let engine_proxy: Arc<dyn OrchestrationEngine> = proxy;
-        let wired = crate::preset::loader::build_wired_outer_graph(
+        let wired = crate::preset_runtime::build_wired_outer_graph(
             &loaded,
             &engine_proxy,
             &caps,
@@ -3861,7 +3862,7 @@ impl GraphFlowEngine {
     /// admission layer freezes them before driving (P2 owns that).
     fn build_descriptor(
         &self,
-        loaded: &crate::preset::LoadedPreset,
+        loaded: &nexus_preset::LoadedPreset,
         creator_id: &str,
     ) -> Result<RunDescriptorV1, EngineError> {
         let source = loaded.source_identity.clone().ok_or_else(|| {
@@ -3889,7 +3890,7 @@ impl GraphFlowEngine {
     /// (Critical 2). Falls back to the raw-graph path when no store exists.
     async fn start_preset_run(
         &self,
-        loaded: &crate::preset::LoadedPreset,
+        loaded: &nexus_preset::LoadedPreset,
         creator_id: &str,
         graph: Arc<Graph>,
     ) -> Result<SessionId, EngineError> {
@@ -3960,7 +3961,7 @@ impl GraphFlowEngine {
     pub async fn start_preset_run_with_input(
         &self,
         session_id: &str,
-        loaded: &crate::preset::LoadedPreset,
+        loaded: &nexus_preset::LoadedPreset,
         creator_id: &str,
         work_id: Option<String>,
         input: serde_json::Map<String, serde_json::Value>,
@@ -4059,7 +4060,7 @@ impl GraphFlowEngine {
         &self,
         schedule_id: &str,
         session_id: &str,
-        loaded: &crate::preset::LoadedPreset,
+        loaded: &nexus_preset::LoadedPreset,
         creator_id: &str,
         work_id: Option<String>,
         input: serde_json::Map<String, serde_json::Value>,
@@ -4067,7 +4068,7 @@ impl GraphFlowEngine {
         core_context_version: u32,
         expected_core_context_version: u32,
         agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
-        frozen_source: Option<crate::run_state::PresetSourceIdentity>,
+        frozen_source: Option<PresetSourceIdentity>,
         admission_gate: Option<crate::run_state::ScheduleAdmissionGate>,
         graph: Arc<Graph>,
     ) -> Result<SessionId, EngineError> {
@@ -4280,14 +4281,14 @@ impl GraphFlowEngine {
         // resolve_preset's own precedence). A directory preset shadows an
         // embedded preset with the same id (A7).
         if let Some(home) = &self.nexus_home {
-            if let Ok(loaded) = crate::preset::resolve_preset(preset_id, home, &caps) {
+            if let Ok(loaded) = nexus_preset::resolve_preset(preset_id, home, &caps) {
                 if let Some(identity) = loaded.source_identity {
                     return Ok((identity, loaded.version));
                 }
             }
         }
         // No nexus_home (or resolve_preset failed): fall back to embedded.
-        if let Ok(loaded) = crate::preset::load_embedded_preset(preset_id, &caps) {
+        if let Ok(loaded) = nexus_preset::load_embedded_preset(preset_id, &caps) {
             if let Some(identity) = loaded.source_identity {
                 return Ok((identity, loaded.version));
             }
@@ -4494,14 +4495,14 @@ impl OrchestrationEngine for GraphFlowEngine {
 
     async fn start_session_with_preset(
         &self,
-        loaded: &crate::preset::LoadedPreset,
+        loaded: &nexus_preset::LoadedPreset,
     ) -> Result<SessionId, EngineError> {
         // WS3 R1: Use EngineProxy wrapping EngineSharedState.
         let proxy: Arc<dyn OrchestrationEngine> = Arc::new(EngineProxy {
             state: self.state.clone(),
         });
         let caps = self.current_caps();
-        let wired = crate::preset::loader::build_wired_outer_graph(
+        let wired = crate::preset_runtime::build_wired_outer_graph(
             loaded,
             &proxy,
             &caps,
@@ -4514,14 +4515,14 @@ impl OrchestrationEngine for GraphFlowEngine {
 
     async fn start_session_with_preset_for_creator(
         &self,
-        loaded: &crate::preset::LoadedPreset,
+        loaded: &nexus_preset::LoadedPreset,
         creator_id: &str,
     ) -> Result<SessionId, EngineError> {
         let proxy: Arc<dyn OrchestrationEngine> = Arc::new(EngineProxy {
             state: self.state.clone(),
         });
         let caps = self.current_caps();
-        let wired = crate::preset::loader::build_wired_outer_graph(
+        let wired = crate::preset_runtime::build_wired_outer_graph(
             loaded,
             &proxy,
             &caps,

@@ -64,9 +64,10 @@ use nexus_orchestration::{
     run_state::WorkflowStateStore,
     schedule::supervisor::{ScheduleRunStarter, ScheduleSupervisor, SupervisorError},
     storage::sqlite::SqliteSessionStorage,
-    system_preset_dir, CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps,
+    CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps,
     GraphFlowEngine,
 };
+use nexus_preset::system_preset_dir;
 use tracing_subscriber::EnvFilter;
 
 /// Daemon API transport configuration.
@@ -871,7 +872,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     let engine_ref: Arc<dyn OrchestrationEngine> = concrete_engine.clone();
     let scan_result = system_preset_dir::scan_system_presets(&system_presets_dir, &capabilities);
     for entry in &scan_result.presets {
-        let graph = nexus_orchestration::preset::loader::build_wired_outer_graph(
+        let graph = nexus_orchestration::preset_runtime::build_wired_outer_graph(
             &entry.loaded,
             &engine_ref.clone(),
             &capabilities.clone(),
@@ -1797,7 +1798,7 @@ async fn resume_auto_chain_work(
         return Err(format!("no preset mapping for stage '{stage}'"));
     };
     let bindings = if let Some(provider_id) = binding_provider {
-        match nexus_orchestration::preset::default_bindings_for_preset(preset_id, provider_id) {
+        match nexus_orchestration::preset_runtime::default_bindings_for_preset(preset_id, provider_id) {
             Some(bindings) => bindings,
             None => {
                 return Err(format!(
@@ -1807,9 +1808,9 @@ async fn resume_auto_chain_work(
         }
     } else {
         let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
-        match nexus_orchestration::preset::load_embedded_preset(preset_id, &caps) {
+        match nexus_preset::load_embedded_preset(preset_id, &caps) {
             Ok(loaded) => {
-                let roles = nexus_orchestration::preset::required_prompt_roles(&loaded);
+                let roles = nexus_preset::required_prompt_roles(&loaded);
                 if !roles.is_empty() {
                     return Err(format!(
                         "preset '{preset_id}' requires prompt roles but no binding \

@@ -22,7 +22,7 @@ use nexus_daemon_runtime::workspace::state_provider::DaemonWorkspaceStateProvide
 use nexus_daemon_runtime::workspace::WorkspaceState;
 use nexus_orchestration::capability::{CapabilityRegistry, CapabilityRuntimeDeps};
 use nexus_orchestration::engine::{GraphFlowEngine, OrchestrationEngine};
-use nexus_orchestration::preset::load_preset_from_str;
+use nexus_preset::load_preset_from_str;
 use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
 use nexus_orchestration::CapabilityRegistryHolder;
 use serde_json::json;

@@ -76,76 +76,68 @@ impl Default for EssayDraftStatusFinalize {
 }
 
 #[async_trait]
-impl Capability for EssayDraftStatusFinalize {
-    fn name(&self) -> &'static str {
-        "essay.draft_status.finalize"
-    }
+impl Capability for EssayDraftStatusFinalize { fn name(&self) -> &'static str {
+    "essay.draft_status.finalize"
+} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::ESSAY_DRAFT_STATUS_FINALIZE_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
+    r#"{"type":"object","properties":{"updated":{"type":"boolean"},"draft_path":{"type":"string"},"word_count":{"type":"integer"}},"required":["updated","draft_path","word_count"],"additionalProperties":false}"#
+}
 
-    fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"work_ref":{"type":"string"},"works_root":{"type":"string"},"word_count":{"anyOf":[{"type":"string","enum":["auto"]},{"type":"integer"}]}},"required":["work_ref"],"additionalProperties":false}"#
-    }
+async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+    let inp: FinalizeDraftInput = serde_json::from_value(input).map_err(|e| {
+        CapabilityError::InputInvalid(format!("essay.draft_status.finalize input: {e}"))
+    })?;
 
-    fn output_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"updated":{"type":"boolean"},"draft_path":{"type":"string"},"word_count":{"type":"integer"}},"required":["updated","draft_path","word_count"],"additionalProperties":false}"#
-    }
+    let work_ref = validate_work_ref(&inp.work_ref)?;
 
-    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let inp: FinalizeDraftInput = serde_json::from_value(input).map_err(|e| {
-            CapabilityError::InputInvalid(format!("essay.draft_status.finalize input: {e}"))
+    info!(
+        work_ref = %work_ref,
+        "essay.draft_status.finalize: start"
+    );
+
+    let works_root = inp
+        .works_root
+        .map_or_else(|| self.works_root.clone(), PathBuf::from);
+    let draft_path = works_root.join(&work_ref).join("Drafts").join("draft.md");
+
+    // Read current draft
+    let content = tokio::fs::read_to_string(&draft_path)
+        .await
+        .map_err(|e| CapabilityError::Internal(format!("read draft.md: {e}")))?;
+
+    // Parse and update YAML frontmatter
+    let updated_content = update_frontmatter_status(&content)?;
+
+    // Count words in body (excluding frontmatter)
+    let word_count = count_body_words(&updated_content);
+
+    // Write atomically via temp+rename
+    let tmp_path = draft_path.with_extension("md.tmp");
+    tokio::fs::write(&tmp_path, &updated_content)
+        .await
+        .map_err(|e| CapabilityError::Internal(format!("write tmp draft.md: {e}")))?;
+    tokio::fs::rename(&tmp_path, &draft_path)
+        .await
+        .map_err(|e| {
+            // Clean up temp on rename failure
+            let _ = std::fs::remove_file(&tmp_path);
+            CapabilityError::Internal(format!("rename tmp to draft.md: {e}"))
         })?;
 
-        let work_ref = validate_work_ref(&inp.work_ref)?;
+    info!(
+        work_ref = %work_ref,
+        draft_path = %draft_path.display(),
+        word_count,
+        "essay.draft_status.finalize: done"
+    );
 
-        info!(
-            work_ref = %work_ref,
-            "essay.draft_status.finalize: start"
-        );
-
-        let works_root = inp
-            .works_root
-            .map_or_else(|| self.works_root.clone(), PathBuf::from);
-        let draft_path = works_root.join(&work_ref).join("Drafts").join("draft.md");
-
-        // Read current draft
-        let content = tokio::fs::read_to_string(&draft_path)
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("read draft.md: {e}")))?;
-
-        // Parse and update YAML frontmatter
-        let updated_content = update_frontmatter_status(&content)?;
-
-        // Count words in body (excluding frontmatter)
-        let word_count = count_body_words(&updated_content);
-
-        // Write atomically via temp+rename
-        let tmp_path = draft_path.with_extension("md.tmp");
-        tokio::fs::write(&tmp_path, &updated_content)
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("write tmp draft.md: {e}")))?;
-        tokio::fs::rename(&tmp_path, &draft_path)
-            .await
-            .map_err(|e| {
-                // Clean up temp on rename failure
-                let _ = std::fs::remove_file(&tmp_path);
-                CapabilityError::Internal(format!("rename tmp to draft.md: {e}"))
-            })?;
-
-        info!(
-            work_ref = %work_ref,
-            draft_path = %draft_path.display(),
-            word_count,
-            "essay.draft_status.finalize: done"
-        );
-
-        let output = FinalizeDraftOutput {
-            updated: true,
-            draft_path: draft_path.display().to_string(),
-            word_count,
-        };
-        serde_json::to_value(output)
-            .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
-    }
-}
+    let output = FinalizeDraftOutput {
+        updated: true,
+        draft_path: draft_path.display().to_string(),
+        word_count,
+    };
+    serde_json::to_value(output)
+        .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
+} }
 
 /// Update the `status` field in YAML frontmatter to `finalized`, and update
 /// `word_count` to the auto-counted value.

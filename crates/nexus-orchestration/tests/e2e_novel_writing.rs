@@ -18,10 +18,10 @@ use nexus_orchestration::OrchestrationEngine;
 /// Build an engine + loaded preset for E2E testing.
 fn setup_engine() -> (
     Arc<nexus_orchestration::GraphFlowEngine>,
-    nexus_orchestration::preset::LoadedPreset,
+    nexus_preset::LoadedPreset,
 ) {
     let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
-    let loaded = nexus_orchestration::preset::load_embedded_preset("novel-writing", &caps)
+    let loaded = nexus_preset::load_embedded_preset("novel-writing", &caps)
         .expect("novel-writing preset should load");
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let engine = Arc::new(nexus_orchestration::GraphFlowEngine::new_with_storage(
@@ -82,7 +82,7 @@ async fn seed_novel_writing_preset_input(
 
 async fn start_novel_writing_session(
     engine: &Arc<nexus_orchestration::GraphFlowEngine>,
-    loaded: &nexus_orchestration::preset::LoadedPreset,
+    loaded: &nexus_preset::LoadedPreset,
 ) -> nexus_orchestration::engine::SessionId {
     let session_id = engine
         .start_session_with_preset(loaded)
@@ -335,7 +335,7 @@ fn core_context_template_is_rendered_into_prompt() {
 #[test]
 fn e2e_novel_writing_has_four_states() {
     let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
-    let loaded = nexus_orchestration::preset::load_embedded_preset("novel-writing", &caps)
+    let loaded = nexus_preset::load_embedded_preset("novel-writing", &caps)
         .expect("novel-writing preset should load");
 
     // V1.52 T-A P0: 6 states (outline_chapter, outline_review, draft_chapter, finalize, finalize_commit, done).
@@ -396,7 +396,7 @@ fn template_syntax_error_returns_deterministic_failure() {
 #[test]
 fn novel_writing_judge_quality_gate_on_finalize() {
     let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
-    let loaded = nexus_orchestration::preset::load_embedded_preset("novel-writing", &caps)
+    let loaded = nexus_preset::load_embedded_preset("novel-writing", &caps)
         .expect("novel-writing preset should load");
 
     // Find the finalize state.
@@ -416,7 +416,7 @@ fn novel_writing_judge_quality_gate_on_finalize() {
 
     // Verify it has llm_judge exit_when.
     match &finalize.exit_when {
-        Some(nexus_orchestration::preset::manifest::ExitWhen::LlmJudge {
+        Some(nexus_preset::manifest::ExitWhen::LlmJudge {
             template_file,
             judge_capability,
             min_interval,
@@ -442,7 +442,7 @@ fn novel_writing_judge_quality_gate_on_finalize() {
 
     // Verify finalize's next state is finalize_commit (not done).
     match &finalize.next {
-        Some(nexus_orchestration::preset::manifest::NextTarget::Linear(target)) => {
+        Some(nexus_preset::manifest::NextTarget::Linear(target)) => {
             assert_eq!(
                 target, "finalize_commit",
                 "finalize should transition to finalize_commit"
@@ -464,7 +464,7 @@ fn novel_writing_judge_quality_gate_on_finalize() {
         "finalize_commit should have exactly one enter action"
     );
     match &finalize_commit.enter[0] {
-        nexus_orchestration::preset::manifest::EnterAction::Capability { name, .. } => {
+        nexus_preset::manifest::EnterAction::Capability { name, .. } => {
             assert_eq!(
                 name, &"novel.chapter_transition",
                 "finalize_commit enter should be novel.chapter_transition"
@@ -473,7 +473,7 @@ fn novel_writing_judge_quality_gate_on_finalize() {
         other => panic!("finalize_commit enter should be Capability, got: {other:?}"),
     }
     match &finalize_commit.next {
-        Some(nexus_orchestration::preset::manifest::NextTarget::Linear(target)) => {
+        Some(nexus_preset::manifest::NextTarget::Linear(target)) => {
             assert_eq!(target, "done", "finalize_commit should transition to done");
         }
         other => panic!("finalize_commit next should be Linear(done), got: {other:?}"),
@@ -487,7 +487,7 @@ fn novel_writing_judge_quality_gate_on_finalize() {
 #[test]
 fn novel_writing_finalize_exit_prompt_referenced() {
     let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
-    let loaded = nexus_orchestration::preset::load_embedded_preset("novel-writing", &caps)
+    let loaded = nexus_preset::load_embedded_preset("novel-writing", &caps)
         .expect("novel-writing preset should load");
 
     // The finalize state's exit_when references prompts/finalize-exit.md
@@ -498,7 +498,7 @@ fn novel_writing_finalize_exit_prompt_referenced() {
         .find(|s| s.id == "finalize")
         .expect("finalize state should exist");
 
-    if let Some(nexus_orchestration::preset::manifest::ExitWhen::LlmJudge {
+    if let Some(nexus_preset::manifest::ExitWhen::LlmJudge {
         template_file, ..
     }) = &finalize.exit_when
     {

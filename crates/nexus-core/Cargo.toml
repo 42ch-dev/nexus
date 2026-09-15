@@ -28,6 +28,7 @@ embedded-mcp = ["dep:rmcp"]
 
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
+nexus-preset = { path = "../nexus-preset" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-local-db = { path = "../nexus-local-db" }
 nexus-knowledge = { path = "../nexus-knowledge" }

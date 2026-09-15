@@ -1421,7 +1421,7 @@ impl WorkflowRunCoordinator {
         let registry = caps.get().ok_or_else(|| {
             RunControlError::NoWorkspace("capability registry unavailable".into())
         })?;
-        let loaded = nexus_orchestration::preset::resolve_preset(preset_id, nexus_home, &registry)
+        let loaded = nexus_preset::resolve_preset(preset_id, nexus_home, &registry)
             .map_err(|e| RunControlError::PresetLoad(preset_id.to_string(), e.to_string()))?;
 
         // N-4: validate role/provider references BEFORE enqueue. Every
@@ -1441,7 +1441,7 @@ impl WorkflowRunCoordinator {
 
         let session_id = format!("{}:{}", preset_id, uuid::Uuid::new_v4());
         let engine_proxy: Arc<dyn OrchestrationEngine> = self.engine.clone();
-        let wired = nexus_orchestration::preset::loader::build_wired_outer_graph(
+        let wired = nexus_orchestration::preset_runtime::build_wired_outer_graph(
             &loaded,
             &engine_proxy,
             &registry,
@@ -2182,7 +2182,7 @@ impl WorkflowRunCoordinator {
     /// payload from the CURRENT resolver/provider configuration:
     ///
     /// 1. Resolves the preset through the shared resolver (same
-    ///    [`nexus_orchestration::preset::resolve_preset`] admission uses).
+    ///    [`nexus_preset::resolve_preset`] admission uses).
     /// 2. Freezes the content-addressed source identity from the loaded
     ///    preset and the row's `work_id` as the available structured input
     ///    (a historical row carries no frozen input map — empty).
@@ -2213,7 +2213,7 @@ impl WorkflowRunCoordinator {
             RunControlError::NoWorkspace("capability registry unavailable".into())
         })?;
         let loaded =
-            nexus_orchestration::preset::resolve_preset(&row.preset_id, nexus_home, &registry)
+            nexus_preset::resolve_preset(&row.preset_id, nexus_home, &registry)
                 .map_err(|e| RunControlError::PresetLoad(row.preset_id.clone(), e.to_string()))?;
 
         // 2. Freeze the source identity (must be present — embedded and
@@ -2232,7 +2232,7 @@ impl WorkflowRunCoordinator {
         //    accepts an empty map; a preset that needs prompt roles but has
         //    no configured default provider refuses with a typed admission
         //    error before any session/claim is created (qc1 F-001).
-        let roles = nexus_orchestration::preset::required_prompt_roles(&loaded);
+        let roles = nexus_preset::required_prompt_roles(&loaded);
         let agent_bindings = if roles.is_empty() {
             std::collections::HashMap::new()
         } else {
@@ -2481,7 +2481,7 @@ impl WorkflowRunCoordinator {
             RunControlError::NoWorkspace("capability registry unavailable".into())
         })?;
         let loaded =
-            nexus_orchestration::preset::resolve_preset(&row.preset_id, nexus_home, &registry)
+            nexus_preset::resolve_preset(&row.preset_id, nexus_home, &registry)
                 .map_err(|e| RunControlError::PresetLoad(row.preset_id.clone(), e.to_string()))?;
 
         // 3. Freeze the core-context seed at the EXACT version persisted with
@@ -2576,7 +2576,7 @@ impl WorkflowRunCoordinator {
         // Build the wired outer graph (production prompt executor + tool
         // dispatch + cancellation tokens) — mirrors boot.rs.
         let engine_proxy: Arc<dyn OrchestrationEngine> = self.engine.clone();
-        let wired = nexus_orchestration::preset::loader::build_wired_outer_graph(
+        let wired = nexus_orchestration::preset_runtime::build_wired_outer_graph(
             &loaded,
             &engine_proxy,
             &registry,
@@ -3083,7 +3083,7 @@ async fn schedule_eligible(
 /// prompt path may accept an empty binding map — proven by graph
 /// inspection, never by deferring to the prompt executor.
 async fn validate_agent_bindings(
-    loaded: &nexus_orchestration::preset::LoadedPreset,
+    loaded: &nexus_preset::LoadedPreset,
     bindings: &std::collections::HashMap<String, nexus_orchestration::run_state::AgentBinding>,
     host: Option<&Arc<dyn nexus_agent_host::HostFacade>>,
 ) -> Result<(), RunControlError> {
@@ -3093,7 +3093,7 @@ async fn validate_agent_bindings(
     // N-4b: the COMPLETE prompt-role set is derived from the resolved outer
     // and inner graphs via the shared helper (same source the daemon's
     // internal binding builder uses — they can never drift).
-    let required = nexus_orchestration::preset::required_prompt_roles(loaded);
+    let required = nexus_preset::required_prompt_roles(loaded);
 
     // Every required role must have an effective binding (N-4b). An empty
     // map is accepted ONLY when the preset has no prompt path at all.
@@ -3415,14 +3415,14 @@ mod tests {
 
         async fn start_session_with_preset(
             &self,
-            loaded: &nexus_orchestration::preset::LoadedPreset,
+            loaded: &nexus_preset::LoadedPreset,
         ) -> Result<SessionId, EngineError> {
             self.inner.start_session_with_preset(loaded).await
         }
 
         async fn start_session_with_preset_for_creator(
             &self,
-            loaded: &nexus_orchestration::preset::LoadedPreset,
+            loaded: &nexus_preset::LoadedPreset,
             creator_id: &str,
         ) -> Result<SessionId, EngineError> {
             self.inner
@@ -3554,14 +3554,14 @@ mod tests {
 
         async fn start_session_with_preset(
             &self,
-            _loaded: &nexus_orchestration::preset::LoadedPreset,
+            _loaded: &nexus_preset::LoadedPreset,
         ) -> Result<SessionId, EngineError> {
             unreachable!("not used by driver unit tests")
         }
 
         async fn start_session_with_preset_for_creator(
             &self,
-            _loaded: &nexus_orchestration::preset::LoadedPreset,
+            _loaded: &nexus_preset::LoadedPreset,
             _creator_id: &str,
         ) -> Result<SessionId, EngineError> {
             unreachable!("not used by driver unit tests")

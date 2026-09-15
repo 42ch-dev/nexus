@@ -36,9 +36,10 @@ use nexus_orchestration::engine::{
     GraphFlowEngine, OrchestrationEngine, SessionStatus, SessionSummary, StepOutcome,
 };
 use nexus_orchestration::run_state::{
-    AgentBinding, PresetSourceIdentity, RunCheckpoint, RunDescriptorV1, RunStateV1,
+    AgentBinding, RunCheckpoint, RunDescriptorV1, RunStateV1,
     WorkflowStateStore,
 };
+use nexus_preset::source_identity::PresetSourceIdentity;
 use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
 use nexus_orchestration::{CapabilityRegistryHolder, SessionId};
 use tempfile::TempDir;

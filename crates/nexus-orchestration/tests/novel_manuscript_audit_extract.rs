@@ -9,8 +9,8 @@
 //! 6. No `review_report` state in extract preset.
 
 use nexus_orchestration::capability::CapabilityRegistry;
-use nexus_orchestration::preset::load_embedded_preset;
-use nexus_orchestration::preset::manifest;
+use nexus_preset::load_embedded_preset;
+use nexus_preset::manifest;
 
 #[test]
 fn extract_preset_loads_successfully() {

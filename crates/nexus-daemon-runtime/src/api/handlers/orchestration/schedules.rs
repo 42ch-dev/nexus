@@ -354,7 +354,7 @@ pub async fn add_schedule(
     // Non-force path: evaluate preset gates if declared.
     if let Some(registry) = state.capability_registry() {
         let home = state.nexus_home();
-        let preset_result = nexus_orchestration::resolve_preset(&body.preset_id, home, &registry);
+        let preset_result = nexus_preset::resolve_preset(&body.preset_id, home, &registry);
 
         if let Ok(preset) = preset_result {
             let gates = &preset.manifest.preset.gates;
@@ -810,7 +810,7 @@ fn build_execution_descriptor(
             message: "capability registry unavailable; cannot freeze preset source identity".into(),
         })?;
     let loaded =
-        nexus_orchestration::preset::resolve_preset(&body.preset_id, state.nexus_home(), &registry)
+        nexus_preset::resolve_preset(&body.preset_id, state.nexus_home(), &registry)
             .map_err(|e| NexusApiError::Internal {
                 code: "PRESET_LOAD_ERROR".into(),
                 message: format!(

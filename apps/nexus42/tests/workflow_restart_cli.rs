@@ -54,14 +54,15 @@ use nexus_daemon_runtime::preset_run::{
 use nexus_daemon_runtime::test_utils;
 use nexus_orchestration::capability::DaemonToolDispatch;
 use nexus_orchestration::engine::{SessionId, SessionStatus, SessionSummary};
-use nexus_orchestration::preset::load_preset_from_str;
-use nexus_orchestration::preset::loader::build_wired_outer_graph;
+use nexus_preset::load_preset_from_str;
+use nexus_orchestration::preset_runtime::build_wired_outer_graph;
 use nexus_orchestration::run_state::WorkflowStateStore;
 use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
 use nexus_orchestration::{
     CapabilityError, CapabilityRegistry, CapabilityRegistryHolder, GraphFlowEngine,
-    OrchestrationEngine, PresetSourceIdentity,
+    OrchestrationEngine,
 };
+use nexus_preset::source_identity::PresetSourceIdentity;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::Path;
@@ -1870,7 +1871,7 @@ async fn daemon_restart_missing_source_continue_refuses_cancel_only() {
 /// hash). `parent` selects the nested-child shape (parent session + inner
 /// graph name).
 fn memory_augmented_descriptor(parent: Option<(&str, &str)>) -> Vec<u8> {
-    let source = nexus_orchestration::preset::embedded_source_identity("memory-augmented")
+    let source = nexus_preset::embedded_source_identity("memory-augmented")
         .expect("memory-augmented embedded source identity");
     let (parent_session_id, graph_name) = match parent {
         Some((parent_sid, graph)) => (Some(parent_sid.to_string()), Some(graph.to_string())),

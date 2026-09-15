@@ -143,7 +143,7 @@ pub async fn persist_review_findings_for_schedule(
 ) -> Result<usize, AutoChainError> {
     // R-V147P0-06 (V1.48 P0 T3): hoisted to `preset_ids` SSOT; referenced
     // from the supervisor terminal guard and the STAGE_PRESET_ALLOWLIST too.
-    use crate::preset_ids::NOVEL_CHAPTER_REVIEW_PRESET_ID as REVIEW_PRESET_ID;
+    use nexus_preset::preset_ids::NOVEL_CHAPTER_REVIEW_PRESET_ID as REVIEW_PRESET_ID;
 
     // SAFETY: dynamic SQL — single-row schedule lookup by PK. `work_id` is
     // nullable (added in 202606080002_creator_schedules_work_id.sql), so we
@@ -1169,7 +1169,7 @@ pub async fn promote_foreshadowing_for_schedule(
     schedule_id: &str,
     workspace_dir: Option<&std::path::Path>,
 ) -> Result<usize, AutoChainError> {
-    use crate::preset_ids::NOVEL_WRITING_PRESET_ID;
+    use nexus_preset::preset_ids::NOVEL_WRITING_PRESET_ID;
 
     // SAFETY: dynamic SQL — single-row schedule lookup by PK (nullable work_id).
     let row = sqlx::query(
@@ -1386,7 +1386,7 @@ fn enqueue_descriptor_json(
     // unresolvable (non-embedded/unknown) preset REJECTS the insertion
     // before any row is published — a drive-enabled row is never emitted
     // with a placeholder identity.
-    let source = crate::preset::embedded_source_identity(preset_id).ok_or_else(|| {
+    let source = nexus_preset::embedded_source_identity(preset_id).ok_or_else(|| {
         AutoChainError::InvalidState(format!(
             "preset '{preset_id}' has no embedded source identity; \
              refusing to publish a drive-enabled row"
@@ -2541,7 +2541,7 @@ mod tests {
     /// cron-triggered presets (`novel-brainstorm`, `novel-write`).
     #[test]
     fn preset_version_mapping_matches_yaml_includes_cron_presets() {
-        use crate::preset::EMBEDDED_PRESETS;
+        use nexus_preset::read_embedded_template;
 
         // R-V150P1CRONBW-05 (qc3 W-003): both cron-triggered preset ids are
         // iterated here so a future `version:` bump cannot drift silently.
@@ -2566,7 +2566,7 @@ mod tests {
 
             // Find the embedded preset
             let yaml_path = format!("{preset_id}/preset.yaml");
-            let Some(yaml_file) = EMBEDDED_PRESETS.get_file(&yaml_path) else {
+            let Some(yaml_str) = read_embedded_template(preset_id, "preset.yaml") else {
                 // Only `novel-write` is expected to be deferred. Any OTHER
                 // missing YAML is a real drift → panic.
                 assert_eq!(
@@ -2580,8 +2580,6 @@ mod tests {
                 );
                 continue;
             };
-            let yaml_str = std::str::from_utf8(yaml_file.contents())
-                .unwrap_or_else(|e| panic!("preset.yaml for '{preset_id}' is not UTF-8: {e}"));
 
             // Extract version: field from YAML
             let yaml_version = yaml_str
@@ -2617,15 +2615,12 @@ mod tests {
     /// `known_ids` array in the sync test above.
     #[test]
     fn preset_version_for_id_novel_brainstorm_resolves() {
-        use crate::preset::EMBEDDED_PRESETS;
+        use nexus_preset::read_embedded_template;
 
         let mapping_version = preset_version_for_id("novel-brainstorm");
 
-        let yaml_bytes = EMBEDDED_PRESETS
-            .get_file("novel-brainstorm/preset.yaml")
-            .expect("novel-brainstorm preset.yaml must ship in T-A P1");
-        let yaml_str = std::str::from_utf8(yaml_bytes.contents())
-            .expect("novel-brainstorm preset.yaml must be UTF-8");
+        let yaml_str = read_embedded_template("novel-brainstorm", "preset.yaml")
+            .expect("novel-brainstorm preset.yaml must ship as UTF-8 in T-A P1");
         let yaml_version = yaml_str
             .lines()
             .find_map(|line| {

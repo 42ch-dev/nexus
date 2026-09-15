@@ -3937,6 +3937,7 @@ dependencies = [
  "nexus-moment-context-assembly",
  "nexus-narrative",
  "nexus-orchestration",
+ "nexus-preset",
  "nexus-spoke-adapter",
  "nexus-wasm-host",
  "rmcp",
@@ -4048,6 +4049,7 @@ dependencies = [
  "nexus-moment-context-assembly",
  "nexus-narrative",
  "nexus-orchestration",
+ "nexus-preset",
  "nexus-spoke-adapter",
  "nexus-wasm-host",
  "nix 0.28.0",
@@ -4216,6 +4218,7 @@ dependencies = [
  "nexus-knowledge",
  "nexus-local-db",
  "nexus-narrative",
+ "nexus-preset",
  "nexus-spoke-adapter",
  "nexus-wasm-host",
  "regex",
@@ -4233,6 +4236,22 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "nexus-preset"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "include_dir",
+ "nexus-contracts",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -4338,6 +4357,7 @@ dependencies = [
  "nexus-moment-context-assembly",
  "nexus-narrative",
  "nexus-orchestration",
+ "nexus-preset",
  "nexus-spoke-adapter",
  "nexus-wasm-host",
  "nix 0.28.0",

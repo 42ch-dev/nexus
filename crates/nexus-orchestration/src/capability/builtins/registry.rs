@@ -390,126 +390,115 @@ impl Default for RegistryRefresh {
 }
 
 #[async_trait]
-impl Capability for RegistryRefresh {
-    fn name(&self) -> &'static str {
-        "registry.refresh"
-    }
+impl Capability for RegistryRefresh { fn name(&self) -> &'static str {
+    "registry.refresh"
+} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::REGISTRY_REFRESH_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
+    r#"{"type":"object","properties":{"cacheAgeMs":{"type":"integer","minimum":0},"capabilityCount":{"type":"integer","minimum":0},"source":{"type":"string","enum":["synthetic","cdn","synthetic_fallback"]},"snapshotVersion":{"type":"string"},"generatedAt":{"type":"string","format":"date-time"},"fetchTimeoutMs":{"type":"integer","minimum":0},"maxRetries":{"type":"integer","minimum":0},"retryCount":{"type":"integer","minimum":0},"fallbackReason":{"type":"string"}},"required":["cacheAgeMs","capabilityCount","source","snapshotVersion","generatedAt"],"additionalProperties":false}"#
+}
 
-    fn input_schema(&self) -> &'static str {
-        // V1.58 P0 fix-wave (QC2 M-1): the `force` property was removed —
-        // it was a documented no-op (no cache layer to bypass). The schema
-        // is now an empty object with additionalProperties:false.
-        r#"{"type":"object","properties":{},"required":[],"additionalProperties":false}"#
-    }
+async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+    // V1.58 P0 T16 (R-V156P1-L007): increment the refresh counter on entry.
+    REFRESH_TOTAL.fetch_add(1, Ordering::Relaxed);
 
-    fn output_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"cacheAgeMs":{"type":"integer","minimum":0},"capabilityCount":{"type":"integer","minimum":0},"source":{"type":"string","enum":["synthetic","cdn","synthetic_fallback"]},"snapshotVersion":{"type":"string"},"generatedAt":{"type":"string","format":"date-time"},"fetchTimeoutMs":{"type":"integer","minimum":0},"maxRetries":{"type":"integer","minimum":0},"retryCount":{"type":"integer","minimum":0},"fallbackReason":{"type":"string"}},"required":["cacheAgeMs","capabilityCount","source","snapshotVersion","generatedAt"],"additionalProperties":false}"#
-    }
+    // V1.58 P0 T7 (R-V156P1-M003) / QC2 M-1 fix: the `force` input
+    // parameter was removed from the contract — it was a documented
+    // no-op (the synthetic path is always fresh; the CDN path always
+    // fetches) but the help text advertised it as bypassing cache
+    // freshness, which was misleading. The input is still parsed so
+    // callers that historically sent `{"force": ...}` do not break
+    // (serde ignores unknown fields by default).
+    let _parsed: RegistryRefreshInput = serde_json::from_value(input)
+        .map_err(|e| CapabilityError::InputInvalid(format!("registry.refresh input: {e}")))?;
 
-    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        // V1.58 P0 T16 (R-V156P1-L007): increment the refresh counter on entry.
-        REFRESH_TOTAL.fetch_add(1, Ordering::Relaxed);
+    // V1.58 P0 T15 (R-V156P1-L006): generated_at is captured ONCE per
+    // invocation (not per retry) so the field is deterministic across the
+    // retry lifecycle of a single refresh call.
+    let now = Utc::now().to_rfc3339();
 
-        // V1.58 P0 T7 (R-V156P1-M003) / QC2 M-1 fix: the `force` input
-        // parameter was removed from the contract — it was a documented
-        // no-op (the synthetic path is always fresh; the CDN path always
-        // fetches) but the help text advertised it as bypassing cache
-        // freshness, which was misleading. The input is still parsed so
-        // callers that historically sent `{"force": ...}` do not break
-        // (serde ignores unknown fields by default).
-        let _parsed: RegistryRefreshInput = serde_json::from_value(input)
-            .map_err(|e| CapabilityError::InputInvalid(format!("registry.refresh input: {e}")))?;
+    // V1.58 P0 T8 (R-V156P1-M004): structured tracing spanning admission →
+    // fetch → response phases.
+    let span = tracing::info_span!(
+        "registry_refresh",
+        cdn_configured = self.cdn_config.is_some(),
+        %now,
+    );
+    let _guard = span.enter();
 
-        // V1.58 P0 T15 (R-V156P1-L006): generated_at is captured ONCE per
-        // invocation (not per retry) so the field is deterministic across the
-        // retry lifecycle of a single refresh call.
-        let now = Utc::now().to_rfc3339();
+    tracing::info!("registry.refresh admitted");
 
-        // V1.58 P0 T8 (R-V156P1-M004): structured tracing spanning admission →
-        // fetch → response phases.
-        let span = tracing::info_span!(
-            "registry_refresh",
-            cdn_configured = self.cdn_config.is_some(),
-            %now,
-        );
-        let _guard = span.enter();
-
-        tracing::info!("registry.refresh admitted");
-
-        // Check if CDN URL is configured (constructor-injected, V1.57 P1)
-        if let Some(ref cdn) = self.cdn_config {
-            // Network mode: fetch from CDN with timeout + retry
-            tracing::debug!(cdn_url = %cdn.url, timeout_ms = cdn.timeout_ms, "fetching registry from CDN");
-            match fetch_from_cdn(cdn).await {
-                Ok((capability_count, retry_count)) => {
-                    let output = RegistryRefreshOutput {
-                        cache_age_ms: 0, // fresh fetch
-                        capability_count,
-                        source: "cdn".to_string(),
-                        snapshot_version: REGISTRY_SNAPSHOT_VERSION.to_string(),
-                        generated_at: now,
-                        fetch_timeout_ms: cdn.timeout_ms,
-                        max_retries: cdn.max_retries,
-                        retry_count,
-                        fallback_reason: String::new(),
-                    };
-                    tracing::info!(
-                        capability_count,
-                        retry_count,
-                        "registry.refresh fetched from CDN"
-                    );
-                    REFRESH_SUCCESS_TOTAL.fetch_add(1, Ordering::Relaxed);
-                    return serde_json::to_value(output)
-                        .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")));
-                }
-                Err(err) => {
-                    // Network failed — fall back to synthetic.
-                    // H-001: fallback_reason carries a typed CdnError variant stringified.
-                    tracing::warn!(error = %err, "CDN fetch failed — falling back to synthetic");
-                    let fallback_reason = err.to_string();
-                    let output = RegistryRefreshOutput {
-                        cache_age_ms: 0,
-                        capability_count: len_u32(REGISTRY_SNAPSHOT_CAPABILITIES.len()),
-                        source: "synthetic_fallback".to_string(),
-                        snapshot_version: REGISTRY_SNAPSHOT_VERSION.to_string(),
-                        generated_at: now,
-                        fetch_timeout_ms: cdn.timeout_ms,
-                        max_retries: cdn.max_retries,
-                        retry_count: cdn.max_retries,
-                        fallback_reason,
-                    };
-                    // Fallback still serves a usable snapshot — count as success
-                    // (the capability returned valid data) but the failure counter
-                    // captures the CDN miss.
-                    REFRESH_SUCCESS_TOTAL.fetch_add(1, Ordering::Relaxed);
-                    REFRESH_FAILURE_TOTAL.fetch_add(1, Ordering::Relaxed);
-                    return serde_json::to_value(output)
-                        .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")));
-                }
+    // Check if CDN URL is configured (constructor-injected, V1.57 P1)
+    if let Some(ref cdn) = self.cdn_config {
+        // Network mode: fetch from CDN with timeout + retry
+        tracing::debug!(cdn_url = %cdn.url, timeout_ms = cdn.timeout_ms, "fetching registry from CDN");
+        match fetch_from_cdn(cdn).await {
+            Ok((capability_count, retry_count)) => {
+                let output = RegistryRefreshOutput {
+                    cache_age_ms: 0, // fresh fetch
+                    capability_count,
+                    source: "cdn".to_string(),
+                    snapshot_version: REGISTRY_SNAPSHOT_VERSION.to_string(),
+                    generated_at: now,
+                    fetch_timeout_ms: cdn.timeout_ms,
+                    max_retries: cdn.max_retries,
+                    retry_count,
+                    fallback_reason: String::new(),
+                };
+                tracing::info!(
+                    capability_count,
+                    retry_count,
+                    "registry.refresh fetched from CDN"
+                );
+                REFRESH_SUCCESS_TOTAL.fetch_add(1, Ordering::Relaxed);
+                return serde_json::to_value(output)
+                    .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")));
+            }
+            Err(err) => {
+                // Network failed — fall back to synthetic.
+                // H-001: fallback_reason carries a typed CdnError variant stringified.
+                tracing::warn!(error = %err, "CDN fetch failed — falling back to synthetic");
+                let fallback_reason = err.to_string();
+                let output = RegistryRefreshOutput {
+                    cache_age_ms: 0,
+                    capability_count: len_u32(REGISTRY_SNAPSHOT_CAPABILITIES.len()),
+                    source: "synthetic_fallback".to_string(),
+                    snapshot_version: REGISTRY_SNAPSHOT_VERSION.to_string(),
+                    generated_at: now,
+                    fetch_timeout_ms: cdn.timeout_ms,
+                    max_retries: cdn.max_retries,
+                    retry_count: cdn.max_retries,
+                    fallback_reason,
+                };
+                // Fallback still serves a usable snapshot — count as success
+                // (the capability returned valid data) but the failure counter
+                // captures the CDN miss.
+                REFRESH_SUCCESS_TOTAL.fetch_add(1, Ordering::Relaxed);
+                REFRESH_FAILURE_TOTAL.fetch_add(1, Ordering::Relaxed);
+                return serde_json::to_value(output)
+                    .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")));
             }
         }
-
-        // Default / air-gap: synthetic output only — zero network calls.
-        // V1.58 P0 T16: synthetic mode serves the embedded snapshot, which is
-        // effectively a cache hit (no network round-trip).
-        tracing::debug!("serving embedded synthetic snapshot");
-        REFRESH_CACHE_HIT_TOTAL.fetch_add(1, Ordering::Relaxed);
-        REFRESH_SUCCESS_TOTAL.fetch_add(1, Ordering::Relaxed);
-        let output = RegistryRefreshOutput {
-            cache_age_ms: 0,
-            capability_count: len_u32(REGISTRY_SNAPSHOT_CAPABILITIES.len()),
-            source: "synthetic".to_string(),
-            snapshot_version: REGISTRY_SNAPSHOT_VERSION.to_string(),
-            generated_at: now,
-            fetch_timeout_ms: 0,
-            max_retries: 0,
-            retry_count: 0,
-            fallback_reason: String::new(),
-        };
-        serde_json::to_value(output)
-            .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
     }
-}
+
+    // Default / air-gap: synthetic output only — zero network calls.
+    // V1.58 P0 T16: synthetic mode serves the embedded snapshot, which is
+    // effectively a cache hit (no network round-trip).
+    tracing::debug!("serving embedded synthetic snapshot");
+    REFRESH_CACHE_HIT_TOTAL.fetch_add(1, Ordering::Relaxed);
+    REFRESH_SUCCESS_TOTAL.fetch_add(1, Ordering::Relaxed);
+    let output = RegistryRefreshOutput {
+        cache_age_ms: 0,
+        capability_count: len_u32(REGISTRY_SNAPSHOT_CAPABILITIES.len()),
+        source: "synthetic".to_string(),
+        snapshot_version: REGISTRY_SNAPSHOT_VERSION.to_string(),
+        generated_at: now,
+        fetch_timeout_ms: 0,
+        max_retries: 0,
+        retry_count: 0,
+        fallback_reason: String::new(),
+    };
+    serde_json::to_value(output)
+        .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
+} }
 
 // ─── Network fetch helpers ─────────────────────────────────────────────────
 

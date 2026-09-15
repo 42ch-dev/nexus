@@ -771,6 +771,7 @@ impl From<nexus_core::CoreError> for NexusApiError {
             nexus_core::CoreError::InvalidInput { field, reason } => {
                 Self::InvalidInput { field, reason }
             }
+            nexus_core::CoreError::Preset(error) => error.into(),
             nexus_core::CoreError::OutlineConflict(details) => Self::OutlineConflict {
                 current_revision: details.current_revision,
                 node_id: details.node_id,
@@ -817,6 +818,27 @@ impl From<nexus_core::CoreError> for NexusApiError {
                 code: "CORE_ERROR".to_string(),
                 message: category,
             },
+        }
+    }
+}
+
+impl From<nexus_core::PresetError> for NexusApiError {
+    fn from(error: nexus_core::PresetError) -> Self {
+        use nexus_core::PresetError;
+        match error {
+            PresetError::Rejected { code, message } => Self::BadRequest { code, message },
+            PresetError::InvalidInput { field, reason } => Self::InvalidInput { field, reason },
+            PresetError::NotFound(resource) => Self::NotFound(resource),
+            PresetError::Conflict(message) => Self::Conflict(message),
+            PresetError::Forbidden { resource, reason } => Self::Forbidden { resource, reason },
+            PresetError::Internal { code, message } => Self::Internal { code, message },
+            PresetError::StrategyConflict(conflict) => Self::strategy_conflict(
+                conflict.current_revision, &conflict.node_id,
+                &conflict.conflicting_path, &conflict.recovery_hint,
+            ),
+            PresetError::StrategyValidation(summary) => Self::strategy_validation_failed(
+                &summary.errors, &summary.warnings,
+            ),
         }
     }
 }

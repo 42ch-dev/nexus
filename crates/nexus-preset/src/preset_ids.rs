@@ -15,7 +15,7 @@
 /// - [`crate::auto_chain::persist_review_findings_for_schedule`] (findings hook)
 /// - [`crate::schedule::supervisor::ScheduleSupervisor::on_schedule_terminal`]
 ///   (terminal guard)
-/// - [`crate::preset::validation::STAGE_PRESET_ALLOWLIST`] (review stage
+/// - [`crate::validation::STAGE_PRESET_ALLOWLIST`] (review stage
 ///   allowlist entry)
 ///
 /// See `.mstar/specs/novel-writing/quality-loop.md` §3 for the normative
@@ -102,7 +102,7 @@ pub const fn cron_role_preset_ids() -> &'static [&'static str] {
 /// `Design/*.md` sections. Registered as a `work_continue` preset.
 ///
 /// Consumed by:
-/// - [`crate::preset::validation::STAGE_PRESET_ALLOWLIST`] (produce stage)
+/// - [`crate::validation::STAGE_PRESET_ALLOWLIST`] (produce stage)
 /// - Schedule supervisor (terminal guard for completion hooks)
 ///
 /// See `.mstar/specs/game-bible-profile.md` §5 for the stage chain.
@@ -168,7 +168,7 @@ mod tests {
         // enqueues schedules with these ids).
         for id in cron_role_preset_ids() {
             assert!(
-                crate::preset::list_embedded_presets()
+                crate::list_embedded_presets()
                     .iter()
                     .any(|e| e == id),
                 "cron-role preset '{id}' must exist in the embedded preset tree"

@@ -41,7 +41,7 @@ pub fn chapter_label(chapter: i32) -> String {
 /// | persist   | `kb-extract`            |
 #[must_use]
 pub fn preset_for_stage(stage: &str) -> Option<&'static str> {
-    crate::preset::validation::default_preset_for_stage(stage)
+    nexus_preset::validation::default_preset_for_stage(stage)
 }
 
 /// Build the schedule label for a stage advance (spec §4).

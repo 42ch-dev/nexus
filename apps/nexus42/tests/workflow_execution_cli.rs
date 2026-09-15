@@ -235,7 +235,7 @@ async fn load_drive_row(daemon: &LiveDaemon, schedule_id: &str) -> ScheduleDrive
 /// REAL content-addressed source identity (never a zero hash) plus a valid
 /// `default` binding so admission's binding-completeness gate passes.
 fn seeded_descriptor_json() -> Vec<u8> {
-    let source = nexus_orchestration::preset::embedded_source_identity(PUBLIC_PRESET)
+    let source = nexus_preset::embedded_source_identity(PUBLIC_PRESET)
         .expect("embedded source identity");
     serde_json::to_vec(&serde_json::json!({
         "creator_id": "test_creator",
@@ -333,7 +333,7 @@ async fn wait_for_run_status(
 /// (N-14 failed-driver fixture): the REAL content-addressed source
 /// identity plus an empty binding map (the preset has no prompt roles).
 fn seeded_combat_descriptor_json() -> Vec<u8> {
-    let source = nexus_orchestration::preset::embedded_source_identity("combat-engine")
+    let source = nexus_preset::embedded_source_identity("combat-engine")
         .expect("combat-engine embedded source identity");
     serde_json::to_vec(&serde_json::json!({
         "creator_id": "test_creator",
@@ -1603,7 +1603,7 @@ async fn admission_internal_insertion_branches_durable() {
         None,
         None,
         &work,
-        nexus_orchestration::preset::default_bindings_for_preset("research", MOCK_PROVIDER)
+        nexus_orchestration::preset_runtime::default_bindings_for_preset("research", MOCK_PROVIDER)
             .expect("research preset resolves"),
         None,
     )
@@ -1644,7 +1644,7 @@ async fn admission_internal_insertion_branches_durable() {
             .expect("chain descriptor parses");
     assert!(
         chain_desc.source
-            != nexus_orchestration::run_state::PresetSourceIdentity::Embedded {
+            != nexus_preset::source_identity::PresetSourceIdentity::Embedded {
                 preset_id: "research".to_string(),
                 content_hash: [0; 32],
             },
@@ -1725,7 +1725,7 @@ async fn admission_internal_insertion_branches_durable() {
         "wrk_chain",
         "novel-brainstorm",
         "brainstorm",
-        nexus_orchestration::preset::default_bindings_for_preset("novel-brainstorm", MOCK_PROVIDER)
+        nexus_orchestration::preset_runtime::default_bindings_for_preset("novel-brainstorm", MOCK_PROVIDER)
             .expect("novel-brainstorm preset resolves"),
     )
     .await
@@ -1770,7 +1770,7 @@ async fn admission_internal_insertion_branches_durable() {
         &daemon.pool,
         "rvm_creator",
         "wrk_chain",
-        nexus_orchestration::preset::default_bindings_for_preset(
+        nexus_orchestration::preset_runtime::default_bindings_for_preset(
             "novel-review-master",
             MOCK_PROVIDER,
         )

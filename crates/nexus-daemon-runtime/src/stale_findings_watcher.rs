@@ -257,7 +257,7 @@ async fn maybe_enqueue_review_master(
     // (`acp.prompt` + `judge.llm`), so a missing provider refuses the
     // enqueue — never a drive-enabled row with an empty binding map.
     let bindings = if let Some(provider_id) = binding_provider {
-        if let Some(bindings) = nexus_orchestration::preset::default_bindings_for_preset(
+        if let Some(bindings) = nexus_orchestration::preset_runtime::default_bindings_for_preset(
             "novel-review-master",
             provider_id,
         ) {
