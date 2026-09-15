@@ -293,3 +293,134 @@ async fn stale_actor_and_journal_failure_never_redispatch() {
         "the closed registry keeps the tombstone guard observable"
     );
 }
+
+/// C1: a principal minted against a different creator/workspace is denied on
+/// every HostHandle method, and a mid-session selection drift is denied by
+/// the disk re-read — with zero observable Host effect.
+#[tokio::test]
+async fn host_authority_admits_only_verified_principals() {
+    let env = seed_env().await;
+    let (core, principal) = open_core(&env).await;
+    let port = CountingPort::new();
+    let handle = core.open_host(port.clone()).await.unwrap();
+
+    // A foreign principal: a core opened against a different seeded creator.
+    let foreign = seed_env().await;
+    let (_, foreign_principal) = open_core(&foreign).await;
+    let request = serde_json::from_value::<nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest>(
+        serde_json::json!({ "kind": "prompt", "content": "hello" }),
+    )
+    .unwrap();
+    for err in [
+        handle
+            .create_session(&foreign_principal, serde_json::from_value(
+                serde_json::json!({ "provider_id": "mock-acp" }),
+            ).unwrap())
+            .unwrap_err(),
+        handle
+            .execute(&foreign_principal, Uuid::new_v4().to_string(), request)
+            .unwrap_err(),
+        handle
+            .query(&foreign_principal, serde_json::from_value(
+                serde_json::json!({ "query": "list_sessions" }),
+            ).unwrap())
+            .unwrap_err(),
+    ] {
+        assert!(
+            matches!(err, CoreError::AuthRequired),
+            "foreign principals are auth-required, got {err:?}"
+        );
+    }
+
+    // Selection drift: the on-disk active slug no longer matches the open.
+    let nexus_home = env.user_home.join(".nexus42");
+    std::fs::write(
+        nexus_home.join("config.toml"),
+        format!(
+            "active_creator_id = \"{CREATOR}\"\n\
+             [active_workspace_slug_by_creator]\n\
+             \"{CREATOR}\" = \"other\""
+        ),
+    )
+    .unwrap();
+    let request = serde_json::from_value::<nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest>(
+        serde_json::json!({ "kind": "prompt", "content": "hello" }),
+    )
+    .unwrap();
+    let err = handle
+        .execute(&principal, Uuid::new_v4().to_string(), request)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, CoreError::AuthRequired),
+        "selection drift is auth-required, got {err:?}"
+    );
+
+    // Zero observable Host effect: no session was ever created.
+    std::fs::write(
+        nexus_home.join("config.toml"),
+        format!(
+            "active_creator_id = \"{CREATOR}\"\n\
+             [active_workspace_slug_by_creator]\n\
+             \"{CREATOR}\" = \"default\""
+        ),
+    )
+    .unwrap();
+    let list = handle
+        .query(&principal, serde_json::from_value(
+            serde_json::json!({ "query": "list_sessions" }),
+        ).unwrap())
+        .await
+        .unwrap();
+    assert!(
+        list.sessions.map(|s| s.items.is_empty()).unwrap_or(true),
+        "denied admissions created no Host session"
+    );
+}
+
+/// C2: the established-owner slot admits exactly one open_host per open
+/// service; a second start is a typed busy rejection, and a confirmed close
+/// frees the slot.
+#[tokio::test]
+async fn second_open_host_is_typed_rejected_until_confirmed_close() {
+    let env = seed_env().await;
+    let (core, _principal) = open_core(&env).await;
+    let first = core.open_host(CountingPort::new()).await.unwrap();
+    let err = core
+        .open_host(CountingPort::new())
+        .await
+        .expect_err("a second start must be rejected");
+    assert!(
+        matches!(err, CoreError::OwnerBusy),
+        "second open is typed OwnerBusy, got {err:?}"
+    );
+    // A confirmed close frees the slot; the first handle still closes cleanly.
+    let report = first.close().await.unwrap();
+    assert!(report.cleanup_confirmed);
+    let _second = core.open_host(CountingPort::new()).await.unwrap();
+}
+
+/// I3: a status write never re-attributes the operation — the stored
+/// session_id/provider_id are write-once at the first insert.
+#[tokio::test]
+async fn journal_status_update_preserves_stored_identity() {
+    let env = seed_env().await;
+    let (core, _principal) = open_core(&env).await;
+    core.journal_provider_write_internal("op-i", "sess-i", "mock-acp", "running")
+        .await
+        .unwrap();
+    // A later status write carrying mismatched identity must not clobber the
+    // stored owner fields.
+    core.journal_provider_write_internal("op-i", "sess-OTHER", "mock-OTHER", "cancelled")
+        .await
+        .unwrap();
+    let row = core
+        .provider_operation_row_internal("op-i")
+        .await
+        .unwrap()
+        .expect("row exists");
+    assert_eq!(row.1, "sess-i", "stored session_id is write-once");
+    assert_eq!(row.2, "mock-acp", "stored provider_id is write-once");
+    assert_eq!(row.0, "op-i");
+
+}

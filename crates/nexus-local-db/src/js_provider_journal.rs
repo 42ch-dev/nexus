@@ -34,7 +34,10 @@ const fn db_err(e: sqlx::Error) -> LocalDbError {
 /// Upsert an operation and prune the journal to the bounded retention window.
 ///
 /// A row that is already terminal is never downgraded back to `running`, so a
-/// restart cannot resurrect a settled operation.
+/// restart cannot resurrect a settled operation. The stored identity columns
+/// (`session_id`, `provider_id`) are write-once at the first insert: a later
+/// status update never re-attributes the operation to another session or
+/// provider.
 ///
 /// # Errors
 ///
@@ -51,8 +54,6 @@ pub async fn upsert_operation(
               (operation_id, session_id, provider_id, status, sequence)
           VALUES (?, ?, ?, ?, COALESCE((SELECT MAX(sequence) FROM js_provider_operation_journal), 0) + 1)
           ON CONFLICT(operation_id) DO UPDATE SET
-              session_id = excluded.session_id,
-              provider_id = excluded.provider_id,
               status = CASE
                   WHEN js_provider_operation_journal.status IN ('finished','failed','interrupted','cancelled')
                       THEN js_provider_operation_journal.status

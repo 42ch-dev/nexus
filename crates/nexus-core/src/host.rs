@@ -87,6 +87,33 @@ impl CoreService {
     /// catalog cannot be discovered, or the [`HostManager`] fails to start.
     pub async fn open_host(&self, port: Arc<dyn ProviderPort>) -> CoreResult<HostHandle> {
         self.ensure_open()?;
+        {
+            // Established-owner admission: at most one authority per open
+            // service; a second start is a typed busy rejection, never a
+            // second engine.
+            let mut established = self
+                .inner
+                .host_authority_established
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if *established {
+                return Err(CoreError::OwnerBusy);
+            }
+            *established = true;
+        }
+        let started = self.open_host_inner(port).await;
+        if started.is_err() {
+            // A failed start never owns the slot: retry is allowed.
+            *self
+                .inner
+                .host_authority_established
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = false;
+        }
+        started
+    }
+
+    async fn open_host_inner(&self, port: Arc<dyn ProviderPort>) -> CoreResult<HostHandle> {
         let user_home = self.inner.nexus_home.clone();
         validate_workspace_path(&user_home).map_err(config_err)?;
         let config_path = agent_host_config_path(&user_home);
@@ -157,6 +184,7 @@ impl HostHandle {
         request: CreateSessionRequest,
     ) -> CoreResult<SessionResponse> {
         self.core.ensure_open()?;
+        self.core.verify_principal(principal)?;
         let pair =
             classify_pair(request.actor_ref.is_some(), request.viewpoint.is_some())?;
         let creator_id = principal.creator_id().to_string();
@@ -277,9 +305,19 @@ impl HostHandle {
         request: ExecuteOperationRequest,
     ) -> CoreResult<OperationResponse> {
         self.core.ensure_open()?;
+        self.core.verify_principal(principal)?;
         let uuid = Uuid::parse_str(&session_id)
             .map_err(|_| invalid("session_id", "session_id must be a valid UUID"))?;
         let sid = HostSessionId(uuid);
+        // Stored owner/tombstone gate: an indexed or retired Actor session is
+        // owner-scoped before any Host access, whatever the operation kind.
+        if let Some((owner, _, _)) = self.registry.stored_session_owner(&sid) {
+            if owner != principal.creator_id() {
+                return Err(CoreError::NotFound {
+                    resource: format!("session {sid}"),
+                });
+            }
+        }
         if self.registry.is_actor_session(&sid)
             && matches!(
                 request,
@@ -449,6 +487,7 @@ impl HostHandle {
         request: CoreHostQuery,
     ) -> CoreResult<CoreHostQueryResponse> {
         self.core.ensure_open()?;
+        self.core.verify_principal(principal)?;
         match request.query {
             CoreHostQueryQuery::Health => {
                 let health = self.host.health().await.map_err(host_err)?;
@@ -536,8 +575,18 @@ impl HostHandle {
                 let native = self.sorted_sessions().await?;
                 let limit = request.limit.map(|n| n.get()).unwrap_or(50).clamp(1, 250);
                 let limit_us = usize::try_from(limit).unwrap_or(250);
-                let items_all: Vec<NexusAgentHostSessionResponse> =
-                    native.iter().map(|s| session_response_wire(s)).collect();
+                let items_all: Vec<NexusAgentHostSessionResponse> = native
+                    .iter()
+                    // Owner-scoped listing: a foreign indexed/retired Actor
+                    // session is invisible to this principal (legacy sessions
+                    // are never indexed and stay unchanged).
+                    .filter(|s| {
+                        self.registry
+                            .stored_session_owner(&s.id)
+                            .map_or(true, |(owner, _, _)| owner == principal.creator_id())
+                    })
+                    .map(|s| session_response_wire(s))
+                    .collect();
                 let items: Vec<NexusAgentHostSessionResponse> = items_all
                     .into_iter()
                     .skip_while(|s| {
@@ -577,7 +626,18 @@ impl HostHandle {
                     .ok_or_else(|| invalid("session_id", "get_session requires session_id"))?;
                 if let Ok(uuid) = Uuid::parse_str(raw) {
                     let native = self.sorted_sessions().await?;
-                    if let Some(session) = native.iter().find(|s| s.id == HostSessionId(uuid)) {
+                    if let Some(session) = native
+                        .iter()
+                        .find(|s| {
+                            s.id == HostSessionId(uuid)
+                                && self
+                                    .registry
+                                    .stored_session_owner(&s.id)
+                                    .map_or(true, |(owner, _, _)| {
+                                        owner == principal.creator_id()
+                                    })
+                        })
+                    {
                         return Ok(CoreHostQueryResponse {
                             session: Some(session_response_wire(session)),
                             health: None,
@@ -661,6 +721,15 @@ impl HostHandle {
             pending.push(format!("host-shutdown: {err}"));
         }
         if pending.is_empty() {
+            // Close/release coordination with the established-owner slot: a
+            // confirmed close frees the authority for a later open; an
+            // unconfirmed close keeps the slot held.
+            *self
+                .core
+                .inner
+                .host_authority_established
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = false;
             Ok(CoreCloseReport {
                 state: CoreCloseReportState::Closed,
                 cleanup_confirmed: true,

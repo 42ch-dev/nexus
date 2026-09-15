@@ -523,10 +523,16 @@ impl EnvState {
         let Some(core) = self.journal_core() else {
             return Ok(());
         };
+        // The operation record keeps its launch identity: the status write
+        // carries the real owning session and provider id, never blanks that
+        // would clobber the stored identity columns.
         let (session_id, provider_id) = self
             .with_js_state(|s| {
-                s.operation(operation_id)
-                    .map(|op| (op.session_id, String::new()))
+                s.operation(operation_id).and_then(|op| {
+                    s.session(&op.session_id).map(|rec| {
+                        (op.session_id.clone(), rec.provider_id.clone())
+                    })
+                })
             })
             .flatten()
             .unwrap_or_default();

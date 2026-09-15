@@ -3,7 +3,7 @@
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use nexus_contracts::{
     CoreChangesRequest, CoreChangesResponse, CoreCloseReport, WorldKbCandidatesResponse,
@@ -84,6 +84,10 @@ pub(crate) struct CoreInner {
     /// Per-Character activity/transition fences (v1.190 P2-T1), Host-free
     /// and separate from any process session registry.
     pub(crate) character_fences: ActorFenceTable,
+    /// Established-owner slot for the Host authority (P4-T2): at most one
+    /// `open_host` manager per open service — a second start is a typed busy
+    /// rejection, never a second engine. Reset only by a confirmed close.
+    pub(crate) host_authority_established: Mutex<bool>,
 }
 
 /// Cloneable handle: `inner` is already shared, so a clone is the same open
