@@ -839,7 +839,7 @@ async fn drain_character_operation(
     registry.settle_operation_terminal(
         &snapshot.operation_id,
         nexus_contracts::generated::daemon_api::agent_host::character_operation_result::
-            CharacterOperationResultRunStatus::Finished,
+            CharacterOperationResultRunStatus::Succeeded,
         Some(nexus_contracts::generated::daemon_api::agent_host::character_operation_result::CharacterOperationResultFinishReason::EndTurn),
     );
 }
