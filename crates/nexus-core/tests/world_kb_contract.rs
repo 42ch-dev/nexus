@@ -1,6 +1,9 @@
 //! P1-T2 `world_kb` contract tests (core service semantics).
 
-use nexus_contracts::WorldKbPatchEntityRequest;
+use nexus_contracts::{
+    CoreProviderJournalWrite, CoreProviderJournalWriteStatus, CoreProviderOperationStatus,
+    WorldKbPatchEntityRequest,
+};
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
 use nexus_local_db::open_pool_read_only;
 use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
@@ -594,4 +597,124 @@ async fn direct_writer_close_allows_reopen() {
         .await
         .expect("graph after reopen");
     core2.close().await.expect("second close must succeed");
+}
+
+fn journal_write(
+    operation_id: &str,
+    session_id: &str,
+    provider_id: &str,
+    status: CoreProviderJournalWriteStatus,
+) -> CoreProviderJournalWrite {
+    CoreProviderJournalWrite {
+        operation_id: operation_id.parse().unwrap(),
+        session_id: session_id.parse().unwrap(),
+        provider_id: provider_id.parse().unwrap(),
+        status,
+    }
+}
+
+/// Provider journal contract (LIFE-3): owned write/read/settle seam on the
+/// service — monotonic sequences, settlement that never downgrades a terminal
+/// row, and read-only access that may read but never write the journal.
+#[tokio::test]
+async fn provider_journal_contract_write_read_settle() {
+    let fx = setup().await;
+
+    fx.core
+        .journal_provider_operation(
+            &fx.principal,
+            journal_write("op_a", "sess_a", "mock-acp", CoreProviderJournalWriteStatus::Running),
+        )
+        .await
+        .unwrap();
+    fx.core
+        .journal_provider_operation(
+            &fx.principal,
+            journal_write("op_b", "sess_b", "mock-acp", CoreProviderJournalWriteStatus::Running),
+        )
+        .await
+        .unwrap();
+
+    let a = fx
+        .core
+        .provider_operation(&fx.principal, "op_a".to_string())
+        .await
+        .unwrap()
+        .expect("journaled op_a is readable");
+    assert_eq!(a.operation_id.as_str(), "op_a");
+    assert_eq!(a.session_id.as_str(), "sess_a");
+    assert_eq!(a.provider_id.as_str(), "mock-acp");
+    assert!(matches!(a.status, CoreProviderOperationStatus::Running));
+
+    let b = fx
+        .core
+        .provider_operation(&fx.principal, "op_b".to_string())
+        .await
+        .unwrap()
+        .expect("journaled op_b is readable");
+    assert!(b.sequence > a.sequence, "journal sequences are monotonic");
+
+    assert!(
+        fx.core
+            .provider_operation(&fx.principal, "op_missing".to_string())
+            .await
+            .unwrap()
+            .is_none(),
+        "unknown ids stay None, never a fabricated record"
+    );
+
+    // op_b reaches a terminal state; settlement must not downgrade it.
+    fx.core
+        .journal_provider_operation(
+            &fx.principal,
+            journal_write("op_b", "sess_b", "mock-acp", CoreProviderJournalWriteStatus::Cancelled),
+        )
+        .await
+        .unwrap();
+    let settled = fx.core.settle_provider_orphans().await.unwrap();
+    assert_eq!(settled, 1, "only the non-terminal op_a is settled");
+    let a = fx
+        .core
+        .provider_operation(&fx.principal, "op_a".to_string())
+        .await
+        .unwrap()
+        .expect("op_a survives settlement");
+    assert!(matches!(a.status, CoreProviderOperationStatus::Interrupted));
+    let b = fx
+        .core
+        .provider_operation(&fx.principal, "op_b".to_string())
+        .await
+        .unwrap()
+        .expect("op_b survives settlement");
+    assert!(matches!(b.status, CoreProviderOperationStatus::Cancelled));
+    assert_eq!(
+        fx.core.settle_provider_orphans().await.unwrap(),
+        0,
+        "settlement is idempotent"
+    );
+
+    // Read-only access may read the journal but never write or settle it.
+    let ro = CoreService::open(CoreOpenOptions {
+        user_home: fx.tmp.path().to_path_buf(),
+        access: CoreAccess::ReadOnly,
+    })
+    .await
+    .unwrap();
+    let ro_principal = ro.active_principal().await.unwrap();
+    let ro_a = ro
+        .provider_operation(&ro_principal, "op_a".to_string())
+        .await
+        .unwrap()
+        .expect("read-only access reads the durable journal");
+    assert!(matches!(ro_a.status, CoreProviderOperationStatus::Interrupted));
+    let err = ro
+        .journal_provider_operation(
+            &ro_principal,
+            journal_write("op_ro", "sess_a", "mock-acp", CoreProviderJournalWriteStatus::Running),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, CoreError::Forbidden { .. }));
+    let err = ro.settle_provider_orphans().await.unwrap_err();
+    assert!(matches!(err, CoreError::Forbidden { .. }));
 }

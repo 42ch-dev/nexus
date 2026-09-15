@@ -3,6 +3,7 @@
 mod changes;
 mod error;
 mod principal;
+mod provider_journal;
 mod service;
 mod world_kb;
 

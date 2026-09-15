@@ -21,7 +21,7 @@ use nexus_local_db::writer_protocol::{
 use sqlx::SqlitePool;
 
 use crate::changes::read_changes;
-use crate::error::{CoreError, CoreResult};
+use crate::error::{local_db_err, CoreError, CoreResult};
 use crate::principal::Principal;
 use crate::world_kb::{candidates, graph, patch};
 
@@ -38,20 +38,20 @@ pub struct CoreOpenOptions {
     pub access: CoreAccess,
 }
 
-struct CoreInner {
-    pool: SqlitePool,
+pub(crate) struct CoreInner {
+    pub(crate) pool: SqlitePool,
     db_path: PathBuf,
     _guarded: Option<GuardedPool>,
     nexus_home: PathBuf,
     creator_id: String,
     workspace_slug: String,
     generation: AtomicU64,
-    access: CoreAccess,
+    pub(crate) access: CoreAccess,
     closing: AtomicBool,
 }
 
 pub struct CoreService {
-    inner: Arc<CoreInner>,
+    pub(crate) inner: Arc<CoreInner>,
 }
 
 impl CoreService {
@@ -90,13 +90,13 @@ impl CoreService {
 
         let (pool, guarded) = match options.access {
             CoreAccess::ReadOnly => {
-                let pool = open_pool_read_only(&db_path).await.map_err(map_db)?;
+                let pool = open_pool_read_only(&db_path).await.map_err(local_db_err)?;
                 (pool, None)
             }
             CoreAccess::DirectWriter => {
                 let guarded = init_guarded_pool(&db_path, &creator_id)
                     .await
-                    .map_err(map_db)?;
+                    .map_err(local_db_err)?;
                 let pool = guarded.clone_pool();
                 (pool, Some(guarded))
             }
@@ -105,12 +105,12 @@ impl CoreService {
                 let guarded =
                     match nexus_local_db::writer_protocol::join_live_engine_pool(&db_path, options)
                         .await
-                        .map_err(map_db)?
+                        .map_err(local_db_err)?
                     {
                         Some(guarded) => guarded,
                         None => init_engine_pool(&db_path, &creator_id, options)
                             .await
-                            .map_err(map_db)?,
+                            .map_err(local_db_err)?,
                     };
                 let pool = guarded.clone_pool();
                 (pool, Some(guarded))
@@ -132,7 +132,7 @@ impl CoreService {
         })
     }
 
-    fn ensure_open(&self) -> CoreResult<()> {
+    pub(crate) fn ensure_open(&self) -> CoreResult<()> {
         if self.inner.closing.load(Ordering::SeqCst) {
             return Err(CoreError::Closing);
         }
@@ -152,7 +152,7 @@ impl CoreService {
         Ok(())
     }
 
-    fn verify_principal(&self, principal: &Principal) -> CoreResult<()> {
+    pub(crate) fn verify_principal(&self, principal: &Principal) -> CoreResult<()> {
         self.ensure_open()?;
         if !principal.verify_generation(self.inner.generation.load(Ordering::SeqCst)) {
             return Err(CoreError::AuthRequired);
@@ -280,9 +280,12 @@ impl CoreService {
         read_changes(&self.inner.pool, request).await
     }
 
-    /// Durable JS-provider operation journal access (LIFE-3). The pool is
-    /// exposed read/write for the native provider-callback bridge and the
-    /// `hostQuery` fallback; it is not a second business truth.
+    /// Transitional pool access for the native provider-callback bridge and
+    /// the `hostQuery` fallback (LIFE-3); it is not a second business truth.
+    /// Deletion owner: P4-T2, once bridge consumers use the owned journal
+    /// methods (`provider_operation`, `journal_provider_operation`,
+    /// `settle_provider_orphans`). This escape hatch must not acquire new
+    /// callers.
     #[must_use]
     pub fn pool(&self) -> &SqlitePool {
         &self.inner.pool
@@ -321,26 +324,3 @@ impl CoreService {
     }
 }
 
-fn is_sqlite_busy(err: &sqlx::Error) -> bool {
-    match err {
-        sqlx::Error::Database(db) => {
-            db.code().as_deref() == Some("5")
-                || db.message().contains("database is locked")
-                || db.message().contains("SQLITE_BUSY")
-        }
-        _ => false,
-    }
-}
-
-fn map_db(e: nexus_local_db::LocalDbError) -> CoreError {
-    match e {
-        nexus_local_db::LocalDbError::OwnerBusy { .. }
-        | nexus_local_db::LocalDbError::Sqlx(sqlx::Error::PoolTimedOut) => CoreError::OwnerBusy,
-        nexus_local_db::LocalDbError::WriterFenced { .. } => CoreError::WriterFenced,
-        nexus_local_db::LocalDbError::SchemaMismatch { .. } => CoreError::SchemaMismatch,
-        nexus_local_db::LocalDbError::Sqlx(err) if is_sqlite_busy(&err) => CoreError::Busy,
-        other => CoreError::Internal {
-            category: format!("database_error: {other}"),
-        },
-    }
-}
