@@ -59,8 +59,9 @@ pub async fn create_test_workspace_for(
     workspace_slug: &str,
 ) -> (TestTempRoot, PathBuf, PathBuf) {
     let tmp = TestTempRoot(tempfile::TempDir::new().expect("failed to create temp dir"));
+    let nexus_home = tmp.path().join(".nexus42");
     let db_path = materialize_workspace_for(tmp.path(), creator_id, workspace_slug).await;
-    (tmp, tmp.path().join(".nexus42"), db_path)
+    (tmp, nexus_home, db_path)
 }
 
 /// Materialize `.nexus42` for `creator_id`/`workspace_slug` inside an existing
