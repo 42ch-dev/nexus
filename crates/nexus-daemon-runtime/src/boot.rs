@@ -758,6 +758,9 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                 workspace_root: state.workspace_path().map(std::path::PathBuf::from),
                 nexus_home: Some(state.nexus_home().clone()),
                 shutdown_notify: Some(state.shutdown_notify()),
+                // Production supplies no build-phase barrier; it exists for
+                // the C3 concurrency harness.
+                build_observer: None,
             };
             let handle = core
                 .start_execution(providers, deps)

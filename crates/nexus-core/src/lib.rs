@@ -29,9 +29,9 @@ pub use principal::Principal;
 pub use service::{CoreAccess, CoreOpenOptions, CoreService};
 #[cfg(feature = "execution")]
 pub use execution::{
-    CancelOutcome, DriveDisposition, ExecutionHandle, ExecutionOpenError, PresetRunConfig,
-    PresetRunOutcome, ResumeDecision, RunControlError, RunControlResult, RunSignal, RunnerDeps,
-    WorkflowRunCoordinator,
+    CancelOutcome, DriveDisposition, ExecutionBuildObserver, ExecutionHandle, ExecutionOpenError,
+    PresetRunConfig, PresetRunOutcome, ResumeDecision, RunControlError, RunControlResult, RunSignal,
+    RunnerDeps, WorkflowRunCoordinator,
 };
 pub use worlds::DELETE_WORLD_BLOCKED_BY_BINDINGS;
 pub use timeline::{CoreTimelineEventsQuery, CoreTimelineOverviewQuery};

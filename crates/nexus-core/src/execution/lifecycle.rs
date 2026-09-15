@@ -103,6 +103,29 @@ pub struct RunnerDeps {
     pub nexus_home: Option<std::path::PathBuf>,
     /// Cancels the bounded recovery re-drive when the transport shuts down.
     pub shutdown_notify: Option<Arc<tokio::sync::Notify>>,
+    /// Optional barrier invoked once the owner is fully built but BEFORE
+    /// [`CoreService::start_execution`] publishes it into the per-service slot.
+    ///
+    /// Production supplies `None`. It exists so a test can hold the exact
+    /// window the C3 race lives in — `start_execution` awaiting its build
+    /// while a concurrent `CoreService::close` runs — and force that
+    /// interleaving deterministically rather than hoping for it. The build
+    /// has already completed engine construction and A7 recovery when this
+    /// fires, so a close racing here observes exactly the split the
+    /// install-time double check must resolve.
+    pub build_observer: Option<Arc<dyn ExecutionBuildObserver>>,
+}
+
+/// Observable point in [`CoreService::start_execution`]'s build phase.
+///
+/// A single await where the caller may hold the build open (see
+/// [`RunnerDeps::build_observer`]). It is a diagnostic seam, not a
+/// collaborator: it observes no state and its only power is to delay the
+/// caller's own build.
+#[async_trait::async_trait]
+pub trait ExecutionBuildObserver: Send + Sync {
+    /// Called once, after the build settles and before the install.
+    async fn built(&self);
 }
 
 /// The single owner of the execution task set and engine epoch.
@@ -378,7 +401,7 @@ impl CoreService {
     pub async fn start_execution(
         &self,
         _providers: Arc<dyn ProviderPort>,
-        deps: RunnerDeps,
+        mut deps: RunnerDeps,
     ) -> Result<Arc<ExecutionHandle>, ExecutionOpenError> {
         self.ensure_open().map_err(|_| ExecutionOpenError::Closing)?;
         if self.inner.access != CoreAccess::EngineOwner {
@@ -401,7 +424,17 @@ impl CoreService {
         // build cannot fence its own DB. A closed or dropped owner frees its
         // slot on the next claim.
         let reservation = OwnerReservation::claim(&self.inner.db_path)?;
+        // The build-phase barrier is consumed HERE, not by the builder: it
+        // gates the install, so it must outlive `build_execution`.
+        let build_observer = deps.build_observer.take();
         let handle = self.build_execution(deps).await?;
+        // C3 barrier (diagnostic seam): the build is complete (engine +
+        // recovery) but nothing is published yet. A test holds this exact
+        // window to force a close to arrive mid-start; production supplies
+        // no observer and skips straight to the install below.
+        if let Some(observer) = build_observer {
+            observer.built().await;
+        }
         // C3: install-time double check. Close sets `closing` BEFORE it takes
         // the per-service slot, and this check+install is atomic under the
         // SAME slot mutex — so either close observes the installed handle
@@ -564,7 +597,6 @@ impl CoreService {
             engine_epoch,
             closing: AtomicBool::new(false),
             settled: AtomicBool::new(false),
-
         }))
     }
 }

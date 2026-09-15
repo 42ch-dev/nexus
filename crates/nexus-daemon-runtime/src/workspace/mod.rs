@@ -937,6 +937,9 @@ impl WorkspaceState {
                     workspace_root: self.workspace_path().map(std::path::PathBuf::from),
                     nexus_home: Some(self.nexus_home().clone()),
                     shutdown_notify: Some(self.shutdown_notify()),
+                    // Production supplies no build-phase barrier; it exists
+                    // for the C3 concurrency harness.
+                    build_observer: None,
                 },
             )
             .await

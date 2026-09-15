@@ -162,6 +162,17 @@ impl CoreService {
         Ok(())
     }
 
+    /// Read-only probe: whether this service has begun closing.
+    ///
+    /// The same predicate [`Self::ensure_open`] enforces, exposed so a caller
+    /// can OBSERVE the close barrier instead of inferring it from a later
+    /// refusal. Used by the concurrent close/start contract to force a close
+    /// into the mid-build window deterministically.
+    #[must_use]
+    pub fn is_closing(&self) -> bool {
+        self.inner.closing.load(Ordering::SeqCst)
+    }
+
     /// Re-read the on-disk active creator/workspace and require it to still
     /// match the context this service was opened against.
     ///

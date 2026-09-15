@@ -20,7 +20,7 @@
 pub mod lifecycle;
 pub mod workflow;
 
-pub use lifecycle::{ExecutionHandle, ExecutionOpenError, RunnerDeps};
+pub use lifecycle::{ExecutionBuildObserver, ExecutionHandle, ExecutionOpenError, RunnerDeps};
 pub use workflow::{
     CancelOutcome, DriveDisposition, PresetRunConfig, PresetRunOutcome, ResumeDecision,
     RunControlError, RunControlResult, RunSignal, WorkflowRunCoordinator, drive_preset_run,

@@ -13,13 +13,14 @@
 
 use async_trait::async_trait;
 use nexus_contracts::{CoreError as WireCoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply};
-use nexus_core::{CoreAccess, CoreOpenOptions, CoreService, RunnerDeps};
 use nexus_core::execution::RunControlError;
+use nexus_core::{CoreAccess, CoreOpenOptions, CoreService, ExecutionBuildObserver, RunnerDeps};
 use nexus_orchestration::capability::{
     CapabilityError, PromptExecutor, PromptRequest, PromptResult,
 };
 use nexus_orchestration::WorkflowStateStore;
 use nexus_provider_ports::{ProviderPort, ProviderResult};
+use std::future::Future;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -369,6 +370,24 @@ async fn second_owner_and_restart_are_fenced() {
 
 // ── Concurrency regressions (T1 review C1/C2/C3) ───────────────────────────
 
+/// Poll `cond` until it holds, failing the test instead of hanging.
+async fn wait_until<F, Fut>(what: &str, mut cond: F)
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = bool>,
+{
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if cond().await {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
+}
+
 /// A prompt executor that parks the drive INSIDE an LLM step until the test
 /// releases it. Holds close()'s drain deterministically: `abort_all_drives`
 /// cannot finish while the executor is parked, so the "closing" window is
@@ -509,9 +528,23 @@ async fn competing_owner_refused_while_close_is_draining() {
         let handle = Arc::clone(&handle);
         tokio::spawn(async move { handle.close().await })
     };
+    // Deterministic barrier: hold until close has ARMED the admission fence
+    // (`begin_shutdown` → `draining`, observable as `is_closed()`) before the
+    // competitor runs. Without this the refusal below could equally be
+    // produced by a merely-LIVE owner, so the test would pass even with the
+    // pre-fix registry and would not discriminate the C1 window at all.
+    // `draining` is armed before the drain and the parked drive cannot join
+    // until `gate.release()`, so the handle is still-unsettled here.
+    let fence_probe = Arc::clone(&handle);
+    wait_until("close arms the admission fence", move || {
+        let fence_probe = Arc::clone(&fence_probe);
+        async move { fence_probe.is_closed() }
+    })
+    .await;
+
     // The drain is in flight (the parked drive has not joined). While the
     // handle is NOT settled, the registry must refuse a replacement — the
-    // C1 fence, not merely a close-started flag.
+    // C1 fence, not merely a live-owner collision.
     let competitor = open_engine_owner(&f).await;
     let refused = competitor
         .start_execution(
@@ -566,39 +599,110 @@ async fn close_fences_new_drive_admission() {
     owner_a.close().await.unwrap();
 }
 
-/// C3: concurrent close and start_execution — either close observes and
-/// settles the installed owner, or the start abandons it. After BOTH
-/// complete, no owner may remain installed.
+/// Build-phase barrier for the C3 race (`RunnerDeps::build_observer`).
+///
+/// Holds `start_execution` at the exact window between "build complete" and
+/// "install into the per-service slot", and reports when a close has arrived
+/// there. That makes the pre-fix interleaving REACHABLE BY CONSTRUCTION
+/// instead of probabilistic: the old code awaited the build, then installed
+/// unconditionally, so a close landing in this window saw an empty slot and
+/// returned while the build went on to install an owner into a closed
+/// service.
+#[derive(Clone)]
+struct BuildGate {
+    entered: Arc<Notify>,
+    release: Arc<Notify>,
+}
+
+impl BuildGate {
+    fn new() -> Self {
+        Self {
+            entered: Arc::new(Notify::new()),
+            release: Arc::new(Notify::new()),
+        }
+    }
+
+    async fn wait_entered(&self) {
+        tokio::time::timeout(Duration::from_secs(10), self.entered.notified())
+            .await
+            .expect("start_execution must reach the build-phase barrier");
+    }
+
+    fn release(&self) {
+        self.release.notify_one();
+    }
+}
+
+#[async_trait]
+impl ExecutionBuildObserver for BuildGate {
+    async fn built(&self) {
+        // Signal entry (Notify stores the permit if the waiter is not
+        // registered yet), then hold the build open until the test releases.
+        self.entered.notify_one();
+        let _ = self.release.notified().await;
+    }
+}
+
+/// C3: a close that arrives WHILE `start_execution` is mid-build must not let
+/// the build install an owner into the closed service. Either close observes
+/// the installed owner and settles it, or the build abandons it — never an
+/// orphan owner, and never an owner surviving the close.
 #[tokio::test]
 async fn concurrent_close_and_start_never_leave_an_owner() {
     let f = fixture().await;
     seed_committed_run(&f.db_path, "test-preset:c3", CREATOR).await;
 
+    // Repeat so the barrier is exercised across scheduling orders, but every
+    // round is deterministically forced into the mid-build window.
     for round in 0..8u32 {
         let owner = Arc::new(open_engine_owner(&f).await);
+        let gate = BuildGate::new();
         let owner_for_start = Arc::clone(&owner);
-        let owner_for_close = Arc::clone(&owner);
+        let gate_for_start = gate.clone();
 
         let start = tokio::spawn(async move {
             owner_for_start
                 .start_execution(
                     Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
-                    RunnerDeps::default(),
+                    RunnerDeps {
+                        build_observer: Some(Arc::new(gate_for_start)),
+                        ..RunnerDeps::default()
+                    },
                 )
                 .await
         });
-        let close = tokio::spawn(async move { owner_for_close.close().await });
 
-        let (started, closed) = tokio::join!(start, close);
-        // `join!` awaits both handles: `closed` is the close RESULT itself.
-        let report = closed.expect("close succeeds");
+        // The build is complete but NOT installed. Close now — this is the
+        // interleaving the pre-fix code lost.
+        gate.wait_entered().await;
+        let close = tokio::spawn({
+            let owner = Arc::clone(&owner);
+            async move { owner.close().await }
+        });
+        // Deterministic ordering: close must have BEGUN (`closing`, C2) and
+        // fully completed its slot take BEFORE the build is allowed to
+        // attempt its install. Awaiting the close task here removes the last
+        // scheduling dependence — the pre-fix install ran unconditionally,
+        // so it would publish an owner into an already-closed service on
+        // every round, while the install-time double check refuses it.
+        let report = close.await.expect("close task joins");
+        assert!(
+            owner.is_closing(),
+            "round {round}: close must have begun before the install window"
+        );
+        gate.release();
+
+        let started = start.await.expect("start task joins");
         assert!(
             report.unwrap().cleanup_confirmed,
             "round {round}: close must report a confirmed cleanup"
         );
-        // Either the start was refused (closing) or it installed and close
-        // took+settled the handle. Both must leave the slot EMPTY.
-        let _ = started;
+        // The build was refused (install-time double check) — it may not have
+        // installed anything into the closed service.
+        assert!(
+            started.is_err(),
+            "round {round}: a start racing a completed close must be refused"
+        );
         assert!(
             owner.execution().is_none(),
             "round {round}: an owner survived concurrent close — orphan effect owner"
