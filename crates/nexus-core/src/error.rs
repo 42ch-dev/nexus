@@ -3,6 +3,7 @@
 use nexus_contracts::{
     WorldKbConflictError, WorldKbValidationError, WorldKbValidationErrorValidationSummary,
 };
+use nexus_local_db::LocalDbError;
 
 pub type CoreResult<T> = Result<T, CoreError>;
 
@@ -61,5 +62,32 @@ impl CoreError {
                 warnings: warnings.to_vec(),
             },
         })
+    }
+}
+
+/// True for SQLite lock-contention errors (`SQLITE_BUSY` family).
+pub(crate) fn is_sqlite_busy(err: &sqlx::Error) -> bool {
+    match err {
+        sqlx::Error::Database(db) => {
+            db.code().as_deref() == Some("5")
+                || db.message().contains("database is locked")
+                || db.message().contains("SQLITE_BUSY")
+        }
+        _ => false,
+    }
+}
+
+/// Map a `nexus_local_db` storage error onto the core taxonomy.
+pub(crate) fn local_db_err(e: LocalDbError) -> CoreError {
+    match e {
+        LocalDbError::OwnerBusy { .. } | LocalDbError::Sqlx(sqlx::Error::PoolTimedOut) => {
+            CoreError::OwnerBusy
+        }
+        LocalDbError::WriterFenced { .. } => CoreError::WriterFenced,
+        LocalDbError::SchemaMismatch { .. } => CoreError::SchemaMismatch,
+        LocalDbError::Sqlx(err) if is_sqlite_busy(&err) => CoreError::Busy,
+        other => CoreError::Internal {
+            category: format!("database_error: {other}"),
+        },
     }
 }
