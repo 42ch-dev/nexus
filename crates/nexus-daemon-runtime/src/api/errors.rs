@@ -827,6 +827,7 @@ impl From<nexus_core::CoreError> for NexusApiError {
                 code: "narrative_generation_failed".to_string(),
                 message,
             },
+            nexus_core::CoreError::Conflict(message) => Self::Conflict(message),
             nexus_core::CoreError::Internal { category } => {
                 let (code, message) = resend_internal_category(&category);
                 Self::Internal { code, message }
