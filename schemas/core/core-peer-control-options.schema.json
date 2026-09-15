@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-peer-control-options.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CorePeerControlOptions",
+  "description": "Peer control start options: whether reverse-invoke peer control is enabled and the bounded operation allowlist peers may drive. Empty allowlist is fail-closed.",
+  "type": "object",
+  "required": [
+    "enabled"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "enabled": {
+      "type": "boolean"
+    },
+    "allowed_operations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "default": [],
+      "description": "Bounded allowlist of operations a peer may invoke; empty means none."
+    }
+  }
+}

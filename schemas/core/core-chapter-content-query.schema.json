@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-chapter-content-query.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreChapterContentQuery",
+  "description": "Core-owned chapter content query; identical wire shape to the existing chapter content query parameters (single underlying definition (allOf to the existing schema; keep in sync through the P5-T0 schema lane)). Query parameters stay separate from request bodies.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/works/chapters/chapter-content-query.schema.json"
+    }
+  ]
+}

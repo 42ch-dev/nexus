@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-workspace-commit-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreWorkspaceCommitRequest",
+  "description": "Workspace session commit request. Wire field spelling is camelCase, preserved from the existing workspace.commit surface. The changes manifest is validated against the session snapshot (OCC).",
+  "type": "object",
+  "required": [
+    "sessionId"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Session id returned by workspace open; must not be empty."
+    },
+    "changes": {
+      "type": "array",
+      "default": [],
+      "description": "Manifest of changes to commit, each with path, op, optional pre-image hash and optional base64 content.",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "op"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Scope-relative path for this change."
+          },
+          "op": {
+            "type": "string",
+            "enum": [
+              "create",
+              "modify",
+              "delete"
+            ]
+          },
+          "expectedHash": {
+            "type": "string",
+            "description": "Lowercase SHA-256 of the pre-image; omitted for create."
+          },
+          "contentBase64": {
+            "type": "string",
+            "description": "Canonical base64 content for create/modify; forbidden for delete."
+          }
+        }
+      }
+    }
+  }
+}

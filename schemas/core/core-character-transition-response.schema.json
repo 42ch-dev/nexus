@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-character-transition-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreCharacterTransitionResponse",
+  "description": "Core-owned Character transition result; identical wire shape to the existing character detail record (single underlying definition (allOf to the existing schema; keep in sync through the P5-T0 schema lane)).",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/characters/character-detail.schema.json"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-peer-control-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CorePeerControlRequest",
+  "description": "Authenticated peer control request: the session peer identity, the operation to drive, and its extensible JSON payload. Caller identity is the authenticated peer, never a payload claim.",
+  "type": "object",
+  "required": [
+    "peer_id",
+    "operation",
+    "payload"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "peer_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Authenticated session peer id."
+    },
+    "operation": {
+      "type": "string",
+      "minLength": 1
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Operation payload; extensible JSON."
+    }
+  }
+}

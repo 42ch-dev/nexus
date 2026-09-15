@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-timeline-overview-query.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreTimelineOverviewQuery",
+  "description": "Owned query for the cross-World timeline overview. Keyset cursor pages by world id; the opaque cursor is bounded.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "cursor": {
+      "type": "string",
+      "maxLength": 256,
+      "description": "Opaque keyset cursor from a previous page; omitted on the first page."
+    }
+  }
+}

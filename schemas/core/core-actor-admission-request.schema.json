@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-actor-admission-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreActorAdmissionRequest",
+  "description": "Stored-data Actor admission request: closed ActorRef plus session viewpoint. Request-body ownership claims are never trusted; Rust mints the opaque AdmittedActor after stored validation.",
+  "type": "object",
+  "required": [
+    "actor_ref",
+    "viewpoint"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "actor_ref": {
+      "$ref": "https://nexus42.invalid/schemas/domain/actor-ref.schema.json"
+    },
+    "viewpoint": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/agent-host/session-viewpoint.schema.json"
+    }
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-outbox-status.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreOutboxStatus",
+  "description": "Local outbox status: bounded page of durable send-queue entries with delivery state, retry accounting and last error. Entry field spelling is snake_case, preserved from the existing outbox entry surface.",
+  "type": "object",
+  "required": [
+    "entries"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "outbox_entry_id",
+          "bundle_id",
+          "idempotency_key",
+          "delivery_state",
+          "created_at"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "outbox_entry_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "bundle_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "delivery_state": {
+            "type": "string",
+            "enum": [
+              "staged",
+              "ready",
+              "sent",
+              "acked",
+              "conflicted",
+              "failed"
+            ]
+          },
+          "retry_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "next_retry_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "RFC 3339 timestamp of the next scheduled retry."
+          },
+          "created_at": {
+            "type": "string",
+            "minLength": 1
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

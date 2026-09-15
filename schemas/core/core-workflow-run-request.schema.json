@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-workflow-run-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreWorkflowRunRequest",
+  "description": "Workflow run admission request. Creator/workspace identity is minted from the authenticated Principal and selected workspace, never carried in the payload; the frozen input map holds preset variables.",
+  "type": "object",
+  "required": [
+    "preset_id"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "preset_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Preset identifier to execute."
+    },
+    "work_id": {
+      "type": "string",
+      "description": "Optional owning Work id (schedule/chain origin)."
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": true,
+      "default": {},
+      "description": "Frozen preset input map."
+    }
+  }
+}

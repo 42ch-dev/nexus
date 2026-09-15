@@ -1,0 +1,131 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-service-discovery.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreServiceDiscovery",
+  "description": "Closed v1 service discovery record published to <user_home>/.nexus42/run/service.json and emitted as the single NEXUS_SERVICE_READY stdout line. Carries no API key or bearer secret; identity/epoch is compared against authenticated runtime status before attach or stop.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "instance_id",
+    "pid",
+    "user_home",
+    "creator_id",
+    "workspace_slug",
+    "engine_epoch",
+    "endpoint",
+    "tls_fingerprint",
+    "readiness",
+    "protocol_version"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "instance_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Random per-start instance identity. Attach and stop must match it against the authenticated runtime; a stale record never authorizes signaling a PID."
+    },
+    "pid": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Owning process id, diagnostic only. Never a stop authorization."
+    },
+    "user_home": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Canonical raw user home; home-layout appends .nexus42 exactly once. Mismatched home never attaches."
+    },
+    "creator_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Selected creator id; null only for the uninitialized shell."
+    },
+    "workspace_slug": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Selected workspace slug; null only for the uninitialized shell."
+    },
+    "engine_epoch": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "description": "Conditional monotonic engine epoch; null until the core is initialized."
+    },
+    "endpoint": {
+      "description": "Tagged endpoint: http URL or unix absolute socket path. The closed union rejects ambiguous URL/socket combinations.",
+      "oneOf": [
+        {
+          "title": "HttpServiceEndpoint",
+          "type": "object",
+          "required": [
+            "transport",
+            "url"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "transport": {
+              "type": "string",
+              "pattern": "^http$",
+              "description": "HTTP transport discriminant."
+            },
+            "url": {
+              "type": "string",
+              "pattern": "^https?://",
+              "description": "Base URL served by the service."
+            }
+          }
+        },
+        {
+          "title": "UnixSocketServiceEndpoint",
+          "type": "object",
+          "required": [
+            "transport",
+            "path"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "transport": {
+              "type": "string",
+              "pattern": "^unix$",
+              "description": "Unix-socket transport discriminant."
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^/",
+              "description": "Absolute Unix domain socket path."
+            }
+          }
+        }
+      ]
+    },
+    "tls_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "TLS certificate fingerprint for https endpoints; null when TLS is unused."
+    },
+    "readiness": {
+      "type": "string",
+      "enum": [
+        "uninitialized",
+        "ready"
+      ],
+      "description": "uninitialized is an explicit shell, not a promise of domain readiness."
+    },
+    "protocol_version": {
+      "type": "integer",
+      "const": 1
+    }
+  }
+}

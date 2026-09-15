@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-timeline-events-query.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreTimelineEventsQuery",
+  "description": "Owned query for one World's timeline events. Branch defaults to the World's current branch; status defaults to canon; cursor is a bounded opaque keyset over (branch_id, sequence_no).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "branch_id": {
+      "type": "string",
+      "pattern": "^fbk_[a-zA-Z0-9]+$",
+      "description": "Fork branch filter; defaults to the World's current branch (fbk_root fallback)."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "canon",
+        "provisional",
+        "rejected"
+      ],
+      "description": "Event status filter; defaults to canon."
+    },
+    "event_type": {
+      "type": "string",
+      "description": "Exact TimelineEventType match."
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Page size bound; server applies its default page size when omitted."
+    },
+    "cursor": {
+      "type": "string",
+      "maxLength": 512,
+      "description": "Opaque keyset cursor from a previous page."
+    }
+  }
+}
