@@ -34,15 +34,17 @@ const DEFAULT_RUN_EVENT_LIMIT: usize = 64;
 impl ExecutionHandle {
     /// Insert a new schedule for the admitted principal's creator.
     ///
-    /// The row is inserted through the attached supervisor, which persists the
-    /// durable status/concurrency/dependency/core-context-version fields every
-    /// other insertion path writes. Eligibility is decided later by the tick,
+    /// The row is inserted through the attached supervisor with its frozen
+    /// admission payload (source identity, structured input, role bindings), so
+    /// a drive-enabled row is never observable without the payload its
+    /// admission will read. Eligibility is still decided later by the tick,
     /// from the STORED row — this call does not pre-admit.
     ///
     /// # Errors
     /// `Forbidden` when the request names a foreign creator, `NotFound` when
-    /// no supervisor is attached, `Busy` for a duplicate row, and `Internal`
-    /// for a storage fault.
+    /// no supervisor is attached, `Busy` for a duplicate row, `Internal` when
+    /// the preset cannot be frozen, and the mapped storage error on a failed
+    /// insert.
     pub async fn add_schedule(
         &self,
         principal: &Principal,
@@ -134,11 +136,18 @@ impl ExecutionHandle {
                 "paused"
             }
             "resume" => {
-                supervisor
+                // Smart resume reports the ACTUAL persisted status (it may fall
+                // back to `pending` when admission is not yet possible), so the
+                // response carries the store's answer rather than an assumption.
+                let outcome = supervisor
                     .resume_schedule(&schedule_id)
                     .await
                     .map_err(map_supervisor_error)?;
-                "running"
+                return Ok(SignalScheduleResponse {
+                    schedule_id,
+                    status: outcome,
+                    current_wait_id: None,
+                });
             }
             "start" | "advance" | "continue" | "cancel" => {
                 return Err(CoreError::InvalidInput {
