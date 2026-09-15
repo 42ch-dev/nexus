@@ -53,7 +53,7 @@ use crate::service::CoreService;
 
 /// Wire-mapping failure carrier: the daemon adapter re-sends the retained
 /// `CHARACTER_WIRE_INVALID` internal code from this exact category prefix.
-pub(crate) const CHARACTER_WIRE_INVALID_PREFIX: &str = "character_wire_invalid";
+pub const CHARACTER_WIRE_INVALID_PREFIX: &str = "character_wire_invalid";
 
 // ── Admission types ─────────────────────────────────────────────────────
 

@@ -20,10 +20,16 @@ mod world_pack;
 mod world_rules;
 
 pub use actor_fence::{ActorActivityLease, CharacterTransitionLease};
-pub use actor_knowledge::{ActorKnowledgePage, ActorKnowledgeViewQuery, ActorKnowledgeViewService};
+pub use actor_knowledge::{
+    ActorKnowledgePage, ActorKnowledgeViewQuery, ActorKnowledgeViewService,
+    KNOWLEDGE_INSERT_FAILED_PREFIX, KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX,
+    KNOWLEDGE_WIRE_INVALID_PREFIX,
+};
 pub use actors::{
     classify_pair, AdmittedActor, AdmittedActorContext, ActorPairMode, ActorViewpoint,
+    CHARACTER_WIRE_INVALID_PREFIX, CoreActorAdmission,
 };
+pub use creators::CREATOR_INTERNAL_CODES;
 pub use error::{CoreError, CoreResult};
 pub use home::CoreHomeService;
 pub use principal::Principal;

@@ -55,7 +55,9 @@ pub const CREATOR_INTERNAL_CODES: &[&str] = &[
     "CACHE_DIR_ERROR",
     "CACHE_SERIALIZE_ERROR",
     "CACHE_WRITE_ERROR",
+    "CACHE_FORMAT_ERROR",
     "PROFILE_HOME_ERROR",
+    "CREATOR_ID_GENERATION_ERROR",
 ];
 
 fn internal(code: &str, message: impl std::fmt::Display) -> CoreError {

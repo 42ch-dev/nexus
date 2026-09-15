@@ -30,10 +30,10 @@ const CURSOR_SEP: char = '\u{1f}';
 
 /// Wire-mapping failure carrier prefixes the daemon adapter re-sends as the
 /// retained internal codes.
-pub(crate) const KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX: &str =
+pub const KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX: &str =
     "actor_knowledge_view_component_failed";
-pub(crate) const KNOWLEDGE_WIRE_INVALID_PREFIX: &str = "actor_knowledge_wire_invalid";
-pub(crate) const KNOWLEDGE_INSERT_FAILED_PREFIX: &str = "actor_knowledge_insert_failed";
+pub const KNOWLEDGE_WIRE_INVALID_PREFIX: &str = "actor_knowledge_wire_invalid";
+pub const KNOWLEDGE_INSERT_FAILED_PREFIX: &str = "actor_knowledge_insert_failed";
 
 /// Keyset-paginated view page.
 #[derive(Debug, Clone)]
@@ -895,10 +895,13 @@ async fn complete_view(
     }
 }
 
+/// The retained `409 view_incomplete` refusal (verbatim daemon code and
+/// wording; the adapter re-renders it via `ActorConflict`).
 fn view_incomplete() -> CoreError {
     CoreError::ActorConflict {
-        code: "actor_knowledge_view_incomplete".to_string(),
-        message: "admitted knowledge view exceeded the bounded page cap".to_string(),
+        code: "view_incomplete".to_string(),
+        message: "admitted KnowledgeView exceeded the hard entry cap or pagination was malformed"
+            .to_string(),
     }
 }
 

@@ -3940,6 +3940,7 @@ dependencies = [
  "nexus-orchestration",
  "nexus-spoke-adapter",
  "nexus-wasm-host",
+ "nix 0.28.0",
  "rmcp",
  "serde",
  "serde_json",
