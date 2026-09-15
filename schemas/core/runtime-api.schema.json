@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/runtime-api.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreServiceStopResponse",
+  "description": "Response for POST /v1/daemon/runtime/stop. The request is accepted only when expected_instance_id and expected_engine_epoch match the serving instance; a mismatch returns conflict and performs no stop. `stopped` reports a confirmed close; `stopping` reports that the owning service acknowledged the request and is draining.",
+  "type": "object",
+  "required": ["status"],
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["stopped", "stopping"],
+      "description": "`stopped`: cleanup is confirmed and the discovery record was removed by the owning service. `stopping`: the stop was accepted and the service is draining; poll runtime health for liveness."
+    }
+  }
+}

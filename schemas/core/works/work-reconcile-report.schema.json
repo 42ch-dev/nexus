@@ -1,0 +1,33 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/works/work-reconcile-report.schema.json",
+ "schema_version": 1,
+ "title": "WorkReconcileReport",
+ "description": "Chapter reconcile counters (DB-as-SSOT resync); identical for the dry-run preview and the committed run.",
+ "type": "object",
+ "required": [
+  "created",
+  "updated",
+  "resynced",
+  "preserved"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "created": {
+   "type": "integer",
+   "minimum": 0
+  },
+  "updated": {
+   "type": "integer",
+   "minimum": 0
+  },
+  "resynced": {
+   "type": "integer",
+   "minimum": 0
+  },
+  "preserved": {
+   "type": "integer",
+   "minimum": 0
+  }
+ }
+}

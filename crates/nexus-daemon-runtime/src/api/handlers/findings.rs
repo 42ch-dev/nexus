@@ -15,32 +15,9 @@ use axum::http::StatusCode;
 use axum::Json;
 use nexus_contracts::{
     BatchUpdateFindingsRequest, BatchUpdateFindingsResponse, FindingDetailResponse, PaginationInfo,
+    UpdateFindingRequest,
 };
 use serde::{Deserialize, Serialize};
-
-// ─── Tri-state serde helper (V1.48 P3 T3 / R-V147P0-03) ────────────────────
-
-/// Deserialize a JSON field into `Option<Option<T>>` so that **absent**,
-/// **null**, and **value** are all distinguishable.
-///
-/// - Field absent → `None` (do not patch the column).
-/// - Field `null` → `Some(None)` (clear the column to SQL NULL).
-/// - Field `value` → `Some(Some(value))` (set the column).
-///
-/// Combined with `#[serde(default)]` on the field, this is the standard
-/// tri-state pattern for nullable PATCH fields. See
-/// `nexus_core::UpdateFindingRequest::rule_suggestion` rustdoc for the full
-/// semantics.
-// V1.48 P3 T3: Option<Option<T>> is the tri-state pattern required by the
-// R-V147P0-03 spec (distinguish absent / null / value). Not a code smell.
-#[allow(clippy::option_option)]
-fn deserialize_some<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    Deserialize::deserialize(deserializer).map(Some)
-}
 
 // ─── Request / Response types ──────────────────────────────────────────────
 
@@ -128,40 +105,41 @@ impl CreateFindingRequest {
     }
 }
 
-/// Update finding request body (all fields optional).
-#[derive(Debug, Deserialize)]
-pub struct UpdateFindingRequest {
-    pub severity: Option<String>,
-    pub status: Option<String>,
-    pub title: Option<String>,
-    pub description: Option<String>,
-    pub target_executor: Option<String>,
-    /// V1.47: optional new `kind`.
-    pub kind: Option<String>,
-    /// V1.48 P3 T3 (R-V147P0-03): tri-state `rule_suggestion`.
-    ///
-    /// - Absent in JSON → `None` (do not touch the column).
-    /// - `null` in JSON → `Some(None)` (clear to SQL NULL).
-    /// - `"value"` in JSON → `Some(Some("value"))` (set).
-    ///
-    /// `#[serde(default)]` makes absent → `None`; `deserialize_some` wraps
-    /// every present value (including `null`) in `Some(...)`.
-    #[serde(default, deserialize_with = "deserialize_some")]
-    pub rule_suggestion: Option<Option<String>>,
-}
-
-impl UpdateFindingRequest {
-    fn into_core(self) -> nexus_core::UpdateFindingRequest {
-        nexus_core::UpdateFindingRequest {
-            severity: self.severity,
-            status: self.status,
-            title: self.title,
-            description: self.description,
-            target_executor: self.target_executor,
-            kind: self.kind,
-            rule_suggestion: self.rule_suggestion,
+/// Wire→core bridge for the findings PATCH: the generated
+/// `UpdateFindingRequest` carries the tri-state `rule_suggestion`
+/// (`Option<serde_json::Value>`, presence-preserving via the
+/// `x-nexus-tri-state` generator attribute); this maps it onto the core
+/// `Option<Option<String>>` domain carrier and rejects any non-string value
+/// before any stored effect. The handwritten duplicate struct is retired —
+/// the schema is the single wire definition (R-V1190-FINDINGS-TRISTATE-DUP).
+/// Free function: the carrier type is generated (E0116 forbids a local
+/// inherent impl on it), unlike the file's local-struct `into_core` methods.
+fn update_finding_request_into_core(
+    request: UpdateFindingRequest,
+) -> Result<nexus_core::UpdateFindingRequest, NexusApiError> {
+    let rule_suggestion = match request.rule_suggestion {
+        None => None,
+        Some(serde_json::Value::Null) => Some(None),
+        Some(serde_json::Value::String(text)) => Some(Some(text)),
+        Some(other) => {
+            return Err(NexusApiError::BadRequest {
+                code: "invalid_input".into(),
+                message: format!(
+                    "invalid rule_suggestion: expected a string, null, or omission, got {}",
+                    if other.is_null() { "null" } else { "a non-string JSON value" }
+                ),
+            });
         }
-    }
+    };
+    Ok(nexus_core::UpdateFindingRequest {
+        severity: request.severity,
+        status: request.status,
+        title: request.title,
+        description: request.description,
+        target_executor: request.target_executor,
+        kind: request.kind,
+        rule_suggestion,
+    })
 }
 
 /// List findings query parameters.
@@ -324,8 +302,9 @@ pub async fn update_finding_handler(
     // Work-ownership precheck stays on the `{work_id}` route; the core update
     // itself is creator-scoped.
     core.get_work(&principal, work_id).await.map_err(findings_error)?;
+    let update = update_finding_request_into_core(body)?;
     let f = core
-        .update_finding(&principal, finding_id, body.into_core())
+        .update_finding(&principal, finding_id, update)
         .await
         .map_err(findings_error)?;
     Ok(Json(f.into()))

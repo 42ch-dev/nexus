@@ -1,0 +1,20 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/narrative/narrative-worlds-list-response.schema.json",
+ "schema_version": 1,
+ "title": "NarrativeWorldsListResponse",
+ "description": "Response for `GET /v1/daemon/narrative/worlds` (empty list when no Worlds are seeded).",
+ "type": "object",
+ "required": [
+  "worlds"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "worlds": {
+   "type": "array",
+   "items": {
+    "$ref": "https://nexus42.invalid/schemas/core/narrative/narrative-world-state.schema.json"
+   }
+  }
+ }
+}

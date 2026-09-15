@@ -1,0 +1,29 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/orchestration-presets/preset-profile-lanes.schema.json",
+ "schema_version": 1,
+ "title": "PresetProfileLanes",
+ "description": "Trigger-lane classification: the four locked PL-3 lanes as a flat wire mirror the CLI `preset show --json` output matches verbatim (AR-25).",
+ "type": "object",
+ "required": [
+  "cron",
+  "wallClock",
+  "session",
+  "direct"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "cron": {
+   "type": "boolean"
+  },
+  "wallClock": {
+   "type": "boolean"
+  },
+  "session": {
+   "type": "boolean"
+  },
+  "direct": {
+   "type": "boolean"
+  }
+ }
+}

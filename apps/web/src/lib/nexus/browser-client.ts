@@ -109,7 +109,6 @@ import type {
   ValidatePresetResponse,
   WorkDetailResponse,
   WorkOutline,
-  World,
   WorldKbCandidatesResponse,
   WorldKbGraphResponse,
   WorldKbKeyBlockStateResponse,
@@ -124,10 +123,45 @@ import type {
   WorldRuleResponse,
   WorldRuleUpdateRequest,
   WorldRulesListResponse,
+  // ── P5-T1 World/Work/content/knowledge family DTOs (`schemas/core/*` +
+  // `schemas/daemon-api/*` producers) ────────────────────────────────────────
+  NarrativeWorldsListResponse,
+  NarrativeWorldResponse,
+  WorkPoolListQuery,
+  WorkPoolListResponse,
+  WorkPoolSetActiveRequest,
+  WorkPoolEntry,
+  WorkPoolPromoteRequest,
+  WorkPoolArchiveRequest,
+  WorkInspirationListQuery,
+  WorkInspirationListResponse,
+  WorkInspirationAddRequest,
+  WorkInspirationAddResponse,
+  WorkInspirationPromoteRequest,
+  WorkInspirationPromoteResponse,
+  WorkInspirationArchiveRequest,
+  WorkInspirationItem,
+  AppendInspirationRequest,
+  AppendInspirationResponse,
+  ReleaseCompletionLockRequest,
+  WorkReconcileReport,
+  ListKbEntriesQuery,
+  ListKbEntriesResponse,
+  AddKbEntryRequest,
+  AddKbEntryResponse,
+  GetKbEntryResponse,
+  DeleteKbEntryResponse,
+  CreateFindingRequest,
+  StaleFindingsResponse,
+  FindingsPruneResponse,
+  ReferenceListResponse,
+  ReferenceGetResponse,
   // ── P4-T3 generated Core slice DTOs (`schemas/core/*`) ─────────────────────
   AgentHostListSessionsQuery,
   CancelOperationResponse,
   CoreChangesRequest,
+  CoreServiceStopRequest,
+  RuntimeApi,
   CoreChangesResponse,
   CreateSessionRequest,
   ExecuteOperationRequest,
@@ -298,6 +332,83 @@ export class BrowserClient implements NexusClient {
     return this.delete<void>(`/v1/daemon/works/${encodeURIComponent(workId)}`);
   }
 
+  // ── Works authoring pool + inspiration (P5-T1, tier2 family routes) ────────
+  /** `GET /v1/daemon/works/pool` — cursor list of authoring-pool entries. */
+  listWorkPool(query?: WorkPoolListQuery): Promise<WorkPoolListResponse> {
+    return this.get<WorkPoolListResponse>('/v1/daemon/works/pool', query);
+  }
+  /**
+   * `POST /v1/daemon/works/pool` — durable Work selection mutation (the same
+   * persisted selection seam as CLI `works use`; never session-local).
+   */
+  setWorkPoolActive(request: WorkPoolSetActiveRequest): Promise<WorkPoolEntry> {
+    return this.post<WorkPoolEntry>('/v1/daemon/works/pool', request);
+  }
+  /** `POST /v1/daemon/works/pool/promote` — promote a candidate into the pool. */
+  promoteWorkPoolEntry(request: WorkPoolPromoteRequest): Promise<WorkPoolEntry> {
+    return this.post<WorkPoolEntry>('/v1/daemon/works/pool/promote', request);
+  }
+  /** `POST /v1/daemon/works/pool/archive` — archive a pool entry. */
+  archiveWorkPoolEntry(request: WorkPoolArchiveRequest): Promise<WorkPoolEntry> {
+    return this.post<WorkPoolEntry>('/v1/daemon/works/pool/archive', request);
+  }
+  /** `GET /v1/daemon/works/pool/inspiration` — cursor list of inspiration items. */
+  listWorkInspiration(query?: WorkInspirationListQuery): Promise<WorkInspirationListResponse> {
+    return this.get<WorkInspirationListResponse>('/v1/daemon/works/pool/inspiration', query);
+  }
+  /** `POST /v1/daemon/works/pool/inspiration` — add a pool inspiration (201). */
+  addWorkInspiration(request: WorkInspirationAddRequest): Promise<WorkInspirationAddResponse> {
+    return this.post<WorkInspirationAddResponse>('/v1/daemon/works/pool/inspiration', request);
+  }
+  /** `POST /v1/daemon/works/pool/inspiration/promote` — promote an inspiration. */
+  promoteWorkInspiration(
+    request: WorkInspirationPromoteRequest,
+  ): Promise<WorkInspirationPromoteResponse> {
+    return this.post<WorkInspirationPromoteResponse>(
+      '/v1/daemon/works/pool/inspiration/promote',
+      request,
+    );
+  }
+  /** `POST /v1/daemon/works/pool/inspiration/archive` — archive an inspiration. */
+  archiveWorkInspiration(request: WorkInspirationArchiveRequest): Promise<WorkInspirationItem> {
+    return this.post<WorkInspirationItem>('/v1/daemon/works/pool/inspiration/archive', request);
+  }
+  /** `POST /v1/daemon/works/{work_id}/inspiration` — append a Work inspiration. */
+  appendWorkInspiration(
+    workId: string,
+    request: AppendInspirationRequest,
+  ): Promise<AppendInspirationResponse> {
+    return this.post<AppendInspirationResponse>(
+      `/v1/daemon/works/${encodeURIComponent(workId)}/inspiration`,
+      request,
+    );
+  }
+  /**
+   * `POST /v1/daemon/works/{work_id}/completion-lock/release` — release the
+   * Work completion lock; 423 carries the structured `Locked` reason.
+   */
+  releaseWorkCompletionLock(
+    workId: string,
+    request: ReleaseCompletionLockRequest,
+  ): Promise<WorkDetailResponse> {
+    return this.post<WorkDetailResponse>(
+      `/v1/daemon/works/${encodeURIComponent(workId)}/completion-lock/release`,
+      request,
+    );
+  }
+  /**
+   * `POST /v1/daemon/works/{work_id}/reconcile-chapters?dry_run=` — chapter
+   * reconcile report; `dry_run` rides on the query string (no request body).
+   */
+  reconcileWorkChapters(
+    workId: string,
+    query?: { dry_run?: boolean },
+  ): Promise<WorkReconcileReport> {
+    return this.post<WorkReconcileReport>(
+      `/v1/daemon/works/${encodeURIComponent(workId)}/reconcile-chapters${toQueryString(query)}`,
+    );
+  }
+
   // ── Orchestration sessions ─────────────────────────────────────────────────
   listSessions(query?: ListSessionsQuery): Promise<ListSessionsResponse> {
     return this.get<ListSessionsResponse>('/v1/daemon/orchestration/sessions', query);
@@ -382,9 +493,34 @@ export class BrowserClient implements NexusClient {
     );
   }
   // V1.77 findings-remediation promotion (V1.67 G2 pattern — types + routes
-  // already shipped; only the TS client surface was missing).
-  getFinding(workId: string, findingId: string): Promise<FindingDetailResponse> {
+  // already shipped; only the TS client surface was missing). Renamed from
+  // `getFinding` (v1.190 P5-T1): the bare name belongs to the canonical
+  // creator-scoped `GET /v1/daemon/findings/{finding_id}` below.
+  getWorkFinding(workId: string, findingId: string): Promise<FindingDetailResponse> {
     return this.get<FindingDetailResponse>(
+      `/v1/daemon/works/${encodeURIComponent(workId)}/findings/${encodeURIComponent(findingId)}`,
+    );
+  }
+  /** `POST /v1/daemon/works/{work_id}/findings` — create a finding (201). */
+  createFinding(workId: string, request: CreateFindingRequest): Promise<FindingDetailResponse> {
+    return this.post<FindingDetailResponse>(
+      `/v1/daemon/works/${encodeURIComponent(workId)}/findings`,
+      request,
+    );
+  }
+  /** `POST /v1/daemon/works/{work_id}/findings/from-review` — create from review (201). */
+  createFindingFromReview(
+    workId: string,
+    request: CreateFindingRequest,
+  ): Promise<FindingDetailResponse> {
+    return this.post<FindingDetailResponse>(
+      `/v1/daemon/works/${encodeURIComponent(workId)}/findings/from-review`,
+      request,
+    );
+  }
+  /** `DELETE /v1/daemon/works/{work_id}/findings/{finding_id}` — 204. */
+  deleteFinding(workId: string, findingId: string): Promise<void> {
+    return this.delete<void>(
       `/v1/daemon/works/${encodeURIComponent(workId)}/findings/${encodeURIComponent(findingId)}`,
     );
   }
@@ -401,6 +537,58 @@ export class BrowserClient implements NexusClient {
   // V1.91 P1 — bulk helper for findings triage.
   batchUpdateFindings(request: BatchUpdateFindingsRequest): Promise<BatchUpdateFindingsResponse> {
     return this.patch<BatchUpdateFindingsResponse>('/v1/daemon/findings/batch', request);
+  }
+  /** `GET /v1/daemon/findings/stale` — stale findings for the retained 96h default. */
+  listStaleFindings(): Promise<StaleFindingsResponse> {
+    return this.get<StaleFindingsResponse>('/v1/daemon/findings/stale');
+  }
+  /** `POST /v1/daemon/findings/prune?older_than_days=&dry_run=` — findings prune. */
+  pruneFindings(query?: {
+    older_than_days?: number;
+    dry_run?: boolean;
+  }): Promise<FindingsPruneResponse> {
+    return this.post<FindingsPruneResponse>(`/v1/daemon/findings/prune${toQueryString(query)}`);
+  }
+  /**
+   * `GET /v1/daemon/findings/{finding_id}` — canonical creator-scoped finding
+   * lookup (v1.190 P5-T1); the work-scoped route is `getWorkFinding` above.
+   */
+  getFinding(findingId: string): Promise<FindingDetailResponse> {
+    return this.get<FindingDetailResponse>(
+      `/v1/daemon/findings/${encodeURIComponent(findingId)}`,
+    );
+  }
+  // ── Work KB index (P5-T1, tier2 family routes) ─────────────────────────────
+  /** `GET /v1/daemon/kb/entries` — cursor list of KB index entries. */
+  listKbEntries(query?: ListKbEntriesQuery): Promise<ListKbEntriesResponse> {
+    return this.get<ListKbEntriesResponse>('/v1/daemon/kb/entries', query);
+  }
+  /** `POST /v1/daemon/kb/entries` — add a KB index entry. */
+  addKbEntry(request: AddKbEntryRequest): Promise<AddKbEntryResponse> {
+    return this.post<AddKbEntryResponse>('/v1/daemon/kb/entries', request);
+  }
+  /** `GET /v1/daemon/kb/entries/{entry_id}` — one KB index entry. */
+  getKbEntry(entryId: string): Promise<GetKbEntryResponse> {
+    return this.get<GetKbEntryResponse>(
+      `/v1/daemon/kb/entries/${encodeURIComponent(entryId)}`,
+    );
+  }
+  /** `DELETE /v1/daemon/kb/entries/{entry_id}` — remove a KB index entry. */
+  deleteKbEntry(entryId: string): Promise<DeleteKbEntryResponse> {
+    return this.delete<DeleteKbEntryResponse>(
+      `/v1/daemon/kb/entries/${encodeURIComponent(entryId)}`,
+    );
+  }
+  // ── Reference registry (P5-T1, tier2 family routes) ────────────────────────
+  /** `GET /v1/daemon/references` — list registered references. */
+  listReferences(): Promise<ReferenceListResponse> {
+    return this.get<ReferenceListResponse>('/v1/daemon/references');
+  }
+  /** `GET /v1/daemon/references/{reference_id}` — one reference (404 unknown). */
+  getReference(referenceId: string): Promise<ReferenceGetResponse> {
+    return this.get<ReferenceGetResponse>(
+      `/v1/daemon/references/${encodeURIComponent(referenceId)}`,
+    );
   }
 
   // ── Preset management ──────────────────────────────────────────────────────
@@ -588,6 +776,16 @@ export class BrowserClient implements NexusClient {
       `/v1/daemon/worlds/${encodeURIComponent(worldId)}/kb/patch-relationship`,
       request,
     );
+  }
+
+  /**
+   * `POST /v1/daemon/runtime/stop` — instance-bound operator stop (§7).
+   * The request carries the instance id and engine epoch the client learned
+   * from the discovery record; a mismatch is the server's 409 conflict and
+   * performs no stop, so this delegation adds no local authorization logic.
+   */
+  stopService(request: CoreServiceStopRequest): Promise<RuntimeApi> {
+    return this.post<RuntimeApi>('/v1/daemon/runtime/stop', request);
   }
 
   // ── P4-T3 generated Core slice (`CoreSliceClient`) ────────────────────────
@@ -848,15 +1046,17 @@ export class BrowserClient implements NexusClient {
     );
   }
 
-  // ── Creator Memory review-loop (V1.78) ─────────────────────────────────────
-  // Review/consume-only surface (compass D-UX LOCKED). `createPendingReview` is
-  // CLI/producer-only and intentionally absent from this client. Every endpoint
-  // is creator-scoped — `creator_id` rides as a query param (or body field for
-  // review) and the daemon enforces active-creator ownership (403 on mismatch).
-  // V1.82: workspace-scoped world list reused by the SOUL selector.
-  async listNarrativeWorlds(): Promise<World[]> {
-    const res = await this.get<{ worlds: World[] }>('/v1/daemon/narrative/worlds');
-    return res.worlds;
+  // V1.82: workspace-scoped world list reused by the SOUL selector. v1.190
+  // P5-T1: returns the canonical generated `NarrativeWorldsListResponse`
+  // envelope; callers read `.worlds` (`NarrativeWorldState[]`).
+  listNarrativeWorlds(): Promise<NarrativeWorldsListResponse> {
+    return this.get<NarrativeWorldsListResponse>('/v1/daemon/narrative/worlds');
+  }
+  /** `GET /v1/daemon/narrative/worlds/{world_id}` — read-model World projection (404 unknown). */
+  getWorld(worldId: string): Promise<NarrativeWorldResponse> {
+    return this.get<NarrativeWorldResponse>(
+      `/v1/daemon/narrative/worlds/${encodeURIComponent(worldId)}`,
+    );
   }
   deleteWorld(worldId: string): Promise<void> {
     return this.delete<void>(`/v1/daemon/worlds/${encodeURIComponent(worldId)}`);

@@ -266,6 +266,86 @@ async fn compute_distinct_keyword_count(
 /// # Errors
 ///
 /// Returns `LocalDbError` if any database query fails.
+/// Read-only variant of [`soul_narrative_fragment_stats`] (v1.190 P2-T2):
+/// identical aggregates, fingerprint check and cached-row read, but the
+/// stats cache is NEVER written — a fingerprint mismatch computes the
+/// distinct-keyword count on the fly and leaves every row untouched. The
+/// observational reflect read path (force=false, including archived scopes)
+/// therefore performs zero DB writes; the cache is only ever persisted by the
+/// explicit write path (`upsert_soul_narrative` / the stats helper itself).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if any database query fails.
+pub async fn soul_narrative_fragment_stats_readonly(
+    pool: &SqlitePool,
+    creator_id: &str,
+    world_id: Option<&str>,
+) -> Result<(SoulNarrativeFragmentStats, Option<SoulNarrativeRecord>), LocalDbError> {
+    let fragment_count = if let Some(wid) = world_id {
+        sqlx::query_scalar!(
+            r#"SELECT COUNT(*) as "count!: i64" FROM memory_fragments WHERE creator_id = ? AND world_id = ?"#,
+            creator_id,
+            wid
+        )
+        .fetch_one(pool)
+        .await?
+    } else {
+        sqlx::query_scalar!(
+            r#"SELECT COUNT(*) as "count!: i64" FROM memory_fragments WHERE creator_id = ?"#,
+            creator_id
+        )
+        .fetch_one(pool)
+        .await?
+    };
+
+    let max_created_at: Option<String> = if let Some(wid) = world_id {
+        sqlx::query_scalar!(
+            r#"SELECT MAX(created_at) as "max_created_at?: String" FROM memory_fragments WHERE creator_id = ? AND world_id = ?"#,
+            creator_id,
+            wid
+        )
+        .fetch_one(pool)
+        .await?
+    } else {
+        sqlx::query_scalar!(
+            r#"SELECT MAX(created_at) as "max_created_at?: String" FROM memory_fragments WHERE creator_id = ?"#,
+            creator_id
+        )
+        .fetch_one(pool)
+        .await?
+    };
+
+    let fingerprint = build_stats_fingerprint(fragment_count, max_created_at.as_deref());
+    let cached = get_soul_narrative(pool, creator_id, world_id).await?;
+
+    if let Some(ref c) = cached {
+        if c.stats_fingerprint.as_deref() == Some(&fingerprint) {
+            return Ok((
+                SoulNarrativeFragmentStats {
+                    fragment_count,
+                    distinct_keyword_count: usize::try_from(c.distinct_keyword_count_cache)
+                        .unwrap_or(0),
+                    max_created_at,
+                },
+                cached,
+            ));
+        }
+    }
+
+    // Fingerprint mismatch or no cache row: compute soundly, persist nothing.
+    let distinct_keyword_count = compute_distinct_keyword_count(pool, creator_id, world_id).await?;
+
+    Ok((
+        SoulNarrativeFragmentStats {
+            fragment_count,
+            distinct_keyword_count,
+            max_created_at,
+        },
+        cached,
+    ))
+}
+
 pub async fn soul_narrative_fragment_stats(
     pool: &SqlitePool,
     creator_id: &str,

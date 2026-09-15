@@ -1,0 +1,21 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/orchestration-presets/preset-profile-enter-action.schema.json",
+ "schema_version": 1,
+ "title": "PresetProfileEnterAction",
+ "description": "One enter action on a state.",
+ "type": "object",
+ "required": [
+  "kind",
+  "name"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "kind": {
+   "type": "string"
+  },
+  "name": {
+   "type": "string"
+  }
+ }
+}

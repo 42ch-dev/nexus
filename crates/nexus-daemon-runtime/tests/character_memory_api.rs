@@ -47,14 +47,8 @@ struct Ctx {
 }
 
 async fn ctx() -> Ctx {
-    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
-    std::fs::write(
-        nexus_home.join("config.toml"),
-        format!(
-            "active_creator_id = \"{OWNER}\"\n\n[active_workspace_slug_by_creator]\n\"{OWNER}\" = \"default\"\n"
-        ),
-    )
-    .unwrap();
+    // Select OWNER's own workspace up front; see `characters_api::ctx`.
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace_for(OWNER, "default").await;
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
     let pool = state.pool().unwrap().clone();
     seed_actor_fixture(&pool).await;
@@ -974,6 +968,28 @@ async fn foreign_missing_inactive_character_and_binding_fail_before_side_effects
     // Valid bindings still work after the deny matrix (no state drift).
     assert_eq!(count_pending(&ctx.server, &chr, Some(&bind1)).await, 0);
     assert_eq!(count_pending(&ctx.server, &chr_b, Some(&bind_b)).await, 0);
+}
+
+// Regression (v1.190 P2-T2 re-review): the provider effect is resolved lazily
+// by the core AFTER admission. The test daemon has no capability registry, so
+// under the former eager handler order this request returned 503 before
+// authorization; the retained behavior is 404 — provider state is never
+// probed pre-auth.
+#[tokio::test]
+async fn reflect_missing_registry_foreign_character_is_404_not_503() {
+    let ctx = ctx().await;
+    let resp = ctx
+        .server
+        .post("/v1/daemon/characters/chr_0000000000000000000000000000ffff/soul/reflect")
+        .json(&json!({ "force_regenerate": true }))
+        .await;
+    assert_eq!(
+        resp.status_code(),
+        404,
+        "unauthorized reflect must 404 before any provider handling: {}",
+        resp.text()
+    );
+    assert_eq!(j(&resp)["error"]["code"], "not_found");
 }
 
 #[tokio::test]

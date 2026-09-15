@@ -8,6 +8,7 @@ mod admitting_provider_port;
 mod callbacks;
 mod cleanup_registry;
 mod core_error;
+mod domain;
 mod env_state;
 mod host_query;
 mod lifecycle;

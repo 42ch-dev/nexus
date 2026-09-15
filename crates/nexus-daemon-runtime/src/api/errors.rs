@@ -813,12 +813,67 @@ impl From<nexus_core::CoreError> for NexusApiError {
                 code: "interrupted".to_string(),
                 message: "interrupted".to_string(),
             },
-            nexus_core::CoreError::Internal { category } => Self::Internal {
-                code: "CORE_ERROR".to_string(),
-                message: category,
+            // Stable actor-family wire conflicts (durable §11.1 codes):
+            // the core carries the retained code + message and the adapter
+            // re-renders them verbatim.
+            nexus_core::CoreError::ActorConflict { code, message } => {
+                Self::ConflictCoded { code, message }
+            }
+            nexus_core::CoreError::ActorInput(message) => Self::BadRequest {
+                code: "invalid_input".to_string(),
+                message,
             },
+            // Retained bearer-memory 403/503/400 wire shapes: the core
+            // carries the split resource+reason, the truthful
+            // no-provider message, and the narrative-quality rejection.
+            nexus_core::CoreError::ForbiddenReason { resource, reason } => {
+                Self::Forbidden { resource, reason }
+            }
+            nexus_core::CoreError::ServiceUnavailable(message) => {
+                Self::ServiceUnavailable { message }
+            }
+            nexus_core::CoreError::NarrativeRejected(message) => Self::BadRequest {
+                code: "narrative_generation_failed".to_string(),
+                message,
+            },
+            nexus_core::CoreError::Conflict(message) => Self::Conflict(message),
+            nexus_core::CoreError::Internal { category } => {
+                let (code, message) = resend_internal_category(&category);
+                Self::Internal { code, message }
+            }
         }
     }
+}
+
+/// Re-send a retained wire-internal code from a core `Internal` category.
+///
+/// The core neutralizes wire codes into `"{CODE}: {message}"` categories;
+/// this adapter strips the family prefixes back to the exact `Internal`
+/// envelopes the daemon handlers always emitted (`CHARACTER_WIRE_INVALID`,
+/// `DATABASE_ERROR`, the creator cache/config carriers, the actor-knowledge
+/// carriers). Unmatched categories keep the P1 `CORE_ERROR` fallback.
+fn resend_internal_category(category: &str) -> (String, String) {
+    const CATEGORY_PREFIXES: &[&str] = &[
+        nexus_core::CHARACTER_WIRE_INVALID_PREFIX,
+        nexus_core::KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX,
+        nexus_core::KNOWLEDGE_WIRE_INVALID_PREFIX,
+        nexus_core::KNOWLEDGE_INSERT_FAILED_PREFIX,
+        "database_error",
+    ];
+    for prefix in CATEGORY_PREFIXES
+        .iter()
+        .copied()
+        .chain(nexus_core::MEMORY_INTERNAL_CODES.iter().copied())
+        .chain(nexus_core::CREATOR_INTERNAL_CODES.iter().copied())
+    {
+        if let Some(message) = category
+            .strip_prefix(prefix)
+            .and_then(|rest| rest.strip_prefix(": "))
+        {
+            return (prefix.to_ascii_uppercase(), message.to_string());
+        }
+    }
+    ("CORE_ERROR".to_string(), category.to_string())
 }
 
 // Note: These tests remain inline because they use `crate::test_utils::create_test_workspace`,
@@ -1185,8 +1240,8 @@ mod tests {
         use crate::api::handlers::workspace::init_workspace;
         use crate::test_utils::create_test_workspace;
         use crate::workspace::WorkspaceState;
-        use axum::extract::State;
         use axum::Json;
+        use axum::extract::State;
 
         let (_tmp, nexus_home, db_path) = create_test_workspace().await;
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
@@ -1220,8 +1275,8 @@ mod tests {
     /// (`require_workspace`), not by the handler itself.
     #[tokio::test]
     async fn creators_lists_ssot_profile_homes_without_sql_rows() {
-        use crate::api::handlers::creators::list;
         use crate::api::handlers::creators::ListCreatorsQuery;
+        use crate::api::handlers::creators::list;
         use crate::test_utils::create_test_workspace;
         use crate::workspace::WorkspaceState;
         use axum::extract::State;

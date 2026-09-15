@@ -1,0 +1,17 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/references/reference-get-response.schema.json",
+ "schema_version": 1,
+ "title": "ReferenceGetResponse",
+ "description": "Response for `GET /v1/daemon/references/{reference_id}`; 404 for an unknown id.",
+ "type": "object",
+ "required": [
+  "reference"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "reference": {
+   "$ref": "https://nexus42.invalid/schemas/core/references/reference-source-info.schema.json"
+  }
+ }
+}

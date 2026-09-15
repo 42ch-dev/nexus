@@ -124,6 +124,11 @@ export function WorldsPage() {
                 {worlds.data.map((world) => {
                   const label = world.title || world.world_id;
                   const wld = overviewMap.get(world.world_id);
+                  // v1.190 P5-T1: the narrative-worlds projection
+                  // (NarrativeWorldState) has no `updated_at`, so without
+                  // overview data the row honestly falls back to the
+                  // no-activity text (the retired `updated_at` branch never
+                  // rendered against the real wire shape).
                   const activityText = wld
                     ? t('timelineActivityOverview', {
                         era: wld.era_count,
@@ -132,11 +137,7 @@ export function WorldsPage() {
                           ? formatRelative(wld.last_event_at)
                           : t('timelineActivityFallback'),
                       })
-                    : world.updated_at
-                      ? t('timelineActivityLastEdited', {
-                          when: formatRelative(world.updated_at),
-                        })
-                      : t('timelineActivityFallback');
+                    : t('timelineActivityFallback');
                   return (
                     <li key={world.world_id}>
                       <button

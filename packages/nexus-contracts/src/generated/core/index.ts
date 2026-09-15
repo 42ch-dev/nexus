@@ -47,5 +47,6 @@ export type { ProviderCall } from './provider-call';
 export type { ProviderEventBatch } from './provider-event-batch';
 export type { ProviderHostEvent } from './provider-host-event';
 export type { ProviderReply } from './provider-reply';
+export type { RuntimeApi } from './runtime-api';
 export type { ValidatedProviderRecipe } from './validated-provider-recipe';
 export type { CoreSliceClient } from './CoreSliceClient';

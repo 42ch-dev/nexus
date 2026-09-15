@@ -1,0 +1,21 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://nexus42.invalid/schemas/core/works/work-pool-promote-request.schema.json",
+ "schema_version": 1,
+ "title": "WorkPoolPromoteRequest",
+ "description": "Body for `POST /v1/daemon/works/pool/promote`.",
+ "type": "object",
+ "required": [
+  "work_id"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "work_id": {
+   "type": "string",
+   "minLength": 1
+  },
+  "set_default": {
+   "type": "boolean"
+  }
+ }
+}
