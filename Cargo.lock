@@ -3929,6 +3929,7 @@ dependencies = [
  "chrono",
  "nexus-acp-host",
  "nexus-agent-host",
+ "nexus-cloud-sync",
  "nexus-contracts",
  "nexus-creator-memory",
  "nexus-home-layout",
@@ -3947,6 +3948,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "toml",
  "tracing",
  "uuid",
 ]

@@ -26,14 +26,11 @@ struct Ctx {
 }
 
 async fn ctx() -> Ctx {
-    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
-    std::fs::write(
-        nexus_home.join("config.toml"),
-        format!(
-            "active_creator_id = \"{OWNER}\"\n\n[active_workspace_slug_by_creator]\n\"{OWNER}\" = \"default\"\n"
-        ),
-    )
-    .unwrap();
+    // Select OWNER's own workspace up front. The host pool binds the
+    // config-resolved database, so a fixture MUST NOT bind one creator's DB
+    // and then rewrite `config.toml` to another: that leaves the storage
+    // binding disagreeing with the selected identity.
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace_for(OWNER, "default").await;
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
     let pool = state.pool().unwrap().clone();
     seed_actor_fixture(&pool).await;
@@ -319,9 +316,9 @@ async fn add_binding_duplicate_and_remove_last_are_stable_conflicts() {
     assert_eq!(remaining, 1);
 }
 
-fn switch_active_creator(ctx: &Ctx, creator_id: &str) {
+fn switch_active_creator(nexus_home: &std::path::Path, creator_id: &str) {
     std::fs::write(
-        ctx.nexus_home.join("config.toml"),
+        nexus_home.join("config.toml"),
         format!(
             "active_creator_id = \"{creator_id}\"\n\n[active_workspace_slug_by_creator]\n\"{creator_id}\" = \"default\"\n"
         ),
@@ -443,23 +440,32 @@ async fn foreign_binding_routes_are_404_and_do_not_mutate() {
     assert_eq!(count_bindings(&ctx.pool, &chr).await, before);
 }
 
+/// A creator switch rewrites the active selection while the process still holds
+/// the core opened against the previous one.
+///
+/// Core is open-scoped: `verify_selected_context` re-reads `config.toml` per
+/// request and refuses when the on-disk selection no longer matches the context
+/// the service was opened against (P2-T0 contract: "CoreService remains
+/// workspace-bound; successful identity/workspace change invalidates old
+/// Principal and requires reopen"). The daemon therefore answers `401
+/// auth_required` until it is reopened, rather than serving the previous
+/// creator's characters from the old database or silently re-targeting the new
+/// one. Zero rows are exposed either way.
 #[tokio::test]
-async fn switching_active_creator_hides_owned_characters() {
+async fn switching_active_creator_requires_reopen_before_serving() {
     let ctx = ctx().await;
     let created = create_character(&ctx.server, "Ava", WORLD_A).await;
     let id = created["character"]["character_id"].as_str().unwrap();
 
-    switch_active_creator(&ctx, OTHER);
+    switch_active_creator(&ctx.nexus_home, OTHER);
 
     let hidden = ctx.server.get(&format!("/v1/daemon/characters/{id}")).await;
-    assert_eq!(hidden.status_code(), 404, "body={}", hidden.text());
-    let hidden_body: Value = hidden.json();
-    assert_eq!(hidden_body["error"]["code"], "not_found");
+    assert_eq!(hidden.status_code(), 401, "body={}", hidden.text());
+    assert_eq!(hidden.json::<Value>()["error"]["code"], "auth_required");
 
     let list = ctx.server.get("/v1/daemon/characters").await;
-    assert_eq!(list.status_code(), 200, "body={}", list.text());
-    let listed: Value = list.json();
-    assert_eq!(listed["items"].as_array().unwrap().len(), 0);
+    assert_eq!(list.status_code(), 401, "body={}", list.text());
+    assert_eq!(list.json::<Value>()["error"]["code"], "auth_required");
 }
 
 #[tokio::test]
@@ -527,15 +533,11 @@ async fn untrimmed_display_name_is_rejected() {
 
 #[tokio::test]
 async fn create_list_show_accept_real_local_creator_id() {
-    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     let owner = "ctr_localabcdef123456";
-    std::fs::write(
-        nexus_home.join("config.toml"),
-        format!(
-            "active_creator_id = \"{owner}\"\n\n[active_workspace_slug_by_creator]\n\"{owner}\" = \"default\"\n"
-        ),
-    )
-    .unwrap();
+    // Select the real creator's own workspace; see `characters_api::ctx`. The
+    // route derives its principal from config, so the bound DB must be that
+    // same creator's.
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace_for(owner, "default").await;
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
     let pool = state.pool().unwrap().clone();
     nexus_local_db::ensure_creator_row(&pool, owner, "Local")
@@ -1343,14 +1345,8 @@ impl HostFacade for CountingHost {
 }
 
 async fn ctx_with_host() -> (Ctx, Arc<CountingHost>) {
-    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
-    std::fs::write(
-        nexus_home.join("config.toml"),
-        format!(
-            "active_creator_id = \"{OWNER}\"\n\n[active_workspace_slug_by_creator]\n\"{OWNER}\" = \"default\"\n"
-        ),
-    )
-    .unwrap();
+    // Select OWNER's own workspace up front; see `characters_api::ctx`.
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace_for(OWNER, "default").await;
     let mut state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
     let host = CountingHost::new();
     state.set_agent_host(host.clone());
@@ -1454,4 +1450,38 @@ async fn pre_archive_session_execute_is_stale_after_material_archive() {
     let body: Value = exec.json();
     assert_eq!(body["error"]["code"], "actor_session_stale");
     assert_eq!(host.execs.load(Ordering::SeqCst), 0);
+}
+
+/// A production-shaped binding mismatch must fail closed.
+///
+/// The host pool binds the creator selected at boot (OWNER). Selecting another
+/// creator on disk while the daemon keeps running — the production drift shape,
+/// with no fixture shim involved — makes the config-resolved selection disagree
+/// with the bound database. The daemon must refuse, instead of opening a second
+/// database and serving the newly selected identity out of it.
+///
+/// OTHER's workspace is fully materialized here, which is what makes this
+/// discriminating: the second database is genuinely openable, so `200` is the
+/// outcome the guard has to prevent — a missing path would fail on its own and
+/// prove nothing.
+#[tokio::test]
+async fn config_selection_drift_is_refused_without_opening_a_second_database() {
+    // OWNER's workspace is bound at construction, as it is at production boot.
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace_for(OWNER, "default").await;
+    let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
+
+    // A second, complete creator workspace exists on disk and is now selected.
+    let other_db_path = test_utils::materialize_workspace_for(tmp.path(), OTHER, "default").await;
+    assert!(other_db_path.exists(), "fixture: second database must exist");
+    assert_ne!(other_db_path, db_path);
+
+    let server = TestServer::new(api::create_router(state.clone(), DaemonApiConfig::keyless()));
+    let resp = server.get("/v1/daemon/characters").await;
+
+    // Refused rather than served from the second database.
+    assert_eq!(resp.status_code(), 401, "body={}", resp.text());
+    assert_eq!(resp.json::<Value>()["error"]["code"], "auth_required");
+    // The process was not re-bound to the newly selected creator: the host's
+    // binding still names the database it was opened against.
+    assert_eq!(state.database_path_buf().as_deref(), Some(db_path.as_path()));
 }

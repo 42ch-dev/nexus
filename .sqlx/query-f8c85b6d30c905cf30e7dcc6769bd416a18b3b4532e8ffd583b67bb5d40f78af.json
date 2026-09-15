@@ -1,0 +1,12 @@
+{
+ "db_name": "SQLite",
+ "query": "UPDATE outbox_entries\n             SET delivery_state = 'failed', last_error = ?, next_retry_at = NULL, updated_at = ?\n             WHERE outbox_entry_id = ? AND delivery_state IN ('conflicted', 'failed')",
+ "describe": {
+  "columns": [],
+  "parameters": {
+   "Right": 3
+  },
+  "nullable": []
+ },
+ "hash": "f8c85b6d30c905cf30e7dcc6769bd416a18b3b4532e8ffd583b67bb5d40f78af"
+}

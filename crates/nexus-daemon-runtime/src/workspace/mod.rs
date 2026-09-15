@@ -1206,6 +1206,18 @@ impl WorkspaceState {
     /// makes any leftover lazy caller join the same single open instead of
     /// starting a second engine owner.
     ///
+    /// # Storage binding (fail-closed)
+    ///
+    /// The daemon's creator-DB slot resolves the workspace path independently of
+    /// Core, so the two can disagree once the active selection moves. When the
+    /// slot has a bound database, this open **verifies** it against the selection
+    /// instead of re-resolving freely: a mismatch is refused by Core with
+    /// [`nexus_core::CoreError::AuthRequired`] before any pool is initialized or
+    /// joined, so the daemon can never serve the newly selected identity out of a
+    /// second database. A slot with no bound path (Tier-0 boot, before Profile
+    /// attach) passes no expectation and keeps today's resolve-from-config
+    /// behaviour.
+    ///
     /// # Errors
     /// Returns [`crate::api::errors::NexusApiError::Internal`] with code
     /// `NEXUS_HOME_INVALID` when the workspace nexus home has no parent
@@ -1224,11 +1236,16 @@ impl WorkspaceState {
                         message: "Workspace nexus home has no parent directory".to_string(),
                     })?
                     .to_path_buf();
-                let core = nexus_core::CoreService::open(nexus_core::CoreOpenOptions {
+                let options = nexus_core::CoreOpenOptions {
                     user_home,
                     access: nexus_core::CoreAccess::EngineOwner,
-                })
-                .await
+                };
+                let core = match self.database_path_buf() {
+                    Some(bound) => {
+                        nexus_core::CoreService::open_with_expected_binding(options, &bound).await
+                    }
+                    None => nexus_core::CoreService::open(options).await,
+                }
                 .map_err(crate::api::errors::NexusApiError::from)?;
                 Ok::<_, crate::api::errors::NexusApiError>(Arc::new(core))
             })
@@ -1565,6 +1582,13 @@ impl WorkspaceState {
             .db_path
             .as_ref()
             .map(|p| p.display().to_string())
+    }
+
+    /// Path-typed counterpart of [`Self::database_path`], for callers that need
+    /// to compare or open the exact bound file rather than a display string.
+    #[must_use]
+    pub fn database_path_buf(&self) -> Option<PathBuf> {
+        self.creator_db_read().db_path.clone()
     }
 
     /// Get nexus home directory.
