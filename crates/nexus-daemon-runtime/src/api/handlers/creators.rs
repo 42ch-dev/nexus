@@ -1,17 +1,23 @@
-//! HTTP handlers have consistent error patterns.
-#![allow(clippy::missing_errors_doc)]
 //! Creator handlers — local creator listing and management.
 //!
-//! Registration proxy routes were removed in V1.21 (Batch D);
-//! registration now lives in the CLI via `nexus-cloud-sync`.
+//! Thin translation over the core `CoreHomeService` creator identity family
+//! (v1.190 P2-T1): the Profile-membership SSOT scan, identity cache,
+//! auth-store resolution and the workspace `creators` SQL enrichment live in
+//! [`nexus_core`]; the handlers keep only route/verb handling, the
+//! handler-local wire structs and status codes. HTTP status and response
+//! envelopes are unchanged. Registration proxy routes were removed in V1.21
+//! (Batch D); registration now lives in the CLI via `nexus-cloud-sync`.
 
 use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
+use nexus_contracts::generated::daemon_api::creators::{
+    list_creators_query::ListCreatorsQuery as CoreListCreatorsQuery,
+    set_active_creator_request::SetActiveCreatorRequest as CoreSetActiveCreatorRequest,
+};
 use nexus_contracts::PaginationInfo;
-use nexus_home_layout::validate_creator_id_safe;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
@@ -96,353 +102,43 @@ pub struct LogoutResponse {
     pub cleared: bool,
 }
 
-#[derive(Clone)]
-struct IdentityEntry {
-    handle: Option<String>,
-    display_name: Option<String>,
-}
-
 // ── Helpers ─────────────────────────────────────────────────────────
 
-/// Read the CLI config from `nexus_home`.
-fn read_cli_config(nexus_home: &std::path::Path) -> Result<toml::Value, NexusApiError> {
-    let config_path = nexus_home.join("config.toml");
-    if !config_path.exists() {
-        return Ok(toml::Value::Table(toml::map::Map::new()));
-    }
-    let content = std::fs::read_to_string(&config_path).map_err(|e| NexusApiError::Internal {
-        code: "CONFIG_READ_ERROR".into(),
-        message: e.to_string(),
-    })?;
-    if content.trim().is_empty() {
-        return Ok(toml::Value::Table(toml::map::Map::new()));
-    }
-    toml::from_str(&content).map_err(|e| NexusApiError::Internal {
-        code: "CONFIG_PARSE_ERROR".into(),
-        message: e.to_string(),
-    })
-}
-
-/// Write CLI config to `nexus_home`.
-fn write_cli_config(
-    nexus_home: &std::path::Path,
-    config: &toml::Value,
-) -> Result<(), NexusApiError> {
-    let config_path = nexus_home.join("config.toml");
-    let toml_str = toml::to_string_pretty(config).map_err(|e| NexusApiError::Internal {
-        code: "CONFIG_SERIALIZE_ERROR".into(),
-        message: e.to_string(),
-    })?;
-    std::fs::write(&config_path, toml_str).map_err(|e| NexusApiError::Internal {
-        code: "CONFIG_WRITE_ERROR".into(),
-        message: e.to_string(),
-    })
-}
-
-/// Read active `creator_id` from CLI config.
-fn read_active_creator_id(nexus_home: &std::path::Path) -> Option<String> {
-    let config = read_cli_config(nexus_home).ok()?;
-    config
-        .get("active_creator_id")
-        .and_then(|v| v.as_str())
-        .map(std::string::ToString::to_string)
-}
-
-/// Set active `creator_id` in CLI config.
-fn set_active_creator_id(
-    nexus_home: &std::path::Path,
-    creator_id: &str,
-) -> Result<(), NexusApiError> {
-    validate_creator_id_safe(creator_id).map_err(|reason| NexusApiError::InvalidInput {
-        field: "creator_id".to_string(),
-        reason,
-    })?;
-
-    let mut config = read_cli_config(nexus_home)?;
-    let table = config
-        .as_table_mut()
+/// Resolve the home-control entry for this workspace (raw user home: the
+/// home-layout appends `.nexus42` exactly once).
+fn home_service(state: &WorkspaceState) -> Result<nexus_core::CoreHomeService, NexusApiError> {
+    let user_home = state
+        .nexus_home()
+        .parent()
         .ok_or_else(|| NexusApiError::Internal {
-            code: "CONFIG_ERROR".into(),
-            message: "config root is not a table".to_string(),
-        })?;
-
-    table.insert(
-        "active_creator_id".to_string(),
-        toml::Value::String(creator_id.to_string()),
-    );
-
-    write_cli_config(nexus_home, &config)
+            code: "NEXUS_HOME_INVALID".into(),
+            message: "Workspace nexus home has no parent directory".to_string(),
+        })?
+        .to_path_buf();
+    nexus_core::CoreHomeService::open(user_home).map_err(NexusApiError::from)
 }
 
-/// Load the creator identity cache.
-fn load_identity_cache() -> serde_json::Value {
-    let Some(home) = dirs::home_dir() else {
-        return serde_json::Value::Null;
-    };
-    let cache_path = home.join(".nexus42").join("creator_identity_cache.json");
-    if !cache_path.exists() {
-        return serde_json::Value::Null;
+fn creator_detail_from_core(detail: nexus_contracts::CreatorDetail) -> CreatorDetail {
+    CreatorDetail {
+        creator_id: detail.creator_id,
+        handle: detail.handle,
+        display_name: detail.display_name,
+        has_api_key: detail.has_api_key,
+        has_cached_token: detail.has_cached_token,
+        is_active: detail.is_active,
     }
-    let Ok(content) = std::fs::read_to_string(&cache_path) else {
-        return serde_json::Value::Null;
-    };
-    serde_json::from_str(&content).unwrap_or(serde_json::Value::Null)
 }
 
-/// Crash-safe file write: write to a sibling temp file on the same filesystem,
-/// then rename it into place. `rename` is atomic on POSIX and avoids leaving a
-/// truncated file if the process is killed mid-write.
-fn atomic_write(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, contents)?;
-    std::fs::rename(&tmp, path)
-}
-
-/// Load the identity cache from disk, reporting parse/read errors instead of
-/// treating them as a missing cache.
-fn load_identity_cache_strict(
-    cache_path: &std::path::Path,
-) -> Result<serde_json::Value, NexusApiError> {
-    let content = std::fs::read_to_string(cache_path).map_err(|e| NexusApiError::Internal {
-        code: "CACHE_READ_ERROR".into(),
-        message: e.to_string(),
-    })?;
-    serde_json::from_str(&content).map_err(|e| NexusApiError::Internal {
-        code: "CACHE_PARSE_ERROR".into(),
-        message: e.to_string(),
-    })
-}
-
-/// Write the identity cache to disk with an atomic temp-file + rename.
-fn save_identity_cache(
-    cache_path: &std::path::Path,
-    cache: &serde_json::Value,
-) -> Result<(), NexusApiError> {
-    if let Some(parent) = cache_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| NexusApiError::Internal {
-            code: "CACHE_DIR_ERROR".into(),
-            message: e.to_string(),
-        })?;
+fn creator_info_from_core(item: nexus_contracts::generated::daemon_api::creators::list_creators_response::NexusCreatorInfo) -> CreatorInfo {
+    CreatorInfo {
+        creator_id: item.creator_id,
+        display_name: item.display_name,
+        status: item.status,
+        cached_at: item.cached_at,
     }
-    let json = serde_json::to_string_pretty(cache).map_err(|e| NexusApiError::Internal {
-        code: "CACHE_SERIALIZE_ERROR".into(),
-        message: e.to_string(),
-    })?;
-    atomic_write(cache_path, &json).map_err(|e| NexusApiError::Internal {
-        code: "CACHE_WRITE_ERROR".into(),
-        message: e.to_string(),
-    })
-}
-
-/// Update the SQL `creators` row for `creator_id`, inserting a minimal active
-/// row if one does not exist.
-async fn upsert_creator_display_name(
-    pool: &sqlx::SqlitePool,
-    creator_id: &str,
-    display_name: &str,
-) -> Result<(), NexusApiError> {
-    let now = chrono::Utc::now().to_rfc3339();
-    let rows = sqlx::query!(
-        "UPDATE creators SET display_name = ?, cached_at = ? WHERE creator_id = ?",
-        display_name,
-        now,
-        creator_id
-    )
-    .execute(pool)
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".into(),
-        message: e.to_string(),
-    })?;
-    if rows.rows_affected() == 0 {
-        sqlx::query!(
-            "INSERT INTO creators (creator_id, display_name, status, cached_at, data) VALUES (?, ?, 'active', ?, '{}')",
-            creator_id,
-            display_name,
-            now
-        )
-        .execute(pool)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: e.to_string(),
-        })?;
-    }
-    Ok(())
-}
-
-/// Get identity cache entry for a creator.
-fn get_identity_entry(cache: &serde_json::Value, creator_id: &str) -> Option<IdentityEntry> {
-    let creators = cache.get("creators")?.as_object()?;
-    let entry = creators.get(creator_id)?;
-    Some(IdentityEntry {
-        handle: entry
-            .get("handle")
-            .and_then(|v| v.as_str())
-            .map(String::from),
-        display_name: entry
-            .get("display_name")
-            .and_then(|v| v.as_str())
-            .map(String::from),
-    })
-}
-
-/// Load the auth store to check credentials.
-fn load_auth_store() -> serde_json::Value {
-    let Some(home) = dirs::home_dir() else {
-        return serde_json::Value::Null;
-    };
-    let auth_path = home.join(".nexus42").join("auth.json");
-    if !auth_path.exists() {
-        return serde_json::Value::Null;
-    }
-    let Ok(content) = std::fs::read_to_string(&auth_path) else {
-        return serde_json::Value::Null;
-    };
-    serde_json::from_str(&content).unwrap_or(serde_json::Value::Null)
-}
-
-/// Check if a creator has an API key stored.
-fn has_creator_api_key(auth_store: &serde_json::Value, creator_id: &str) -> bool {
-    auth_store
-        .get("creators")
-        .and_then(|c| c.get(creator_id))
-        .and_then(|e| e.get("creator_api_key"))
-        .and_then(|v| v.as_str())
-        .is_some_and(|s| !s.is_empty())
-}
-
-/// Check if a creator has a cached access token.
-fn has_cached_token(auth_store: &serde_json::Value, creator_id: &str) -> bool {
-    auth_store
-        .get("creators")
-        .and_then(|c| c.get(creator_id))
-        .and_then(|e| e.get("access_token"))
-        .and_then(|v| v.as_str())
-        .is_some_and(|s| !s.is_empty())
-}
-
-/// Remove a creator's credentials from the auth store.
-fn clear_creator_credentials(creator_id: &str) -> Result<bool, NexusApiError> {
-    let home = dirs::home_dir().ok_or_else(|| NexusApiError::Internal {
-        code: "HOME_DIR_ERROR".into(),
-        message: "Cannot determine home directory".to_string(),
-    })?;
-    let auth_path = home.join(".nexus42").join("auth.json");
-    if !auth_path.exists() {
-        return Ok(false);
-    }
-
-    let content = std::fs::read_to_string(&auth_path).map_err(|e| NexusApiError::Internal {
-        code: "AUTH_READ_ERROR".into(),
-        message: e.to_string(),
-    })?;
-    let mut store: serde_json::Value =
-        serde_json::from_str(&content).map_err(|e| NexusApiError::Internal {
-            code: "AUTH_PARSE_ERROR".into(),
-            message: e.to_string(),
-        })?;
-
-    let removed = store
-        .get_mut("creators")
-        .and_then(|c| c.as_object_mut())
-        .is_some_and(|creators| creators.remove(creator_id).is_some());
-
-    if removed {
-        let json = serde_json::to_string_pretty(&store).map_err(|e| NexusApiError::Internal {
-            code: "AUTH_SERIALIZE_ERROR".into(),
-            message: e.to_string(),
-        })?;
-        std::fs::write(&auth_path, json).map_err(|e| NexusApiError::Internal {
-            code: "AUTH_WRITE_ERROR".into(),
-            message: e.to_string(),
-        })?;
-    }
-
-    Ok(removed)
 }
 
 // ── Handlers ────────────────────────────────────────────────────────
-
-/// Profile membership SSOT: directories under `~/.nexus42/creators/<id>/`.
-///
-/// The active workspace `creators` SQL table and `creator_identity_cache.json`
-/// are **enrichment only** — they never expand membership. Orphan SQL/cache
-/// rows (dirty test data) stay invisible until a matching Profile home exists
-/// on disk (or is created via `POST /creators`).
-fn list_profile_ids_ssot(nexus_home: &std::path::Path) -> Vec<String> {
-    let creators_dir = nexus_home.join("creators");
-    let Ok(entries) = std::fs::read_dir(&creators_dir) else {
-        return Vec::new();
-    };
-    let mut ids = Vec::new();
-    for entry in entries.flatten() {
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-        if !file_type.is_dir() {
-            continue;
-        }
-        let name = entry.file_name();
-        let Some(id) = name.to_str() else {
-            continue;
-        };
-        if validate_creator_id_safe(id).is_err() {
-            continue;
-        }
-        ids.push(id.to_string());
-    }
-    ids.sort();
-    ids
-}
-
-/// Ensure a Profile home exists on disk (membership SSOT write).
-fn ensure_profile_home_ssot(
-    nexus_home: &std::path::Path,
-    creator_id: &str,
-) -> Result<(), NexusApiError> {
-    validate_creator_id_safe(creator_id).map_err(|reason| NexusApiError::InvalidInput {
-        field: "creator_id".to_string(),
-        reason,
-    })?;
-    let profile_home = nexus_home.join("creators").join(creator_id);
-    std::fs::create_dir_all(profile_home.join("workspaces").join("default")).map_err(|e| {
-        NexusApiError::Internal {
-            code: "PROFILE_HOME_ERROR".into(),
-            message: e.to_string(),
-        }
-    })?;
-    Ok(())
-}
-
-/// Enrich a SSOT Profile id with display metadata from secondary sources.
-///
-/// Priority: active-pool SQL row → identity cache → creator id fallback.
-/// Never invents membership.
-fn enrich_profile(
-    creator_id: &str,
-    sql_by_id: &std::collections::HashMap<String, CreatorInfo>,
-    identity_cache: &serde_json::Value,
-) -> CreatorInfo {
-    if let Some(row) = sql_by_id.get(creator_id) {
-        return CreatorInfo {
-            creator_id: creator_id.to_string(),
-            display_name: row.display_name.clone(),
-            status: row.status.clone(),
-            cached_at: row.cached_at.clone(),
-        };
-    }
-    let display_name = get_identity_entry(identity_cache, creator_id)
-        .and_then(|entry| entry.display_name)
-        .filter(|name| !name.trim().is_empty())
-        .unwrap_or_else(|| creator_id.to_string());
-    CreatorInfo {
-        creator_id: creator_id.to_string(),
-        display_name,
-        status: "active".to_string(),
-        cached_at: None,
-    }
-}
 
 /// GET /v1/daemon/creators
 pub async fn list(
@@ -452,74 +148,27 @@ pub async fn list(
     info!("Handling list creators request");
 
     let limit = params.limit.clamp(1, MAX_LIMIT);
-
-    // Membership SSOT: on-disk Profile homes only.
-    let ssot_ids = list_profile_ids_ssot(state.nexus_home());
-
-    // Secondary enrichment map (may contain dirty/orphan rows — ignored unless
-    // the id is in the SSOT set).
-    let identity_cache = load_identity_cache();
-    let mut sql_by_id: std::collections::HashMap<String, CreatorInfo> =
-        std::collections::HashMap::new();
-    if let Some(pool) = state.pool() {
-        let sql_creators = sqlx::query_as!(
-            CreatorInfo,
-            r#"SELECT creator_id as "creator_id!", display_name, status, cached_at FROM creators ORDER BY cached_at DESC"#
-        )
-        .fetch_all(pool)
+    let home = home_service(&state)?;
+    let response = home
+        .list_creators(CoreListCreatorsQuery {
+            limit: Some(i64::try_from(limit).unwrap_or(i64::MAX)),
+            cursor: params.cursor,
+        })
         .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: e.to_string(),
-        })?;
-        for creator in sql_creators {
-            sql_by_id.insert(creator.creator_id.clone(), creator);
-        }
+        .map_err(NexusApiError::from)?;
 
-        // Complete the active-pool cache from SSOT (never the reverse).
-        for creator_id in &ssot_ids {
-            if sql_by_id.contains_key(creator_id) {
-                continue;
-            }
-            let enriched = enrich_profile(creator_id, &sql_by_id, &identity_cache);
-            upsert_creator_display_name(pool, creator_id, &enriched.display_name).await?;
-            sql_by_id.insert(creator_id.clone(), enriched);
-        }
-    }
-
-    let mut items: Vec<CreatorInfo> = ssot_ids
-        .iter()
-        .map(|id| enrich_profile(id, &sql_by_id, &identity_cache))
-        .collect();
-    items.sort_by(|a, b| {
-        b.cached_at
-            .cmp(&a.cached_at)
-            .then_with(|| a.creator_id.cmp(&b.creator_id))
-    });
-
-    // Apply cursor-based pagination (cursor = creator_id)
-    if let Some(ref cursor) = params.cursor {
-        let pos = items.iter().position(|i| i.creator_id == *cursor);
-        if let Some(idx) = pos {
-            items = items.split_off(idx + 1);
-        }
-    }
-
-    let next_cursor = if items.len() > limit {
-        items.truncate(limit);
-        items.last().map(|i| i.creator_id.clone())
-    } else {
-        None
-    };
-
-    debug!(count = items.len(), "Creators retrieved");
+    debug!(count = response.items.len(), "Creators retrieved");
     info!("List creators completed");
     Ok(Json(ListCreatorsResponse {
-        items,
+        items: response
+            .items
+            .into_iter()
+            .map(creator_info_from_core)
+            .collect(),
         pagination: PaginationInfo {
-            limit: i64::try_from(limit).unwrap_or(i64::MAX),
-            has_more: next_cursor.is_some(),
-            next_cursor,
+            limit: response.pagination.limit,
+            has_more: response.pagination.has_more,
+            next_cursor: response.pagination.next_cursor,
         },
     }))
 }
@@ -527,10 +176,8 @@ pub async fn list(
 /// `POST /v1/daemon/creators` — create a new local creator profile (V1.129 P0).
 ///
 /// Generates a `ctr_local…` id (matching the `CreatorId` pattern), validates the
-/// `display_name`, lazily attaches the creator pool when `active_creator_id` is
-/// present in config but the pool is not yet open (mirrors `patch_creator`'s
-/// V1.119 pool-attach pattern at `creators.rs:533-541`), INSERTs the row, and
-/// returns a `CreatorDetail`-shaped 201 response.
+/// `display_name`, materializes the membership-SSOT Profile home, INSERTs the
+/// workspace row, and returns a `CreatorDetail`-shaped 201 response.
 ///
 /// Tier-1 (API key) only — do not gate on active creator (architect lock #2).
 /// The handler reuses the canonical `NexusApiError` envelope for all failures.
@@ -540,87 +187,15 @@ pub async fn create_creator(
 ) -> Result<(StatusCode, Json<CreatorDetail>), NexusApiError> {
     info!("Handling create creator request");
 
-    // Validate display_name: non-empty (after trim) and ≤ 256 chars (by char count,
-    // mirroring `patch_creator`'s rule so CJK / emoji are counted once).
-    let display_name = req.display_name.trim().to_string();
-    if display_name.is_empty() {
-        return Err(NexusApiError::InvalidInput {
-            field: "display_name".to_string(),
-            reason: "display_name cannot be empty".to_string(),
-        });
-    }
-    if display_name.chars().count() > 256 {
-        return Err(NexusApiError::InvalidInput {
-            field: "display_name".to_string(),
-            reason: "display_name must be 256 characters or fewer".to_string(),
-        });
-    }
+    let home = home_service(&state)?;
+    let detail = home
+        .create_creator(req.display_name)
+        .await
+        .map_err(NexusApiError::from)?;
 
-    // Generate a creator id matching the `^ctr_[a-zA-Z0-9]+$` pattern used by
-    // `nexus-creator::local_identity::generate_local_id`. Inline copy here so
-    // the daemon-runtime crate does not depend on a private helper that may
-    // change shape; the pattern itself is the public contract.
-    let random: String = uuid::Uuid::new_v4()
-        .to_string()
-        .replace('-', "")
-        .chars()
-        .take(12)
-        .collect();
-    let creator_id = format!("ctr_local{random}");
-    // Defensive: the generated id always matches the safe-id check, but run it
-    // anyway so future id-shape changes cannot bypass the path-traversal guard.
-    validate_creator_id_safe(&creator_id).map_err(|reason| NexusApiError::Internal {
-        code: "CREATOR_ID_GENERATION_ERROR".into(),
-        message: reason,
-    })?;
-
-    // Membership SSOT write — Profile is real only when the home dir exists.
-    ensure_profile_home_ssot(state.nexus_home(), &creator_id)?;
-
-    // Lazily attach the creator pool when `active_creator_id` is present in
-    // config but the pool is not yet open (mirrors `patch_creator` V1.119 fix).
-    // When no creator is active in config at all, the pool may be absent — we
-    // still attempt the insert and surface a descriptive `Internal` if the
-    // schema is missing (architect lock #3).
-    if state.pool().is_none() && read_active_creator_id(state.nexus_home()).is_some() {
-        state
-            .ensure_creator_pool()
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".into(),
-                message: e.to_string(),
-            })?;
-    }
-
-    let pool = state.pool_or_uninit()?;
-    let now = chrono::Utc::now().to_rfc3339();
-    sqlx::query!(
-        "INSERT INTO creators (creator_id, display_name, status, cached_at, data) VALUES (?, ?, 'active', ?, '{}')",
-        creator_id,
-        display_name,
-        now
-    )
-    .execute(pool)
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".into(),
-        message: e.to_string(),
-    })?;
-
-    debug!(creator_id = %creator_id, display_name = %display_name, "Creator created");
-    info!(creator_id = %creator_id, "Create creator completed");
-
-    Ok((
-        StatusCode::CREATED,
-        Json(CreatorDetail {
-            creator_id,
-            handle: None,
-            display_name: Some(display_name),
-            has_api_key: false,
-            has_cached_token: false,
-            is_active: false,
-        }),
-    ))
+    debug!(creator_id = %detail.creator_id, "Creator created");
+    info!(creator_id = %detail.creator_id, "Create creator completed");
+    Ok((StatusCode::CREATED, Json(creator_detail_from_core(detail))))
 }
 
 /// `GET /v1/daemon/creators/{creator_id}` — creator status/detail
@@ -630,37 +205,16 @@ pub async fn get_creator(
 ) -> Result<Json<CreatorDetail>, NexusApiError> {
     info!(creator_id = %creator_id, "Getting creator detail");
 
-    reject_colon_verb_segment(&creator_id)?;
-    validate_creator_id_safe(&creator_id).map_err(|reason| NexusApiError::InvalidInput {
-        field: "creator_id".to_string(),
-        reason,
-    })?;
-
-    let cache = load_identity_cache();
-    let entry = get_identity_entry(&cache, &creator_id);
-    let auth_store = load_auth_store();
-    let active_id = read_active_creator_id(state.nexus_home());
-
-    Ok(Json(CreatorDetail {
-        creator_id: creator_id.clone(),
-        handle: entry.as_ref().and_then(|e| e.handle.clone()),
-        display_name: entry.as_ref().and_then(|e| e.display_name.clone()),
-        has_api_key: has_creator_api_key(&auth_store, &creator_id),
-        has_cached_token: has_cached_token(&auth_store, &creator_id),
-        is_active: active_id.as_deref() == Some(creator_id.as_str()),
-    }))
+    let home = home_service(&state)?;
+    let detail = home.creator_detail(&creator_id).map_err(NexusApiError::from)?;
+    Ok(Json(creator_detail_from_core(detail)))
 }
 
 /// `PATCH /v1/daemon/creators/{creator_id}` — update creator display name.
 ///
-/// Updates the local `creator_identity_cache.json` entry for the given creator,
-/// creating a minimal entry if one does not yet exist.
-///
-/// **Note:** `display_name` updates also upsert into the creator SQL table and require an open pool.
-/// When `active_creator_id` is present in config but the pool is not yet open (clean first run
-/// after `ensureSetupBootstrap`), the pool is lazily attached here (mirroring
-/// `require_active_creator`). When no creator is active in config at all, the request returns
-/// HTTP 409 `uninitialized`.
+/// Updates the creator's display name in the identity cache and the workspace
+/// `creators` SQL row (display-name members only; the materialization and
+/// cache-parse discipline live in the core family).
 pub async fn patch_creator(
     State(state): State<WorkspaceState>,
     Path(creator_id): Path<String>,
@@ -668,125 +222,12 @@ pub async fn patch_creator(
 ) -> Result<Json<CreatorDetail>, NexusApiError> {
     info!(creator_id = %creator_id, "Patching creator");
 
-    reject_colon_verb_segment(&creator_id)?;
-    validate_creator_id_safe(&creator_id).map_err(|reason| NexusApiError::InvalidInput {
-        field: "creator_id".to_string(),
-        reason,
-    })?;
-
-    // Author-facing PATCH materializes membership SSOT when missing (enrichment
-    // targets only exist for Profiles that have a home on disk).
-    ensure_profile_home_ssot(state.nexus_home(), &creator_id)?;
-
-    if let Some(ref display_name) = req.display_name {
-        if display_name.is_empty() {
-            return Err(NexusApiError::InvalidInput {
-                field: "display_name".to_string(),
-                reason: "display_name cannot be empty".to_string(),
-            });
-        }
-        if display_name.chars().count() > 256 {
-            return Err(NexusApiError::InvalidInput {
-                field: "display_name".to_string(),
-                reason: "display_name must be 256 characters or fewer".to_string(),
-            });
-        }
-    }
-
-    let home = dirs::home_dir().ok_or_else(|| NexusApiError::Internal {
-        code: "HOME_DIR_ERROR".into(),
-        message: "Cannot determine home directory".to_string(),
-    })?;
-    let cache_path = home.join(".nexus42").join("creator_identity_cache.json");
-
-    // Only initialize a fresh cache when the file does not exist. If the file
-    // exists but cannot be parsed, report an error instead of silently wiping
-    // all cached identities (QC2-F-002).
-    let mut cache = if cache_path.exists() {
-        load_identity_cache_strict(&cache_path)?
-    } else {
-        serde_json::json!({"creators": {}})
-    };
-
-    if !cache.is_object() {
-        return Err(NexusApiError::Internal {
-            code: "CACHE_FORMAT_ERROR".into(),
-            message: "Identity cache root is not an object".to_string(),
-        });
-    }
-    let cache_obj = cache
-        .as_object_mut()
-        .ok_or_else(|| NexusApiError::Internal {
-            code: "CACHE_FORMAT_ERROR".into(),
-            message: "Identity cache root is not an object".to_string(),
-        })?;
-    if cache_obj.get("creators").is_none_or(|v| !v.is_object()) {
-        return Err(NexusApiError::Internal {
-            code: "CACHE_FORMAT_ERROR".into(),
-            message: "Identity cache creators field is not an object".to_string(),
-        });
-    }
-    let creators = cache_obj
-        .get_mut("creators")
-        .and_then(|v| v.as_object_mut())
-        .ok_or_else(|| NexusApiError::Internal {
-            code: "CACHE_FORMAT_ERROR".into(),
-            message: "Identity cache creators field is not an object".to_string(),
-        })?;
-
-    let entry = creators
-        .entry(creator_id.clone())
-        .or_insert_with(|| serde_json::json!({}));
-    let entry_obj = entry
-        .as_object_mut()
-        .ok_or_else(|| NexusApiError::Internal {
-            code: "CACHE_FORMAT_ERROR".into(),
-            message: "Identity cache entry is not an object".to_string(),
-        })?;
-
-    if let Some(display_name) = req.display_name {
-        // Lazily attach the creator pool when `active_creator_id` is present in
-        // config but the pool is not yet open. On a clean first run the daemon
-        // boots without a creator DB (AC-P0-1); `ensureSetupBootstrap` then
-        // writes `active_creator_id` to config, but PATCH creator is Tier-1 (no
-        // `require_active_creator` middleware) so without this attach the
-        // display-name persist returns HTTP 409 `uninitialized`. Mirrors the
-        // `require_active_creator` middleware (api/middleware.rs).
-        if state.pool().is_none() && read_active_creator_id(state.nexus_home()).is_some() {
-            state
-                .ensure_creator_pool()
-                .await
-                .map_err(|e| NexusApiError::Internal {
-                    code: "DATABASE_ERROR".into(),
-                    message: e.to_string(),
-                })?;
-        }
-        // Write the display name to the SQL `creators` table so that `list_creators`
-        // (used by the footer via useCreators()) reflects the rename as well as
-        // the JSON identity cache (QC1-F-001).
-        upsert_creator_display_name(state.pool_or_uninit()?, &creator_id, &display_name).await?;
-        entry_obj.insert(
-            "display_name".to_string(),
-            serde_json::Value::String(display_name),
-        );
-    }
-
-    save_identity_cache(&cache_path, &cache)?;
-
-    // Re-read the updated cache so the returned detail reflects the write.
-    let cache = load_identity_cache();
-    let entry = get_identity_entry(&cache, &creator_id);
-    let auth_store = load_auth_store();
-    let active_id = read_active_creator_id(state.nexus_home());
-
-    Ok(Json(CreatorDetail {
-        creator_id: creator_id.clone(),
-        handle: entry.as_ref().and_then(|e| e.handle.clone()),
-        display_name: entry.as_ref().and_then(|e| e.display_name.clone()),
-        has_api_key: has_creator_api_key(&auth_store, &creator_id),
-        has_cached_token: has_cached_token(&auth_store, &creator_id),
-        is_active: active_id.as_deref() == Some(creator_id.as_str()),
-    }))
+    let home = home_service(&state)?;
+    let detail = home
+        .patch_creator(&creator_id, req.display_name)
+        .await
+        .map_err(NexusApiError::from)?;
+    Ok(Json(creator_detail_from_core(detail)))
 }
 
 /// `PUT /v1/daemon/creators/active` — set active creator
@@ -796,53 +237,15 @@ pub async fn set_active_creator(
 ) -> Result<Json<SetActiveCreatorResponse>, NexusApiError> {
     info!(creator_id = %req.creator_id, "Setting active creator");
 
-    validate_creator_id_safe(&req.creator_id).map_err(|reason| NexusApiError::InvalidInput {
-        field: "creator_id".to_string(),
-        reason,
-    })?;
+    let home = home_service(&state)?;
+    let response = home
+        .use_creator(CoreSetActiveCreatorRequest {
+            creator_id: req.creator_id.clone(),
+        })
+        .map_err(NexusApiError::from)?;
 
-    // Verify the creator has credentials stored
-    let auth_store = load_auth_store();
-    let cache = load_identity_cache();
-
-    let in_auth = auth_store
-        .get("creators")
-        .and_then(|c| c.as_object())
-        .is_some_and(|obj| obj.contains_key(&req.creator_id));
-    let in_cache = get_identity_entry(&cache, &req.creator_id).is_some();
-
-    if !in_auth && !in_cache {
-        return Err(NexusApiError::NotFound(format!(
-            "Creator {} not found. Register first.",
-            req.creator_id
-        )));
-    }
-
-    set_active_creator_id(state.nexus_home(), &req.creator_id)?;
-
-    // Reset workspace slug for this creator to the default. Profile switch
-    // previously *removed* the entry and relied on read-path fallback; write
-    // `"default"` explicitly so config stays self-describing and older
-    // read paths that lack the fallback do not surface AuthRequired.
-    let mut config = read_cli_config(state.nexus_home())?;
-    if let Some(table) = config.as_table_mut() {
-        if table.get("active_workspace_slug_by_creator").is_none() {
-            table.insert(
-                "active_workspace_slug_by_creator".to_string(),
-                toml::Value::Table(toml::map::Map::new()),
-            );
-        }
-        if let Some(slug_table) = table.get_mut("active_workspace_slug_by_creator") {
-            if let Some(slugs) = slug_table.as_table_mut() {
-                slugs.insert(
-                    req.creator_id.clone(),
-                    toml::Value::String("default".to_string()),
-                );
-            }
-        }
-        write_cli_config(state.nexus_home(), &config)?;
-    }
-
+    // Daemon-process side effect (H1): the shared creator_db slot attaches
+    // eagerly on selection so later Tier-1 handlers never see a missing pool.
     state
         .ensure_creator_pool()
         .await
@@ -852,7 +255,7 @@ pub async fn set_active_creator(
         })?;
 
     Ok(Json(SetActiveCreatorResponse {
-        creator_id: req.creator_id,
+        creator_id: response.creator_id,
     }))
 }
 
@@ -860,16 +263,12 @@ pub async fn set_active_creator(
 pub async fn get_active_creator(
     State(state): State<WorkspaceState>,
 ) -> Result<Json<ActiveCreatorResponse>, NexusApiError> {
-    let creator_id = read_active_creator_id(state.nexus_home())
-        .ok_or_else(|| NexusApiError::NotFound("No active creator selected".to_string()))?;
-
-    let cache = load_identity_cache();
-    let entry = get_identity_entry(&cache, &creator_id);
-
+    let home = home_service(&state)?;
+    let active = home.active_creator().map_err(NexusApiError::from)?;
     Ok(Json(ActiveCreatorResponse {
-        creator_id,
-        handle: entry.as_ref().and_then(|e| e.handle.clone()),
-        display_name: entry.and_then(|e| e.display_name),
+        creator_id: active.creator_id,
+        handle: active.handle,
+        display_name: active.display_name,
     }))
 }
 
@@ -890,49 +289,14 @@ pub async fn logout_creator(
 
     info!(creator_id = %creator_id, "Logging out creator");
 
-    if creator_id.is_empty() || creator_id.contains(':') {
-        return Err(NexusApiError::InvalidInput {
-            field: "creator_id".to_string(),
-            reason: "creator_id must not be empty or contain ':'".to_string(),
-        });
-    }
-
-    validate_creator_id_safe(&creator_id).map_err(|reason| NexusApiError::InvalidInput {
-        field: "creator_id".to_string(),
-        reason,
-    })?;
-
-    let cleared = clear_creator_credentials(&creator_id)?;
-
-    // If this was the active creator, clear the active selection
-    if let Some(active) = read_active_creator_id(state.nexus_home()) {
-        if active == creator_id {
-            let mut config = read_cli_config(state.nexus_home())?;
-            if let Some(table) = config.as_table_mut() {
-                table.remove("active_creator_id");
-                write_cli_config(state.nexus_home(), &config)?;
-            }
-        }
-    }
-
+    let home = home_service(&state)?;
+    let response = home
+        .logout_creator(&creator_id)
+        .map_err(NexusApiError::from)?;
     Ok(Json(LogoutResponse {
-        creator_id,
-        cleared,
+        creator_id: response.creator_id,
+        cleared: response.cleared,
     }))
-}
-
-/// Reject path segments that look like Google-AIP custom verbs (`id:verb`).
-///
-/// Those URLs share the `:creator_id` capture with logout; GET/PATCH must not
-/// treat `ctr_x:logout` as a valid creator id (ghost 200).
-fn reject_colon_verb_segment(creator_id: &str) -> Result<(), NexusApiError> {
-    if creator_id.contains(':') {
-        return Err(NexusApiError::InvalidInput {
-            field: "creator_id".to_string(),
-            reason: "creator_id must not contain ':'".to_string(),
-        });
-    }
-    Ok(())
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────
@@ -943,8 +307,9 @@ mod tests {
     use crate::test_utils::create_test_workspace;
     use serial_test::serial;
 
-    /// Temporarily override `HOME` so disk-backed helpers (e.g. `load_identity_cache`)
-    /// operate inside the isolated test directory. The original value is restored on drop.
+    /// Temporarily override `HOME` so disk-backed state initialization
+    /// (`WorkspaceState::initialize`) operates inside the isolated test
+    /// directory. The original value is restored on drop.
     struct HomeOverride {
         original: Option<String>,
     }
@@ -964,16 +329,6 @@ mod tests {
                 None => std::env::remove_var("HOME"),
             }
         }
-    }
-
-    #[test]
-    fn validate_creator_id_rejects_traversal() {
-        assert!(validate_creator_id_safe("../etc").is_err());
-    }
-
-    #[test]
-    fn validate_creator_id_accepts_valid() {
-        assert!(validate_creator_id_safe("crt_abc123").is_ok());
     }
 
     #[tokio::test]

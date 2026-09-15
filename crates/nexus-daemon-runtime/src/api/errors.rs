@@ -804,13 +804,53 @@ impl From<nexus_core::CoreError> for NexusApiError {
                 code: "interrupted".to_string(),
                 message: "interrupted".to_string(),
             },
-            nexus_core::CoreError::Internal { category } => Self::Internal {
-                code: "CORE_ERROR".to_string(),
-                message: category,
+            // Stable actor-family wire conflicts (durable §11.1 codes):
+            // the core carries the retained code + message and the adapter
+            // re-renders them verbatim.
+            nexus_core::CoreError::ActorConflict { code, message } => {
+                Self::ConflictCoded { code, message }
+            }
+            nexus_core::CoreError::ActorInput(message) => Self::BadRequest {
+                code: "invalid_input".to_string(),
+                message,
             },
+            nexus_core::CoreError::Internal { category } => {
+                let (code, message) = resend_internal_category(&category);
+                Self::Internal { code, message }
+            }
         }
     }
 }
+
+/// Re-send a retained wire-internal code from a core `Internal` category.
+///
+/// The core neutralizes wire codes into `"{CODE}: {message}"` categories;
+/// this adapter strips the family prefixes back to the exact `Internal`
+/// envelopes the daemon handlers always emitted (`CHARACTER_WIRE_INVALID`,
+/// `DATABASE_ERROR`, the creator cache/config carriers, the actor-knowledge
+/// carriers). Unmatched categories keep the P1 `CORE_ERROR` fallback.
+fn resend_internal_category(category: &str) -> (String, String) {
+    const CATEGORY_PREFIXES: &[&str] = &[
+        nexus_core::CHARACTER_WIRE_INVALID_PREFIX,
+        nexus_core::KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX,
+        nexus_core::KNOWLEDGE_WIRE_INVALID_PREFIX,
+        nexus_core::KNOWLEDGE_INSERT_FAILED_PREFIX,
+        "database_error",
+    ];
+    for prefix in CATEGORY_PREFIXES
+        .iter()
+        .copied()
+        .chain(nexus_core::CREATOR_INTERNAL_CODES.iter().copied())
+    {
+        if let Some(message) =
+            category.strip_prefix(prefix).and_then(|rest| rest.strip_prefix(": "))
+        {
+            return (prefix.to_ascii_uppercase(), message.to_string());
+        }
+    }
+    ("CORE_ERROR".to_string(), category.to_string())
+}
+
 
 // Note: These tests remain inline because they use `crate::test_utils::create_test_workspace`,
 // which is a private test-only helper. Integration tests in `tests/` cannot access
