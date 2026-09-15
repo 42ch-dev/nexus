@@ -100,6 +100,54 @@ describe('cancel honours the request deadline', () => {
     );
   });
 
+  test('cancel retry must confirm cleanup after terminal delivery', { timeout: 10_000 }, async (t) => {
+    const child = spawn(resolveNode(), ['-e', 'process.stdout.write("ready\\n");setInterval(() => {}, 1000)'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    t.after(async () => {
+      if (childAlive(child)) child.kill('SIGKILL');
+      assert.ok(await waitForDeath(child), 'test-owned child must be reaped');
+    });
+    await new Promise((resolve) => child.stdout.once('data', resolve));
+    const engine = createTestEngine();
+    const owner = makeOwner(child, 'gen-retry');
+    const identity = owner.boundIdentity;
+    owner.boundIdentity = { ...identity, process_birth: 'stale-birth-token' };
+    owner.connection = { cancel: async () => undefined };
+    engine.adoptSession('sess-retry', owner, 'gen-retry');
+    engine.adoptOperation('sess-retry', 'op-retry', Promise.resolve(), new OperationDelivery('op-retry'));
+    const cancel = () => engine.call({
+      request_id: 'cancel-retry',
+      method: 'cancel',
+      session_id: 'sess-retry',
+      operation_id: 'op-retry',
+      deadline_ms: 3000,
+      payload: {},
+    });
+
+    const first = await cancel();
+    assert.equal(first.ok, false);
+    assert.equal(first.error?.details?.cleanup_unconfirmed, true);
+    const terminal = await engine.next('op-retry', 16, 256 * 1024);
+    assert.equal(terminal.has_more, false);
+
+    const retry = await cancel();
+    assert.equal(retry.ok, false, 'terminal delivery cannot turn an unconfirmed reap into success');
+    assert.equal(retry.error?.code, 'interrupted');
+    assert.equal(retry.error?.details?.cleanup_unconfirmed, true);
+    assert.equal(engine.cleanupFenceCount(), 1);
+    assert.equal(childAlive(child), true, 'mismatched identity must not be signalled');
+
+    // Restore the real identity only in the fixture. A subsequent public cancel
+    // must perform the actual reap and clear its fence, without a test-only
+    // settlement call standing in for the production retry path.
+    owner.boundIdentity = identity;
+    const settled = await cancel();
+    assert.equal(settled.ok, true, JSON.stringify(settled));
+    assert.equal(engine.cleanupFenceCount(), 0);
+    assert.ok(await waitForDeath(child), 'successful retry must reap the retained owner');
+  });
+
   test('shutdown honours the deadline for a busy session', async () => {
     const child = spawn(resolveNode(), ['-e', 'setInterval(() => {}, 1000)'], {
       stdio: ['pipe', 'pipe', 'pipe'],

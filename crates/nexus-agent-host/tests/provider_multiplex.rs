@@ -117,11 +117,15 @@ fn shim(root: &Path, name: &str, fixture: &str) -> PathBuf {
 }
 
 async fn host(root: &Path) -> Arc<HostManager> {
+    host_with_acp_fixture(root, "mock_acp_workflow.py").await
+}
+
+async fn host_with_acp_fixture(root: &Path, acp_fixture: &str) -> Arc<HostManager> {
     let families = [
         ("claude-native", "native_cli", "native_protocol/mock_claude_cli.py"),
         ("codex-native", "native_cli", "native_protocol/mock_codex_app_server.py"),
         ("dsh-native", "native_cli", "native_protocol/mock_dsh_agent.py"),
-        ("configured-acp", "acp", "mock_acp_workflow.py"),
+        ("configured-acp", "acp", acp_fixture),
     ];
     let config = AgentHostConfig {
         max_sessions: 8,
@@ -248,6 +252,88 @@ async fn session_keeps_selected_provider_and_truthful_cancel() {
     assert!(host.list_sessions().await.expect("native registry").iter().any(|s| s.id.to_string() == session));
     rust_port.call(call(ProviderCallMethod::Shutdown, Some(&session), None, json!({}))).await.expect("Rust ACP shutdown");
     callback.close().await;
+    host.shutdown().await.expect("host shutdown");
+}
+
+#[tokio::test]
+async fn native_control_cancel_uses_returned_id_and_preserves_completed_result() {
+    let tmp = tempfile::tempdir().expect("workspace");
+    let root = tmp.path().canonicalize().expect("canonical workspace");
+    let fixture = root.join("control-peer.py");
+    // A protocol peer, not a replacement adapter: control execution and cancel
+    // travel through the maintained Rust ACP adapter and real HostManager.
+    std::fs::write(&fixture, r#"
+import json, os, sys
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request["method"]
+    with open(os.environ["ACP_FIXTURE_LOG"], "a") as log:
+        log.write(json.dumps(request) + "\n")
+    if method == "initialize":
+        result = {"protocolVersion": 1, "agentCapabilities": {}}
+    elif method == "session/new":
+        result = {"sessionId": "control-session"}
+    elif method == "session/set_mode":
+        result = {}
+    elif method == "session/cancel":
+        continue
+    else:
+        raise RuntimeError("unexpected method: " + method)
+    print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)
+"#).expect("control peer");
+    let host = host_with_acp_fixture(&root, fixture.to_str().expect("fixture path")).await;
+    let port = compose_provider_port(host.clone(), Arc::new(host.build_provider_port().await), None);
+    let session_id = launch(port.as_ref(), &root, "configured-acp").await;
+    let reply = port.call(call(ProviderCallMethod::Execute, Some(&session_id), None,
+        json!({"SetMode": {"mode": "plan"}}))).await.expect("real set_mode RPC");
+    assert!(reply.ok, "{reply:?}");
+    let op_id = reply.operation_id.expect("control operation ID");
+    let session = host.list_sessions().await.expect("sessions").into_iter()
+        .find(|session| session.id.to_string() == session_id).expect("owning session");
+    assert_eq!(session.active_op_id.as_ref().map(ToString::to_string), Some(op_id.clone()));
+    assert!(matches!(session.state, nexus_agent_host::SessionState::Busy(_)));
+
+    let cancelled = port.call(call(ProviderCallMethod::Cancel, Some(&session_id), Some(&op_id), json!({})))
+        .await.expect("cancel resolves returned control identity");
+    assert!(cancelled.ok, "{cancelled:?}");
+    assert_eq!(cancelled.operation_id.as_deref(), Some(op_id.as_str()));
+    let session = host.list_sessions().await.expect("sessions").into_iter()
+        .find(|session| session.id.to_string() == session_id).expect("owning session");
+    assert!(matches!(session.state, nexus_agent_host::SessionState::Cancelling(ref current)
+        if current.to_string() == op_id));
+
+    // Confirm the selected real ACP connection received cancel, before shutdown
+    // can send its separate cooperative cancellation notification.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let log = std::fs::read_to_string(root.join("acp.jsonl")).expect("protocol log");
+            let requests: Vec<Value> = log.lines().map(|line| serde_json::from_str(line).expect("request")).collect();
+            if let Some(cancel) = requests.iter().position(|request| request["method"] == "session/cancel") {
+                let control = requests.iter().position(|request| request["method"] == "session/set_mode").expect("control RPC");
+                assert!(control < cancel);
+                assert_eq!(requests[control]["params"]["modeId"], "plan");
+                assert_eq!(requests[cancel]["params"]["sessionId"], "control-session");
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await.expect("peer receives cancel");
+
+    // The control RPC already succeeded before execute replied. Cancellation
+    // does not roll it back or relabel its retained result as Cancelled.
+    let batch = port.next(op_id.clone(), 16, 256 * 1024).await.expect("control terminal");
+    assert!(batch.gap.is_none());
+    assert!(!batch.has_more);
+    let terminal = serde_json::to_value(&batch.events[0]).expect("terminal JSON");
+    assert_eq!(terminal["OpFinished"]["op_id"], op_id);
+    assert_eq!(terminal["OpFinished"]["session_id"], session_id);
+    assert_eq!(terminal["OpFinished"]["reason"],
+        serde_json::to_value(nexus_agent_host::capability::model::FinishReason::EndTurn).expect("finish reason"));
+    let session = host.list_sessions().await.expect("sessions").into_iter()
+        .find(|session| session.id.to_string() == session_id).expect("owning session");
+    assert!(matches!(session.state, nexus_agent_host::SessionState::Ready));
+    assert!(session.active_op_id.is_none());
+    port.call(call(ProviderCallMethod::Shutdown, Some(&session_id), None, json!({}))).await.expect("shutdown");
     host.shutdown().await.expect("host shutdown");
 }
 

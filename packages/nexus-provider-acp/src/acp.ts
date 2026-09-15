@@ -332,11 +332,16 @@ export class AcpProviderEngine {
     return `${id.pid}:${id.process_birth ?? ''}:${id.group_id ?? ''}`;
   }
 
-  private retainCleanupFence(key: string, owned: OwnedConnection): void {
+  private hasCleanupFenceForOwner(owned: OwnedConnection): boolean {
     const identity = this.ownerIdentityKey(owned);
     for (const existing of this.cleanupFences.values()) {
-      if (this.ownerIdentityKey(existing) === identity) return;
+      if (this.ownerIdentityKey(existing) === identity) return true;
     }
+    return false;
+  }
+
+  private retainCleanupFence(key: string, owned: OwnedConnection): void {
+    if (this.hasCleanupFenceForOwner(owned)) return;
     this.cleanupFences.set(key, owned);
   }
 
@@ -703,7 +708,10 @@ export class AcpProviderEngine {
     // fresh default, or the handler would outlive the deadline it was given.
     const deadline = handlerDeadlineMs(request.deadline_ms);
     op.cancelled = true;
-    if (!op.delivery?.trySetTerminal({ kind: 'finished', reason: 'cancelled' })) {
+    // A retained terminal does not prove the previous reap succeeded. Retrying
+    // cancel must settle this owner's fence before acknowledging cleanup.
+    if (!op.delivery?.trySetTerminal({ kind: 'finished', reason: 'cancelled' }) &&
+        !this.hasCleanupFenceForOwner(session.owned)) {
       return okReply(request.request_id, { operation_id: operationId, session_id: op.sessionId });
     }
     // Narrowing does not survive the closure boundary, so capture it here.

@@ -637,17 +637,31 @@ impl ProviderPortAdapter {
             .map_err(|e| Self::invalid_input(format!("execute payload: {e}")))?;
         let control = !matches!(&op, HostOperation::Prompt { .. });
         let op_id = match &op {
-            HostOperation::Prompt { op_id, .. } => op_id.clone(),
-            _ => HostOperationId::new(),
+            HostOperation::Prompt { op_id, .. } => Some(op_id.clone()),
+            _ => None,
         };
         let stream = self
             .host
             .exec(session_id.clone(), op)
             .await
             .map_err(|err| Self::map_host_error(&err))?;
-        // HostManager and ACP controls have private operation IDs. Correlate
-        // their terminal with the ID this port returned, after the manager's
-        // stream wrapper has applied its own lifecycle transition.
+        // The returned stream has not been polled, so HostManager still owns
+        // the active control operation. Publish that same identity for both
+        // cancellation and terminal delivery rather than inventing a wire ID.
+        let op_id = match op_id {
+            Some(op_id) => op_id,
+            None => self
+                .host
+                .list_sessions()
+                .await
+                .map_err(|err| Self::map_host_error(&err))?
+                .into_iter()
+                .find(|session| session.id == session_id)
+                .and_then(|session| session.active_op_id)
+                .ok_or_else(|| Self::internal_error("control operation has no active host identity"))?,
+        };
+        // ACP controls generate their own terminal ID after the synchronous
+        // RPC. Correlate it after HostManager applies its lifecycle transition.
         let stream = if control {
             let wire_id = op_id.clone();
             Box::pin(stream.map(move |event| event.map(|mut event| {
@@ -874,21 +888,10 @@ mod tests {
 
         async fn exec(
             &self,
-            session_id: HostSessionId,
-            op: HostOperation,
+            _session_id: HostSessionId,
+            _op: HostOperation,
         ) -> crate::HostResult<HostEventStream> {
-            match op {
-                HostOperation::SetMode { .. } | HostOperation::SetModel { .. } => {
-                    Ok(Box::pin(futures_util::stream::iter([Ok(HostEvent::OpFinished(
-                        OperationFinishedEvent {
-                            session_id,
-                            op_id: HostOperationId::new(),
-                            reason: FinishReason::EndTurn,
-                        },
-                    ))])))
-                }
-                HostOperation::Prompt { .. } => Err(HostError::internal("not used")),
-            }
+            Err(HostError::internal("not used"))
         }
 
         async fn cancel(&self, _op_id: HostOperationId) -> crate::HostResult<()> {
@@ -938,25 +941,6 @@ mod tests {
         })
     }
 
-    #[tokio::test]
-    async fn control_terminal_matches_the_returned_operation_id() {
-        let port = adapter();
-        let session_id = HostSessionId::new().to_string();
-        let reply = port.call(ProviderCall {
-            method: ProviderCallMethod::Execute,
-            request_id: "set-mode".into(),
-            session_id: Some(session_id.clone()),
-            operation_id: None,
-            deadline_ms: 1_000,
-            payload: serde_json::json!({"SetMode": {"mode": "plan"}}).as_object().unwrap().clone(),
-        }).await.unwrap();
-        let operation_id = reply.operation_id.unwrap();
-        let batch = port.next(operation_id.clone(), 16, 4096).await.unwrap();
-        assert!(!batch.has_more);
-        let event = serde_json::to_value(&batch.events[0]).unwrap();
-        assert_eq!(event["OpFinished"]["op_id"], operation_id);
-        assert_eq!(event["OpFinished"]["session_id"], session_id);
-    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrent_same_operation_pull_is_busy_and_flag_resets() {
