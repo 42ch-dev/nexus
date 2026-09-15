@@ -44,6 +44,7 @@ pub mod provider_call;
 pub mod provider_event_batch;
 pub mod provider_host_event;
 pub mod provider_reply;
+pub mod runtime_api;
 pub mod validated_provider_recipe;
 
 pub use core_actor_admission_request::*;
@@ -89,4 +90,5 @@ pub use provider_call::*;
 pub use provider_event_batch::*;
 pub use provider_host_event::ProviderHostEvent;
 pub use provider_reply::*;
+pub use runtime_api::*;
 pub use validated_provider_recipe::*;

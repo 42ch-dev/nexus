@@ -5,9 +5,13 @@ import {
   type Server,
   type ServerResponse,
 } from 'node:http';
-import { createServer as createHttpsServer } from 'node:https';
+import {
+  createServer as createHttpsServer,
+} from 'node:https';
+import { existsSync, rmSync } from 'node:fs';
+import net from 'node:net';
 import { randomUUID } from 'node:crypto';
-import type { CoreCloseReport } from '@42ch/nexus-contracts';
+import type { CoreCloseReport, CoreServiceDiscovery, CoreServiceStopRequest } from '@42ch/nexus-contracts';
 import {
   formatHttpAuthority,
   HEADER_DEADLINE_CHECK_MS,
@@ -24,10 +28,71 @@ import { handleRoute, matchRoute } from './routes.js';
 import { releaseSessionSubscriber, reserveSessionSubscriber } from './sse.js';
 
 export interface RunningService {
-  readonly url: string;
+  /** HTTP(S) base URL; null on the unix transport (use `endpoint.path`). */
+  readonly url: string | null;
+  /** The tagged wire endpoint actually bound after listen. */
+  readonly endpoint: CoreServiceDiscovery['endpoint'];
+  /** The v1 discovery record published for this instance (§7). */
+  readonly discovery: CoreServiceDiscovery;
   /** Same-process observability seam for scoped tests; not part of the wire API. */
   readonly service: ServiceCore;
   close(): Promise<CoreCloseReport>;
+}
+
+/** Instance-bound operator stop endpoint (architecture §7). */
+const RUNTIME_STOP_PATH = '/v1/daemon/runtime/stop';
+
+/**
+ * Closed admission of the generated `CoreServiceStopRequest` shape. Rejected
+ * here because the stop path never crosses the native wire validator.
+ */
+function parseStopRequest(body: unknown): CoreServiceStopRequest {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    throw new HttpError(400, 'invalid_input', 'stop request must be a JSON object');
+  }
+  const { expected_instance_id, expected_engine_epoch, ...extra } = body as Record<string, unknown>;
+  if (typeof expected_instance_id !== 'string' || expected_instance_id.length === 0) {
+    throw new HttpError(400, 'invalid_input', 'stop request requires expected_instance_id');
+  }
+  if (
+    expected_engine_epoch !== null &&
+    (typeof expected_engine_epoch !== 'number' ||
+      !Number.isSafeInteger(expected_engine_epoch) ||
+      expected_engine_epoch < 0)
+  ) {
+    throw new HttpError(
+      400,
+      'invalid_input',
+      'expected_engine_epoch must be a non-negative integer or null',
+    );
+  }
+  if (Object.keys(extra).length > 0) {
+    throw new HttpError(400, 'invalid_input', 'stop request accepts no unknown fields');
+  }
+  return { expected_instance_id, expected_engine_epoch };
+}
+
+/**
+ * A leftover socket file from a crashed owner is removable only when nothing
+ * answers on it; a live listener refuses the bind with `busy` instead of a
+ * cryptic EADDRINUSE.
+ */
+async function clearStaleUnixSocket(path: string): Promise<void> {
+  if (!existsSync(path)) return;
+  const live = await new Promise<boolean>((resolveProbe) => {
+    const probe = net.connect(path);
+    const settle = (value: boolean) => {
+      probe.destroy();
+      resolveProbe(value);
+    };
+    probe.once('connect', () => settle(true));
+    probe.once('error', () => settle(false));
+    setTimeout(() => settle(false), 500).unref();
+  });
+  if (live) {
+    throw new HttpError(503, 'busy', 'another service is listening on this socket path');
+  }
+  rmSync(path, { force: true });
 }
 
 function requestId(req: IncomingMessage): string {
@@ -117,7 +182,9 @@ export function createServiceServer(
   config: ResolvedServiceConfig,
   service: ServiceCore,
   closeFn: () => Promise<CoreCloseReport>,
-): { server: Server; running: RunningService } {
+): { server: Server } {
+  // URL base for relative request-URL parsing only; the wire endpoint is
+  // reported from the bound listener, never from this placeholder.
   const protocol = config.tlsCert && config.tlsKey ? 'https' : 'http';
   const url = `${protocol}://${formatHttpAuthority(config.host, config.port)}`;
 
@@ -143,6 +210,53 @@ export function createServiceServer(
         return;
       }
 
+      // Instance-bound operator stop (architecture §7): same guarded-tier
+      // admission as domain routes, handled before the domain route matcher
+      // because it controls the transport itself rather than a family.
+      if (method === 'POST' && urlObj.pathname === RUNTIME_STOP_PATH) {
+        const auth = checkApiKey(req, config, remoteAddress);
+        if (!auth.ok) {
+          sendError(
+            res,
+            new HttpError(auth.status, auth.code, auth.message, auth.details),
+            id,
+            origin,
+            config.allowedOrigins,
+          );
+          return;
+        }
+        const bodyBuffer = await readBody(req);
+        const stopRequest = parseStopRequest(parseJsonBody(bodyBuffer, method));
+        const matches =
+          stopRequest.expected_instance_id === service.instanceId &&
+          stopRequest.expected_engine_epoch === service.engineEpoch;
+        if (!matches) {
+          // Mismatch returns conflict and performs no stop: a stale record
+          // never stops its replacement, and a read-only attach never kills
+          // an unowned service.
+          throw new HttpError(
+            409,
+            'instance_conflict',
+            'stop request does not match this service instance',
+            {
+              expected_instance_id: stopRequest.expected_instance_id,
+              expected_engine_epoch: stopRequest.expected_engine_epoch,
+              actual_instance_id: service.instanceId,
+              actual_engine_epoch: service.engineEpoch,
+            },
+          );
+        }
+        // Respond BEFORE the close runs: the close owner force-destroys
+        // sockets, including the one carrying this response, so the close is
+        // deferred until the response is flushed ('finish') and its result is
+        // observed by polling the health route (§7 semantics).
+        res.once('finish', () => {
+          void closeFn().catch(() => undefined);
+        });
+        sendJson(res, 200, { status: 'stopping' }, id, origin, config.allowedOrigins);
+        return;
+      }
+
       const route = matchRoute(method, urlObj.pathname);
       if (!route) {
         sendError(res, new HttpError(501, 'route_not_migrated', `Route is not migrated: ${urlObj.pathname}`), id, origin, config.allowedOrigins);
@@ -162,6 +276,7 @@ export function createServiceServer(
           return;
         }
       }
+
 
       const bodyBuffer = method === 'GET' || method === 'HEAD' ? Buffer.alloc(0) : await readBody(req);
       const body = parseJsonBody(bodyBuffer, method);
@@ -239,18 +354,39 @@ export function createServiceServer(
   (server as Server & { connectionsCheckingInterval: number }).connectionsCheckingInterval =
     HEADER_DEADLINE_CHECK_MS;
 
-  const running: RunningService = {
-    url,
-    service,
-    close: closeFn,
-  };
 
-  return { server, running };
+  return { server };
 }
 
-export function listenServer(server: Server, host: string, port: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(port, host, () => resolve());
+/**
+ * Bind the listener and report the wire endpoint actually served: the tagged
+ * http URL (with the bound port, so port 0 works) or the unix socket path.
+ */
+export async function listenServer(
+  server: Server,
+  config: ResolvedServiceConfig,
+): Promise<CoreServiceDiscovery['endpoint']> {
+  if (config.transport === 'unix') {
+    const socketPath = config.socketPath;
+    if (!socketPath) {
+      throw new HttpError(500, 'internal', 'unix transport requires a socket path');
+    }
+    await clearStaleUnixSocket(socketPath);
+    await new Promise<void>((resolveListen, rejectListen) => {
+      server.once('error', rejectListen);
+      server.listen(socketPath, () => resolveListen());
+    });
+    return { transport: 'unix', path: socketPath };
+  }
+  await new Promise<void>((resolveListen, rejectListen) => {
+    server.once('error', rejectListen);
+    server.listen(config.port, config.host, () => resolveListen());
   });
+  const bound = server.address();
+  const port = bound && typeof bound === 'object' ? bound.port : config.port;
+  const protocol = config.tlsCert && config.tlsKey ? 'https' : 'http';
+  return {
+    transport: 'http',
+    url: `${protocol}://${formatHttpAuthority(config.host, port)}`,
+  };
 }

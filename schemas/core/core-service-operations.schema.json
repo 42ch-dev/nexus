@@ -104,6 +104,11 @@
           "returns": "CancelOperationResponse"
         },
         {
+          "name": "stopService",
+          "args": [{ "name": "request", "type": "CoreServiceStopRequest" }],
+          "returns": "RuntimeApi"
+        },
+        {
           "name": "subscribeAgentHostEvents",
           "args": [
             { "name": "sessionId", "type": "string" },

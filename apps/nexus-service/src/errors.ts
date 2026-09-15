@@ -30,6 +30,9 @@ const STATUS_BY_CODE: Record<CoreError['code'], number> = {
   invalid_input: 400,
   forbidden: 403,
   not_found: 404,
+  // An operation this service does not serve is refused without side effects,
+  // mirroring the 501 route_not_migrated semantics rather than fake success.
+  not_supported: 501,
   world_kb_conflict: 409,
   world_kb_validation: 422,
   writer_fenced: 409,

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import { isLoopbackBindHost } from './bind.js';
 
 export interface ServiceOptions {
@@ -10,6 +10,14 @@ export interface ServiceOptions {
   domainOnly?: boolean;
   tlsCert?: string;
   tlsKey?: string;
+  /** Wire transport (architecture §7). Defaults to `http`. */
+  transport?: 'http' | 'unix';
+  /** Absolute Unix domain socket path; required for `unix`, forbidden for `http`. */
+  socketPath?: string;
+  /** ACP registry CDN base; must pass the legacy public-HTTPS validation. */
+  cdnUrl?: string;
+  /** Enable the embedded MCP lane for peers that request it. */
+  embeddedMcp?: boolean;
 }
 
 export interface ResolvedServiceConfig extends ServiceOptions {
@@ -17,8 +25,11 @@ export interface ResolvedServiceConfig extends ServiceOptions {
   apiKey: string | null;
   allowedOrigins: string[];
   tlsCertMtimeMs?: number;
+  transport: 'http' | 'unix';
+  socketPath?: string;
+  cdnUrl?: string;
+  embeddedMcp: boolean;
 }
-
 export const MAX_REQUEST_BYTES = 1024 * 1024;
 export const HEADER_READ_TIMEOUT_MS = 5_000;
 /** Sweep interval that makes the frozen 5s header deadline observable on time. */
@@ -180,12 +191,84 @@ export function validateServiceHome(home: string): void {
   }
 }
 
+function isBlockedCdnIp(ip: string): boolean {
+  const v4 = ip.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    if (a > 255 || b > 255) return false;
+    // Private, loopback, link-local ranges plus the 169.254.0.0/16 metadata
+    // endpoint, mirroring the legacy `is_blocked_ip` V4 arm.
+    return (
+      a === 10 ||
+      a === 127 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254)
+    );
+  }
+  if (ip.includes(':')) {
+    const lowered = ip.toLowerCase();
+    const mapped = lowered.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (mapped) return isBlockedCdnIp(mapped[1]);
+    // Loopback (::1) and unique-local fc00::/7.
+    return lowered === '::1' || lowered.startsWith('fc') || lowered.startsWith('fd');
+  }
+  return false;
+}
+
+/**
+ * Legacy CDN validation (registry.rs `validate_cdn_url_static`), preserved
+ * verbatim in spirit: public HTTPS URLs only, literal-IP hosts in private,
+ * loopback, link-local or metadata ranges are refused.
+ */
+export function validateCdnUrl(url: string): void {
+  if (url.trim().length === 0) {
+    throw new Error('--cdn-url must be a public HTTPS CDN URL (https://...); got empty value');
+  }
+  if (!url.startsWith('https://')) {
+    throw new Error(`--cdn-url must be a public HTTPS CDN URL (https://...); got ${JSON.stringify(url)}`);
+  }
+  const hostPart = url.slice('https://'.length).split('/')[0] ?? '';
+  const host = hostPart.split(':')[0] ?? '';
+  if (host.length === 0 || isBlockedCdnIp(host)) {
+    throw new Error(`--cdn-url must be a public HTTPS CDN URL (https://...); got ${JSON.stringify(url)}`);
+  }
+}
+
+/**
+ * Resolve the transport selection (architecture §7): `http` by default; a
+ * unix socket requires an absolute `socketPath`, and the socket path conflicts
+ * with an explicitly selected HTTP bind.
+ */
+function resolveTransport(
+  options: Pick<ServiceOptions, 'transport' | 'socketPath'>,
+): { transport: 'http' | 'unix'; socketPath?: string } {
+  const transport = options.transport ?? 'http';
+  if (transport === 'unix') {
+    const socketPath = options.socketPath;
+    if (!socketPath) {
+      throw new Error('--socket <absolute-path> is required for the unix transport');
+    }
+    if (!isAbsolute(socketPath)) {
+      throw new Error(`--socket must be an absolute path: ${JSON.stringify(socketPath)}`);
+    }
+    return { transport, socketPath };
+  }
+  if (options.socketPath) {
+    throw new Error('--socket conflicts with the http transport; pass --transport unix');
+  }
+  return { transport };
+}
+
 export function resolveServiceConfig(options: ServiceOptions): ResolvedServiceConfig {
   const home = resolve(options.home);
   const host = options.host.trim() || DEFAULT_HOST;
   const port = options.port;
   const rawKey = process.env.NEXUS42_DAEMON_API_KEY?.trim() ?? '';
   const apiKey = rawKey.length > 0 ? rawKey : null;
+  const { transport, socketPath } = resolveTransport(options);
+  if (options.cdnUrl) validateCdnUrl(options.cdnUrl);
+  const cdnUrl = options.cdnUrl;
   return {
     ...options,
     home,
@@ -193,6 +276,10 @@ export function resolveServiceConfig(options: ServiceOptions): ResolvedServiceCo
     port,
     apiKey,
     allowedOrigins: resolveAllowedOrigins(port, host),
+    transport,
+    socketPath,
+    cdnUrl,
+    embeddedMcp: options.embeddedMcp === true,
   };
 }
 
@@ -204,6 +291,10 @@ export interface CliArgs {
   allowRemote: boolean;
   tlsCert?: string;
   tlsKey?: string;
+  transport: 'http' | 'unix';
+  socketPath?: string;
+  cdnUrl?: string;
+  embeddedMcp: boolean;
 }
 
 export function parseCliArgs(argv: string[]): CliArgs {
@@ -215,6 +306,12 @@ export function parseCliArgs(argv: string[]): CliArgs {
   let allowRemote = false;
   let tlsCert: string | undefined;
   let tlsKey: string | undefined;
+  let transport: 'http' | 'unix' = 'http';
+  let socketPath: string | undefined;
+  let cdnUrl: string | undefined;
+  let embeddedMcp = false;
+  let hostGiven = false;
+  let portGiven = false;
 
   for (let i = 0; i < args.length; i += 1) {
     const token = args[i];
@@ -224,9 +321,11 @@ export function parseCliArgs(argv: string[]): CliArgs {
         break;
       case '--host':
         host = args[++i] ?? DEFAULT_HOST;
+        hostGiven = true;
         break;
       case '--port':
         port = Number.parseInt(args[++i] ?? '', 10);
+        portGiven = true;
         break;
       case '--domain-only':
         domainOnly = true;
@@ -239,6 +338,23 @@ export function parseCliArgs(argv: string[]): CliArgs {
         break;
       case '--tls-key':
         tlsKey = resolve(args[++i] ?? '');
+        break;
+      case '--transport': {
+        const value = args[++i] ?? '';
+        if (value !== 'http' && value !== 'unix') {
+          throw new Error(`--transport must be "http" or "unix", got ${JSON.stringify(value)}`);
+        }
+        transport = value;
+        break;
+      }
+      case '--socket':
+        socketPath = args[++i] ?? '';
+        break;
+      case '--cdn-url':
+        cdnUrl = args[++i] ?? '';
+        break;
+      case '--embedded-mcp':
+        embeddedMcp = true;
         break;
       default:
         throw new Error(`unknown argument: ${token}`);
@@ -254,8 +370,37 @@ export function parseCliArgs(argv: string[]): CliArgs {
   if ((tlsCert && !tlsKey) || (!tlsCert && tlsKey)) {
     throw new Error('--tls-cert and --tls-key must be supplied together');
   }
+  // `--socket` is required only for unix and conflicts with an explicitly
+  // selected HTTP bind (architecture §7): an explicit --host/--port on the
+  // unix transport has no meaning, and a socket path on http is ambiguous.
+  if (transport === 'unix') {
+    if (!socketPath) {
+      throw new Error('--socket <absolute-path> is required for --transport unix');
+    }
+    if (hostGiven || portGiven) {
+      throw new Error('--socket conflicts with an explicit --host/--port HTTP bind');
+    }
+  } else if (socketPath) {
+    throw new Error('--socket conflicts with the http transport; pass --transport unix');
+  }
+  if (socketPath && !isAbsolute(socketPath)) {
+    throw new Error(`--socket must be an absolute path: ${JSON.stringify(socketPath)}`);
+  }
+  if (cdnUrl) validateCdnUrl(cdnUrl);
 
-  return { home, host, port, domainOnly, allowRemote, tlsCert, tlsKey };
+  return {
+    home,
+    host,
+    port,
+    domainOnly,
+    allowRemote,
+    tlsCert,
+    tlsKey,
+    transport,
+    socketPath,
+    cdnUrl,
+    embeddedMcp,
+  };
 }
 
 export function loadTlsMaterial(

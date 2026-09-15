@@ -43,6 +43,8 @@ const IMPORT_TYPES = [
   'ExecuteOperationRequest',
   'OperationResponse',
   'CancelOperationResponse',
+  'CoreServiceStopRequest',
+  'RuntimeApi',
   'ProviderHostEvent',
 ];
 

@@ -4,7 +4,7 @@
  * Generator: tooling/codegen/src/client-gen.ts
  */
 
-import type { WorldKbGraphResponse, WorldKbPatchEntityRequest, WorldKbPatchEntityResponse, WorldKbCandidatesResponse, CoreChangesRequest, CoreChangesResponse, CreateSessionRequest, AgentHostListSessionsQuery, SessionListResponse, SessionResponse, ShutdownSessionResponse, ExecuteOperationRequest, OperationResponse, CancelOperationResponse, ProviderHostEvent } from '../index';
+import type { WorldKbGraphResponse, WorldKbPatchEntityRequest, WorldKbPatchEntityResponse, WorldKbCandidatesResponse, CoreChangesRequest, CoreChangesResponse, CreateSessionRequest, AgentHostListSessionsQuery, SessionListResponse, SessionResponse, ShutdownSessionResponse, ExecuteOperationRequest, OperationResponse, CancelOperationResponse, CoreServiceStopRequest, RuntimeApi, ProviderHostEvent } from '../index';
 import type { CoreStreamGap } from './provider-event-batch';
 
 export interface CoreSliceClient {
@@ -19,5 +19,6 @@ export interface CoreSliceClient {
   executeAgentHostOperation(sessionId: string, request: ExecuteOperationRequest): Promise<OperationResponse>;
   getAgentHostOperation(operationId: string): Promise<OperationResponse>;
   cancelAgentHostOperation(operationId: string): Promise<CancelOperationResponse>;
+  stopService(request: CoreServiceStopRequest): Promise<RuntimeApi>;
   subscribeAgentHostEvents(sessionId: string, signal: AbortSignal): AsyncIterable<ProviderHostEvent | CoreStreamGap>;
 }

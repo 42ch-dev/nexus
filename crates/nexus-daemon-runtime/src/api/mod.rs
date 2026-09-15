@@ -812,6 +812,9 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
             post(handlers::acp::tool_execute),
         )
         .route("/v1/daemon/tools", get(handlers::tools::list_tools))
+        // Instance-bound operator stop (§7): API-key protected, no active
+        // creator requirement — it controls the service itself.
+        .route("/v1/daemon/runtime/stop", post(handlers::runtime::stop))
         .merge(agent_host_tier1_routes());
 
     let protected_routes = Router::new()

@@ -1,7 +1,15 @@
 #!/usr/bin/env node
 import { parseCliArgs } from './config.js';
+import { SERVICE_READY_PREFIX } from './discovery.js';
 import { startService } from './index.js';
 
+/**
+ * Service process boot (architecture §7): the transport host owns the boot
+ * signal/server-task responsibilities moved here from the former Rust daemon
+ * boot path. Exactly ONE stdout line is the machine-readable ready contract —
+ * `NEXUS_SERVICE_READY <discovery-json>` after the record is published; every
+ * human log goes to stderr.
+ */
 async function main(): Promise<void> {
   const args = parseCliArgs(process.argv.slice(2));
   const running = await startService({
@@ -12,6 +20,10 @@ async function main(): Promise<void> {
     domainOnly: args.domainOnly,
     tlsCert: args.tlsCert,
     tlsKey: args.tlsKey,
+    transport: args.transport,
+    socketPath: args.socketPath,
+    cdnUrl: args.cdnUrl,
+    embeddedMcp: args.embeddedMcp,
   });
 
   let shuttingDown = false;
@@ -31,7 +43,9 @@ async function main(): Promise<void> {
     void shutdown('SIGTERM');
   });
 
-  console.log(`[nexus-service] listening on ${running.url}`);
+  process.stdout.write(`${SERVICE_READY_PREFIX}${JSON.stringify(running.discovery)}\n`);
+  const where = running.url ?? `unix:${running.endpoint.transport === 'unix' ? running.endpoint.path : ''}`;
+  console.error(`[nexus-service] listening on ${where}`);
 }
 
 main().catch((error) => {
