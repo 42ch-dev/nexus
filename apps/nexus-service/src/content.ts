@@ -178,6 +178,15 @@ export const CONTENT_ROUTES: readonly DomainRoute[] = [
   },
   {
     method: 'GET',
+    pattern: /^\/v1\/daemon\/works\/([^/]+)\/chapters\/([^/]+)$/,
+    tier: 'tier2',
+    family: 'content',
+    handle: async (service, params, search) => ({
+      body: await getChapter(service, params[0], params[1], search),
+    }),
+  },
+  {
+    method: 'GET',
     pattern: /^\/v1\/daemon\/works\/([^/]+)\/chapters\/([^/]+)\/outline$/,
     tier: 'tier2',
     family: 'content',

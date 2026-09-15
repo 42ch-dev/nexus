@@ -22,6 +22,8 @@ import type {
   PackImportResponse,
   TimelineOverviewResponse,
   WorldFindingsListResponse,
+  WorldKbPatchRelationshipRequest,
+  WorldKbPromoteCandidateRequest,
   WorldRuleCreateRequest,
   WorldRuleResponse,
   WorldRuleUpdateRequest,
@@ -30,7 +32,13 @@ import type {
 import type { ServiceCore } from './lifecycle.js';
 import type { DomainRoute } from './routes.js';
 import { HttpError } from './errors.js';
-import { withPrincipal, wirePayload } from './world-kb.js';
+import {
+  getWorldKbKeyBlockState,
+  patchWorldKbRelationship,
+  promoteWorldKbCandidate,
+  withPrincipal,
+  wirePayload,
+} from './world-kb.js';
 
 /** `GET /v1/daemon/narrative/worlds`. */
 export function listWorlds(service: ServiceCore): Promise<NarrativeWorldsListResponse> {
@@ -300,6 +308,43 @@ export const WORLD_ROUTES: readonly DomainRoute[] = [
     family: 'worlds',
     handle: async (service, params, search) => ({
       body: await listTimelineEvents(service, params[0], search),
+    }),
+  },
+  // ── World KB canvas identities promoted from the legacy matcher (verbatim
+  // verb/path/tier; handlers shared with the world-kb module) ────────────────
+  {
+    method: 'POST',
+    pattern: /^\/v1\/daemon\/worlds\/([^/]+)\/kb\/promote-candidate$/,
+    tier: 'tier2',
+    family: 'worlds',
+    handle: async (service, params, _search, body) => ({
+      body: await promoteWorldKbCandidate(
+        service,
+        params[0],
+        wirePayload<WorldKbPromoteCandidateRequest>(body, 'request'),
+      ),
+    }),
+  },
+  {
+    method: 'POST',
+    pattern: /^\/v1\/daemon\/worlds\/([^/]+)\/kb\/patch-relationship$/,
+    tier: 'tier2',
+    family: 'worlds',
+    handle: async (service, params, _search, body) => ({
+      body: await patchWorldKbRelationship(
+        service,
+        params[0],
+        wirePayload<WorldKbPatchRelationshipRequest>(body, 'request'),
+      ),
+    }),
+  },
+  {
+    method: 'GET',
+    pattern: /^\/v1\/daemon\/worlds\/([^/]+)\/kb\/key-blocks\/([^/]+)\/state$/,
+    tier: 'tier2',
+    family: 'worlds',
+    handle: async (service, params) => ({
+      body: await getWorldKbKeyBlockState(service, params[0], params[1]),
     }),
   },
 ];
