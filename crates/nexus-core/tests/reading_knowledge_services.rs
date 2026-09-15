@@ -425,3 +425,91 @@ async fn kb_scope_isolation_and_entry_round_trip() {
     assert_eq!(field, "entry_id");
     core.close().await.unwrap();
 }
+
+/// Work-scoped create binds the finding to an existing, creator-owned Work:
+/// unknown and foreign `work_id` values are rejected before insert
+/// (QC2-F-002 — the legacy create-route hole is closed at the core, not the
+/// adapter).
+#[tokio::test]
+async fn create_finding_rejects_foreign_or_missing_work() {
+    let temp = tempfile::tempdir().unwrap();
+    let (core, principal, work_id) = core_with_work(temp.path()).await;
+    let make = |title: &str| nexus_core::CreateFindingRequest {
+        chapter: None,
+        severity: "minor".into(),
+        title: title.into(),
+        description: String::new(),
+        target_executor: "none".into(),
+        kind: "craft".into(),
+        rule_suggestion: None,
+    };
+
+    // Missing Work.
+    assert!(matches!(
+        core.create_finding(&principal, "missing".into(), make("t")).await,
+        Err(CoreError::NotFound { resource }) if resource == "work missing"
+    ));
+
+    // Foreign Work (row moved to another creator in the same database).
+    let home = temp.path();
+    let db = nexus_home_layout::workspace_state_db_path(home, "author", "default");
+    let seed = nexus_local_db::writer_protocol::init_guarded_pool(&db, "author").await.unwrap();
+    let pool = seed.clone_pool();
+    nexus_local_db::creators::ensure_creator_row(&pool, "other", "Other").await.unwrap();
+    sqlx::query("UPDATE works SET creator_id = 'other' WHERE work_id = ?")
+        .bind(&work_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    drop(seed);
+
+    assert!(matches!(
+        core.create_finding(&principal, work_id.clone(), make("t")).await,
+        Err(CoreError::NotFound { .. })
+    ));
+    core.close().await.unwrap();
+}
+
+/// The Work-scoped GET binds the returned row to the path `work_id`: a
+/// finding stored under one Work is reported with the legacy 404 shape
+/// through another owned Work's route and stays readable through its own
+/// (QC2-F-003 — no cross-work disclosure).
+#[tokio::test]
+async fn get_work_finding_binds_row_to_path_work() {
+    let temp = tempfile::tempdir().unwrap();
+    let (core, principal, work_a) = core_with_work(temp.path()).await;
+    let world = core
+        .create_world(&principal, serde_json::from_value::<CreateWorldRequest>(serde_json::json!({"title": "Second World"})).unwrap())
+        .await
+        .unwrap()
+        .world_id;
+    let work_b = core
+        .create_work(&principal, serde_json::from_value::<CreateWorkRequest>(serde_json::json!({
+            "title": "Second", "long_term_goal": "Write", "initial_idea": "Idea", "world_id": world
+        })).unwrap())
+        .await
+        .unwrap()
+        .work_id;
+    let finding = core.create_finding(&principal, work_a.clone(), nexus_core::CreateFindingRequest {
+        chapter: None,
+        severity: "minor".into(),
+        title: "bound".into(),
+        description: String::new(),
+        target_executor: "none".into(),
+        kind: "craft".into(),
+        rule_suggestion: None,
+    }).await.unwrap();
+
+    // Own route still resolves.
+    assert_eq!(
+        core.get_work_finding(&principal, work_a.clone(), finding.finding_id.clone()).await.unwrap().finding_id,
+        finding.finding_id
+    );
+    // Cross-work route: legacy 404 shape, indistinguishable from absence.
+    assert!(matches!(
+        core.get_work_finding(&principal, work_b.clone(), finding.finding_id.clone()).await,
+        Err(CoreError::NotFound { resource }) if resource == format!("finding {}", finding.finding_id)
+    ));
+    core.close().await.unwrap();
+}

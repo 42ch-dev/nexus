@@ -62,15 +62,15 @@ async fn work_selection_invalidates_foreign_context() {
     assert_eq!(listed.items.iter().map(|work| &work.work_id).collect::<Vec<_>>(), vec![&second]);
 
     // Core-owned nullable patch keeps absence / clear / set distinct.
-    core.patch_work(&principal, second.clone(), WorkPatchRequest { story_ref: Some(Some("story".into())), ..Default::default() }).await.unwrap();
-    core.patch_work(&principal, second.clone(), WorkPatchRequest { title: Some("Changed".into()), ..Default::default() }).await.unwrap();
+    core.patch_work(&principal, second.clone(), "core", WorkPatchRequest { story_ref: Some(Some("story".into())), ..Default::default() }).await.unwrap();
+    core.patch_work(&principal, second.clone(), "core", WorkPatchRequest { title: Some("Changed".into()), ..Default::default() }).await.unwrap();
     assert_eq!(core.get_work(&principal, second.clone()).await.unwrap().story_ref.as_deref(), Some("story"));
-    core.patch_work(&principal, second.clone(), WorkPatchRequest { story_ref: Some(None), ..Default::default() }).await.unwrap();
+    core.patch_work(&principal, second.clone(), "core", WorkPatchRequest { story_ref: Some(None), ..Default::default() }).await.unwrap();
     assert_eq!(core.get_work(&principal, second.clone()).await.unwrap().story_ref, None);
-    assert!(matches!(core.patch_work(&principal, second.clone(), WorkPatchRequest { world_id: Some(None), ..Default::default() }).await, Err(CoreError::InvalidInput { .. })));
+    assert!(matches!(core.patch_work(&principal, second.clone(), "core", WorkPatchRequest { world_id: Some(None), ..Default::default() }).await, Err(CoreError::InvalidInput { .. })));
     assert_eq!(core.get_work(&principal, second.clone()).await.unwrap().world_id.as_deref(), Some(world.as_str()));
     assert_eq!(core.get_work(&principal, second.clone()).await.unwrap().runtime_lock_holder, None);
-    assert!(matches!(core.patch_work(&principal, second.clone(), WorkPatchRequest {
+    assert!(matches!(core.patch_work(&principal, second.clone(), "core", WorkPatchRequest {
         stage_status: Some("complete".into()), title: Some("Rejected".into()), ..Default::default()
     }).await, Err(CoreError::InvalidInput { .. })));
     let unchanged = core.get_work(&principal, second.clone()).await.unwrap();
@@ -85,8 +85,8 @@ async fn work_selection_invalidates_foreign_context() {
     sqlx::query("UPDATE works SET work_ref = 'book' WHERE work_id = ?").bind(&second).execute(&pool).await.unwrap();
     sqlx::query("UPDATE works SET completion_locked_at = '2026-09-15', novel_completion_status = 'completed', total_planned_chapters = 3 WHERE work_id = ?").bind(&second).execute(&pool).await.unwrap();
     let expected_lock = format!("work_conflict:work {second} is completion-locked since 2026-09-15; use 'creator works completion-lock release' first");
-    assert!(matches!(core.patch_work(&principal, second.clone(), WorkPatchRequest::default()).await, Err(CoreError::Forbidden { resource }) if resource == expected_lock));
-    assert!(matches!(core.delete_work(&principal, second.clone()).await, Err(CoreError::Forbidden { resource }) if resource == expected_lock));
+    assert!(matches!(core.patch_work(&principal, second.clone(), "core", WorkPatchRequest::default()).await, Err(CoreError::Forbidden { resource }) if resource == expected_lock));
+    assert!(matches!(core.delete_work(&principal, second.clone(), "core").await, Err(CoreError::Forbidden { resource }) if resource == expected_lock));
     let released = core.release_work_completion_lock(&principal, second.clone(), nexus_contracts::ReleaseCompletionLockRequest { reason: "continue writing".into() }).await.unwrap();
     assert_eq!(released.completion_locked_at, None);
     assert_eq!(released.novel_completion_status.as_deref(), Some("reopened"));
@@ -94,7 +94,7 @@ async fn work_selection_invalidates_foreign_context() {
     assert!(!lock_path.exists());
 
     sqlx::query("UPDATE works SET runtime_lock_holder = 'driver', runtime_lock_acquired_at = ? WHERE work_id = ?").bind(chrono::Utc::now().to_rfc3339()).bind(&second).execute(&pool).await.unwrap();
-    assert!(matches!(core.patch_work(&principal, second.clone(), WorkPatchRequest::default()).await,
+    assert!(matches!(core.patch_work(&principal, second.clone(), "core", WorkPatchRequest::default()).await,
         Err(CoreError::Forbidden { resource }) if resource == format!("work_locked:work {second} is locked by 'driver'; wait for release or check 'creator works status'")));
     sqlx::query("UPDATE works SET runtime_lock_holder = NULL, runtime_lock_acquired_at = NULL WHERE work_id = ?").bind(&second).execute(&pool).await.unwrap();
 
@@ -112,7 +112,7 @@ async fn work_selection_invalidates_foreign_context() {
     std::fs::write(nexus_home_layout::operational_workspace_dir(home, "author", "default").join("meta.json"),
         serde_json::to_vec(&serde_json::json!({"creative_root": creative_root})).unwrap()).unwrap();
     sqlx::query("UPDATE works SET work_ref = '../outside' WHERE work_id = ?").bind(&promoted.work_id).execute(&pool).await.unwrap();
-    core.delete_work(&principal, promoted.work_id.clone()).await.unwrap();
+    core.delete_work(&principal, promoted.work_id.clone(), "core").await.unwrap();
     assert!(matches!(core.get_work(&principal, promoted.work_id).await, Err(CoreError::NotFound { .. })));
     assert_eq!(std::fs::read_to_string(creative_root.join("outside/keep")).unwrap(), "must survive");
 
@@ -236,5 +236,119 @@ async fn internal_database_fault_carries_legacy_code() {
         panic!("dropped storage tables must surface as CoreError::Internal");
     };
     assert!(category.starts_with("DATABASE_ERROR: "), "legacy classification must ride the carrier, got: {category}");
+    core.close().await.unwrap();
+}
+
+/// Shape helper for the legacy 423 reason: the observable holder must be the
+/// `cli:http:<uuid>` label minted for the HTTP surface, never `cli:core:`.
+fn assert_http_holder_shape(reason: &str) {
+    let marker = "'cli:http:";
+    let start = reason.find(marker).expect("legacy cli:http holder in reason");
+    let tail = &reason[start + marker.len()..];
+    let uuid = tail.split('\'').next().expect("closing quote");
+    assert_eq!(uuid.len(), 36, "holder uuid shape: {reason}");
+    assert_eq!(uuid.chars().filter(|c| *c == '-').count(), 4, "uuid dashes: {reason}");
+    assert!(!reason.contains("cli:core:"), "core label must not leak into the HTTP surface: {reason}");
+}
+
+/// Fix-round regression (QC2-F-001): Work lifecycle locks minted through the
+/// daemon-holder surface keep the legacy `cli:http:<uuid>` label in the
+/// observable 423 reason — the same shape regression the content routes carry.
+#[tokio::test]
+async fn work_lifecycle_locks_report_http_holder_shape() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path();
+    std::fs::create_dir_all(home.join(".nexus42")).unwrap();
+    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(home, "author", "default")).unwrap();
+    select_creator(home, "author", "default");
+    let db = nexus_home_layout::workspace_state_db_path(home, "author", "default");
+    {
+        let seed = init_guarded_pool(&db, "author").await.unwrap();
+        let pool = seed.clone_pool();
+        nexus_local_db::creators::ensure_creator_row(&pool, "author", "Author").await.unwrap();
+        pool.close().await;
+    }
+    let core = CoreService::open(CoreOpenOptions { user_home: home.into(), access: CoreAccess::DirectWriter }).await.unwrap();
+    let principal = core.active_principal().await.unwrap();
+    let world = core.create_world(&principal, serde_json::from_value::<CreateWorldRequest>(serde_json::json!({"title": "World"})).unwrap()).await.unwrap().world_id;
+    let work_id = create(&core, &principal, &world, "Locked Work").await;
+    // Reconcile resolves story_ref and the creative root BEFORE its lock
+    // phase — seed both so the mutator actually reaches lock acquire.
+    core.patch_work(&principal, work_id.clone(), "core", WorkPatchRequest { story_ref: Some(Some("locked-work".into())), ..Default::default() }).await.unwrap();
+    std::fs::create_dir_all(home.join("creative/Works/locked-work")).unwrap();
+    std::fs::write(
+        nexus_home_layout::operational_workspace_dir(home, "author", "default").join("meta.json"),
+        serde_json::to_vec(&serde_json::json!({"creative_root": home.join("creative")})).unwrap(),
+    )
+    .unwrap();
+    // Hold the Work with the legacy HTTP holder label, exactly as the daemon
+    // surface mints it.
+    let lock_seed = init_guarded_pool(&db, "author").await.unwrap();
+    let lock_pool = lock_seed.clone_pool();
+    let holder = nexus_local_db::cli_holder("http");
+    assert!(matches!(
+        nexus_local_db::acquire_runtime_lock(&lock_pool, principal.creator_id(), &work_id, &holder, nexus_local_db::ttl_from_env(), false).await.unwrap(),
+        nexus_local_db::AcquireResult::Acquired { .. }
+    ));
+
+    let Err(CoreError::Forbidden { resource }) = core.patch_work(&principal, work_id.clone(), "http", WorkPatchRequest::default()).await else {
+        panic!("locked Work must reject patch");
+    };
+    assert_http_holder_shape(&resource);
+    let Err(CoreError::Forbidden { resource }) = core.append_work_inspiration(&principal, work_id.clone(), "http", nexus_contracts::AppendInspirationRequest { note: "blocked".into() }).await else {
+        panic!("locked Work must reject inspiration append");
+    };
+    assert_http_holder_shape(&resource);
+    let Err(CoreError::Forbidden { resource }) = core.delete_work(&principal, work_id.clone(), "http").await else {
+        panic!("locked Work must reject delete");
+    };
+    assert_http_holder_shape(&resource);
+    let Err(CoreError::Forbidden { resource }) = core.reconcile_work_chapters(&principal, work_id.clone(), "http", nexus_core::ReconcileDryRunQuery { dry_run: None }).await else {
+        panic!("locked Work must reject reconcile");
+    };
+    assert_http_holder_shape(&resource);
+
+    lock_pool.close().await;
+    drop(lock_seed);
+    core.close().await.unwrap();
+}
+
+/// Every Work lifecycle mutation the retained host-tool executors delegate to
+/// carries the work-write gate: read-only core access is rejected with the
+/// shared `work: read-only core access` Forbidden resource (QC1-F-001
+/// read-only denial, verified at the authority the executors now call).
+#[tokio::test]
+async fn work_lifecycle_mutators_reject_read_only_core() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path();
+    std::fs::create_dir_all(home.join(".nexus42")).unwrap();
+    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(home, "author", "default")).unwrap();
+    select_creator(home, "author", "default");
+    let db = nexus_home_layout::workspace_state_db_path(home, "author", "default");
+    {
+        let seed = init_guarded_pool(&db, "author").await.unwrap();
+        let pool = seed.clone_pool();
+        nexus_local_db::creators::ensure_creator_row(&pool, "author", "Author").await.unwrap();
+        pool.close().await;
+    }
+    let writer = CoreService::open(CoreOpenOptions { user_home: home.into(), access: CoreAccess::DirectWriter }).await.unwrap();
+    let writer_principal = writer.active_principal().await.unwrap();
+    let world = writer.create_world(&writer_principal, serde_json::from_value::<CreateWorldRequest>(serde_json::json!({"title": "World"})).unwrap()).await.unwrap().world_id;
+    let work_id = create(&writer, &writer_principal, &world, "Read Only").await;
+    let finding = writer.create_finding(&writer_principal, work_id.clone(), nexus_core::CreateFindingRequest {
+        chapter: None, severity: "minor".into(), title: "t".into(), description: String::new(),
+        target_executor: "none".into(), kind: "craft".into(), rule_suggestion: None,
+    }).await.unwrap();
+    writer.close().await.unwrap();
+
+    let core = CoreService::open(CoreOpenOptions { user_home: home.into(), access: CoreAccess::ReadOnly }).await.unwrap();
+    let principal = core.active_principal().await.unwrap();
+    assert!(matches!(core.patch_work(&principal, work_id.clone(), "http", WorkPatchRequest::default()).await, Err(CoreError::Forbidden { resource }) if resource == "work: read-only core access"));
+    assert!(matches!(core.append_work_inspiration(&principal, work_id.clone(), "http", nexus_contracts::AppendInspirationRequest { note: "n".into() }).await, Err(CoreError::Forbidden { resource }) if resource == "work: read-only core access"));
+    assert!(matches!(core.delete_work(&principal, work_id.clone(), "http").await, Err(CoreError::Forbidden { resource }) if resource == "work: read-only core access"));
+    assert!(matches!(core.reconcile_work_chapters(&principal, work_id.clone(), "http", nexus_core::ReconcileDryRunQuery { dry_run: None }).await, Err(CoreError::Forbidden { resource }) if resource == "work: read-only core access"));
+    assert!(matches!(core.promote_work_pool_entry(&principal, nexus_core::PromotePoolRequest { work_id: work_id.clone(), set_default: None }).await, Err(CoreError::Forbidden { resource }) if resource == "work: read-only core access"));
+    assert!(matches!(core.archive_work_pool_entry(&principal, nexus_core::ArchivePoolRequest { entry_id: "entry".into() }).await, Err(CoreError::Forbidden { resource }) if resource == "work: read-only core access"));
+    assert!(matches!(core.update_finding(&principal, finding.finding_id.clone(), nexus_core::UpdateFindingRequest::default()).await, Err(CoreError::Forbidden { resource }) if resource == "work: read-only core access"));
     core.close().await.unwrap();
 }

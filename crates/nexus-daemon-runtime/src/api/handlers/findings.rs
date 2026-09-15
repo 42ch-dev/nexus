@@ -203,7 +203,7 @@ pub struct ListFindingsResponse {
 /// `database_error: …` carrier is re-classified as the legacy
 /// `DATABASE_ERROR`; every other internal category keeps the shared
 /// `CORE_ERROR` shape.
-fn findings_error(error: nexus_core::CoreError) -> NexusApiError {
+pub(crate) fn findings_error(error: nexus_core::CoreError) -> NexusApiError {
     match error {
         nexus_core::CoreError::InvalidInput { field, reason } => {
             NexusApiError::BadRequest { code: field, message: reason }

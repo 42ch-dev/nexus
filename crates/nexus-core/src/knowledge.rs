@@ -456,6 +456,17 @@ impl CoreService {
     /// write sequence is crash-consistent (QC3 W-006): temp index rename
     /// commits the metadata, then the temp content rename commits the entry.
     ///
+    /// # Trust boundary (QC2-F-004, operator-local by contract)
+    ///
+    /// When `content` is absent, `file_path` is read verbatim via
+    /// `std::fs::read_to_string` with no confinement to the workspace root:
+    /// any path the daemon process can read may be ingested. This is a
+    /// deliberate retained behavior — the surface is operator-local (the
+    /// caller already holds host filesystem access), and constraining reads
+    /// here would change retained behavior. Revisit only as an explicit
+    /// containment decision (e.g. confining to the creative root), not as a
+    /// drive-by fix.
+    ///
     /// # Errors
     /// As [`CoreService::list_kb_entries`]; additionally
     /// [`CoreError::NotFound`] for a missing `file_path`, and

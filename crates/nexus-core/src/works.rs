@@ -337,16 +337,16 @@ impl CoreService {
         self.verify_principal(principal)?;
         Ok(response)
     }
-    pub async fn patch_work(&self, principal: &Principal, work_id: String, req: WorkPatchRequest) -> CoreResult<WorkDetails> {
+    pub async fn patch_work(&self, principal: &Principal, work_id: String, holder_kind: &str, req: WorkPatchRequest) -> CoreResult<WorkDetails> {
         self.verify_principal(principal)?;
         self.require_work_write()?;
-        patch_work(self, principal, work_id, req).await.map_err(CoreError::from)
+        patch_work(self, principal, work_id, holder_kind, req).await.map_err(CoreError::from)
     }
-    pub async fn append_work_inspiration(&self, principal: &Principal, work_id: String, req: AppendInspirationRequest) -> CoreResult<AppendInspirationResponse> {
+    pub async fn append_work_inspiration(&self, principal: &Principal, work_id: String, holder_kind: &str, req: AppendInspirationRequest) -> CoreResult<AppendInspirationResponse> {
         self.verify_principal(principal)?;
         self.resolve_owned_work(principal, &work_id).await?;
         self.require_work_write()?;
-        append_inspiration(self, principal, work_id, req).await.map_err(CoreError::from)
+        append_inspiration(self, principal, work_id, holder_kind, req).await.map_err(CoreError::from)
     }
     pub async fn set_work_pool_active(&self, principal: &Principal, req: SetPoolActiveRequest) -> CoreResult<WorkPoolEntry> {
         self.verify_principal(principal)?;
@@ -358,15 +358,15 @@ impl CoreService {
         self.require_work_write()?;
         release_completion_lock_handler(self, principal, work_id, req).await.map_err(CoreError::from)
     }
-    pub async fn delete_work(&self, principal: &Principal, work_id: String) -> CoreResult<()> {
+    pub async fn delete_work(&self, principal: &Principal, work_id: String, holder_kind: &str) -> CoreResult<()> {
         self.verify_principal(principal)?;
         self.require_work_write()?;
-        delete_work(self, principal, work_id).await.map_err(CoreError::from)
+        delete_work(self, principal, work_id, holder_kind).await.map_err(CoreError::from)
     }
-    pub async fn reconcile_work_chapters(&self, principal: &Principal, work_id: String, dry_run_query: ReconcileDryRunQuery) -> CoreResult<WorkReconcileReport> {
+    pub async fn reconcile_work_chapters(&self, principal: &Principal, work_id: String, holder_kind: &str, dry_run_query: ReconcileDryRunQuery) -> CoreResult<WorkReconcileReport> {
         self.verify_principal(principal)?;
         if !dry_run_query.dry_run.unwrap_or(false) { self.require_work_write()?; }
-        reconcile_chapters(self, principal, work_id, dry_run_query).await
+        reconcile_chapters(self, principal, work_id, holder_kind, dry_run_query).await
             .map(|report| WorkReconcileReport { created: report.created, updated: report.updated, resynced: report.resynced, preserved: report.preserved })
             .map_err(CoreError::from)
     }
@@ -925,7 +925,7 @@ async fn get_work(service: &CoreService, principal: &Principal, work_id: String)
     Ok(enrich_with_chapters(pool, record).await)
 }
 
-async fn patch_work(service: &CoreService, principal: &Principal, work_id: String, req: WorkPatchRequest) -> Result<WorkDetails, WorkFault> {
+async fn patch_work(service: &CoreService, principal: &Principal, work_id: String, holder_kind: &str, req: WorkPatchRequest) -> Result<WorkDetails, WorkFault> {
     let pool = &service.inner.pool;
     let creator_id =
         principal.creator_id().to_string();
@@ -958,7 +958,7 @@ async fn patch_work(service: &CoreService, principal: &Principal, work_id: Strin
 
     // V1.42 P0 (T2): Acquire runtime lock for this mutating operation.
     service.verify_principal(principal)?;
-    let lock = RuntimeLockGuard::acquire(pool, &creator_id, &work_id).await?;
+    let lock = RuntimeLockGuard::acquire(pool, &creator_id, &work_id, holder_kind).await?;
 
     // Capture every result before releasing: validation/DB failures must not
     // strand the runtime holder, including the stage-change branch.
@@ -977,7 +977,7 @@ async fn patch_work(service: &CoreService, principal: &Principal, work_id: Strin
     result.map(WorkDetails::from)
 }
 
-async fn append_inspiration(service: &CoreService, principal: &Principal, work_id: String, req: AppendInspirationRequest) -> Result<AppendInspirationResponse, WorkFault> {
+async fn append_inspiration(service: &CoreService, principal: &Principal, work_id: String, holder_kind: &str, req: AppendInspirationRequest) -> Result<AppendInspirationResponse, WorkFault> {
     let creator_id =
         principal.creator_id().to_string();
     let now = chrono::Utc::now().to_rfc3339();
@@ -1012,7 +1012,7 @@ async fn append_inspiration(service: &CoreService, principal: &Principal, work_i
 
     // V1.42 P0 (T2): Acquire runtime lock for this mutating operation.
     service.verify_principal(principal)?;
-    let lock = RuntimeLockGuard::acquire(&service.inner.pool, &creator_id, &work_id).await?;
+    let lock = RuntimeLockGuard::acquire(&service.inner.pool, &creator_id, &work_id, holder_kind).await?;
 
     // Build JSON for inspiration entry
     let entry = serde_json::json!({
@@ -1164,7 +1164,7 @@ async fn release_completion_lock_handler(service: &CoreService, principal: &Prin
     Ok(WorkDetails::from(updated))
 }
 
-async fn delete_work(service: &CoreService, principal: &Principal, work_id: String) -> Result<(), WorkFault> {
+async fn delete_work(service: &CoreService, principal: &Principal, work_id: String, holder_kind: &str) -> Result<(), WorkFault> {
     let pool = &service.inner.pool;
     let creator_id =
         principal.creator_id().to_string();
@@ -1195,7 +1195,7 @@ async fn delete_work(service: &CoreService, principal: &Principal, work_id: Stri
 
     // Acquire the runtime lock for this mutating operation.
     service.verify_principal(principal)?;
-    let lock = RuntimeLockGuard::acquire(pool, &creator_id, &work_id).await?;
+    let lock = RuntimeLockGuard::acquire(pool, &creator_id, &work_id, holder_kind).await?;
 
     // Hard-delete the Work row. SQLite FK cascades drop the children:
     // work_chapters / work_chapter_volumes / findings / novel_pool_entries /
@@ -1266,7 +1266,7 @@ async fn delete_work(service: &CoreService, principal: &Principal, work_id: Stri
     Ok(())
 }
 
-async fn reconcile_chapters(service: &CoreService, principal: &Principal, work_id: String, dry_run_query: ReconcileDryRunQuery) -> Result<nexus_local_db::work_chapters::ReconcileReport, WorkFault> {
+async fn reconcile_chapters(service: &CoreService, principal: &Principal, work_id: String, holder_kind: &str, dry_run_query: ReconcileDryRunQuery) -> Result<nexus_local_db::work_chapters::ReconcileReport, WorkFault> {
     let creator_id =
         principal.creator_id().to_string();
     let pool = &service.inner.pool;
@@ -1353,7 +1353,7 @@ async fn reconcile_chapters(service: &CoreService, principal: &Principal, work_i
 
     // Phase B: acquire the lock and apply only the writes.
     service.verify_principal(principal)?;
-    let lock = RuntimeLockGuard::acquire(pool, &creator_id, &work_id).await?;
+    let lock = RuntimeLockGuard::acquire(pool, &creator_id, &work_id, holder_kind).await?;
     let lock_acquired_at = chrono::Utc::now();
     tracing::info!(
         work_id = %work_id,
@@ -2021,8 +2021,10 @@ fn is_valid_work_ref(s: &str) -> bool {
 
 struct RuntimeLockGuard { pool: sqlx::SqlitePool, creator_id: String, work_id: String, holder: String }
 impl RuntimeLockGuard {
-    async fn acquire(pool: &sqlx::SqlitePool, creator_id: &str, work_id: &str) -> Result<Self, WorkFault> {
-        let holder = nexus_local_db::cli_holder("core");
+    /// `holder_kind` labels the minted `cli:<kind>:<uuid>` holder; the daemon
+    /// HTTP surface passes `http` so 423 reasons keep the legacy label.
+    async fn acquire(pool: &sqlx::SqlitePool, creator_id: &str, work_id: &str, holder_kind: &str) -> Result<Self, WorkFault> {
+        let holder = nexus_local_db::cli_holder(holder_kind);
         let acquired = nexus_local_db::acquire_runtime_lock(pool, creator_id, work_id, &holder, nexus_local_db::ttl_from_env(), true)
             .await.map_err(crate::error::local_db_err)?;
         match acquired {

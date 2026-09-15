@@ -354,7 +354,7 @@ pub struct ArchiveInspirationRequest {
     pub item_id: String,
 }
 
-fn work_error(error: nexus_core::CoreError) -> NexusApiError {
+pub(crate) fn work_error(error: nexus_core::CoreError) -> NexusApiError {
     match error {
         nexus_core::CoreError::InvalidInput { field, reason } => NexusApiError::BadRequest { code: field, message: reason },
         nexus_core::CoreError::Forbidden { resource } if resource.starts_with("work_conflict:") => NexusApiError::Conflict(resource[14..].to_owned()),
@@ -401,7 +401,7 @@ pub async fn patch_work(State(state): State<WorkspaceState>, Path(work_id): Path
     let principal = core.active_principal().await?;
     let resume_auto_chain = req.auto_chain_interrupted == Some(false)
         && req.current_stage.is_none() && req.stage_status.is_none();
-    let result = core.patch_work(&principal, work_id, nexus_core::WorkPatchRequest { title: req.title, long_term_goal: req.long_term_goal, creative_brief: req.creative_brief, intake_status: req.intake_status, status: req.status, world_id: req.world_id, story_ref: req.story_ref, primary_preset_id: req.primary_preset_id, current_stage: req.current_stage, stage_status: req.stage_status, force: req.force, auto_review_master_on_timeout: req.auto_review_master_on_timeout, auto_chain_interrupted: req.auto_chain_interrupted, work_profile: req.work_profile }).await.map_err(work_error)?;
+    let result = core.patch_work(&principal, work_id, "http", nexus_core::WorkPatchRequest { title: req.title, long_term_goal: req.long_term_goal, creative_brief: req.creative_brief, intake_status: req.intake_status, status: req.status, world_id: req.world_id, story_ref: req.story_ref, primary_preset_id: req.primary_preset_id, current_stage: req.current_stage, stage_status: req.stage_status, force: req.force, auto_review_master_on_timeout: req.auto_review_master_on_timeout, auto_chain_interrupted: req.auto_chain_interrupted, work_profile: req.work_profile }).await.map_err(work_error)?;
     // Legacy daemon composition only; scheduling remains outside the core Work service.
     if resume_auto_chain {
         if let Some(supervisor) = state.schedule_supervisor() {
@@ -416,7 +416,7 @@ pub async fn patch_work(State(state): State<WorkspaceState>, Path(work_id): Path
 pub async fn append_inspiration(State(state): State<WorkspaceState>, Path(work_id): Path<String>, Json(req): Json<AppendInspirationRequest>) -> Result<Json<AppendInspirationResponse>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let result = core.append_work_inspiration(&principal, work_id, nexus_contracts::AppendInspirationRequest { note: req.note }).await.map_err(work_error)?;
+    let result = core.append_work_inspiration(&principal, work_id, "http", nexus_contracts::AppendInspirationRequest { note: req.note }).await.map_err(work_error)?;
     Ok(Json(AppendInspirationResponse { work_id: result.work_id, inspiration_count: usize::try_from(result.inspiration_count).unwrap_or(usize::MAX) }))
 }
 
@@ -437,14 +437,14 @@ pub async fn release_completion_lock_handler(State(state): State<WorkspaceState>
 pub async fn delete_work(State(state): State<WorkspaceState>, Path(work_id): Path<String>) -> Result<StatusCode, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    core.delete_work(&principal, work_id).await.map_err(work_error)?;
+    core.delete_work(&principal, work_id, "http").await.map_err(work_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn reconcile_chapters(State(state): State<WorkspaceState>, Path(work_id): Path<String>, Query(query): Query<ReconcileDryRunQuery>) -> Result<(StatusCode, Json<nexus_local_db::work_chapters::ReconcileReport>), NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let result = core.reconcile_work_chapters(&principal, work_id, nexus_core::ReconcileDryRunQuery { dry_run: query.dry_run }).await.map_err(work_error)?;
+    let result = core.reconcile_work_chapters(&principal, work_id, "http", nexus_core::ReconcileDryRunQuery { dry_run: query.dry_run }).await.map_err(work_error)?;
     Ok((StatusCode::OK, Json(nexus_local_db::work_chapters::ReconcileReport {
         created: result.created, updated: result.updated, resynced: result.resynced, preserved: result.preserved,
     })))

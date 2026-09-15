@@ -237,9 +237,11 @@ fn finding_patch_from_update(request: UpdateFindingRequest) -> FindingPatch {
 impl CoreService {
     /// Create a finding on a Work (201 at the adapter).
     ///
-    /// Deliberately mirrors the legacy surface: no Work-ownership precheck on
-    /// this path (the create route never had one); ID minting stays delegated
-    /// to the findings DAO (R-V139P1-W-2).
+    /// The target Work must exist and belong to the active creator
+    /// (`resolve_owned_work` before insert, QC2-F-002 — the legacy
+    /// create-route hole that accepted arbitrary `work_id` values is closed
+    /// here, not at the adapter); ID minting stays delegated to the findings
+    /// DAO (R-V139P1-W-2).
     ///
     /// # Errors
     /// Returns [`CoreError::AuthRequired`] when the principal fails
@@ -253,6 +255,7 @@ impl CoreService {
         request: CreateFindingRequest,
     ) -> CoreResult<FindingDetailResponse> {
         self.verify_principal(principal)?;
+        self.resolve_owned_work(principal, &work_id).await?;
         self.require_work_write()?;
         // R-V139P1-W-2: delegate ID mint to findings module (single source of truth).
         let finding_id = findings::mint_finding_id();
@@ -391,6 +394,11 @@ impl CoreService {
 
     /// One finding, Work-ownership verified first.
     ///
+    /// The returned row is also bound to the path `work_id`: a finding
+    /// stored under a different Work is reported as `NotFound` with the
+    /// legacy shape (QC2-F-003 — no cross-work disclosure through the
+    /// Work-scoped route).
+    ///
     /// # Errors
     /// As [`CoreService::list_findings`] (no filter/cursor faults).
     pub async fn get_work_finding(
@@ -405,7 +413,11 @@ impl CoreService {
             .await
             .map_err(findings_db_err)?
             .ok_or_else(|| FindingsFault::NotFound(format!("finding {finding_id}")))?;
-        self.verify_principal(principal)?;
+        if f.work_id != work_id {
+            // Path `work_id` does not match the stored row: keep the legacy
+            // 404 shape so the mismatch is indistinguishable from absence.
+            return Err(FindingsFault::NotFound(format!("finding {finding_id}")).into());
+        }
         Ok(to_finding_detail(f))
     }
 

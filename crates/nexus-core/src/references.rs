@@ -69,7 +69,6 @@ impl CoreService {
             .await
             .map_err(local_db_err)?;
         let references = rows.into_iter().map(ReferenceInfo::from).collect();
-        self.verify_principal(principal)?;
         Ok(ListReferencesResponse { references })
     }
 
@@ -91,7 +90,6 @@ impl CoreService {
             .ok_or_else(|| crate::CoreError::NotFound {
                 resource: format!("reference_source: {reference_id}"),
             })?;
-        self.verify_principal(principal)?;
         Ok(GetReferenceResponse { reference: ReferenceInfo::from(row) })
     }
 }
