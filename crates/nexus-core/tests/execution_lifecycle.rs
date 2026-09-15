@@ -12,8 +12,9 @@
 #![cfg(feature = "execution")]
 
 use async_trait::async_trait;
-use nexus_contracts::{CoreError as WireCoreError, ProviderCall, ProviderEventBatch, ProviderReply};
+use nexus_contracts::{CoreError as WireCoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply};
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService, RunnerDeps};
+use nexus_orchestration::WorkflowStateStore;
 use nexus_provider_ports::{ProviderPort, ProviderResult};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -41,8 +42,14 @@ impl NullProvider {
 impl ProviderPort for NullProvider {
     async fn call(&self, _request: ProviderCall) -> ProviderResult<ProviderReply> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        Err(WireCoreError::Internal {
-            category: "null provider: no live model in this test".to_string(),
+        // The wire `CoreError` is a struct (`code`/`message`/`details`/
+        // `http_status`), not an enum with an `Internal` variant — mirror the
+        // canonical mapping in `nexus_agent_host::providers::port`.
+        Err(WireCoreError {
+            code: CoreErrorCode::Internal,
+            message: "null provider: no live model in this test".to_string(),
+            details: serde_json::Map::default(),
+            http_status: Some(500),
         })
     }
 
