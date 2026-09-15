@@ -311,21 +311,30 @@ async fn host_authority_admits_only_verified_principals() {
         serde_json::json!({ "kind": "prompt", "content": "hello" }),
     )
     .unwrap();
-    for err in [
+    let mut denials = Vec::new();
+    denials.push(
         handle
             .create_session(&foreign_principal, serde_json::from_value(
                 serde_json::json!({ "provider_id": "mock-acp" }),
             ).unwrap())
+            .await
             .unwrap_err(),
+    );
+    denials.push(
         handle
             .execute(&foreign_principal, Uuid::new_v4().to_string(), request)
+            .await
             .unwrap_err(),
+    );
+    denials.push(
         handle
             .query(&foreign_principal, serde_json::from_value(
                 serde_json::json!({ "query": "list_sessions" }),
             ).unwrap())
+            .await
             .unwrap_err(),
-    ] {
+    );
+    for err in denials {
         assert!(
             matches!(err, CoreError::AuthRequired),
             "foreign principals are auth-required, got {err:?}"

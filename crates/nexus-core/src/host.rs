@@ -53,6 +53,14 @@ use crate::principal::Principal;
 use crate::service::CoreService;
 use crate::soul::CoreCharacterMind;
 
+impl std::fmt::Debug for HostHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Deliberately non-exhaustive without member detail: no provider,
+        // catalog, or profile state leaks through Debug.
+        f.debug_struct("HostHandle").finish_non_exhaustive()
+    }
+}
+
 fn host_err(err: nexus_agent_host::HostError) -> CoreError {
     CoreError::Internal {
         category: format!("agent_host: {err}"),
