@@ -169,7 +169,9 @@ export function patchTimelineEvent(
 export const CONTENT_ROUTES: readonly DomainRoute[] = [
   {
     method: 'GET',
-    pattern: /^\/v1\/daemon\/works\/([^/]+)\/chapters\/$/,
+    // Canonical wire form: the Rust daemon serves (and the browser delegation
+    // has always sent) the list WITHOUT a trailing slash.
+    pattern: /^\/v1\/daemon\/works\/([^/]+)\/chapters$/,
     tier: 'tier2',
     family: 'content',
     handle: async (service, params, search) => ({

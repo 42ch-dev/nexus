@@ -122,7 +122,7 @@ describe('domain-http (P5-T1)', () => {
       ['POST', '/v1/daemon/works/([^/]+)/inspiration'],
       ['POST', '/v1/daemon/works/([^/]+)/completion-lock/release'],
       ['POST', '/v1/daemon/works/([^/]+)/reconcile-chapters'],
-      ['GET', '/v1/daemon/works/([^/]+)/chapters/'],
+      ['GET', '/v1/daemon/works/([^/]+)/chapters'],
       ['GET', '/v1/daemon/works/([^/]+)/chapters/([^/]+)'],
       ['PATCH', '/v1/daemon/works/([^/]+)/chapters/([^/]+)'],
       ['GET', '/v1/daemon/works/([^/]+)/chapters/([^/]+)/outline'],
