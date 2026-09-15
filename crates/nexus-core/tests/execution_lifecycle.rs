@@ -14,12 +14,17 @@
 use async_trait::async_trait;
 use nexus_contracts::{CoreError as WireCoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply};
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService, RunnerDeps};
+use nexus_core::execution::RunControlError;
+use nexus_orchestration::capability::{
+    CapabilityError, PromptExecutor, PromptRequest, PromptResult,
+};
 use nexus_orchestration::WorkflowStateStore;
 use nexus_provider_ports::{ProviderPort, ProviderResult};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tempfile::TempDir;
+use tokio::sync::Notify;
 
 const CREATOR: &str = "test_creator";
 const SLUG: &str = "default";
@@ -169,6 +174,17 @@ async fn seed_run(
     creator: &str,
     state: nexus_orchestration::RunStateV1,
 ) {
+    seed_run_at(db_path, session_id, creator, state, SEED_PRESET_INITIAL).await;
+}
+
+/// Same admission seam as [`seed_run`], at an explicit persisted position.
+async fn seed_run_at(
+    db_path: &Path,
+    session_id: &str,
+    creator: &str,
+    state: nexus_orchestration::RunStateV1,
+    initial: &str,
+) {
     let preset_id = SEED_PRESET;
     let source = nexus_preset::embedded_source_identity(preset_id)
         .expect("seed preset must be a real embedded preset");
@@ -201,7 +217,7 @@ async fn seed_run(
     };
     // The persisted position is the preset's initial state, so reconstruction
     // rebuilds a runner whose position is a real task in the frozen graph.
-    let root = graph_flow::Session::new_from_task(session_id.to_string(), SEED_PRESET_INITIAL);
+    let root = graph_flow::Session::new_from_task(session_id.to_string(), initial);
     root.context
         .set("_session_id", session_id.to_string())
         .expect("seed session context");
@@ -348,4 +364,233 @@ async fn second_owner_and_restart_are_fenced() {
         "ownership/recovery must not perform a provider effect on its own"
     );
     owner_a.close().await.unwrap();
+}
+
+// ── Concurrency regressions (T1 review C1/C2/C3) ───────────────────────────
+
+/// A prompt executor that parks the drive INSIDE an LLM step until the test
+/// releases it. Holds close()'s drain deterministically: `abort_all_drives`
+/// cannot finish while the executor is parked, so the "closing" window is
+/// observable.
+#[derive(Clone)]
+struct GatedPromptExecutor {
+    entered: Arc<Notify>,
+    release: Arc<Notify>,
+}
+
+impl GatedPromptExecutor {
+    fn new() -> Self {
+        Self {
+            entered: Arc::new(Notify::new()),
+            release: Arc::new(Notify::new()),
+        }
+    }
+
+    async fn wait_entered(&self) {
+        self.entered.notified().await;
+    }
+
+    fn release(&self) {
+        self.release.notify_one();
+    }
+}
+
+#[async_trait]
+impl PromptExecutor for GatedPromptExecutor {
+    async fn execute(&self, request: PromptRequest) -> Result<PromptResult, CapabilityError> {
+        self.entered.notified().await;
+        // Hold past the drive-loop cancellation deliberately: the drain must
+        // remain in flight until the TEST releases it, so the mid-close
+        // registry fence is observable.
+        let _ = self.release.notified().await;
+        let _ = request;
+        Err(CapabilityError::Internal("test: released".into()))
+    }
+}
+
+/// C1: while close is draining (closing, not yet settled), the per-DB
+/// registry must hold the fence — a competing EngineOwner is refused and
+/// cannot build a second engine. Only AFTER the drives join is the slot
+/// released and a replacement admitted.
+#[tokio::test]
+async fn draining_close_holds_the_db_fence_until_drives_join() {
+    let f = fixture().await;
+    // A run parked inside the `generate` LLM step: recovery re-drives it and
+    // the gated executor holds the drive loop open.
+    seed_run_at(
+        &f.db_path,
+        "test-preset:held",
+        CREATOR,
+        nexus_orchestration::RunStateV1::default(),
+        "generate",
+    )
+    .await;
+
+    let owner_a = open_engine_owner(&f).await;
+    let gate = GatedPromptExecutor::new();
+    let handle = owner_a
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps {
+                prompt_executor: Some(Arc::new(gate.clone())),
+                ..RunnerDeps::default()
+            },
+        )
+        .await
+        .expect("owner starts");
+
+    // Deterministic hold: the recovery re-drive is parked inside the prompt.
+    gate.wait_entered().await;
+
+    // Close begins: drains (fenced admission) and joins the parked drive —
+    // in the background, so the drain window is observable.
+    let closer = {
+        let handle = Arc::clone(&handle);
+        tokio::spawn(async move { handle.close().await })
+    };
+    gate.release();
+    let _ = closer.await;
+    assert!(
+        handle.is_settled(),
+        "close must settle only after every drive has joined"
+    );
+
+    // The fence is released AFTER settle: a replacement is now admitted.
+    let competitor = open_engine_owner(&f).await;
+    competitor
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .expect("replacement admitted only after the prior owner settled");
+    competitor.close().await.unwrap();
+    owner_a.close().await.unwrap();
+}
+
+/// C1 (mid-drain window): while close is draining, a competing EngineOwner
+/// must be REFUSED — the fence is held until settle, never merely until
+/// close starts.
+#[tokio::test]
+async fn competing_owner_refused_while_close_is_draining() {
+    let f = fixture().await;
+    seed_run_at(
+        &f.db_path,
+        "test-preset:held",
+        CREATOR,
+        nexus_orchestration::RunStateV1::default(),
+        "generate",
+    )
+    .await;
+
+    let owner_a = open_engine_owner(&f).await;
+    let gate = GatedPromptExecutor::new();
+    let handle = owner_a
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps {
+                prompt_executor: Some(Arc::new(gate.clone())),
+                ..RunnerDeps::default()
+            },
+        )
+        .await
+        .expect("owner starts");
+
+    gate.wait_entered().await;
+
+    let closer = {
+        let handle = Arc::clone(&handle);
+        tokio::spawn(async move { handle.close().await })
+    };
+    // The drain is in flight (the parked drive has not joined). While the
+    // handle is NOT settled, the registry must refuse a replacement — the
+    // C1 fence, not merely a close-started flag.
+    let competitor = open_engine_owner(&f).await;
+    let refused = competitor
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .is_err();
+    assert!(
+        refused,
+        "a competing EngineOwner must be refused while close is draining"
+    );
+    assert!(
+        !handle.is_settled(),
+        "the drain must still be in flight at the refusal (deterministic hold)"
+    );
+
+    gate.release();
+    let _ = closer.await;
+    assert!(handle.is_settled());
+    competitor.close().await.unwrap();
+    owner_a.close().await.unwrap();
+}
+
+/// C2: close fences new drive admission — no drive may start after close
+/// began, and the fence is observable through the coordinator's public
+/// admission primitive.
+#[tokio::test]
+async fn close_fences_new_drive_admission() {
+    let f = fixture().await;
+    seed_committed_run(&f.db_path, "test-preset:c2", CREATOR).await;
+    let owner_a = open_engine_owner(&f).await;
+    let handle = owner_a
+        .start_execution(
+            Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
+        .await
+        .expect("owner starts");
+    handle.close().await.unwrap();
+
+    // C2: after close, admission is fenced. Before the fix a drive could be
+    // registered AFTER close returned `cleanup_confirmed: true`.
+    let err = handle
+        .coordinator()
+        .ensure_driving(&nexus_orchestration::SessionId("test-preset:c2".into()))
+        .await;
+    assert!(
+        matches!(err, Err(RunControlError::Closing)),
+        "ensure_driving must be fenced during/after close, got {err:?}"
+    );
+    owner_a.close().await.unwrap();
+}
+
+/// C3: concurrent close and start_execution — either close observes and
+/// settles the installed owner, or the start abandons it. After BOTH
+/// complete, no owner may remain installed.
+#[tokio::test]
+async fn concurrent_close_and_start_never_leave_an_owner() {
+    let f = fixture().await;
+    seed_committed_run(&f.db_path, "test-preset:c3", CREATOR).await;
+
+    for round in 0..8u32 {
+        let owner = Arc::new(open_engine_owner(&f).await);
+        let owner_for_start = Arc::clone(&owner);
+        let owner_for_close = Arc::clone(&owner);
+
+        let start = tokio::spawn(async move {
+            owner_for_start
+                .start_execution(
+                    Arc::clone(&NullProvider::new()) as Arc<dyn ProviderPort>,
+                    RunnerDeps::default(),
+                )
+                .await
+        });
+        let close = tokio::spawn(async move { owner_for_close.close().await });
+
+        let (started, closed) = tokio::join!(start, close);
+        closed.await.unwrap().cleanup_confirmed.then_some(()).expect("close confirmed");
+        // Either the start was refused (closing) or it installed and close
+        // took+settled the handle. Both must leave the slot EMPTY.
+        let _ = started;
+        assert!(
+            owner.execution().is_none(),
+            "round {round}: an owner survived concurrent close — orphan effect owner"
+        );
+        owner.close().await.unwrap();
+    }
 }

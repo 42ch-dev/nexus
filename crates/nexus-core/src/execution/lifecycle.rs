@@ -127,7 +127,13 @@ pub struct ExecutionHandle {
     /// workspace gate at establishment. It identifies the ownership
     /// generation of every run this handle drives.
     engine_epoch: i64,
-    closed: AtomicBool,
+    /// Set when `close()` begins: drives admission is fenced (C2) and
+    /// repeated closes are no-ops. Replaced by `settled` when the drain
+    /// finishes.
+    closing: AtomicBool,
+    /// Set when `close()` has finished: every owned drive was cancelled and
+    /// joined (C1). Only a SETTLED owner may be superseded in the registry.
+    settled: AtomicBool,
 }
 
 impl ExecutionHandle {
@@ -185,31 +191,51 @@ impl ExecutionHandle {
         Arc::clone(&self.session_cancels)
     }
 
-    /// Whether this owner has already been closed.
+    /// Whether this owner's close has begun: drives admission is fenced
+    /// and repeated closes are no-ops.
     #[must_use]
     pub fn is_closed(&self) -> bool {
-        self.closed.load(Ordering::SeqCst)
+        self.closing.load(Ordering::SeqCst)
+    }
+
+    /// Whether this owner's close has COMPLETED: every owned drive was
+    /// cancelled and joined (C1). Only a settled owner may be superseded in
+    /// the per-DB owner registry — a closing-but-draining owner keeps the
+    /// fence until its drives are gone.
+    #[must_use]
+    pub fn is_settled(&self) -> bool {
+        self.settled.load(Ordering::SeqCst)
     }
 
     /// Abort every owned drive and settle the handle's cleanup in the
     /// documented order.
     ///
-    /// Ordering: stop admitting new drives (the close flag), fire every
-    /// owned cancellation token and join the drive loops, then release the
-    /// handle's own references. Repeated calls report the already-closed
-    /// state.
+    /// Ordering: fence new drive admission (C2), fire every owned
+    /// cancellation token and join the drive loops, THEN mark the handle
+    /// settled (C1) so the per-DB registry admits a replacement only after
+    /// every owned drive has joined. Repeated calls report the
+    /// already-closed state.
     ///
     /// # Errors
     /// Currently infallible: the report always describes a settled close.
     pub async fn close(&self) -> CoreResult<CoreCloseReport> {
         if self
-            .closed
+            .closing
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
         {
+            // Another close owns the drain (C2). It reports `confirmed` only
+            // AFTER the drives have joined — wait for that settle rather than
+            // returning a false confirmed report from a close that did
+            // nothing.
+            while !self.is_settled() {
+                tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+            }
             return Ok(closed_report());
         }
+        self.coordinator.begin_shutdown();
         self.coordinator.abort_all_drives().await;
+        self.settled.store(true, Ordering::SeqCst);
         Ok(closed_report())
     }
 
@@ -285,7 +311,7 @@ impl OwnerReservation {
         // A dropped or closed owner no longer fences its DB.
         owners.retain(|_, slot| match slot {
             OwnerSlot::Building => true,
-            OwnerSlot::Established(weak) => weak.upgrade().is_some_and(|h| !h.is_closed()),
+            OwnerSlot::Established(weak) => weak.upgrade().is_some_and(|h| !h.is_settled()),
         });
         if owners.contains_key(&key) {
             return Err(ExecutionOpenError::AlreadyOwned);
@@ -376,12 +402,33 @@ impl CoreService {
         // slot on the next claim.
         let reservation = OwnerReservation::claim(&self.inner.db_path)?;
         let handle = self.build_execution(deps).await?;
+        // C3: install-time double check. Close sets `closing` BEFORE it takes
+        // the per-service slot, and this check+install is atomic under the
+        // SAME slot mutex — so either close observes the installed handle
+        // and settles it, or the build abandons it. Neither path leaves an
+        // owner behind after close returns.
+        let installing = {
+            let mut slot = self
+                .inner
+                .execution
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if self.inner.closing.load(Ordering::SeqCst) {
+                false
+            } else {
+                *slot = Some(Arc::clone(&handle));
+                true
+            }
+        };
+        if !installing {
+            // The service began closing while this build ran. The build ran
+            // recovery (which spawns drives), so settle the freshly built
+            // owner before abandoning it — a dropped handle must not leak
+            // live drives.
+            handle.shutdown().await;
+            return Err(ExecutionOpenError::Closing);
+        }
         reservation.install(&handle);
-        *self
-            .inner
-            .execution
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::clone(&handle));
         Ok(handle)
     }
 
@@ -515,7 +562,9 @@ impl CoreService {
             capability_holder,
             session_cancels,
             engine_epoch,
-            closed: AtomicBool::new(false),
+            closing: AtomicBool::new(false),
+            settled: AtomicBool::new(false),
+
         }))
     }
 }

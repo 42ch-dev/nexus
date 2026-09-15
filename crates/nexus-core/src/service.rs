@@ -342,24 +342,30 @@ impl CoreService {
                 reason: None,
             });
         }
+        // I4: settle the execution owner BEFORE the SQL pool closes. Drive
+        // cancellation, the bounded join and every final durable settlement
+        // run against a LIVE pool — closing the pool first would make the
+        // documented cleanup path fail against a dead connection.
+        #[cfg(feature = "execution")]
+        let execution_handle = self
+            .inner
+            .execution
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        #[cfg(feature = "execution")]
+        if let Some(handle) = &execution_handle {
+            handle.shutdown().await;
+        }
         self.inner.pool.close().await;
         if self.inner.access == CoreAccess::DirectWriter {
             release_retained_writer_guards(&self.inner.db_path);
         }
+        // `take` returned the handle, so ownership is settled; release the
+        // per-DB fence so a later open of the same DB can claim it.
         #[cfg(feature = "execution")]
-        {
-            let handle = self
-                .inner
-                .execution
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .take();
-            if let Some(handle) = handle {
-                handle.shutdown().await;
-                // `take` returned the handle, so ownership is settled; release
-                // the per-DB fence so a later open of the same DB can claim it.
-                crate::execution::lifecycle::release_owner_slot(&self.inner.db_path, &handle);
-            }
+        if let Some(handle) = execution_handle {
+            crate::execution::lifecycle::release_owner_slot(&self.inner.db_path, &handle);
         }
         Ok(CoreCloseReport {
             state: nexus_contracts::CoreCloseReportState::Closed,

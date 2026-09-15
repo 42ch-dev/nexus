@@ -87,57 +87,6 @@ pub trait ProviderCatalogPort: Send + Sync {
     async fn provider_available(&self, provider_id: &str) -> Result<bool, String>;
 }
 
-/// WS2 R1 + A7: recover persisted non-terminal sessions into the in-memory
-/// tracker (runner reconstruction from the frozen source) and re-drive the
-/// eligible converge/merge class through the single coordinator owner.
-///
-/// This is the ONE recovery seam: production boot calls it (via
-/// [`CoreService::start_execution`](crate::CoreService::start_execution)) and
-/// a transport-level restart republishes a bundle then calls it directly, so
-/// every restart runs the SAME A7 order — each recovered session is
-/// classified by the durable v1 record (Terminal / Unreadable / Interrupted /
-/// `HumanWait` / `SafeBoundary` skip immediately; only `ConvergeMerge` is
-/// re-driven from its persisted position).
-///
-/// The re-drive is bounded by `max_steps`, runs in the background so boot does
-/// not block, and is cancelled when `shutdown_notify` fires. With no
-/// coordinator (a Tier-0 transport that never started execution) only the
-/// engine-side tracker reconstruction runs — there is nothing to re-drive.
-pub async fn run_boot_recovery(
-    engine: &Arc<dyn OrchestrationEngine>,
-    sqlite_boot_storage: &Arc<SqliteSessionStorage>,
-    run_coordinator: Option<&Arc<WorkflowRunCoordinator>>,
-    shutdown_notify: Arc<tokio::sync::Notify>,
-) {
-    let Some(coordinator) = run_coordinator else {
-        match sqlite_boot_storage.list_non_terminal_sessions().await {
-            Ok(summaries) if !summaries.is_empty() => {
-                tracing::info!(
-                    "recovering {} persisted session(s) into in-memory tracker",
-                    summaries.len()
-                );
-                // Trait entry point: `recover_sessions` delegates to the
-                // concrete engine's `recover_sessions_inner` (full A7 runner
-                // reconstruction + owned-descendant closure). This seam holds
-                // a `dyn OrchestrationEngine`, so the trait method is the
-                // only reachable spelling here.
-                engine.recover_sessions(summaries).await;
-            }
-            Ok(_) => {}
-            Err(e) => {
-                tracing::warn!("failed to recover persisted sessions: {}", e);
-            }
-        }
-        return;
-    };
-    let decisions = coordinator
-        .recover_persisted(sqlite_boot_storage, Some(shutdown_notify))
-        .await;
-    for d in &decisions {
-        tracing::info!(decision = ?d, "resume re-drive decision");
-    }
-}
-
 /// Bounds and posture for one [`drive_preset_run`] call.
 #[derive(Debug, Clone)]
 pub struct PresetRunConfig {
@@ -1058,6 +1007,12 @@ pub enum RunControlError {
         /// Machine-stable reason (source missing/hash mismatch/child corrupt).
         reason: String,
     },
+
+    /// The coordinator has begun shutting down: no new drive owner is
+    /// admitted (close, C2). Terminal for the coordinator generation — a
+    /// republished generation constructs a fresh coordinator.
+    #[error("coordinator is shutting down: drive admission is fenced")]
+    Closing,
 }
 
 /// Public control signal for a driven run (A4/A5).
@@ -1182,6 +1137,11 @@ pub struct WorkflowRunCoordinator {
     /// Active drive owners: session id → cancellation token + join handle.
     /// One owner per session; re-entry returns the same run.
     drives: Arc<tokio::sync::Mutex<std::collections::HashMap<String, DriveOwner>>>,
+    /// Shutdown admission fence (close, C2): set BEFORE the drives map is
+    /// drained so no late owner can be registered after the drain. Every
+    /// admission route (`ensure_driving`, the A7 recovery re-drive) checks
+    /// this fence atomically with the drives-map lock.
+    draining: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Fail-closed fence (closure 8): session ids whose drive loop failed
     /// AND whose durable non-replayable `Failed` transition could not be
     /// committed. `ensure_driving` refuses re-entry for these sessions
@@ -1247,6 +1207,19 @@ impl WorkflowRunCoordinator {
                 .remove(&sid);
         }
     }
+
+    /// Fence new drive admission and begin shutdown (close, C2).
+    ///
+    /// Every admission route checks this fence atomically with the
+    /// drives-map lock, so a close that begins mid-admission cannot be
+    /// overtaken by a late owner registration — and
+    /// [`Self::abort_all_drives`] can never race a driver spawned after
+    /// the drain.
+    pub fn begin_shutdown(&self) {
+        self.draining
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
 
     /// Recover persisted non-terminal sessions after a daemon-level restart
     /// (A7) and re-drive the eligible converge/merge class through this
@@ -1352,6 +1325,7 @@ impl WorkflowRunCoordinator {
             session_cancels,
             drives: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             failed_owners: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
+            draining: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             workflow_store,
             config: PresetRunConfig::default(),
             schedule_supervisor: std::sync::Arc::new(std::sync::RwLock::new(None)),
@@ -1827,8 +1801,13 @@ impl WorkflowRunCoordinator {
                 }
             }
         }
-
         let mut drives = self.drives.lock().await;
+        // C2: close fences admission atomically with the drives map. The
+        // check and the owner registration below share this lock, so a close
+        // that begins mid-admission can never be overtaken by a late owner.
+        if self.draining.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(RunControlError::Closing);
+        }
         if let Some(owner) = drives.get(&session_id.0) {
             if !owner.join.is_finished() {
                 return Ok(DriveDisposition::AlreadyDriving);
@@ -2064,7 +2043,15 @@ impl WorkflowRunCoordinator {
             // Register the owner BEFORE enqueue (I-1): the coordinator's
             // drives map is the single ownership registry. A concurrent
             // public re-entry observes the same owner.
+            // C2: the shutdown admission fence gates the recovery re-drive
+            // too. The check is INSIDE the drives-lock critical section so a
+            // close that begins mid-recovery can never be overtaken by a
+            // late owner registration (the check and the registration share
+            // the same critical section).
             let mut drives = self.drives.lock().await;
+            if self.draining.load(std::sync::atomic::Ordering::SeqCst) {
+                continue;
+            }
             if let Some(owner) = drives.get(&session_id.0) {
                 if !owner.join.is_finished() {
                     decisions.push(ResumeDecision::ReDriven {

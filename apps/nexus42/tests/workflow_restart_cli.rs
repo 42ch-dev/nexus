@@ -2392,7 +2392,7 @@ async fn daemon_restart_safe_boundary_is_reconstructed_and_redriven() {
     .await;
 
     // The exact production recovery seam boot/restart runs
-    // (`run_boot_recovery` → `recover_persisted`): reconstruction from the
+    // (`recover_persisted` inside `start_execution`): reconstruction from the
     // frozen source, classification, then the single-owner re-drive.
     let coordinator = daemon.state.run_coordinator().expect("coordinator wired");
     let sqlite = Arc::new(SqliteSessionStorage::new(Arc::new(daemon.pool.clone())));
