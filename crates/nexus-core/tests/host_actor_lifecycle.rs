@@ -14,7 +14,8 @@ use nexus_core::{
 };
 use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
 use nexus_local_db::{ensure_creator_row, CreateCharacterParams};
-use nexus_provider_ports::{ProviderCall, ProviderEventBatch, ProviderPort, ProviderReply, ProviderResult};
+use nexus_contracts::{ProviderCall, ProviderEventBatch, ProviderReply};
+use nexus_provider_ports::{ProviderPort, ProviderResult};
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -156,7 +157,7 @@ impl ProviderPort for CountingPort {
 }
 
 async fn admit_character(
-    core: &CoreService,
+    _core: &CoreService,
     principal: &nexus_core::Principal,
     env: &Env,
 ) -> nexus_core::AdmittedActorContext {
@@ -180,7 +181,7 @@ async fn admit_character(
 }
 
 fn registry_key(
-    registry: &ActorSessionRegistry,
+    _registry: &ActorSessionRegistry,
     ctx: &nexus_core::AdmittedActorContext,
     home: &Path,
 ) -> ActorSessionKey {
