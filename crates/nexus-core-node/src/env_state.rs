@@ -136,10 +136,6 @@ pub struct EnvState {
     ///
     /// `hostQuery` also reads it as a fallback when a hydration miss occurs.
     pub js_state: StdMutex<JsProviderState>,
-    /// Durable journal pool for JS-provider operations (LIFE-3). Set when the
-    /// core opens; `None` for the service-only shell. Survives process exit so
-    /// a previously active op is still queryable as `interrupted`.
-    pub journal_pool: StdMutex<Option<sqlx::SqlitePool>>,
     /// Service-only shell: compatibility/status without DB, host, or principal.
     pub service_only_uninitialized: AtomicBool,
 }
@@ -290,7 +286,6 @@ impl EnvState {
             close_in_flight: Mutex::new(false),
             pending_operation_ids: Mutex::new(Vec::new()),
             js_state: StdMutex::new(JsProviderState::new()),
-            journal_pool: StdMutex::new(None),
             service_only_uninitialized: AtomicBool::new(false),
         }
     }
@@ -428,59 +423,35 @@ impl EnvState {
         self.js_state.lock().ok().map(|state| f(&state))
     }
 
-    /// Install the durable journal pool when the core opens.
-    pub fn set_journal_pool(&self, pool: sqlx::SqlitePool) {
-        if let Ok(mut slot) = self.journal_pool.lock() {
-            *slot = Some(pool);
-        }
+    /// Clone the open core for the effect-boundary journal seam (P4-T2). The
+    /// durable JS-provider journal is owned by [`CoreService`]; no pool handle
+    /// is stored or exposed on the environment any more.
+    pub(crate) fn journal_core(&self) -> Option<Arc<CoreService>> {
+        self.core.lock().ok().and_then(|slot| slot.clone())
     }
 
-    /// A cloned journal pool handle, if the core opened.
-    #[must_use]
-    pub fn journal_pool(&self) -> Option<sqlx::SqlitePool> {
-        self.journal_pool.lock().ok().and_then(|slot| slot.clone())
-    }
-
-    /// Journal an operation write-through at the provider boundary. The
-    /// in-memory state remains authoritative for this process, but the durable
-    /// mirror is part of the effect contract (LIFE-3): a failed write is
-    /// returned to the caller, never discarded.
+    /// Journal an operation write-through at the provider boundary through
+    /// the [`CoreService`]-owned journal (LIFE-3). The in-memory state
+    /// remains authoritative for this process, but the durable mirror is part
+    /// of the effect contract: a failed write is returned to the caller,
+    /// never discarded. With no open core (service-only shell) there is no
+    /// journal and nothing to mirror.
     ///
     /// # Errors
     ///
-    /// Returns [`nexus_local_db::LocalDbError`] when the journal upsert fails.
+    /// Returns [`CoreError`] when the journal upsert fails.
     pub async fn journal_operation(
         &self,
         operation_id: &str,
         session_id: &str,
         provider_id: &str,
         status: &str,
-    ) -> Result<(), nexus_local_db::LocalDbError> {
-        let Some(pool) = self.journal_pool() else {
+    ) -> Result<(), CoreError> {
+        let Some(core) = self.journal_core() else {
             return Ok(());
         };
-        nexus_local_db::js_provider_journal::upsert_operation(
-            &pool,
-            operation_id,
-            session_id,
-            provider_id,
-            status,
-        )
-        .await
-    }
-
-    /// Settle orphaned journal entries on open: any non-terminal operation the
-    /// predecessor process left behind becomes `interrupted` (LIFE-3).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`nexus_local_db::LocalDbError`] when the settlement query
-    /// fails.
-    pub async fn settle_journal_on_open(&self) -> Result<u64, nexus_local_db::LocalDbError> {
-        let Some(pool) = self.journal_pool() else {
-            return Ok(0);
-        };
-        nexus_local_db::js_provider_journal::settle_orphaned_as_interrupted(&pool).await
+        core.journal_provider_write_internal(operation_id, session_id, provider_id, status)
+            .await
     }
 
     /// Inspect the actual delivered provider events WITHOUT mutating state:
@@ -538,17 +509,18 @@ impl EnvState {
         }
     }
 
-    /// Journal an operation's terminal status durably (LIFE-3).
+    /// Journal an operation's terminal status durably through the
+    /// [`CoreService`]-owned journal (LIFE-3).
     ///
     /// # Errors
     ///
-    /// Returns [`nexus_local_db::LocalDbError`] when the journal upsert fails.
+    /// Returns [`CoreError`] when the journal upsert fails.
     pub async fn journal_operation_status(
         &self,
         operation_id: &str,
         status: &str,
-    ) -> Result<(), nexus_local_db::LocalDbError> {
-        let Some(pool) = self.journal_pool() else {
+    ) -> Result<(), CoreError> {
+        let Some(core) = self.journal_core() else {
             return Ok(());
         };
         let (session_id, provider_id) = self
@@ -558,29 +530,21 @@ impl EnvState {
             })
             .flatten()
             .unwrap_or_default();
-        nexus_local_db::js_provider_journal::upsert_operation(
-            &pool,
-            operation_id,
-            &session_id,
-            &provider_id,
-            status,
-        )
-        .await
+        core.journal_provider_write_internal(operation_id, &session_id, &provider_id, status)
+            .await
     }
 
-    /// Drop journaled operations for a cleanly shut-down session.
+    /// Drop journaled operations for a cleanly shut-down session through the
+    /// [`CoreService`]-owned journal.
     ///
     /// # Errors
     ///
-    /// Returns [`nexus_local_db::LocalDbError`] when the delete fails.
-    pub async fn forget_journal_session(
-        &self,
-        session_id: &str,
-    ) -> Result<(), nexus_local_db::LocalDbError> {
-        let Some(pool) = self.journal_pool() else {
+    /// Returns [`CoreError`] when the delete fails.
+    pub async fn forget_journal_session(&self, session_id: &str) -> Result<(), CoreError> {
+        let Some(core) = self.journal_core() else {
             return Ok(());
         };
-        nexus_local_db::js_provider_journal::forget_session(&pool, session_id).await
+        core.forget_provider_session_internal(session_id).await
     }
 
     pub fn lifecycle_phase(&self) -> EnvLifecyclePhase {
@@ -1194,16 +1158,51 @@ mod tests {
         assert!(state.try_reserve_js_session());
     }
 
-    /// A journal pool whose database genuinely lacks the journal table: every
-    /// write/settlement fails for real, and the Result must say so — LIFE-3 is
-    /// never silently best-effort.
+    /// Seed a minimal nexus home + workspace DB and open a real
+    /// engine-owner [`CoreService`] installed on the env, so the journal
+    /// tests exercise the P4-T2 CoreService-owned journal seam end to end.
+    async fn open_env_with_core() -> (tempfile::TempDir, Arc<EnvState>) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let user_home = tmp.path().to_path_buf();
+        let nexus_home = nexus_home_layout::nexus_root_from_home(&user_home);
+        std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+            &user_home,
+            "creator-journal",
+            "default",
+        ))
+        .expect("workspace dir");
+        std::fs::write(
+            nexus_home.join("config.toml"),
+            "active_creator_id = \"creator-journal\"\n\
+             [active_workspace_slug_by_creator]\n\
+             \"creator-journal\" = \"default\"",
+        )
+        .expect("config");
+        let core = nexus_core::CoreService::open(nexus_core::CoreOpenOptions {
+            user_home,
+            access: nexus_core::CoreAccess::EngineOwner,
+        })
+        .await
+        .expect("core open");
+        let state = EnvState::new();
+        state
+            .core
+            .lock()
+            .expect("core mutex")
+            .replace(Arc::new(core));
+        (tmp, state)
+    }
+
+    /// A core whose journal storage can no longer accept writes: every write
+    /// fails for real, and the Result must say so — LIFE-3 is never silently
+    /// best-effort.
     #[tokio::test]
     async fn journal_failures_are_propagated_not_discarded() {
-        let state = EnvState::new();
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:")
-            .await
-            .expect("open in-memory pool");
-        state.set_journal_pool(pool);
+        let (_tmp, state) = open_env_with_core().await;
+        let core = state.journal_core().expect("core installed");
+        // Fail the journal by closing the owning service behind the env's
+        // back; the owned seam must surface the failure, not swallow it.
+        core.close().await.expect("close");
         assert!(
             state
                 .journal_operation("op-x", "sess-x", "mock-acp", "running")
@@ -1223,25 +1222,17 @@ mod tests {
             "a failed clean-session forget must be observable"
         );
         assert!(
-            state.settle_journal_on_open().await.is_err(),
+            core.settle_provider_orphans().await.is_err(),
             "a failed open settlement must fail the open path"
         );
     }
 
-    /// Success behavior is unchanged: with the real admitted engine pool the
+    /// Success behavior is unchanged: with the real admitted engine core the
     /// same calls return Ok and the journal reflects the writes.
     #[tokio::test]
     async fn journal_success_path_still_returns_ok() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let guarded = nexus_local_db::writer_protocol::init_engine_pool(
-            &dir.path().join("state.db"),
-            nexus_local_db::writer_protocol::BOOTSTRAP_CREATOR_ID,
-            nexus_local_db::writer_protocol::GuardedPoolOptions::default(),
-        )
-        .await
-        .expect("open admitted engine pool");
-        let state = EnvState::new();
-        state.set_journal_pool(guarded.clone_pool());
+        let (_tmp, state) = open_env_with_core().await;
+        let core = state.journal_core().expect("core installed");
         state.record_js_session("sess-ok".to_string(), "mock-acp".to_string());
         state.record_js_session_operation("sess-ok", "op-ok".to_string());
 
@@ -1255,10 +1246,7 @@ mod tests {
             .expect("terminal upsert succeeds");
         // A cancelled operation is already terminal: settlement has nothing to
         // settle and reports zero affected rows, not an error.
-        let settled = state
-            .settle_journal_on_open()
-            .await
-            .expect("settlement succeeds");
+        let settled = core.settle_provider_orphans().await.expect("settlement");
         assert_eq!(settled, 0);
         state
             .forget_journal_session("sess-ok")

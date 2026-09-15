@@ -8,7 +8,6 @@ use nexus_agent_host::providers::recipe_admission::reject_caller_recipe_payload;
 use nexus_agent_host::HostManager;
 use nexus_contracts::provider_call::ProviderCallMethod;
 use nexus_contracts::{CoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply};
-use nexus_local_db::LocalDbError;
 use nexus_provider_ports::{ProviderPort, ProviderResult};
 
 use crate::env_state::{JsOperationStatus, JS_PROVIDER_MAX_ACTIVE_SESSIONS};
@@ -24,10 +23,10 @@ fn map_host_error(err: nexus_agent_host::error::HostError) -> CoreError {
 /// A durable-journal failure is a typed internal error at the provider
 /// boundary: the effect's required write-through (LIFE-3) did not land, so
 /// success is never reported without its durable mirror.
-fn journal_failure(err: LocalDbError) -> CoreError {
+fn journal_failure(err: CoreError) -> CoreError {
     CoreError {
         code: CoreErrorCode::Internal,
-        message: format!("durable js-provider journal write failed: {err}"),
+        message: format!("durable js-provider journal write failed: {}", err.message),
         details: Default::default(),
         http_status: Some(500),
     }
@@ -39,7 +38,7 @@ fn journal_failure(err: LocalDbError) -> CoreError {
 /// is a typed 500 that names the affected operation/session so callers can
 /// inspect and clean up deterministically, and EnvState is kept aligned with
 /// the actual provider effect (see the per-method call sites).
-fn effect_committed_failure(err: LocalDbError, operation_id: &str, session_id: &str) -> CoreError {
+fn effect_committed_failure(err: CoreError, operation_id: &str, session_id: &str) -> CoreError {
     let mut details = serde_json::Map::new();
     details.insert("effect_committed".into(), serde_json::Value::Bool(true));
     if !operation_id.is_empty() {
@@ -57,7 +56,8 @@ fn effect_committed_failure(err: LocalDbError, operation_id: &str, session_id: &
     CoreError {
         code: CoreErrorCode::Internal,
         message: format!(
-            "durable js-provider journal write failed after the provider effect committed; the effect is not rolled back and the call is not retryable; inspect/cleanup operation_id={operation_id:?} session_id={session_id:?}: {err}"
+            "durable js-provider journal write failed after the provider effect committed; the effect is not rolled back and the call is not retryable; inspect/cleanup operation_id={operation_id:?} session_id={session_id:?}: {}",
+            err.message
         ),
         details,
         http_status: Some(500),
@@ -579,12 +579,38 @@ mod tests {
         }
     }
 
-    /// A journal pool whose database has no journal table: the write fails for
-    /// real (no mocks, no fault flags).
-    async fn journalless_pool() -> sqlx::SqlitePool {
-        sqlx::SqlitePool::connect("sqlite::memory:")
-            .await
-            .expect("open in-memory pool")
+    /// Build a real [`nexus_core::CoreService`] and install it on the env as
+    /// the journal owner (P4-T2 seam). A read-only core refuses journal
+    /// writes for real; an engine-owner core accepts them.
+    async fn install_journal_core(
+        state: &EnvState,
+        access: nexus_core::CoreAccess,
+    ) -> (tempfile::TempDir, Arc<nexus_core::CoreService>) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let user_home = tmp.path().to_path_buf();
+        let nexus_home = nexus_home_layout::nexus_root_from_home(&user_home);
+        std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+            &user_home,
+            "creator-journal",
+            "default",
+        ))
+        .expect("workspace dir");
+        std::fs::write(
+            nexus_home.join("config.toml"),
+            "active_creator_id = \"creator-journal\"\n\
+             [active_workspace_slug_by_creator]\n\
+             \"creator-journal\" = \"default\"",
+        )
+        .expect("config");
+        let core = nexus_core::CoreService::open(nexus_core::CoreOpenOptions {
+            user_home,
+            access,
+        })
+        .await
+        .expect("core open");
+        let core = Arc::new(core);
+        *state.core.lock().expect("core mutex") = Some(core.clone());
+        (tmp, core)
     }
 
     fn execute_request() -> ProviderCall {
@@ -609,7 +635,8 @@ mod tests {
     #[tokio::test]
     async fn execute_journal_failure_is_effect_committed_and_tracked() {
         let state = Arc::new(EnvState::new());
-        state.set_journal_pool(journalless_pool().await);
+        // A read-only core refuses journal writes for real (P4-T2 seam).
+        let (_dir, _core) = install_journal_core(&state, nexus_core::CoreAccess::ReadOnly).await;
         // Production records the session at Launch; the journal write-through
         // resolves the provider id from that session record.
         state.record_js_session("sess-j".to_string(), "mock-acp".to_string());
@@ -660,7 +687,8 @@ mod tests {
         let state = Arc::new(EnvState::new());
         state.record_js_session("sess-j".to_string(), "mock-acp".to_string());
         state.record_js_session_operation("sess-j", "op-j".to_string());
-        state.set_journal_pool(journalless_pool().await);
+        // A read-only core refuses journal writes for real (P4-T2 seam).
+        let (_dir, _core) = install_journal_core(&state, nexus_core::CoreAccess::ReadOnly).await;
         let port = AdmittingProviderPort::new(
             Arc::new(HostManager::new()),
             Arc::new(ExecuteOkPort),
@@ -756,7 +784,8 @@ mod tests {
         let state = Arc::new(EnvState::new());
         state.record_js_session("sess-j".to_string(), "mock-acp".to_string());
         state.record_js_session_operation("sess-j", "op-j".to_string());
-        state.set_journal_pool(journalless_pool().await);
+        // A read-only core refuses journal writes for real (P4-T2 seam).
+        let (_dir, _core) = install_journal_core(&state, nexus_core::CoreAccess::ReadOnly).await;
         let inner = Arc::new(ConsumingTerminalPort {
             pulls: AtomicUsize::new(0),
         });
@@ -802,16 +831,8 @@ mod tests {
 
         // The journal recovers: the retry journals first, settles memory,
         // re-delivers the exact batch once, and clears the cache.
-        let dir = tempfile::tempdir().expect("tempdir");
-        let guarded = nexus_local_db::writer_protocol::init_engine_pool(
-            &dir.path().join("state.db"),
-            nexus_local_db::writer_protocol::BOOTSTRAP_CREATOR_ID,
-            nexus_local_db::writer_protocol::GuardedPoolOptions::default(),
-        )
-        .await
-        .expect("open working journal pool");
-        let pool = guarded.clone_pool();
-        state.set_journal_pool(pool.clone());
+        // The journal recovers: an engine-owner core accepts the write.
+        let (_dir_ok, core_ok) = install_journal_core(&state, nexus_core::CoreAccess::EngineOwner).await;
         let batch = port
             .next("op-j".to_string(), 10, 64_000)
             .await
@@ -850,12 +871,13 @@ mod tests {
             None,
             "the terminal releases the session's active operation"
         );
-        let journaled = nexus_local_db::js_provider_journal::get_operation(&pool, "op-j")
+        let journaled = core_ok
+            .provider_operation_row_internal("op-j")
             .await
             .expect("journal read")
             .expect("the durable mirror row exists");
-        assert_eq!(journaled.status, "failed");
-        assert_eq!(journaled.session_id, "sess-j");
+        assert_eq!(journaled.2, "failed");
+        assert_eq!(journaled.1, "sess-j");
 
         // A later pull reaches the provider again and carries no terminal:
         // the terminal batch was delivered exactly once.
@@ -881,7 +903,8 @@ mod tests {
         let state = Arc::new(EnvState::new());
         state.record_js_session("sess-j".to_string(), "mock-acp".to_string());
         state.record_js_session_operation("sess-j", "op-j".to_string());
-        state.set_journal_pool(journalless_pool().await);
+        // A read-only core refuses journal writes for real (P4-T2 seam).
+        let (_dir, _core) = install_journal_core(&state, nexus_core::CoreAccess::ReadOnly).await;
         let port = AdmittingProviderPort::new(
             Arc::new(HostManager::new()),
             Arc::new(EchoPort {
@@ -936,16 +959,7 @@ mod tests {
         let state = Arc::new(EnvState::new());
         state.record_js_session("sess-j".to_string(), "mock-acp".to_string());
         state.record_js_session_operation("sess-j", "op-y".to_string());
-        let dir = tempfile::tempdir().expect("tempdir");
-        let guarded = nexus_local_db::writer_protocol::init_engine_pool(
-            &dir.path().join("state.db"),
-            nexus_local_db::writer_protocol::BOOTSTRAP_CREATOR_ID,
-            nexus_local_db::writer_protocol::GuardedPoolOptions::default(),
-        )
-        .await
-        .expect("open working journal pool");
-        let pool = guarded.clone_pool();
-        state.set_journal_pool(pool.clone());
+        let (_dir, core) = install_journal_core(&state, nexus_core::CoreAccess::EngineOwner).await;
         let port = AdmittingProviderPort::new(
             Arc::new(HostManager::new()),
             Arc::new(EchoPort {
@@ -987,13 +1001,14 @@ mod tests {
             Some("op-y".to_string()),
             "the session keeps its active op when the cancel targets a different operation"
         );
-        let journaled = nexus_local_db::js_provider_journal::get_operation(&pool, "op-x")
+        let journaled = core
+            .provider_operation_row_internal("op-x")
             .await
             .expect("journal read")
             .expect("the durable mirror row exists for the requested op");
-        assert_eq!(journaled.status, "cancelled");
+        assert_eq!(journaled.2, "cancelled");
         assert!(
-            nexus_local_db::js_provider_journal::get_operation(&pool, "op-y")
+            core.provider_operation_row_internal("op-y")
                 .await
                 .expect("journal read")
                 .is_none(),
@@ -1010,7 +1025,8 @@ mod tests {
         let state = Arc::new(EnvState::new());
         state.record_js_session("sess-j".to_string(), "mock-acp".to_string());
         state.record_js_session_operation("sess-j", "op-y".to_string());
-        state.set_journal_pool(journalless_pool().await);
+        // A read-only core refuses journal writes for real (P4-T2 seam).
+        let (_dir, _core) = install_journal_core(&state, nexus_core::CoreAccess::ReadOnly).await;
         let port = AdmittingProviderPort::new(
             Arc::new(HostManager::new()),
             Arc::new(EchoPort {

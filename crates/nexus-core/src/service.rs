@@ -361,16 +361,6 @@ impl CoreService {
         read_changes(&self.inner.pool, request).await
     }
 
-    /// Transitional pool access for the native provider-callback bridge and
-    /// the `hostQuery` fallback (LIFE-3); it is not a second business truth.
-    /// Deletion owner: P4-T2, once bridge consumers use the owned journal
-    /// methods (`provider_operation`, `journal_provider_operation`,
-    /// `settle_provider_orphans`). This escape hatch must not acquire new
-    /// callers.
-    #[must_use]
-    pub fn pool(&self) -> &SqlitePool {
-        &self.inner.pool
-    }
 
     /// Close the pool and release writer guards exactly once; repeated calls
     /// report the already-closed state.
