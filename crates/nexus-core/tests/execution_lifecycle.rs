@@ -24,6 +24,17 @@ use tempfile::TempDir;
 const CREATOR: &str = "test_creator";
 const SLUG: &str = "default";
 
+/// The embedded preset the seeded runs are frozen against.
+///
+/// A REAL preset (not a placeholder id) so recovery's frozen-source
+/// verification actually runs: reconstruction re-resolves the identity from
+/// this id and refuses on a hash/version mismatch, so a fabricated descriptor
+/// would only ever exercise the `reconstruction_unavailable` path.
+const SEED_PRESET: &str = "memory-augmented";
+/// `SEED_PRESET`'s initial state — the persisted position a seeded run holds
+/// at a clean boundary.
+const SEED_PRESET_INITIAL: &str = "recall";
+
 /// Deterministic, no-model provider port. It never performs an effect; the
 /// tests here exercise ownership/recovery, not provider behaviour.
 struct NullProvider {
@@ -118,72 +129,105 @@ async fn open_engine_owner(f: &Fixture) -> CoreService {
         .expect("engine-owner core open")
 }
 
-/// Insert one v1 run row through the admitted engine pool — the same seam the
-/// engine owner itself uses.
+/// Seed a durable v1 run through the REAL store API, not hand-written SQL.
 ///
-/// A bare `SqlitePool::connect` installs none of the five `nexus_writer_*`
-/// scalar functions, so the `orchestration_sessions` guard trigger aborts with
-/// `no such function: nexus_writer_protocol` before it can even evaluate the
-/// writer mode. Opening the pool through the guarded seam installs them via the
-/// connection hook, and the engine-mode registration it records is exactly the
-/// credential the guard checks for.
-async fn seed_run_row(
+/// `start_run` is the single path that writes an authoritative v1 row: the
+/// `execution_version = 1` record together with the frozen
+/// `run_descriptor_json` that the v1 contract requires. A v1 row without that
+/// descriptor is non-replayable by contract — the store refuses to load it —
+/// so hand-written SQL that omits it cannot exercise recovery at all. The
+/// fixture must write the bytes production writes, including the state blob
+/// whose `step_in_flight` is an `Option<String>` (an unfinished-step mark),
+/// not a struct.
+///
+/// The descriptor names a REAL embedded preset and carries its genuine
+/// content-addressed source identity (`embedded_source_identity`), because
+/// reconstruction re-resolves the frozen source and verifies the hash against
+/// the loaded preset: a zero or invented hash would classify every seeded row
+/// `reconstruction_unavailable` instead of exercising the re-drive. The preset
+/// version comes from the loaded preset, not a constant, so the frozen-version
+/// check passes too.
+///
+/// The pool is the same admitted engine seam the owner uses, so the row is
+/// admitted under the engine-mode registration the guard trigger checks.
+async fn seed_run(
     db_path: &Path,
     session_id: &str,
     creator: &str,
-    state_revision: i64,
-    run_state: serde_json::Value,
+    state: nexus_orchestration::RunStateV1,
 ) {
+    let preset_id = SEED_PRESET;
+    let source = nexus_preset::embedded_source_identity(preset_id)
+        .expect("seed preset must be a real embedded preset");
+    let preset_version = nexus_preset::load_embedded_preset(
+        preset_id,
+        &nexus_preset::capability_catalog::BuiltinCapabilityCatalog,
+    )
+    .expect("seed preset loads")
+    .version;
+
     let guarded = nexus_local_db::init_engine_pool(db_path)
         .await
         .expect("seed engine pool init");
-    let now = chrono::Utc::now().timestamp();
-    let ctx = serde_json::json!({ "_session_id": session_id }).to_string();
-    sqlx::query(
-        "INSERT INTO orchestration_sessions \
-         (session_id, creator_id, preset_id, preset_version, current_task_id, status, context_json, \
-          created_at, updated_at, execution_version, state_revision, run_state_json) \
-         VALUES (?, ?, 'test-preset', 1, 'start', 'running', ?, ?, ?, 1, ?, ?)",
-    )
-    .bind(session_id)
-    .bind(creator)
-    .bind(ctx)
-    .bind(now)
-    .bind(now)
-    .bind(state_revision)
-    .bind(run_state.to_string())
-    .execute(guarded.pool())
-    .await
-    .expect("seed run row");
+    let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(Arc::new(
+        guarded.clone_pool(),
+    ));
+
+    let sid = nexus_orchestration::SessionId(session_id.to_string());
+    let descriptor = nexus_orchestration::RunDescriptorV1 {
+        creator_id: creator.to_string(),
+        work_id: None,
+        workspace_root: std::path::PathBuf::from("/tmp/ws"),
+        preset_id: preset_id.to_string(),
+        preset_version,
+        source,
+        input: serde_json::Map::default(),
+        agent_bindings: std::collections::HashMap::new(),
+        parent_session_id: None,
+        graph_name: None,
+    };
+    // The persisted position is the preset's initial state, so reconstruction
+    // rebuilds a runner whose position is a real task in the frozen graph.
+    let root = graph_flow::Session::new_from_task(session_id.to_string(), SEED_PRESET_INITIAL);
+    root.context
+        .set("_session_id", session_id.to_string())
+        .expect("seed session context");
+    let checkpoint = nexus_orchestration::RunCheckpoint {
+        root: &root,
+        children: &[],
+    };
+    store
+        .start_run(&sid, &descriptor, checkpoint, &state)
+        .await
+        .expect("seed start_run");
+
     guarded.pool().close().await;
     nexus_local_db::writer_protocol::release_retained_writer_guards(db_path);
 }
 
-/// Seed a committed, non-terminal v1 run row directly (simulating a run that
-/// was durably committed by a previous owner before a restart).
+/// Seed a committed, non-terminal v1 run at a clean boundary: no wait, no
+/// in-flight prompt, no unfinished step. Recovery classifies it
+/// `SafeBoundary` — a committed run, not an uncertain one.
 async fn seed_committed_run(db_path: &Path, session_id: &str, creator: &str) {
-    seed_run_row(
+    seed_run(
         db_path,
         session_id,
         creator,
-        3,
-        serde_json::json!({"in_flight": null, "step_in_flight": null, "failure": null}),
+        nexus_orchestration::RunStateV1::default(),
     )
     .await;
 }
 
 /// Mark an in-flight step so A7 classifies the run `Interrupted`.
 async fn seed_in_flight_run(db_path: &Path, session_id: &str, creator: &str) {
-    seed_run_row(
+    seed_run(
         db_path,
         session_id,
         creator,
-        5,
-        serde_json::json!({
-            "in_flight": {"step_id": "s1", "attempt_id": "a1"},
-            "step_in_flight": {"step_id": "s1", "attempt_id": "a1"},
-            "failure": null
-        }),
+        nexus_orchestration::RunStateV1 {
+            step_in_flight: Some("s1".to_string()),
+            ..Default::default()
+        },
     )
     .await;
 }
