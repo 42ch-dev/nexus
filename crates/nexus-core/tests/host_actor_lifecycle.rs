@@ -31,32 +31,38 @@ struct Env {
 }
 
 async fn seed_env() -> Env {
+    seed_env_as(CREATOR).await
+}
+
+/// Seed an environment bound to an explicit creator, so a foreign principal
+/// really carries a different creator identity.
+async fn seed_env_as(creator: &str) -> Env {
     let tmp = TempDir::new().unwrap();
     let user_home = tmp.path().to_path_buf();
     let nexus_home = user_home.join(".nexus42");
     std::fs::create_dir_all(&nexus_home).unwrap();
     std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
         &user_home,
-        CREATOR,
+        creator,
         "default",
     ))
     .unwrap();
     std::fs::write(
         nexus_home.join("config.toml"),
         format!(
-            "active_creator_id = \"{CREATOR}\"\n\
+            "active_creator_id = \"{creator}\"\n\
              [active_workspace_slug_by_creator]\n\
-             \"{CREATOR}\" = \"default\""
+             \"{creator}\" = \"default\""
         ),
     )
     .unwrap();
-    let db_path = nexus_home_layout::workspace_state_db_path(&user_home, CREATOR, "default");
+    let db_path = nexus_home_layout::workspace_state_db_path(&user_home, creator, "default");
     let (character_id, binding_id) = {
-        let guarded = init_engine_pool(&db_path, CREATOR, GuardedPoolOptions::default())
+        let guarded = init_engine_pool(&db_path, creator, GuardedPoolOptions::default())
             .await
             .unwrap();
         let pool = guarded.clone_pool();
-        ensure_creator_row(&pool, CREATOR, "Owner").await.unwrap();
+        ensure_creator_row(&pool, creator, "Owner").await.unwrap();
         sqlx::query(
             "INSERT INTO narrative_worlds \
              (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
@@ -304,8 +310,9 @@ async fn host_authority_admits_only_verified_principals() {
     let port = CountingPort::new();
     let handle = core.open_host(port.clone()).await.unwrap();
 
-    // A foreign principal: a core opened against a different seeded creator.
-    let foreign = seed_env().await;
+    // A foreign principal: a core opened against a genuinely different
+    // creator identity, so verify_principal must reject it.
+    let foreign = seed_env_as("ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").await;
     let (_, foreign_principal) = open_core(&foreign).await;
     let request = serde_json::from_value::<nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest>(
         serde_json::json!({ "kind": "prompt", "content": "hello" }),
@@ -428,8 +435,9 @@ async fn journal_status_update_preserves_stored_identity() {
         .await
         .unwrap()
         .expect("row exists");
+    assert_eq!(row.0, "op-i");
     assert_eq!(row.1, "sess-i", "stored session_id is write-once");
     assert_eq!(row.2, "mock-acp", "stored provider_id is write-once");
-    assert_eq!(row.0, "op-i");
+    assert_eq!(row.3, "cancelled", "the status update still lands");
 
 }

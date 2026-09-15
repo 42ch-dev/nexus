@@ -486,8 +486,18 @@ impl HostHandle {
     /// Query the authority: health, catalog (+ PATH scan), session list, and
     /// session/operation lookup with the durable journal restart fallback.
     ///
+    /// Legacy owner semantics (P2 admission contract): legacy sessions are
+    /// never indexed, so they carry no per-session stored owner. The
+    /// authority is single-owner per open — `verify_principal` proves the
+    /// caller is the open's verified creator AND that the on-disk selection
+    /// still matches, so any admitted caller IS the owner of the legacy
+    /// surface; a foreign or drifted identity is `auth_required` before any
+    /// Host access. Indexed/retired Actor sessions additionally carry their
+    /// own stored owner gate below.
+    ///
     /// # Errors
-    /// `invalid_input` for malformed queries; host failures are `internal`.
+    /// `auth_required` for foreign/drifted principals, `invalid_input` for
+    /// malformed queries; host failures are `internal`.
     #[allow(clippy::too_many_lines)]
     pub async fn query(
         &self,

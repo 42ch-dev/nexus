@@ -330,7 +330,7 @@ pub async fn dispatch_host_query(
             // gone, but a previously active op is still queryable as
             // interrupted, read through the CoreService-owned journal.
             if let Some(core) = state.journal_core() {
-                if let Ok(Some((operation_id, session_id, status))) =
+                if let Ok(Some((operation_id, session_id, _provider_id, status))) =
                     core.provider_operation_row_internal(raw).await
                 {
                     return Ok(CoreHostQueryResponse {

@@ -178,7 +178,8 @@ impl CoreService {
     /// Internal read seam mirroring [`Self::journal_provider_write_internal`]:
     /// raw stored row fields for the `hostQuery` restart fallback, without a
     /// per-request principal. Returns the stored `(operation_id, session_id,
-    /// status)` verbatim; no terminal is ever fabricated.
+    /// provider_id, status)` verbatim; no terminal is ever fabricated and the
+    /// write-once identity stays observable to the owning transport.
     ///
     /// # Errors
     /// Returns [`CoreError::Closing`] when the service is closing and the
@@ -188,13 +189,20 @@ impl CoreService {
     pub async fn provider_operation_row_internal(
         &self,
         operation_id: &str,
-    ) -> CoreResult<Option<(String, String, String)>> {
+    ) -> CoreResult<Option<(String, String, String, String)>> {
         self.ensure_open()?;
         Ok(
             js_provider_journal::get_operation(&self.inner.pool, operation_id)
                 .await
                 .map_err(local_db_err)?
-                .map(|row| (row.operation_id, row.session_id, row.status)),
+                .map(|row| {
+                    (
+                        row.operation_id,
+                        row.session_id,
+                        row.provider_id,
+                        row.status,
+                    )
+                }),
         )
     }
 
