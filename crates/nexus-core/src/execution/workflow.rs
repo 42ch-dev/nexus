@@ -9331,6 +9331,19 @@ async fn cancel_drive_race_concurrent_failure_settle_one_winner() {
         async fn remove_live(&self, _run_id: &str) {}
         fn publish_run_state(&self, _run_id: &str, _record: &RunRecord) {}
         fn mark_terminal(&self, _run_id: &str) {}
+        fn read_page(
+            &self,
+            run_id: &str,
+            _after_sequence: Option<u64>,
+            _limit: usize,
+        ) -> Result<crate::execution::run_events::RunPage, crate::execution::run_events::PageError>
+        {
+            // This double models the quota-refused port: no ring was ever
+            // registered, so a read has nothing to serve.
+            Err(crate::execution::run_events::PageError::UnknownRun(
+                run_id.to_string(),
+            ))
+        }
     }
 
     /// QC2 F-004 (moved with the code from the daemon's `preset_run` module,
@@ -9455,6 +9468,22 @@ async fn cancel_drive_race_concurrent_failure_settle_one_winner() {
         }
         fn mark_terminal(&self, run_id: &str) {
             self.terminal.lock().push(run_id.to_string());
+        }
+        fn read_page(
+            &self,
+            _run_id: &str,
+            after_sequence: Option<u64>,
+            _limit: usize,
+        ) -> Result<crate::execution::run_events::RunPage, crate::execution::run_events::PageError>
+        {
+            // This double only records publishes; it retains no frames, so a
+            // read is an empty, non-terminal, non-resyncing page.
+            Ok(crate::execution::run_events::RunPage {
+                frames: Vec::new(),
+                next_sequence: after_sequence.unwrap_or(0),
+                terminal: false,
+                resync_required: false,
+            })
         }
     }
 
