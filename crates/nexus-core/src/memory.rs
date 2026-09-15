@@ -426,7 +426,7 @@ impl CoreService {
             &character_id,
             binding_id,
         )?;
-        let nexus_home = self.inner.nexus_home.clone();
+        let nexus_home = self.nexus_home().clone();
         // Fetch batch_limit + 1 so the extra row proves more rows exist;
         // truncate the processing slice back to the documented batch bound
         // (mirrors the Creator memory review handler — no off-by-one on
@@ -629,7 +629,7 @@ impl CoreService {
         self.verify_principal(principal)?;
         let review = sqlx::query!(
             r#"SELECT pending_id as "pending_id!", session_id, creator_id, world_id, task_kind, raw_digest, created_at
-               FROM memory_pending_review WHERE pending_id = ?"#,
+         FROM memory_pending_review WHERE pending_id = ?"#, // sqlx R3: use ? instead of ?1
             pending_id.as_str()
         )
         .fetch_optional(&self.inner.pool)
@@ -719,7 +719,7 @@ impl CoreService {
             })?
         };
 
-        let fragments = records
+        let fragments: Vec<MemoryFragmentInfo> = records
             .into_iter()
             .map(|r| MemoryFragmentInfo {
                 fragment_id: r.fragment_id,
@@ -759,7 +759,7 @@ impl CoreService {
                 ),
             });
         }
-        let nexus_home = self.inner.nexus_home.clone();
+        let nexus_home = self.nexus_home().clone();
         // Bounded fetch: REVIEW_BATCH_LIMIT + 1 overfetch drives `has_more`.
         let fetch_limit = REVIEW_BATCH_LIMIT + 1;
         let mut rows =
@@ -847,11 +847,11 @@ async fn fetch_pending_reviews_page(
     {
         sqlx::query!(
             r#"SELECT pending_id as "pending_id!", session_id, creator_id, world_id, task_kind, raw_digest, created_at
-               FROM memory_pending_review
-               WHERE creator_id = ?
-                 AND (created_at < ? OR (created_at = ? AND pending_id < ?))
-               ORDER BY created_at DESC, pending_id DESC
-               LIMIT ?"#,
+             FROM memory_pending_review
+             WHERE creator_id = ?
+               AND (created_at < ? OR (created_at = ? AND pending_id < ?))
+             ORDER BY created_at DESC, pending_id DESC
+             LIMIT ?"#,
             creator_id,
             cursor_ca,
             cursor_ca,
@@ -874,10 +874,10 @@ async fn fetch_pending_reviews_page(
     } else {
         sqlx::query!(
             r#"SELECT pending_id as "pending_id!", session_id, creator_id, world_id, task_kind, raw_digest, created_at
-               FROM memory_pending_review
-               WHERE creator_id = ?
-               ORDER BY created_at DESC, pending_id DESC
-               LIMIT ?"#,
+             FROM memory_pending_review
+             WHERE creator_id = ?
+             ORDER BY created_at DESC, pending_id DESC
+             LIMIT ?"#,
             creator_id,
             fetch_limit
         )
