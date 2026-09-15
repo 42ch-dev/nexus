@@ -401,7 +401,7 @@ pub async fn patch_work(State(state): State<WorkspaceState>, Path(work_id): Path
     let principal = core.active_principal().await?;
     let resume_auto_chain = req.auto_chain_interrupted == Some(false)
         && req.current_stage.is_none() && req.stage_status.is_none();
-    let result = core.patch_work(&principal, work_id, "http", nexus_core::WorkPatchRequest { title: req.title, long_term_goal: req.long_term_goal, creative_brief: req.creative_brief, intake_status: req.intake_status, status: req.status, world_id: req.world_id, story_ref: req.story_ref, primary_preset_id: req.primary_preset_id, current_stage: req.current_stage, stage_status: req.stage_status, force: req.force, auto_review_master_on_timeout: req.auto_review_master_on_timeout, auto_chain_interrupted: req.auto_chain_interrupted, work_profile: req.work_profile }).await.map_err(work_error)?;
+    let result = core.patch_work(&principal, work_id, "http", nexus_core::WorkPatchRequest { title: req.title, long_term_goal: req.long_term_goal, creative_brief: req.creative_brief, intake_status: req.intake_status, status: req.status, world_id: req.world_id, story_ref: req.story_ref, primary_preset_id: req.primary_preset_id, current_stage: req.current_stage, stage_status: req.stage_status, force: req.force, auto_review_master_on_timeout: req.auto_review_master_on_timeout, auto_chain_interrupted: req.auto_chain_interrupted, work_profile: req.work_profile, schedule_ids: None }).await.map_err(work_error)?;
     // Legacy daemon composition only; scheduling remains outside the core Work service.
     if resume_auto_chain {
         if let Some(supervisor) = state.schedule_supervisor() {

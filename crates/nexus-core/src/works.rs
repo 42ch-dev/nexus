@@ -134,6 +134,10 @@ pub struct WorkPatchRequest {
     pub auto_chain_interrupted: Option<bool>,
     /// V1.65: explicit work profile classification (additive optional).
     pub work_profile: Option<String>,
+    /// V1.190 P1 (QC1-F-001 class): schedule-id list patch for the
+    /// `nexus.work.schedule.set` host tool; the authority serializes the
+    /// list into the DAO's JSON `schedule_ids` column.
+    pub schedule_ids: Option<Vec<String>>,
 }
 #[derive(Debug, Clone)]
 pub struct SetPoolActiveRequest {
@@ -455,7 +459,12 @@ impl CoreService {
         };
         let metadata: serde_json::Value = serde_json::from_str(&text)
             .map_err(|error| CoreError::Internal { category: format!("workspace metadata: {error}") })?;
-        Ok(metadata.get("creative_root").and_then(serde_json::Value::as_str).map(str::to_owned))
+        // The operational meta.json key written by the daemon and CLI
+        // workspace registration (`local_root`; handlers/workspaces.rs and
+        // the CLI legacy_impl both emit it). There is no `creative_root`
+        // writer anywhere — reading it resolved every core filesystem path
+        // against an empty root.
+        Ok(metadata.get("local_root").and_then(serde_json::Value::as_str).map(str::to_owned))
     }
 }
 
@@ -1760,7 +1769,8 @@ async fn apply_non_stage_fields(
         || req.primary_preset_id.is_some()
         || req.auto_review_master_on_timeout.is_some()
         || req.auto_chain_interrupted.is_some()
-        || req.work_profile.is_some();
+        || req.work_profile.is_some()
+        || req.schedule_ids.is_some();
 
     if !has_non_stage {
         return Ok(());
@@ -1775,7 +1785,7 @@ async fn apply_non_stage_fields(
         world_id: req.world_id.clone(),
         story_ref: req.story_ref.clone(),
         primary_preset_id: req.primary_preset_id.clone(),
-        schedule_ids: None,
+        schedule_ids: req.schedule_ids.as_ref().map(|ids| serde_json::to_string(ids).unwrap_or_default()),
         current_stage: None,
         stage_status: None,
         work_profile: req.work_profile.clone().map(Some),

@@ -117,7 +117,7 @@ async fn setup() -> Fixture {
     std::fs::create_dir_all(&creative_root).unwrap();
     std::fs::write(
         nexus_home_layout::operational_workspace_dir(home, "author", "default").join("meta.json"),
-        serde_json::to_vec(&serde_json::json!({"creative_root": creative_root})).unwrap(),
+        serde_json::to_vec(&serde_json::json!({"local_root": creative_root})).unwrap(),
     )
     .unwrap();
 

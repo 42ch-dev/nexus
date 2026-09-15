@@ -1610,10 +1610,14 @@ async fn execute_world_configure(
 }
 
 /// `nexus.work.schedule.set` — link/unlink schedule ids to a work.
+///
+/// The mutation routes through the core Work authority (QC1-F-001 class, same
+/// as the patch/finding-resolve/pool executors); the boundary keeps payload
+/// validation and transport error mapping only.
 async fn execute_work_schedule_set(
     req: &ToolExecuteRequest,
     state: &WorkspaceState,
-    creator_id: &str,
+    _creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
     let work_id =
         req.parameters["work_id"]
@@ -1631,71 +1635,33 @@ async fn execute_work_schedule_set(
                 reason: "must be an array of schedule id strings".into(),
             })?;
 
-    // Validate all entries are strings
+    // Validate all entries are strings and collect the typed list for core.
+    let mut ids = Vec::with_capacity(schedule_ids.len());
     for (i, id) in schedule_ids.iter().enumerate() {
-        if !id.is_string() {
-            return Err(NexusApiError::InvalidInput {
-                field: format!("parameters.schedule_ids[{i}]"),
-                reason: "must be a string".into(),
-            });
+        match id.as_str() {
+            Some(id) => ids.push(id.to_string()),
+            None => {
+                return Err(NexusApiError::InvalidInput {
+                    field: format!("parameters.schedule_ids[{i}]"),
+                    reason: "must be a string".into(),
+                });
+            }
         }
     }
 
-    // Verify work ownership first
-    let pool = state.pool_or_uninit()?;
-    let _record = works::get_work(pool, creator_id, work_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::Forbidden {
-            resource: "work".to_string(),
-            reason: "work not found or cross-creator access denied".to_string(),
-        })?;
-
-    let schedule_ids_json = serde_json::to_string(&schedule_ids).unwrap_or_default();
-    let now = chrono::Utc::now().to_rfc3339();
-
-    let patch = nexus_local_db::works::WorkPatch {
-        schedule_ids: Some(schedule_ids_json),
-        title: None,
-        long_term_goal: None,
-        creative_brief: None,
-        intake_status: None,
-        status: None,
-        world_id: None,
-        story_ref: None,
-        primary_preset_id: None,
-        current_stage: None,
-        stage_status: None,
-        work_profile: None,
-        work_ref: None,
-        total_planned_chapters: None,
-        current_chapter: None,
-        auto_chain_enabled: None,
-        driver_schedule_id: None,
-        auto_chain_interrupted: None,
-        auto_review_master_on_timeout: None,
-        runtime_lock_holder: None,
-        runtime_lock_acquired_at: None,
-        completion_locked_at: None,
-        novel_completion_status: None,
-        lineage_from_work_id: None,
-    };
-
-    works::patch_work(pool, creator_id, work_id, &patch, &now)
-        .await
-        .map_err(|e| match &e {
-            nexus_local_db::LocalDbError::MissingVersionKey { .. } => NexusApiError::Forbidden {
-                resource: "work".into(),
-                reason: "work not found or cross-creator".into(),
-            },
-            _ => NexusApiError::Internal {
-                code: "DATABASE_ERROR".into(),
-                message: e.to_string(),
-            },
-        })?;
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    core.patch_work(
+        &principal,
+        work_id.to_string(),
+        "http",
+        nexus_core::WorkPatchRequest {
+            schedule_ids: Some(ids),
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(work_error)?;
 
     Ok(serde_json::json!({
         "work_id": work_id,
@@ -2843,6 +2809,64 @@ mod tests {
 
         let req = work_patch_request(serde_json::json!({ "work_id": work_id, "title": "stolen" }));
         let result = execute_work_patch(&req, &state, "test_creator").await;
+        assert!(matches!(result, Err(NexusApiError::NotFound(_))), "foreign work must be rejected, got {result:?}");
+    }
+
+    /// `nexus.work.schedule.set` links schedule ids through the core Work
+    /// authority; the persisted row carries the JSON list.
+    #[tokio::test]
+    async fn execute_work_schedule_set_routes_through_core_authority() {
+        let (state, _tmp, work_id) = setup_work_tool_state().await;
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.work.schedule.set".to_string(),
+            parameters: serde_json::json!({
+                "work_id": work_id,
+                "schedule_ids": ["sch_a", "sch_b"],
+            }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = execute_work_schedule_set(&req, &state, "test_creator").await;
+        assert!(result.is_ok(), "schedule set should succeed: {result:?}");
+        assert_eq!(
+            result.unwrap()["schedule_ids"],
+            serde_json::json!(["sch_a", "sch_b"]),
+            "legacy response shape preserved"
+        );
+
+        let pool = state.pool_or_uninit().expect("workspace pool");
+        let record = nexus_local_db::works::get_work(pool, "test_creator", &work_id)
+            .await
+            .expect("work row readable")
+            .expect("work row exists");
+        assert_eq!(
+            record.schedule_ids,
+            "[\"sch_a\",\"sch_b\"]",
+            "schedule ids persisted through the core patch authority"
+        );
+    }
+
+    /// A Work row owned by another creator is rejected by the core's
+    /// owned-work check (legacy 403 → core NotFound 404, aligned with the
+    /// migrated host-tool surface).
+    #[tokio::test]
+    async fn execute_work_schedule_set_rejects_foreign_work() {
+        let (state, _tmp, work_id) = setup_work_tool_state().await;
+        sqlx::query("UPDATE works SET creator_id = 'other' WHERE work_id = ?")
+            .bind(&work_id)
+            .execute(state.pool_or_uninit().expect("workspace pool"))
+            .await
+            .expect("seed foreign creator");
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.work.schedule.set".to_string(),
+            parameters: serde_json::json!({ "work_id": work_id, "schedule_ids": ["sch_x"] }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = execute_work_schedule_set(&req, &state, "test_creator").await;
         assert!(matches!(result, Err(NexusApiError::NotFound(_))), "foreign work must be rejected, got {result:?}");
     }
 

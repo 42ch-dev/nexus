@@ -81,7 +81,7 @@ async fn work_selection_invalidates_foreign_context() {
     std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
     std::fs::write(&lock_path, "{}").unwrap();
     std::fs::write(nexus_home_layout::operational_workspace_dir(home, "author", "default").join("meta.json"),
-        serde_json::to_vec(&serde_json::json!({"creative_root": home.join("creative")})).unwrap()).unwrap();
+        serde_json::to_vec(&serde_json::json!({"local_root": home.join("creative")})).unwrap()).unwrap();
     sqlx::query("UPDATE works SET work_ref = 'book' WHERE work_id = ?").bind(&second).execute(&pool).await.unwrap();
     sqlx::query("UPDATE works SET completion_locked_at = '2026-09-15', novel_completion_status = 'completed', total_planned_chapters = 3 WHERE work_id = ?").bind(&second).execute(&pool).await.unwrap();
     let expected_lock = format!("work_conflict:work {second} is completion-locked since 2026-09-15; use 'creator works completion-lock release' first");
@@ -110,7 +110,7 @@ async fn work_selection_invalidates_foreign_context() {
     std::fs::create_dir_all(creative_root.join("outside")).unwrap();
     std::fs::write(creative_root.join("outside/keep"), "must survive").unwrap();
     std::fs::write(nexus_home_layout::operational_workspace_dir(home, "author", "default").join("meta.json"),
-        serde_json::to_vec(&serde_json::json!({"creative_root": creative_root})).unwrap()).unwrap();
+        serde_json::to_vec(&serde_json::json!({"local_root": creative_root})).unwrap()).unwrap();
     sqlx::query("UPDATE works SET work_ref = '../outside' WHERE work_id = ?").bind(&promoted.work_id).execute(&pool).await.unwrap();
     core.delete_work(&principal, promoted.work_id.clone(), "core").await.unwrap();
     assert!(matches!(core.get_work(&principal, promoted.work_id).await, Err(CoreError::NotFound { .. })));
@@ -278,7 +278,7 @@ async fn work_lifecycle_locks_report_http_holder_shape() {
     std::fs::create_dir_all(home.join("creative/Works/locked-work")).unwrap();
     std::fs::write(
         nexus_home_layout::operational_workspace_dir(home, "author", "default").join("meta.json"),
-        serde_json::to_vec(&serde_json::json!({"creative_root": home.join("creative")})).unwrap(),
+        serde_json::to_vec(&serde_json::json!({"local_root": home.join("creative")})).unwrap(),
     )
     .unwrap();
     // Hold the Work with the legacy HTTP holder label, exactly as the daemon
