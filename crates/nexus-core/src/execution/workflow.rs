@@ -1220,6 +1220,25 @@ impl WorkflowRunCoordinator {
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
+    /// The C2 admission fence: refuse when close has begun.
+    ///
+    /// Every admission route checks this fence at its ENTRY, before any
+    /// durable work. A coordinator that has begun closing admits no drive at
+    /// all, so it can never answer a run-shaped disposition (`NotDriving`,
+    /// `AlreadyDriving`) that hides the close from the caller. The in-lock
+    /// re-checks are what make the refusal atomic against the drain: the
+    /// entry check rejects work before it starts, the in-lock check catches a
+    /// close that begins mid-admission.
+    ///
+    /// # Errors
+    /// Returns [`RunControlError::Closing`] once close has begun.
+    fn admission_fence(&self) -> Result<(), RunControlError> {
+        if self.draining.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(RunControlError::Closing);
+        }
+        Ok(())
+    }
+
     /// Recover persisted non-terminal sessions after a daemon-level restart
     /// (A7) and re-drive the eligible converge/merge class through this
     /// coordinator.
@@ -1471,6 +1490,10 @@ impl WorkflowRunCoordinator {
                 format!("system preset '{preset_id}' cannot be started as a user session"),
             ));
         }
+        // C2: a closing coordinator admits no new run. Checked BEFORE the
+        // durable admission below so close can never race a run row that no
+        // owner will drive.
+        self.admission_fence()?;
 
         let registry = caps.get().ok_or_else(|| {
             RunControlError::NoWorkspace("capability registry unavailable".into())
@@ -1758,6 +1781,11 @@ impl WorkflowRunCoordinator {
         &self,
         session_id: &SessionId,
     ) -> Result<DriveDisposition, RunControlError> {
+        // C2: a coordinator that has begun closing admits no drive at all.
+        // This entry check runs before the durable-state gate below so a
+        // closed coordinator can never answer a run-shaped disposition
+        // (`NotDriving`/`AlreadyDriving`) that hides the close.
+        self.admission_fence()?;
         {
             let drives = self.drives.lock().await;
             if let Some(owner) = drives.get(&session_id.0) {
@@ -1801,12 +1829,11 @@ impl WorkflowRunCoordinator {
             }
         }
         let mut drives = self.drives.lock().await;
-        // C2: close fences admission atomically with the drives map. The
-        // check and the owner registration below share this lock, so a close
-        // that begins mid-admission can never be overtaken by a late owner.
-        if self.draining.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(RunControlError::Closing);
-        }
+        // C2: re-check the fence INSIDE the critical section that registers
+        // the owner. The check and the registration share this lock, so a
+        // close that begins mid-admission can never be overtaken by a late
+        // owner registration.
+        self.admission_fence()?;
         if let Some(owner) = drives.get(&session_id.0) {
             if !owner.join.is_finished() {
                 return Ok(DriveDisposition::AlreadyDriving);
@@ -1901,6 +1928,12 @@ impl WorkflowRunCoordinator {
         let mut decisions = Vec::with_capacity(summaries.len());
         for summary in summaries {
             if parent_cancel.is_cancelled() {
+                break;
+            }
+            // C2: a coordinator that has begun closing admits no recovered
+            // drive either — the fence is checked per session at the entry,
+            // before any storage read or reconstruction.
+            if self.admission_fence().is_err() {
                 break;
             }
             let session_id = summary.session_id.clone();
@@ -2048,7 +2081,7 @@ impl WorkflowRunCoordinator {
             // late owner registration (the check and the registration share
             // the same critical section).
             let mut drives = self.drives.lock().await;
-            if self.draining.load(std::sync::atomic::Ordering::SeqCst) {
+            if self.admission_fence().is_err() {
                 continue;
             }
             if let Some(owner) = drives.get(&session_id.0) {
@@ -2153,6 +2186,10 @@ impl WorkflowRunCoordinator {
             std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>,
         >,
     ) -> Result<SessionId, RunControlError> {
+        // C2: a closing coordinator admits no run. Checked BEFORE the row read
+        // and the policy cutover below, so close can never race a durable
+        // `driven_v1` cutover that no owner will drive.
+        self.admission_fence()?;
         // Load the schedule row.
         let row = sqlx::query_as!(
             ScheduleAdmissionRow,
@@ -2424,6 +2461,10 @@ impl WorkflowRunCoordinator {
             std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>,
         >,
     ) -> Result<SessionId, RunControlError> {
+        // C2: a closing coordinator admits no schedule run either. Checked
+        // BEFORE the eligibility read and the admission transaction below, so
+        // close can never race a durable claim that no owner will drive.
+        self.admission_fence()?;
         // 1. Load the schedule row.
         let row = sqlx::query_as!(
             ScheduleAdmissionRow,

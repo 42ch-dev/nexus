@@ -401,7 +401,11 @@ impl GatedPromptExecutor {
 #[async_trait]
 impl PromptExecutor for GatedPromptExecutor {
     async fn execute(&self, request: PromptRequest) -> Result<PromptResult, CapabilityError> {
-        self.entered.notified().await;
+        // Signal entry FIRST (the test's deterministic hold depends on it),
+        // then park until the test releases. `Notify::notify_one` stores a
+        // permit when no waiter is registered yet, so the signal is never
+        // lost to a scheduling race.
+        self.entered.notify_one();
         // Hold past the drive-loop cancellation deliberately: the drain must
         // remain in flight until the TEST releases it, so the mid-close
         // registry fence is observable.
@@ -589,7 +593,7 @@ async fn concurrent_close_and_start_never_leave_an_owner() {
         // `join!` awaits both handles: `closed` is the close RESULT itself.
         let report = closed.expect("close succeeds");
         assert!(
-            report.cleanup_confirmed,
+            report.unwrap().cleanup_confirmed,
             "round {round}: close must report a confirmed cleanup"
         );
         // Either the start was refused (closing) or it installed and close

@@ -220,11 +220,10 @@ impl LiveDaemon {
     /// engine/coordinator/supervisor over the same pool, runs the
     /// terminal-schedule reconciliation, AND performs A7 recovery, because
     /// recovery is owned by the execution owner the publish establishes
-    /// (`start_execution`). Production boot (`boot.rs`) recovers the same way
-    /// and never calls `run_boot_recovery` separately, so neither does this
-    /// harness. A fresh listener/router is bound and `daemon_url` in the
-    /// hermetic `config.toml` is updated so CLI children resolve the new
-    /// daemon.
+    /// (`start_execution`). Production boot (`boot.rs`) recovers the same way,
+    /// so neither does this harness. A fresh listener/router is bound and
+    /// `daemon_url` in the hermetic `config.toml` is updated so CLI children
+    /// resolve the new daemon.
     ///
     /// The bundled Host facade / agent-host config / tool dispatch are kept
     /// (the test owns them); every engine-side handle (runners, coordinator
