@@ -25,6 +25,7 @@ use tempfile::TempDir;
 const CREATOR: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const OTHER: &str = "ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const WORLD: &str = "wld_worldA";
+const WORLD_B: &str = "wld_worldB";
 
 const PROMOTE_DIGEST: &str =
     "The chapter pivots from betrayal to alliance, with causal consequences for three factions.";
@@ -92,6 +93,7 @@ async fn seed_env() -> Env {
         ensure_creator_row(&pool, CREATOR, "Owner").await.unwrap();
         ensure_creator_row(&pool, OTHER, "Other").await.unwrap();
         seed_world(&pool, WORLD, CREATOR).await;
+        seed_world(&pool, WORLD_B, CREATOR).await;
         let created = create_character_with_initial_binding(
             &pool,
             CreateCharacterParams {
@@ -173,6 +175,16 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
     let (core, principal) = open_core(&env).await;
     let chr = env.character_id.clone();
     let bind1 = env.binding_id.clone();
+    // Unrelated cache scope: a real second binding of the same Character (the
+    // cache upsert admits binding provenance, so a fabricated id is refused).
+    let bind2 = core
+        .add_binding(&principal, chr.clone(), WORLD_B.to_string(), None)
+        .await
+        .expect("second binding")
+        .binding
+        .binding_id
+        .as_str()
+        .to_string();
 
     core.capture_character_pending_review(
         &principal,
@@ -221,7 +233,7 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
     nexus_local_db::upsert_character_soul_narrative(&pool, CREATOR, &cache_seed(Some(&bind1)))
         .await
         .unwrap();
-    nexus_local_db::upsert_character_soul_narrative(&pool, CREATOR, &cache_seed(Some("bnd_other")))
+    nexus_local_db::upsert_character_soul_narrative(&pool, CREATOR, &cache_seed(Some(&bind2)))
         .await
         .unwrap();
     pool.close().await;
@@ -278,7 +290,7 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
     .map(|row: (std::option::Option<String>,)| row.0)
     .collect();
     pool.close().await;
-    assert_eq!(caches, vec![Some("bnd_other".to_string())]);
+    assert_eq!(caches, vec![Some(bind2)]);
 
     // Re-promotion of an already-shared fragment → stable conflict.
     let err = core
