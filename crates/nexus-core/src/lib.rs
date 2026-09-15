@@ -7,6 +7,9 @@ mod provider_journal;
 mod service;
 mod worlds;
 mod world_kb;
+mod forks;
+mod world_pack;
+mod world_rules;
 
 pub use error::{CoreError, CoreResult};
 pub use principal::Principal;

@@ -136,10 +136,10 @@ fn project_candidate(
     }
 }
 
-mod guards {
+pub(crate) mod guards {
     use super::{db_err, CoreError, CoreResult, Sqlite};
 
-    pub(super) async fn require_world_owner(
+    pub(crate) async fn require_world_owner(
         executor: impl sqlx::Executor<'_, Database = Sqlite>,
         world_id: &str,
         creator_id: &str,
