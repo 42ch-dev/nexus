@@ -43,6 +43,7 @@ use sqlx::SqlitePool;
 
 use crate::actors::ActorViewpoint;
 use crate::error::{CoreError, CoreResult};
+use crate::memory_pipeline::internal_err;
 use crate::principal::Principal;
 use crate::service::CoreService;
 
