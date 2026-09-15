@@ -528,6 +528,129 @@ impl Outbox {
         Ok(())
     }
 
+    /// Re-queue a stuck (`conflicted` / `failed`) entry for delivery.
+    ///
+    /// The entry moves back to `ready` with its retry accounting cleared, so
+    /// the next [`Self::replay`]/push cycle re-delivers the local bundle.
+    /// Resolution stays local: this never sends by itself. Non-stuck entries
+    /// do not match and surface as [`SyncError::OutboxEntryNotFound`]
+    /// (v1.190 P2-T0 core `resolve_outbox` retry action).
+    ///
+    /// # Errors
+    /// Returns [`SyncError::OutboxEntryNotFound`] when no stuck entry with
+    /// the given id exists, and the specific error type if the operation
+    /// fails.
+    pub async fn requeue_stuck(&self, outbox_entry_id: &str) -> SyncResult<()> {
+        let now = chrono::Utc::now();
+
+        let result = sqlx::query!(
+            "UPDATE outbox_entries
+             SET delivery_state = 'ready', last_error = NULL, next_retry_at = NULL, updated_at = ?
+             WHERE outbox_entry_id = ? AND delivery_state IN ('conflicted', 'failed')",
+            now,
+            outbox_entry_id
+        )
+        .execute(self.pool.inner())
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(SyncError::OutboxEntryNotFound {
+                id: outbox_entry_id.to_string(),
+            });
+        }
+
+        tracing::info!(outbox_entry_id = %outbox_entry_id, "Requeued stuck entry for delivery");
+        Ok(())
+    }
+
+    /// Drop a stuck (`conflicted` / `failed`) entry from the local send
+    /// queue.
+    ///
+    /// The entry becomes permanently `failed` with no retry time, so
+    /// [`Self::replay`] never re-sends it; the durable row (with its last
+    /// error and `reason`) is retained for audit. Non-stuck entries do not
+    /// match and surface as [`SyncError::OutboxEntryNotFound`] (v1.190 P2-T0
+    /// core `resolve_outbox` discard action).
+    ///
+    /// # Errors
+    /// Returns [`SyncError::OutboxEntryNotFound`] when no stuck entry with
+    /// the given id exists, and the specific error type if the operation
+    /// fails.
+    pub async fn discard_stuck(&self, outbox_entry_id: &str, reason: &str) -> SyncResult<()> {
+        let now = chrono::Utc::now();
+
+        let result = sqlx::query!(
+            "UPDATE outbox_entries
+             SET delivery_state = 'failed', last_error = ?, next_retry_at = NULL, updated_at = ?
+             WHERE outbox_entry_id = ? AND delivery_state IN ('conflicted', 'failed')",
+            reason,
+            now,
+            outbox_entry_id
+        )
+        .execute(self.pool.inner())
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(SyncError::OutboxEntryNotFound {
+                id: outbox_entry_id.to_string(),
+            });
+        }
+
+        tracing::info!(outbox_entry_id = %outbox_entry_id, "Discarded stuck entry from send queue");
+        Ok(())
+    }
+
+    /// Bounded page of durable send-queue entries, newest first.
+    ///
+    /// Status surface for the core `outbox_status` command (v1.190 P2-T0):
+    /// every durable entry in the page — including stuck entries whose retry
+    /// time has not elapsed — with delivery state, retry accounting and last
+    /// error. Read-only: never mutates the queue.
+    ///
+    /// # Errors
+    /// Returns the specific error type if the operation fails.
+    pub async fn list_page(&self, limit: i64) -> SyncResult<Vec<OutboxEntry>> {
+        // sqlx R2: Uses module-level OutboxRow struct.
+        let rows = sqlx::query_as!(
+            OutboxRow,
+            "SELECT outbox_entry_id as \"outbox_entry_id!\", bundle_id as \"bundle_id!\",
+                    idempotency_key as \"idempotency_key!\", delivery_state as \"delivery_state!\",
+                    retry_count as \"retry_count!\", last_error, next_retry_at,
+                    created_at as \"created_at!\", updated_at
+             FROM outbox_entries
+             ORDER BY created_at DESC
+             LIMIT ?",
+            limit
+        )
+        .fetch_all(self.pool.inner())
+        .await?;
+
+        let mut entries = Vec::with_capacity(rows.len());
+        for row in rows {
+            let delivery_state = DeliveryState::from_str(&row.delivery_state).map_err(|_| {
+                SyncError::OutboxDatabase(format!("invalid delivery_state: {}", row.delivery_state))
+            })?;
+            entries.push(OutboxEntry {
+                schema_version: LATEST_SCHEMA_VERSION,
+                outbox_entry_id: row.outbox_entry_id,
+                bundle_id: row.bundle_id,
+                idempotency_key: row.idempotency_key,
+                delivery_state,
+                retry_count: Some(u64::try_from(row.retry_count).map_err(|_| {
+                    SyncError::InvalidInput(format!(
+                        "outbox retry_count is negative: {}",
+                        row.retry_count
+                    ))
+                })?),
+                last_error: row.last_error,
+                next_retry_at: row.next_retry_at,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+            });
+        }
+        Ok(entries)
+    }
+
     /// Replay all pending entries (staged, ready, failed-with-retry-due).
     ///
     /// Returns entries that are eligible for sync processing.

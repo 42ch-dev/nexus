@@ -30,6 +30,10 @@ embedded-mcp = ["dep:rmcp"]
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-local-db = { path = "../nexus-local-db" }
+# v1.190 P2-T0 (architecture §8): the core's local-outbox reuse is a normal
+# domain dependency on the existing nexus-cloud-sync `legacy-sync`
+# implementation (guarded, engine/Host-free). No new outbox implementation.
+nexus-cloud-sync = { path = "../nexus-cloud-sync", features = ["legacy-sync"] }
 nexus-knowledge = { path = "../nexus-knowledge" }
 nexus-spoke-adapter = { path = "../nexus-spoke-adapter", default-features = false }
 nexus-narrative = { path = "../nexus-narrative" }
@@ -48,6 +52,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 chrono.workspace = true
+toml.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]

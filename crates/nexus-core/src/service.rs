@@ -40,7 +40,7 @@ pub struct CoreOpenOptions {
 
 pub(crate) struct CoreInner {
     pub(crate) pool: SqlitePool,
-    db_path: PathBuf,
+    pub(crate) db_path: PathBuf,
     _guarded: Option<GuardedPool>,
     nexus_home: PathBuf,
     /// Active creator this service was opened against (open-scoped).
