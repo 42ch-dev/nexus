@@ -33,6 +33,7 @@ use nexus_contracts::local::orchestration::{WorkspaceChangeEntry, WorkspaceChang
 use nexus_contracts::{
     CoreWorkspaceCommitRequest, CoreWorkspaceCommitRequestChangesItem,
     CoreWorkspaceCommitRequestChangesItemOp, CoreWorkspaceCommitResponse,
+    CoreWorkspaceCommitResponseRevision,
 };
 
 use crate::error::{CoreError, CoreResult};
@@ -97,20 +98,20 @@ impl WorkspaceCommitAuthority {
 /// against it, so a session from a foreign root cannot commit here.
 ///
 /// # Errors
-/// Returns the mapped commit refusal: a `Conflict` for a hash/OCC mismatch,
-/// an expired/consumed session or an unsettled recovery intent, an
-/// `InvalidInput` for a manifest/bounds violation, and `Internal` for a
-/// storage fault.
+/// Returns the mapped commit refusal: [`CoreError::Busy`] for a hash/OCC
+/// mismatch, an expired/consumed session, an unsettled recovery intent or a
+/// foreign workspace root; `InvalidInput` for a manifest/bounds violation; and
+/// `Internal` for a storage fault.
 pub async fn commit_workspace(
     manager: &Arc<WorkspaceSessionManager>,
     request: CoreWorkspaceCommitRequest,
     active_workspace_root: &str,
 ) -> CoreResult<CoreWorkspaceCommitResponse> {
-    let session_id = SessionId(request.session_id.clone());
+    let session_id = SessionId(String::from(request.session_id));
     let changes = request
         .changes
         .into_iter()
-        .map(Into::into)
+        .map(WorkspaceChangeEntry::from)
         .collect::<Vec<_>>();
     let outcome: CommitOutcome = WorkspaceSessionManager::commit_session_durable_owned(
         Arc::clone(manager),
@@ -121,7 +122,11 @@ pub async fn commit_workspace(
     .await
     .map_err(map_commit_error)?;
     Ok(CoreWorkspaceCommitResponse {
-        revision: outcome.revision,
+        revision: CoreWorkspaceCommitResponseRevision::try_from(outcome.revision).map_err(
+            |err| CoreError::Internal {
+                category: format!("commit revision encode: {err}"),
+            },
+        )?,
         committed: outcome.committed,
     })
 }
@@ -166,6 +171,28 @@ fn map_commit_error(err: SessionError) -> CoreError {
         },
         SessionError::Database(msg) | SessionError::Io(msg) | SessionError::Internal(msg) => {
             CoreError::Internal { category: msg }
+        }
+    }
+}
+
+/// One generated manifest entry -> the durable commit manifest entry.
+///
+/// The generated `contentBase64`/`expectedHash` field names and the local
+/// `content_base64`/`expected_hash` fields carry identical wire semantics, and
+/// the op enum is the same three-way `create|modify|delete`. This is the single
+/// conversion seam, so the commit authority keeps naming ONE manifest type.
+impl From<CoreWorkspaceCommitRequestChangesItem> for WorkspaceChangeEntry {
+    fn from(item: CoreWorkspaceCommitRequestChangesItem) -> Self {
+        let op = match item.op {
+            CoreWorkspaceCommitRequestChangesItemOp::Create => WorkspaceChangeOp::Create,
+            CoreWorkspaceCommitRequestChangesItemOp::Modify => WorkspaceChangeOp::Modify,
+            CoreWorkspaceCommitRequestChangesItemOp::Delete => WorkspaceChangeOp::Delete,
+        };
+        Self {
+            path: String::from(item.path),
+            op,
+            expected_hash: item.expected_hash,
+            content_base64: item.content_base64,
         }
     }
 }

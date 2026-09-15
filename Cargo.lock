@@ -3933,6 +3933,7 @@ dependencies = [
  "nexus-acp-host",
  "nexus-agent-host",
  "nexus-contracts",
+ "nexus-core",
  "nexus-creator-memory",
  "nexus-home-layout",
  "nexus-knowledge",

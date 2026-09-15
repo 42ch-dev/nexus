@@ -210,34 +210,45 @@ pub fn run_event_page(
         })
         .transpose()?;
     let limit = usize::try_from(request.limit.get()).unwrap_or(DEFAULT_RUN_EVENT_LIMIT);
+    // Unwrap the request's newtypes once, up front: the ring takes `&str` and
+    // the response needs the owned id, so binding it here avoids cloning.
+    let run_id = String::from(request.run_id);
     let page = port
-        .read_page(request.run_id.as_str(), after, limit)
+        .read_page(&run_id, after, limit)
         .map_err(|err| match err {
             PageError::UnknownRun(run_id) => CoreError::NotFound {
                 resource: format!("run event ring {run_id}"),
             },
         })?;
 
+    // `kind` is a minLength-1 newtype. The ring only ever writes non-empty
+    // event names, so a conversion failure is a ring bug worth surfacing
+    // rather than papering over with a fabricated kind.
     let events = page
         .frames
         .into_iter()
-        .map(|frame| CoreRunEventsResponseEventsItem {
-            sequence: frame.sequence,
-            kind: CoreRunEventsResponseEventsItemKind::try_from(frame.kind)
-                .unwrap_or_else(|_| CoreRunEventsResponseEventsItemKind("event".to_string())),
-            payload: serde_json::from_str::<serde_json::Value>(&frame.data)
-                .ok()
-                .and_then(|v| v.as_object().cloned())
-                .unwrap_or_default(),
+        .map(|frame| {
+            let kind = CoreRunEventsResponseEventsItemKind::try_from(frame.kind.as_str())
+                .map_err(|err| CoreError::Internal {
+                    category: format!("run-event kind encode: {err}"),
+                })?;
+            Ok(CoreRunEventsResponseEventsItem {
+                sequence: frame.sequence,
+                kind,
+                payload: serde_json::from_str::<serde_json::Value>(&frame.data)
+                    .ok()
+                    .and_then(|v| v.as_object().cloned())
+                    .unwrap_or_default(),
+            })
         })
-        .collect();
+        .collect::<CoreResult<Vec<_>>>()?;
     Ok(CoreRunEventsResponse {
-        run_id: CoreRunEventsResponseRunId::try_from(request.run_id).map_err(|err| {
-            CoreError::InvalidInput {
+        run_id: CoreRunEventsResponseRunId::try_from(run_id).map_err(
+            |err| CoreError::InvalidInput {
                 field: "run_id".into(),
                 reason: err.to_string(),
-            }
-        })?,
+            },
+        )?,
         events,
         next_sequence: CoreRunEventsResponseNextSequence::try_from(
             page.next_sequence.to_string(),
@@ -313,7 +324,12 @@ impl ExecutionHandle {
         let agent_bindings = if roles.is_empty() {
             std::collections::HashMap::new()
         } else {
-            let Some(provider_id) = self.coordinator().binding_provider() else {
+            // Bind the coordinator (and the provider string) before the
+            // closure below captures it: `self.coordinator()` returns a
+            // temporary `Arc` that would otherwise be dropped at the end of
+            // the `let-else` statement.
+            let coordinator = self.coordinator();
+            let Some(provider_id) = coordinator.binding_provider() else {
                 return Err(CoreError::Internal {
                     category: format!(
                         "preset '{}' requires {} prompt role binding(s) but no configured \
@@ -329,7 +345,7 @@ impl ExecutionHandle {
                     (
                         role,
                         AgentBinding {
-                            provider_id: provider_id.to_string(),
+                            provider_id: provider_id.to_owned(),
                             model: None,
                         },
                     )

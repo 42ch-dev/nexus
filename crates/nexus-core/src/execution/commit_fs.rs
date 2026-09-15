@@ -508,6 +508,9 @@ pub(crate) fn split_relative(rel_path: &str) -> io::Result<Vec<String>> {
 mod unix_dir {
     use super::{displaced_basename, restore_basename, CREATE_FILE_MODE};
     use nix::fcntl::{openat, renameat, AtFlags, OFlag};
+    // `libc` is reached THROUGH nix (`pub use libc`), so the cohort gains no
+    // second edge for the three open flags below.
+    use nix::libc;
     use nix::sys::stat::{mode_t, Mode};
     use nix::unistd::{linkat, unlinkat};
     use sha2::Digest;
