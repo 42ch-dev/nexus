@@ -21,8 +21,10 @@ use nexus_contracts::{
 /// legacy internal codes (DATABASE_ERROR, CONTRACT_ERROR, FILE_READ_ERROR,
 /// DIRECTORY_CREATE_ERROR, OUTLINE_WRITE_ERROR, OUTLINE_SERIALIZE_ERROR,
 /// OUTLINE_REVISION_NEGATIVE, WORK_REF_MISSING, PATH_GUARD_PANIC) are carried
-/// verbatim as `<CODE>: <message>` and re-emitted with the original code;
-/// every other internal category keeps the shared `CORE_ERROR` shape.
+/// verbatim as `<CODE>: <message>` and re-emitted with the original code; the
+/// core `local_db_err` lowercase `database_error: …` carrier (Work-lookup
+/// storage faults) is re-classified as the legacy `DATABASE_ERROR`; every
+/// other internal category keeps the shared `CORE_ERROR` shape.
 pub(crate) fn content_error(error: nexus_core::CoreError) -> NexusApiError {
     match error {
         nexus_core::CoreError::InvalidInput { field, reason } => {
@@ -58,6 +60,13 @@ pub(crate) fn content_error(error: nexus_core::CoreError) -> NexusApiError {
             {
                 NexusApiError::Internal { code: code.to_owned(), message: message.to_owned() }
             }
+            // Work-lookup storage failures ride the core `local_db_err`
+            // lowercase carrier (`database_error: …`); the legacy surface
+            // classified them as `DATABASE_ERROR`, so re-emit that code.
+            Some(("database_error", message)) => NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_owned(),
+                message: message.to_owned(),
+            },
             _ => nexus_core::CoreError::Internal { category }.into(),
         },
         other => other.into(),
@@ -118,6 +127,9 @@ pub async fn patch_chapter(
     let detail = core
         .patch_chapter(
             &principal,
+            // Legacy HTTP caller label: the 423 `Locked.reason` reports
+            // `cli:http:<uuid>` for locks held by this surface.
+            "http",
             work_id,
             n,
             nexus_core::CoreChapterContentQuery::from(query),
@@ -224,6 +236,18 @@ mod tests {
             assert_eq!(code, expected_code);
             assert_eq!(message, expected_message);
         }
+
+        // Work-lookup DB faults surface through the core `local_db_err`
+        // lowercase carrier; the adapter must restore the legacy
+        // `DATABASE_ERROR` classification (pre-extraction observable).
+        let db_fault = content_error(nexus_core::CoreError::Internal {
+            category: "database_error: no such table: works".into(),
+        });
+        let NexusApiError::Internal { code, message } = &db_fault else {
+            panic!("db fault must stay Internal, got {db_fault:?}");
+        };
+        assert_eq!(code, "DATABASE_ERROR");
+        assert_eq!(message, "no such table: works");
 
         // Non-legacy internal categories keep the shared CORE_ERROR fallback.
         let fallback =

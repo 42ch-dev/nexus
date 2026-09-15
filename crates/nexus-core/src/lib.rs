@@ -1,6 +1,7 @@
 //! Transport-neutral World KB core service (v1.189 P1-T2).
 
 mod changes;
+mod chronology;
 mod content;
 mod error;
 mod outline;
@@ -23,7 +24,8 @@ pub use works::{
     PromoteInspirationResponse, ArchiveInspirationRequest,
     WorkReconcileReport,
 };
-pub use content::CoreChapterContentQuery;
+pub use chronology::CoreWorkChronology;
+pub use content::{CoreChapterContentQuery, resolve_guarded_path, resolve_guarded_path_async};
 
 /// Internal-purpose projection seam for promote/relationship consumers.
 pub mod projection {

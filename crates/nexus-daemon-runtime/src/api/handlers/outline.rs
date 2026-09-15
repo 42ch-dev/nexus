@@ -37,7 +37,7 @@ pub async fn patch_outline_structure(
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
     let response = core
-        .patch_outline_structure(&principal, work_id, req)
+        .patch_outline_structure(&principal, "http", work_id, req)
         .await
         .map_err(super::chapters::content_error)?;
     Ok(Json(response))
@@ -52,7 +52,7 @@ pub async fn patch_outline_chapter(
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
     let response = core
-        .patch_outline_chapter(&principal, work_id, n, req)
+        .patch_outline_chapter(&principal, "http", work_id, n, req)
         .await
         .map_err(super::chapters::content_error)?;
     Ok(Json(response))
@@ -67,7 +67,7 @@ pub async fn patch_timeline_event(
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
     let response = core
-        .patch_timeline_event(&principal, work_id, req)
+        .patch_timeline_event(&principal, "http", work_id, req)
         .await
         .map_err(super::chapters::content_error)?;
     Ok(Json(response))

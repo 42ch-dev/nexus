@@ -95,13 +95,15 @@ pub(crate) fn wire_cast<T: serde::de::DeserializeOwned, S: serde::Serialize>(
 /// model, while adversarial multi-user FS access is out of scope
 /// (`R-V166-QC2-TOCTOU`).
 ///
-/// # Errors
-///
 /// Returns [`CoreError::InvalidInput`] whose `field` carries the legacy
 /// `CHAPTER_PATH_*` code (`chapter_path_empty`, `chapter_path_unresolvable`,
 /// `chapter_path_forbidden`) when the path is empty, cannot be resolved, or
 /// escapes the workspace root. Callers may substitute domain-specific codes.
-pub(crate) fn resolve_guarded_path(
+///
+/// This is the single W-002 authority: the daemon `api/path_guard.rs` and the
+/// host-tool write paths delegate here and map the error at their own
+/// boundary, so a security fix cannot diverge between surfaces.
+pub fn resolve_guarded_path(
     workspace_root: &Path,
     rel_path: &str,
     must_exist: bool,
@@ -165,8 +167,10 @@ pub(crate) fn resolve_guarded_path(
 }
 
 /// Async wrapper around [`resolve_guarded_path`] that runs the blocking
-/// `std::fs::canonicalize` syscalls on the tokio blocking pool.
-pub(crate) async fn resolve_guarded_path_async(
+/// `std::fs::canonicalize` syscalls on the tokio blocking pool. Shared by the
+/// core content/outline services and the daemon surface (single W-002
+/// authority); a spawn failure carries the legacy `PATH_GUARD_PANIC` code.
+pub async fn resolve_guarded_path_async(
     workspace_root: PathBuf,
     rel_path: String,
     must_exist: bool,
@@ -228,6 +232,11 @@ pub(crate) async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::i
 /// shared by the content and outline services. The low-level acquire/release
 /// primitives live in `nexus_local_db::runtime_lock`; this guard only carries
 /// the legacy locked/DATABASE_ERROR classification.
+///
+/// `holder_kind` on [`WorkLock::acquire`] is the caller label riding the
+/// `cli:<kind>:<uuid>` holder format. The daemon content surface passes
+/// `http` so the observable 423 `Locked.reason` keeps the legacy
+/// `cli:http:<uuid>` holder string.
 pub(crate) struct WorkLock {
     pool: sqlx::SqlitePool,
     creator_id: String,
@@ -240,8 +249,9 @@ impl WorkLock {
         pool: &sqlx::SqlitePool,
         creator_id: &str,
         work_id: &str,
+        holder_kind: &str,
     ) -> Result<Self, CoreError> {
-        let holder = nexus_local_db::cli_holder("core");
+        let holder = nexus_local_db::cli_holder(holder_kind);
         let acquired = nexus_local_db::acquire_runtime_lock(
             pool,
             creator_id,
@@ -660,6 +670,9 @@ impl CoreService {
 
     /// Partial structure update of a chapter (slug/word count/volume/status).
     ///
+    /// `holder` is the per-Work runtime-lock caller label (see
+    /// [`WorkLock::acquire`]); the daemon content surface passes `http`.
+    ///
     /// # Errors
     /// As [`CoreService::chapter_detail`]; additionally
     /// [`CoreError::Forbidden`] under read-only core access or when the Work
@@ -670,6 +683,7 @@ impl CoreService {
     pub async fn patch_chapter(
         &self,
         principal: &Principal,
+        holder: &str,
         work_id: String,
         chapter_id: String,
         query: CoreChapterContentQuery,
@@ -679,9 +693,10 @@ impl CoreService {
         self.resolve_owned_work(principal, &work_id).await?;
         self.require_work_write()?;
         let root = self.optional_workspace_root(principal)?;
-        let detail = patch_chapter(self, principal, &work_id, &chapter_id, query, request, root.as_deref())
-            .await
-            .map_err(CoreError::from)?;
+        let detail =
+            patch_chapter(self, principal, holder, &work_id, &chapter_id, query, request, root.as_deref())
+                .await
+                .map_err(CoreError::from)?;
         self.verify_principal(principal)?;
         Ok(detail)
     }
@@ -857,6 +872,7 @@ async fn chapter_body(
 async fn patch_chapter(
     service: &CoreService,
     principal: &Principal,
+    holder: &str,
     work_id: &str,
     chapter_id: &str,
     query: CoreChapterContentQuery,
@@ -912,9 +928,8 @@ async fn patch_chapter(
             _ => {}
         }
     }
-
     // Acquire runtime lock before mutating DB metadata.
-    let lock = WorkLock::acquire(pool, creator_id, work_id).await?;
+    let lock = WorkLock::acquire(pool, creator_id, work_id, holder).await?;
 
     let updated: Result<WorkChapterRecord, ContentFault> = async {
         let patch = PatchChapterParams {

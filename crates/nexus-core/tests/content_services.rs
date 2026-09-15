@@ -226,6 +226,7 @@ async fn published_chapter_mutation_blocked_and_content_survives() {
         .core
         .patch_chapter(
             &fx.principal,
+            "http",
             fx.work_id.clone(),
             "1".into(),
             content_query(),
@@ -251,6 +252,7 @@ async fn published_chapter_mutation_blocked_and_content_survives() {
         .core
         .patch_outline_chapter(
             &fx.principal,
+            "http",
             fx.work_id.clone(),
             "1".into(),
             chapter_patch_request(serde_json::json!({
@@ -283,6 +285,7 @@ async fn published_chapter_mutation_blocked_and_content_survives() {
         .core
         .patch_outline_chapter(
             &fx.principal,
+            "http",
             fx.work_id.clone(),
             "2".into(),
             chapter_patch_request(serde_json::json!({
@@ -315,6 +318,7 @@ async fn chapter_patch_updates_slug_volume_and_rejects_title() {
         .core
         .patch_chapter(
             &fx.principal,
+            "http",
             fx.work_id.clone(),
             "1".into(),
             content_query(),
@@ -332,6 +336,7 @@ async fn chapter_patch_updates_slug_volume_and_rejects_title() {
         .core
         .patch_chapter(
             &fx.principal,
+            "http",
             fx.work_id.clone(),
             "1".into(),
             content_query(),
@@ -345,6 +350,7 @@ async fn chapter_patch_updates_slug_volume_and_rejects_title() {
         .core
         .patch_chapter(
             &fx.principal,
+            "http",
             fx.work_id.clone(),
             "1".into(),
             content_query(),
@@ -358,6 +364,7 @@ async fn chapter_patch_updates_slug_volume_and_rejects_title() {
         .core
         .patch_chapter(
             &fx.principal,
+            "http",
             fx.work_id.clone(),
             "2".into(),
             content_query(),
@@ -374,6 +381,7 @@ async fn chapter_patch_updates_slug_volume_and_rejects_title() {
         .core
         .patch_chapter(
             &fx.principal,
+            "http",
             fx.work_id.clone(),
             "2".into(),
             content_query(),
@@ -466,6 +474,7 @@ async fn outline_patch_conflict_and_locked_reread() {
         .core
         .patch_outline_structure(
             &fx.principal,
+            "http",
             fx.work_id.clone(),
             structure_request(serde_json::json!({
                 "work_id": fx.work_id, "base_revision": 5,
@@ -488,6 +497,7 @@ async fn outline_patch_conflict_and_locked_reread() {
     fx.core
         .patch_outline_chapter(
             &fx.principal,
+            "http",
             fx.work_id.clone(),
             "1".into(),
             chapter_patch_request(serde_json::json!({
@@ -526,6 +536,7 @@ async fn timeline_patch_round_trip_and_guards() {
     fx.core
         .patch_timeline_event(
             &fx.principal,
+            "http",
             fx.work_id.clone(),
             patch(
                 0,
@@ -539,6 +550,7 @@ async fn timeline_patch_round_trip_and_guards() {
     fx.core
         .patch_timeline_event(
             &fx.principal,
+            "http",
             fx.work_id.clone(),
             patch(
                 1,
@@ -561,6 +573,7 @@ async fn timeline_patch_round_trip_and_guards() {
     fx.core
         .patch_timeline_event(
             &fx.principal,
+            "http",
             fx.work_id.clone(),
             patch(
                 2,
@@ -580,6 +593,7 @@ async fn timeline_patch_round_trip_and_guards() {
         .core
         .patch_timeline_event(
             &fx.principal,
+            "http",
             fx.work_id.clone(),
             patch(
                 3,
@@ -602,6 +616,7 @@ async fn timeline_patch_round_trip_and_guards() {
         .core
         .patch_timeline_event(
             &fx.principal,
+            "http",
             fx.work_id.clone(),
             patch(
                 3,
@@ -623,6 +638,7 @@ async fn timeline_patch_round_trip_and_guards() {
     fx.core
         .patch_timeline_event(
             &fx.principal,
+            "http",
             fx.work_id.clone(),
             patch(
                 3,
@@ -648,6 +664,7 @@ async fn outline_chapter_patch_writes_prose_and_seeds_path() {
     fx.core
         .patch_outline_chapter(
             &fx.principal,
+            "http",
             fx.work_id.clone(),
             "1".into(),
             chapter_patch_request(serde_json::json!({
@@ -706,6 +723,7 @@ async fn outline_frontmatter_delimiter_edges() {
     fx.core
         .patch_outline_chapter(
             &fx.principal,
+            "http",
             fx.work_id.clone(),
             "1".into(),
             chapter_patch_request(serde_json::json!({
@@ -726,6 +744,7 @@ async fn outline_frontmatter_delimiter_edges() {
     fx.core
         .patch_outline_chapter(
             &fx.principal,
+            "http",
             fx.work_id.clone(),
             "1".into(),
             chapter_patch_request(serde_json::json!({
@@ -744,6 +763,131 @@ async fn outline_frontmatter_delimiter_edges() {
         final_content.starts_with("---\noutline_revision: 1"),
         "default frontmatter must be re-seeded and bumped: {final_content}"
     );
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// Fix-round regression (lock-holder label): a lock acquired through the
+/// daemon-holder content route reports the legacy `cli:http:<uuid>` holder
+/// verbatim in the observable 423 `Locked.reason` (`work … is locked by
+/// 'cli:http:…'`).
+#[tokio::test]
+async fn locked_work_reports_http_holder_in_reason() {
+    let fx = setup().await;
+    let holder = nexus_local_db::cli_holder("http");
+    let acquired = nexus_local_db::acquire_runtime_lock(
+        &fx.pool,
+        fx.principal.creator_id(),
+        &fx.work_id,
+        &holder,
+        nexus_local_db::ttl_from_env(),
+        false,
+    )
+    .await
+    .unwrap();
+    assert!(matches!(acquired, nexus_local_db::AcquireResult::Acquired { .. }));
+
+    let err = fx
+        .core
+        .patch_chapter(
+            &fx.principal,
+            "http",
+            fx.work_id.clone(),
+            "1".into(),
+            content_query(),
+            patch_request(serde_json::json!({"slug": "blocked-by-lock"})),
+        )
+        .await
+        .err()
+        .expect("locked Work must reject the patch");
+    let CoreError::Forbidden { resource } = err else {
+        panic!("expected locked carrier, got {err:?}");
+    };
+    let reason = resource
+        .strip_prefix("work_locked:")
+        .expect("locked resource prefix");
+    let marker = "'cli:http:";
+    let start = reason.find(marker).expect("legacy cli:http holder in reason");
+    let holder_tail = &reason[start + marker.len()..];
+    let uuid = holder_tail.split('\'').next().expect("closing quote");
+    assert_eq!(uuid.len(), 36, "holder uuid shape: {reason}");
+    assert!(uuid.chars().filter(|c| *c == '-').count() == 4, "uuid dashes");
+    assert!(
+        !reason.contains("cli:core:"),
+        "core label must not leak into the HTTP surface: {reason}"
+    );
+
+    // The route's own holder also releases cleanly (label round-trips).
+    let released = nexus_local_db::release_runtime_lock(
+        &fx.pool,
+        fx.principal.creator_id(),
+        &fx.work_id,
+        &holder,
+    )
+    .await
+    .unwrap();
+    assert!(released);
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// Fix-round regression (database_error carrier): a real storage fault on the
+/// Work-lookup path (`works` table dropped) rides the core lowercase
+/// `database_error: …` category that the daemon adapter re-classifies as the
+/// legacy `DATABASE_ERROR`.
+#[tokio::test]
+async fn work_lookup_db_fault_rides_lowercase_carrier() {
+    let fx = setup().await;
+    sqlx::query("DROP TABLE works").execute(&fx.pool).await.unwrap();
+
+    let err = fx
+        .core
+        .list_chapters(&fx.principal, fx.work_id.clone(), chapters_query(serde_json::json!({})))
+        .await
+        .err()
+        .expect("storage fault must fail the lookup");
+    let CoreError::Internal { category } = err else {
+        panic!("expected internal carrier, got {err:?}");
+    };
+    let message = category
+        .strip_prefix("database_error: ")
+        .expect("lowercase local_db_err carrier");
+    assert!(!message.is_empty(), "fault message preserved: {category}");
+    fx.pool.close().await;
+    fx.core.close().await.unwrap();
+}
+
+/// Fix-round addition (chronology core read): `CoreService::work_chronology`
+/// resolves a Work by ref slug or id and projects the auto-chronology flag,
+/// matching the CLI `chronology show` read semantics.
+#[tokio::test]
+async fn work_chronology_projects_flag_by_ref_or_id() {
+    let fx = setup().await;
+    let now = chrono::Utc::now().to_rfc3339();
+
+    // Default state reads false by both ref slug and work_id.
+    let by_ref = fx.core.work_chronology(&fx.principal, "test-novel").await.unwrap();
+    assert_eq!(by_ref.work_id, fx.work_id);
+    assert!(!by_ref.auto_chronology);
+    let by_id = fx.core.work_chronology(&fx.principal, &fx.work_id).await.unwrap();
+    assert_eq!(by_id, by_ref);
+
+    nexus_local_db::works::set_auto_chronology(&fx.pool, &fx.work_id, true, &now)
+        .await
+        .unwrap();
+    let enabled = fx.core.work_chronology(&fx.principal, "test-novel").await.unwrap();
+    assert!(enabled.auto_chronology);
+
+    let err = fx
+        .core
+        .work_chronology(&fx.principal, "no-such-work")
+        .await
+        .err()
+        .expect("unknown ref must 404");
+    let CoreError::NotFound { resource } = err else {
+        panic!("expected NotFound, got {err:?}");
+    };
+    assert_eq!(resource, "work no-such-work");
     fx.pool.close().await;
     fx.core.close().await.unwrap();
 }

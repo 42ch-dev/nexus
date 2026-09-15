@@ -489,6 +489,7 @@ impl CoreService {
     pub async fn patch_outline_structure(
         &self,
         principal: &Principal,
+        holder: &str,
         work_id: String,
         request: OutlinePatchStructureRequest,
     ) -> CoreResult<OutlinePatchResponse> {
@@ -496,9 +497,10 @@ impl CoreService {
         let work = self.resolve_owned_work(principal, &work_id).await?;
         self.require_work_write()?;
         let root = self.workspace_root(principal)?;
-        let response = patch_outline_structure(self, principal, &work_id, &work, &root, request)
-            .await
-            .map_err(CoreError::from)?;
+        let response =
+            patch_outline_structure(self, principal, holder, &work_id, &work, &root, request)
+                .await
+                .map_err(CoreError::from)?;
         self.verify_principal(principal)?;
         Ok(response)
     }
@@ -511,6 +513,7 @@ impl CoreService {
     pub async fn patch_outline_chapter(
         &self,
         principal: &Principal,
+        holder: &str,
         work_id: String,
         chapter_id: String,
         request: OutlinePatchChapterRequest,
@@ -519,10 +522,11 @@ impl CoreService {
         let work = self.resolve_owned_work(principal, &work_id).await?;
         self.require_work_write()?;
         let root = self.workspace_root(principal)?;
-        let response =
-            patch_outline_chapter(self, principal, &work_id, &work, &root, &chapter_id, request)
-                .await
-                .map_err(CoreError::from)?;
+        let response = patch_outline_chapter(
+            self, principal, holder, &work_id, &work, &root, &chapter_id, request,
+        )
+        .await
+        .map_err(CoreError::from)?;
         self.verify_principal(principal)?;
         Ok(response)
     }
@@ -535,6 +539,7 @@ impl CoreService {
     pub async fn patch_timeline_event(
         &self,
         principal: &Principal,
+        holder: &str,
         work_id: String,
         request: TimelinePatchEventRequest,
     ) -> CoreResult<OutlinePatchResponse> {
@@ -542,9 +547,10 @@ impl CoreService {
         let work = self.resolve_owned_work(principal, &work_id).await?;
         self.require_work_write()?;
         let root = self.workspace_root(principal)?;
-        let response = patch_timeline_event(self, principal, &work_id, &work, &root, request)
-            .await
-            .map_err(CoreError::from)?;
+        let response =
+            patch_timeline_event(self, principal, holder, &work_id, &work, &root, request)
+                .await
+                .map_err(CoreError::from)?;
         self.verify_principal(principal)?;
         Ok(response)
     }
@@ -580,6 +586,7 @@ async fn get_work_outline(
 async fn patch_outline_structure(
     service: &CoreService,
     principal: &Principal,
+    holder: &str,
     work_id: &str,
     work: &works::WorkRecord,
     workspace_root: &Path,
@@ -617,8 +624,7 @@ async fn patch_outline_structure(
             recovery_hint: "refetch the work outline and reapply".to_string(),
         });
     }
-
-    let lock = WorkLock::acquire(&service.inner.pool, principal.creator_id(), work_id).await?;
+    let lock = WorkLock::acquire(&service.inner.pool, principal.creator_id(), work_id, holder).await?;
 
     // Re-read both frontmatter and body under lock to close the TOCTOU window
     // for concurrent writers and avoid persisting a stale body snapshot.
@@ -658,6 +664,7 @@ async fn patch_outline_structure(
 async fn patch_outline_chapter(
     service: &CoreService,
     principal: &Principal,
+    holder: &str,
     work_id: &str,
     work: &works::WorkRecord,
     workspace_root: &Path,
@@ -728,7 +735,7 @@ async fn patch_outline_chapter(
         });
     }
 
-    let lock = WorkLock::acquire(&service.inner.pool, principal.creator_id(), work_id).await?;
+    let lock = WorkLock::acquire(&service.inner.pool, principal.creator_id(), work_id, holder).await?;
 
     // Re-read both frontmatter and body under lock to close the TOCTOU window
     // for concurrent writers and avoid persisting a stale body snapshot.
@@ -776,6 +783,7 @@ async fn patch_outline_chapter(
 async fn patch_timeline_event(
     service: &CoreService,
     principal: &Principal,
+    holder: &str,
     work_id: &str,
     work: &works::WorkRecord,
     workspace_root: &Path,
@@ -811,7 +819,7 @@ async fn patch_timeline_event(
         });
     }
 
-    let lock = WorkLock::acquire(&service.inner.pool, principal.creator_id(), work_id).await?;
+    let lock = WorkLock::acquire(&service.inner.pool, principal.creator_id(), work_id, holder).await?;
 
     // Re-read both frontmatter and body under lock to close the TOCTOU window
     // for concurrent writers and avoid persisting a stale body snapshot.
