@@ -69,7 +69,6 @@ import {
   flattenPages,
   useComputeModules,
   useForkLineage,
-  useNarrativeWorlds,
   useWorldTimelineEvents,
   useWorks,
 } from '@/api/queries';
@@ -142,12 +141,15 @@ export interface TimelineCanvasProps {
 const TIMELINE_EVENTS_PROJECTION_CAP = 500;
 
 /**
- * Bugbot 2 — root-branch fallback when `narrative_worlds.root_fork_branch_id`
- * is unset. Mirrors the daemon's root resolution (`resolve_run_branch` /
- * timeline-events root fallback in `compute_runs.rs` + `timeline_events.rs`).
- * Root is otherwise represented as NO `?branch=` param; comparing against
- * this id lets the parent hop normalize a root parent to `undefined` instead
- * of writing the root id into the URL (the dual-representation bug).
+ * Bugbot 2 — root-branch identity. Mirrors the daemon's root resolution
+ * (`resolve_run_branch` / timeline-events root fallback in `compute_runs.rs` +
+ * `timeline_events.rs`): root is `fbk_root` when no explicit root fork branch
+ * is stored. v1.190 P5-T1: the narrative-worlds projection
+ * (`NarrativeWorldState`) carries no `root_fork_branch_id`, so this constant
+ * IS the root branch id on this seam. Root is otherwise represented as NO
+ * `?branch=` param; comparing against this id lets the parent hop normalize a
+ * root parent to `undefined` instead of writing the root id into the URL (the
+ * dual-representation bug).
  */
 const ROOT_BRANCH_ID_FALLBACK = 'fbk_root';
 
@@ -259,20 +261,14 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     [searchParams, setSearchParams],
   );
 
-  // Bugbot 2 — the World's ROOT branch id, from the narrative-worlds DTO
-  // (`World.root_fork_branch_id`; daemon fallback `fbk_root` when unset).
-  // `handleOpenParentBranch` compares the parent against this so a hop to
-  // the World's root CLEARS `?branch=` (root = no param) instead of setting
-  // the root id — the degraded-badge guard (`forkLineageUnavailable`) must
-  // never see a truthy root `activeBranchId`. The shared worlds query key
-  // means the list is reused (not re-fetched) when the app already loaded it.
-  const worlds = useNarrativeWorlds();
-  const rootBranchId = useMemo(
-    () =>
-      worlds.data?.find((w) => w.world_id === worldId)?.root_fork_branch_id ??
-      ROOT_BRANCH_ID_FALLBACK,
-    [worlds.data, worldId],
-  );
+  // Bugbot 2 — the World's ROOT branch id. `handleOpenParentBranch` compares
+  // the parent against this so a hop to the World's root CLEARS `?branch=`
+  // (root = no param) instead of setting the root id — the degraded-badge
+  // guard (`forkLineageUnavailable`) must never see a truthy root
+  // `activeBranchId`. v1.190 P5-T1: the narrative-worlds projection never
+  // carried `root_fork_branch_id` (see ROOT_BRANCH_ID_FALLBACK above), so the
+  // root branch id is the constant; the former per-World lookup was dead.
+  const rootBranchId = ROOT_BRANCH_ID_FALLBACK;
 
   // ── V1.147 P2 T3 — compute events + module registry ──────────────────────
   //

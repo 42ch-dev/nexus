@@ -144,9 +144,10 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     await client.inspectSchedule('sch1');
     await client.listCapabilities();
     await client.listFindings(workId);
-    // V1.77 findings-remediation promotion (getFinding/updateFinding) — the
-    // types + daemon routes already existed; these exercise the new TS surface.
-    await client.getFinding(workId, 'f1');
+    // V1.77 findings-remediation promotion (getWorkFinding/updateFinding) —
+    // the types + daemon routes already existed; these exercise the TS
+    // surface (v1.190 P5-T1 renamed getFinding → getWorkFinding).
+    await client.getWorkFinding(workId, 'f1');
     await client.updateFinding(workId, 'f1', { status: 'triaged' });
     await client.listPresets();
     await client.scaffoldPreset({ name: 'foo' });
@@ -507,12 +508,15 @@ describe('NexusClient preset-method parity guard (R-V167P1-QC3-S1)', () => {
 
 /**
  * The V1.77 findings-remediation promotion added `getFinding`/`updateFinding`
- * to the `NexusClient` interface. This guard mirrors the preset-method guard:
- * it fails at compile time (the `satisfies` constraint) if the interface drops
- * either method, and at runtime if an adapter implementation is missing it.
+ * to the `NexusClient` interface. v1.190 P5-T1 renamed the work-scoped method
+ * to `getWorkFinding` (the bare `getFinding` is now the canonical
+ * creator-scoped `GET /v1/daemon/findings/{finding_id}` from the generated
+ * `CoreSliceClient`). This guard mirrors the preset-method guard: it fails at
+ * compile time (the `satisfies` constraint) if the interface drops a method,
+ * and at runtime if an adapter implementation is missing it.
  */
 const FINDINGS_METHODS = [
-  'getFinding',
+  'getWorkFinding',
   'updateFinding',
   'batchUpdateFindings',
 ] as const satisfies readonly (keyof NexusClient)[];
@@ -538,7 +542,7 @@ describe('NexusClient findings-method parity guard (V1.77)', () => {
     }
   });
 
-  it('getFinding / updateFinding route to the {finding_id} path with GET / PATCH', async () => {
+  it('getWorkFinding / updateFinding route to the {finding_id} path with GET / PATCH', async () => {
     // Contract edge: the two promoted findings methods target
     // `/v1/daemon/works/{work_id}/findings/{finding_id}` with GET/PATCH and
     // URL-encode both path params. Pinned via the fetchImpl seam (this file owns
@@ -561,7 +565,7 @@ describe('NexusClient findings-method parity guard (V1.77)', () => {
     };
 
     const client = new BrowserClient({ fetchImpl });
-    await client.getFinding('w1', 'f1');
+    await client.getWorkFinding('w1', 'f1');
     await client.updateFinding('w1', 'f1', { status: 'triaged', target_executor: 'write' });
 
     expect(seen).toEqual([
