@@ -111,6 +111,113 @@ export function rewriteExactStringPatterns(node: unknown): void {
   for (const value of Object.values(rec)) rewriteExactStringPatterns(value);
 }
 
+/**
+ * Draft-07 annotation keywords: carry metadata, never a type constraint. Their
+ * values are example data (arbitrary JSON), not schemas — the walker below never
+ * descends into them.
+ */
+const ANNOTATION_KEYWORDS: Record<string, true> = {
+  $comment: true,
+  title: true,
+  description: true,
+  default: true,
+  examples: true,
+  deprecated: true,
+  readOnly: true,
+  writeOnly: true,
+};
+
+/** Keywords whose value is a single subschema (or a tuple array of subschemas for `items`). */
+const SUBSCHEMA_KEYWORDS: Record<string, true> = {
+  items: true,
+  additionalProperties: true,
+  additionalItems: true,
+  contains: true,
+  propertyNames: true,
+  not: true,
+  if: true,
+  then: true,
+  else: true,
+};
+
+/** Keywords whose value is an array of subschemas. */
+const SUBSCHEMA_LIST_KEYWORDS: Record<string, true> = {
+  allOf: true,
+  anyOf: true,
+  oneOf: true,
+};
+
+/** Keywords whose value maps names to subschemas (the keys are property names, not keywords). */
+const SUBSCHEMA_MAP_KEYWORDS: Record<string, true> = {
+  properties: true,
+  patternProperties: true,
+  $defs: true,
+  definitions: true,
+};
+
+/** True when a subschema carries only annotation keywords — i.e. it is unrestricted ("any JSON value"). */
+function isUnrestrictedSubschema(schema: unknown): boolean {
+  if (typeof schema !== 'object' || schema === null || Array.isArray(schema)) return false;
+  return Object.keys(schema).every(key => ANNOTATION_KEYWORDS[key] === true);
+}
+
+/** Rewrite a subschema at a known schema position, or descend when it stays an object. */
+function rewriteSchemaPosition(value: unknown, replace: (next: unknown) => void): void {
+  if (isUnrestrictedSubschema(value)) {
+    replace(true);
+  } else {
+    rewriteUnrestrictedJsonValues(value);
+  }
+}
+
+/**
+ * Rewrite unrestricted JSON-value subschemas (`{}` or annotation-only objects) to the
+ * boolean `true` schema so jstt emits `unknown` instead of an object index signature.
+ * Without this, a typeless wire field (e.g. `core-tool-execute-response.result`,
+ * mirroring `serde_json::Value` on the Rust side) compiles to
+ * `{ [k: string]: unknown }`, which wrongly rejects scalar/array/null JSON values.
+ * The boolean `true` schema compiles to `unknown` — the same representation the
+ * handwritten contracts use for arbitrary JSON (`payload: unknown` in desktop ipc).
+ *
+ * Only known schema positions are descended: annotation values (`default`/`examples`)
+ * are opaque data, `properties`/`definitions` keys are property names, and unknown
+ * keywords (e.g. `schema_version`) are left untouched. The root schema is never
+ * rewritten — jstt cannot compile a boolean root.
+ */
+export function rewriteUnrestrictedJsonValues(node: unknown): void {
+  if (Array.isArray(node)) {
+    for (let i = 0; i < node.length; i++) {
+      rewriteSchemaPosition(node[i], next => {
+        node[i] = next;
+      });
+    }
+    return;
+  }
+  if (node === null || typeof node !== 'object') return;
+  const slot = node as Record<string, unknown>;
+  for (const [key, value] of Object.entries(slot)) {
+    if (ANNOTATION_KEYWORDS[key] === true) continue;
+    if (SUBSCHEMA_KEYWORDS[key] === true) {
+      rewriteSchemaPosition(value, next => {
+        slot[key] = next;
+      });
+    } else if (SUBSCHEMA_LIST_KEYWORDS[key] === true) {
+      rewriteUnrestrictedJsonValues(value);
+    } else if (
+      SUBSCHEMA_MAP_KEYWORDS[key] === true &&
+      typeof value === 'object' &&
+      value !== null &&
+      !Array.isArray(value)
+    ) {
+      for (const [name, sub] of Object.entries(value)) {
+        rewriteSchemaPosition(sub, next => {
+          (value as Record<string, unknown>)[name] = next;
+        });
+      }
+    }
+  }
+}
+
 /** POSIX-relative schema paths (relative to the localized tree root). */
 function posix(rel: string): string {
   return rel.split(path.sep).join('/');
@@ -135,6 +242,7 @@ export async function generateTSTypes(): Promise<void> {
     const abs = path.join(localizedDir, ...rel.split('/'));
     const raw = readJSON<Record<string, unknown>>(abs);
     rewriteExactStringPatterns(raw);
+    rewriteUnrestrictedJsonValues(raw);
     fs.writeFileSync(abs, `${JSON.stringify(raw, null, 2)}\n`);
   }
   const emitRel = allRel.filter(rel => !SKIP_LIST.has(rel));

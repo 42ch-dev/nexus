@@ -38,12 +38,7 @@ export interface AddScheduleRequest {
    * Unix timestamp string for deferred execution.
    */
   scheduled_at?: string;
-  /**
-   * Structured input context for the preset (key-value pairs).
-   */
-  input?: {
-    [k: string]: unknown | undefined;
-  };
+  input?: unknown;
   /**
    * Role to provider binding map (A1). Frozen at admission into the run descriptor.
    */

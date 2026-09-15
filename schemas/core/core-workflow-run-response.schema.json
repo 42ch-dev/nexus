@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-workflow-run-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreWorkflowRunResponse",
+  "description": "Authoritative workflow run record projection: run identity, status and the CAS state revision anchoring workflow control. Also returned by cancel.",
+  "type": "object",
+  "required": [
+    "run_id",
+    "status",
+    "state_revision"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Run (session) identity."
+    },
+    "status": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Authoritative orchestration run status."
+    },
+    "state_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Current state revision (CAS anchor)."
+    }
+  }
+}

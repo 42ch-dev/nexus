@@ -417,6 +417,48 @@ fn apply_nested_session_viewpoint_order(rust: &str, src_schema_path: &Path) -> S
     reorder_root_struct_fields(rust, "NexusSessionViewpoint", &order)
 }
 
+/// Mirror typify's convert_case Pascal naming for a schema `title`
+/// (`"Nexus CharacterDetail"` → `NexusCharacterDetail`).
+fn title_to_type_name(title: &str) -> String {
+    title
+        .split_whitespace()
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect()
+}
+
+/// Rename identifier-prefixed occurrences of `from` to `to`. A match counts
+/// when the preceding char is not part of an identifier, so derived names
+/// (`NexusXBuilder`, `NexusXNested`) shift coherently with the root rename.
+fn rename_identifier_prefix(rust: &str, from: &str, to: &str) -> String {
+    if from == to || from.is_empty() {
+        return rust.to_string();
+    }
+    let mut out = String::with_capacity(rust.len());
+    let mut rest = rust;
+    while let Some(pos) = rest.find(from) {
+        let bounded = rest[..pos]
+            .chars()
+            .next_back()
+            .map(|c| !(c.is_alphanumeric() || c == '_'))
+            .unwrap_or(true);
+        out.push_str(&rest[..pos]);
+        if bounded {
+            out.push_str(to);
+        } else {
+            out.push_str(from);
+        }
+        rest = &rest[pos + from.len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Generate Rust source for a single schema via `typify` and write it to `out_path`.
 ///
 /// `rel` is the schema's path relative to the schemas dir (POSIX or platform); it
@@ -452,6 +494,22 @@ fn generate_schema_rust(
         .ok_or_else(|| format!("root schema must be an object: {}", schema_path.display()))?
         .insert("title".to_owned(), Value::String(type_name.clone()));
 
+    // Root-level `allOf` wrappers (alias schemas sharing a single underlying
+    // definition): the prep stage inlines the referenced schema verbatim, so
+    // typify names the merged root type from the REFERENCED member's `title`
+    // (e.g. `NexusCharacterDetail`), drifting from the basename-derived TS
+    // contract name set above. Capture that member-derived name; after
+    // generation the emitted identifiers are renamed to the contract name, and
+    // derived helper names (builders, nested newtypes) shift coherently.
+    let member_type_name: Option<String> = schema
+        .as_object()
+        .and_then(|obj| obj.get("allOf"))
+        .and_then(|value| value.as_array())
+        .and_then(|members| members.first())
+        .and_then(|member| member.get("title"))
+        .and_then(|title| title.as_str())
+        .map(title_to_type_name);
+
     let mut settings = TypeSpaceSettings::default();
     // Mirror the proven spoke setting; T4 may tune derives if clippy requires.
     settings.with_struct_builder(true);
@@ -471,6 +529,11 @@ fn generate_schema_rust(
             "typify produced empty output for {}",
             schema_path.display()
         ));
+    }
+    if let Some(from) = member_type_name {
+        if from != type_name {
+            rust = rename_identifier_prefix(&rust, &from, &type_name);
+        }
     }
     let rel_posix_path = rel_posix(rel);
     if PRESERVE_PROPERTY_ORDER.contains(&rel_posix_path.as_str()) {

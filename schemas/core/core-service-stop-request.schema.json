@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-service-stop-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreServiceStopRequest",
+  "description": "Closed v1 instance-bound stop request for the runtime stop endpoint. A mismatch on instance id or engine epoch returns conflict and performs no stop; no PID-only stop exists.",
+  "type": "object",
+  "required": [
+    "expected_instance_id",
+    "expected_engine_epoch"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "expected_instance_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Instance identity from discovery; stop is refused when it no longer owns the service."
+    },
+    "expected_engine_epoch": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "description": "Engine epoch expected by the caller; null matches an uninitialized service. Mismatch returns conflict."
+    }
+  }
+}

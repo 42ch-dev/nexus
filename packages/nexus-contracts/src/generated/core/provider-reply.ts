@@ -24,12 +24,16 @@ export interface ProviderReply {
  * Wire error envelope for nexus-core / native / service adapters (NexusApiError-compatible categories).
  */
 export interface NexusCoreError {
+  /**
+   * NexusApiError-compatible category. not_supported refuses an operation this service does not serve (unsupported operations fail with this code and zero side effects; the finer lowercase peer wire code, e.g. op_unsupported, is preserved in details.wire_code).
+   */
   code:
     | "uninitialized"
     | "auth_required"
     | "invalid_input"
     | "forbidden"
     | "not_found"
+    | "not_supported"
     | "world_kb_conflict"
     | "world_kb_validation"
     | "writer_fenced"

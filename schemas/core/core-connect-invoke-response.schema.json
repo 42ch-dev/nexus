@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-connect-invoke-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreConnectInvokeResponse",
+  "description": "Canonical Connect invoke result envelope: exactly one of result or error is non-null, encoded as a closed success/failure union. Error codes reuse the shared CoreError categories, including not_supported for operations this service does not serve.",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/definitions/success" },
+    { "$ref": "#/definitions/failure" }
+  ],
+  "definitions": {
+    "success": {
+      "title": "ConnectInvokeSuccess",
+      "type": "object",
+      "description": "Operation succeeded: result carries the payload and error is null.",
+      "required": [
+        "result",
+        "error"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "result": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Operation result; non-null exactly when error is null."
+        },
+        "error": {
+          "type": "null",
+          "description": "Null on success."
+        }
+      }
+    },
+    "failure": {
+      "title": "ConnectInvokeFailure",
+      "type": "object",
+      "description": "Operation refused or failed: error carries the wire envelope and result is null.",
+      "required": [
+        "result",
+        "error"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "result": {
+          "type": "null",
+          "description": "Null on failure."
+        },
+        "error": {
+          "$ref": "https://nexus42.invalid/schemas/core/core-error.schema.json",
+          "description": "Wire error envelope; non-null exactly when result is null."
+        }
+      }
+    }
+  }
+}

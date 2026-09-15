@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-strategy-patch-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreStrategyPatchResponse",
+  "description": "Core-owned Strategy patch result; identical wire shape to the existing Strategy patch response, including validation summary and optional side effects (single underlying definition (allOf to the existing schema; keep in sync through the P5-T0 schema lane)).",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/canvas/strategy/strategy-patch-response.schema.json"
+    }
+  ]
+}

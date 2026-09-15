@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-run-events-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreRunEventsRequest",
+  "description": "Bounded run-events pull request. Run events keep their own cursor/terminal source, distinct from provider events and core changes.",
+  "type": "object",
+  "required": [
+    "run_id"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "after_sequence": {
+      "type": "string",
+      "pattern": "^[0-9]+$",
+      "description": "Non-negative decimal string sequence cursor (exclusive lower bound)."
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 256,
+      "default": 64,
+      "description": "Maximum events in this page."
+    }
+  }
+}

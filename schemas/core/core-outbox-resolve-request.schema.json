@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-outbox-resolve-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreOutboxResolveRequest",
+  "description": "Resolve a stuck local outbox entry: retry it now or discard it. Only entries in a stuck state (conflicted/failed) are resolvable; resolution is local and never re-sends by itself.",
+  "type": "object",
+  "required": [
+    "outbox_entry_id",
+    "action"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "outbox_entry_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "retry",
+        "discard"
+      ],
+      "description": "retry re-queues the entry for delivery; discard drops it locally."
+    }
+  }
+}

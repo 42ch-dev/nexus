@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/core/core-provider-operation.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreProviderOperation",
+  "description": "One durable JS-provider operation journal record (bounded retention, newest-first read). Status is terminal once finished/failed/interrupted/cancelled and is never downgraded back to running by a restart.",
+  "type": "object",
+  "required": [
+    "operation_id",
+    "session_id",
+    "provider_id",
+    "status",
+    "sequence"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "operation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provider_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "running",
+        "finished",
+        "failed",
+        "interrupted",
+        "cancelled"
+      ]
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonic journal sequence assigned at write time."
+    }
+  }
+}

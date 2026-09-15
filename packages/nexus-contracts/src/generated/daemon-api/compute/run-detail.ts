@@ -83,12 +83,7 @@ export interface NexusComputeOutputEnvelope {
      * KnowledgeEntry entry_id the delta applies to (opaque string per spoke knowledge-entry.schema.json). When omitted, the host applies the delta to the entry implied by the capability context.
      */
     target_key_block_id?: string;
-    /**
-     * Value for set, or numeric delta for add/sub. Untyped (any JSON) to allow module-declared state shapes.
-     */
-    value?: {
-      [k: string]: unknown | undefined;
-    };
+    value?: unknown;
   }[];
   /**
    * Timeline events to append (V1.60 timeline.event.append). Typically a story_advance or state_update event recording the outcome of the compute step.
