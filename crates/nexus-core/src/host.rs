@@ -483,7 +483,7 @@ impl HostHandle {
     #[allow(clippy::too_many_lines)]
     pub async fn query(
         &self,
-        _principal: &Principal,
+        principal: &Principal,
         request: CoreHostQuery,
     ) -> CoreResult<CoreHostQueryResponse> {
         self.core.ensure_open()?;
