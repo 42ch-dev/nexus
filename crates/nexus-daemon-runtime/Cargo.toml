@@ -134,7 +134,6 @@ spoke-operations = { workspace = true }
 # Enable the gated execution test seams for this package's own tests without
 # exposing them in the production build. The seams moved to nexus-core in
 # v1.190 P3-T2, so this package's tests reach them through the core feature.
-nexus-daemon-runtime = { path = ".", features = ["test-hooks"] }
 nexus-core = { path = "../nexus-core", features = ["execution", "test-hooks"] }
 axum-test = "19.1"
 graph-flow = { version = "=0.8.0", default-features = false }
@@ -172,11 +171,9 @@ path = "tests/embedded_mcp_e2e.rs"
 required-features = ["connect-client", "embedded-mcp"]
 
 [features]
-test-support = []
-# v1.190 P3-T2: the injected crash/race/owner seams moved into nexus-core's
-# `execution` cohort, so this feature now only marks the daemon's own gated
-# test-support surface; the core seam is enabled by the dev-dependency above.
-test-hooks = ["test-support"]
+# v1.190 P3-T2: the workspace-commit crash/race/owner seams now live in
+# nexus-core's `execution` cohort behind ITS `test-hooks` feature (see
+# [dev-dependencies]); no daemon feature gates them any more.
 # V1.174 P0 (AR-61): peer-tools client stack — WS `Transport` (T1),
 # accept loop + session manager (T2), manifest ingestion (T3), outbound
 # authz (T4), honesty lockstep tests (T5). Everything behind it compiles
