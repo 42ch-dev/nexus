@@ -687,7 +687,9 @@ impl CoreService {
     /// verification keeps auth parity with the other endpoints.
     ///
     /// # Errors
-    /// As [`CoreService::list_stale_findings`].
+    /// As [`CoreService::list_stale_findings`]; additionally
+    /// [`CoreError::Forbidden`] under read-only core access — pruning
+    /// mutates resolved findings.
     pub async fn prune_findings(
         &self,
         principal: &Principal,
@@ -695,6 +697,7 @@ impl CoreService {
         dry_run: bool,
     ) -> CoreResult<PruneFindingsOutcome> {
         self.verify_principal(principal)?;
+        self.require_work_write()?;
         let older_than_days = older_than_days.unwrap_or(findings::RETENTION_DEFAULT_DAYS);
         let retention_seconds = older_than_days.saturating_mul(86_400);
         let now_epoch = chrono::Utc::now().timestamp();

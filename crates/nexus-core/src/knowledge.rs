@@ -306,6 +306,51 @@ fn remove_from_kb_entry_index(entry_id: &str) {
     }
 }
 
+/// Scan one creator's workspace roots for `entry_file` under `kb/entries`.
+/// Returns `(workspace_root, entry_path)` of the first workspace holding it.
+fn scan_creator_workspaces(
+    creator_root: &std::path::Path,
+    entry_file: &str,
+) -> Option<(PathBuf, PathBuf)> {
+    let ws_entries = std::fs::read_dir(creator_root.join("workspaces")).ok()?;
+    for ws_entry in ws_entries.flatten() {
+        let ws_root = ws_entry.path();
+        let candidate = ws_root.join("kb").join("entries").join(entry_file);
+        if candidate.exists() {
+            return Some((ws_root, candidate));
+        }
+    }
+    None
+}
+
+/// Whether any other creator's workspaces hold `entry_file`. Keeps the
+/// slow-path fallback fail-closed: an entry that exists only under a foreign
+/// creator must classify Forbidden (`kb_owner:`), never a silent NotFound.
+fn foreign_creator_holds_entry(
+    creators_root: &std::path::Path,
+    owner_id: &str,
+    entry_file: &str,
+) -> bool {
+    let Ok(creators) = std::fs::read_dir(creators_root) else {
+        return false;
+    };
+    for creator_entry in creators.flatten() {
+        if !creator_entry.path().is_dir() {
+            continue;
+        }
+        let Ok(creator_id) = creator_entry.file_name().into_string() else {
+            continue;
+        };
+        if creator_id == owner_id {
+            continue;
+        }
+        if scan_creator_workspaces(&creator_entry.path(), entry_file).is_some() {
+            return true;
+        }
+    }
+    false
+}
+
 /// Map a knowledge-store failure onto the family fault.
 fn knowledge_err(error: nexus_knowledge::errors::KnowledgeError) -> KnowledgeFault {
     match error {
@@ -536,7 +581,9 @@ impl CoreService {
     }
 
     /// Get a single work-scope entry, via the O(1) entry index (QC3 W-005)
-    /// with a filesystem-scan fallback for a stale index.
+    /// with a filesystem-scan fallback for a stale index. Ownership is
+    /// classified identically in both paths: a foreign entry is always
+    /// Forbidden, never hidden behind a cold/stale index as NotFound.
     ///
     /// # Errors
     /// Returns [`CoreError::InvalidInput`] for an unsafe `entry_id`,
@@ -596,57 +643,42 @@ impl CoreService {
 
         let entry_file = format!("{entry_id}.md");
 
-        for creator_entry in std::fs::read_dir(&creators_root)
-            .map_err(|e| KnowledgeFault::Internal {
-                code: "DIR_READ_ERROR".into(),
-                message: e.to_string(),
-            })?
-            .flatten()
-        {
-            if !creator_entry.path().is_dir() {
-                continue;
-            }
-            let Ok(creator_id) = creator_entry.file_name().into_string() else {
-                continue;
-            };
-            if creator_id != principal.creator_id() {
-                // The scan stays creator-scoped under the core authority.
-                continue;
-            }
-            let ws_root = creator_entry.path().join("workspaces");
-            let Ok(ws_entries) = std::fs::read_dir(&ws_root) else {
-                continue;
-            };
-            for ws_entry in ws_entries.flatten() {
-                let kb_entries = ws_entry.path().join("kb").join("entries");
-                let candidate = kb_entries.join(&entry_file);
-                if candidate.exists() {
-                    let content = std::fs::read_to_string(&candidate)
-                        .map_err(|e| KnowledgeFault::Internal {
-                            code: "FILE_READ_ERROR".into(),
-                            message: e.to_string(),
-                        })?;
+        // Ownership is classified deterministically, independent of index
+        // temperature: the creator's own copy wins; an entry that exists only
+        // under a foreign creator gets the same `kb_owner:` Forbidden as the
+        // warm index path; only a truly absent entry is NotFound.
+        let own_root = creators_root.join(principal.creator_id());
+        if let Some((ws_root, candidate)) = scan_creator_workspaces(&own_root, &entry_file) {
+            let content =
+                std::fs::read_to_string(&candidate).map_err(|e| KnowledgeFault::Internal {
+                    code: "FILE_READ_ERROR".into(),
+                    message: e.to_string(),
+                })?;
 
-                    // Read index for metadata
-                    let index_path = ws_entry.path().join("kb").join("index.json");
-                    let index = read_kb_index(&index_path);
-                    let index_entry = index.entries.iter().find(|e| e.entry_id == entry_id);
+            // Read index for metadata
+            let index_path = ws_root.join("kb").join("index.json");
+            let index = read_kb_index(&index_path);
+            let index_entry = index.entries.iter().find(|e| e.entry_id == entry_id);
 
-                    let (title, created_at) = index_entry.map_or_else(
-                        || (entry_id.clone(), String::new()),
-                        |ie| (ie.title.clone(), ie.created_at.clone()),
-                    );
+            let (title, created_at) = index_entry.map_or_else(
+                || (entry_id.clone(), String::new()),
+                |ie| (ie.title.clone(), ie.created_at.clone()),
+            );
 
-                    return Ok(GetKbEntryResponse { entry_id, title, created_at, content });
-                }
-            }
+            return Ok(GetKbEntryResponse { entry_id, title, created_at, content });
+        }
+        if foreign_creator_holds_entry(&creators_root, principal.creator_id(), &entry_file) {
+            return Err(
+                KnowledgeFault::ForeignEntry(format!("kb_owner:KB entry {entry_id}")).into(),
+            );
         }
 
         Err(KnowledgeFault::NotFound(format!("KB entry {entry_id} not found")).into())
     }
 
     /// Delete a single work-scope entry, via the O(1) entry index (QC3 W-005)
-    /// with a filesystem-scan fallback for a stale index.
+    /// with a filesystem-scan fallback for a stale index; ownership is
+    /// classified identically in both paths (as [`CoreService::get_kb_entry`]).
     ///
     /// # Errors
     /// As [`CoreService::get_kb_entry`]; additionally
@@ -707,54 +739,38 @@ impl CoreService {
 
         let entry_file = format!("{entry_id}.md");
 
-        for creator_entry in std::fs::read_dir(&creators_root)
-            .map_err(|e| KnowledgeFault::Internal {
-                code: "DIR_READ_ERROR".into(),
+        // Ownership is classified deterministically, independent of index
+        // temperature: the creator's own copy is deleted; an entry that exists
+        // only under a foreign creator gets the same `kb_owner:` Forbidden as
+        // the warm index path; only a truly absent entry is NotFound.
+        let own_root = creators_root.join(principal.creator_id());
+        if let Some((ws_root, candidate)) = scan_creator_workspaces(&own_root, &entry_file) {
+            // Remove entry file
+            std::fs::remove_file(&candidate).map_err(|e| KnowledgeFault::Internal {
+                code: "FILE_DELETE_ERROR".into(),
                 message: e.to_string(),
-            })?
-            .flatten()
-        {
-            if !creator_entry.path().is_dir() {
-                continue;
-            }
-            let Ok(creator_id) = creator_entry.file_name().into_string() else {
-                continue;
-            };
-            if creator_id != principal.creator_id() {
-                // The scan stays creator-scoped under the core authority.
-                continue;
-            }
-            let ws_root = creator_entry.path().join("workspaces");
-            let Ok(ws_entries) = std::fs::read_dir(&ws_root) else {
-                continue;
-            };
-            for ws_entry in ws_entries.flatten() {
-                let kb_entries = ws_entry.path().join("kb").join("entries");
-                let candidate = kb_entries.join(&entry_file);
-                if candidate.exists() {
-                    // Remove entry file
-                    std::fs::remove_file(&candidate).map_err(|e| KnowledgeFault::Internal {
-                        code: "FILE_DELETE_ERROR".into(),
-                        message: e.to_string(),
-                    })?;
+            })?;
 
-                    // Update index
-                    let index_path = ws_entry.path().join("kb").join("index.json");
-                    let mut index = read_kb_index(&index_path);
-                    index.entries.retain(|e| e.entry_id != entry_id);
-                    if index.entries.is_empty() {
-                        // Clean up empty index
-                        let _ = std::fs::remove_file(&index_path);
-                    } else {
-                        write_kb_index(&index_path, &index)?;
-                    }
-
-                    remove_from_kb_entry_index(&entry_id);
-
-                    self.verify_principal(principal)?;
-                    return Ok(DeleteKbEntryResponse { entry_id, deleted: true });
-                }
+            // Update index
+            let index_path = ws_root.join("kb").join("index.json");
+            let mut index = read_kb_index(&index_path);
+            index.entries.retain(|e| e.entry_id != entry_id);
+            if index.entries.is_empty() {
+                // Clean up empty index
+                let _ = std::fs::remove_file(&index_path);
+            } else {
+                write_kb_index(&index_path, &index)?;
             }
+
+            remove_from_kb_entry_index(&entry_id);
+
+            self.verify_principal(principal)?;
+            return Ok(DeleteKbEntryResponse { entry_id, deleted: true });
+        }
+        if foreign_creator_holds_entry(&creators_root, principal.creator_id(), &entry_file) {
+            return Err(
+                KnowledgeFault::ForeignEntry(format!("kb_owner:KB entry {entry_id}")).into(),
+            );
         }
 
         Err(KnowledgeFault::NotFound(format!("KB entry {entry_id} not found")).into())
@@ -843,5 +859,139 @@ impl CoreService {
             .map_err(knowledge_err)?;
         self.verify_principal(principal)?;
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod kb_ownership_tests {
+    use super::*;
+
+    async fn kb_service(home: &std::path::Path) -> (CoreService, Principal) {
+        std::fs::create_dir_all(home.join(".nexus42")).unwrap();
+        std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+            home,
+            "author",
+            "default",
+        ))
+        .unwrap();
+        std::fs::write(
+            home.join(".nexus42/config.toml"),
+            "active_creator_id = \"author\"\n[active_workspace_slug_by_creator]\n\"author\" = \"default\"\n",
+        )
+        .unwrap();
+        {
+            let db = nexus_home_layout::workspace_state_db_path(home, "author", "default");
+            let seed = nexus_local_db::writer_protocol::init_guarded_pool(&db, "author")
+                .await
+                .unwrap();
+            seed.clone_pool().close().await;
+        }
+        let core = CoreService::open(crate::CoreOpenOptions {
+            user_home: home.to_path_buf(),
+            access: crate::CoreAccess::DirectWriter,
+        })
+        .await
+        .unwrap();
+        let principal = core.active_principal().await.unwrap();
+        (core, principal)
+    }
+
+    /// Foreign-creator fixture: `<root>/creators/creator_b/workspaces/default/
+    /// kb/entries/<entry_id>.md`, optionally registered in the workspace
+    /// `index.json` so an index rebuild resolves it (warm).
+    fn foreign_entry(root: &std::path::Path, entry_id: &str, registered: bool) {
+        let kb_dir = root
+            .join("creators")
+            .join("creator_b")
+            .join("workspaces")
+            .join("default")
+            .join("kb");
+        std::fs::create_dir_all(kb_dir.join("entries")).unwrap();
+        std::fs::write(kb_dir.join("entries").join(format!("{entry_id}.md")), "foreign body")
+            .unwrap();
+        if registered {
+            let index = KbIndex {
+                entries: vec![KbIndexEntry {
+                    entry_id: entry_id.to_string(),
+                    title: "Foreign".to_string(),
+                    created_at: String::new(),
+                }],
+            };
+            std::fs::write(
+                kb_dir.join("index.json"),
+                serde_json::to_string(&index).unwrap(),
+            )
+            .unwrap();
+        }
+    }
+
+    /// GET/DELETE classify foreign vs missing entries identically whether the
+    /// process-wide entry index resolves the entry (warm) or the filesystem
+    /// scan answers instead (cold/stale): a foreign entry is always Forbidden
+    /// with the `kb_owner:` carrier, only a truly absent entry is NotFound.
+    #[tokio::test]
+    async fn kb_get_delete_ownership_independent_of_index_temperature() {
+        let temp = tempfile::tempdir().unwrap();
+        let (core, principal) = kb_service(temp.path()).await;
+        let root = core.inner.nexus_home.clone();
+
+        // Warm: the index (rebuilt here from index.json) knows the entry.
+        invalidate_kb_entry_index();
+        foreign_entry(&root, "kb_warmf", true);
+        assert!(matches!(
+            core.get_kb_entry(&principal, "kb_warmf".into()).await,
+            Err(CoreError::Forbidden { ref resource })
+                if resource == "kb_owner:KB entry kb_warmf"
+        ));
+
+        // Cold: the entry exists on disk but the freshly rebuilt index misses
+        // it — the scan fallback must classify the same as the warm path.
+        invalidate_kb_entry_index();
+        foreign_entry(&root, "kb_coldf", false);
+        assert!(matches!(
+            core.get_kb_entry(&principal, "kb_coldf".into()).await,
+            Err(CoreError::Forbidden { ref resource })
+                if resource == "kb_owner:KB entry kb_coldf"
+        ));
+
+        // Missing: warm index miss and cold scan miss are both NotFound.
+        assert!(matches!(
+            core.get_kb_entry(&principal, "kb_warmmiss".into()).await,
+            Err(CoreError::NotFound { ref resource }) if resource.contains("kb_warmmiss")
+        ));
+        invalidate_kb_entry_index();
+        assert!(matches!(
+            core.get_kb_entry(&principal, "kb_coldmiss".into()).await,
+            Err(CoreError::NotFound { ref resource }) if resource.contains("kb_coldmiss")
+        ));
+
+        // DELETE: the same four quadrants.
+        invalidate_kb_entry_index();
+        foreign_entry(&root, "kb_warmd", true);
+        assert!(matches!(
+            core.delete_kb_entry(&principal, "kb_warmd".into()).await,
+            Err(CoreError::Forbidden { ref resource })
+                if resource == "kb_owner:KB entry kb_warmd"
+        ));
+
+        invalidate_kb_entry_index();
+        foreign_entry(&root, "kb_coldd", false);
+        assert!(matches!(
+            core.delete_kb_entry(&principal, "kb_coldd".into()).await,
+            Err(CoreError::Forbidden { ref resource })
+                if resource == "kb_owner:KB entry kb_coldd"
+        ));
+
+        assert!(matches!(
+            core.delete_kb_entry(&principal, "kb_warmmiss".into()).await,
+            Err(CoreError::NotFound { ref resource }) if resource.contains("kb_warmmiss")
+        ));
+        invalidate_kb_entry_index();
+        assert!(matches!(
+            core.delete_kb_entry(&principal, "kb_coldmiss".into()).await,
+            Err(CoreError::NotFound { ref resource }) if resource.contains("kb_coldmiss")
+        ));
+
+        core.close().await.unwrap();
     }
 }

@@ -323,6 +323,28 @@ async fn findings_update_and_batch_triage_semantics() {
     core.close().await.unwrap();
 }
 
+/// `prune_findings` mutates resolved findings: like every other findings
+/// mutation it carries the work-write guard, so read-only core access is
+/// rejected with the shared `work:` Forbidden resource.
+#[tokio::test]
+async fn prune_findings_requires_work_write_access() {
+    let temp = tempfile::tempdir().unwrap();
+    let (writer, _principal, _work_id) = core_with_work(temp.path()).await;
+    writer.close().await.unwrap();
+    let read_only = CoreService::open(CoreOpenOptions {
+        user_home: temp.path().into(),
+        access: CoreAccess::ReadOnly,
+    })
+    .await
+    .unwrap();
+    let principal = read_only.active_principal().await.unwrap();
+    assert!(matches!(
+        read_only.prune_findings(&principal, None, false).await,
+        Err(CoreError::Forbidden { ref resource }) if resource == "work: read-only core access"
+    ));
+    read_only.close().await.unwrap();
+}
+
 /// Work-scope KB honesty (entity-scope-model §5.3) and creator isolation:
 /// non-work scope and foreign creators are rejected, and the add → get →
 /// list → delete round trip works against the temp nexus root.
