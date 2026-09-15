@@ -6,10 +6,8 @@
 //! state machine follows the fragment gate and the per-bearer cache without
 //! ever synthesizing in the background.
 
-use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_request::CaptureCharacterPendingReviewRequest;
 use nexus_contracts::daemon_api::characters::memory::review_character_memory_request::ReviewCharacterMemoryRequest;
 use nexus_contracts::daemon_api::memory::review_request::ReviewRequest;
-use nexus_contracts::daemon_api::memory::soul_narrative_request::SoulNarrativeRequest;
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
 use nexus_creator_memory::bearer::MemoryBearerRef;
 use nexus_creator_memory::errors::MemoryError;
@@ -199,7 +197,7 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
     assert_eq!(fragments.fragments.len(), 1);
     let fragment = &fragments.fragments[0];
     let fragment_id = fragment.fragment_id.as_str().to_string();
-    assert_eq!(i64::from(fragment.revision), 0);
+    assert_eq!(fragment.revision, 0u64);
     assert_eq!(
         fragment.binding_id.as_ref().map(|b| b.as_str()),
         Some(bind1.as_str())
@@ -239,7 +237,7 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
         .await
         .unwrap();
     assert_eq!(after.fragments.len(), 1, "stale promotion must not mutate");
-    assert_eq!(i64::from(after.fragments[0].revision), 0);
+    assert_eq!(after.fragments[0].revision, 0u64);
 
     // Correct revision → same id, provenance cleared, revision bumped.
     let promoted = core
@@ -248,7 +246,7 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
         .expect("promotion on the observed revision");
     let promoted_fragment = &promoted.fragment;
     assert_eq!(promoted_fragment.fragment_id.as_str(), fragment_id);
-    assert_eq!(i64::from(promoted_fragment.revision), 1);
+    assert_eq!(promoted_fragment.revision, 1u64);
     assert!(
         promoted_fragment.binding_id.is_none(),
         "promotion clears binding provenance"
@@ -277,7 +275,7 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
     .await
     .unwrap()
     .into_iter()
-    .map(|(b): (Option<String>,)| b)
+    .map(|row| row.0)
     .collect();
     pool.close().await;
     assert_eq!(caches, vec![Some("bnd_other".to_string())]);
@@ -506,7 +504,7 @@ async fn reflect_states_follow_the_gate_cache_and_provider_presence() {
         .await
         .expect_err("forced reflect without a provider is a truthful error");
     assert!(
-        matches!(err, CoreError::ServiceUnavailable(m) if m.contains("capability registry not available")),
+        matches!(&err, CoreError::ServiceUnavailable(m) if m.contains("capability registry not available")),
         "got {err:?}"
     );
     // …and nothing was synthesized in the background.

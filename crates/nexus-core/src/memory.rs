@@ -426,7 +426,7 @@ impl CoreService {
             &character_id,
             binding_id,
         )?;
-        let nexus_home = self.nexus_home().clone();
+        let nexus_home = self.nexus_home();
         // Fetch batch_limit + 1 so the extra row proves more rows exist;
         // truncate the processing slice back to the documented batch bound
         // (mirrors the Creator memory review handler — no off-by-one on
@@ -759,7 +759,7 @@ impl CoreService {
                 ),
             });
         }
-        let nexus_home = self.nexus_home().clone();
+        let nexus_home = self.nexus_home();
         // Bounded fetch: REVIEW_BATCH_LIMIT + 1 overfetch drives `has_more`.
         let fetch_limit = REVIEW_BATCH_LIMIT + 1;
         let mut rows =
