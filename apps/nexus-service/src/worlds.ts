@@ -12,6 +12,7 @@ import type {
   CreateForkResponse,
   CreateWorldRequest,
   CreateWorldResponse,
+  CoreTimelineEventsQuery,
   ListTimelineEventsResponse,
   NarrativeWorldResponse,
   NarrativeWorldsListResponse,
@@ -28,6 +29,7 @@ import type {
 } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
 import type { DomainRoute } from './routes.js';
+import { HttpError } from './errors.js';
 import { withPrincipal, wirePayload } from './world-kb.js';
 
 /** `GET /v1/daemon/narrative/worlds`. */
@@ -139,6 +141,22 @@ export function timelineOverview(
     service.core.timelineOverview(principal, cursor === null ? {} : { cursor }),
   );
 }
+/** The wire timeline-event status vocabulary (`CoreTimelineEventsQuery.status`). */
+const TIMELINE_EVENT_STATUSES: readonly NonNullable<
+  CoreTimelineEventsQuery['status']
+>[] = ['canon', 'provisional', 'rejected'];
+
+/** Validate `?status=` against the wire union (400 on anything else). */
+function timelineEventStatus(raw: string): NonNullable<CoreTimelineEventsQuery['status']> {
+  if ((TIMELINE_EVENT_STATUSES as readonly string[]).includes(raw)) {
+    return raw as NonNullable<CoreTimelineEventsQuery['status']>;
+  }
+  throw new HttpError(
+    400,
+    'invalid_input',
+    `status must be one of: ${TIMELINE_EVENT_STATUSES.join(', ')}`,
+  );
+}
 
 /** `GET /v1/daemon/worlds/{world_id}/timeline/events` — bounded page read. */
 export function listTimelineEvents(
@@ -154,7 +172,7 @@ export function listTimelineEvents(
   return withPrincipal(service, (principal) =>
     service.core.listTimelineEvents(principal, worldId, {
       ...(branch_id !== null ? { branch_id } : {}),
-      ...(status !== null ? { status } : {}),
+      ...(status !== null ? { status: timelineEventStatus(status) } : {}),
       ...(event_type !== null ? { event_type } : {}),
       ...(limit !== null ? { limit: Number(limit) } : {}),
       ...(cursor !== null ? { cursor } : {}),

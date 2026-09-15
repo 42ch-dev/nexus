@@ -13,6 +13,7 @@ import type {
   ChapterDetail,
   ChapterOutline,
   ListChaptersQuery,
+  ChapterStatus,
   ListChaptersResponse,
   OutlinePatchChapterRequest,
   OutlinePatchResponse,
@@ -22,6 +23,7 @@ import type {
   WorkOutline,
 } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
+import { HttpError } from './errors.js';
 import type { DomainRoute } from './routes.js';
 import { parseOptionalInteger, withPrincipal, wirePayload } from './world-kb.js';
 
@@ -29,6 +31,27 @@ import { parseOptionalInteger, withPrincipal, wirePayload } from './world-kb.js'
 export function chapterQuery(searchParams: URLSearchParams): ChapterContentQuery {
   const volume = parseOptionalInteger(searchParams, 'volume', { min: 1 });
   return volume === undefined ? {} : { volume };
+}
+
+/** The wire chapter-status vocabulary (`ChapterStatus`). */
+const CHAPTER_STATUSES: readonly ChapterStatus[] = [
+  'not_started',
+  'outlined',
+  'draft',
+  'finalized',
+  'published',
+];
+
+/** Validate `?status=` against the wire union (400 on anything else). */
+function chapterStatus(raw: string): ChapterStatus {
+  if ((CHAPTER_STATUSES as readonly string[]).includes(raw)) {
+    return raw as ChapterStatus;
+  }
+  throw new HttpError(
+    400,
+    'invalid_input',
+    `status must be one of: ${CHAPTER_STATUSES.join(', ')}`,
+  );
 }
 
 /** `GET /v1/daemon/works/{work_id}/chapters/` — cursor-paginated summaries. */
@@ -41,7 +64,7 @@ export function listChapters(
   const cursor = searchParams.get('cursor');
   const limit = searchParams.get('limit');
   const query: ListChaptersQuery = {
-    ...(status !== null ? { status } : {}),
+    ...(status !== null ? { status: chapterStatus(status) } : {}),
     ...(cursor !== null ? { cursor } : {}),
     ...(limit !== null ? { limit: parseOptionalInteger(searchParams, 'limit', { min: 1 }) } : {}),
   };

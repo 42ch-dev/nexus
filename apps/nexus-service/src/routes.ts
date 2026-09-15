@@ -378,7 +378,12 @@ async function handleTier2(
   }
   if (method === 'GET' && route.worldId && pathname.includes('/kb/key-blocks/')) {
     const keyBlockState = pathname.match(WORLD_KB_KEY_BLOCK_STATE);
-    return getWorldKbKeyBlockState(service, route.worldId, keyBlockState[2]);
+    // A `/kb/key-blocks/` prefix without the trailing `/state` segment is not
+    // a routed identity: fall through to `routeNotMigrated` instead of
+    // asserting the optional match result.
+    if (keyBlockState) {
+      return getWorldKbKeyBlockState(service, route.worldId, keyBlockState[2]);
+    }
   }
   if (method === 'GET' && route.worldId && pathname.endsWith('/kb/candidates')) {
     const limit = parseClampedLimit(searchParams.get('limit'), 'limit');
