@@ -160,7 +160,7 @@ import type {
   CreateFindingRequest,
   StaleFindingsResponse,
   FindingsPruneResponse,
-  ListReferencesResponse,
+  ReferenceListResponse,
   ReferenceGetResponse,
   // ── P4-T3 generated Core slice DTOs (`schemas/core/*`) ─────────────────────
   AgentHostListSessionsQuery,
@@ -587,8 +587,8 @@ export class BrowserClient implements NexusClient {
   }
   // ── Reference registry (P5-T1, tier2 family routes) ────────────────────────
   /** `GET /v1/daemon/references` — list registered references. */
-  listReferences(): Promise<ListReferencesResponse> {
-    return this.get<ListReferencesResponse>('/v1/daemon/references');
+  listReferences(): Promise<ReferenceListResponse> {
+    return this.get<ReferenceListResponse>('/v1/daemon/references');
   }
   /** `GET /v1/daemon/references/{reference_id}` — one reference (404 unknown). */
   getReference(referenceId: string): Promise<ReferenceGetResponse> {

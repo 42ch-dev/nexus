@@ -197,7 +197,7 @@
           "name": "getTimelineEvents",
           "args": [
             { "name": "worldId", "type": "string" },
-            { "name": "query", "type": "ListTimelineEventsQuery", "optional": true }
+            { "name": "query", "type": "CoreTimelineEventsQuery", "optional": true }
           ],
           "returns": "ListTimelineEventsResponse"
         },
@@ -513,7 +513,7 @@
         {
           "name": "listReferences",
           "args": [],
-          "returns": "ListReferencesResponse"
+          "returns": "ReferenceListResponse"
         },
         {
           "name": "getReference",

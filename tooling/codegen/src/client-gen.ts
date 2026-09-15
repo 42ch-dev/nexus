@@ -69,7 +69,7 @@ const IMPORT_TYPES = [
   'WorldRuleUpdateRequest',
   'WorldFindingsListResponse',
   'TimelineOverviewResponse',
-  'ListTimelineEventsQuery',
+  'CoreTimelineEventsQuery',
   'ListTimelineEventsResponse',
   // Works family (P5-T1 works/pool/inspiration)
   'ListWorksQuery',
@@ -131,7 +131,7 @@ const IMPORT_TYPES = [
   'ReadingAnnotation',
   'ReadingAnnotationPatchRequest',
   'ReadingAnnotationListResponse',
-  'ListReferencesResponse',
+  'ReferenceListResponse',
   'ReferenceGetResponse',
 ];
 
