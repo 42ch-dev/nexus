@@ -838,7 +838,8 @@ async fn drain_character_operation(
     let _ = cancel_requested;
     registry.settle_operation_terminal(
         &snapshot.operation_id,
-        CharacterOperationResultRunStatus::Finished,
+        nexus_contracts::generated::daemon_api::agent_host::character_operation_result::
+            CharacterOperationResultRunStatus::Finished,
         Some(nexus_contracts::generated::daemon_api::agent_host::character_operation_result::CharacterOperationResultFinishReason::EndTurn),
     );
 }
