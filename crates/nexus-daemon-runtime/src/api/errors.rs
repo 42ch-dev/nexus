@@ -814,6 +814,19 @@ impl From<nexus_core::CoreError> for NexusApiError {
                 code: "invalid_input".to_string(),
                 message,
             },
+            // Retained bearer-memory 403/503/400 wire shapes: the core
+            // carries the split resource+reason, the truthful
+            // no-provider message, and the narrative-quality rejection.
+            nexus_core::CoreError::ForbiddenReason { resource, reason } => {
+                Self::Forbidden { resource, reason }
+            }
+            nexus_core::CoreError::ServiceUnavailable(message) => {
+                Self::ServiceUnavailable { message }
+            }
+            nexus_core::CoreError::NarrativeRejected(message) => Self::BadRequest {
+                code: "narrative_generation_failed".to_string(),
+                message,
+            },
             nexus_core::CoreError::Internal { category } => {
                 let (code, message) = resend_internal_category(&category);
                 Self::Internal { code, message }
@@ -840,17 +853,18 @@ fn resend_internal_category(category: &str) -> (String, String) {
     for prefix in CATEGORY_PREFIXES
         .iter()
         .copied()
+        .chain(nexus_core::MEMORY_INTERNAL_CODES.iter().copied())
         .chain(nexus_core::CREATOR_INTERNAL_CODES.iter().copied())
     {
-        if let Some(message) =
-            category.strip_prefix(prefix).and_then(|rest| rest.strip_prefix(": "))
+        if let Some(message) = category
+            .strip_prefix(prefix)
+            .and_then(|rest| rest.strip_prefix(": "))
         {
             return (prefix.to_ascii_uppercase(), message.to_string());
         }
     }
     ("CORE_ERROR".to_string(), category.to_string())
 }
-
 
 // Note: These tests remain inline because they use `crate::test_utils::create_test_workspace`,
 // which is a private test-only helper. Integration tests in `tests/` cannot access
@@ -1216,8 +1230,8 @@ mod tests {
         use crate::api::handlers::workspace::init_workspace;
         use crate::test_utils::create_test_workspace;
         use crate::workspace::WorkspaceState;
-        use axum::extract::State;
         use axum::Json;
+        use axum::extract::State;
 
         let (_tmp, nexus_home, db_path) = create_test_workspace().await;
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
@@ -1251,8 +1265,8 @@ mod tests {
     /// (`require_workspace`), not by the handler itself.
     #[tokio::test]
     async fn creators_lists_ssot_profile_homes_without_sql_rows() {
-        use crate::api::handlers::creators::list;
         use crate::api::handlers::creators::ListCreatorsQuery;
+        use crate::api::handlers::creators::list;
         use crate::test_utils::create_test_workspace;
         use crate::workspace::WorkspaceState;
         use axum::extract::State;

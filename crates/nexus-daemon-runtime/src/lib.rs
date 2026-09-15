@@ -18,7 +18,6 @@ pub mod auth;
 pub mod auto_chronology;
 pub mod boot;
 pub mod capability_registry;
-pub mod character_tom;
 pub mod check;
 pub mod config;
 // V1.174 P0 T1 (AR-57/AR-61): peer-tools Connect client stack — WS
@@ -61,12 +60,3 @@ pub mod test_support;
 /// for the intended dependency graph of this crate.
 #[cfg(test)]
 mod architecture_assertions;
-
-/// Dual-bearer memory-pipeline semantic suite. Lives outside
-/// `api::handlers::memory_pipeline` so it cannot fabricate a
-/// [`BearerPipelineCtx`] (fields are private). Character contexts use
-/// [`BearerPipelineCtx::character_read`] (retained reads) or
-/// [`BearerPipelineCtx::character_write`] (writable; wraps an admitted
-/// [`ActorSessionRegistry::admit_character_activity`] guard).
-#[cfg(test)]
-mod memory_pipeline_semantic_tests;

@@ -1,34 +1,28 @@
 //! Character SOUL/Memory Daemon API handlers (v1.184 P3 Task 3).
 //!
-//! Thin authorization + wire-shaping layer over the dedicated `character_*`
-//! repositories and the shared bearer-parameterized memory pipeline. The
-//! active Creator is the only trusted owner; request bodies never carry
-//! `owner_creator_id`. Every mutating entrypoint is sealed behind
-//! [`BearerPipelineCtx::character_read`] / [`character_write`] so a foreign or
+//! Thin translation over the core bearer-isolated memory family (v1.190
+//! P2-T2): pending-review capture/list/count/delete, fragment listing and
+//! revision-checked promotion, and the SOUL narrative reflect all live in
+//! [`nexus_core`]; the handlers keep only auth resolution, wire parsing and
+//! status/envelope translation. The active Creator is the only trusted owner;
+//! request bodies never carry `owner_creator_id`. Every mutating route holds
+//! the core per-Character activity lease inside the core call (a foreign or
 //! missing Character rejects before any DB row, file write, or synthesis;
 //! retained reads permit an archived Character's rows while every mutation
-//! admits a per-Character activity fence (an archived Character is `409
-//! character_inactive`). Binding-local provenance requires the exact active
-//! binding of the path Character in an owned active World.
+//! admits the fence — an archived Character is `409 character_inactive`).
 
 #![allow(clippy::missing_errors_doc)]
 
 use crate::api::errors::NexusApiError;
-use crate::api::handlers::memory_pipeline::{
-    process_bearer_review_batch, reflect_bearer_soul, BearerPipelineCtx, ReflectOutcome,
-    REVIEW_BATCH_LIMIT,
-};
 use crate::api::handlers::soul_narrative_synthesizer::AcpSoulNarrativeSynthesizer;
-use crate::api::handlers::world_kb_guards::require_creator;
-use crate::api::pagination::{decode_offset_cursor, offset_page_meta};
+use crate::api::handlers::world_kb_guards::resolve_core_principal;
+use crate::api::pagination::decode_offset_cursor;
 use crate::workspace::WorkspaceState;
+use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
-use axum::Json;
 use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_request::CaptureCharacterPendingReviewRequest;
 use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_response::CaptureCharacterPendingReviewResponse;
-use nexus_contracts::daemon_api::characters::memory::character_memory_fragment_info::CharacterMemoryFragmentInfo;
-use nexus_contracts::daemon_api::characters::memory::character_pending_review_info::CharacterPendingReviewInfo;
 use nexus_contracts::daemon_api::characters::memory::count_character_pending_reviews_query::CountCharacterPendingReviewsQuery;
 use nexus_contracts::daemon_api::characters::memory::count_character_pending_reviews_response::CountCharacterPendingReviewsResponse;
 use nexus_contracts::daemon_api::characters::memory::delete_character_pending_review_response::DeleteCharacterPendingReviewResponse;
@@ -42,27 +36,10 @@ use nexus_contracts::daemon_api::characters::memory::review_character_memory_req
 use nexus_contracts::daemon_api::characters::memory::review_character_memory_response::ReviewCharacterMemoryResponse;
 use nexus_contracts::daemon_api::characters::soul::character_soul_narrative_request::CharacterSoulNarrativeRequest;
 use nexus_contracts::daemon_api::characters::soul::character_soul_narrative_response::CharacterSoulNarrativeResponse;
-use nexus_creator_memory::review::PendingReviewInput;
-use nexus_local_db::RUN_PENDING_ID_PREFIX;
 use serde::de::DeserializeOwned;
-use serde::Serialize;
 
 const DEFAULT_LIMIT: u32 = 50;
 const MAX_LIMIT: u32 = 100;
-const MAX_DIGEST_BYTES: usize = 64 * 1024;
-const REVIEW_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-
-fn wire_err(err: impl std::fmt::Display) -> NexusApiError {
-    NexusApiError::Internal {
-        code: "CHARACTER_MEMORY_WIRE_INVALID".into(),
-        message: err.to_string(),
-    }
-}
-
-fn map_wire<T: DeserializeOwned>(value: impl Serialize) -> Result<T, NexusApiError> {
-    let json = serde_json::to_value(value).map_err(wire_err)?;
-    serde_json::from_value(json).map_err(wire_err)
-}
 
 fn parse_canonical_json<T: DeserializeOwned>(bytes: &Bytes) -> Result<T, NexusApiError> {
     serde_json::from_slice(bytes).map_err(|err| NexusApiError::BadRequest {
@@ -91,46 +68,6 @@ fn optional_str(value: Option<&impl std::ops::Deref<Target = String>>) -> Option
     value.map(|s| s.as_str())
 }
 
-fn pagination_info(limit: u32, has_more: bool, next_cursor: Option<&str>) -> serde_json::Value {
-    serde_json::json!({
-        "limit": limit,
-        "has_more": has_more,
-        "next_cursor": next_cursor,
-    })
-}
-
-/// Read-only Character pipeline context for retained-data reads (v1.185 P0
-/// Task 2). A foreign or missing Character is `404 not_found`; an archived
-/// Character is still readable (no lifecycle admission for reads). The
-/// returned context is read-only and cannot mutate.
-async fn require_character_read_ctx<'a>(
-    state: &WorkspaceState,
-    owner_creator_id: &'a str,
-    character_id: &'a str,
-    scope_id: Option<&'a str>,
-) -> Result<BearerPipelineCtx<'a>, NexusApiError> {
-    let pool = state.pool_or_uninit()?;
-    BearerPipelineCtx::character_read(pool, owner_creator_id, character_id, scope_id).await
-}
-
-/// Writable Character pipeline context: admits one per-Character activity
-/// (404 foreign/missing, 409 `character_inactive` for an archived Character),
-/// holds the fence through all DB/file/provider effects, and returns a
-/// writable context that owns the guard.
-async fn require_character_write_ctx<'a>(
-    state: &WorkspaceState,
-    owner_creator_id: &'a str,
-    character_id: &'a str,
-    scope_id: Option<&'a str>,
-) -> Result<BearerPipelineCtx<'a>, NexusApiError> {
-    let pool = state.pool_or_uninit()?;
-    let guard = state
-        .actor_sessions()
-        .admit_character_activity(pool, owner_creator_id, character_id)
-        .await?;
-    BearerPipelineCtx::character_write(guard, owner_creator_id, character_id, scope_id)
-}
-
 /// `POST /v1/daemon/characters/{character_id}/memory/pending-review`
 pub async fn capture_pending_review(
     State(state): State<WorkspaceState>,
@@ -138,82 +75,11 @@ pub async fn capture_pending_review(
     body: Bytes,
 ) -> Result<Json<CaptureCharacterPendingReviewResponse>, NexusApiError> {
     let req: CaptureCharacterPendingReviewRequest = parse_canonical_json(&body)?;
-    let creator = require_creator(&state)?;
-    let binding_id = optional_str(req.binding_id.as_ref());
-    let _ctx = require_character_write_ctx(&state, &creator, &character_id, binding_id).await?;
-
-    let pending_id = req.pending_id.as_str().to_string();
-    let session_id = req.session_id.as_str().to_string();
-    let task_kind = optional_str(req.task_kind.as_ref())
-        .unwrap_or("unknown")
-        .to_string();
-    let raw_digest = req.raw_digest.as_str().to_string();
-    let created_at = req
-        .created_at
-        .map_or_else(|| chrono::Utc::now().to_rfc3339(), |t| t.to_rfc3339());
-
-    validate_capture_input(&req, &raw_digest)?;
-
-    let record = nexus_local_db::CharacterPendingReviewRecord {
-        pending_id: pending_id.clone(),
-        session_id,
-        character_id: character_id.clone(),
-        actor_world_binding_id: binding_id.map(std::string::ToString::to_string),
-        task_kind,
-        raw_digest,
-        created_at,
-        source_operation_id: None,
-    };
-    nexus_local_db::create_character_pending_review(state.pool_or_uninit()?, &creator, &record)
+    let (core, principal) = resolve_core_principal(&state).await?;
+    let response = core
+        .capture_character_pending_review(&principal, character_id, req)
         .await?;
-
-    Ok(Json(map_wire::<CaptureCharacterPendingReviewResponse>(
-        serde_json::json!({
-            "success": true,
-            "pending_id": pending_id,
-        }),
-    )?))
-}
-
-fn validate_capture_input(
-    req: &CaptureCharacterPendingReviewRequest,
-    raw_digest: &str,
-) -> Result<(), NexusApiError> {
-    let pending_id = req.pending_id.as_str();
-    if pending_id.is_empty() || pending_id.len() > 128 {
-        return Err(NexusApiError::BadRequest {
-            code: "invalid_input".into(),
-            message: "pending_id must be between 1 and 128 characters".into(),
-        });
-    }
-    if pending_id.starts_with(RUN_PENDING_ID_PREFIX) {
-        return Err(NexusApiError::BadRequest {
-            code: "invalid_input".into(),
-            message: format!("pending_id cannot use the reserved {RUN_PENDING_ID_PREFIX} prefix"),
-        });
-    }
-    let session_id = req.session_id.as_str();
-    if session_id.is_empty() || session_id.len() > 128 {
-        return Err(NexusApiError::BadRequest {
-            code: "invalid_input".into(),
-            message: "session_id must be between 1 and 128 characters".into(),
-        });
-    }
-    if raw_digest.is_empty() || raw_digest.len() > MAX_DIGEST_BYTES {
-        return Err(NexusApiError::BadRequest {
-            code: "invalid_input".into(),
-            message: format!("raw_digest must be between 1 and {MAX_DIGEST_BYTES} bytes"),
-        });
-    }
-    if let Some(kind) = optional_str(req.task_kind.as_ref()) {
-        if kind.len() > 64 {
-            return Err(NexusApiError::BadRequest {
-                code: "invalid_input".into(),
-                message: "task_kind must be at most 64 characters".into(),
-            });
-        }
-    }
-    Ok(())
+    Ok(Json(response))
 }
 
 /// `GET /v1/daemon/characters/{character_id}/memory/pending-review`
@@ -222,45 +88,14 @@ pub async fn list_pending_reviews(
     Path(character_id): Path<String>,
     Query(query): Query<ListCharacterPendingReviewsQuery>,
 ) -> Result<Json<ListCharacterPendingReviewsResponse>, NexusApiError> {
-    let creator = require_creator(&state)?;
-    let binding_id = optional_str(query.binding_id.as_ref());
-    require_character_read_ctx(&state, &creator, &character_id, binding_id).await?;
-
+    let (core, principal) = resolve_core_principal(&state).await?;
+    let binding_id = optional_str(query.binding_id.as_ref()).map(str::to_string);
     let limit = resolve_limit(query.limit)?;
     let offset = decode_offset_cursor(&query.cursor)?;
-    let fetch_limit = i64::from(limit) + 1;
-    let rows = nexus_local_db::list_character_pending_reviews(
-        state.pool_or_uninit()?,
-        &creator,
-        &character_id,
-        binding_id,
-        fetch_limit,
-        i64::from(offset),
-    )
-    .await?;
-    let (next_cursor, has_more) = offset_page_meta(rows.len(), limit, offset);
-    let items: Vec<CharacterPendingReviewInfo> = rows
-        .into_iter()
-        .take(limit as usize)
-        .map(|r| {
-            map_wire::<CharacterPendingReviewInfo>(serde_json::json!({
-                "pending_id": r.pending_id,
-                "session_id": r.session_id,
-                "character_id": r.character_id,
-                "binding_id": r.actor_world_binding_id,
-                "task_kind": r.task_kind,
-                "raw_digest": r.raw_digest,
-                "created_at": r.created_at,
-                "source_operation_id": r.source_operation_id,
-            }))
-        })
-        .collect::<Result<_, _>>()?;
-    Ok(Json(map_wire::<ListCharacterPendingReviewsResponse>(
-        serde_json::json!({
-            "items": items,
-            "pagination": pagination_info(limit, has_more, next_cursor.as_deref()),
-        }),
-    )?))
+    let response = core
+        .list_character_pending_reviews(&principal, character_id, binding_id, limit, offset)
+        .await?;
+    Ok(Json(response))
 }
 
 /// `GET /v1/daemon/characters/{character_id}/memory/pending-review/count`
@@ -269,21 +104,12 @@ pub async fn count_pending_reviews(
     Path(character_id): Path<String>,
     Query(query): Query<CountCharacterPendingReviewsQuery>,
 ) -> Result<Json<CountCharacterPendingReviewsResponse>, NexusApiError> {
-    let creator = require_creator(&state)?;
-    let binding_id = optional_str(query.binding_id.as_ref());
-    require_character_read_ctx(&state, &creator, &character_id, binding_id).await?;
-    let count = nexus_local_db::count_character_pending_reviews(
-        state.pool_or_uninit()?,
-        &creator,
-        &character_id,
-        binding_id,
-    )
-    .await?;
-    Ok(Json(map_wire::<CountCharacterPendingReviewsResponse>(
-        serde_json::json!({
-            "count": i64::try_from(count).unwrap_or(i64::MAX),
-        }),
-    )?))
+    let (core, principal) = resolve_core_principal(&state).await?;
+    let binding_id = optional_str(query.binding_id.as_ref()).map(str::to_string);
+    let response = core
+        .count_character_pending_reviews(&principal, character_id, binding_id)
+        .await?;
+    Ok(Json(response))
 }
 
 /// `DELETE /v1/daemon/characters/{character_id}/memory/pending-review/{pending_id}`
@@ -291,26 +117,11 @@ pub async fn delete_pending_review(
     State(state): State<WorkspaceState>,
     Path((character_id, pending_id)): Path<(String, String)>,
 ) -> Result<Json<DeleteCharacterPendingReviewResponse>, NexusApiError> {
-    let creator = require_creator(&state)?;
-    let _ctx = require_character_write_ctx(&state, &creator, &character_id, None).await?;
-    let deleted = nexus_local_db::delete_character_pending_review(
-        state.pool_or_uninit()?,
-        &creator,
-        &character_id,
-        &pending_id,
-    )
-    .await?;
-    if !deleted {
-        return Err(NexusApiError::NotFound(format!(
-            "pending review '{pending_id}'"
-        )));
-    }
-    Ok(Json(map_wire::<DeleteCharacterPendingReviewResponse>(
-        serde_json::json!({
-            "success": true,
-            "pending_id": pending_id,
-        }),
-    )?))
+    let (core, principal) = resolve_core_principal(&state).await?;
+    let response = core
+        .delete_character_pending_review(&principal, character_id, pending_id)
+        .await?;
+    Ok(Json(response))
 }
 
 /// `POST /v1/daemon/characters/{character_id}/memory/review`
@@ -320,62 +131,11 @@ pub async fn review(
     body: Bytes,
 ) -> Result<Json<ReviewCharacterMemoryResponse>, NexusApiError> {
     let req: ReviewCharacterMemoryRequest = parse_canonical_json(&body)?;
-    let creator = require_creator(&state)?;
-    let binding_id = optional_str(req.binding_id.as_ref());
-    let pool = state.pool_or_uninit()?.clone();
-    // Review drains the queue and promotes/writes files: hold a writable
-    // activity context across the whole batch (includes file promotion).
-    let ctx = require_character_write_ctx(&state, &creator, &character_id, binding_id).await?;
-    let nexus_home = state.nexus_home().to_owned();
-    // Fetch batch_limit + 1 so the extra row proves more rows exist; truncate
-    // the processing slice back to the documented batch bound (mirrors the
-    // Creator memory review handler — no off-by-one on has_more).
-    let fetch_limit = REVIEW_BATCH_LIMIT + 1;
-    let mut rows = nexus_local_db::list_character_pending_reviews(
-        &pool,
-        &creator,
-        &character_id,
-        binding_id,
-        fetch_limit,
-        0,
-    )
-    .await?;
-    let batch_limit = usize::try_from(REVIEW_BATCH_LIMIT).unwrap_or(usize::MAX);
-    let more_in_db = rows.len() > batch_limit;
-    if more_in_db {
-        rows.truncate(batch_limit);
-    }
-    let processing_slice = rows.len();
-    let inputs: Vec<PendingReviewInput> = rows
-        .into_iter()
-        .map(|r| PendingReviewInput {
-            pending_id: r.pending_id,
-            session_id: r.session_id,
-            bearer_id: r.character_id,
-            scope_id: r.actor_world_binding_id,
-            task_kind: r.task_kind,
-            raw_digest: r.raw_digest,
-            created_at: r.created_at,
-        })
-        .collect();
-    let deadline = tokio::time::Instant::now() + REVIEW_CALL_TIMEOUT;
-    let mut outcome =
-        process_bearer_review_batch(&inputs, &nexus_home, &ctx, &pool, deadline).await?;
-    drop(ctx);
-    let deadline_stopped = outcome.processed < processing_slice;
-    outcome.has_more = more_in_db || deadline_stopped || outcome.any_row_remained_pending;
-    outcome.more_in_db = more_in_db;
-    outcome.processing_slice = processing_slice;
-
-    Ok(Json(map_wire::<ReviewCharacterMemoryResponse>(
-        serde_json::json!({
-            "promoted": outcome.promoted,
-            "fragmented": outcome.fragmented,
-            "dropped": outcome.dropped,
-            "has_more": outcome.has_more,
-            "processed": i64::try_from(outcome.processed).unwrap_or(i64::MAX),
-        }),
-    )?))
+    let (core, principal) = resolve_core_principal(&state).await?;
+    let response = core
+        .review_character_memory(&principal, character_id, req)
+        .await?;
+    Ok(Json(response))
 }
 
 /// `GET /v1/daemon/characters/{character_id}/memory/fragments`
@@ -384,50 +144,14 @@ pub async fn list_fragments(
     Path(character_id): Path<String>,
     Query(query): Query<ListCharacterMemoryFragmentsQuery>,
 ) -> Result<Json<ListCharacterMemoryFragmentsResponse>, NexusApiError> {
-    let creator = require_creator(&state)?;
-    let binding_id = optional_str(query.binding_id.as_ref());
-    require_character_read_ctx(&state, &creator, &character_id, binding_id).await?;
-
+    let (core, principal) = resolve_core_principal(&state).await?;
+    let binding_id = optional_str(query.binding_id.as_ref()).map(str::to_string);
     let limit = resolve_limit(query.limit)?;
     let offset = decode_offset_cursor(&query.cursor)?;
-    let fetch_limit = i64::from(limit) + 1;
-    let rows = nexus_local_db::list_character_fragments(
-        state.pool_or_uninit()?,
-        &creator,
-        &character_id,
-        binding_id,
-        fetch_limit,
-        i64::from(offset),
-    )
-    .await?;
-    let (next_cursor, has_more) = offset_page_meta(rows.len(), limit, offset);
-    let fragments: Vec<CharacterMemoryFragmentInfo> = rows
-        .into_iter()
-        .take(limit as usize)
-        .map(|r| {
-            map_wire::<CharacterMemoryFragmentInfo>(serde_json::json!({
-                "fragment_id": r.fragment_id,
-                "session_id": r.session_id,
-                "character_id": r.character_id,
-                "binding_id": r.actor_world_binding_id,
-                "summary": r.summary,
-                "keywords": decode_fragment_keywords(&r.keywords),
-                "created_at": r.created_at,
-                "ttl": r.ttl,
-                "revision": r.revision,
-            }))
-        })
-        .collect::<Result<_, _>>()?;
-    Ok(Json(map_wire::<ListCharacterMemoryFragmentsResponse>(
-        serde_json::json!({
-            "fragments": fragments,
-            "pagination": pagination_info(limit, has_more, next_cursor.as_deref()),
-        }),
-    )?))
-}
-
-fn decode_fragment_keywords(raw: &str) -> Vec<String> {
-    serde_json::from_str::<Vec<String>>(raw).unwrap_or_default()
+    let response = core
+        .list_character_memory_fragments(&principal, character_id, binding_id, limit, offset)
+        .await?;
+    Ok(Json(response))
 }
 
 /// `POST /v1/daemon/characters/{character_id}/memory/fragments/{fragment_id}:promote`
@@ -447,56 +171,16 @@ pub async fn promote_fragment(
         })?
         .to_string();
     let req: PromoteCharacterFragmentRequest = parse_canonical_json(&body)?;
-    let creator = require_creator(&state)?;
-    let _ctx = require_character_write_ctx(&state, &creator, &character_id, None).await?;
     let expected_revision =
         i64::try_from(req.expected_revision).map_err(|_| NexusApiError::BadRequest {
             code: "invalid_input".into(),
             message: "expected_revision is out of range".into(),
         })?;
-    // The repository commits and returns the authoritative promoted record
-    // (same fragment id, cleared binding provenance, bumped revision). Map it
-    // directly — no post-commit re-query or panic path.
-    let promoted = nexus_local_db::promote_character_fragment_to_shared(
-        state.pool_or_uninit()?,
-        &creator,
-        &character_id,
-        &fragment_id,
-        expected_revision,
-    )
-    .await
-    .map_err(map_local_db_promote_error)?;
-    Ok(Json(map_wire::<PromoteCharacterFragmentResponse>(
-        serde_json::json!({
-            "fragment": character_fragment_info(&promoted)?,
-        }),
-    )?))
-}
-
-fn map_local_db_promote_error(e: nexus_local_db::LocalDbError) -> NexusApiError {
-    match e {
-        nexus_local_db::LocalDbError::VersionMismatch { .. } => NexusApiError::ConflictCoded {
-            code: "version_mismatch".into(),
-            message: e.to_string(),
-        },
-        other => NexusApiError::from(other),
-    }
-}
-
-fn character_fragment_info(
-    r: &nexus_local_db::CharacterMemoryFragmentRecord,
-) -> Result<CharacterMemoryFragmentInfo, NexusApiError> {
-    map_wire::<CharacterMemoryFragmentInfo>(serde_json::json!({
-        "fragment_id": r.fragment_id,
-        "session_id": r.session_id,
-        "character_id": r.character_id,
-        "binding_id": r.actor_world_binding_id,
-        "summary": r.summary,
-        "keywords": decode_fragment_keywords(&r.keywords),
-        "created_at": r.created_at,
-        "ttl": r.ttl,
-        "revision": r.revision,
-    }))
+    let (core, principal) = resolve_core_principal(&state).await?;
+    let response = core
+        .promote_character_fragment(&principal, character_id, fragment_id, expected_revision)
+        .await?;
+    Ok(Json(response))
 }
 
 /// `POST /v1/daemon/characters/{character_id}/soul/reflect`
@@ -506,18 +190,9 @@ pub async fn reflect_soul(
     body: Bytes,
 ) -> Result<Json<CharacterSoulNarrativeResponse>, NexusApiError> {
     let req: CharacterSoulNarrativeRequest = parse_canonical_json(&body)?;
-    let creator = require_creator(&state)?;
-    let binding_id = optional_str(req.binding_id.as_ref());
-    let pool = state.pool_or_uninit()?;
-
-    // A non-regenerating reflect is an observational retained read and must
-    // never create a cache/file or call the synthesizer (§11.2). A forced
-    // reflect persists a synthesized narrative: it requires activity.
-    let ctx = if req.force_regenerate {
-        require_character_write_ctx(&state, &creator, &character_id, binding_id).await?
-    } else {
-        require_character_read_ctx(&state, &creator, &character_id, binding_id).await?
-    };
+    let (core, principal) = resolve_core_principal(&state).await?;
+    // Build the ACP synthesizer only when force=true; the core returns the
+    // canonical `ServiceUnavailable` when no capability registry is present.
     let synthesizer = if req.force_regenerate {
         let registry =
             state
@@ -529,37 +204,8 @@ pub async fn reflect_soul(
     } else {
         None
     };
-
-    let outcome =
-        reflect_bearer_soul(pool, &ctx, req.force_regenerate, synthesizer.as_ref()).await?;
-    drop(ctx);
-    Ok(Json(map_character_reflect_outcome(&character_id, &outcome)))
-}
-
-fn map_character_reflect_outcome(
-    character_id: &str,
-    o: &ReflectOutcome,
-) -> CharacterSoulNarrativeResponse {
-    let state_str = match o.state {
-        crate::api::handlers::memory_pipeline::ReflectState::InsufficientData => {
-            "insufficient_data"
-        }
-        crate::api::handlers::memory_pipeline::ReflectState::Ungenerated => "ungenerated",
-        crate::api::handlers::memory_pipeline::ReflectState::Current => "current",
-        crate::api::handlers::memory_pipeline::ReflectState::Stale => "stale",
-    };
-    map_wire::<CharacterSoulNarrativeResponse>(serde_json::json!({
-        "character_id": character_id,
-        "state": state_str,
-        "narrative": o.narrative,
-        "generated_at": o.generated_at,
-        "stale": o.stale,
-        "fragment_count_at_generation": o.fragment_count_at_generation,
-        "max_fragment_created_at_at_generation": o.max_fragment_created_at_at_generation,
-        "current_fragment_count": o.current_fragment_count,
-        "current_distinct_keyword_count": o.current_distinct_keyword_count,
-        "min_fragment_count": crate::api::handlers::memory_pipeline::MIN_SOUL_NARRATIVE_FRAGMENTS,
-        "min_distinct_keyword_count": crate::api::handlers::memory_pipeline::MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
-    }))
-    .expect("canonical character soul narrative wire")
+    let response = core
+        .reflect_character_soul(&principal, character_id, req, synthesizer.as_ref())
+        .await?;
+    Ok(Json(response))
 }
