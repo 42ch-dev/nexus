@@ -718,3 +718,49 @@ async fn provider_journal_contract_write_read_settle() {
     let err = ro.settle_provider_orphans().await.unwrap_err();
     assert!(matches!(err, CoreError::Forbidden { .. }));
 }
+
+/// Settlement admission contract: a service that stayed open across an
+/// on-disk Creator/workspace selection change must refuse to settle and must
+/// leave the stale workspace's journal untouched.
+#[tokio::test]
+async fn provider_journal_contract_settle_rejects_stale_selection() {
+    let fx = setup().await;
+
+    fx.core
+        .journal_provider_operation(
+            &fx.principal,
+            journal_write(
+                "op_stale",
+                "sess_a",
+                "mock-acp",
+                CoreProviderJournalWriteStatus::Running,
+            ),
+        )
+        .await
+        .unwrap();
+
+    // Active selection moves to another creator on disk; the service is not
+    // reopened, so its bound context is stale for every domain write.
+    let nexus_home = fx.tmp.path().join(".nexus42");
+    std::fs::write(
+        nexus_home.join("config.toml"),
+        "active_creator_id = \"other_creator\"\n[active_workspace_slug_by_creator]\n\"other_creator\" = \"default\"\n",
+    )
+    .unwrap();
+
+    let err = fx.core.settle_provider_orphans().await.unwrap_err();
+    assert!(
+        matches!(err, CoreError::AuthRequired),
+        "settlement after a selection change must be rejected"
+    );
+
+    // No side effects: the stale workspace's orphan is still running.
+    let pool = read_only_pool(fx.tmp.path()).await;
+    let status: String = sqlx::query_scalar(
+        "SELECT status FROM js_provider_operation_journal WHERE operation_id = 'op_stale'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(status, "running", "stale workspace journal is untouched");
+}

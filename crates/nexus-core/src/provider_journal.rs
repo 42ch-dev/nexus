@@ -128,10 +128,13 @@ impl CoreService {
     ///
     /// # Errors
     /// Returns [`CoreError::Closing`] when the service is closing,
+    /// [`CoreError::AuthRequired`] when the on-disk selection no longer
+    /// matches the context this service was opened against,
     /// [`CoreError::Forbidden`] under read-only access, and the mapped
     /// storage error otherwise.
     pub async fn settle_provider_orphans(&self) -> CoreResult<u64> {
         self.ensure_open()?;
+        self.verify_selected_context()?;
         self.require_write_access("provider_journal_settle")?;
         js_provider_journal::settle_orphaned_as_interrupted(&self.inner.pool)
             .await

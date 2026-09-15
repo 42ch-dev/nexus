@@ -139,7 +139,7 @@ impl CoreService {
         Ok(())
     }
 
-    fn verify_selected_context(&self) -> CoreResult<()> {
+    pub(crate) fn verify_selected_context(&self) -> CoreResult<()> {
         if read_active_creator_id(&self.inner.nexus_home).as_deref()
             != Some(self.inner.creator_id.as_str())
         {
