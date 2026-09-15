@@ -7,7 +7,8 @@
 //! 2. **Field passthrough** — the request's concurrency declaration and its
 //!    explicit role bindings reach the durable row and the frozen descriptor.
 //! 3. **Owner fence** — every entry point refuses once the owner is closing.
-//! 4. **Ownership** — a signal against a foreign schedule is refused.
+//! 4. **Frozen bindings** — the caller's explicit bindings reach the descriptor.
+//! 5. **Ownership** — a signal against a foreign schedule is refused.
 //!
 //! The gate/ownership cases exercise the durable store directly (they need a
 //! `creator_schedules` row), while the fence case needs only a live handle.
@@ -17,7 +18,7 @@
 
 use async_trait::async_trait;
 use nexus_contracts::local::schedule::http::{
-    AddScheduleRequest, ScheduleConcurrencyRequest, SignalScheduleRequest,
+    AddScheduleRequest, AgentBindingDto, ScheduleConcurrencyRequest, SignalScheduleRequest,
 };
 use nexus_contracts::{CoreError as WireCoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply};
 use nexus_core::execution::ExecutionHandle;
@@ -118,7 +119,24 @@ async fn fixture() -> Fixture {
 }
 
 /// Open an engine-owner core and establish a handle over it.
+///
+/// A schedule supervisor is attached over the coordinator's own pool, exactly
+/// as the daemon wires its runtime bundle. Without it `add_schedule` refuses
+/// with `NotFound` (no insertion authority), so every success-path assertion
+/// here would be measuring the refusal instead of the behaviour under test.
 async fn open_handle(f: &Fixture) -> (CoreService, Arc<ExecutionHandle>) {
+    let (core, handle) = open_handle_bare(f).await;
+    handle.set_schedule_supervisor(Arc::new(
+        nexus_orchestration::schedule::supervisor::ScheduleSupervisor::new(
+            handle.coordinator().pool(),
+        ),
+    ));
+    (core, handle)
+}
+
+/// Same owner, but with NO schedule supervisor attached — the insertion
+/// authority is absent, so `add_schedule` cannot reach the insert.
+async fn open_handle_bare(f: &Fixture) -> (CoreService, Arc<ExecutionHandle>) {
     let core = CoreService::open(CoreOpenOptions {
         user_home: f.tmp.path().to_path_buf(),
         access: CoreAccess::EngineOwner,
@@ -155,6 +173,21 @@ fn request_for(creator: &str, preset: &str) -> AddScheduleRequest {
         reason: None,
         agent_bindings: None,
     }
+}
+
+/// `memory-augmented` declares an `acp_prompt` node, so the freeze requires a
+/// binding for the `default` role. Supplying it explicitly keeps the success
+/// path reachable without a configured default provider.
+fn default_bindings() -> std::collections::HashMap<String, AgentBindingDto> {
+    let mut bindings = std::collections::HashMap::new();
+    bindings.insert(
+        "default".to_string(),
+        AgentBindingDto {
+            provider_id: "test-provider".to_string(),
+            model: None,
+        },
+    );
+    bindings
 }
 
 /// 1. A foreign creator is refused before any write.
@@ -194,28 +227,53 @@ async fn force_gates_requires_a_reason() {
     );
 }
 
-/// 3. A `force_gates` bypass is recorded in the audit log.
+/// 3. A `force_gates` bypass leaves an audit row even when the insert never
+///    runs.
+///
+/// This is the ordering invariant: the audit row is written BEFORE every
+/// fallible insertion precondition. The daemon writes the audit and schedule
+/// rows in one transaction; this seam keeps ONE insertion authority (the
+/// supervisor, which owns the row+deps+seed transaction) and accepts an
+/// audit-without-schedule row, which records an ATTEMPTED bypass — the
+/// conservative side.
+///
+/// Regression: the audit write used to sit AFTER the insertion preconditions,
+/// so a bypass attempt that was refused for any of them (here: no supervisor
+/// attached, i.e. no insertion authority) left NO trace at all.
 #[tokio::test]
 #[serial_test::serial]
-async fn force_gates_bypass_is_audited() {
+async fn force_gates_bypass_is_audited_even_when_the_insert_is_refused() {
     let f = fixture().await;
-    let (core, handle) = open_handle(&f).await;
+    let (core, handle) = open_handle_bare(&f).await;
     let principal = core.active_principal().await.unwrap();
 
     let mut request = request_for(CREATOR, "memory-augmented");
     request.force_gates = true;
     request.reason = Some("test bypass".to_string());
-    // The insert may fail for unrelated reasons (no registry for the preset);
-    // the audit row is written BEFORE the insert, so it exists either way.
-    let _ = handle.add_schedule(&principal, request).await;
+    request.agent_bindings = Some(default_bindings());
+    // No supervisor: the insert cannot run and the call is refused.
+    let err = handle.add_schedule(&principal, request).await.unwrap_err();
+    assert!(
+        matches!(err, CoreError::NotFound { .. }),
+        "an unattached insertion authority must be refused, got {err:?}"
+    );
 
     let rows = nexus_local_db::list_force_gates_audit(core.pool(), CREATOR)
         .await
         .expect("audit rows");
     assert!(
         rows.iter().any(|r| r.preset_id == "memory-augmented"),
-        "the bypass must leave an audit row, got {rows:?}"
+        "a refused bypass must still leave an audit row, got {rows:?}"
     );
+
+    // And the refused attempt published no schedule row.
+    let scheduled: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM creator_schedules WHERE creator_id = ?")
+            .bind(CREATOR)
+            .fetch_one(core.pool())
+            .await
+            .unwrap();
+    assert_eq!(scheduled, 0, "a refused insert must publish no schedule row");
 }
 
 /// 4. The request's concurrency declaration reaches the durable row.
@@ -230,11 +288,11 @@ async fn add_schedule_preserves_parallel_with_concurrency() {
     request.concurrency = Some(ScheduleConcurrencyRequest::ParallelWith {
         schedule_ids: vec!["SCH-other".to_string()],
     });
-    // `_system.`-free preset resolution may fail without a registry; the row
-    // write happens after the freeze, so only assert when the insert landed.
-    let Ok(response) = handle.add_schedule(&principal, request).await else {
-        return;
-    };
+    request.agent_bindings = Some(default_bindings());
+    let response = handle
+        .add_schedule(&principal, request)
+        .await
+        .expect("a fully-specified request must be admitted");
 
     let kind: String = sqlx::query_scalar(
         "SELECT concurrency_kind FROM creator_schedules WHERE schedule_id = ?",
@@ -260,7 +318,34 @@ async fn add_schedule_preserves_parallel_with_concurrency() {
     );
 }
 
-/// 5. A signal against a foreign schedule is refused (ownership is enforced
+/// 5. The caller's explicit bindings are frozen into the descriptor, so
+///    admission cannot silently rebind a run to a different provider.
+#[tokio::test]
+#[serial_test::serial]
+async fn add_schedule_freezes_explicit_agent_bindings() {
+    let f = fixture().await;
+    let (core, handle) = open_handle(&f).await;
+    let principal = core.active_principal().await.unwrap();
+
+    let mut request = request_for(CREATOR, "memory-augmented");
+    request.agent_bindings = Some(default_bindings());
+    let response = handle.add_schedule(&principal, request).await.unwrap();
+
+    let raw: Option<Vec<u8>> = sqlx::query_scalar(
+        "SELECT execution_descriptor_json FROM creator_schedules WHERE schedule_id = ?",
+    )
+    .bind(&response.schedule_id)
+    .fetch_one(core.pool())
+    .await
+    .unwrap();
+    let descriptor = String::from_utf8(raw.expect("a driven_v1 row must carry a descriptor")).unwrap();
+    assert!(
+        descriptor.contains("test-provider"),
+        "the frozen descriptor must carry the caller's binding, got {descriptor}"
+    );
+}
+
+/// 6. A signal against a foreign schedule is refused (ownership is enforced
 ///    before mutation, and a foreign row is indistinguishable from absent).
 #[tokio::test]
 #[serial_test::serial]
@@ -308,7 +393,7 @@ async fn signal_schedule_refuses_foreign_owner() {
     assert_eq!(status, "pending", "a refused signal must not mutate the row");
 }
 
-/// 6. Every entry point refuses once the owner has begun closing.
+/// 7. Every entry point refuses once the owner has begun closing.
 #[tokio::test]
 #[serial_test::serial]
 async fn closing_owner_fences_every_entry_point() {

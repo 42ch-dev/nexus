@@ -97,18 +97,25 @@ impl ExecutionHandle {
             .map_or(empty_gates, |preset| preset.manifest.preset.gates.as_slice());
         let audit_reason = self.enforce_gate_policy(&request, gates).await?;
 
-        let supervisor = self.schedule_supervisor()?;
-        let schedule_id = new_schedule_id();
-
-        // A bypass is recorded BEFORE the row is inserted. The daemon writes the
-        // two in one transaction; this seam keeps ONE insertion authority (the
-        // supervisor, which owns the row+deps+seed transaction) and instead
-        // guarantees the audit trail is never missing — an audit row without a
-        // schedule records an ATTEMPTED bypass, which is the conservative side.
+        // A bypass is recorded BEFORE anything else can fail, and in particular
+        // before the insertion preconditions below. The daemon writes the audit
+        // and schedule rows in one transaction; this seam keeps ONE insertion
+        // authority (the supervisor, which owns the row+deps+seed transaction)
+        // and instead guarantees the audit trail is never missing — an audit row
+        // without a schedule records an ATTEMPTED bypass, which is the
+        // conservative side.
+        //
+        // Ordering is load-bearing: an audit written after a fallible
+        // precondition would be silently skipped exactly when the operation is
+        // refused, so a bypass attempt that never reached a row would leave no
+        // trace at all. Everything that can refuse the insert therefore runs
+        // AFTER the audit write.
         if let Some(reason) = &audit_reason {
             self.write_force_gates_audit(&request, reason).await?;
         }
 
+        let supervisor = self.schedule_supervisor()?;
+        let schedule_id = new_schedule_id();
         let schedule = build_schedule(&schedule_id, &request);
         // C-2/I-5: a `driven_v1` row must never be published without its
         // frozen admission payload.
