@@ -3254,6 +3254,16 @@ async fn fixture() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf
 \"test_creator\" = \"default\"",
     )
     .expect("config.toml");
+    // Materialize the operational workspace directory before opening the DB.
+    // In production the home-layout init creates it; a test fixture owns the
+    // same responsibility. `init_engine_pool` writes `state.db.migration.lock`
+    // BESIDE `state.db`, so a missing parent aborts with `NotFound` before any
+    // admission runs. The daemon fixture got these directories for free
+    // (it also writes `meta.json` under the operational dir); this one did not.
+    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+        &user_home, CREATOR, SLUG,
+    ))
+    .expect("operational workspace dir");
     let db_path = nexus_home_layout::workspace_state_db_path(&user_home, CREATOR, SLUG);
     let guarded = nexus_local_db::init_engine_pool(&db_path)
         .await
