@@ -64,7 +64,7 @@ pub fn host_error_to_core_error(err: &HostError) -> CoreError {
         HostError::OperationTimeout { .. } | HostError::CleanupUnconfirmed { .. } => {
             (CoreErrorCode::Busy, 503)
         }
-        HostError::CapabilityUnsupported { .. } => (CoreErrorCode::InvalidInput, 400),
+        HostError::CapabilityUnsupported { .. } => (CoreErrorCode::NotSupported, 400),
         HostError::LaunchFailed { .. }
         | HostError::ProviderProtocolError { .. }
         | HostError::InternalHostError { .. } => (CoreErrorCode::Internal, 500),
@@ -635,6 +635,7 @@ impl ProviderPortAdapter {
         let session_id = Self::parse_session_id(session_raw)?;
         let op: HostOperation = serde_json::from_value(payload_value)
             .map_err(|e| Self::invalid_input(format!("execute payload: {e}")))?;
+        let control = !matches!(&op, HostOperation::Prompt { .. });
         let op_id = match &op {
             HostOperation::Prompt { op_id, .. } => op_id.clone(),
             _ => HostOperationId::new(),
@@ -644,6 +645,23 @@ impl ProviderPortAdapter {
             .exec(session_id.clone(), op)
             .await
             .map_err(|err| Self::map_host_error(&err))?;
+        // HostManager and ACP controls have private operation IDs. Correlate
+        // their terminal with the ID this port returned, after the manager's
+        // stream wrapper has applied its own lifecycle transition.
+        let stream = if control {
+            let wire_id = op_id.clone();
+            Box::pin(stream.map(move |event| event.map(|mut event| {
+                match &mut event {
+                    HostEvent::OpStarted(event) => event.op_id = wire_id.clone(),
+                    HostEvent::OpFinished(event) => event.op_id = wire_id.clone(),
+                    HostEvent::OpFailed(event) => event.op_id = wire_id.clone(),
+                    _ => {}
+                }
+                event
+            }))) as HostEventStream
+        } else {
+            stream
+        };
         self.insert_operation(op_id.to_string(), stream);
         Ok(ProviderReply {
             request_id: request.request_id,
@@ -663,6 +681,19 @@ impl ProviderPortAdapter {
             .ok_or_else(|| Self::invalid_input("cancel requires operation_id"))?;
         let op_id = Self::parse_operation_id(op_raw)?;
         let op_id_str = op_id.to_string();
+        // Check negotiated capability before HostManager can transition the
+        // session to Cancelling. DSH's adapter-level no-op is not cancellation.
+        let sessions = self.host.list_sessions().await.map_err(|err| Self::map_host_error(&err))?;
+        if let Some(session) = sessions.iter().find(|session| session.active_op_id.as_ref() == Some(&op_id)) {
+            if !session.negotiated_capabilities.cancellation {
+                return Err(CoreError {
+                    code: CoreErrorCode::NotSupported,
+                    message: "provider does not support cancellation".into(),
+                    details: Default::default(),
+                    http_status: Some(400),
+                });
+            }
+        }
         self.host
             .cancel(op_id)
             .await
@@ -843,10 +874,21 @@ mod tests {
 
         async fn exec(
             &self,
-            _session_id: HostSessionId,
-            _op: HostOperation,
+            session_id: HostSessionId,
+            op: HostOperation,
         ) -> crate::HostResult<HostEventStream> {
-            Err(HostError::internal("not used"))
+            match op {
+                HostOperation::SetMode { .. } | HostOperation::SetModel { .. } => {
+                    Ok(Box::pin(futures_util::stream::iter([Ok(HostEvent::OpFinished(
+                        OperationFinishedEvent {
+                            session_id,
+                            op_id: HostOperationId::new(),
+                            reason: FinishReason::EndTurn,
+                        },
+                    ))])))
+                }
+                HostOperation::Prompt { .. } => Err(HostError::internal("not used")),
+            }
         }
 
         async fn cancel(&self, _op_id: HostOperationId) -> crate::HostResult<()> {
@@ -894,6 +936,26 @@ mod tests {
             op_id: HostOperationId::new(),
             reason: FinishReason::EndTurn,
         })
+    }
+
+    #[tokio::test]
+    async fn control_terminal_matches_the_returned_operation_id() {
+        let port = adapter();
+        let session_id = HostSessionId::new().to_string();
+        let reply = port.call(ProviderCall {
+            method: ProviderCallMethod::Execute,
+            request_id: "set-mode".into(),
+            session_id: Some(session_id.clone()),
+            operation_id: None,
+            deadline_ms: 1_000,
+            payload: serde_json::json!({"SetMode": {"mode": "plan"}}).as_object().unwrap().clone(),
+        }).await.unwrap();
+        let operation_id = reply.operation_id.unwrap();
+        let batch = port.next(operation_id.clone(), 16, 4096).await.unwrap();
+        assert!(!batch.has_more);
+        let event = serde_json::to_value(&batch.events[0]).unwrap();
+        assert_eq!(event["OpFinished"]["op_id"], operation_id);
+        assert_eq!(event["OpFinished"]["session_id"], session_id);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1197,7 +1259,7 @@ mod tests {
                     capability: "prompt".into(),
                     message: "unsupported".into(),
                 },
-                CoreErrorCode::InvalidInput,
+                CoreErrorCode::NotSupported,
                 400,
             ),
         ];
