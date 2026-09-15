@@ -6,11 +6,15 @@
 //!
 //! - exact raw-home / selected-workspace identity round-trips (the DTO layer
 //!   never rewrites the raw user home),
+//! - the §7 shell-vs-ready invariant is structural: a ready record with null
+//!   identity/epoch and an uninitialized shell with selected identity are both
+//!   rejected,
 //! - generated deserialization is closed: unknown fields and ambiguous
 //!   endpoint / instance / epoch shapes are rejected.
 
 use nexus_contracts::generated::core::core_service_discovery::CoreServiceDiscovery;
 use nexus_contracts::generated::core::core_service_stop_request::CoreServiceStopRequest;
+use nexus_contracts::generated::SCHEMA_VERSIONS;
 use serde_json::{json, Value};
 
 /// A valid `ready` HTTP discovery record with a raw (un-suffixed) user home
@@ -39,12 +43,24 @@ fn discovery_and_stop_reject_ambiguous_identity() {
         serde_json::from_value(record.clone()).expect("ready HTTP record deserializes");
     let back: Value = serde_json::to_value(&dto).expect("ready HTTP record re-serializes");
     assert_eq!(back, record, "round-trip must preserve the record exactly");
+    let CoreServiceDiscovery::ReadyServiceDiscovery {
+        creator_id,
+        user_home,
+        workspace_slug,
+        engine_epoch,
+        readiness,
+        ..
+    } = &dto
+    else {
+        panic!("a ready record must take the ready variant");
+    };
     // Raw home semantics: the DTO carries the raw user home verbatim
     // (home-layout appends `.nexus42` exactly once, never the wire type).
-    assert_eq!(dto.user_home.as_str(), "/Users/ava/raw-home");
-    assert_eq!(dto.creator_id.as_deref(), Some("ctr_localabcdef123456"));
-    assert_eq!(dto.workspace_slug.as_deref(), Some("novel-draft"));
-    assert_eq!(dto.engine_epoch, Some(3));
+    assert_eq!(user_home.as_str(), "/Users/ava/raw-home");
+    assert_eq!(creator_id.as_str(), "ctr_localabcdef123456");
+    assert_eq!(workspace_slug.as_str(), "novel-draft");
+    assert_eq!(*engine_epoch, 3);
+    assert_eq!(readiness.as_str(), "ready");
 
     // Uninitialized shell: null identity/epoch is representable and stable.
     let shell = json!({
@@ -66,8 +82,14 @@ fn discovery_and_stop_reject_ambiguous_identity() {
         serde_json::to_value(&shell_dto).expect("shell re-serializes"),
         shell
     );
-    assert_eq!(shell_dto.creator_id, None);
-    assert_eq!(shell_dto.engine_epoch, None);
+    let CoreServiceDiscovery::UninitializedServiceDiscovery {
+        readiness: shell_readiness,
+        ..
+    } = &shell_dto
+    else {
+        panic!("an uninitialized record must take the shell variant");
+    };
+    assert_eq!(shell_readiness.as_str(), "uninitialized");
 
     // ── Closed object: unknown fields are rejected ─────────────────────────
     let mut leaky = ready_http_discovery();
@@ -114,6 +136,52 @@ fn discovery_and_stop_reject_ambiguous_identity() {
     assert!(
         serde_json::from_value::<CoreServiceDiscovery>(socket_url).is_err(),
         "the http arm rejects a socket path where a URL is required"
+    );
+
+    // ── §7 shell-vs-ready invariant is structural ─────────────────────────
+    // A ready record must carry creator_id, workspace_slug and engine_epoch:
+    // nulling any one of them matches neither variant.
+    for field in ["creator_id", "workspace_slug", "engine_epoch"] {
+        let mut broken = ready_http_discovery();
+        broken[field] = Value::Null;
+        assert!(
+            serde_json::from_value::<CoreServiceDiscovery>(broken).is_err(),
+            "a ready record with a null {field} must be rejected"
+        );
+    }
+
+    // An uninitialized shell must carry all three as null: populated identity
+    // (in full or in part) matches neither variant.
+    let mut populated_shell = shell.clone();
+    populated_shell["creator_id"] = json!("ctr_localabcdef123456");
+    populated_shell["workspace_slug"] = json!("novel-draft");
+    populated_shell["engine_epoch"] = json!(3);
+    assert!(
+        serde_json::from_value::<CoreServiceDiscovery>(populated_shell).is_err(),
+        "an uninitialized shell with selected identity must be rejected"
+    );
+
+    let mut partly_populated_shell = shell.clone();
+    partly_populated_shell["creator_id"] = json!("ctr_localabcdef123456");
+    assert!(
+        serde_json::from_value::<CoreServiceDiscovery>(partly_populated_shell).is_err(),
+        "a shell with one populated identity field is neither variant"
+    );
+
+    // No third readiness exists: an unknown readiness matches neither variant.
+    let mut third_readiness = ready_http_discovery();
+    third_readiness["readiness"] = json!("initializing");
+    assert!(
+        serde_json::from_value::<CoreServiceDiscovery>(third_readiness).is_err(),
+        "readiness is closed to ready|uninitialized"
+    );
+
+    // The published discovery contract stays at schema_version 1.
+    assert!(
+        SCHEMA_VERSIONS
+            .iter()
+            .any(|(name, version)| *name == "CoreServiceDiscovery" && *version == 1),
+        "core-service-discovery must remain schema_version 1"
     );
 
     // ── Ambiguous instance identity is rejected ────────────────────────────

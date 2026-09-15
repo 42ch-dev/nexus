@@ -5,30 +5,49 @@
  */
 
 /**
- * Canonical Connect invoke result envelope: exactly one of result or error is non-null. Error codes reuse the shared CoreError categories, including unsupported operations.
+ * Canonical Connect invoke result envelope: exactly one of result or error is non-null, encoded as a closed success/failure union. Error codes reuse the shared CoreError categories, including not_supported for operations this service does not serve.
  */
-export interface CoreConnectInvokeResponse {
+export type CoreConnectInvokeResponse = ConnectInvokeSuccess | ConnectInvokeFailure;
+
+/**
+ * Operation succeeded: result carries the payload and error is null.
+ */
+export interface ConnectInvokeSuccess {
   /**
-   * Operation result; null on failure.
+   * Operation result; non-null exactly when error is null.
    */
   result: {
     [k: string]: unknown | undefined;
-  } | null;
+  };
   /**
-   * Wire error envelope; null on success.
+   * Null on success.
    */
-  error: NexusCoreError | null;
+  error: null;
 }
 /**
- * Wire error envelope for nexus-core / native / service adapters (NexusApiError-compatible categories).
+ * Operation refused or failed: error carries the wire envelope and result is null.
+ */
+export interface ConnectInvokeFailure {
+  /**
+   * Null on failure.
+   */
+  result: null;
+  error: NexusCoreError;
+}
+/**
+ * Wire error envelope; non-null exactly when result is null.
  */
 export interface NexusCoreError {
+  /**
+   * NexusApiError-compatible category. not_supported refuses an operation this service does not serve (unsupported operations fail with this code and zero side effects; the finer lowercase peer wire code, e.g. op_unsupported, is preserved in details.wire_code).
+   */
   code:
     | "uninitialized"
     | "auth_required"
     | "invalid_input"
     | "forbidden"
     | "not_found"
+    | "not_supported"
     | "world_kb_conflict"
     | "world_kb_validation"
     | "writer_fenced"

@@ -5,47 +5,59 @@
  */
 
 /**
- * Closed v1 service discovery record published to <user_home>/.nexus42/run/service.json and emitted as the single NEXUS_SERVICE_READY stdout line. Carries no API key or bearer secret; identity/epoch is compared against authenticated runtime status before attach or stop.
+ * Closed v1 service discovery record published to <user_home>/.nexus42/run/service.json and emitted as the single NEXUS_SERVICE_READY stdout line. Carries no API key or bearer secret; identity/epoch is compared against authenticated runtime status before attach or stop. Shell-vs-ready is structural: a ready record carries non-null creator_id, workspace_slug and engine_epoch; an uninitialized shell carries all three as null.
  */
-export interface CoreServiceDiscovery {
-  schema_version: 1;
+export type CoreServiceDiscovery = ReadyServiceDiscovery | UninitializedServiceDiscovery;
+export type SchemaVersion = 1;
+/**
+ * Random per-start instance identity. Attach and stop must match it against the authenticated runtime; a stale record never authorizes signaling a PID.
+ */
+export type InstanceId = string;
+/**
+ * Owning process id, diagnostic only. Never a stop authorization.
+ */
+export type Pid = number;
+/**
+ * Canonical raw user home; home-layout appends .nexus42 exactly once. Mismatched home never attaches.
+ */
+export type UserHome = string;
+/**
+ * Tagged endpoint: http URL or unix absolute socket path. The closed union rejects ambiguous URL/socket combinations.
+ */
+export type Endpoint = HttpServiceEndpoint | UnixSocketServiceEndpoint;
+/**
+ * TLS certificate fingerprint for https endpoints; null when TLS is unused.
+ */
+export type TlsFingerprint = string | null;
+export type ProtocolVersion = 1;
+
+/**
+ * Ready record: the core is initialized, so selected creator/workspace identity and the engine epoch are all present.
+ */
+export interface ReadyServiceDiscovery {
+  schema_version: SchemaVersion;
+  instance_id: InstanceId;
+  pid: Pid;
+  user_home: UserHome;
   /**
-   * Random per-start instance identity. Attach and stop must match it against the authenticated runtime; a stale record never authorizes signaling a PID.
+   * Selected creator id; present on every ready record, null only on the uninitialized shell.
    */
-  instance_id: string;
+  creator_id: string;
   /**
-   * Owning process id, diagnostic only. Never a stop authorization.
+   * Selected workspace slug; present on every ready record, null only on the uninitialized shell.
    */
-  pid: number;
+  workspace_slug: string;
   /**
-   * Canonical raw user home; home-layout appends .nexus42 exactly once. Mismatched home never attaches.
+   * Monotonic engine epoch; present on every ready record, null until the core is initialized.
    */
-  user_home: string;
+  engine_epoch: number;
+  endpoint: Endpoint;
+  tls_fingerprint: TlsFingerprint;
   /**
-   * Selected creator id; null only for the uninitialized shell.
+   * Ready: domain surface is served. An explicit shell uses the uninitialized variant instead.
    */
-  creator_id: string | null;
-  /**
-   * Selected workspace slug; null only for the uninitialized shell.
-   */
-  workspace_slug: string | null;
-  /**
-   * Conditional monotonic engine epoch; null until the core is initialized.
-   */
-  engine_epoch: number | null;
-  /**
-   * Tagged endpoint: http URL or unix absolute socket path. The closed union rejects ambiguous URL/socket combinations.
-   */
-  endpoint: HttpServiceEndpoint | UnixSocketServiceEndpoint;
-  /**
-   * TLS certificate fingerprint for https endpoints; null when TLS is unused.
-   */
-  tls_fingerprint: string | null;
-  /**
-   * uninitialized is an explicit shell, not a promise of domain readiness.
-   */
-  readiness: "uninitialized" | "ready";
-  protocol_version: 1;
+  readiness: "ready";
+  protocol_version: ProtocolVersion;
 }
 export interface HttpServiceEndpoint {
   /**
@@ -66,4 +78,32 @@ export interface UnixSocketServiceEndpoint {
    * Absolute Unix domain socket path.
    */
   path: string;
+}
+/**
+ * Uninitialized shell: explicit, not a promise of domain readiness; creator/workspace/epoch identity is null.
+ */
+export interface UninitializedServiceDiscovery {
+  schema_version: SchemaVersion;
+  instance_id: InstanceId;
+  pid: Pid;
+  user_home: UserHome;
+  /**
+   * Null: an uninitialized shell has no selected creator.
+   */
+  creator_id: null;
+  /**
+   * Null: an uninitialized shell has no selected workspace.
+   */
+  workspace_slug: null;
+  /**
+   * Null: the engine epoch does not exist until the core is initialized.
+   */
+  engine_epoch: null;
+  endpoint: Endpoint;
+  tls_fingerprint: TlsFingerprint;
+  /**
+   * Uninitialized is an explicit shell, not a promise of domain readiness.
+   */
+  readiness: "uninitialized";
+  protocol_version: ProtocolVersion;
 }

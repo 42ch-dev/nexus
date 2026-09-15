@@ -3,23 +3,106 @@
   "$id": "https://nexus42.invalid/schemas/core/core-service-discovery.schema.json",
   "schema_version": 1,
   "title": "Nexus CoreServiceDiscovery",
-  "description": "Closed v1 service discovery record published to <user_home>/.nexus42/run/service.json and emitted as the single NEXUS_SERVICE_READY stdout line. Carries no API key or bearer secret; identity/epoch is compared against authenticated runtime status before attach or stop.",
+  "description": "Closed v1 service discovery record published to <user_home>/.nexus42/run/service.json and emitted as the single NEXUS_SERVICE_READY stdout line. Carries no API key or bearer secret; identity/epoch is compared against authenticated runtime status before attach or stop. Shell-vs-ready is structural: a ready record carries non-null creator_id, workspace_slug and engine_epoch; an uninitialized shell carries all three as null.",
   "type": "object",
-  "required": [
-    "schema_version",
-    "instance_id",
-    "pid",
-    "user_home",
-    "creator_id",
-    "workspace_slug",
-    "engine_epoch",
-    "endpoint",
-    "tls_fingerprint",
-    "readiness",
-    "protocol_version"
+  "oneOf": [
+    { "$ref": "#/definitions/ready" },
+    { "$ref": "#/definitions/uninitialized" }
   ],
-  "additionalProperties": false,
-  "properties": {
+  "definitions": {
+    "ready": {
+      "title": "ReadyServiceDiscovery",
+      "type": "object",
+      "description": "Ready record: the core is initialized, so selected creator/workspace identity and the engine epoch are all present.",
+      "required": [
+        "schema_version",
+        "instance_id",
+        "pid",
+        "user_home",
+        "creator_id",
+        "workspace_slug",
+        "engine_epoch",
+        "endpoint",
+        "tls_fingerprint",
+        "readiness",
+        "protocol_version"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": { "$ref": "#/definitions/schema_version" },
+        "instance_id": { "$ref": "#/definitions/instance_id" },
+        "pid": { "$ref": "#/definitions/pid" },
+        "user_home": { "$ref": "#/definitions/user_home" },
+        "creator_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Selected creator id; present on every ready record, null only on the uninitialized shell."
+        },
+        "workspace_slug": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Selected workspace slug; present on every ready record, null only on the uninitialized shell."
+        },
+        "engine_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Monotonic engine epoch; present on every ready record, null until the core is initialized."
+        },
+        "endpoint": { "$ref": "#/definitions/endpoint" },
+        "tls_fingerprint": { "$ref": "#/definitions/tls_fingerprint" },
+        "readiness": {
+          "type": "string",
+          "pattern": "^ready$",
+          "description": "Ready: domain surface is served. An explicit shell uses the uninitialized variant instead."
+        },
+        "protocol_version": { "$ref": "#/definitions/protocol_version" }
+      }
+    },
+    "uninitialized": {
+      "title": "UninitializedServiceDiscovery",
+      "type": "object",
+      "description": "Uninitialized shell: explicit, not a promise of domain readiness; creator/workspace/epoch identity is null.",
+      "required": [
+        "schema_version",
+        "instance_id",
+        "pid",
+        "user_home",
+        "creator_id",
+        "workspace_slug",
+        "engine_epoch",
+        "endpoint",
+        "tls_fingerprint",
+        "readiness",
+        "protocol_version"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": { "$ref": "#/definitions/schema_version" },
+        "instance_id": { "$ref": "#/definitions/instance_id" },
+        "pid": { "$ref": "#/definitions/pid" },
+        "user_home": { "$ref": "#/definitions/user_home" },
+        "creator_id": {
+          "type": "null",
+          "description": "Null: an uninitialized shell has no selected creator."
+        },
+        "workspace_slug": {
+          "type": "null",
+          "description": "Null: an uninitialized shell has no selected workspace."
+        },
+        "engine_epoch": {
+          "type": "null",
+          "description": "Null: the engine epoch does not exist until the core is initialized."
+        },
+        "endpoint": { "$ref": "#/definitions/endpoint" },
+        "tls_fingerprint": { "$ref": "#/definitions/tls_fingerprint" },
+        "readiness": {
+          "type": "string",
+          "pattern": "^uninitialized$",
+          "description": "Uninitialized is an explicit shell, not a promise of domain readiness."
+        },
+        "protocol_version": { "$ref": "#/definitions/protocol_version" }
+      }
+    },
     "schema_version": {
       "type": "integer",
       "const": 1
@@ -38,28 +121,6 @@
       "type": "string",
       "minLength": 1,
       "description": "Canonical raw user home; home-layout appends .nexus42 exactly once. Mismatched home never attaches."
-    },
-    "creator_id": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "description": "Selected creator id; null only for the uninitialized shell."
-    },
-    "workspace_slug": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "description": "Selected workspace slug; null only for the uninitialized shell."
-    },
-    "engine_epoch": {
-      "type": [
-        "integer",
-        "null"
-      ],
-      "minimum": 0,
-      "description": "Conditional monotonic engine epoch; null until the core is initialized."
     },
     "endpoint": {
       "description": "Tagged endpoint: http URL or unix absolute socket path. The closed union rejects ambiguous URL/socket combinations.",
@@ -114,14 +175,6 @@
         "null"
       ],
       "description": "TLS certificate fingerprint for https endpoints; null when TLS is unused."
-    },
-    "readiness": {
-      "type": "string",
-      "enum": [
-        "uninitialized",
-        "ready"
-      ],
-      "description": "uninitialized is an explicit shell, not a promise of domain readiness."
     },
     "protocol_version": {
       "type": "integer",
