@@ -41,6 +41,21 @@ fn map_core_error(err: CoreError) -> CliError {
             status: 403,
             message: resource,
         },
+        // World-owner scoping denial. Mirrors the daemon adapter
+        // (`errors.rs`): `Forbidden { resource: "world {world_id}", reason }`
+        // at status 403 — so the direct-core caller sees the same family the
+        // HTTP route emits.
+        CoreError::WorldOwnerDenied { world_id, reason } => CliError::Api {
+            status: 403,
+            message: format!("world {world_id}: {reason}"),
+        },
+        // Preset/strategy authoring failures surfaced through the Core
+        // authority. Mirrors the daemon adapter's per-variant status and
+        // `[code] message` envelope, which is exactly what
+        // `DaemonClient::parse_error_response` renders for the `preset`
+        // command family over the wire — one preset error must not read
+        // differently depending on which transport reached it.
+        CoreError::Preset(error) => map_preset_error(error),
         CoreError::NotFound { resource } => CliError::Api {
             status: 404,
             message: resource,
@@ -86,6 +101,122 @@ fn map_core_error(err: CoreError) -> CliError {
         ),
         CoreError::Closing | CoreError::Interrupted => CliError::Other(err.to_string()),
         CoreError::Internal { category } => CliError::Other(category),
+    }
+}
+
+/// Preset/strategy error mapping, mirroring the daemon adapter's
+/// `From<PresetError> for NexusApiError` variant for variant.
+///
+/// The `preset` command family reaches the same domain failures over the
+/// daemon HTTP transport, where `DaemonClient::parse_error_response` renders
+/// the daemon's `[code] message` envelope into `CliError::Api`. Reusing that
+/// shape here keeps one preset error reading identically on both transports.
+/// `StrategyConflict` stays structured (`[strategy_conflict]` + named fields,
+/// AR-83 #5 / PL-5) instead of being flattened into the generic envelope.
+fn map_preset_error(error: nexus_core::PresetError) -> CliError {
+    use nexus_core::PresetError;
+    match error {
+        // The daemon adapter routes `Rejected` to `BadRequest { code, message }`,
+        // whose status and public code are both code-driven. Mirroring the same
+        // two tables keeps the outcome identical on either transport.
+        PresetError::Rejected { code, message } => CliError::Api {
+            status: preset_rejected_status(&code),
+            message: format!("[{}] Bad request: {message}", preset_rejected_code(&code)),
+        },
+        // `InvalidInput { reason }` displays without the field; the daemon's
+        // `details.field` is appended by `parse_error_response`.
+        PresetError::InvalidInput { field, reason } => CliError::Api {
+            status: 400,
+            message: format!("[invalid_input] Invalid input: {reason} (field: {field})"),
+        },
+        PresetError::NotFound(resource) => CliError::Api {
+            status: 404,
+            message: format!("[not_found] Not found: {resource}"),
+        },
+        PresetError::Conflict(message) => CliError::Api {
+            status: 409,
+            message: format!("[conflict] Conflict: {message}"),
+        },
+        // `Forbidden { resource, reason }` displays only the reason; `resource`
+        // travels in `details` (not rendered by the CLI envelope).
+        PresetError::Forbidden { reason, .. } => CliError::Api {
+            status: 403,
+            message: format!("[forbidden] Forbidden: {reason}"),
+        },
+        // `Internal` always reports the public code `internal` — the inner
+        // `code` is internal classification, deliberately not leaked.
+        PresetError::Internal { message, .. } => CliError::Api {
+            status: 500,
+            message: format!("[internal] Internal error: {message}"),
+        },
+        // The 409 CAS conflict stays structured: code + the four named fields
+        // the daemon envelope carries, rendered exactly as
+        // `parse_error_response` renders them for the daemon transport
+        // (AR-83 #5 / PL-5 — never swallowed).
+        PresetError::StrategyConflict(conflict) => {
+            let current_revision = conflict.current_revision;
+            let node_id = conflict.node_id;
+            let conflicting_path = conflict.conflicting_path;
+            let recovery_hint = conflict.recovery_hint;
+            CliError::Api {
+                status: 409,
+                message: format!(
+                    "[strategy_conflict] Strategy conflict: {conflicting_path} \
+                     (current_revision: {current_revision}) (node_id: {node_id}) \
+                     (conflicting_path: {conflicting_path}) (recovery_hint: {recovery_hint})"
+                ),
+            }
+        }
+        PresetError::StrategyValidation(summary) => CliError::Api {
+            status: 422,
+            message: format!(
+                "[strategy_validation_failed] Strategy validation failed{}",
+                summary
+                    .errors
+                    .iter()
+                    .map(|e| format!(" (validation: {e})"))
+                    .collect::<String>()
+            ),
+        },
+    }
+}
+
+/// HTTP status for a `PresetError::Rejected` code, mirroring the daemon
+/// adapter's `BadRequest` table (`status_code`): semantic validation codes are
+/// 422; everything else is 400. `policy_blocked` → 403 is unreachable here —
+/// preset rejection never emits it.
+fn preset_rejected_status(code: &str) -> u16 {
+    match code {
+        "world_id_required"
+        | "invalid_world_id"
+        | "world_clear_forbidden"
+        | "invalid_transition"
+        | "invalid_input"
+        | "invalid_state"
+        | "too_many_findings"
+        | "strategy_self_loop"
+        | "strategy_transition_duplicate" => 422,
+        _ => 400,
+    }
+}
+
+/// Public error code for a `PresetError::Rejected` code, mirroring the daemon
+/// adapter's `error_code` table: canonical codes surface verbatim; anything
+/// else degrades to `bad_request` so internal classification never leaks.
+fn preset_rejected_code(code: &str) -> &str {
+    match code {
+        "policy_blocked"
+        | "not_supported"
+        | "invalid_input"
+        | "invalid_state"
+        | "invalid_transition"
+        | "too_many_findings"
+        | "world_id_required"
+        | "invalid_world_id"
+        | "world_clear_forbidden"
+        | "strategy_self_loop"
+        | "strategy_transition_duplicate" => code,
+        _ => "bad_request",
     }
 }
 
