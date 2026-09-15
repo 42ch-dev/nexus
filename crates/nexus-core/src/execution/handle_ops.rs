@@ -103,7 +103,12 @@ impl ExecutionHandle {
                 resource: "workspace commit requires an admitted principal".into(),
             });
         }
-        let authority = self.workspace_commit_authority()?;
+        let authority = self
+            .workspace_commit_authority()
+            .ok_or_else(|| CoreError::NotFound {
+                resource: "workspace commit authority (no execution owner bound)".into(),
+            })?
+            .clone();
         authority.commit(request).await
     }
 
@@ -282,7 +287,7 @@ impl ExecutionHandle {
         if request.preset_id.starts_with("_system.") {
             return Ok(None);
         }
-        let home = self.nexus_home.as_deref().ok_or_else(|| CoreError::Internal {
+        let home = self.nexus_home().ok_or_else(|| CoreError::Internal {
             category: "schedule insert requires a nexus home to resolve the preset".into(),
         })?;
         let registry = self
@@ -372,17 +377,6 @@ impl ExecutionHandle {
             .map(Some)
             .map_err(|e| CoreError::Internal {
                 category: format!("failed to serialize execution descriptor: {e}"),
-            })
-    }
-
-    /// The bound workspace commit authority, or a typed `NotFound`.
-    fn workspace_commit_authority(
-        &self,
-    ) -> CoreResult<crate::execution::workspace::WorkspaceCommitAuthority> {
-        self.workspace_commit
-            .clone()
-            .ok_or_else(|| CoreError::NotFound {
-                resource: "workspace commit authority (no execution owner bound)".into(),
             })
     }
 

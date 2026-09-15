@@ -223,6 +223,25 @@ impl ExecutionHandle {
         self.engine_epoch
     }
 
+    /// The nexus home this owner resolves presets against, if one was
+    /// supplied. Used to freeze a schedule's source identity at insertion.
+    #[must_use]
+    pub fn nexus_home(&self) -> Option<&Path> {
+        self.nexus_home.as_deref()
+    }
+
+    /// The bound workspace commit authority, if the transport supplied one.
+    ///
+    /// `None` on a Tier-0 core (no manager/root published yet); the typed
+    /// `commit_workspace` then reports `NotFound` rather than committing
+    /// through a foreign root.
+    #[must_use]
+    pub fn workspace_commit_authority(
+        &self,
+    ) -> Option<&crate::execution::workspace::WorkspaceCommitAuthority> {
+        self.workspace_commit.as_ref()
+    }
+
     /// The shared per-run cancellation map (also held by the engine).
     #[must_use]
     pub fn session_cancels(
