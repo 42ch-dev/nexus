@@ -42,8 +42,8 @@ pub(crate) struct CoreInner {
     pub(crate) pool: SqlitePool,
     db_path: PathBuf,
     _guarded: Option<GuardedPool>,
-    nexus_home: PathBuf,
     /// Active creator this service was opened against (open-scoped).
+    pub(crate) nexus_home: PathBuf,
     creator_id: String,
     workspace_slug: String,
     /// Open-scoped generation: minted as `1` at [`CoreService::open`] and

@@ -7,7 +7,8 @@
 #![allow(clippy::too_many_lines)]
 
 use crate::api::errors::NexusApiError;
-use crate::api::handlers::works::WorkApiDto;
+use crate::api::handlers::findings::findings_error;
+use crate::api::handlers::works::{work_error, WorkApiDto};
 use crate::api::path_guard::resolve_guarded_path_async;
 use crate::capability_registry::host_tool_registry;
 use crate::config::{read_active_creator_id, read_active_workspace_slug};
@@ -240,22 +241,21 @@ async fn execute_work_get(
             }
         })?;
 
-    let dto = WorkApiDto::from(record);
+    let dto = WorkApiDto::from(nexus_core::WorkDetails::from(record));
     Ok(serde_json::to_value(dto).unwrap_or_else(|_| serde_json::json!({})))
 }
 
 /// `nexus.work.patch` — append inspiration + allowed metadata fields (spec §4.4).
 ///
 /// Multi-field patches (`title` + `inspiration_log` + `stage_metadata`) are applied
-/// sequentially within the same handler invocation. Each DB call uses its own
-/// transaction via the shared pool. Full atomicity across all fields requires
-/// wrapping in a single transaction (deferred to post-V1.34 when concurrent
-/// multi-connection mutations become realistic). For V1.34 pre-release the
-/// sequential approach is sufficient (`SQLite` WAL, single daemon process).
+/// sequentially within the same handler invocation. All mutations go through the
+/// [`nexus_core::CoreService`] Work authority (principal/write gates, owned
+/// requests, shared lock and error boundary); this boundary only validates the
+/// tool payload and maps transport errors (QC1-F-001).
 async fn execute_work_patch(
     req: &ToolExecuteRequest,
     state: &WorkspaceState,
-    creator_id: &str,
+    _creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
     let work_id =
         req.parameters["work_id"]
@@ -265,7 +265,8 @@ async fn execute_work_patch(
                 reason: "must be a string".into(),
             })?;
 
-    let pool = state.pool_or_uninit()?;
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
 
     // Validate patch fields (spec §4.4)
     let params = req
@@ -313,28 +314,17 @@ async fn execute_work_patch(
                     reason: "each entry must include a 'text' or 'note' field".into(),
                 })?;
 
-            let now = chrono::Utc::now().to_rfc3339();
-            let json_entry = serde_json::json!({
-                "at": now,
-                "note": note,
-                "source": entry.get("source").and_then(|v| v.as_str()).unwrap_or("agent_tool"),
-            });
-            let entry_json = serde_json::to_string(&json_entry).unwrap_or_default();
-
-            works::append_inspiration(pool, creator_id, work_id, &entry_json, &now)
-                .await
-                .map_err(|e| match &e {
-                    nexus_local_db::LocalDbError::MissingVersionKey { .. } => {
-                        NexusApiError::Forbidden {
-                            resource: "work".into(),
-                            reason: "work not found or cross-creator".into(),
-                        }
-                    }
-                    _ => NexusApiError::Internal {
-                        code: "DATABASE_ERROR".into(),
-                        message: e.to_string(),
-                    },
-                })?;
+            // The core composes the canonical inspiration entry
+            // (`{"at", "note"}`); per-entry `source` sidecar values from the
+            // legacy host-tool payload are normalized away by the authority.
+            core.append_work_inspiration(
+                &principal,
+                work_id.to_string(),
+                "http",
+                nexus_contracts::AppendInspirationRequest { note: note.to_string() },
+            )
+            .await
+            .map_err(work_error)?;
         }
     }
 
@@ -351,47 +341,17 @@ async fn execute_work_patch(
             });
         }
 
-        let patch = nexus_local_db::works::WorkPatch {
-            title: Some(title_str.to_string()),
-            long_term_goal: None,
-            creative_brief: None,
-            intake_status: None,
-            status: None,
-            world_id: None,
-            story_ref: None,
-            primary_preset_id: None,
-            schedule_ids: None,
-            current_stage: None,
-            stage_status: None,
-            work_profile: None,
-            work_ref: None,
-            total_planned_chapters: None,
-            current_chapter: None,
-            auto_chain_enabled: None,
-            driver_schedule_id: None,
-            auto_chain_interrupted: None,
-            auto_review_master_on_timeout: None,
-            runtime_lock_holder: None,
-            runtime_lock_acquired_at: None,
-            completion_locked_at: None,
-            novel_completion_status: None,
-            lineage_from_work_id: None,
-        };
-        let now = chrono::Utc::now().to_rfc3339();
-        works::patch_work(pool, creator_id, work_id, &patch, &now)
-            .await
-            .map_err(|e| match &e {
-                nexus_local_db::LocalDbError::MissingVersionKey { .. } => {
-                    NexusApiError::Forbidden {
-                        resource: "work".into(),
-                        reason: "work not found or cross-creator".into(),
-                    }
-                }
-                _ => NexusApiError::Internal {
-                    code: "DATABASE_ERROR".into(),
-                    message: e.to_string(),
-                },
-            })?;
+        core.patch_work(
+            &principal,
+            work_id.to_string(),
+            "http",
+            nexus_core::WorkPatchRequest {
+                title: Some(title_str.to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(work_error)?;
     }
 
     // Handle stage_metadata patch — validate sub-field allowlist (spec §4.4).
@@ -424,43 +384,23 @@ async fn execute_work_patch(
             }
         }
 
-        let now = chrono::Utc::now().to_rfc3339();
-        let entry = serde_json::json!({
-            "at": now,
-            "note": format!("[stage_metadata] {}", serde_json::to_string(metadata).unwrap_or_default()),
-            "source": "agent_tool",
-            "type": "stage_metadata",
-        });
-        let entry_json = serde_json::to_string(&entry).unwrap_or_default();
-        works::append_inspiration(pool, creator_id, work_id, &entry_json, &now)
-            .await
-            .map_err(|e| match &e {
-                nexus_local_db::LocalDbError::MissingVersionKey { .. } => {
-                    NexusApiError::Forbidden {
-                        resource: "work".into(),
-                        reason: "work not found or cross-creator".into(),
-                    }
-                }
-                _ => NexusApiError::Internal {
-                    code: "DATABASE_ERROR".into(),
-                    message: e.to_string(),
-                },
-            })?;
+        let note = format!(
+            "[stage_metadata] {}",
+            serde_json::to_string(metadata).unwrap_or_default()
+        );
+        core.append_work_inspiration(
+            &principal,
+            work_id.to_string(),
+            "http",
+            nexus_contracts::AppendInspirationRequest { note },
+        )
+        .await
+        .map_err(work_error)?;
     }
 
-    // Return the updated Work
-    let updated = works::get_work(pool, creator_id, work_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::Forbidden {
-            resource: "work".into(),
-            reason: "work not found after patch".into(),
-        })?;
-
-    let dto = WorkApiDto::from(updated);
+    // Return the updated Work through the same core authority.
+    let details = core.get_work(&principal, work_id.to_string()).await.map_err(work_error)?;
+    let dto = WorkApiDto::from(details);
     Ok(serde_json::to_value(dto).unwrap_or_else(|_| serde_json::json!({})))
 }
 
@@ -1670,10 +1610,14 @@ async fn execute_world_configure(
 }
 
 /// `nexus.work.schedule.set` — link/unlink schedule ids to a work.
+///
+/// The mutation routes through the core Work authority (QC1-F-001 class, same
+/// as the patch/finding-resolve/pool executors); the boundary keeps payload
+/// validation and transport error mapping only.
 async fn execute_work_schedule_set(
     req: &ToolExecuteRequest,
     state: &WorkspaceState,
-    creator_id: &str,
+    _creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
     let work_id =
         req.parameters["work_id"]
@@ -1691,71 +1635,33 @@ async fn execute_work_schedule_set(
                 reason: "must be an array of schedule id strings".into(),
             })?;
 
-    // Validate all entries are strings
+    // Validate all entries are strings and collect the typed list for core.
+    let mut ids = Vec::with_capacity(schedule_ids.len());
     for (i, id) in schedule_ids.iter().enumerate() {
-        if !id.is_string() {
-            return Err(NexusApiError::InvalidInput {
-                field: format!("parameters.schedule_ids[{i}]"),
-                reason: "must be a string".into(),
-            });
+        match id.as_str() {
+            Some(id) => ids.push(id.to_string()),
+            None => {
+                return Err(NexusApiError::InvalidInput {
+                    field: format!("parameters.schedule_ids[{i}]"),
+                    reason: "must be a string".into(),
+                });
+            }
         }
     }
 
-    // Verify work ownership first
-    let pool = state.pool_or_uninit()?;
-    let _record = works::get_work(pool, creator_id, work_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::Forbidden {
-            resource: "work".to_string(),
-            reason: "work not found or cross-creator access denied".to_string(),
-        })?;
-
-    let schedule_ids_json = serde_json::to_string(&schedule_ids).unwrap_or_default();
-    let now = chrono::Utc::now().to_rfc3339();
-
-    let patch = nexus_local_db::works::WorkPatch {
-        schedule_ids: Some(schedule_ids_json),
-        title: None,
-        long_term_goal: None,
-        creative_brief: None,
-        intake_status: None,
-        status: None,
-        world_id: None,
-        story_ref: None,
-        primary_preset_id: None,
-        current_stage: None,
-        stage_status: None,
-        work_profile: None,
-        work_ref: None,
-        total_planned_chapters: None,
-        current_chapter: None,
-        auto_chain_enabled: None,
-        driver_schedule_id: None,
-        auto_chain_interrupted: None,
-        auto_review_master_on_timeout: None,
-        runtime_lock_holder: None,
-        runtime_lock_acquired_at: None,
-        completion_locked_at: None,
-        novel_completion_status: None,
-        lineage_from_work_id: None,
-    };
-
-    works::patch_work(pool, creator_id, work_id, &patch, &now)
-        .await
-        .map_err(|e| match &e {
-            nexus_local_db::LocalDbError::MissingVersionKey { .. } => NexusApiError::Forbidden {
-                resource: "work".into(),
-                reason: "work not found or cross-creator".into(),
-            },
-            _ => NexusApiError::Internal {
-                code: "DATABASE_ERROR".into(),
-                message: e.to_string(),
-            },
-        })?;
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    core.patch_work(
+        &principal,
+        work_id.to_string(),
+        "http",
+        nexus_core::WorkPatchRequest {
+            schedule_ids: Some(ids),
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(work_error)?;
 
     Ok(serde_json::json!({
         "work_id": work_id,
@@ -1767,7 +1673,7 @@ async fn execute_work_schedule_set(
 async fn execute_finding_resolve(
     req: &ToolExecuteRequest,
     state: &WorkspaceState,
-    creator_id: &str,
+    _creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
     let finding_id =
         req.parameters["finding_id"]
@@ -1781,49 +1687,23 @@ async fn execute_finding_resolve(
         .as_str()
         .unwrap_or("resolved via tool");
 
-    let now_epoch = chrono::Utc::now().timestamp();
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
 
-    let patch = nexus_local_db::findings::FindingPatch {
-        status: Some("resolved".to_string()),
-        severity: None,
-        title: None,
-        description: Some(format!("Resolved via tool: {resolution}")),
-        target_executor: None,
-        kind: None,
-        rule_suggestion: None,
-    };
-
-    let updated = nexus_local_db::findings::update_finding(
-        state.pool_or_uninit()?,
-        creator_id,
-        finding_id,
-        &patch,
-        now_epoch,
+    // Single findings authority (QC1-F-001): principal verification, the
+    // work-write gate, lifecycle transition validation and the not-found
+    // mapping all live in the core; this boundary keeps only the payload.
+    core.update_finding(
+        &principal,
+        finding_id.to_string(),
+        nexus_core::UpdateFindingRequest {
+            status: Some("resolved".to_string()),
+            description: Some(format!("Resolved via tool: {resolution}")),
+            ..Default::default()
+        },
     )
     .await
-    .map_err(|e| match &e {
-        nexus_local_db::LocalDbError::MissingVersionKey { .. } => NexusApiError::Forbidden {
-            resource: "finding".into(),
-            reason: "finding not found or cross-creator".into(),
-        },
-        nexus_local_db::LocalDbError::IllegalTransition { .. } => NexusApiError::BadRequest {
-            code: "invalid_transition".to_string(),
-            message: e.to_string(),
-        },
-        nexus_local_db::LocalDbError::InvalidEnum { .. } => NexusApiError::InvalidInput {
-            field: "parameters.status".into(),
-            reason: e.to_string(),
-        },
-        _ => NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: e.to_string(),
-        },
-    })?;
-
-    // W-002: check the returned bool — false means no row was updated.
-    if !updated {
-        return Err(NexusApiError::NotFound(format!("finding {finding_id}")));
-    }
+    .map_err(findings_error)?;
 
     Ok(serde_json::json!({
         "finding_id": finding_id,
@@ -1852,31 +1732,30 @@ async fn execute_pool_entry_manage(
             reason: "must be a string (add, remove, promote, archive)".into(),
         })?;
 
-    // Verify work ownership for non-creator-scoped actions
-    let pool = state.pool_or_uninit()?;
-    let _record = works::get_work(pool, creator_id, work_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::Forbidden {
-            resource: "work".to_string(),
-            reason: "work not found or cross-creator access denied".to_string(),
-        })?;
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
 
     match action {
         "add" | "promote" => {
-            nexus_local_db::novel_pool_entries::promote_to_active(pool, creator_id, work_id)
-                .await
-                .map_err(|e| NexusApiError::Internal {
-                    code: "POOL_ERROR".to_string(),
-                    message: e.to_string(),
-                })?;
+            // Core authority owns the work-ownership precheck
+            // (`resolve_owned_work`) and the write gate for promotion.
+            core.promote_work_pool_entry(
+                &principal,
+                nexus_core::PromotePoolRequest {
+                    work_id: work_id.to_string(),
+                    set_default: None,
+                },
+            )
+            .await
+            .map_err(work_error)?;
         }
         "remove" | "archive" => {
+            // Creator-scoped read at the boundary resolves the entry id; the
+            // archive mutation itself goes through the core authority.
             let entry = nexus_local_db::novel_pool_entries::get_pool_entry_by_work(
-                pool, creator_id, work_id,
+                state.pool_or_uninit()?,
+                creator_id,
+                work_id,
             )
             .await
             .map_err(|e| NexusApiError::Internal {
@@ -1885,16 +1764,12 @@ async fn execute_pool_entry_manage(
             })?
             .ok_or_else(|| NexusApiError::NotFound(format!("pool entry for {work_id}")))?;
 
-            nexus_local_db::novel_pool_entries::archive_pool_entry(
-                pool,
-                &entry.entry_id,
-                creator_id,
+            core.archive_work_pool_entry(
+                &principal,
+                nexus_core::ArchivePoolRequest { entry_id: entry.entry_id },
             )
             .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "POOL_ERROR".to_string(),
-                message: e.to_string(),
-            })?;
+            .map_err(work_error)?;
         }
         _ => {
             return Err(NexusApiError::InvalidInput {
@@ -2850,5 +2725,257 @@ mod tests {
             Err(other) => panic!("expected Forbidden file error, got {other:?}"),
             Ok(_) => panic!("expected error"),
         }
+    }
+
+    // ── QC1-F-001: retained host-tool mutation executors route through the
+    // CoreService authority (principal/write gates, owned requests); the
+    // boundary keeps payload validation and transport error mapping only. ──
+
+    async fn setup_work_tool_state() -> (
+        WorkspaceState,
+        crate::test_utils::TestTempRoot,
+        String,
+    ) {
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let state = crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        crate::test_utils::seed_test_creator_and_world(
+            state.pool_or_uninit().expect("test fixture ensures creator DB is open"),
+        )
+        .await;
+        let core = state.core_or_uninit().await.expect("core opens over the test workspace");
+        let principal = core.active_principal().await.expect("active creator resolved");
+        let work_id = core
+            .create_work(&principal, nexus_contracts::CreateWorkRequest {
+                title: "Tool Work".into(),
+                long_term_goal: "write".into(),
+                initial_idea: "idea".into(),
+                world_id: Some("wld_test_world".into()),
+                story_ref: None,
+                primary_preset_id: None,
+                client_request_id: None,
+                lineage_from_work_id: None,
+                set_pool_active: None,
+                work_profile: None,
+            })
+            .await
+            .expect("work created through the core authority")
+            .work_id;
+        (state, tmp, work_id)
+    }
+
+    fn work_patch_request(parameters: serde_json::Value) -> ToolExecuteRequest {
+        ToolExecuteRequest {
+            tool_name: "nexus.work.patch".to_string(),
+            parameters,
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        }
+    }
+
+    /// `nexus.work.patch` applies title and inspiration through the core
+    /// authority; the persisted inspiration entry carries the core shape.
+    #[tokio::test]
+    async fn execute_work_patch_routes_through_core_authority() {
+        let (state, _tmp, work_id) = setup_work_tool_state().await;
+        let req = work_patch_request(serde_json::json!({
+            "work_id": work_id,
+            "title": "Renamed via tool",
+            "inspiration_log": [{ "text": "a spark" }],
+        }));
+        let result = execute_work_patch(&req, &state, "test_creator").await;
+        assert!(result.is_ok(), "patch should succeed: {result:?}");
+        assert_eq!(result.unwrap()["title"], "Renamed via tool");
+
+        let pool = state.pool_or_uninit().expect("workspace pool");
+        let record = nexus_local_db::works::get_work(pool, "test_creator", &work_id)
+            .await
+            .expect("work row readable")
+            .expect("work row exists");
+        assert!(record.inspiration_log.contains("a spark"), "inspiration entry persisted: {}", record.inspiration_log);
+    }
+
+    /// A Work row owned by another creator is rejected by the core's
+    /// owned-work check (legacy 403 → core NotFound 404, aligned with the
+    /// migrated HTTP surface).
+    #[tokio::test]
+    async fn execute_work_patch_rejects_foreign_work() {
+        let (state, _tmp, work_id) = setup_work_tool_state().await;
+        sqlx::query("UPDATE works SET creator_id = 'other' WHERE work_id = ?")
+            .bind(&work_id)
+            .execute(state.pool_or_uninit().expect("workspace pool"))
+            .await
+            .expect("seed foreign creator");
+
+        let req = work_patch_request(serde_json::json!({ "work_id": work_id, "title": "stolen" }));
+        let result = execute_work_patch(&req, &state, "test_creator").await;
+        assert!(matches!(result, Err(NexusApiError::NotFound(_))), "foreign work must be rejected, got {result:?}");
+    }
+
+    /// `nexus.work.schedule.set` links schedule ids through the core Work
+    /// authority; the persisted row carries the JSON list.
+    #[tokio::test]
+    async fn execute_work_schedule_set_routes_through_core_authority() {
+        let (state, _tmp, work_id) = setup_work_tool_state().await;
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.work.schedule.set".to_string(),
+            parameters: serde_json::json!({
+                "work_id": work_id,
+                "schedule_ids": ["sch_a", "sch_b"],
+            }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = execute_work_schedule_set(&req, &state, "test_creator").await;
+        assert!(result.is_ok(), "schedule set should succeed: {result:?}");
+        assert_eq!(
+            result.unwrap()["schedule_ids"],
+            serde_json::json!(["sch_a", "sch_b"]),
+            "legacy response shape preserved"
+        );
+
+        let pool = state.pool_or_uninit().expect("workspace pool");
+        let record = nexus_local_db::works::get_work(pool, "test_creator", &work_id)
+            .await
+            .expect("work row readable")
+            .expect("work row exists");
+        assert_eq!(
+            record.schedule_ids,
+            "[\"sch_a\",\"sch_b\"]",
+            "schedule ids persisted through the core patch authority"
+        );
+    }
+
+    /// A Work row owned by another creator is rejected by the core's
+    /// owned-work check (legacy 403 → core NotFound 404, aligned with the
+    /// migrated host-tool surface).
+    #[tokio::test]
+    async fn execute_work_schedule_set_rejects_foreign_work() {
+        let (state, _tmp, work_id) = setup_work_tool_state().await;
+        sqlx::query("UPDATE works SET creator_id = 'other' WHERE work_id = ?")
+            .bind(&work_id)
+            .execute(state.pool_or_uninit().expect("workspace pool"))
+            .await
+            .expect("seed foreign creator");
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.work.schedule.set".to_string(),
+            parameters: serde_json::json!({ "work_id": work_id, "schedule_ids": ["sch_x"] }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = execute_work_schedule_set(&req, &state, "test_creator").await;
+        assert!(matches!(result, Err(NexusApiError::NotFound(_))), "foreign work must be rejected, got {result:?}");
+    }
+
+    /// `nexus.finding.resolve` resolves through the core findings authority;
+    /// the legacy response shape is preserved at the boundary.
+    #[tokio::test]
+    async fn execute_finding_resolve_routes_through_core_authority() {
+        let (state, _tmp, work_id) = setup_work_tool_state().await;
+        let core = state.core_or_uninit().await.expect("core");
+        let principal = core.active_principal().await.expect("principal");
+        let finding = core
+            .create_finding(&principal, work_id, nexus_core::CreateFindingRequest {
+                chapter: None,
+                severity: "minor".into(),
+                title: "loose thread".into(),
+                description: String::new(),
+                target_executor: "none".into(),
+                kind: "craft".into(),
+                rule_suggestion: None,
+            })
+            .await
+            .expect("finding created");
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.finding.resolve".to_string(),
+            parameters: serde_json::json!({
+                "finding_id": finding.finding_id,
+                "resolution": "thread closed in ch.2",
+            }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = execute_finding_resolve(&req, &state, "test_creator").await;
+        assert!(result.is_ok(), "resolve should succeed: {result:?}");
+        assert_eq!(result.unwrap()["resolved"], true);
+
+        let updated = core.get_finding(&principal, finding.finding_id).await.expect("finding readable");
+        assert_eq!(updated.status, "resolved");
+        assert_eq!(updated.description, "Resolved via tool: thread closed in ch.2");
+    }
+
+    /// An unknown finding id surfaces the core NotFound (404) instead of the
+    /// legacy Forbidden mapping.
+    #[tokio::test]
+    async fn execute_finding_resolve_unknown_finding_is_not_found() {
+        let (state, _tmp, _work_id) = setup_work_tool_state().await;
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.finding.resolve".to_string(),
+            parameters: serde_json::json!({ "finding_id": "fnd_missing" }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = execute_finding_resolve(&req, &state, "test_creator").await;
+        assert!(matches!(result, Err(NexusApiError::NotFound(_))), "unknown finding must 404, got {result:?}");
+    }
+
+    /// `nexus.pool.entry.manage` promotes and archives through the core pool
+    /// authority; a foreign Work is rejected by the core owned-work check.
+    #[tokio::test]
+    async fn execute_pool_entry_manage_routes_through_core_authority() {
+        let (state, _tmp, work_id) = setup_work_tool_state().await;
+        let manage = |work_id: &str, action: &str| {
+            let work_id = work_id.to_string();
+            let action = action.to_string();
+            let state = &state;
+            async move {
+                let req = ToolExecuteRequest {
+                    tool_name: "nexus.pool.entry.manage".to_string(),
+                    parameters: serde_json::json!({ "work_id": work_id, "action": action }),
+                    session_id: None,
+                    request_id: None,
+                    caller_kind: None,
+                };
+                execute_pool_entry_manage(&req, state, "test_creator").await
+            }
+        };
+
+        // Foreign Work is rejected before any pool mutation.
+        sqlx::query("UPDATE works SET creator_id = 'other' WHERE work_id = ?")
+            .bind(&work_id)
+            .execute(state.pool_or_uninit().expect("workspace pool"))
+            .await
+            .expect("seed foreign creator");
+        let result = manage(&work_id, "promote").await;
+        assert!(matches!(result, Err(NexusApiError::NotFound(_))), "foreign work must be rejected, got {result:?}");
+
+        // Restore ownership: the happy path promotes, then archives.
+        sqlx::query("UPDATE works SET creator_id = 'test_creator' WHERE work_id = ?")
+            .bind(&work_id)
+            .execute(state.pool_or_uninit().expect("workspace pool"))
+            .await
+            .expect("restore creator");
+        let promoted = manage(&work_id, "promote").await;
+        assert!(promoted.is_ok(), "promote should succeed: {promoted:?}");
+        let pool = state.pool_or_uninit().expect("workspace pool");
+        let active = nexus_local_db::novel_pool_entries::get_active_pool_entry(pool, "test_creator")
+            .await
+            .expect("active entry readable")
+            .expect("work is pool-active");
+        assert_eq!(active.work_id.as_deref(), Some(work_id.as_str()));
+
+        let archived = manage(&work_id, "archive").await;
+        assert!(archived.is_ok(), "archive should succeed: {archived:?}");
+        let entry = nexus_local_db::novel_pool_entries::get_pool_entry_by_work(pool, "test_creator", &work_id)
+            .await
+            .expect("entry readable")
+            .expect("entry exists");
+        assert_eq!(entry.status, "archived");
     }
 }

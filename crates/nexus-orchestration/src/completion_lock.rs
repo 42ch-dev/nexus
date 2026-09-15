@@ -125,33 +125,11 @@ pub fn read_completion_lock(
     Ok(Some(lock))
 }
 
-/// Remove the completion-lock file.
-///
-/// # SSOT declaration
-///
-/// **DB column `works.completion_locked_at` is the authoritative lock state.**
-/// This function removes the on-disk artifact only. The caller is responsible
-/// for clearing the DB column in a coordinated operation. If the file deletion
-/// fails after the DB column is cleared, the stale file is harmless — the
-/// supervisor gates on the DB column, not the file.
-///
-/// # Errors
-///
-/// Returns `std::io::Error` if the file exists but cannot be removed.
-/// Returns `Ok(())` if the file does not exist (idempotent).
-pub fn release_completion_lock(workspace_dir: &Path, work_ref: &str) -> Result<(), std::io::Error> {
-    let path = completion_lock_path(workspace_dir, work_ref);
-
-    if path.exists() {
-        std::fs::remove_file(&path)?;
-    }
-
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nexus_local_db::work_stage::release_completion_lock;
     use std::path::PathBuf;
     use tempfile::TempDir;
 

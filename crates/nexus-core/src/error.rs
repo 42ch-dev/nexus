@@ -25,6 +25,10 @@ pub enum CoreError {
     NotFound { resource: String },
     #[error("invalid input: {field} — {reason}")]
     InvalidInput { field: String, reason: String },
+    #[error("outline conflict")]
+    OutlineConflict(OutlineConflictError),
+    #[error("outline validation failed")]
+    OutlineValidation(OutlineValidationError),
     #[error("world kb conflict")]
     WorldKbConflict(WorldKbConflictError),
     #[error("world kb validation failed")]
@@ -43,6 +47,22 @@ pub enum CoreError {
     Interrupted,
     #[error("internal: {category}")]
     Internal { category: String },
+}
+
+/// Structured outline-canvas OCC conflict payload (HTTP 409 at the adapter).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutlineConflictError {
+    pub current_revision: u64,
+    pub node_id: String,
+    pub conflicting_path: String,
+    pub recovery_hint: String,
+}
+
+/// Structured outline-canvas validation payload (HTTP 422 at the adapter).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutlineValidationError {
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
 }
 
 impl CoreError {
@@ -67,6 +87,31 @@ impl CoreError {
                 errors: errors.to_vec(),
                 warnings: warnings.to_vec(),
             },
+        })
+    }
+
+    /// Build an `outline_conflict` error with structured recovery details.
+    #[must_use]
+    pub fn outline_conflict(
+        current_revision: u64,
+        node_id: impl Into<String>,
+        conflicting_path: impl Into<String>,
+        recovery_hint: impl Into<String>,
+    ) -> Self {
+        Self::OutlineConflict(OutlineConflictError {
+            current_revision,
+            node_id: node_id.into(),
+            conflicting_path: conflicting_path.into(),
+            recovery_hint: recovery_hint.into(),
+        })
+    }
+
+    /// Build an `outline_validation_failed` error from a validation summary.
+    #[must_use]
+    pub fn outline_validation_failed(errors: &[String], warnings: &[String]) -> Self {
+        Self::OutlineValidation(OutlineValidationError {
+            errors: errors.to_vec(),
+            warnings: warnings.to_vec(),
         })
     }
 }
