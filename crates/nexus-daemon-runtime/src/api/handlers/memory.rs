@@ -305,21 +305,12 @@ pub async fn reflect_soul(
         "Reflecting on SOUL narrative"
     );
 
-    // Build the ACP synthesizer only when force=true; the core returns the
-    // canonical `ServiceUnavailable` when no capability registry is present.
     // The world-ownership gate (retained `soul_narrative` 403) lives in the
-    // core reflect command.
-    let synthesizer = if req.force_regenerate {
-        let registry =
-            state
-                .capability_registry()
-                .ok_or_else(|| NexusApiError::ServiceUnavailable {
-                    message: "capability registry not available".to_string(),
-                })?;
-        Some(AcpSoulNarrativeSynthesizer::new(registry))
-    } else {
-        None
-    };
+    // core reflect command; the provider effect is resolved only as an
+    // argument to the already core-authorized call, so a missing registry
+    // yields the core's retained 503 after authorization, never before it
+    // (no provider state is touched pre-auth).
+    let synthesizer = state.capability_registry().map(AcpSoulNarrativeSynthesizer::new);
 
     let (core, principal) = resolve_core_principal(&state).await?;
     let response = core

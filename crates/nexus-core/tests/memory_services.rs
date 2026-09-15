@@ -495,6 +495,20 @@ async fn reflect_states_follow_the_gate_cache_and_provider_presence() {
         .unwrap();
     assert_eq!(creator_read.state.to_string(), "insufficient_data");
 
+    // Zero-write read contract: even with the gate unmet, a non-forced
+    // reflect must leave both cache tables completely untouched (no
+    // stats-only rows, no fingerprint rows) — before any synthesis exists.
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM character_soul_narratives").await,
+        0
+    );
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_soul_narratives").await,
+        0
+    );
+    pool.close().await;
+
     // Above the data gate but never synthesized → ungenerated.
     seed_fragments(&env, &chr).await;
     let ungenerated = core
@@ -508,6 +522,19 @@ async fn reflect_states_follow_the_gate_cache_and_provider_presence() {
         .unwrap();
     assert_eq!(ungenerated.state.to_string(), "ungenerated");
     assert_eq!(ungenerated.current_fragment_count, 12);
+
+    // The fingerprint-mismatch read (fragments present, no cache row) is
+    // still zero-write on both bearers.
+    let pool = plain_pool(&env).await;
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM character_soul_narratives").await,
+        0
+    );
+    assert_eq!(
+        count_where(&pool, "SELECT COUNT(*) FROM memory_soul_narratives").await,
+        0
+    );
+    pool.close().await;
 
     // Forced reflect without a provider → retained truthful 503 carrier.
     let err = core
@@ -535,6 +562,20 @@ async fn reflect_states_follow_the_gate_cache_and_provider_presence() {
         .unwrap();
     assert_eq!(still.state.to_string(), "ungenerated");
     assert!(still.narrative.is_none());
+
+    // Authorization precedes provider resolution: a forced reflect on a
+    // foreign Character without any provider returns the retained 404, never
+    // the provider 503.
+    let err = core
+        .reflect_character_soul::<MockSynth>(
+            &principal,
+            "chr_0000000000000000000000000000ffff".to_string(),
+            dto(serde_json::json!({ "force_regenerate": true })),
+            None,
+        )
+        .await
+        .expect_err("foreign character must 404 before provider handling");
+    assert!(matches!(err, CoreError::NotFound { .. }), "got {err:?}");
 
     // Explicit synthesis through the host-supplied provider caches per bearer.
     let current = core

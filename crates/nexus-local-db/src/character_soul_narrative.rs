@@ -279,6 +279,88 @@ async fn update_stats_cache(
 /// Returns `LocalDbError::ActorNotFound` when the Character (or, for a
 /// binding-scoped read, the binding/World) is missing or foreign;
 /// `LocalDbError` on database failure.
+/// Read-only variant of [`character_soul_narrative_fragment_stats`]
+/// (v1.190 P2-T2): identical reads and fingerprint check, but the stats cache
+/// is NEVER written — a fingerprint mismatch computes the distinct-keyword
+/// count on the fly and leaves every row untouched, so the observational
+/// reflect read path (force=false, including archived Characters) performs
+/// zero DB writes.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::ActorNotFound` when the Character (or binding
+/// scope) is missing or foreign; `LocalDbError` on database failure.
+pub async fn character_soul_narrative_fragment_stats_readonly(
+    pool: &SqlitePool,
+    owner_creator_id: &str,
+    character_id: &str,
+    binding_id: Option<&str>,
+) -> Result<
+    (
+        SoulNarrativeFragmentStats,
+        Option<CharacterSoulNarrativeRecord>,
+    ),
+    LocalDbError,
+> {
+    require_owned_character_pool(pool, owner_creator_id, character_id).await?;
+    if let Some(binding_id) = binding_id {
+        require_owned_binding_provenance_pool(pool, owner_creator_id, character_id, binding_id)
+            .await?;
+    }
+
+    // 1. Cheap SQL aggregates — O(1) index scan, no row materialization.
+    let fragment_count = sqlx::query_scalar!(
+        r#"SELECT COUNT(*) as "count!: i64" FROM character_memory_fragments
+           WHERE character_id = ? AND actor_world_binding_id IS ?"#,
+        character_id,
+        binding_id
+    )
+    .fetch_one(pool)
+    .await?;
+
+    let max_created_at: Option<String> = sqlx::query_scalar!(
+        r#"SELECT MAX(created_at) as "max_created_at?: String" FROM character_memory_fragments
+           WHERE character_id = ? AND actor_world_binding_id IS ?"#,
+        character_id,
+        binding_id
+    )
+    .fetch_one(pool)
+    .await?;
+
+    // 2. Build fingerprint from cheap aggregates.
+    let fingerprint = build_stats_fingerprint(fragment_count, max_created_at.as_deref());
+
+    // 3. Check the fingerprint cache for this Character scope.
+    let cached = load_narrative(pool, character_id, binding_id).await?;
+
+    if let Some(ref c) = cached {
+        if c.stats_fingerprint.as_deref() == Some(&fingerprint) {
+            return Ok((
+                SoulNarrativeFragmentStats {
+                    fragment_count,
+                    distinct_keyword_count: usize::try_from(c.distinct_keyword_count_cache)
+                        .unwrap_or(0),
+                    max_created_at,
+                },
+                cached,
+            ));
+        }
+    }
+
+    // 4. Fingerprint mismatch or no cache row: compute soundly, persist nothing.
+    let distinct_keyword_count =
+        compute_distinct_keyword_count(pool, character_id, binding_id).await?;
+
+    Ok((
+        SoulNarrativeFragmentStats {
+            fragment_count,
+            distinct_keyword_count,
+            max_created_at,
+        },
+        cached,
+    ))
+}
+
 pub async fn character_soul_narrative_fragment_stats(
     pool: &SqlitePool,
     owner_creator_id: &str,

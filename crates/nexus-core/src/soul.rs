@@ -255,6 +255,13 @@ fn outcome_current(
 }
 
 /// Dispatch fragment-stats + cache-row lookup to the bearer's scope.
+///
+/// Read-only by contract: the local-db `*_readonly` variants never persist
+/// stats-only cache rows, so a non-forced reflect performs zero DB writes
+/// (rows, cache rows and files) even on fingerprint mismatch or for an
+/// archived Character's retained read. The cache is only ever persisted by
+/// the explicit write path (`bearer_persist_narrative` after a successful
+/// synthesis).
 async fn bearer_fragment_stats(
     pool: &SqlitePool,
     ctx: &MemoryPipelineCtx,
@@ -265,7 +272,7 @@ async fn bearer_fragment_stats(
     match ctx.bearer_ref() {
         MemoryBearerRef::Creator(creator_id) => {
             let (stats, cached) =
-                nexus_local_db::soul_narrative_fragment_stats(pool, creator_id, ctx.scope())
+                nexus_local_db::soul_narrative_fragment_stats_readonly(pool, creator_id, ctx.scope())
                     .await
                     .map_err(map_local_db_error)?;
             Ok((stats, cached))
@@ -274,7 +281,7 @@ async fn bearer_fragment_stats(
             owner_creator_id,
             character_id,
         } => {
-            let (stats, cached) = nexus_local_db::character_soul_narrative_fragment_stats(
+            let (stats, cached) = nexus_local_db::character_soul_narrative_fragment_stats_readonly(
                 pool,
                 owner_creator_id,
                 character_id,
