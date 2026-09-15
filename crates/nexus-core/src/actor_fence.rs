@@ -14,15 +14,20 @@
 //!    prohibited, so the table is per-service; sharing across independently
 //!    opened cores (and across processes) is carried by layer 2.
 //! 2. **Stable per-Character OS shared/exclusive resource lock** — a
-//!    `flock(2)` shared/exclusive pair on
+//!    shared/exclusive pair acquired with `std::fs::File::lock_shared` /
+//!    `try_lock` on
 //!    `<state-db dir>/character_locks/<character_id>.lock`, one descriptor
-//!    per live lease. Descriptors in the same process contend with each
-//!    other (per-open-file-description semantics), so two independently
-//!    opened cores race correctly, and a direct CLI transition fences
-//!    against a live service. Unix-only, matching the existing
-//!    resource-lock discipline (`nexus-local-db::file_lock`,
-//!    `workspace::authority`); on non-unix targets the OS layer is a no-op
-//!    and the shared-DB write path stays WAL-governed.
+//!    per live lease. OS locks ride on the open file description, so
+//!    descriptors in the same process contend with each other exactly as two
+//!    processes would: two independently opened cores race correctly, and a
+//!    direct CLI transition fences against a live service. `std` file locking
+//!    is used (not a Unix-only `flock(2)` binding) because it is the same
+//!    primitive `nexus-local-db::writer_protocol` already relies on for its
+//!    writer protocol, and it keeps this contract enforced on every supported
+//!    target rather than degrading to a process-local no-op off Unix. One
+//!    caveat that follows: Windows byte-range locks are enforced against
+//!    other handles, so this fence must never be applied to a file that is
+//!    also opened for content — `<character_id>.lock` carries no payload.
 //!
 //! Stored `lifecycle_epoch` and ownership are re-read after acquiring the
 //! fence (both layers) so the lease witnesses an exact pre-transition epoch
@@ -47,8 +52,7 @@ pub(crate) struct ActorFenceTable {
 /// provider/terminal-capture effect; drop releases both fence layers.
 pub struct ActorActivityLease {
     _read: OwnedRwLockReadGuard<()>,
-    #[cfg(unix)]
-    _os: Option<OsSharedLock>,
+    _os: OsSharedLock,
     owner_creator_id: String,
     character_id: String,
     epoch: i64,
@@ -60,8 +64,7 @@ pub struct ActorActivityLease {
 /// old-epoch sessions while the fence is still held (durable §11.3.3).
 pub struct CharacterTransitionLease {
     _write: OwnedRwLockWriteGuard<()>,
-    #[cfg(unix)]
-    _os: Option<OsExclusiveLock>,
+    _os: OsExclusiveLock,
     owner_creator_id: String,
     character_id: String,
     epoch: std::sync::atomic::AtomicI64,
@@ -79,7 +82,6 @@ impl ActorFenceTable {
     }
 
     /// Stable per-Character OS lock file path.
-    #[cfg(unix)]
     fn lock_path(&self, character_id: &str) -> PathBuf {
         self.locks_dir.join(format!("{character_id}.lock"))
     }
@@ -106,19 +108,8 @@ impl ActorFenceTable {
         character_id: &str,
     ) -> CoreResult<ActivityFenceParts> {
         let read = Arc::clone(&self.fence_for(character_id)).read_owned().await;
-        #[cfg(unix)]
-        {
-            let os = OsSharedLock::acquire(self.lock_path(character_id)).await?;
-            Ok(ActivityFenceParts {
-                read,
-                os: Some(os),
-            })
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = &self.locks_dir;
-            Ok(ActivityFenceParts { read })
-        }
+        let os = OsSharedLock::acquire(self.lock_path(character_id)).await?;
+        Ok(ActivityFenceParts { read, os })
     }
 
     /// Try to take the exclusive transition fence (busy refusal, never
@@ -131,43 +122,28 @@ impl ActorFenceTable {
         let write = Arc::clone(&self.fence_for(character_id))
             .try_write_owned()
             .map_err(|_| busy_error(character_id))?;
-        #[cfg(unix)]
-        {
-            let os = OsExclusiveLock::try_acquire(self.lock_path(character_id))
-                .map_err(|err| {
-                    if is_lock_busy(&err) {
-                        busy_error(character_id)
-                    } else {
-                        CoreError::Internal {
-                            category: format!("character_lock: {err}"),
-                        }
-                    }
-                })?;
-            Ok(TransitionFenceParts {
-                write,
-                os: Some(os),
-            })
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = &self.locks_dir;
-            Ok(TransitionFenceParts { write })
-        }
+        let os = OsExclusiveLock::try_acquire(self.lock_path(character_id)).map_err(|err| {
+            match err {
+                std::fs::TryLockError::WouldBlock => busy_error(character_id),
+                std::fs::TryLockError::Error(io) => CoreError::Internal {
+                    category: format!("character_lock: {io}"),
+                },
+            }
+        })?;
+        Ok(TransitionFenceParts { write, os })
     }
 }
 
 /// Raw fence halves handed to the lease constructors.
 pub(crate) struct ActivityFenceParts {
     read: OwnedRwLockReadGuard<()>,
-    #[cfg(unix)]
-    os: Option<OsSharedLock>,
+    os: OsSharedLock,
 }
 
 /// Raw transition fence halves handed to the lease constructors.
 pub(crate) struct TransitionFenceParts {
     write: OwnedRwLockWriteGuard<()>,
-    #[cfg(unix)]
-    os: Option<OsExclusiveLock>,
+    os: OsExclusiveLock,
 }
 
 /// The retained `409 character_busy` refusal (verbatim daemon wording).
@@ -180,15 +156,72 @@ pub(crate) fn busy_error(character_id: &str) -> CoreError {
     }
 }
 
-/// Classify a non-blocking `flock` failure as a held lease (`EWOULDBLOCK`/
-/// `EAGAIN` on Linux, `EACCES` on some BSD paths) — one platform-independent
-/// predicate, mirroring `workspace::authority`.
-#[cfg(unix)]
-fn is_lock_busy(err: &std::io::Error) -> bool {
-    matches!(
-        err.kind(),
-        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::PermissionDenied
-    )
+/// One descriptor per live lease: OS locks ride on the open file description,
+/// so two descriptors in the same process contend exactly like two processes.
+fn open_lock_file(path: &Path) -> std::io::Result<std::fs::File> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .read(true)
+        .open(path)
+}
+
+/// Shared (read) OS lock released on drop.
+struct OsSharedLock {
+    file: std::fs::File,
+}
+
+impl OsSharedLock {
+    /// Acquire blocking; runs on the blocking pool so a cross-process
+    /// exclusive holder delays admission without stalling the runtime.
+    async fn acquire(path: PathBuf) -> CoreResult<Self> {
+        tokio::task::spawn_blocking(move || {
+            let file = open_lock_file(&path).map_err(|err| CoreError::Internal {
+                category: format!("character_lock: {err}"),
+            })?;
+            file.lock_shared().map_err(|err| CoreError::Internal {
+                category: format!("character_lock: {err}"),
+            })?;
+            Ok(Self { file })
+        })
+        .await
+        .map_err(|err| CoreError::Internal {
+            category: format!("character_lock: {err}"),
+        })?
+    }
+}
+
+impl Drop for OsSharedLock {
+    fn drop(&mut self) {
+        // Released with the descriptor; an explicit unlock keeps the release
+        // independent of when the file handle is finally closed.
+        let _ = self.file.unlock();
+    }
+}
+
+/// Exclusive (write) OS lock released on drop.
+struct OsExclusiveLock {
+    file: std::fs::File,
+}
+
+impl OsExclusiveLock {
+    /// Acquire non-blocking; a held lease surfaces as [`TryLockError::WouldBlock`]
+    /// and is translated to the retained busy refusal by the caller.
+    fn try_acquire(path: PathBuf) -> Result<Self, std::fs::TryLockError> {
+        let file = open_lock_file(&path).map_err(std::fs::TryLockError::Error)?;
+        file.try_lock()?;
+        Ok(Self { file })
+    }
+}
+
+impl Drop for OsExclusiveLock {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
 }
 
 impl ActorActivityLease {
@@ -200,7 +233,6 @@ impl ActorActivityLease {
     ) -> Self {
         Self {
             _read: parts.read,
-            #[cfg(unix)]
             _os: parts.os,
             owner_creator_id,
             character_id,
@@ -246,7 +278,6 @@ impl CharacterTransitionLease {
     ) -> Self {
         Self {
             _write: parts.write,
-            #[cfg(unix)]
             _os: parts.os,
             owner_creator_id,
             character_id,
@@ -293,91 +324,3 @@ impl std::fmt::Debug for CharacterTransitionLease {
     }
 }
 
-#[cfg(unix)]
-mod os {
-    use std::os::unix::io::AsRawFd;
-
-    /// One descriptor per live lease: `flock` locks ride on the open file
-    /// description, so two descriptors in the same process contend exactly
-    /// like two processes.
-    fn open_lock_file(path: &std::path::Path) -> std::io::Result<std::fs::File> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .read(true)
-            .open(path)
-    }
-
-    fn unlock(file: &std::fs::File) {
-        // nix 0.28 deprecates `flock()` in favor of the `Flock` struct, but
-        // that struct requires ownership of the descriptor; keep the
-        // deprecated call alive for the guard path (same rationale as
-        // `nexus-local-db::file_lock`).
-        #[allow(deprecated)]
-        let _ = nix::fcntl::flock(file.as_raw_fd(), nix::fcntl::FlockArg::Unlock);
-    }
-
-    /// Shared (`LOCK_SH`) OS lock released on drop.
-    pub(crate) struct OsSharedLock {
-        file: std::fs::File,
-    }
-
-    impl OsSharedLock {
-        /// Acquire blocking; runs on the blocking pool so a cross-process
-        /// exclusive holder delays admission without stalling the runtime.
-        pub(crate) async fn acquire(path: std::path::PathBuf) -> crate::error::CoreResult<Self> {
-            tokio::task::spawn_blocking(move || {
-                let file = open_lock_file(&path).map_err(|err| crate::error::CoreError::Internal {
-                    category: format!("character_lock: {err}"),
-                })?;
-                #[allow(deprecated)]
-                nix::fcntl::flock(file.as_raw_fd(), nix::fcntl::FlockArg::LockShared).map_err(
-                    |err| {
-                        crate::error::CoreError::Internal {
-                            category: format!("character_lock: {err}"),
-                        }
-                    },
-                )?;
-                Ok(Self { file })
-            })
-            .await
-            .map_err(|err| crate::error::CoreError::Internal {
-                category: format!("character_lock: {err}"),
-            })?
-        }
-    }
-
-    impl Drop for OsSharedLock {
-        fn drop(&mut self) {
-            unlock(&self.file);
-        }
-    }
-
-    /// Exclusive (`LOCK_EX | LOCK_NB`) OS lock released on drop.
-    pub(crate) struct OsExclusiveLock {
-        file: std::fs::File,
-    }
-
-    impl OsExclusiveLock {
-        /// Acquire non-blocking; a held lease surfaces as a busy I/O error.
-        pub(crate) fn try_acquire(path: std::path::PathBuf) -> std::io::Result<Self> {
-            let file = open_lock_file(&path)?;
-            #[allow(deprecated)]
-            nix::fcntl::flock(file.as_raw_fd(), nix::fcntl::FlockArg::LockExclusiveNonblock)?;
-            Ok(Self { file })
-        }
-    }
-
-    impl Drop for OsExclusiveLock {
-        fn drop(&mut self) {
-            unlock(&self.file);
-        }
-    }
-}
-
-#[cfg(unix)]
-use os::{OsExclusiveLock, OsSharedLock};
