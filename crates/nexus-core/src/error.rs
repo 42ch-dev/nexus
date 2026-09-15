@@ -53,6 +53,10 @@ pub enum CoreError {
     /// Retained 400 narrative-quality rejection (`narrative_generation_failed`).
     #[error("narrative generation failed: {0}")]
     NarrativeRejected(String),
+    /// Retained plain 409 conflict with a human message and no stable code
+    /// (Moment Directive `set` without `replace`).
+    #[error("conflict: {0}")]
+    Conflict(String),
     #[error("internal: {category}")]
     Internal { category: String },
     /// Stable actor-family wire conflict (409 at HTTP adapters) with its
@@ -185,4 +189,8 @@ pub const MEMORY_INTERNAL_CODES: &[&str] = &[
     "character_tom_db_failed",
     "character_tom_scope_invalid",
     "pipeline_guard_mismatch",
+    "directive_wire_invalid",
+    "directive_row_serialize",
+    "directive_response_decode",
+    "inspector_packet_decode",
 ];

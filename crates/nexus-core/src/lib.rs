@@ -4,6 +4,7 @@ mod actor_fence;
 mod actor_knowledge;
 mod actors;
 mod changes;
+mod context;
 mod creators;
 mod error;
 mod forks;
@@ -32,6 +33,7 @@ pub use actors::{
     ActorPairMode, ActorViewpoint, AdmittedActor, AdmittedActorContext,
     CHARACTER_WIRE_INVALID_PREFIX, CoreActorAdmission, classify_pair,
 };
+pub use context::{LocalDirectiveStore, ReadOnlyDirectiveStore};
 pub use creators::CREATOR_INTERNAL_CODES;
 pub use error::{CoreError, CoreResult, MEMORY_INTERNAL_CODES};
 pub use home::CoreHomeService;
