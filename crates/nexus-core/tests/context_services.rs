@@ -53,7 +53,7 @@ fn work_record(work_id: &str, world_id: Option<&str>) -> WorkRecord {
         long_term_goal: "Finish the harbor arc.".to_string(),
         initial_idea: "A standoff in the fog.".to_string(),
         creative_brief: None,
-        intake_status: "done".to_string(),
+        intake_status: "complete".to_string(),
         world_id: world_id.map(str::to_string),
         story_ref: None,
         inspiration_log: "[]".to_string(),
