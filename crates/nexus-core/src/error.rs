@@ -41,6 +41,20 @@ pub enum CoreError {
     Closing,
     #[error("interrupted")]
     Interrupted,
+    /// Retained bearer-memory 403 shape: the daemon envelope splits a
+    /// resource tag and a specific reason string (`Forbidden { resource,
+    /// reason }`); the generic [`CoreError::Forbidden`] collapses the reason.
+    #[error("forbidden: {resource} — {reason}")]
+    ForbiddenReason { resource: String, reason: String },
+    /// Retained truthful 503 ("no synthesis provider/capability registry");
+    /// never a background-synthesis fallback.
+    #[error("service unavailable: {0}")]
+    ServiceUnavailable(String),
+    /// Retained 400 narrative-quality rejection (`narrative_generation_failed`).
+    #[error("narrative generation failed: {0}")]
+    NarrativeRejected(String),
+    #[error("internal: {category}")]
+    Internal { category: String },
     /// Stable actor-family wire conflict (409 at HTTP adapters) with its
     /// retained code and message (`character_busy`, `character_inactive`,
     /// `world_inactive`, `last_active_actor_world_binding`, …). The code is
@@ -53,10 +67,7 @@ pub enum CoreError {
     /// attached structured `field` details to these rejections.
     #[error("{0}")]
     ActorInput(String),
-    #[error("internal: {category}")]
-    Internal { category: String },
 }
-
 impl CoreError {
     pub fn world_kb_conflict(
         current_version: u64,
@@ -157,3 +168,21 @@ pub(crate) fn actor_insert_db_err(e: LocalDbError) -> CoreError {
         other => actor_db_err(other),
     }
 }
+
+/// Retained bearer-memory internal wire codes the daemon adapter re-sends
+/// verbatim from `"{CODE}: {message}"` core categories (same convention as the
+/// creator cache/config carriers in `creators.rs`).
+pub const MEMORY_INTERNAL_CODES: &[&str] = &[
+    "promote_to_long_term_failed",
+    "pending_review_queue_advance_stale",
+    "narrative_synthesis_error",
+    "character_soul_read_error",
+    "character_memory_list_error",
+    "character_memory_load_error",
+    "character_memory_render_error",
+    "character_tom_wire_invalid",
+    "character_tom_kb_failed",
+    "character_tom_db_failed",
+    "character_tom_scope_invalid",
+    "pipeline_guard_mismatch",
+];

@@ -4,20 +4,23 @@ mod actor_fence;
 mod actor_knowledge;
 mod actors;
 mod changes;
+mod creators;
 mod error;
+mod forks;
 mod home;
+mod memory;
+mod memory_pipeline;
 mod principal;
 mod provider_journal;
 mod service;
+mod soul;
 mod storage_status;
 mod sync;
-mod worlds;
-mod world_kb;
-mod creators;
 mod timeline;
-mod forks;
+mod world_kb;
 mod world_pack;
 mod world_rules;
+mod worlds;
 
 pub use actor_fence::{ActorActivityLease, CharacterTransitionLease};
 pub use actor_knowledge::{
@@ -26,14 +29,19 @@ pub use actor_knowledge::{
     KNOWLEDGE_WIRE_INVALID_PREFIX,
 };
 pub use actors::{
-    classify_pair, AdmittedActor, AdmittedActorContext, ActorPairMode, ActorViewpoint,
-    CHARACTER_WIRE_INVALID_PREFIX, CoreActorAdmission,
+    ActorPairMode, ActorViewpoint, AdmittedActor, AdmittedActorContext,
+    CHARACTER_WIRE_INVALID_PREFIX, CoreActorAdmission, classify_pair,
 };
 pub use creators::CREATOR_INTERNAL_CODES;
-pub use error::{CoreError, CoreResult};
+pub use error::{CoreError, CoreResult, MEMORY_INTERNAL_CODES};
 pub use home::CoreHomeService;
+pub use memory::{
+    CharacterTomBeliefRow, CharacterTomListQuery, CharacterTomPage, CharacterTomRecordInput,
+    CharacterTomService,
+};
 pub use principal::Principal;
 pub use service::{CoreAccess, CoreOpenOptions, CoreService};
+pub use soul::CoreCharacterMind;
 pub use storage_status::{CoreStorageStatus, CoreStorageVersions};
-pub use worlds::DELETE_WORLD_BLOCKED_BY_BINDINGS;
 pub use timeline::{CoreTimelineEventsQuery, CoreTimelineOverviewQuery};
+pub use worlds::DELETE_WORLD_BLOCKED_BY_BINDINGS;
