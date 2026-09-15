@@ -200,6 +200,7 @@ impl CoreService {
                 generation: AtomicU64::new(1),
                 access: options.access,
                 closing: AtomicBool::new(false),
+                host_authority_established: Mutex::new(false),
                 character_fences: ActorFenceTable::new(&db_path),
             }),
         })
