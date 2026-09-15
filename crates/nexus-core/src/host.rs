@@ -699,7 +699,7 @@ impl HostHandle {
                 // Durable journal fallback: after a restart the in-memory
                 // state is gone, but a previously active op is still queryable
                 // as interrupted — read through the CoreService-owned journal.
-                if let Ok(Some((operation_id, session_id, status))) =
+                if let Ok(Some((operation_id, session_id, _provider_id, status))) =
                     self.core.provider_operation_row_internal(raw).await
                 {
                     return Ok(CoreHostQueryResponse {
