@@ -543,8 +543,11 @@ impl RunEventRegistry {
         let first_retained = ring.records.front().map_or(1, |r| r.sequence);
         // A cursor below the retained window means the requested tail was
         // retention-trimmed: the reader must resynchronize rather than
-        // silently receive a non-contiguous page.
-        let resync_required = after_sequence.is_some_and(|seq| seq + 1 < first_retained);
+        // silently receive a non-contiguous page. The comparison is written
+        // WITHOUT `seq + 1`, which would wrap at `u64::MAX` (a schema-valid
+        // cursor) and either panic in debug or mis-report in release.
+        let resync_required =
+            after_sequence.is_some_and(|seq| seq.saturating_add(1) < first_retained);
         let mut raw = collect_from(ring, run_id, after_sequence);
         raw.truncate(limit.max(1));
         let next_sequence = raw

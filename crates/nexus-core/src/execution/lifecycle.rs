@@ -165,6 +165,11 @@ pub struct ExecutionHandle {
     /// validates against); a `driven_v1` row must never be published without
     /// one.
     nexus_home: Option<PathBuf>,
+    /// The frozen workspace root this owner's runs execute in.
+    ///
+    /// Retained so a gate evaluation resolves `Filesystem`-kind paths against
+    /// the SAME root the engine and commit authority were given.
+    workspace_root: Option<PathBuf>,
     /// The engine epoch this owner was admitted with, read from the durable
     /// workspace gate at establishment. It identifies the ownership
     /// generation of every run this handle drives.
@@ -223,6 +228,15 @@ impl ExecutionHandle {
         self.engine_epoch
     }
 
+    /// The frozen workspace root this owner's runs execute in.
+    ///
+    /// Gate evaluation resolves `Filesystem`-kind paths against it, so it must
+    /// be the SAME root the engine and commit authority were given.
+    #[must_use]
+    pub fn workspace_root(&self) -> Option<&Path> {
+        self.workspace_root.as_deref()
+    }
+
     /// The nexus home this owner resolves presets against, if one was
     /// supplied. Used to freeze a schedule's source identity at insertion.
     #[must_use]
@@ -257,6 +271,17 @@ impl ExecutionHandle {
     #[must_use]
     pub fn is_closed(&self) -> bool {
         self.closing.load(Ordering::SeqCst)
+    }
+
+    /// Whether this owner has begun draining: every typed effect entry point
+    /// (`add_schedule`, `signal_schedule`, `commit_workspace`, `run_events`)
+    /// is fenced while this is `true`.
+    ///
+    /// This is the owner-level view of the coordinator's T1 admission barrier
+    /// — the same predicate `ensure_driving`/`admit_schedule` gate on.
+    #[must_use]
+    pub fn is_draining(&self) -> bool {
+        self.coordinator.is_draining()
     }
 
     /// Whether this owner's close has COMPLETED: every owned drive was
@@ -627,6 +652,7 @@ impl CoreService {
 
         let workspace_commit = deps.workspace_commit;
         let nexus_home = deps.nexus_home;
+        let workspace_root = deps.workspace_root;
         let engine_epoch = read_engine_epoch(&pool).await;
 
         Ok(Arc::new(ExecutionHandle {
@@ -636,6 +662,7 @@ impl CoreService {
             session_cancels,
             workspace_commit,
             nexus_home,
+            workspace_root,
             engine_epoch,
             closing: AtomicBool::new(false),
             settled: AtomicBool::new(false),

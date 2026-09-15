@@ -1251,6 +1251,16 @@ impl WorkflowRunCoordinator {
     ///
     /// # Errors
     /// Returns [`RunControlError::Closing`] once close has begun.
+    /// Whether this coordinator has begun shutting down.
+    ///
+    /// The public view of the T1 admission barrier: every owner-level effect
+    /// entry point checks it so an operation reaching a closing owner is
+    /// refused rather than writing beside the in-flight drain.
+    #[must_use]
+    pub fn is_draining(&self) -> bool {
+        self.draining.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
     fn admission_fence(&self) -> Result<(), RunControlError> {
         if self.draining.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(RunControlError::Closing);
@@ -1440,6 +1450,16 @@ impl WorkflowRunCoordinator {
             .schedule_supervisor
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(supervisor);
+    }
+
+    /// The Creator-DB pool this coordinator runs against.
+    ///
+    /// The same pool the supervisor and the commit authority use, so a gate
+    /// evaluation, an audit write or an ownership read cannot observe a
+    /// different database.
+    #[must_use]
+    pub fn pool(&self) -> Arc<sqlx::SqlitePool> {
+        Arc::clone(&self.pool)
     }
 
     /// The configured default binding provider (C-3), if any.
