@@ -8,6 +8,8 @@
  * soul,tom}/…`, `…/memory/…`).
  */
 import type {
+  CountPendingReviewsQuery,
+  DeletePendingReviewQuery,
   CaptureCharacterPendingReviewRequest,
   CharacterSoulNarrativeRequest,
   CountCharacterPendingReviewsQuery,
@@ -213,18 +215,30 @@ export function listPendingReviews(
   );
 }
 
-/** `GET /v1/daemon/memory/pending-review/count`. */
-export function countPendingReviews(service: ServiceCore): Promise<CountPendingReviewsResponse> {
-  return withPrincipal(service, (principal) => service.core.countPendingReviews(principal));
+/** `GET /v1/daemon/memory/pending-review/count?creator_id=…` — the query
+ * member is required (400 when absent); the active-creator equality and
+ * format checks stay native. */
+export function countPendingReviews(
+  service: ServiceCore,
+  searchParams: URLSearchParams,
+): Promise<CountPendingReviewsResponse> {
+  const query: CountPendingReviewsQuery = { creator_id: requiredCreatorId(searchParams) };
+  return withPrincipal(service, (principal) =>
+    service.core.countPendingReviews(principal, query),
+  );
 }
 
-/** `DELETE /v1/daemon/memory/pending-review/{pending_id}`. */
+/** `DELETE /v1/daemon/memory/pending-review/{pending_id}?creator_id=…` — the
+ * query member is required (400 when absent); the active-creator equality
+ * and format checks stay native. */
 export function deletePendingReview(
   service: ServiceCore,
   pendingId: string,
+  searchParams: URLSearchParams,
 ): Promise<DeletePendingReviewResponse> {
+  const query: DeletePendingReviewQuery = { creator_id: requiredCreatorId(searchParams) };
   return withPrincipal(service, (principal) =>
-    service.core.deletePendingReview(principal, pendingId),
+    service.core.deletePendingReview(principal, pendingId, query),
   );
 }
 
@@ -401,15 +415,17 @@ export const MEMORY_ROUTES: readonly DomainRoute[] = [
     pattern: /^\/v1\/daemon\/memory\/pending-review\/count$/,
     tier: 'tier2',
     family: 'memory',
-    handle: async (service) => ({ body: await countPendingReviews(service) }),
+    handle: async (service, _params, search) => ({
+      body: await countPendingReviews(service, search),
+    }),
   },
   {
     method: 'DELETE',
     pattern: /^\/v1\/daemon\/memory\/pending-review\/([^/]+)$/,
     tier: 'tier2',
     family: 'memory',
-    handle: async (service, params) => ({
-      body: await deletePendingReview(service, params[0]),
+    handle: async (service, params, search) => ({
+      body: await deletePendingReview(service, params[0], search),
     }),
   },
   {

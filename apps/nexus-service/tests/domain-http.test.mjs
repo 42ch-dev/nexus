@@ -162,9 +162,15 @@ describe('domain-http (P5-T1)', () => {
         `missing mounted identity: ${method} ${path}\nmounted:\n${[...mounted].sort().join('\n')}`,
       );
     }
-    // Tier parity: every family route is creator-tier; none is unguarded.
+    // Tier parity (daemon mod.rs authority): the Creator home family is
+    // tier1 (API-key only, no active creator); every other family route is
+    // tier2. None is unguarded.
     for (const route of inventory) {
-      assert.equal(route.tier, 'tier2', `${route.method} ${route.path} must stay tier2`);
+      if (route.path.startsWith('/v1/daemon/creators')) {
+        assert.equal(route.tier, 'tier1', `${route.method} ${route.path} must stay tier1`);
+      } else {
+        assert.equal(route.tier, 'tier2', `${route.method} ${route.path} must stay tier2`);
+      }
     }
   });
 

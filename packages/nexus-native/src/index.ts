@@ -149,7 +149,9 @@ import type {
   ListPendingReviewsQuery,
   ListPendingReviewsResponse,
   CountPendingReviewsResponse,
+  CountPendingReviewsQuery,
   DeletePendingReviewResponse,
+  DeletePendingReviewQuery,
   ReviewRequest,
   ReviewResponse,
   ListMemoryFragmentsQuery,
@@ -590,8 +592,15 @@ export interface NativeCore {
     query: ListCharacterTomQuery,
   ): Promise<ListCharacterTomResponse>;
   listPendingReviews(principal: PrincipalHandle, query: ListPendingReviewsQuery): Promise<ListPendingReviewsResponse>;
-  countPendingReviews(principal: PrincipalHandle): Promise<CountPendingReviewsResponse>;
-  deletePendingReview(principal: PrincipalHandle, pendingId: string): Promise<DeletePendingReviewResponse>;
+  countPendingReviews(
+    principal: PrincipalHandle,
+    query: CountPendingReviewsQuery,
+  ): Promise<CountPendingReviewsResponse>;
+  deletePendingReview(
+    principal: PrincipalHandle,
+    pendingId: string,
+    query: DeletePendingReviewQuery,
+  ): Promise<DeletePendingReviewResponse>;
   reviewMemory(principal: PrincipalHandle, request: ReviewRequest): Promise<ReviewResponse>;
   listMemoryFragments(
     principal: PrincipalHandle,
@@ -1178,11 +1187,11 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
     async listPendingReviews(principal, query) {
       return json(await inner.listPendingReviews(principal, wire(query, 'query')));
     },
-    async countPendingReviews(principal) {
-      return json(await inner.countPendingReviews(principal));
+    async countPendingReviews(principal, query) {
+      return json(await inner.countPendingReviews(principal, wire(query, 'query')));
     },
-    async deletePendingReview(principal, pendingId) {
-      return json(await inner.deletePendingReview(principal, pendingId));
+    async deletePendingReview(principal, pendingId, query) {
+      return json(await inner.deletePendingReview(principal, pendingId, wire(query, 'query')));
     },
     async reviewMemory(principal, request) {
       return json(await inner.reviewMemory(principal, wire(request, 'request')));

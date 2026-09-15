@@ -280,8 +280,15 @@ export function getActiveCreator(service: ServiceCore) {
   return service.core.getActiveCreator();
 }
 
-/** `POST /v1/daemon/creators/{creator_id}` — retained `:logout` verb. */
-export function logoutCreator(service: ServiceCore, creatorId: string) {
+/** `POST /v1/daemon/creators/{creator_id}:logout` — the retained verb rides
+ * the shared `{creator_id}` segment (`matchit` rejects `:a:b` patterns), so
+ * the `:logout` suffix is stripped here exactly like the daemon handler; a
+ * POST without the suffix is not a routed identity (404). */
+export function logoutCreator(service: ServiceCore, segment: string) {
+  const creatorId = segment.replace(/:logout$/, '');
+  if (creatorId === segment) {
+    throw new HttpError(404, 'not_found', `Creator route '${segment}' not found`);
+  }
   return service.core.logoutCreator(creatorId);
 }
 
@@ -480,14 +487,14 @@ export const ACTOR_ROUTES: readonly DomainRoute[] = [
   {
     method: 'GET',
     pattern: /^\/v1\/daemon\/creators$/,
-    tier: 'tier2',
+    tier: 'tier1',
     family: 'actors',
     handle: async (service, _params, search) => ({ body: await listCreators(service, search) }),
   },
   {
     method: 'POST',
     pattern: /^\/v1\/daemon\/creators$/,
-    tier: 'tier2',
+    tier: 'tier1',
     family: 'actors',
     status: 201,
     handle: async (service, _params, _search, body) => ({
@@ -497,14 +504,14 @@ export const ACTOR_ROUTES: readonly DomainRoute[] = [
   {
     method: 'GET',
     pattern: /^\/v1\/daemon\/creators\/active$/,
-    tier: 'tier2',
+    tier: 'tier1',
     family: 'actors',
     handle: async (service) => ({ body: await getActiveCreator(service) }),
   },
   {
     method: 'PUT',
     pattern: /^\/v1\/daemon\/creators\/active$/,
-    tier: 'tier2',
+    tier: 'tier1',
     family: 'actors',
     handle: async (service, _params, _search, body) => ({
       body: await setActiveCreator(service, body),
@@ -513,14 +520,14 @@ export const ACTOR_ROUTES: readonly DomainRoute[] = [
   {
     method: 'GET',
     pattern: /^\/v1\/daemon\/creators\/([^/]+)$/,
-    tier: 'tier2',
+    tier: 'tier1',
     family: 'actors',
     handle: async (service, params) => ({ body: await getCreator(service, params[0]) }),
   },
   {
     method: 'PATCH',
     pattern: /^\/v1\/daemon\/creators\/([^/]+)$/,
-    tier: 'tier2',
+    tier: 'tier1',
     family: 'actors',
     handle: async (service, params, _search, body) => ({
       body: await patchCreator(service, params[0], body),
@@ -529,7 +536,7 @@ export const ACTOR_ROUTES: readonly DomainRoute[] = [
   {
     method: 'POST',
     pattern: /^\/v1\/daemon\/creators\/([^/]+)$/,
-    tier: 'tier2',
+    tier: 'tier1',
     family: 'actors',
     handle: async (service, params) => ({ body: await logoutCreator(service, params[0]) }),
   },

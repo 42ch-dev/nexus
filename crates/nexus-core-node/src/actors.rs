@@ -67,7 +67,9 @@ use nexus_contracts::daemon_api::inspector::{
     moment_inspect_request::MomentInspectRequest, moment_inspect_response::MomentInspectResponse,
 };
 use nexus_contracts::daemon_api::memory::{
+    count_pending_reviews_query::CountPendingReviewsQuery,
     count_pending_reviews_response::CountPendingReviewsResponse,
+    delete_pending_review_query::DeletePendingReviewQuery,
     delete_pending_review_response::DeletePendingReviewResponse,
     list_memory_fragments_query::ListMemoryFragmentsQuery,
     list_pending_reviews_query::ListPendingReviewsQuery,
@@ -1111,10 +1113,30 @@ impl NativeCore {
         .await
     }
 
-    /// `GET /v1/daemon/memory/pending-review/count`.
+    /// `GET /v1/daemon/memory/pending-review/count?creator_id=…` — the wire
+    /// `creator_id` must be the natively minted active creator; a mismatch is
+    /// the retained 403 (same equality + format guard as the list route).
     #[napi]
-    pub async fn count_pending_reviews(&self, principal_handle: String) -> Result<Buffer> {
+    pub async fn count_pending_reviews(
+        &self,
+        principal_handle: String,
+        query_json: Buffer,
+    ) -> Result<Buffer> {
+        let query: CountPendingReviewsQuery = decode(query_json, "query")?;
         self.json_call(principal_handle, async move |core, principal| {
+            if query.creator_id.as_str() != principal.creator_id() {
+                return Err(CoreError::Forbidden {
+                    resource: "pending_review".to_string(),
+                });
+            }
+            if !valid_creator_id(query.creator_id.as_str()) {
+                return Err(CoreError::InvalidInput {
+                    field: "creator_id".to_string(),
+                    reason:
+                        "creator_id must start with 'ctr_' followed by alphanumeric characters"
+                            .to_string(),
+                });
+            }
             let response: CountPendingReviewsResponse =
                 core.count_pending_reviews(&principal).await?;
             Ok(response)
@@ -1122,14 +1144,31 @@ impl NativeCore {
         .await
     }
 
-    /// `DELETE /v1/daemon/memory/pending-review/{pending_id}`.
+    /// `DELETE /v1/daemon/memory/pending-review/{pending_id}?creator_id=…` —
+    /// the wire `creator_id` must be the natively minted active creator; a
+    /// mismatch is the retained 403 (same guard as the list route).
     #[napi]
     pub async fn delete_pending_review(
         &self,
         principal_handle: String,
         pending_id: String,
+        query_json: Buffer,
     ) -> Result<Buffer> {
+        let query: DeletePendingReviewQuery = decode(query_json, "query")?;
         self.json_call(principal_handle, async move |core, principal| {
+            if query.creator_id.as_str() != principal.creator_id() {
+                return Err(CoreError::Forbidden {
+                    resource: "pending_review".to_string(),
+                });
+            }
+            if !valid_creator_id(query.creator_id.as_str()) {
+                return Err(CoreError::InvalidInput {
+                    field: "creator_id".to_string(),
+                    reason:
+                        "creator_id must start with 'ctr_' followed by alphanumeric characters"
+                            .to_string(),
+                });
+            }
             let response: DeletePendingReviewResponse =
                 core.delete_pending_review(&principal, pending_id).await?;
             Ok(response)

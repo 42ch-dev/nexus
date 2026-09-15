@@ -290,8 +290,12 @@ export interface NativeCoreBinding {
   ): Promise<Uint8Array>;
   listCharacterTom(principal: string, characterId: string, queryJson: Uint8Array): Promise<Uint8Array>;
   listPendingReviews(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
-  countPendingReviews(principal: string): Promise<Uint8Array>;
-  deletePendingReview(principal: string, pendingId: string): Promise<Uint8Array>;
+  countPendingReviews(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
+  deletePendingReview(
+    principal: string,
+    pendingId: string,
+    queryJson: Uint8Array,
+  ): Promise<Uint8Array>;
   reviewMemory(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
   listMemoryFragments(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
   reflectCreatorSoul(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
