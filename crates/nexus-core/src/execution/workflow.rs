@@ -1220,7 +1220,6 @@ impl WorkflowRunCoordinator {
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
-
     /// Recover persisted non-terminal sessions after a daemon-level restart
     /// (A7) and re-drive the eligible converge/merge class through this
     /// coordinator.

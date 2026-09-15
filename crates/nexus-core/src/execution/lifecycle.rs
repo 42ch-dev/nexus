@@ -413,7 +413,7 @@ impl CoreService {
                 .execution
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if self.inner.closing.load(Ordering::SeqCst) {
+            if self.ensure_open().is_err() {
                 false
             } else {
                 *slot = Some(Arc::clone(&handle));
