@@ -103,6 +103,19 @@ fn map_core_error(err: CoreError) -> CliError {
             status: coded_status(&code),
             message: format!("[{code}] {message}"),
         },
+        // A peer's refusal: the daemon renders it through its own
+        // `PeerToolDenied` variant at 400, with the peer's finer wire code in
+        // `details.wire_code`. A direct-core caller gets the same public code
+        // and status, and the wire code is kept in the message so it is not
+        // silently dropped — mirroring how `DaemonClient` surfaces it.
+        CoreError::PeerDenied {
+            code,
+            wire_code,
+            message,
+        } => CliError::Api {
+            status: 400,
+            message: format!("[{code}] {message} (peer code: {wire_code})"),
+        },
         CoreError::WriterFenced | CoreError::SchemaMismatch => CliError::Config(
             "workspace writer protocol mismatch — upgrade or restart host".to_string(),
         ),
