@@ -43,6 +43,35 @@ pub enum CoreError {
     SchemaMismatch,
     #[error("busy")]
     Busy,
+    /// A refusal carrying the transport-retained `(code, message)` pair.
+    ///
+    /// The neutral taxonomy names the DOMAIN class; several retained surfaces
+    /// additionally promise a finer lowercase wire code (`policy_blocked`,
+    /// `not_supported`, `invalid_state`, `compute_fuel_exhausted`, …) whose
+    /// HTTP status the adapter derives from that code. The core has no closed
+    /// enum slot for an open set of codes, so it carries the pair and the
+    /// adapter family that promised the code renders it verbatim.
+    ///
+    /// This is NOT a transport leak: the code is part of the retained
+    /// contract, and the domain is the only layer that knows which refusal
+    /// occurred. The adapter decides the status; the core decides the code.
+    #[error("{code}: {message}")]
+    Coded { code: String, message: String },
+    /// A peer's refusal, preserving the peer's own lowercase wire code.
+    ///
+    /// The spine's public code stays `not_supported` (the same answer an
+    /// unknown builtin gives); the peer's finer code (`op_unsupported`,
+    /// `capability_missing`, …) travels separately so the adapter can render
+    /// it in `details.wire_code` — verbatim, never re-parsed from the message.
+    #[error("peer denied {code}: {message}")]
+    PeerDenied {
+        /// The spine's public code.
+        code: String,
+        /// The peer's own wire code.
+        wire_code: String,
+        /// The peer's message.
+        message: String,
+    },
     #[error("closing")]
     Closing,
     #[error("interrupted")]

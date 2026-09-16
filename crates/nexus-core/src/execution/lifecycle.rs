@@ -97,6 +97,23 @@ pub struct RunnerDeps {
     pub binding_provider: Option<String>,
     /// Per-run live-ring registry for the run SSE surface.
     pub run_events: Option<Arc<dyn RunEventPort>>,
+    /// Process-level facts the tool health surface reports (P3-T3).
+    ///
+    /// Genuinely process state (runtime mode, HSM state, start time, uptime,
+    /// initialization) that the domain cannot derive. A composer that has no
+    /// such facts leaves this `None` and the tools report the defaults
+    /// honestly rather than a fabricated running daemon.
+    #[cfg(feature = "execution")]
+    pub runtime_facts: Option<crate::execution::capabilities::ToolRuntimeFacts>,
+    /// The compiled WASM module cache (P3-T3, compute only).
+    #[cfg(feature = "compute")]
+    pub compute_cache: Option<Arc<nexus_wasm_host::ModuleCache>>,
+    /// The WASM engine (P3-T3, compute only).
+    #[cfg(feature = "compute")]
+    pub compute_engine: Option<Arc<nexus_wasm_host::WasmEngine>>,
+    /// The engine-global invocation serializer (P3-T3, compute only).
+    #[cfg(feature = "compute")]
+    pub compute_serializer: Option<Arc<tokio::sync::Semaphore>>,
     /// The durable workspace commit authority (P3-T2).
     ///
     /// Supplied by the transport (or a test) with the shared session manager
@@ -170,6 +187,26 @@ pub struct ExecutionHandle {
     /// Retained so a gate evaluation resolves `Filesystem`-kind paths against
     /// the SAME root the engine and commit authority were given.
     workspace_root: Option<PathBuf>,
+    /// Process-level facts the tool health surface reports (P3-T3).
+    #[cfg(feature = "execution")]
+    runtime_facts: crate::execution::capabilities::ToolRuntimeFacts,
+    /// The compiled WASM module cache (P3-T3).
+    #[cfg(feature = "compute")]
+    compute_cache: Option<Arc<nexus_wasm_host::ModuleCache>>,
+    /// The WASM engine (P3-T3).
+    #[cfg(feature = "compute")]
+    compute_engine: Option<Arc<nexus_wasm_host::WasmEngine>>,
+    /// The engine-global invocation serializer (P3-T3).
+    #[cfg(feature = "compute")]
+    compute_serializer: Arc<tokio::sync::Semaphore>,
+    /// A WEAK link back to the service that established this owner.
+    ///
+    /// The service stores the handle (`CoreInner::execution`), so a strong
+    /// reference here would be a reference cycle that keeps both alive past
+    /// `close`. Weak breaks the cycle while still letting a handle-typed
+    /// operation reach the family services (`execute_tool`, `compute_run`)
+    /// without the caller having to pass the service back in.
+    pub(crate) service: std::sync::Weak<crate::service::CoreInner>,
     /// The engine epoch this owner was admitted with, read from the durable
     /// workspace gate at establishment. It identifies the ownership
     /// generation of every run this handle drives.
@@ -271,6 +308,51 @@ impl ExecutionHandle {
     #[must_use]
     pub fn is_closed(&self) -> bool {
         self.closing.load(Ordering::SeqCst)
+    }
+
+    /// The process-level facts the tool health surface reports.
+    #[must_use]
+    #[cfg(feature = "execution")]
+    pub fn runtime_facts(&self) -> &crate::execution::capabilities::ToolRuntimeFacts {
+        &self.runtime_facts
+    }
+
+    /// The compiled WASM module cache, when this build linked compute.
+    #[must_use]
+    #[cfg(feature = "compute")]
+    pub fn compute_cache(&self) -> Option<Arc<nexus_wasm_host::ModuleCache>> {
+        self.compute_cache.clone()
+    }
+
+    /// The WASM engine, when this build linked compute.
+    #[must_use]
+    #[cfg(feature = "compute")]
+    pub fn compute_engine(&self) -> Option<Arc<nexus_wasm_host::WasmEngine>> {
+        self.compute_engine.clone()
+    }
+
+    /// The engine-global invocation serializer.
+    #[must_use]
+    #[cfg(feature = "compute")]
+    pub fn compute_serializer(&self) -> Arc<tokio::sync::Semaphore> {
+        Arc::clone(&self.compute_serializer)
+    }
+
+    /// The service that established this owner, if it is still alive.
+    ///
+    /// A `Weak` upgrade: the owner never keeps its own service alive, so a
+    /// handle outliving `CoreService::close` reports `NotFound` rather than
+    /// resurrecting a closed service.
+    ///
+    /// # Errors
+    /// `NotFound` when the establishing service has already been dropped.
+    pub fn linked_core(&self) -> crate::CoreResult<Arc<crate::service::CoreService>> {
+        self.service
+            .upgrade()
+            .map(|inner| crate::service::CoreService { inner })
+            .ok_or_else(|| crate::CoreError::NotFound {
+                resource: "execution owner's service (already released)".into(),
+            })
     }
 
     /// Whether this owner has begun draining: every typed effect entry point
@@ -650,12 +732,29 @@ impl CoreService {
             tracing::info!(decision = ?d, "execution start: recovery re-drive decision");
         }
 
+        let deps_runtime_facts = deps.runtime_facts.unwrap_or_default();
+        #[cfg(feature = "compute")]
+        let deps_compute_cache = deps.compute_cache;
+        #[cfg(feature = "compute")]
+        let deps_compute_engine = deps.compute_engine;
+        #[cfg(feature = "compute")]
+        let deps_compute_serializer = deps
+            .compute_serializer
+            .unwrap_or_else(|| Arc::new(tokio::sync::Semaphore::new(1)));
         let workspace_commit = deps.workspace_commit;
         let nexus_home = deps.nexus_home;
         let workspace_root = deps.workspace_root;
         let engine_epoch = read_engine_epoch(&pool).await;
 
         Ok(Arc::new(ExecutionHandle {
+            service: Arc::downgrade(&self.inner),
+            runtime_facts: deps_runtime_facts,
+            #[cfg(feature = "compute")]
+            compute_cache: deps_compute_cache,
+            #[cfg(feature = "compute")]
+            compute_engine: deps_compute_engine,
+            #[cfg(feature = "compute")]
+            compute_serializer: deps_compute_serializer,
             engine,
             coordinator,
             capability_holder,

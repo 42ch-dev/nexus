@@ -802,6 +802,27 @@ impl From<nexus_core::CoreError> for NexusApiError {
                 code: "schema_mismatch".to_string(),
                 message: "schema mismatch".to_string(),
             },
+            // The core names the refusal; the adapter renders the retained
+            // envelope. `conflict`/`invalid_state` are 409/422 in the daemon's
+            // own tables, so routing them through `Conflict`/`BadRequest`
+            // keeps the public surface identical to the pre-extraction
+            // handlers (which built these variants directly).
+            nexus_core::CoreError::Coded { code, message } if code == "conflict" => {
+                Self::Conflict(message)
+            }
+            nexus_core::CoreError::Coded { code, message } => Self::BadRequest { code, message },
+            // A peer's refusal: the spine's public code plus the peer's own
+            // finer code, rendered through the typed variant so the lowercase
+            // wire code survives verbatim in `details.wire_code`.
+            nexus_core::CoreError::PeerDenied {
+                code,
+                wire_code,
+                message,
+            } => Self::PeerToolDenied {
+                code,
+                wire_code,
+                message,
+            },
             nexus_core::CoreError::Busy => Self::BadRequest {
                 code: "busy".to_string(),
                 message: "busy".to_string(),

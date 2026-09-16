@@ -32,6 +32,11 @@ execution = [
     "dep:hex",
     "dep:base64",
     "dep:nix",
+    # The capability dispatch path reads the workspace's `permissions.toml`
+    # policy (the per-tool grant/deny gate). `toml` is already a workspace
+    # dependency (nexus-home-layout's config reader), so this adds no new
+    # third-party edge.
+    "dep:toml",
 ]
 # The crash/rendezvous seams the workspace-commit recovery proofs drive. They
 # are compiled out of a production build and enabled by this package's own
@@ -82,6 +87,7 @@ base64 = { version = "0.22", optional = true }
 sha2 = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
+toml = { workspace = true, optional = true }
 sqlx.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
@@ -99,7 +105,10 @@ nix = { version = "0.28", features = ["fs"], optional = true }
 [dev-dependencies]
 # Enable the gated execution test seams for this package's own tests without
 # exposing them in the production build.
-nexus-core = { path = ".", features = ["execution", "test-hooks"] }
+# `compute` is included so the capability/compute integration target can
+# reach the gated WASM path; the target itself is `#![cfg(feature = ...)]`,
+# so a user of this package is unaffected.
+nexus-core = { path = ".", features = ["execution", "compute", "test-hooks"] }
 serial_test = "4"
 tempfile = "3"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
@@ -110,3 +119,12 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 # `[dependencies]` — that target is `#![cfg(feature = "execution")]`, and the
 # feature enables those optional edges.
 parking_lot = "0.12"
+# The capability/compute target builds a real WASM module and a real user
+# capability scan, so it needs the engine, the WAT compiler and the capability
+# scanner's dependencies.
+nexus-wasm-host = { path = "../nexus-wasm-host" }
+nexus-orchestration = { path = "../nexus-orchestration" }
+nexus-knowledge = { path = "../nexus-knowledge" }
+chrono.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true

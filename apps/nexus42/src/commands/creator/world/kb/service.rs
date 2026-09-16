@@ -96,11 +96,47 @@ fn map_core_error(err: CoreError) -> CliError {
             holder_name: "workspace writer".to_string(),
             stale: false,
         },
+        // A coded refusal carries the transport-retained lowercase code. The
+        // daemon adapter renders it at the status its own table assigns; a
+        // direct-core caller sees the same code and family.
+        CoreError::Coded { code, message } => CliError::Api {
+            status: coded_status(&code),
+            message: format!("[{code}] {message}"),
+        },
         CoreError::WriterFenced | CoreError::SchemaMismatch => CliError::Config(
             "workspace writer protocol mismatch — upgrade or restart host".to_string(),
         ),
         CoreError::Closing | CoreError::Interrupted => CliError::Other(err.to_string()),
         CoreError::Internal { category } => CliError::Other(category),
+    }
+}
+
+/// The HTTP status the daemon adapter assigns to a coded refusal.
+///
+/// Mirrors the daemon's own tables (`api/errors.rs`): `conflict` is a 409;
+/// the semantic-validation and compute-budget codes are 422; everything else
+/// falls back to 400. Keeps one coded refusal reading the same on either
+/// transport.
+fn coded_status(code: &str) -> u16 {
+    match code {
+        "conflict" => 409,
+        "invalid_state"
+        | "invalid_transition"
+        | "invalid_input"
+        | "world_id_required"
+        | "invalid_world_id"
+        | "world_clear_forbidden"
+        | "too_many_findings"
+        | "strategy_self_loop"
+        | "strategy_transition_duplicate"
+        | "compute_fuel_exhausted"
+        | "compute_wall_time_exceeded"
+        | "compute_memory_cap_exceeded"
+        | "compute_module_trapped"
+        | "compute_module_error" => 422,
+        "policy_blocked" => 403,
+        "not_supported" => 400,
+        _ => 400,
     }
 }
 

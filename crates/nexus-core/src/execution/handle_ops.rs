@@ -45,6 +45,10 @@ use crate::error::{CoreError, CoreResult};
 use crate::execution::lifecycle::ExecutionHandle;
 use crate::execution::run_events::PageError;
 use crate::execution::workflow::RunEventPort;
+use crate::execution::capabilities::{ToolContext, ToolExecuteRequest};
+#[cfg(feature = "compute")]
+use crate::execution::compute::ComputeContext;
+use nexus_contracts::generated::core::core_tool_execute_response::CoreToolExecuteResponse;
 use crate::principal::Principal;
 use crate::PresetError;
 
@@ -241,7 +245,121 @@ impl ExecutionHandle {
         })
     }
 
-    /// Read a bounded page of a run's retained events.
+        /// Dispatch one host tool through the spine.
+    ///
+    /// The handle supplies the narrow owned context (pool, home, workspace
+    /// path, lifecycle scalars, and the live capability holder) and then runs
+    /// the SAME admission pipeline, dispatch and audit the transport runs —
+    /// so a non-HTTP caller gets identical refusals, including the audit row.
+    ///
+    /// # Errors
+    /// `Closing` when the owner is shutting down; otherwise the dispatch
+    /// refusal (`Coded` carries the retained lowercase wire code).
+    pub async fn execute_tool(
+        &self,
+        principal: &Principal,
+        request: ToolExecuteRequest,
+    ) -> CoreResult<CoreToolExecuteResponse> {
+        self.ensure_admitting()?;
+        if principal.creator_id().trim().is_empty() {
+            return Err(CoreError::Forbidden {
+                resource: "tool execution requires an admitted principal".into(),
+            });
+        }
+        let context = self.tool_context()?;
+        let value = crate::execution::capabilities::execute_tool(&context, &request).await?;
+        Ok(CoreToolExecuteResponse {
+            success: true,
+            result: value,
+        })
+    }
+
+    /// Invoke a compute module against a World.
+    ///
+    /// # Errors
+    /// `Closing` when the owner is shutting down, `Internal` when this build
+    /// linked no WASM engine, and the compute refusal otherwise.
+    #[cfg(feature = "compute")]
+    pub async fn compute_run(
+        &self,
+        principal: &Principal,
+        request: nexus_contracts::generated::daemon_api::compute::run_request::RunRequest,
+    ) -> CoreResult<nexus_contracts::generated::daemon_api::compute::run_response::RunResponse>
+    {
+        self.ensure_admitting()?;
+        let context = self.compute_context(principal)?;
+        crate::execution::compute::compute_run(&self.linked_core()?, &context, request).await
+    }
+
+    /// Accept a succeeded compute run's proposals, atomically.
+    ///
+    /// # Errors
+    /// `Closing` when the owner is shutting down; the accept refusal otherwise.
+    #[cfg(feature = "compute")]
+    pub async fn accept_compute_run(
+        &self,
+        principal: &Principal,
+        run_id: String,
+        request: nexus_contracts::generated::daemon_api::compute::run_accept_request::RunAcceptRequest,
+    ) -> CoreResult<nexus_contracts::generated::daemon_api::compute::run_accept_response::RunAcceptResponse>
+    {
+        self.ensure_admitting()?;
+        crate::execution::compute::accept_compute_run(
+            &self.linked_core()?,
+            principal,
+            &run_id,
+            request,
+        )
+        .await
+    }
+
+    /// Build the narrow owned tool context for this owner.
+    ///
+    /// The pool, home, workspace root and capability holder come from the
+    /// owner itself, so a dispatch can only ever observe the authority this
+    /// owner was admitted with. The process facts are supplied by
+    /// [`RunnerDeps::runtime_facts`]; when the composer provided none, the
+    /// defaults are reported as-is rather than a fabricated running state.
+    ///
+    /// # Errors
+    /// `Internal` when the owner was established without a nexus home, which
+    /// the tool surface requires to resolve the active creator.
+    fn tool_context(&self) -> CoreResult<ToolContext> {
+        let nexus_home = self.nexus_home().ok_or_else(|| CoreError::Internal {
+            category: "tool dispatch requires a nexus home (owner was established without one)"
+                .to_string(),
+        })?;
+        Ok(ToolContext {
+            pool: (*self.coordinator().pool()).clone(),
+            nexus_home,
+            workspace_path: self
+                .workspace_root()
+                .map(|p| p.to_string_lossy().into_owned()),
+            runtime_facts: self.runtime_facts().clone(),
+            core: self.linked_core().ok(),
+            user_capabilities: Some(self.capability_holder()),
+        })
+    }
+
+    /// Build the compute context for this owner.
+    ///
+    /// # Errors
+    /// `Forbidden` for a principal with no creator.
+    #[cfg(feature = "compute")]
+    fn compute_context(&self, principal: &Principal) -> CoreResult<ComputeContext> {
+        if principal.creator_id().trim().is_empty() {
+            return Err(CoreError::Forbidden {
+                resource: "compute requires an admitted principal".into(),
+            });
+        }
+        Ok(ComputeContext {
+            creator_id: principal.creator_id().to_string(),
+            engine: self.compute_engine(),
+            cache: self.compute_cache(),
+            serializer: self.compute_serializer(),
+        })
+    }
+/// Read a bounded page of a run's retained events.
     ///
     /// # Errors
     /// `Closing` when the owner is shutting down, `NotFound` when this owner

@@ -31,6 +31,13 @@
 
 pub mod authority;
 pub mod bounds;
+// Capability dispatch, compute and the protocol-neutral peer registry
+// (v1.190 P3-T3). `capabilities` and `peer_tools` join the execution cohort;
+// `compute` additionally requires the WASM edge, so it is gated separately.
+pub mod capabilities;
+pub mod peer_tools;
+#[cfg(feature = "compute")]
+pub mod compute;
 pub mod commit_fs;
 pub mod executor;
 pub mod handle_ops;
