@@ -16,7 +16,7 @@ use nexus_daemon_runtime::api::auth_middleware::DaemonApiConfig;
 use nexus_daemon_runtime::test_utils;
 use nexus_daemon_runtime::test_utils::TestTempRoot;
 use nexus_daemon_runtime::workspace::WorkspaceState;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -571,13 +571,21 @@ impl LiveDaemon {
         }
     }
 
+    /// Declared `local_root` from workspace `meta.json` (`$HOME/creative`).
+    ///
+    /// Core resolves guarded filesystem paths against this root, not the daemon
+    /// state's `workspace_path` handle — fixtures must seed/read files here.
+    pub fn creative_root(&self) -> PathBuf {
+        self.home.path().join("creative")
+    }
+
     /// Boot the daemon with a real workspace directory on disk (needed by
     /// routes that read/write workspace files, e.g. the V1.72 outline
-    /// canvas). The workspace root is `$HOME/workspace`.
+    /// canvas). The creative root is `$HOME/creative` (matches `meta.json`).
     pub async fn start_with_workspace() -> Self {
         let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
-        let workspace_dir = tmp.path().join("workspace");
-        std::fs::create_dir_all(&workspace_dir).expect("create workspace dir");
+        let workspace_dir = tmp.path().join("creative");
+        std::fs::create_dir_all(&workspace_dir).expect("create creative workspace dir");
 
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
