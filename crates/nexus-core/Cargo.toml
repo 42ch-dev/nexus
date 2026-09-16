@@ -43,7 +43,15 @@ provider-host = ["dep:nexus-agent-host", "dep:nexus-acp-host"]
 compute = ["execution", "dep:nexus-wasm-host", "nexus-spoke-adapter/compute"]
 # Reverse-invoke/peer-control edge attaches with its owning cohort task; the
 # bounded rmcp protocol adapter is the embedded-mcp edge (§Cohorts).
-connect-client = []
+# Reverse-invoke/peer-control edge (v1.190 P4-T3): the peer/MCP session,
+# visibility, bounded WS transport and watcher ownership moved here; the
+# spoke remote adapter types the WS transport implements. rmcp stays the
+# embedded-mcp edge.
+connect-client = [
+    "dep:spoke-connect",
+    "dep:tokio-tungstenite",
+    "dep:nexus-orchestration",
+]
 embedded-mcp = ["dep:rmcp"]
 
 [dependencies]
@@ -61,6 +69,10 @@ nexus-narrative = { path = "../nexus-narrative" }
 nexus-creator-memory = { path = "../nexus-creator-memory" }
 nexus-moment-context-assembly = { path = "../nexus-moment-context-assembly" }
 nexus-orchestration = { path = "../nexus-orchestration", optional = true }
+# v1.190 P4-T3 connect-client cohort edges: the WS transport speaks the
+# spoke remote-adapter Transport; tungstenite is the bounded WS wire.
+spoke-connect = { workspace = true, features = ["remote-adapter"], optional = true }
+tokio-tungstenite = { workspace = true, optional = true }
 nexus-provider-ports = { path = "../nexus-provider-ports", optional = true }
 # graph-flow is the engine's session backend: the execution layer names
 # `SessionStorage` directly (the engine trait surface does not re-export it).

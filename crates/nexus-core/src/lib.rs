@@ -5,6 +5,8 @@ mod actor_fence;
 pub mod actor_sessions;
 #[cfg(feature = "provider-host")]
 pub mod host;
+#[cfg(feature = "connect-client")]
+pub mod connect;
 mod actor_knowledge;
 mod actors;
 mod changes;
