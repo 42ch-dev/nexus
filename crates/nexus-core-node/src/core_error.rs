@@ -382,7 +382,7 @@ fn wire_core_error_from_preset(error: nexus_core::PresetError) -> CoreError {
             code: CoreErrorCode::Internal,
             message: "internal error".into(),
             details: serde_json::Map::from_iter([
-                ("bucket".into(), Value::String(internal_error_bucket(&message))),
+                ("bucket".into(), Value::String(internal_error_bucket(&message).into())),
                 ("wire_code".into(), Value::String(code)),
             ]),
             http_status: Some(500),
@@ -414,7 +414,12 @@ fn wire_core_error_from_preset(error: nexus_core::PresetError) -> CoreError {
 ///
 /// Mirrors the daemon's own tables so this native surface and the HTTP
 /// transport render the same family for the same refusal.
-fn coded_wire_status(code: &str) -> u16 {
+///
+/// Returns `i64` rather than the daemon's `u16` because the wire
+/// `CoreError.http_status` is `Option<i64>` (generated from the schema); the
+/// numbers are identical either way, and the helper exists only to feed that
+/// field.
+fn coded_wire_status(code: &str) -> i64 {
     match code {
         "conflict" => 409,
         "invalid_state"
@@ -440,7 +445,10 @@ fn coded_wire_status(code: &str) -> u16 {
 ///
 /// `Rejected` renders as the daemon's `BadRequest`, whose public status is 422
 /// for the semantic-validation codes and 400 otherwise.
-fn preset_rejected_status(code: &str) -> u16 {
+///
+/// Returns `i64` for the same reason as [`coded_wire_status`]: the wire
+/// `http_status` field is `Option<i64>`.
+fn preset_rejected_status(code: &str) -> i64 {
     match code {
         "world_id_required"
         | "invalid_world_id"
