@@ -78,27 +78,6 @@ pub enum CollisionPolicy {
 /// the connect-host config files).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
-impl PeerToolsConfig {
-    /// The registry-consumed projection. Single authority rule (P4-T3): the
-    /// registry in `crate::execution::peer_tools` owns its config type; this
-    /// connect-side config keeps only the connection settings and projects
-    /// the admission-relevant fields onto the registry's type.
-    #[must_use]
-    pub fn registry_config(&self) -> crate::execution::peer_tools::PeerToolsConfig {
-        crate::execution::peer_tools::PeerToolsConfig {
-            collision_policy: match self.collision_policy {
-                CollisionPolicy::FirstStays => {
-                    crate::execution::peer_tools::CollisionPolicy::FirstStays
-                }
-                CollisionPolicy::PriorityOrder => {
-                    crate::execution::peer_tools::CollisionPolicy::PriorityOrder
-                }
-            },
-            peer_priority: self.peer_priority.clone(),
-        }
-    }
-}
-
 pub struct PeerToolsConfig {
     /// Listen host. Non-loopback reuses the daemon remote-bind gate
     /// (`NEXUS42_DAEMON_API_KEY` + `NEXUS_DAEMON_REMOTE_BIND=1`); loopback is
@@ -162,6 +141,27 @@ pub struct PeerToolsConfig {
     /// never grants execute).
     #[serde(default)]
     pub mcp_visibility: Vec<String>,
+}
+
+impl PeerToolsConfig {
+    /// The registry-consumed projection. Single authority rule (P4-T3): the
+    /// registry in `crate::execution::peer_tools` owns its config type; this
+    /// connect-side config keeps only the connection settings and projects
+    /// the admission-relevant fields onto the registry's type.
+    #[must_use]
+    pub fn registry_config(&self) -> crate::execution::peer_tools::PeerToolsConfig {
+        crate::execution::peer_tools::PeerToolsConfig {
+            collision_policy: match self.collision_policy {
+                CollisionPolicy::FirstStays => {
+                    crate::execution::peer_tools::CollisionPolicy::FirstStays
+                }
+                CollisionPolicy::PriorityOrder => {
+                    crate::execution::peer_tools::CollisionPolicy::PriorityOrder
+                }
+            },
+            peer_priority: self.peer_priority.clone(),
+        }
+    }
 }
 
 impl Default for PeerToolsConfig {
