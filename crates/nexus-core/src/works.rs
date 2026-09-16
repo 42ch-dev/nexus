@@ -746,6 +746,7 @@ fn checked_work_directory(
     Ok(path)
 }
 
+#[allow(clippy::too_many_lines)] // one linear domain operation
 async fn create_work(
     service: &CoreService,
     principal: &Principal,
@@ -922,7 +923,7 @@ async fn list_works(
         "work",
     )?;
 
-    let offset = decode_offset_cursor(&query.cursor)?;
+    let offset = decode_offset_cursor(query.cursor.as_ref())?;
     let limit = u32::try_from(query.limit.unwrap_or(100))
         .unwrap_or(100)
         .min(500);
@@ -979,6 +980,7 @@ async fn list_works(
     })
 }
 
+#[allow(clippy::too_many_lines)] // one linear domain operation
 async fn get_work(
     service: &CoreService,
     principal: &Principal,
@@ -2079,6 +2081,7 @@ async fn enrich_with_chapters(
 /// Apply non-stage fields (title, goal, brief, etc.) if any are present in the request.
 ///
 /// Returns early with `Ok(())` if no non-stage fields are present.
+#[allow(clippy::too_many_lines)] // one linear domain operation
 async fn apply_non_stage_fields(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
@@ -2411,7 +2414,7 @@ impl RuntimeLockGuard {
 // daemon `list_works` behavior exactly. Consumed only by `list_works` here; the daemon
 // Work route forwards the query unchanged and never re-parses. Daemon `api::pagination`
 // / `api::sort` remain separate helpers for other handler families — not for Work.
-fn decode_offset_cursor(cursor: &Option<String>) -> Result<u32, WorkFault> {
+fn decode_offset_cursor(cursor: Option<&String>) -> Result<u32, WorkFault> {
     let Some(raw) = cursor else {
         return Ok(0);
     };

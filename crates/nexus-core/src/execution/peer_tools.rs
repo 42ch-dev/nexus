@@ -316,6 +316,7 @@ impl PeerToolRegistry {
         AdmissionOutcome::Admitted { tool_ids: admitted }
     }
 
+    #[allow(clippy::significant_drop_tightening)] // the guard deliberately spans the whole operation
     /// Evict every row owned by `peer_id`.
     ///
     /// `expected` guards against a stale monitor evicting a REPLACEMENT

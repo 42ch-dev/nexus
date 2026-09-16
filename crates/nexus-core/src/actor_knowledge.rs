@@ -62,6 +62,7 @@ fn invalid_cursor() -> CoreError {
     CoreError::ActorInput("cursor is not a valid opaque two-field keyset token".to_string())
 }
 
+#[allow(clippy::needless_pass_by_value)] // callers move the owned payload in
 fn timestamp_err(err: String) -> CoreError {
     CoreError::Internal {
         category: format!("{KNOWLEDGE_WIRE_INVALID_PREFIX}: {err}"),
@@ -592,6 +593,7 @@ impl CoreService {
     /// Returns [`CoreError::AuthRequired`] when the principal fails
     /// verification, [`CoreError::ActorInput`] for shape violations, and the
     /// mapped storage/kb-store conflicts otherwise.
+    #[allow(clippy::too_many_lines)] // one linear domain operation
     pub async fn add_actor_knowledge_entry(
         &self,
         principal: &Principal,

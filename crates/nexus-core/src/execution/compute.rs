@@ -141,6 +141,7 @@ pub fn get_compute_module(module_id: &str) -> CoreResult<nexus_wasm_host::Module
 /// `Forbidden` for a World the creator does not own, `NotFound` for an
 /// unknown module, `Preset`-style coded refusals for sandbox limits and
 /// invalid input, `Internal` for storage faults.
+#[allow(clippy::too_many_lines)] // one linear domain operation
 pub async fn compute_run(
     core: &CoreService,
     context: &ComputeContext,
@@ -357,6 +358,7 @@ pub async fn compute_run(
 /// an unknown run, a coded conflict when the run is already `applied` or
 /// `discarded`, `InvalidInput` for a non-`succeeded` run or an unknown event
 /// id, `Internal` for storage faults.
+#[allow(clippy::too_many_lines)] // one linear domain operation
 pub async fn accept_compute_run(
     core: &CoreService,
     principal: &Principal,

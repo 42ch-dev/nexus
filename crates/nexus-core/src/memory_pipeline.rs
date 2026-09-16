@@ -184,6 +184,7 @@ impl MemoryPipelineCtx {
 
     /// Borrow the bearer for a read path. Readable contexts and writable
     /// contexts both allow reads.
+    #[allow(clippy::option_if_let_else)] // the match names both wire bearers directly
     pub(crate) fn bearer_ref(&self) -> MemoryBearerRef<'_> {
         match &self.character_id {
             None => MemoryBearerRef::Creator(&self.owner_creator_id),

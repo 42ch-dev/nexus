@@ -867,17 +867,14 @@ pub fn character_reflect_wire(
 }
 
 /// Map a bearer-agnostic reflect outcome to the Creator wire response.
-pub fn creator_reflect_wire(
-    creator_id: String,
-    o: ReflectOutcome,
-) -> CoreResult<SoulNarrativeResponse> {
+pub fn creator_reflect_wire(creator_id: String, o: ReflectOutcome) -> SoulNarrativeResponse {
     let state_str = match o.state {
         ReflectState::InsufficientData => "insufficient_data",
         ReflectState::Ungenerated => "ungenerated",
         ReflectState::Current => "current",
         ReflectState::Stale => "stale",
     };
-    Ok(SoulNarrativeResponse {
+    SoulNarrativeResponse {
         creator_id,
         state: state_str.parse().expect("valid state constant"),
         narrative: o.narrative,
@@ -889,7 +886,7 @@ pub fn creator_reflect_wire(
         current_distinct_keyword_count: o.current_distinct_keyword_count,
         min_fragment_count: MIN_SOUL_NARRATIVE_FRAGMENTS,
         min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
-    })
+    }
 }
 
 impl CoreService {
@@ -1002,7 +999,10 @@ impl CoreService {
         )
         .await?;
         drop(ctx);
-        creator_reflect_wire(principal.creator_id().to_string(), outcome)
+        Ok(creator_reflect_wire(
+            principal.creator_id().to_string(),
+            outcome,
+        ))
     }
 }
 

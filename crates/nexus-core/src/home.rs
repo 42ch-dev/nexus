@@ -94,6 +94,7 @@ impl CoreHomeService {
     /// Returns [`CoreError::InvalidInput`] for invalid display names or
     /// platform ids and for display-name collisions, and the mapped storage
     /// error when the global identity store or the config write fails.
+    #[allow(clippy::too_many_lines)] // one linear domain operation
     pub async fn register_creator(
         &self,
         request: CoreRegisterCreatorRequest,
@@ -225,6 +226,8 @@ impl CoreHomeService {
     /// when it is not, and return its detail. Read paths stay read-only —
     /// no identity-row or workspace-row writes (a home registration cannot
     /// assume a workspace).
+    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
+    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
     async fn converge_identity(
         &self,
         creator_id: &str,
@@ -254,7 +257,9 @@ impl CoreHomeService {
     ///
     /// # Errors
     /// Returns the mapped storage error only; unreadable directories are
+    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
     /// skipped, mirroring the extracted daemon scan.
+    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
     pub async fn list_workspaces(&self) -> CoreResult<ListWorkspacesResponse> {
         let items = scan_workspaces(&self.nexus_home);
         let limit = i64::try_from(items.len()).unwrap_or(i64::MAX);
@@ -351,6 +356,7 @@ impl CoreHomeService {
     ///
     /// # Errors
     /// Returns [`CoreError::Internal`] when the config file cannot be read or
+    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
     /// parsed.
     #[allow(clippy::unused_async)] // selected contract shape: async for transport symmetry
     pub async fn configuration(&self) -> CoreResult<CoreHomeConfiguration> {

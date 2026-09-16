@@ -37,8 +37,9 @@ use sqlx::Row;
 /// the daemon handler rule (char count, so CJK / emoji count once).
 pub const MAX_DISPLAY_NAME_CHARS: usize = 256;
 
-/// Wire-internal code carriers this family re-sends verbatim at the adapter:
-/// the daemon handler built `Internal { code, message }` envelopes for cache,
+/// Wire-internal code carriers this family re-sends verbatim at the adapter.
+///
+/// The daemon handler built `Internal { code, message }` envelopes for cache,
 /// config and profile-home failures, so the core carries
 /// `"{CODE}: {message}"` categories and the adapter matches each prefix
 /// exactly (the `database_error:` convention from P2-T0).
@@ -76,11 +77,19 @@ impl CoreHomeService {
     /// be read, the mapped internal carriers when the identity cache or the
     /// workspace enrichment fails, and [`CoreError::Uninitialized`] when the
     /// SQL enrichment path cannot resolve its store.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if the builder produces a pagination payload that violates
+    /// its own invariants (`limit` is clamped to 1..=250 and every optional
+    /// field is set here), which cannot happen for this call site.
     pub async fn list_creators(
         &self,
         query: ListCreatorsQuery,
     ) -> CoreResult<ListCreatorsResponse> {
-        let limit = query.limit.unwrap_or(50).clamp(1, 250) as usize;
+        // Clamped to 1..=250 above, so the conversion is infallible; state it
+        // with try_from rather than a sign-losing `as`.
+        let limit = usize::try_from(query.limit.unwrap_or(50).clamp(1, 250)).unwrap_or(250);
 
         // Membership SSOT: on-disk Profile homes only.
         let ssot_ids = list_profile_ids_ssot(&self.nexus_home);

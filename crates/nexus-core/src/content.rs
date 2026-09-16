@@ -886,6 +886,7 @@ async fn chapter_body(
     })
 }
 
+#[allow(clippy::too_many_arguments)] // mirrors the generated request DTO field set
 #[allow(clippy::too_many_lines)]
 async fn patch_chapter(
     service: &CoreService,

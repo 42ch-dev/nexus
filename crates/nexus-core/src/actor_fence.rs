@@ -65,10 +65,11 @@ pub struct ActorActivityLease {
     epoch: i64,
 }
 
-/// Exclusive transition lease (durable §11.3.2): busy refusal, epoch re-read
-/// under the fence, updated to the committed epoch by
-/// [`crate::CoreService::commit_character_transition`] so the host can retire
-/// old-epoch sessions while the fence is still held (durable §11.3.3).
+/// Exclusive transition lease (durable §11.3.2).
+///
+/// Busy refusal, epoch re-read under the fence, updated to the committed
+/// epoch by [`crate::CoreService::commit_character_transition`] so the host
+/// can retire old-epoch sessions while the fence is still held (§11.3.3).
 pub struct CharacterTransitionLease {
     _write: OwnedRwLockWriteGuard<()>,
     _os: OsExclusiveLock,
@@ -83,7 +84,7 @@ impl ActorFenceTable {
             process: Mutex::new(HashMap::new()),
             locks_dir: db_path
                 .parent()
-                .unwrap_or(Path::new("."))
+                .unwrap_or_else(|| Path::new("."))
                 .join("character_locks"),
         }
     }
@@ -204,6 +205,7 @@ impl OsSharedLock {
     /// refusal by the caller. Never waits on the blocking pool: an admission
     /// blocked behind an in-flight transition would stall the caller instead
     /// of reporting busy, which the lease contract forbids.
+    #[allow(clippy::needless_pass_by_value)] // callers move the owned payload in
     fn try_acquire(path: PathBuf) -> Result<Self, std::fs::TryLockError> {
         let file = open_lock_file(&path).map_err(std::fs::TryLockError::Error)?;
         file.try_lock_shared()?;
@@ -227,6 +229,7 @@ struct OsExclusiveLock {
 impl OsExclusiveLock {
     /// Acquire non-blocking; a held lease surfaces as [`TryLockError::WouldBlock`]
     /// and is translated to the retained busy refusal by the caller.
+    #[allow(clippy::needless_pass_by_value)] // callers move the owned payload in
     fn try_acquire(path: PathBuf) -> Result<Self, std::fs::TryLockError> {
         let file = open_lock_file(&path).map_err(std::fs::TryLockError::Error)?;
         file.try_lock()?;

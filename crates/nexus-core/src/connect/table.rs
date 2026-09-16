@@ -38,7 +38,6 @@ pub use crate::execution::peer_tools::{
 pub type PeerToolTable = crate::execution::peer_tools::PeerToolRegistry;
 
 /// MCP catalog admission: the peer descriptor's input must be a root object.
-#[must_use]
 /// # Errors
 ///
 /// Returns `CoreError` when the manifest is malformed or the peer is not

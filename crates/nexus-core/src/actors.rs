@@ -247,7 +247,7 @@ impl CoreService {
     ) -> CoreResult<AdmittedActor> {
         self.verify_principal(principal)?;
         let actor = admit_actor_token(principal.creator_id(), request.actor_ref)?;
-        let viewpoint = admit_viewpoint(request.viewpoint)?;
+        let viewpoint = admit_viewpoint(request.viewpoint);
         require_admitted_ownership(&self.inner.pool, principal.creator_id(), &actor, &viewpoint)
             .await?;
         Ok(actor)
@@ -443,13 +443,14 @@ fn admit_actor_token(
     })
 }
 
-fn admit_viewpoint(viewpoint: NexusSessionViewpoint) -> CoreResult<ActorViewpoint> {
-    Ok(ActorViewpoint {
+#[allow(clippy::needless_pass_by_value)] // callers move the owned payload in
+fn admit_viewpoint(viewpoint: NexusSessionViewpoint) -> ActorViewpoint {
+    ActorViewpoint {
         world_id: viewpoint.world_id.to_string(),
         binding_id: viewpoint.binding_id.as_ref().map(|id| id.to_string()),
         branch_id: viewpoint.branch_id.as_ref().map(|id| id.to_string()),
         event_id: viewpoint.event_id.as_ref().map(|id| id.to_string()),
-    })
+    }
 }
 
 /// Validate stored ownership for an admission (durable §11.3 admission
@@ -940,11 +941,13 @@ pub fn map_wire_one<T: serde::Serialize, U: serde::de::DeserializeOwned>(
     serde_json::from_value(json).map_err(wire_err)
 }
 
-/// Pool-bound stored admission for hosts that compose admission around their
-/// own session registry (the daemon agent-host shim until P4-T2 consumes the
-/// core leases). It carries the same stored-ownership business as
-/// [`CoreService::admit_actor`] plus the bounded [`AdmittedActorContext`]
-/// assembly — no host/MCA/session side effects.
+/// Pool-bound stored admission for hosts that compose admission around
+/// their own session registry (the daemon agent-host shim until P4-T2
+/// consumes the core leases).
+///
+/// Carries the same stored-ownership business as [`CoreService::admit_actor`]
+/// plus the bounded [`AdmittedActorContext`] assembly — no host/MCA/session
+/// side effects.
 pub struct CoreActorAdmission {
     views: crate::actor_knowledge::ActorKnowledgeViewService,
     pool: SqlitePool,

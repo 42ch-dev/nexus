@@ -286,6 +286,8 @@ impl CoreService {
     ///
     /// Returns `CoreError` when the principal is rejected, the preset is unknown
     /// or fails validation, or the guarded home read/write fails.
+    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
+    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
     pub async fn get_preset(
         &self,
         principal: &Principal,
@@ -309,7 +311,9 @@ impl CoreService {
     /// # Errors
     ///
     /// Returns `CoreError` when the principal is rejected, the preset is unknown
+    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
     /// or fails validation, or the guarded home read/write fails.
+    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
     pub async fn list_presets(&self, principal: &Principal) -> CoreResult<ListPresetsResponse> {
         self.verify_principal(principal)?;
         let caps = BuiltinCapabilityCatalog;
@@ -373,8 +377,10 @@ impl CoreService {
 
     /// # Errors
     ///
+    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
     /// Returns `CoreError` when the principal is rejected, the preset is unknown
     /// or fails validation, or the guarded home read/write fails.
+    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
     pub async fn validate_preset(
         &self,
         principal: &Principal,
@@ -419,9 +425,11 @@ impl CoreService {
 
     /// # Errors
     ///
+    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
     /// Returns `CoreError` when the principal is rejected, the preset is unknown
     /// or fails validation, or the guarded home read/write fails.
     /// Retained orchestration listing: embedded IDs followed by unique system IDs.
+    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
     pub async fn list_orchestration_presets(
         &self,
         principal: &Principal,
@@ -441,10 +449,12 @@ impl CoreService {
     }
 
     /// # Errors
+    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
     ///
     /// Returns `CoreError` when the principal is rejected, the preset is unknown
     /// or fails validation, or the guarded home read/write fails.
     /// Read the profile using the retained user/system/embedded resolution order.
+    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
     pub async fn get_preset_profile(
         &self,
         principal: &Principal,

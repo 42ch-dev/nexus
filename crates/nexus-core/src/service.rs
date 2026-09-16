@@ -233,7 +233,6 @@ impl CoreService {
     /// seed and inspect the same guarded store the service writes. It is not a
     /// second business truth and must not acquire production callers.
     #[cfg(any(test, feature = "test-hooks"))]
-
     pub fn pool(&self) -> &SqlitePool {
         &self.inner.pool
     }

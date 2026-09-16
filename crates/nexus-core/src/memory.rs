@@ -166,6 +166,7 @@ impl CoreService {
         }))
     }
 
+    #[allow(clippy::significant_drop_tightening)] // the guard deliberately spans the whole operation
     /// List one owned Character's pending reviews (retained read; any
     /// lifecycle status), offset-paginated.
     ///
@@ -226,6 +227,7 @@ impl CoreService {
         }))
     }
 
+    #[allow(clippy::significant_drop_tightening)] // the guard deliberately spans the whole operation
     /// Count one owned Character's pending reviews (retained read).
     ///
     /// # Errors
@@ -299,6 +301,7 @@ impl CoreService {
         }))
     }
 
+    #[allow(clippy::significant_drop_tightening)] // the guard deliberately spans the whole operation
     /// List one owned Character's memory fragments (retained read),
     /// offset-paginated.
     ///
@@ -959,6 +962,9 @@ pub struct CharacterTomRecordInput {
 #[derive(sqlx::FromRow, Debug, Clone)]
 pub struct ProbeCarrier {
     pub key_block_id: String,
+    /// Projected by the probe query (the row shape is part of the SQL
+    /// contract) but not read by any classifier today.
+    #[allow(dead_code)]
     pub revision: Option<i64>,
     pub status: String,
     pub character_id: Option<String>,

@@ -21,9 +21,11 @@ use crate::service::CoreService;
 use crate::CoreAccess;
 
 /// `CoreError::Forbidden.resource` marker for a World hard-delete blocked by
-/// remaining Character bindings. The HTTP adapter translates it back to the
-/// retained `409 world_has_actor_bindings` body; the string matches the
-/// `as_str()` of `nexus_local_db::ActorContractConflict::WorldHasActorBindings`.
+/// remaining Character bindings.
+///
+/// The HTTP adapter translates it back to the retained
+/// `409 world_has_actor_bindings` body; the string matches the `as_str()` of
+/// `nexus_local_db::ActorContractConflict::WorldHasActorBindings`.
 pub const DELETE_WORLD_BLOCKED_BY_BINDINGS: &str = "world_has_actor_bindings";
 
 impl CoreService {

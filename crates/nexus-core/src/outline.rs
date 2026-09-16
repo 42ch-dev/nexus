@@ -668,6 +668,7 @@ async fn patch_outline_structure(
     patch_ok(frontmatter.outline_revision, Vec::new())
 }
 
+#[allow(clippy::too_many_arguments)] // mirrors the generated request DTO field set
 #[allow(clippy::too_many_lines)]
 async fn patch_outline_chapter(
     service: &CoreService,
@@ -1097,6 +1098,7 @@ async fn persist_chapter_outline_content(
         .map_err(OutlineFault::Core)
 }
 
+#[allow(clippy::too_many_arguments)] // mirrors the generated request DTO field set
 #[allow(clippy::too_many_lines)]
 async fn apply_chapter_patch(
     service: &CoreService,

@@ -63,12 +63,14 @@ impl std::fmt::Debug for HostHandle {
     }
 }
 
+#[allow(clippy::needless_pass_by_value)] // callers move the owned payload in
 fn host_err(err: nexus_agent_host::HostError) -> CoreError {
     CoreError::Internal {
         category: format!("agent_host: {err}"),
     }
 }
 
+#[allow(clippy::needless_pass_by_value)] // callers move the owned payload in
 fn config_err(err: nexus_agent_host::HostError) -> CoreError {
     CoreError::Internal {
         category: format!("agent_host_config: {err}"),
@@ -252,7 +254,7 @@ impl HostHandle {
                 &ctx,
             )?;
             let host_req =
-                self.host_create_request(&request, &canonical_root, &ctx.owner_creator_id);
+                Self::host_create_request(&request, &canonical_root, &ctx.owner_creator_id);
             let host_for_create = self.host.clone();
             let session = self
                 .registry
@@ -279,7 +281,7 @@ impl HostHandle {
                 viewpoint,
             ));
         }
-        let host_req = self.host_create_request(&request, &canonical_root, &creator_id);
+        let host_req = Self::host_create_request(&request, &canonical_root, &creator_id);
         let model = request.model.clone();
         let session = self.host.create_session(host_req).await.map_err(host_err)?;
         Ok(session_wire(
@@ -293,6 +295,7 @@ impl HostHandle {
         ))
     }
 
+    #[allow(clippy::significant_drop_tightening)] // the guard deliberately spans the whole operation
     /// Execute a normalized host operation (`prompt`, `set_model`, `set_mode`)
     /// through the real Host authority. Actor-indexed sessions re-admit the
     /// stored Actor, deny a stale `lifecycle_epoch` before any provider
@@ -301,6 +304,12 @@ impl HostHandle {
     /// # Errors
     /// See the per-branch taxonomy; a stale epoch is `actor_conflict
     /// actor_session_stale` and never reaches the provider.
+    ///
+    /// # Panics
+    ///
+    /// Panics only when a character session is registered but has no captured
+    /// context entry — a registry invariant maintained on session creation, so
+    /// a missing entry is a programming error rather than a caller error.
     #[allow(clippy::too_many_lines)]
     pub async fn execute(
         &self,
@@ -348,7 +357,7 @@ impl HostHandle {
                         "remember requires an admitted stored Character session with an active binding",
                     ));
                 }
-                let (assembled, _lease) = if is_character {
+                let (assembled, lease) = if is_character {
                     let ctx = self
                         .registry
                         .context_for(&sid)
@@ -401,7 +410,7 @@ impl HostHandle {
                         remember,
                         raw_prompt: raw_prompt.clone(),
                     };
-                    self.registry.reserve_character_operation(snap.clone())?;
+                    self.registry.reserve_character_operation(&snap)?;
                     self.registry
                         .register_indexed_operation(op_id.clone(), sid.clone());
                     Some(snap)
@@ -430,10 +439,10 @@ impl HostHandle {
                 if let Some(snapshot) = snapshot {
                     let registry = self.registry.clone();
                     tokio::spawn(async move {
-                        drain_character_operation(registry, stream, snapshot, _lease).await;
+                        drain_character_operation(registry, stream, snapshot, lease).await;
                     });
                 } else {
-                    tokio::spawn(drain_plain(stream, _lease));
+                    tokio::spawn(drain_plain(stream, lease));
                 }
                 Ok(OperationResponse {
                     operation_id: op_id.to_string(),
@@ -584,7 +593,7 @@ impl HostHandle {
                     .map_or(50, std::num::NonZero::get)
                     .clamp(1, 250);
                 let limit_us = usize::try_from(limit).unwrap_or(250);
-                let items_all: Vec<NexusAgentHostSessionResponse> = native
+                let items: Vec<NexusAgentHostSessionResponse> = native
                     .iter()
                     // Owner-scoped listing: a foreign indexed/retired Actor
                     // session is invisible to this principal (legacy sessions
@@ -595,9 +604,6 @@ impl HostHandle {
                             .is_none_or(|(owner, _, _)| owner == principal.creator_id())
                     })
                     .map(session_response_wire)
-                    .collect();
-                let items: Vec<NexusAgentHostSessionResponse> = items_all
-                    .into_iter()
                     .skip_while(|s| {
                         request
                             .cursor
@@ -768,7 +774,6 @@ impl HostHandle {
     }
 
     fn host_create_request(
-        &self,
         request: &CreateSessionRequest,
         canonical_root: &std::path::Path,
         owner_creator_id: &str,
@@ -845,15 +850,18 @@ fn internal(category: impl Into<String>) -> CoreError {
 }
 
 fn session_cwd(request: &CreateSessionRequest, core: &CoreService) -> CoreResult<PathBuf> {
-    match request.cwd.as_ref() {
-        Some(cwd) => validate_workspace_path(std::path::Path::new(cwd))
-            .map_err(|e| invalid("cwd", e.to_string()))
-            .map(|p: PathBuf| p),
-        // The request body never supplies the workspace root: the canonical
-        // open boundary is the fallback.
-        None => validate_workspace_path(&core.inner.nexus_home)
-            .map_err(|e| invalid("cwd", e.to_string())),
-    }
+    // The request body never supplies the workspace root: the canonical open
+    // boundary is the fallback.
+    request.cwd.as_ref().map_or_else(
+        || {
+            validate_workspace_path(&core.inner.nexus_home)
+                .map_err(|e| invalid("cwd", e.to_string()))
+        },
+        |cwd| {
+            validate_workspace_path(std::path::Path::new(cwd))
+                .map_err(|e| invalid("cwd", e.to_string()))
+        },
+    )
 }
 
 const fn session_wire(

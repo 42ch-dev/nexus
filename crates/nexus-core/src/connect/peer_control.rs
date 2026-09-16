@@ -86,6 +86,8 @@ impl ExecutionHandle {
     /// Returns [`CoreError::Closing`] when the owning service is closed and
     /// [`CoreError::AuthRequired`] when the principal or the on-disk
     /// selection fails verification.
+    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
+    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
     pub async fn start_peer_control(
         &self,
         principal: &crate::principal::Principal,
@@ -102,6 +104,7 @@ impl ExecutionHandle {
             .peer_control
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        #[allow(clippy::option_if_let_else)] // the else branch initializes the slot
         let lane = if let Some(lane) = slot.as_ref() {
             Arc::clone(lane)
         } else {
@@ -129,7 +132,9 @@ impl ExecutionHandle {
     /// # Errors
     /// As [`Self::start_peer_control`], plus [`CoreError::InvalidInput`]
     /// for an unknown operation and [`CoreError::Forbidden`] when the
+    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
     /// operation is not allowlisted.
+    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
     pub async fn peer_control(
         &self,
         principal: &crate::principal::Principal,

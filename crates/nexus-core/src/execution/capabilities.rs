@@ -383,6 +383,7 @@ fn err_code(err: &CoreError) -> &str {
 /// 5. Audit log (written by caller `execute()`, not here)
 ///
 /// Returns `(creator_id, workspace_slug)` if all gates pass.
+#[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
 pub(crate) async fn admission_pipeline(
     req: &ToolExecuteRequest,
     context: &ToolContext,
@@ -852,6 +853,7 @@ async fn execute_context_assemble(
 ///
 /// V1.86 T5 (R-V156P0-M004): all blocking `std::fs` operations run on the
 /// tokio blocking pool so the async runtime is not stalled by local disk I/O.
+#[allow(clippy::similar_names)] // the paired names are the domain vocabulary here
 async fn execute_read_file(
     req: &ToolExecuteRequest,
     context: &ToolContext,
@@ -910,6 +912,7 @@ async fn execute_read_file(
 ///
 /// V1.86 T5 (R-V156P0-M004): all blocking `std::fs` operations run on the
 /// tokio blocking pool so the async runtime is not stalled by local disk I/O.
+#[allow(clippy::similar_names)] // the paired names are the domain vocabulary here
 async fn execute_write_file(
     req: &ToolExecuteRequest,
     context: &ToolContext,
@@ -2278,7 +2281,7 @@ async fn execute_manuscript_list(
     let workspace_slug =
         read_active_workspace_slug(&context.nexus_home, creator_id).ok_or_else(|| {
             NexusApiError::Forbidden {
-                resource: format!("{}: {}", "manuscript.list", "active workspace required",),
+                resource: format!("{}: {}", "manuscript.list", "active workspace required"),
             }
         })?;
 
@@ -2312,6 +2315,7 @@ async fn execute_manuscript_list(
 }
 
 /// T2: `nexus.manuscript.read_range` — read a bounded content range from a chapter body.
+#[allow(clippy::similar_names)] // the paired names are the domain vocabulary here
 async fn execute_manuscript_read_range(
     req: &ToolExecuteRequest,
     context: &ToolContext,
@@ -2450,6 +2454,7 @@ async fn execute_manuscript_read_range(
 }
 
 /// T3: `nexus.manuscript.write` — write manuscript content within size quotas.
+#[allow(clippy::similar_names)] // the paired names are the domain vocabulary here
 async fn execute_manuscript_write(
     req: &ToolExecuteRequest,
     context: &ToolContext,
@@ -3506,10 +3511,12 @@ async fn dispatch_user_cap(
     })
 }
 
-/// Catalog admission for a user capability (AR-68 #6): name must not start
-/// with `nexus.` and must not match the peer grammar `^tools\.…`; the
-/// declared `input_schema()` must parse as a JSON object. Fail-closed —
-/// a non-admitted capability is neither dispatchable nor listed.
+/// Catalog admission for a user capability (AR-68 #6).
+///
+/// The name must not start with `nexus.` and must not match the peer grammar
+/// `^tools\.…`; the declared `input_schema()` must parse as a JSON object.
+/// Fail-closed — a non-admitted capability is neither dispatchable nor
+/// listed.
 pub fn user_cap_catalog_admission(
     cap: Option<&dyn nexus_orchestration::capability::Capability>,
 ) -> Result<&dyn nexus_orchestration::capability::Capability, UserCapCatalogRefusal> {
@@ -3538,11 +3545,12 @@ pub fn user_cap_catalog_admission(
     Ok(cap)
 }
 
-/// AR-70 §3 inclusion rule: a JSON-Schema string is carried as an MCP
-/// `output_schema` only when it parses and declares a root `type: "object"`
-/// (MCP requires an object root; non-object outputs are omitted, never
-/// invented, never wrapped). Shared by the peer merge (connect-client) and
-/// the user-cap branch of the catalog.
+/// AR-70 §3 inclusion rule for MCP `output_schema` payloads.
+///
+/// A JSON-Schema string is carried only when it parses and declares a root
+/// `type: "object"` (MCP requires an object root; non-object outputs are
+/// omitted, never invented, never wrapped). Shared by the peer merge
+/// (connect-client) and the user-cap branch of the catalog.
 #[must_use]
 pub fn json_schema_has_object_root(raw: &str) -> bool {
     serde_json::from_str::<Value>(raw)

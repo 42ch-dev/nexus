@@ -26,7 +26,7 @@ fn journal_internal(what: &str, e: impl std::fmt::Display) -> CoreError {
 }
 
 /// Wire spelling of a journal write status (schema enum order).
-const fn status_wire(status: &CoreProviderJournalWriteStatus) -> &'static str {
+const fn status_wire(status: CoreProviderJournalWriteStatus) -> &'static str {
     match status {
         CoreProviderJournalWriteStatus::Running => "running",
         CoreProviderJournalWriteStatus::Finished => "finished",
@@ -41,6 +41,7 @@ const fn status_wire(status: &CoreProviderJournalWriteStatus) -> &'static str {
 /// Rows are only ever written through [`CoreService::journal_provider_operation`],
 /// so a row that fails projection means the stored journal was tampered with;
 /// the error is `internal`, never a fabricated success.
+#[allow(clippy::needless_pass_by_value)] // callers move the owned payload in
 fn project_operation(row: JournaledOperation) -> CoreResult<CoreProviderOperation> {
     let sequence =
         u64::try_from(row.sequence).map_err(|_| journal_internal("sequence", row.sequence))?;
@@ -115,7 +116,7 @@ impl CoreService {
             &request.operation_id,
             &request.session_id,
             &request.provider_id,
-            status_wire(&request.status),
+            status_wire(request.status),
         )
         .await
         .map_err(local_db_err)

@@ -473,6 +473,7 @@ struct OwnerReservation {
 }
 
 impl OwnerReservation {
+    #[allow(clippy::significant_drop_tightening)] // the guard deliberately spans the whole operation
     /// Reserve the single owner slot for `db_path`, or refuse when a live
     /// owner already holds it.
     fn claim(db_path: &Path) -> Result<Self, ExecutionOpenError> {
@@ -490,6 +491,7 @@ impl OwnerReservation {
         Ok(Self { key, armed: true })
     }
 
+    #[allow(clippy::significant_drop_tightening)] // the guard deliberately spans the whole operation
     /// Publish `handle` as the established owner and stop owning the slot.
     fn install(mut self, handle: &Arc<ExecutionHandle>) {
         let mut owners = owners_lock();
@@ -647,6 +649,7 @@ impl CoreService {
         }
     }
 
+    #[allow(clippy::too_many_lines)] // one linear domain operation
     async fn build_execution(
         &self,
         deps: RunnerDeps,

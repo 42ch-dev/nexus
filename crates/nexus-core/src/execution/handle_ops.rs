@@ -888,12 +888,15 @@ fn gate_failure(preset_id: &str, work_id: &str, failed_gates: Vec<FailedGate>) -
 
 /// Render a gate failure into the retained human-readable message.
 fn render_gate_failure(failure: &PresetGatesFailed) -> String {
+    use std::fmt::Write as _;
+
     let mut msg = format!("preset gates failed for '{}'", failure.preset_id);
     for gate in &failure.failed_gates {
-        msg.push_str(&format!(
+        let _ = write!(
+            msg,
             "; {}: expected {}, got {}",
             gate.kind, gate.expected, gate.actual
-        ));
+        );
     }
     msg
 }

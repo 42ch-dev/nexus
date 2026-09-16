@@ -844,7 +844,6 @@ impl CoreService {
 }
 
 type ContextActorRef = NexusActorRef;
-type ContextConversionError = <ContextActorRef as std::str::FromStr>::Err;
 
 /// Project the opaque admitted Actor onto the closed wire sum.
 fn actor_ref_wire(actor: &crate::actors::AdmittedActor) -> CoreResult<ContextActorRef> {

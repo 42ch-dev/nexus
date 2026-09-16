@@ -1411,7 +1411,7 @@ pub mod promote {
                 Ok(())
             }
             PromoteAdoptCommitAmbiguityResolution::Fail => Err(
-                promote_adopt_commit_ambiguity_error(commit_err, reread.err().as_ref()),
+                promote_adopt_commit_ambiguity_error(&commit_err, reread.err().as_ref()),
             ),
         }
     }
@@ -1438,8 +1438,9 @@ pub mod promote {
     }
 
     /// Combine commit and optional re-read errors for ambiguity failure paths.
+    #[allow(clippy::option_if_let_else)] // the match keeps both error branches side by side
     fn promote_adopt_commit_ambiguity_error(
-        commit_err: sqlx::Error,
+        commit_err: &sqlx::Error,
         reread_err: Option<&sqlx::Error>,
     ) -> CoreError {
         match reread_err {
@@ -1448,7 +1449,7 @@ pub mod promote {
                     "promote_adopt commit failed ({commit_err}) and status re-read failed ({reread})"
                 ),
             },
-            None => db_err(&commit_err),
+            None => db_err(commit_err),
         }
     }
 

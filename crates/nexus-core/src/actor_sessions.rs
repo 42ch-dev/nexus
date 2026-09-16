@@ -308,7 +308,7 @@ impl ActorSessionRegistry {
     /// Returns capacity or shutdown conflicts.
     pub fn reserve_character_operation(
         &self,
-        snapshot: CharacterOperationSnapshot,
+        snapshot: &CharacterOperationSnapshot,
     ) -> CoreResult<()> {
         let mut maps = self.maps();
         Self::reject_if_closed(&maps)?;
@@ -328,7 +328,7 @@ impl ActorSessionRegistry {
                 owner_creator_id: snapshot.owner_creator_id.clone(),
                 session_id: snapshot.session_id.clone(),
                 phase: OperationPhase::Running,
-                outcome: running_outcome(&snapshot),
+                outcome: running_outcome(snapshot),
                 _seq: seq,
             },
         );
