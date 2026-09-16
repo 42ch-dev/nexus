@@ -177,7 +177,7 @@ fn coded_status(code: &str) -> u16 {
         | "compute_module_trapped"
         | "compute_module_error" => 422,
         "policy_blocked" => 403,
-        "not_supported" => 400,
+        // Every other carrier (including `not_supported`) is a client-fault 400.
         _ => 400,
     }
 }
@@ -247,14 +247,15 @@ fn map_preset_error(error: nexus_core::PresetError) -> CliError {
         }
         PresetError::StrategyValidation(summary) => CliError::Api {
             status: 422,
-            message: format!(
-                "[strategy_validation_failed] Strategy validation failed{}",
-                summary
-                    .errors
-                    .iter()
-                    .map(|e| format!(" (validation: {e})"))
-                    .collect::<String>()
-            ),
+            message: {
+                use std::fmt::Write as _;
+                let mut message =
+                    String::from("[strategy_validation_failed] Strategy validation failed");
+                for error in &summary.errors {
+                    let _ = write!(message, " (validation: {error})");
+                }
+                message
+            },
         },
     }
 }

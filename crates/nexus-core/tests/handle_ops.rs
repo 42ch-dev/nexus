@@ -81,7 +81,6 @@ impl PromptExecutor for NullPromptExecutor {
 
 struct Fixture {
     tmp: TempDir,
-    db_path: std::path::PathBuf,
 }
 
 /// Build a workspace home and seed the admitted creator, exactly as the daemon
@@ -118,7 +117,7 @@ async fn fixture() -> Fixture {
     guarded.pool().close().await;
     nexus_local_db::writer_protocol::release_retained_writer_guards(&db_path);
 
-    Fixture { tmp, db_path }
+    Fixture { tmp }
 }
 
 /// Open an engine-owner core and establish a handle over it.

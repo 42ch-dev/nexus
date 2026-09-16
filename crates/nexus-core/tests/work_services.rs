@@ -1,4 +1,5 @@
 //! Work selection, authoring and selected-context isolation on guarded storage.
+#![allow(clippy::too_many_lines)] // one end-to-end scenario per test
 use nexus_contracts::{CreateWorkRequest, CreateWorldRequest, ListWorksQuery};
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, WorkPatchRequest};
 use nexus_local_db::writer_protocol::init_guarded_pool;
@@ -400,7 +401,7 @@ async fn work_selection_invalidates_foreign_context() {
     assert_eq!(
         core.list_works(
             &principal,
-            query(serde_json::json!({"limit":4294967296_i64}))
+            query(serde_json::json!({"limit":4_294_967_296_i64}))
         )
         .await
         .unwrap()

@@ -77,8 +77,16 @@ pub enum PackImportError {
 }
 
 /// Translate the retained CLI shape, delegating every effect to the core owner.
+///
 /// # Errors
-/// Returns the legacy error carrier for core authorization, parse or storage errors.
+///
+/// Returns the legacy error carrier for core authorization, parse or storage
+/// errors.
+///
+/// # Panics
+///
+/// Panics only if the caller supplies a `world_id`/`creator_id` pair the core
+/// admission rejects as malformed (the CLI always passes resolved ids).
 // transitional: single deletion owner P6-T1; no new callers
 pub async fn import_pack(
     pool: &SqlitePool,

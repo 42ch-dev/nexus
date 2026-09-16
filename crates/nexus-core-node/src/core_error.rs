@@ -374,51 +374,6 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             )]),
             http_status: Some(500),
         },
-        // v1.190 P2/P3 additions (P4-T3 merge): the wire vocabulary has no
-        // dedicated arms, so these carry the closest client-fault codes with
-        // their Display messages.
-        DomainError::ForbiddenReason { resource, reason } => CoreError {
-            code: CoreErrorCode::Forbidden,
-            message: format!("forbidden: {resource} — {reason}"),
-            details: serde_json::Map::from_iter([
-                ("resource".into(), Value::String(resource)),
-                ("reason".into(), Value::String(reason)),
-            ]),
-            http_status: Some(403),
-        },
-        DomainError::ActorConflict { code, message } => CoreError {
-            code: CoreErrorCode::Busy,
-            message: format!("actor conflict: {code}: {message}"),
-            details: serde_json::Map::from_iter([
-                ("code".into(), Value::String(code)),
-                ("message".into(), Value::String(message)),
-            ]),
-            http_status: Some(409),
-        },
-        DomainError::ActorInput(message) => CoreError {
-            code: CoreErrorCode::InvalidInput,
-            message: message.clone(),
-            details: serde_json::Map::from_iter([("reason".into(), Value::String(message))]),
-            http_status: Some(400),
-        },
-        DomainError::Conflict(message) => CoreError {
-            code: CoreErrorCode::Busy,
-            message,
-            details: Default::default(),
-            http_status: Some(409),
-        },
-        DomainError::ServiceUnavailable(message) => CoreError {
-            code: CoreErrorCode::Closing,
-            message,
-            details: Default::default(),
-            http_status: Some(503),
-        },
-        DomainError::NarrativeRejected(message) => CoreError {
-            code: CoreErrorCode::InvalidInput,
-            message,
-            details: Default::default(),
-            http_status: Some(400),
-        },
     }
 }
 

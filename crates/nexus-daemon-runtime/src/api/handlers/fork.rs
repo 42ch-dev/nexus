@@ -1,4 +1,5 @@
 //! Local timeline fork HTTP translation. Core owns fork-point validation,
+//!
 //! branch allocation, the canon lineage marker and the world-ownership
 //! guard (whose typed denial renders the retained 403/404 envelopes here).
 
@@ -10,6 +11,12 @@ use axum::Json;
 use nexus_contracts::daemon_api::{CreateForkRequest, CreateForkResponse};
 use serde_json::json;
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn create_fork(
     State(state): State<WorkspaceState>,
     Path(world_id): Path<String>,

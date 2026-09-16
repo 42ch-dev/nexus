@@ -17,7 +17,6 @@ pub struct ActorKnowledgeViewService(nexus_core::ActorKnowledgeViewService);
 
 impl ActorKnowledgeViewService {
     /// Bind the service to a workspace pool.
-    #[must_use]
     pub fn new(pool: SqlitePool) -> Self {
         Self(nexus_core::ActorKnowledgeViewService::new(pool))
     }
@@ -62,32 +61,6 @@ impl ActorKnowledgeViewService {
     ) -> Result<ActorKnowledgePage, NexusApiError> {
         self.0
             .list_character_owned(caller_creator_id, character_id, limit, cursor)
-            .await
-            .map_err(NexusApiError::from)
-    }
-
-    /// Active stored binding tuple (write admission).
-    pub(crate) async fn require_active_binding(
-        &self,
-        character_id: &str,
-        binding_id: &str,
-        world_id: &str,
-    ) -> Result<(), NexusApiError> {
-        self.0
-            .require_active_binding(character_id, binding_id, world_id)
-            .await
-            .map_err(NexusApiError::from)
-    }
-
-    /// Stored binding tuple with no status requirement (retained reads).
-    pub(crate) async fn require_stored_binding_tuple(
-        &self,
-        character_id: &str,
-        binding_id: &str,
-        world_id: &str,
-    ) -> Result<(), NexusApiError> {
-        self.0
-            .require_stored_binding_tuple(character_id, binding_id, world_id)
             .await
             .map_err(NexusApiError::from)
     }

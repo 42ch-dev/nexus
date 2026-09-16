@@ -46,14 +46,14 @@ fn assert_conflict(err: CoreError, code: &str) {
     }
 }
 
-fn assert_not_found(err: CoreError) {
+fn assert_not_found(err: &CoreError) {
     assert!(
         matches!(err, CoreError::NotFound { .. }),
         "expected NotFound, got {err:?}"
     );
 }
 
-fn assert_invalid_input(err: CoreError) {
+fn assert_invalid_input(err: &CoreError) {
     assert!(
         matches!(err, CoreError::ActorInput(_)),
         "expected ActorInput, got {err:?}"
@@ -253,6 +253,7 @@ async fn transition_races_admitted_activity() {
     assert_conflict(err, "character_inactive");
 }
 
+#[allow(clippy::significant_drop_tightening)] // the lease is deliberately held across the next call
 /// The reverse race of [`transition_races_admitted_activity`]: while another
 /// core HOLDS the exclusive transition lease, an activity admission must
 /// report `character_busy` promptly instead of parking behind the holder.
@@ -366,31 +367,31 @@ async fn foreign_owner_routes_are_not_found_and_do_not_mutate() {
         .add_binding(&principal, foreign.clone(), WORLD.to_string(), None)
         .await
         .expect_err("foreign add must be 404");
-    assert_not_found(err);
+    assert_not_found(&err);
 
     let err = core
         .list_bindings(&principal, foreign.clone(), 50, 0)
         .await
         .expect_err("foreign list must be 404");
-    assert_not_found(err);
+    assert_not_found(&err);
 
     let err = core
         .binding(&principal, foreign.clone(), env.foreign_binding_id.clone())
         .await
         .expect_err("foreign read must be 404");
-    assert_not_found(err);
+    assert_not_found(&err);
 
     let err = core
         .character(&principal, foreign.clone())
         .await
         .expect_err("foreign detail must be 404");
-    assert_not_found(err);
+    assert_not_found(&err);
 
     let err = core
         .remove_binding(&principal, foreign.clone(), env.foreign_binding_id.clone())
         .await
         .expect_err("foreign removal must be 404");
-    assert_not_found(err);
+    assert_not_found(&err);
 
     let pool = plain_pool(&env).await;
     let remaining: i64 =
@@ -449,7 +450,7 @@ async fn admission_deny_matrix_world_character_binding_mismatches() {
         )
         .await
         .expect_err("foreign creator token");
-    assert_not_found(err);
+    assert_not_found(&err);
 
     let err = admission
         .admit(
@@ -461,7 +462,7 @@ async fn admission_deny_matrix_world_character_binding_mismatches() {
         )
         .await
         .expect_err("creator with binding");
-    assert_invalid_input(err);
+    assert_invalid_input(&err);
 
     // Pair classification stays a stable 400 on partial pairs.
     assert!(matches!(
@@ -480,7 +481,7 @@ async fn admission_deny_matrix_world_character_binding_mismatches() {
         )
         .await
         .expect_err("missing world");
-    assert_not_found(err);
+    assert_not_found(&err);
 
     sqlx::query("UPDATE narrative_worlds SET status = 'archived' WHERE world_id = ?")
         .bind(WORLD)
@@ -543,7 +544,7 @@ async fn admission_deny_matrix_world_character_binding_mismatches() {
         )
         .await
         .expect_err("inactive binding");
-    assert_not_found(err);
+    assert_not_found(&err);
     sqlx::query("UPDATE actor_world_bindings SET status = 'active' WHERE binding_id = ?")
         .bind(bid)
         .execute(&pool)
@@ -561,7 +562,7 @@ async fn admission_deny_matrix_world_character_binding_mismatches() {
         )
         .await
         .expect_err("cross-character binding");
-    assert_not_found(err);
+    assert_not_found(&err);
 
     let err = admission
         .admit(
@@ -573,7 +574,7 @@ async fn admission_deny_matrix_world_character_binding_mismatches() {
         )
         .await
         .expect_err("binding targeting foreign world");
-    assert_not_found(err);
+    assert_not_found(&err);
 
     pool.close().await;
 }

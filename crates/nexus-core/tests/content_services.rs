@@ -2,6 +2,7 @@
 //! storage. The named selector `get_body_rejects_escaped_body_path` carries
 //! AC-P1-T2: traversal/symlink paths outside the Work are denied before any
 //! read/write, and a denied published-chapter mutation leaves content intact.
+#![allow(clippy::too_many_lines)] // one end-to-end scenario per test
 
 use std::num::NonZeroU64;
 use std::path::PathBuf;
@@ -56,12 +57,12 @@ struct Fixture {
 }
 
 impl Fixture {
-    fn body_rel(&self, chapter: u32) -> String {
+    fn body_rel(chapter: u32) -> String {
         format!("Works/test-novel/Stories/ch{chapter:02}-ch{chapter:02}.md")
     }
 
     fn write_body(&self, chapter: u32, content: &str) {
-        let path = self.creative_root.join(self.body_rel(chapter));
+        let path = self.creative_root.join(Self::body_rel(chapter));
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, content).unwrap();
     }
@@ -222,7 +223,7 @@ async fn get_body_rejects_escaped_body_path() {
 
     // The same guard denies detail-editability probes for escaped paths.
     sqlx::query("UPDATE work_chapters SET body_path = ?, outline_path = '../creative-evil/outline.md' WHERE work_id = ? AND chapter = 1")
-        .bind(fx.body_rel(1))
+        .bind(Fixture::body_rel(1))
         .bind(&fx.work_id)
         .execute(&fx.pool)
         .await

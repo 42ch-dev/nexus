@@ -150,6 +150,7 @@ pub struct CreateWorkResponse {
     pub work_id: String,
     pub status: String,
 }
+#[allow(clippy::option_option)] // the outer Option is presence, the inner is the wire null
 fn deserialize_nullable<'de, T: Deserialize<'de>, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<Option<T>>, D::Error> {
@@ -395,6 +396,12 @@ pub(crate) fn work_error(error: nexus_core::CoreError) -> NexusApiError {
     }
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn create_work(
     State(state): State<WorkspaceState>,
     Json(req): Json<CreateWorkRequest>,
@@ -433,6 +440,12 @@ pub async fn create_work(
     ))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn list_works(
     State(state): State<WorkspaceState>,
     Query(query): Query<ListWorksQuery>,
@@ -446,6 +459,12 @@ pub async fn list_works(
     Ok(Json(result))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn get_work(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
@@ -459,6 +478,12 @@ pub async fn get_work(
     Ok(Json(result.into()))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn patch_work(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
@@ -505,6 +530,12 @@ pub async fn patch_work(
     Ok(Json(result.into()))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn append_inspiration(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
@@ -527,6 +558,12 @@ pub async fn append_inspiration(
     }))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn set_pool_active(
     State(state): State<WorkspaceState>,
     Json(req): Json<SetPoolActiveRequest>,
@@ -547,6 +584,12 @@ pub async fn set_pool_active(
     Ok(Json(result.into()))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn release_completion_lock_handler(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
@@ -565,6 +608,12 @@ pub async fn release_completion_lock_handler(
     Ok(Json(result.into()))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn delete_work(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
@@ -577,6 +626,12 @@ pub async fn delete_work(
     Ok(StatusCode::NO_CONTENT)
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn reconcile_chapters(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
@@ -612,6 +667,12 @@ pub async fn reconcile_chapters(
     ))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn list_pool(
     State(state): State<WorkspaceState>,
     Query(query): Query<ListPoolQuery>,
@@ -637,6 +698,12 @@ pub async fn list_pool(
     }))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn promote_pool_entry(
     State(state): State<WorkspaceState>,
     Json(req): Json<PromotePoolRequest>,
@@ -656,6 +723,12 @@ pub async fn promote_pool_entry(
     Ok(Json(result.into()))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn archive_pool_entry_handler(
     State(state): State<WorkspaceState>,
     Json(req): Json<ArchivePoolRequest>,
@@ -674,6 +747,12 @@ pub async fn archive_pool_entry_handler(
     Ok(Json(result.into()))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn add_inspiration(
     State(state): State<WorkspaceState>,
     Json(req): Json<AddInspirationRequest>,
@@ -696,6 +775,12 @@ pub async fn add_inspiration(
     ))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn list_inspiration(
     State(state): State<WorkspaceState>,
     Query(query): Query<ListInspirationQuery>,
@@ -721,6 +806,12 @@ pub async fn list_inspiration(
     }))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn promote_inspiration_handler(
     State(state): State<WorkspaceState>,
     Json(req): Json<PromoteInspirationRequest>,
@@ -744,6 +835,12 @@ pub async fn promote_inspiration_handler(
     }))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn archive_inspiration_handler(
     State(state): State<WorkspaceState>,
     Json(req): Json<ArchiveInspirationRequest>,

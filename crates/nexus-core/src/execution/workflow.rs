@@ -9501,6 +9501,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::too_many_lines)] // one linear workflow drive-advance scenario
     /// QC2 F-001 (moved with the code, now expressed against the port): the
     /// durable winner is published to the run's ring, and the ring is CLOSED
     /// only for an authoritative terminal status. `Interrupted` is the

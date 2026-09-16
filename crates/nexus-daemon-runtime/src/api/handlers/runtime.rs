@@ -237,9 +237,11 @@ pub struct ServiceRuntimeIdentity {
 
 static RUNTIME_IDENTITY: OnceLock<ServiceRuntimeIdentity> = OnceLock::new();
 
-/// Install the boot identity. Idempotent: the first caller wins and later
-/// boots in the same process cannot silently rotate identity underneath live
-/// clients. Returns `false` when an identity was already installed.
+/// Install the boot identity.
+///
+/// Idempotent: the first caller wins and later boots in the same process
+/// cannot silently rotate identity underneath live clients. Returns `false`
+/// when an identity was already installed.
 pub fn init_runtime_identity(identity: ServiceRuntimeIdentity) -> bool {
     RUNTIME_IDENTITY.set(identity).is_ok()
 }

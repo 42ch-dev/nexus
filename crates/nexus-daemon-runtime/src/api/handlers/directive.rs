@@ -1,4 +1,5 @@
 //! Moment Directive route — `POST /v1/daemon/moment-directive` (V1.151 P0,
+//!
 //! DF-76). Thin translation over the core Moment Directive family
 //! (v1.190 P2-T3): scope ownership (retained 403), CLI-parity validation,
 //! the set/show/clear semantics with Work-wins / World-override precedence

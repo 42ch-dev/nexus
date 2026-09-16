@@ -15,6 +15,12 @@ use nexus_contracts::{
 use nexus_home_layout::user_preset_bundle_dir;
 use tracing::info;
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn list_presets(
     State(state): State<WorkspaceState>,
 ) -> Result<Json<ListPresetsResponse>, NexusApiError> {
@@ -23,6 +29,12 @@ pub async fn list_presets(
     Ok(Json(core.list_presets(&principal).await?))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn scaffold_preset(
     State(state): State<WorkspaceState>,
     Json(request): Json<ScaffoldPresetRequest>,
@@ -32,6 +44,12 @@ pub async fn scaffold_preset(
     Ok(Json(core.scaffold_preset(&principal, request).await?))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn validate_preset(
     State(state): State<WorkspaceState>,
     Json(request): Json<ValidatePresetRequest>,
@@ -41,6 +59,12 @@ pub async fn validate_preset(
     Ok(Json(core.validate_preset(&principal, request).await?))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn get_preset(
     State(state): State<WorkspaceState>,
     Path(id): Path<String>,
@@ -50,6 +74,12 @@ pub async fn get_preset(
     Ok(Json(core.get_preset(&principal, id).await?))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn update_preset(
     State(state): State<WorkspaceState>,
     Path(id): Path<String>,
@@ -60,6 +90,12 @@ pub async fn update_preset(
     Ok(Json(core.update_preset(&principal, id, request).await?))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn delete_preset(
     State(state): State<WorkspaceState>,
     Path(id): Path<String>,
@@ -70,6 +106,12 @@ pub async fn delete_preset(
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 /// `POST /v1/daemon/presets/:id` — reload preset (T37)
 ///
 /// Routed as `POST /v1/daemon/presets/:id` because matchit 0.7 cannot register

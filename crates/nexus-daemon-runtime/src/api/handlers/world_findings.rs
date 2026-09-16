@@ -9,6 +9,12 @@ use axum::extract::{Path, State};
 use axum::Json;
 use nexus_contracts::daemon_api::WorldFindingsListResponse;
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn list_world_findings(
     State(state): State<WorkspaceState>,
     Path(world_id): Path<String>,

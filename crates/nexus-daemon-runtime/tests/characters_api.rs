@@ -445,7 +445,7 @@ async fn foreign_binding_routes_are_404_and_do_not_mutate() {
 ///
 /// Core is open-scoped: `verify_selected_context` re-reads `config.toml` per
 /// request and refuses when the on-disk selection no longer matches the context
-/// the service was opened against (P2-T0 contract: "CoreService remains
+/// the service was opened against (P2-T0 contract: "`CoreService` remains
 /// workspace-bound; successful identity/workspace change invalidates old
 /// Principal and requires reopen"). The daemon therefore answers `401
 /// auth_required` until it is reopened, rather than serving the previous

@@ -118,7 +118,9 @@ async fn stale_source_hash_cannot_overwrite_strategy() {
 #[tokio::test]
 async fn concurrent_editors_have_one_commit_and_one_conflict() {
     let fixture = setup().await;
-    let (first, second) = tokio::join!(
+    // `tokio::join!` already yields a tuple; collect it directly rather than
+    // re-spelling the two results as an array.
+    let results = tokio::join!(
         fixture.core.patch_strategy_state(
             &fixture.principal,
             "test-strategy".into(),
@@ -132,10 +134,15 @@ async fn concurrent_editors_have_one_commit_and_one_conflict() {
             state_request(1, "Second")
         ),
     );
-    let results = [first, second];
-    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
     assert_eq!(
-        results
+        [&results.0, &results.1]
+            .iter()
+            .filter(|r| r.is_ok())
+            .count(),
+        1
+    );
+    assert_eq!(
+        [&results.0, &results.1]
             .iter()
             .filter(|result| matches!(
                 result,

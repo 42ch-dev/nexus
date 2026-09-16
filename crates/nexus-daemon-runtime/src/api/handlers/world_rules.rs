@@ -12,6 +12,12 @@ use nexus_contracts::daemon_api::worlds::{
     WorldRuleCreateRequest, WorldRuleResponse, WorldRuleUpdateRequest, WorldRulesListResponse,
 };
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn list_world_rules(
     State(state): State<WorkspaceState>,
     Path(world_id): Path<String>,
@@ -24,6 +30,12 @@ pub async fn list_world_rules(
         .map_err(NexusApiError::from)
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn create_world_rule(
     State(state): State<WorkspaceState>,
     Path(world_id): Path<String>,
@@ -38,6 +50,12 @@ pub async fn create_world_rule(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 pub async fn update_world_rule(
     State(state): State<WorkspaceState>,
     Path((world_id, rule_id)): Path<(String, String)>,

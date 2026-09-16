@@ -246,7 +246,8 @@ pub async fn list_workspaces(
         })?;
     }
 
-    let limit = query.limit.unwrap_or(50).clamp(1, MAX_LIMIT as i64) as usize;
+    let max_limit = i64::try_from(MAX_LIMIT).unwrap_or(i64::MAX);
+    let limit = usize::try_from(query.limit.unwrap_or(50).clamp(1, max_limit)).unwrap_or(50);
 
     let home = CoreHomeService::open(user_home_of(&state)?).map_err(NexusApiError::from)?;
     let all_items = if let Some(items) = get_cached_workspaces() {

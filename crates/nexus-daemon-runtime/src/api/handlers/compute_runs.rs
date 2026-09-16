@@ -66,7 +66,7 @@ pub struct DeleteRunsQuery {
 /// # Errors
 /// `ServiceUnavailable` when this daemon was built without a WASM engine or
 /// module cache — the compute lanes cannot run, and saying so is honest.
-async fn compute_context(state: &WorkspaceState) -> Result<ComputeContext, NexusApiError> {
+fn compute_context(state: &WorkspaceState) -> Result<ComputeContext, NexusApiError> {
     let creator_id = crate::config::read_active_creator_id(state.nexus_home())
         .ok_or(NexusApiError::AuthRequired)?;
     let Some(engine) = state.wasm_engine() else {
@@ -97,7 +97,7 @@ pub async fn run(
     Json(request): Json<RunRequest>,
 ) -> Result<Json<RunResponse>, NexusApiError> {
     let core = state.core_or_uninit().await?;
-    let context = compute_context(&state).await?;
+    let context = compute_context(&state)?;
     nexus_core::execution::compute::compute_run(&core, &context, request)
         .await
         .map(Json)

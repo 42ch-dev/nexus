@@ -399,7 +399,7 @@ where
 }
 
 /// A prompt executor that parks the drive INSIDE an LLM step until the test
-/// releases it. Holds close()'s drain deterministically: `abort_all_drives`
+/// releases it. Holds `close()`'s drain deterministically: `abort_all_drives`
 /// cannot finish while the executor is parked, so the "closing" window is
 /// observable.
 #[derive(Clone)]
@@ -438,14 +438,14 @@ impl PromptExecutor for GatedPromptExecutor {
         // Hold past the drive-loop cancellation deliberately: the drain must
         // remain in flight until the TEST releases it, so the mid-close
         // registry fence is observable.
-        let _ = self.release.notified().await;
+        let () = self.release.notified().await;
         let _ = request;
         Err(CapabilityError::Internal("test: released".into()))
     }
 }
 
 /// C1: while close is draining (closing, not yet settled), the per-DB
-/// registry must hold the fence — a competing EngineOwner is refused and
+/// registry must hold the fence — a competing `EngineOwner` is refused and
 /// cannot build a second engine. Only AFTER the drives join is the slot
 /// released and a replacement admitted.
 #[tokio::test]
@@ -504,7 +504,7 @@ async fn draining_close_holds_the_db_fence_until_drives_join() {
     owner_a.close().await.unwrap();
 }
 
-/// C1 (mid-drain window): while close is draining, a competing EngineOwner
+/// C1 (mid-drain window): while close is draining, a competing `EngineOwner`
 /// must be REFUSED — the fence is held until settle, never merely until
 /// close starts.
 #[tokio::test]
@@ -649,7 +649,7 @@ impl ExecutionBuildObserver for BuildGate {
         // Signal entry (Notify stores the permit if the waiter is not
         // registered yet), then hold the build open until the test releases.
         self.entered.notify_one();
-        let _ = self.release.notified().await;
+        let () = self.release.notified().await;
     }
 }
 

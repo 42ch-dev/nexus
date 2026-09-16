@@ -11,6 +11,12 @@ use nexus_contracts::daemon_api::kb::{
     PackExportRequest, PackExportResponse, PackImportRequest, PackImportResponse,
 };
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 /// Export an owned World's lore; the response remains the handbook pack.
 pub async fn pack_export(
     State(state): State<WorkspaceState>,
@@ -25,6 +31,12 @@ pub async fn pack_export(
         .map_err(NexusApiError::from)
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 /// Import a pack; pack-level source anchors remain an accepted no-op.
 pub async fn pack_import(
     State(state): State<WorkspaceState>,

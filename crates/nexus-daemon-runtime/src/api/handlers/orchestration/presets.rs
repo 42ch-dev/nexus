@@ -6,6 +6,12 @@ use axum::{extract::Path, extract::State, http::StatusCode, Json};
 use nexus_contracts::local::orchestration::http::ReloadPresetResponse;
 use nexus_contracts::{OrchestrationPresetListResponse, PresetProfileResponse};
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 /// `GET /v1/daemon/orchestration/presets`
 ///
 /// Returns all available embedded preset IDs plus system presets discovered

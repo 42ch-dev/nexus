@@ -3216,6 +3216,7 @@ pub const NAMED_PLACEHOLDER_INPUT: &str =
 /// being added without a schema. Test-only: the catalog route reads
 /// `NAMED_PLACEHOLDER_INPUT`, never this ledger.
 #[cfg(test)]
+#[allow(dead_code)] // lockstep pin: catalog rows with unauthored schemas must be recorded here
 pub(crate) const SCHEMA_REMAINDER_LEDGER: &[&str] = &[];
 
 // ─── Registry ──────────────────────────────────────────────────────────────

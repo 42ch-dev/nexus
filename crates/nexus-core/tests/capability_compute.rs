@@ -24,7 +24,7 @@ use nexus_contracts::generated::daemon_api::compute::{
 use nexus_core::execution::capabilities::{ToolContext, ToolExecuteRequest, ToolRuntimeFacts};
 use nexus_core::execution::compute::ComputeContext;
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService};
-use nexus_wasm_host::{CachedModule, ModuleCache, ModuleManifest, WasmEngine};
+use nexus_wasm_host::{ModuleCache, WasmEngine};
 use serde_json::json;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -35,7 +35,7 @@ const WORLD: &str = "wld_combat";
 const MODULE: &str = "basic-combat";
 
 struct Fixture {
-    _tmp: TempDir,
+    tmp: TempDir,
     /// The engine-owner core the family APIs are driven through.
     core: CoreService,
     /// A tool context over the same pool for the capability entry points.
@@ -123,7 +123,7 @@ async fn fixture() -> Fixture {
     };
 
     Fixture {
-        _tmp: tmp,
+        tmp,
         core,
         context,
         compute,
@@ -223,7 +223,7 @@ async fn run_succeeded(f: &Fixture, context: &ComputeContext) -> String {
         .expect("compute run succeeds");
     // The generated status enum carries Display but not PartialEq.
     assert_eq!(response.status.to_string(), "succeeded");
-    response.run_id.to_string()
+    response.run_id
 }
 
 /// Deterministic provider that never performs an effect.
@@ -377,7 +377,7 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
     // already `<home>/.nexus42/capabilities`), so the bundle is written
     // directly under it — an extra `capabilities/` level makes the scanner
     // look for `<root>/<name>/capability.json` and find nothing.
-    let scan_root = f._tmp.path().join("usercaps");
+    let scan_root = f.tmp.path().join("usercaps");
     let dir = scan_root.join("t3.requires.thing");
     std::fs::create_dir_all(&dir).unwrap();
     let wasm = b"fake module bytes";
@@ -518,7 +518,7 @@ async fn execute_tool_refuses_a_principal_from_another_core() {
         .start_execution(
             Arc::new(NullProvider) as Arc<dyn nexus_provider_ports::ProviderPort>,
             nexus_core::execution::RunnerDeps {
-                nexus_home: Some(f._tmp.path().join(".nexus42")),
+                nexus_home: Some(f.tmp.path().join(".nexus42")),
                 ..nexus_core::execution::RunnerDeps::default()
             },
         )
@@ -527,7 +527,7 @@ async fn execute_tool_refuses_a_principal_from_another_core() {
 
     // A SECOND core over a DIFFERENT creator: its principal is well-formed but
     // was minted by another service, so this handle must not accept it.
-    let other_home = f._tmp.path().join("other");
+    let other_home = f.tmp.path().join("other");
     let other_nexus = other_home.join(".nexus42");
     std::fs::create_dir_all(&other_nexus).unwrap();
     std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
@@ -594,7 +594,7 @@ async fn execute_tool_accepts_the_owners_own_principal() {
         .start_execution(
             Arc::new(NullProvider) as Arc<dyn nexus_provider_ports::ProviderPort>,
             nexus_core::execution::RunnerDeps {
-                nexus_home: Some(f._tmp.path().join(".nexus42")),
+                nexus_home: Some(f.tmp.path().join(".nexus42")),
                 ..nexus_core::execution::RunnerDeps::default()
             },
         )
@@ -619,7 +619,7 @@ async fn execute_tool_accepts_the_owners_own_principal() {
 /// C2: `nexus.research.query` is creator-scoped.
 ///
 /// Both the direct-id lookup and the list must be scoped, and a foreign row
-/// must be indistinguishable from a missing one (NotFound, never Forbidden —
+/// must be indistinguishable from a missing one (`NotFound`, never Forbidden —
 /// a 403 would confirm the row exists).
 #[tokio::test]
 #[serial_test::serial]
@@ -694,7 +694,7 @@ async fn reference_refresh_is_refused_under_a_read_only_policy() {
     // consults `nexus.*.read` and grants, while the write predicate consults
     // only the tool name and `nexus.*` and refuses. Under `default = "deny"`
     // BOTH would refuse, so this test could not tell the fix from the bug.
-    let workspace_dir = f._tmp.path().join("policy-ws");
+    let workspace_dir = f.tmp.path().join("policy-ws");
     std::fs::create_dir_all(workspace_dir.join(".nexus42")).unwrap();
     std::fs::write(
         workspace_dir.join(".nexus42").join("permissions.toml"),

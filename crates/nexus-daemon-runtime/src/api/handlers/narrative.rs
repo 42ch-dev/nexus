@@ -138,10 +138,10 @@ pub async fn delete_world(
             nexus_core::CoreError::Forbidden { resource }
                 if resource == nexus_core::DELETE_WORLD_BLOCKED_BY_BINDINGS =>
             {
-                let code = nexus_local_db::ActorContractConflict::WorldHasActorBindings;
+                let conflict = nexus_local_db::ActorContractConflict::WorldHasActorBindings;
                 NexusApiError::ConflictCoded {
-                    code: code.as_str().to_string(),
-                    message: code.message().to_string(),
+                    code: conflict.as_str().to_string(),
+                    message: conflict.message().to_string(),
                 }
             }
             other => NexusApiError::from(other),

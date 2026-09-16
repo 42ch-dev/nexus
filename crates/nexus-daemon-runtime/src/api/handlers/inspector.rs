@@ -1,4 +1,5 @@
 //! Inspector handlers — Daemon HTTP surface for the enriched MCA assembly
+//!
 //! inspector packet (V1.151 P0, DF-76). Thin translation over the core
 //! inspector assembly (v1.190 P2-T3): world ownership (retained 403), the
 //! work→world binding check (400, QC2-S-001), CLI-parity `MomentRequest`

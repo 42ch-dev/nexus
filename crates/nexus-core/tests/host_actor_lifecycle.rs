@@ -136,7 +136,7 @@ impl ProviderPort for CountingPort {
     async fn call(&self, request: ProviderCall) -> ProviderResult<ProviderReply> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(ProviderReply {
-            request_id: request.request_id.clone(),
+            request_id: request.request_id,
             ok: true,
             session_id: Some("sess-counting".to_string()),
             operation_id: Some("op-counting".to_string()),
@@ -291,7 +291,8 @@ async fn stale_actor_and_journal_failure_never_redispatch() {
         .insert_indexed_entry(key2, ctx2, nexus_agent_host::HostSessionId(sid2));
     // Retire the id so the close drain attempts a Host shutdown the Host
     // cannot confirm.
-    h2.actor_sessions()
+    let _retired = h2
+        .actor_sessions()
         .retire_character_sessions(&env.character_id);
     let report = h2.close().await.expect("close returns a report");
     assert!(
@@ -306,7 +307,7 @@ async fn stale_actor_and_journal_failure_never_redispatch() {
 }
 
 /// C1: a principal minted against a different creator/workspace is denied on
-/// every HostHandle method, and a mid-session selection drift is denied by
+/// every `HostHandle` method, and a mid-session selection drift is denied by
 /// the disk re-read — with zero observable Host effect.
 #[tokio::test]
 async fn host_authority_admits_only_verified_principals() {
@@ -407,12 +408,12 @@ async fn host_authority_admits_only_verified_principals() {
         .await
         .unwrap();
     assert!(
-        list.sessions.map(|s| s.items.is_empty()).unwrap_or(true),
+        list.sessions.is_none_or(|s| s.items.is_empty()),
         "denied admissions created no Host session"
     );
 }
 
-/// C2: the established-owner slot admits exactly one open_host per open
+/// C2: the established-owner slot admits exactly one `open_host` per open
 /// service; a second start is a typed busy rejection, and a confirmed close
 /// frees the slot.
 #[tokio::test]
@@ -435,7 +436,7 @@ async fn second_open_host_is_typed_rejected_until_confirmed_close() {
 }
 
 /// I3: a status write never re-attributes the operation — the stored
-/// session_id/provider_id are write-once at the first insert.
+/// `session_id/provider_id` are write-once at the first insert.
 #[tokio::test]
 async fn journal_status_update_preserves_stored_identity() {
     let env = seed_env().await;

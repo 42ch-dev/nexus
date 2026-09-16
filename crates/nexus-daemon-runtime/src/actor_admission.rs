@@ -22,7 +22,6 @@ pub struct ActorAdmissionService {
 
 impl ActorAdmissionService {
     /// Bind admission to a workspace pool.
-    #[must_use]
     pub fn new(pool: SqlitePool) -> Self {
         Self {
             admission: nexus_core::CoreActorAdmission::new(pool),

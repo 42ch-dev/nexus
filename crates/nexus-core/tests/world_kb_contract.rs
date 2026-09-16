@@ -613,6 +613,7 @@ fn journal_write(
     }
 }
 
+#[allow(clippy::too_many_lines)] // one end-to-end KB contract scenario
 /// Provider journal contract (LIFE-3): owned write/read/settle seam on the
 /// service — monotonic sequences, settlement that never downgrades a terminal
 /// row, and read-only access that may read but never write the journal.

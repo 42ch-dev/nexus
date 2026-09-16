@@ -1,5 +1,6 @@
 //! P0-T2 service-layer migration of the retained cross-world skip/reimport
 //! regression. Also proves dry-run and the transitional bridge's admission.
+#![allow(clippy::too_many_lines)] // one end-to-end scenario per test
 
 use nexus_contracts::daemon_api::kb::{PackExportRequest, PackImportRequest};
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};

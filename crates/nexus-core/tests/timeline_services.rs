@@ -258,6 +258,7 @@ async fn cursor_pagination() {
     f.pool.close().await;
 }
 
+#[allow(clippy::too_many_lines)] // one end-to-end timeline scenario
 /// Cursor pages preserve the `status` / `event_type` filters: each page is a
 /// filtered keyset continuation, never a re-scan of unfiltered rows.
 #[tokio::test]

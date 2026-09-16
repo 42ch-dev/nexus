@@ -9,6 +9,12 @@ use nexus_contracts::{
     StrategyPatchTransitionRequest,
 };
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 /// Patch a state, retaining the Strategy response envelope.
 pub async fn patch_state(
     State(state): State<WorkspaceState>,
@@ -23,6 +29,12 @@ pub async fn patch_state(
     Ok(Json(super::wire_cast(response)))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 /// Patch a transition, retaining the Strategy response envelope.
 pub async fn patch_transition(
     State(state): State<WorkspaceState>,
@@ -37,6 +49,12 @@ pub async fn patch_transition(
     Ok(Json(super::wire_cast(response)))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 /// Patch prompt bytes, retaining the Strategy response envelope.
 pub async fn patch_prompt_template(
     State(state): State<WorkspaceState>,

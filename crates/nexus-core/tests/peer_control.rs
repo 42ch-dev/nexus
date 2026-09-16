@@ -101,10 +101,10 @@ async fn visible_peer_tool_still_requires_authorization() {
     // Admission: the peer tool enters the dispatchable surface.
     // The operator allowlist is default-deny: admitting the anchor tool
     // requires naming it (the AR-68 #2(iii) contract).
-    let allowlist: std::collections::HashSet<String> = [TOOL.to_string()].into_iter().collect();
+    let allowlist: std::collections::HashSet<String> = std::iter::once(TOOL.to_string()).collect();
     // The hello-negotiated capabilities must carry the id (Layer-1 refusal
     // `not_negotiated` otherwise).
-    let negotiated: std::collections::HashSet<String> = [TOOL.to_string()].into_iter().collect();
+    let negotiated: std::collections::HashSet<String> = std::iter::once(TOOL.to_string()).collect();
     let outcome = registry.admit_and_register(
         PEER,
         &manifest_with_tools(&[TOOL]),

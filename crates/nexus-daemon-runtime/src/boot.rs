@@ -822,10 +822,10 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             None
         };
 
-    let concrete_engine: Arc<GraphFlowEngine> = match &execution_handle {
-        Some(handle) => handle.engine_concrete(),
-        None => tier0_engine.expect("Tier-0 boot wired an in-memory GraphFlowEngine"),
-    };
+    let concrete_engine: Arc<GraphFlowEngine> = execution_handle.as_ref().map_or_else(
+        || tier0_engine.expect("Tier-0 boot wired an in-memory GraphFlowEngine"),
+        |handle| handle.engine_concrete(),
+    );
     let engine: Arc<dyn OrchestrationEngine> = concrete_engine.clone();
 
     if execution_handle.is_some() {

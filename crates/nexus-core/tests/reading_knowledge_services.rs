@@ -4,6 +4,7 @@
 //! trip and the null-note boundary) onto the core service and protects the
 //! scope/isolation, cursor-pagination and explicit nullable-update invariants
 //! through the extraction.
+#![allow(clippy::too_many_lines)] // one end-to-end scenario per test
 use nexus_contracts::daemon_api::kb::ListKbEntriesQuery;
 use nexus_contracts::daemon_api::reading::{
     ReadingAnnotationCreateRequest, ReadingAnnotationListQuery, ReadingAnnotationPatchRequest,
@@ -346,6 +347,7 @@ async fn findings_list_pagination_and_filter_parity() {
 /// `updated: 0` contract, partial-success buckets (`not_found` / conflict) and
 /// the lifecycle transition rules on the single PATCH path.
 #[tokio::test]
+#[allow(clippy::default_trait_access)] // the DTO has no inherent default ctor
 async fn findings_update_and_batch_triage_semantics() {
     let temp = tempfile::tempdir().unwrap();
     let (core, principal, work_id) = core_with_work(temp.path()).await;

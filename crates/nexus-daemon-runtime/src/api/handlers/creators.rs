@@ -142,6 +142,12 @@ fn creator_info_from_core(
 
 // ── Handlers ────────────────────────────────────────────────────────
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 /// GET /v1/daemon/creators
 pub async fn list(
     State(state): State<WorkspaceState>,
@@ -175,6 +181,12 @@ pub async fn list(
     }))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 /// `POST /v1/daemon/creators` — create a new local creator profile (V1.129 P0).
 ///
 /// Generates a `ctr_local…` id (matching the `CreatorId` pattern), validates the
@@ -200,6 +212,12 @@ pub async fn create_creator(
     Ok((StatusCode::CREATED, Json(creator_detail_from_core(detail))))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 /// `GET /v1/daemon/creators/{creator_id}` — creator status/detail
 pub async fn get_creator(
     State(state): State<WorkspaceState>,
@@ -214,6 +232,12 @@ pub async fn get_creator(
     Ok(Json(creator_detail_from_core(detail)))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 /// `PATCH /v1/daemon/creators/{creator_id}` — update creator display name.
 ///
 /// Updates the creator's display name in the identity cache and the workspace
@@ -234,6 +258,12 @@ pub async fn patch_creator(
     Ok(Json(creator_detail_from_core(detail)))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 /// `PUT /v1/daemon/creators/active` — set active creator
 pub async fn set_active_creator(
     State(state): State<WorkspaceState>,
@@ -263,6 +293,12 @@ pub async fn set_active_creator(
     }))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 /// `GET /v1/daemon/creators/active` — get active creator
 pub async fn get_active_creator(
     State(state): State<WorkspaceState>,
@@ -276,6 +312,12 @@ pub async fn get_active_creator(
     }))
 }
 
+///
+/// # Errors
+///
+/// Returns [`NexusApiError`] when the creator/workspace guard rejects the
+/// request, the core authority denies it (ownership, admission or validation),
+/// or the bounded store read/write fails.
 /// `POST /v1/daemon/creators/{id}:logout` — clear credentials.
 ///
 /// Routed as `POST /v1/daemon/creators/:creator_id` because matchit 0.7 cannot

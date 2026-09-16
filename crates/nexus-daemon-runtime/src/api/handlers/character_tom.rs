@@ -1,4 +1,5 @@
 //! Character `ToM` HTTP handlers (v1.184 P4 Task 2) — thin translation over
+//!
 //! the core Character `ToM` carrier family (v1.190 P2-T2). The bounded
 //! carrier probes, atomic CAS + derivative `MindState` and keyset pagination
 //! live in [`nexus_core`]; the handlers keep only auth resolution, wire

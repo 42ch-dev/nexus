@@ -12,6 +12,7 @@ use nexus_core::{CoreAccess, CoreError, CoreHomeService, CoreOpenOptions, CoreSe
 use sqlx::Row;
 use tempfile::TempDir;
 
+#[allow(clippy::unused_async)] // the test helper mirrors the async service signature
 async fn home() -> (TempDir, CoreHomeService) {
     let tmp = tempfile::tempdir().unwrap();
     let svc = CoreHomeService::open(tmp.path().to_path_buf()).expect("open home");
@@ -273,6 +274,7 @@ async fn stale_old_selection_cannot_mutate() {
     core.close().await.expect("close");
 }
 
+#[allow(clippy::too_many_lines)] // one end-to-end home-service scenario
 #[tokio::test]
 async fn outbox_status_and_resolve_operate_on_the_workspace_outbox() {
     let (tmp, svc) = home().await;

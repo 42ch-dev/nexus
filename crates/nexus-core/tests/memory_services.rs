@@ -5,6 +5,7 @@
 //! (ported from the daemon dual-arm semantic suite), and the SOUL reflect
 //! state machine follows the fragment gate and the per-bearer cache without
 //! ever synthesizing in the background.
+#![allow(clippy::too_many_lines)] // one end-to-end scenario per test
 
 use nexus_contracts::daemon_api::characters::memory::review_character_memory_request::ReviewCharacterMemoryRequest;
 use nexus_contracts::daemon_api::memory::review_request::ReviewRequest;

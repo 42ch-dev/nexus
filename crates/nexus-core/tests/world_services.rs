@@ -3,6 +3,7 @@
 //! change sequence untouched, successful canonical mutations are visible to a
 //! second guarded reader, and the World lifecycle keeps its create/delete
 //! contracts.
+#![allow(clippy::too_many_lines)] // one end-to-end scenario per test
 
 use nexus_contracts::{
     CreateWorldRequest, WorldKbPatchRelationshipRequest, WorldKbPromoteCandidateRequest,
@@ -43,6 +44,7 @@ async fn seed_world(pool: &SqlitePool, world_id: &str, owner: &str) {
     .unwrap();
 }
 
+#[allow(clippy::too_many_arguments)] // the fixture seeds every column in one call
 async fn seed_kb(
     pool: &SqlitePool,
     id: &str,

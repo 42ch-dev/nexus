@@ -59,9 +59,11 @@ pub async fn resolve_guarded_path_async(
 }
 
 /// Resolve a relative path under the workspace root and enforce the
-/// W-002-style path guard (see [`nexus_core::resolve_guarded_path`] for the
-/// canonical semantics: canonicalize + component-wise containment, with a
-/// creatable walk-up probe on write paths).
+/// W-002-style path guard.
+///
+/// See [`nexus_core::resolve_guarded_path`] for the canonical semantics:
+/// canonicalize + component-wise containment, with a creatable walk-up probe
+/// on write paths.
 ///
 /// # Errors
 ///
