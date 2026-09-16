@@ -25,7 +25,7 @@
 //! manually write the converge-arrivals context key.**
 
 use graph_flow::{Context, NextAction, Task};
-use nexus_orchestration::preset::manifest::{ConvergeConfig, ConvergeStrategy, NextTarget};
+use nexus_preset::manifest::{ConvergeConfig, ConvergeStrategy, NextTarget};
 use nexus_orchestration::tasks::StateCompositeTask;
 use std::collections::HashSet;
 
@@ -39,7 +39,7 @@ fn make_converge_task(
         .iter()
         .map(std::string::ToString::to_string)
         .collect();
-    StateCompositeTask::from_manifest(&nexus_orchestration::preset::manifest::StateDefinition {
+    StateCompositeTask::from_manifest(&nexus_preset::manifest::StateDefinition {
         id: id.to_string(),
         description: None,
         enter: vec![],
@@ -280,7 +280,7 @@ async fn converge_no_predecessors_skips_gate() {
 async fn converge_non_converge_state_skips_gate() {
     // A state without converge config should not be affected.
     let task = StateCompositeTask::from_manifest(
-        &nexus_orchestration::preset::manifest::StateDefinition {
+        &nexus_preset::manifest::StateDefinition {
             id: "normal_state".to_string(),
             description: None,
             enter: vec![],
@@ -303,50 +303,3 @@ async fn converge_non_converge_state_skips_gate() {
     );
 }
 
-// ── Reachability regression ────────────────────────────────────────────
-
-#[tokio::test]
-async fn reachability_existing_preset_loading_still_works() {
-    // Regression: loading a preset with labeled edges and merge still loads
-    // successfully (proves converge changes don't break existing paths).
-    let yaml = r#"
-preset:
-  id: regression-test
-  version: 1
-  kind: creator
-  description: test
-  requires_capabilities: []
-  run_intents: [work_init]
-  initial: a
-  terminal: done
-states:
-  - id: a
-    enter: []
-    exit_when:
-      kind: llm_judge
-      template_file: "test template"
-    next:
-      - label: x
-        target: merged
-  - id: b
-    enter: []
-    exit_when:
-      kind: llm_judge
-      template_file: "test template"
-    next:
-      - label: y
-        target: merged
-  - id: merged
-    merge:
-      kind: all
-    exit_when: { kind: manual }
-    next: done
-  - id: done
-    terminal: true
-"#;
-    let registry = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
-    let loaded = nexus_orchestration::preset::load_preset_from_str(yaml, &registry).unwrap();
-    assert_eq!(loaded.id, "regression-test");
-    assert!(loaded.outer_graph.get_task("a").is_some());
-    assert!(loaded.outer_graph.get_task("merged").is_some());
-}

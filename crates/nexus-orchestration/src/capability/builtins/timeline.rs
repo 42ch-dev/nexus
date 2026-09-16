@@ -68,116 +68,108 @@ impl Default for TimelineEventAppend {
 }
 
 #[async_trait]
-impl Capability for TimelineEventAppend {
-    fn name(&self) -> &'static str {
-        "nexus.timeline.event.append"
+impl Capability for TimelineEventAppend { fn name(&self) -> &'static str {
+    "nexus.timeline.event.append"
+} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::NEXUS_TIMELINE_EVENT_APPEND_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
+    r#"{"type":"object","properties":{"event_id":{"type":"string"},"sequence_no":{"type":"integer","minimum":0},"status":{"type":"string","enum":["provisional"]},"created_at":{"type":"string","format":"date-time"}},"required":["event_id","sequence_no","status","created_at"],"additionalProperties":false}"#
+}
+
+async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+    let parsed: TimelineEventAppendInput = serde_json::from_value(input).map_err(|e| {
+        CapabilityError::InputInvalid(format!("timeline.event.append input: {e}"))
+    })?;
+
+    let pool = self
+        .pool
+        .as_ref()
+        .ok_or(CapabilityError::WorkerUnavailable)?;
+
+    tracing::info!(
+        world_id = %parsed.world_id,
+        branch_id = %parsed.branch_id,
+        event_type = %parsed.event_type,
+        "timeline.event.append admitted"
+    );
+
+    // Admission gate: creator must own the world.
+    ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
+
+    // Atomic append + optional explicit-id rename.
+    // V1.67 P2 (R-V160P0-QC2-W002): wrap append and rename in one
+    // transaction so a rename failure cannot leave the event under the
+    // auto-allocated id.
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| CapabilityError::Internal(format!("begin tx: {e}")))?;
+
+    // Canon immutability: if the caller supplied an explicit event_id, reject
+    // if it already exists (no silent rewrite). The check runs inside the
+    // same transaction as the append so the collision guard is consistent
+    // with the insert.
+    if let Some(ref explicit_id) = parsed.event_id {
+        // SAFETY: EXISTS check against known narrative_timeline_events schema.
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM narrative_timeline_events WHERE timeline_event_id = ?)",
+        )
+        .bind(explicit_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| CapabilityError::Internal(format!("event_id collision check: {e}")))?;
+        if exists != 0 {
+            return Err(CapabilityError::InputInvalid(format!(
+                "event_id collision: '{explicit_id}' already exists; canon history is immutable"
+            )));
+        }
     }
 
-    fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"world_id":{"type":"string"},"creator_id":{"type":"string"},"branch_id":{"type":"string"},"event_type":{"type":"string"},"title":{"type":"string"},"summary":{"type":"string"},"event_id":{"type":"string"}},"required":["world_id","creator_id","branch_id","event_type"],"additionalProperties":false}"#
-    }
+    let result = nexus_local_db::narrative_write::append_event_in_tx(
+        &mut tx,
+        &parsed.world_id,
+        &parsed.branch_id,
+        &parsed.event_type,
+        parsed.title.as_deref(),
+        parsed.summary.as_deref(),
+    )
+    .await
+    .map_err(|e| match e {
+        nexus_local_db::narrative_write::NarrativeWriteError::SequenceConflict { .. } => {
+            CapabilityError::InputInvalid(format!("sequence conflict: {e}"))
+        }
+        other => CapabilityError::Internal(format!("append_event: {other}")),
+    })?;
 
-    fn output_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"event_id":{"type":"string"},"sequence_no":{"type":"integer","minimum":0},"status":{"type":"string","enum":["provisional"]},"created_at":{"type":"string","format":"date-time"}},"required":["event_id","sequence_no","status","created_at"],"additionalProperties":false}"#
-    }
-
-    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let parsed: TimelineEventAppendInput = serde_json::from_value(input).map_err(|e| {
-            CapabilityError::InputInvalid(format!("timeline.event.append input: {e}"))
-        })?;
-
-        let pool = self
-            .pool
-            .as_ref()
-            .ok_or(CapabilityError::WorkerUnavailable)?;
-
-        tracing::info!(
-            world_id = %parsed.world_id,
-            branch_id = %parsed.branch_id,
-            event_type = %parsed.event_type,
-            "timeline.event.append admitted"
-        );
-
-        // Admission gate: creator must own the world.
-        ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
-
-        // Atomic append + optional explicit-id rename.
-        // V1.67 P2 (R-V160P0-QC2-W002): wrap append and rename in one
-        // transaction so a rename failure cannot leave the event under the
-        // auto-allocated id.
-        let mut tx = pool
-            .begin()
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("begin tx: {e}")))?;
-
-        // Canon immutability: if the caller supplied an explicit event_id, reject
-        // if it already exists (no silent rewrite). The check runs inside the
-        // same transaction as the append so the collision guard is consistent
-        // with the insert.
-        if let Some(ref explicit_id) = parsed.event_id {
-            // SAFETY: EXISTS check against known narrative_timeline_events schema.
-            let exists: i64 = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM narrative_timeline_events WHERE timeline_event_id = ?)",
+    // If the caller supplied an explicit id, rename the allocated event to it
+    // (the collision was already rejected above, so this is safe).
+    let final_id = if let Some(ref explicit_id) = parsed.event_id {
+        if explicit_id != &result.event_id {
+            // SAFETY: id rename against known narrative_timeline_events schema.
+            sqlx::query(
+                "UPDATE narrative_timeline_events SET timeline_event_id = ? \
+                 WHERE timeline_event_id = ?",
             )
             .bind(explicit_id)
-            .fetch_one(&mut *tx)
+            .bind(&result.event_id)
+            .execute(&mut *tx)
             .await
-            .map_err(|e| CapabilityError::Internal(format!("event_id collision check: {e}")))?;
-            if exists != 0 {
-                return Err(CapabilityError::InputInvalid(format!(
-                    "event_id collision: '{explicit_id}' already exists; canon history is immutable"
-                )));
-            }
+            .map_err(|e| CapabilityError::Internal(format!("event_id rename: {e}")))?;
         }
+        explicit_id.clone()
+    } else {
+        result.event_id
+    };
 
-        let result = nexus_local_db::narrative_write::append_event_in_tx(
-            &mut tx,
-            &parsed.world_id,
-            &parsed.branch_id,
-            &parsed.event_type,
-            parsed.title.as_deref(),
-            parsed.summary.as_deref(),
-        )
+    tx.commit()
         .await
-        .map_err(|e| match e {
-            nexus_local_db::narrative_write::NarrativeWriteError::SequenceConflict { .. } => {
-                CapabilityError::InputInvalid(format!("sequence conflict: {e}"))
-            }
-            other => CapabilityError::Internal(format!("append_event: {other}")),
-        })?;
+        .map_err(|e| CapabilityError::TransientExternal(format!("commit: {e}")))?;
 
-        // If the caller supplied an explicit id, rename the allocated event to it
-        // (the collision was already rejected above, so this is safe).
-        let final_id = if let Some(ref explicit_id) = parsed.event_id {
-            if explicit_id != &result.event_id {
-                // SAFETY: id rename against known narrative_timeline_events schema.
-                sqlx::query(
-                    "UPDATE narrative_timeline_events SET timeline_event_id = ? \
-                     WHERE timeline_event_id = ?",
-                )
-                .bind(explicit_id)
-                .bind(&result.event_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| CapabilityError::Internal(format!("event_id rename: {e}")))?;
-            }
-            explicit_id.clone()
-        } else {
-            result.event_id
-        };
-
-        tx.commit()
-            .await
-            .map_err(|e| CapabilityError::TransientExternal(format!("commit: {e}")))?;
-
-        Ok(json!({
-            "event_id": final_id,
-            "sequence_no": result.sequence_no,
-            "status": "provisional",
-            "created_at": result.created_at,
-        }))
-    }
-}
+    Ok(json!({
+        "event_id": final_id,
+        "sequence_no": result.sequence_no,
+        "status": "provisional",
+        "created_at": result.created_at,
+    }))
+} }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
 

@@ -3331,7 +3331,7 @@ mod tests {
             workspace_root: std::path::PathBuf::from("/ws"),
             preset_id: "preset_t".to_string(),
             preset_version: 7,
-            source: crate::run_state::PresetSourceIdentity::Embedded {
+            source: nexus_preset::source_identity::PresetSourceIdentity::Embedded {
                 preset_id: "preset_t".to_string(),
                 content_hash: [7u8; 32],
             },

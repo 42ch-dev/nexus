@@ -16,8 +16,8 @@
 //! - tracing spans at each refresh attempt; metrics counters for
 //!   total/success/failure.
 //!
-//! This mirrors the [`crate::stale_findings_watcher`] and
-//! [`crate::cron_supervisor`] spawn patterns.
+//! This mirrors the [`super::stale_findings`] and
+//! [`super::cron`] spawn patterns.
 
 use std::sync::Arc;
 use std::time::Duration;

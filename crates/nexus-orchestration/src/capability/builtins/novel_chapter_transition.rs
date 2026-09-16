@@ -104,81 +104,72 @@ impl Default for NovelChapterTransition {
     }
 }
 
-const INPUT_SCHEMA: &str = r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer","minimum":1},"from_status":{"type":"string"},"to_status":{"type":"string"},"actual_word_count":{"type":"integer","minimum":0},"force":{"type":"boolean","default":false},"reason":{"type":"string"},"workspace_root":{"type":"string"},"work_ref":{"type":"string"},"body_path":{"type":"string"}},"required":["work_id","chapter","from_status","to_status"],"additionalProperties":false}"#;
 
 const OUTPUT_SCHEMA: &str = r#"{"type":"object","properties":{"from_status":{"type":"string"},"to_status":{"type":"string"},"forced":{"type":"boolean"},"actual_word_count":{"type":["integer","null"],"minimum":0}},"required":["from_status","to_status","forced"],"additionalProperties":false}"#;
 
 #[async_trait]
-impl Capability for NovelChapterTransition {
-    fn name(&self) -> &'static str {
-        "novel.chapter_transition"
-    }
+impl Capability for NovelChapterTransition { fn name(&self) -> &'static str {
+    "novel.chapter_transition"
+} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::NOVEL_CHAPTER_TRANSITION_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
+    OUTPUT_SCHEMA
+}
 
-    fn input_schema(&self) -> &'static str {
-        INPUT_SCHEMA
-    }
+async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+    let inp: TransitionInput = serde_json::from_value(input).map_err(|e| {
+        CapabilityError::InputInvalid(format!("novel.chapter_transition input: {e}"))
+    })?;
 
-    fn output_schema(&self) -> &'static str {
-        OUTPUT_SCHEMA
-    }
+    let forced = inp.force;
 
-    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let inp: TransitionInput = serde_json::from_value(input).map_err(|e| {
-            CapabilityError::InputInvalid(format!("novel.chapter_transition input: {e}"))
-        })?;
-
-        let forced = inp.force;
-
-        // Audit log for force overrides
-        if forced {
-            let reason = inp.reason.as_deref().unwrap_or("<no reason>");
-            warn!(
-                work_id = %inp.work_id,
-                chapter = inp.chapter,
-                reason = %reason,
-                "forced_finalize_on_nogo"
-            );
-        }
-
-        // If pool is available, update DB row
-        if let Some(pool) = &self.pool {
-            self.transition_db(pool, &inp).await?;
-        }
-
-        // If workspace_root + work_ref + body_path available, update frontmatter
-        if let (Some(ws_root), Some(_work_ref), Some(body_path)) =
-            (&inp.workspace_root, &inp.work_ref, &inp.body_path)
-        {
-            let full_path = PathBuf::from(ws_root).join(body_path);
-            if full_path.exists() {
-                Self::update_frontmatter_status(&full_path, &inp.to_status)?;
-            } else {
-                info!(
-                    path = %full_path.display(),
-                    "chapter body file not found; skipping frontmatter update"
-                );
-            }
-        }
-
-        info!(
+    // Audit log for force overrides
+    if forced {
+        let reason = inp.reason.as_deref().unwrap_or("<no reason>");
+        warn!(
             work_id = %inp.work_id,
             chapter = inp.chapter,
-            from = %inp.from_status,
-            to = %inp.to_status,
-            forced = forced,
-            "chapter_transition_completed"
+            reason = %reason,
+            "forced_finalize_on_nogo"
         );
-
-        let output = TransitionOutput {
-            from_status: inp.from_status.clone(),
-            to_status: inp.to_status.clone(),
-            forced,
-            actual_word_count: inp.actual_word_count,
-        };
-        serde_json::to_value(output)
-            .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
     }
-}
+
+    // If pool is available, update DB row
+    if let Some(pool) = &self.pool {
+        self.transition_db(pool, &inp).await?;
+    }
+
+    // If workspace_root + work_ref + body_path available, update frontmatter
+    if let (Some(ws_root), Some(_work_ref), Some(body_path)) =
+        (&inp.workspace_root, &inp.work_ref, &inp.body_path)
+    {
+        let full_path = PathBuf::from(ws_root).join(body_path);
+        if full_path.exists() {
+            Self::update_frontmatter_status(&full_path, &inp.to_status)?;
+        } else {
+            info!(
+                path = %full_path.display(),
+                "chapter body file not found; skipping frontmatter update"
+            );
+        }
+    }
+
+    info!(
+        work_id = %inp.work_id,
+        chapter = inp.chapter,
+        from = %inp.from_status,
+        to = %inp.to_status,
+        forced = forced,
+        "chapter_transition_completed"
+    );
+
+    let output = TransitionOutput {
+        from_status: inp.from_status.clone(),
+        to_status: inp.to_status.clone(),
+        forced,
+        actual_word_count: inp.actual_word_count,
+    };
+    serde_json::to_value(output)
+        .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
+} }
 
 impl NovelChapterTransition {
     /// Update the `work_chapters` DB row.

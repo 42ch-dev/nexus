@@ -18,7 +18,25 @@ default = []
 # v1.190 architecture §Cohorts — optional edges. The default/domain cohort
 # pulls none of these; each `dep:` edge stays inert until its feature is
 # requested. `compute` is never enabled by default/domain/Connect-host.
-execution = ["dep:nexus-orchestration"]
+execution = [
+    "dep:nexus-orchestration",
+    "dep:nexus-provider-ports",
+    "dep:graph-flow",
+    "dep:tokio-util",
+    "dep:async-trait",
+    # The durable workspace commit authority moved out of the daemon: the
+    # intent/digest/recovery protocol hashes content (sha2), hex-encodes the
+    # digest, decodes base64 manifest bodies and uses renameat/linkat for the
+    # atomic file apply. All four are execution-only edges.
+    "dep:sha2",
+    "dep:hex",
+    "dep:base64",
+    "dep:nix",
+]
+# The crash/rendezvous seams the workspace-commit recovery proofs drive. They
+# are compiled out of a production build and enabled by this package's own
+# dev-dependency self-reference, exactly as the daemon did before the move.
+test-hooks = []
 provider-host = ["dep:nexus-agent-host", "dep:nexus-acp-host"]
 compute = ["execution", "dep:nexus-wasm-host", "nexus-spoke-adapter/compute"]
 # Reverse-invoke/peer-control edge attaches with its owning cohort task; the
@@ -28,6 +46,7 @@ embedded-mcp = ["dep:rmcp"]
 
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
+nexus-preset = { path = "../nexus-preset" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-local-db = { path = "../nexus-local-db" }
 # v1.190 P2-T0 (architecture §8): the core's local-outbox reuse is a normal
@@ -40,11 +59,31 @@ nexus-narrative = { path = "../nexus-narrative" }
 nexus-creator-memory = { path = "../nexus-creator-memory" }
 nexus-moment-context-assembly = { path = "../nexus-moment-context-assembly" }
 nexus-orchestration = { path = "../nexus-orchestration", optional = true }
+nexus-provider-ports = { path = "../nexus-provider-ports", optional = true }
+# graph-flow is the engine's session backend: the execution layer names
+# `SessionStorage` directly (the engine trait surface does not re-export it).
+graph-flow = { version = "=0.8.0", default-features = false, optional = true }
+tokio-util = { workspace = true, optional = true }
 nexus-agent-host = { path = "../nexus-agent-host", optional = true }
 nexus-acp-host = { path = "../nexus-acp-host", optional = true }
 nexus-wasm-host = { path = "../nexus-wasm-host", optional = true }
 rmcp = { version = "=3.2.0", default-features = false, optional = true }
-async-trait.workspace = true
+# async-trait is used ONLY by the execution cohort's port traits and the
+# module's test doubles. Nothing outside `execution` uses the macro (the
+# `#![allow(clippy::unused_async_trait_impl)]` in knowledge.rs is a lint name,
+# not a crate use), so the edge is optional and enabled by `execution`.
+async-trait = { workspace = true, optional = true }
+# The durable workspace commit authority (v1.190 P3-T2) moved out of the
+# daemon with its module set. These edges are `execution`-only:
+#   sha2   — content-addressed OCC hashes for the snapshot/intent digest
+#   hex    — lowercase-hex rendering of those digests
+#   base64 — manifest `contentBase64` body decode
+#   nix    — renameat/linkat + flock for the atomic file apply and the
+#            workspace-authority lease. Unix-only, so it is declared under
+#            `cfg(unix)` and its `dep:nix` edge only resolves there.
+hex = { version = "0.4", optional = true }
+base64 = { version = "0.22", optional = true }
+sha2 = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
@@ -56,6 +95,35 @@ toml.workspace = true
 uuid.workspace = true
 serde_yaml = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+# Descriptor-relative atomic mutation (openat/renameat/linkat/unlinkat) and the
+# advisory workspace-authority lease. Every use site is `cfg(unix)`-gated, so
+# the edge is scoped to Unix rather than linked on every target.
+nix = { version = "0.28", features = ["fs"], optional = true }
+
 [dev-dependencies]
+# Enable the gated execution test seams for this package's own tests without
+# exposing them in the production build.
+# `compute` is included so the capability/compute integration target can
+# reach the gated WASM path; the target itself is `#![cfg(feature = ...)]`,
+# so a user of this package is unaffected.
+nexus-core = { path = ".", features = ["execution", "compute", "test-hooks"] }
+serial_test = "4"
 tempfile = "3"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+# Only `parking_lot` needs a dev-dep: the relocated execution regression module
+# builds one scripted engine fixture with interior mutability, and parking_lot
+# is not otherwise a `nexus-core` dependency. The integration target's other
+# imports (`nexus-provider-ports`, `nexus-local-db`, `async-trait`) come from
+# `[dependencies]` — that target is `#![cfg(feature = "execution")]`, and the
+# feature enables those optional edges.
+parking_lot = "0.12"
+# The capability/compute target builds a real WASM module and a real user
+# capability scan, so it needs the engine, the WAT compiler and the capability
+# scanner's dependencies.
+nexus-wasm-host = { path = "../nexus-wasm-host" }
+nexus-orchestration = { path = "../nexus-orchestration" }
+nexus-knowledge = { path = "../nexus-knowledge" }
+chrono.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true

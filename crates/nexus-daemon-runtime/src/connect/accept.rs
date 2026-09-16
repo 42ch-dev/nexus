@@ -367,10 +367,17 @@ async fn monitor_session(
             // the shared holder at admission time — hot-reloaded user-cap
             // names stay reserved against peer admission.
             let reserved = live_reserved_tool_ids(options.capability_registry.as_ref());
+            // The core registry takes the protocol-neutral port, so the wire
+            // responder is wrapped once per admission.
+            let port: Arc<dyn nexus_core::execution::peer_tools::PeerResponder> =
+                Arc::new(crate::connect::table::ConnectResponderAdapter::new(
+                    Arc::clone(&responder),
+                    peer_id.clone(),
+                ));
             match crate::connect::peer_tool_table().admit_and_register(
                 &peer_id,
                 &manifest,
-                &responder,
+                &port,
                 &daemon_caps,
                 &allowlist,
                 &reserved,
@@ -409,7 +416,12 @@ async fn monitor_session(
     if evicted {
         // AR-68 #8: same tick as close observation — the PeerToolTable rows
         // for this peer disappear from the spine + catalog.
-        crate::connect::peer_tool_table().evict_peer(&peer_id, Some(&responder));
+        let port: Arc<dyn nexus_core::execution::peer_tools::PeerResponder> =
+            Arc::new(crate::connect::table::ConnectResponderAdapter::new(
+                Arc::clone(&responder),
+                peer_id.clone(),
+            ));
+        crate::connect::peer_tool_table().evict_peer(&peer_id, Some(&port));
         tracing::info!(%peer_id, "peer session evicted after close observation");
     }
 }

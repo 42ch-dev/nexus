@@ -1,463 +1,56 @@
-//! Preset management handlers (V1.20 Batch 5, T34–T37).
-//!
-//! Endpoints:
-//! - `GET /v1/daemon/presets` — list presets grouped by source
-//! - `POST /v1/daemon/presets` — scaffold user preset
-//! - `POST /v1/daemon/presets:validate` — validate preset YAML/bundle
-//! - `POST /v1/daemon/presets/{id}:reload` — reload preset
-
-#![allow(clippy::missing_errors_doc)]
+//! Preset transport adapters. Authoring and validation live in nexus-core.
 
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::raw_user_home;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, State};
 use axum::Json;
-use nexus_contracts::{GetPresetResponse, UpdatePresetRequest, UpdatePresetResponse};
+use nexus_contracts::{
+    GetPresetResponse, ScaffoldPresetRequest, ScaffoldPresetResponse,
+    UpdatePresetRequest, UpdatePresetResponse, ValidatePresetRequest, ValidatePresetResponse,
+};
+use nexus_contracts::generated::daemon_api::preset_management::{
+    list_presets_response::ListPresetsResponse,
+    reload_preset_response::ReloadPresetResponse,
+};
 use nexus_home_layout::user_preset_bundle_dir;
-use serde::{Deserialize, Serialize};
 use tracing::info;
 
-/// Default maximum YAML file size for validation (1 MiB).
-const VALIDATE_MAX_YAML_SIZE: usize = 1024 * 1024;
-
-/// Default maximum YAML nesting depth for validation.
-const VALIDATE_MAX_YAML_DEPTH: usize = 10;
-
-// ─── Request / Response types ──────────────────────────────────────────────
-
-#[derive(Debug, Serialize)]
-pub struct PresetSummary {
-    pub id: String,
-    pub source: String, // "embedded" | "system" | "user"
-    /// Declared run intents (V1.33 §5). Empty if the preset doesn't declare any.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub run_intents: Vec<String>,
+pub async fn list_presets(State(state): State<WorkspaceState>) -> Result<Json<ListPresetsResponse>, NexusApiError> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    Ok(Json(core.list_presets(&principal).await?))
 }
 
-#[derive(Debug, Serialize)]
-pub struct ListPresetsGroupedResponse {
-    pub embedded: Vec<PresetSummary>,
-    pub system: Vec<PresetSummary>,
-    pub user: Vec<PresetSummary>,
+pub async fn scaffold_preset(State(state): State<WorkspaceState>, Json(request): Json<ScaffoldPresetRequest>) -> Result<Json<ScaffoldPresetResponse>, NexusApiError> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    Ok(Json(core.scaffold_preset(&principal, request).await?))
 }
 
-#[derive(Debug, Deserialize)]
-pub struct ScaffoldPresetRequest {
-    pub name: String,
+pub async fn validate_preset(State(state): State<WorkspaceState>, Json(request): Json<ValidatePresetRequest>) -> Result<Json<ValidatePresetResponse>, NexusApiError> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    Ok(Json(core.validate_preset(&principal, request).await?))
 }
 
-#[derive(Debug, Serialize)]
-pub struct ScaffoldPresetResponse {
-    pub id: String,
-    pub path: String,
+pub async fn get_preset(State(state): State<WorkspaceState>, Path(id): Path<String>) -> Result<Json<GetPresetResponse>, NexusApiError> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    Ok(Json(core.get_preset(&principal, id).await?))
 }
 
-#[derive(Debug, Deserialize)]
-pub struct ValidatePresetRequest {
-    /// Path to the preset.yaml file to validate.
-    pub path: String,
+pub async fn update_preset(State(state): State<WorkspaceState>, Path(id): Path<String>, Json(request): Json<UpdatePresetRequest>) -> Result<Json<UpdatePresetResponse>, NexusApiError> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    Ok(Json(core.update_preset(&principal, id, request).await?))
 }
 
-#[derive(Debug, Serialize)]
-pub struct ValidatePresetResponse {
-    pub valid: bool,
-    pub id: Option<String>,
-    pub version: Option<u32>,
-    pub state_count: Option<usize>,
-    pub errors: Vec<String>,
-    /// Non-fatal warnings from semantic validation (V1.32 P1).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub warnings: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ReloadPresetResponse {
-    pub id: String,
-    pub reloaded: bool,
-}
-
-// ─── Template ──────────────────────────────────────────────────────────────
-
-/// The template YAML for a new user preset.
-const PRESET_INIT_TEMPLATE: &str = r#"preset:
-  id: {{name}}
-  version: 1
-  kind: creator
-  description: "Custom orchestration strategy"
-  requires_capabilities: []
-  run_intents: [work_init]
-  initial: start
-  terminal: done
-states:
-  - id: start
-    description: "Begin the workflow"
-    enter:
-      - kind: capability
-        name: workspace.open
-        args:
-          path: prompts/start.md
-    exit_when:
-      kind: manual
-    next: done
-  - id: done
-    terminal: true
-"#;
-
-/// Template for the default prompt file scaffolding.
-const PROMPT_INIT_CONTENT: &str = r"# Start Prompt
-
-{{input}}
-";
-
-// ─── Helpers ───────────────────────────────────────────────────────────────
-
-/// Validate a preset name: non-empty, single path segment, not reserved.
-fn validate_preset_name(name: &str) -> Result<(), NexusApiError> {
-    if name.is_empty()
-        || name.contains('/')
-        || name.contains('\\')
-        || name == "."
-        || name == ".."
-        || name == "_system"
-    {
-        return Err(NexusApiError::InvalidInput {
-            field: "name".to_string(),
-            reason:
-                "must be a non-empty path segment without separators, not '.', '..', or '_system'"
-                    .to_string(),
-        });
-    }
-    Ok(())
-}
-
-/// Compile-time generated embedded preset IDs.
-/// In the daemon-runtime, we list embedded presets via the orchestration crate.
-fn list_embedded_ids() -> Vec<String> {
-    nexus_orchestration::preset::list_embedded_presets()
-}
-
-/// List user preset IDs from filesystem.
-///
-/// `home` is the RAW user home (`$HOME`); `nexus_home_layout` helpers join
-/// `.nexus42` internally (conventions/nexus-home-layout-path-helpers.md).
-fn list_user_ids(home: &std::path::Path) -> Vec<String> {
-    nexus_home_layout::list_user_preset_ids(home)
-}
-
-/// List system preset IDs from filesystem.
-fn list_system_ids(nexus_home: &std::path::Path) -> Vec<String> {
-    let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
-    let scan_result =
-        nexus_orchestration::system_preset_dir::scan_system_presets(nexus_home, &caps);
-    nexus_orchestration::system_preset_dir::list_system_preset_ids(&scan_result)
-}
-
-// ─── Handlers ──────────────────────────────────────────────────────────────
-
-/// `GET /v1/daemon/presets` — list presets grouped by source (T34)
-///
-/// Replaces `GET /v1/daemon/orchestration/presets` with richer grouping.
-pub async fn list_presets(
-    State(state): State<WorkspaceState>,
-) -> Result<Json<ListPresetsGroupedResponse>, NexusApiError> {
-    let nexus_home = state.nexus_home();
-    let caps = state.capability_registry();
-
-    // Build a map of preset id -> run_intents from the capability registry
-    let intent_map: std::collections::HashMap<String, Vec<String>> =
-        caps.map_or_else(std::collections::HashMap::new, |registry| {
-            nexus_orchestration::preset::list_embedded_presets()
-                .into_iter()
-                .filter_map(|id| {
-                    let loaded =
-                        nexus_orchestration::preset::load_embedded_preset(&id, &registry).ok()?;
-                    let intents = loaded
-                        .manifest
-                        .preset
-                        .run_intents
-                        .iter()
-                        .map(|ri| {
-                            serde_json::to_value(ri)
-                                .ok()
-                                .and_then(|v| v.as_str().map(String::from))
-                                .unwrap_or_default()
-                        })
-                        .collect();
-                    Some((id, intents))
-                })
-                .collect()
-        });
-
-    let embedded = list_embedded_ids()
-        .into_iter()
-        .map(|id| {
-            let run_intents = intent_map.get(&id).cloned().unwrap_or_default();
-            PresetSummary {
-                id,
-                source: "embedded".to_string(),
-                run_intents,
-            }
-        })
-        .collect();
-
-    let system = list_system_ids(nexus_home)
-        .into_iter()
-        .map(|id| PresetSummary {
-            id,
-            source: "system".to_string(),
-            run_intents: vec![],
-        })
-        .collect();
-
-    let user = list_user_ids(raw_user_home(nexus_home)?)
-        .into_iter()
-        .map(|id| PresetSummary {
-            id,
-            source: "user".to_string(),
-            run_intents: vec![],
-        })
-        .collect();
-
-    Ok(Json(ListPresetsGroupedResponse {
-        embedded,
-        system,
-        user,
-    }))
-}
-
-/// `POST /v1/daemon/presets` — scaffold user preset (T35)
-///
-/// Creates a new user preset bundle directory with template files.
-pub async fn scaffold_preset(
-    State(state): State<WorkspaceState>,
-    Json(req): Json<ScaffoldPresetRequest>,
-) -> Result<Json<ScaffoldPresetResponse>, NexusApiError> {
-    info!(name = %req.name, "Scaffolding user preset");
-    validate_preset_name(&req.name)?;
-
-    let nexus_home = state.nexus_home();
-    // `user_preset_bundle_dir` takes the RAW user home and joins `.nexus42`
-    // internally (conventions/nexus-home-layout-path-helpers.md); passing the
-    // `.nexus42` root would double-nest to `~/.nexus42/.nexus42/presets/<id>`
-    // and diverge from the canonical `scan_user_presets` layout (F-QA-001).
-    let bundle_dir = user_preset_bundle_dir(raw_user_home(nexus_home)?, &req.name);
-
-    if bundle_dir.exists() {
-        return Err(NexusApiError::Conflict(format!(
-            "Preset '{}' already exists at {}",
-            req.name,
-            bundle_dir.display()
-        )));
-    }
-
-    // Create directory structure
-    let prompts_dir = bundle_dir.join("prompts");
-    std::fs::create_dir_all(&prompts_dir).map_err(|e| NexusApiError::Internal {
-        code: "DIR_CREATE_ERROR".into(),
-        message: e.to_string(),
-    })?;
-
-    // Write preset.yaml
-    let preset_yaml = PRESET_INIT_TEMPLATE.replace("{{name}}", &req.name);
-    std::fs::write(bundle_dir.join("preset.yaml"), preset_yaml).map_err(|e| {
-        NexusApiError::Internal {
-            code: "FILE_WRITE_ERROR".into(),
-            message: e.to_string(),
-        }
-    })?;
-
-    // Write default start prompt
-    std::fs::write(prompts_dir.join("start.md"), PROMPT_INIT_CONTENT).map_err(|e| {
-        NexusApiError::Internal {
-            code: "FILE_WRITE_ERROR".into(),
-            message: e.to_string(),
-        }
-    })?;
-
-    Ok(Json(ScaffoldPresetResponse {
-        id: req.name,
-        path: bundle_dir.display().to_string(),
-    }))
-}
-
-/// `POST /v1/daemon/presets:validate` — validate preset YAML/bundle (T36, V1.32 P1)
-///
-/// Validates a preset YAML file for structural correctness with
-/// field-level detail in the error response. Routes through the shared
-/// semantic validation facade (`nexus_orchestration::preset::validate_preset_semantic`)
-/// so the daemon endpoint and the runtime loader reject the same defects.
-///
-/// R-V139P5-N3 (waived): non-CLI callers (future API, programmatic consumers)
-/// must route preset.input through this endpoint or the schedule enqueue path
-/// (which runs `evaluate_gates`). Both paths validate; no unvalidated preset
-/// input reaches execution.
-///
-/// Asset-path checks (template file existence) run when the path points to a
-/// directory (bundle mode); otherwise only in-memory semantic checks run.
-pub async fn validate_preset(
-    Json(req): Json<ValidatePresetRequest>,
-) -> Result<Json<ValidatePresetResponse>, NexusApiError> {
-    info!(path = %req.path, "Validating preset");
-    let file_path = std::path::Path::new(&req.path);
-
-    if !file_path.exists() {
-        return Err(NexusApiError::NotFound(format!(
-            "File not found: {}",
-            file_path.display()
-        )));
-    }
-
-    // Check file size via metadata BEFORE reading
-    let metadata = std::fs::metadata(file_path).map_err(|e| NexusApiError::Internal {
-        code: "METADATA_ERROR".into(),
-        message: e.to_string(),
-    })?;
-    if metadata.len() > VALIDATE_MAX_YAML_SIZE as u64 {
-        return Ok(ValidatePresetResponse::invalid(&[format!(
-            "Preset YAML exceeds maximum size ({} bytes, limit is {} bytes)",
-            metadata.len(),
-            VALIDATE_MAX_YAML_SIZE
-        )]));
-    }
-
-    let yaml = std::fs::read_to_string(file_path).map_err(|e| NexusApiError::Internal {
-        code: "FILE_READ_ERROR".into(),
-        message: e.to_string(),
-    })?;
-
-    // Defense-in-depth size check
-    if yaml.len() > VALIDATE_MAX_YAML_SIZE {
-        return Ok(ValidatePresetResponse::invalid(&[format!(
-            "Preset YAML exceeds maximum size ({} bytes, limit is {} bytes)",
-            yaml.len(),
-            VALIDATE_MAX_YAML_SIZE
-        )]));
-    }
-
-    // Parse + depth check
-    let manifest = parse_and_check_manifest(&yaml)?;
-
-    // C2: Run loader-equivalent structural validation so the daemon endpoint
-    //     rejects the same defects the runtime loader would reject.
-    let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
-    let structural_problems =
-        nexus_orchestration::preset::loader_validate_manifest_compat(&manifest, &caps);
-    if !structural_problems.is_empty() {
-        let errors: Vec<String> = structural_problems
-            .iter()
-            .map(|p| format!("{}: {}", p.path, p.error))
-            .collect();
-        return Ok(Json(ValidatePresetResponse {
-            valid: false,
-            id: Some(manifest.preset.id.clone()),
-            version: Some(manifest.preset.version),
-            state_count: Some(manifest.states.len()),
-            errors,
-            warnings: Vec::new(),
-        }));
-    }
-
-    // C3: Shared path-safety check (same `assert_template_file_safe` the loader uses).
-    let path_result = nexus_orchestration::preset::validate_path_safety(&manifest);
-
-    // A5: Run shared semantic validation (the same surface used by the loader).
-    let sem_result = nexus_orchestration::preset::validate_preset_semantic(&manifest, &caps);
-
-    // A3: If the path points into a bundle directory, also run asset checks.
-    let asset_result = infer_bundle_root(file_path).map_or_else(
-        nexus_orchestration::preset::ValidationResult::default,
-        |bundle_root| {
-            nexus_orchestration::preset::validate_assets_in_bundle(&manifest, &bundle_root)
-        },
-    );
-
-    // Combine diagnostics from path safety + semantic + asset checks
-    let mut errors: Vec<String> = Vec::new();
-    for d in path_result
-        .diagnostics
-        .iter()
-        .chain(sem_result.diagnostics.iter())
-        .chain(asset_result.diagnostics.iter())
-        .filter(|d| d.severity == nexus_orchestration::preset::DiagnosticSeverity::Error)
-    {
-        // Sanitize: use only the relative path, not full host FS path
-        errors.push(format!("{}: {}", d.path, d.message));
-    }
-
-    // Warnings are reported separately in the response (informational).
-    let warnings: Vec<String> = path_result
-        .diagnostics
-        .iter()
-        .chain(sem_result.diagnostics.iter())
-        .chain(asset_result.diagnostics.iter())
-        .filter(|d| d.severity == nexus_orchestration::preset::DiagnosticSeverity::Warning)
-        .map(|d| format!("{}: {}", d.path, d.message))
-        .collect();
-
-    let valid = errors.is_empty();
-    Ok(Json(ValidatePresetResponse {
-        valid,
-        id: Some(manifest.preset.id.clone()),
-        version: Some(manifest.preset.version),
-        state_count: Some(manifest.states.len()),
-        errors,
-        warnings,
-    }))
-}
-
-/// Infer the bundle root directory from a preset.yaml path.
-///
-/// If `file_path` ends with `preset.yaml`, return its parent directory.
-/// Otherwise return `None` (standalone YAML file, no bundle).
-fn infer_bundle_root(file_path: &std::path::Path) -> Option<std::path::PathBuf> {
-    if file_path.file_name().is_some_and(|f| f == "preset.yaml") {
-        file_path.parent().map(std::path::Path::to_path_buf)
-    } else {
-        None
-    }
-}
-
-/// Parse YAML text into a `PresetManifest`, checking depth and structure.
-fn parse_and_check_manifest(
-    yaml: &str,
-) -> Result<nexus_contracts::local::orchestration::preset::PresetManifest, NexusApiError> {
-    let yaml_value: serde_yaml::Value = match serde_yaml::from_str(yaml) {
-        Ok(v) => v,
-        Err(e) => {
-            return Err(NexusApiError::Internal {
-                code: "YAML_PARSE_ERROR".into(),
-                message: format!("YAML parse error: {e}"),
-            });
-        }
-    };
-
-    let depth = nexus_orchestration::preset::yaml_value_depth(&yaml_value);
-    if depth > VALIDATE_MAX_YAML_DEPTH {
-        return Err(NexusApiError::Internal {
-            code: "DEPTH_EXCEEDED".into(),
-            message: format!("Nesting depth ({depth}) exceeds maximum ({VALIDATE_MAX_YAML_DEPTH})"),
-        });
-    }
-
-    serde_yaml::from_value(yaml_value).map_err(|e| NexusApiError::Internal {
-        code: "STRUCTURAL_ERROR".into(),
-        message: format!("Structural validation error: {e}"),
-    })
-}
-
-impl ValidatePresetResponse {
-    /// Build an invalid response with the given errors and no manifest data.
-    fn invalid(errors: &[String]) -> Json<Self> {
-        Json(Self {
-            valid: false,
-            id: None,
-            version: None,
-            state_count: None,
-            errors: errors.to_vec(),
-            warnings: Vec::new(),
-        })
-    }
+pub async fn delete_preset(State(state): State<WorkspaceState>, Path(id): Path<String>) -> Result<axum::http::StatusCode, NexusApiError> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    core.delete_preset(&principal, id).await?;
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 /// `POST /v1/daemon/presets/:id` — reload preset (T37)
@@ -481,7 +74,7 @@ pub async fn reload_preset(
 
     // Try loading from embedded/system first
     let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
-    let loaded = nexus_orchestration::preset::load_embedded_preset(&preset_id, &caps);
+    let loaded = nexus_preset::load_embedded_preset(&preset_id, &caps);
 
     if let Ok(_preset) = loaded {
         return Ok(Json(ReloadPresetResponse {
@@ -516,191 +109,35 @@ pub async fn reload_preset(
 /// prefix before joining (AD-P0-1b). Unqualified ids pass through unchanged.
 fn system_preset_dir_for_id(nexus_home: &std::path::Path, preset_id: &str) -> std::path::PathBuf {
     let dir_name = preset_id.strip_prefix("_system.").unwrap_or(preset_id);
-    nexus_orchestration::system_preset_dir::system_preset_bundle_dir(nexus_home, dir_name)
+    nexus_preset::system_preset_dir::system_preset_bundle_dir(nexus_home, dir_name)
 }
-
-/// Locate a preset by ID and return its source + filesystem path.
-fn locate_preset(
-    nexus_home: &std::path::Path,
-    preset_id: &str,
-) -> Result<(String, Option<std::path::PathBuf>), NexusApiError> {
-    if list_embedded_ids().contains(&preset_id.to_string()) {
-        return Ok(("embedded".to_string(), None));
-    }
-
-    let user_dir = user_preset_bundle_dir(raw_user_home(nexus_home)?, preset_id);
-    if user_dir.join("preset.yaml").exists() {
-        return Ok(("user".to_string(), Some(user_dir)));
-    }
-
-    let system_dir = system_preset_dir_for_id(nexus_home, preset_id);
-    if system_dir.join("preset.yaml").exists() {
-        return Ok(("system".to_string(), Some(system_dir)));
-    }
-
-    Err(NexusApiError::NotFound(format!(
-        "Preset '{preset_id}' not found"
-    )))
-}
-
-/// Load the raw YAML content for a preset.
-async fn load_preset_yaml(
-    _nexus_home: &std::path::Path,
-    preset_id: &str,
-    source: &str,
-    path: Option<&std::path::Path>,
-) -> Result<String, NexusApiError> {
-    match source {
-        "embedded" => {
-            let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
-            let loaded = nexus_orchestration::preset::load_embedded_preset(preset_id, &caps)
-                .map_err(|e| NexusApiError::Internal {
-                    code: "PRESET_LOAD_ERROR".to_string(),
-                    message: e.to_string(),
-                })?;
-            serde_yaml::to_string(&loaded.manifest).map_err(|e| NexusApiError::Internal {
-                code: "YAML_SERIALIZE_ERROR".to_string(),
-                message: e.to_string(),
-            })
-        }
-        "system" | "user" => {
-            let dir = path.ok_or_else(|| NexusApiError::Internal {
-                code: "PRESET_PATH_MISSING".to_string(),
-                message: format!("{source} preset '{preset_id}' has no path"),
-            })?;
-            let yaml_path = dir.join("preset.yaml");
-            tokio::fs::read_to_string(&yaml_path).await.map_err(|e| {
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    NexusApiError::NotFound(format!("Preset '{preset_id}' not found"))
-                } else {
-                    NexusApiError::Internal {
-                        code: "FILE_READ_ERROR".to_string(),
-                        message: e.to_string(),
-                    }
-                }
-            })
-        }
-        _ => Err(NexusApiError::Internal {
-            code: "UNKNOWN_PRESET_SOURCE".to_string(),
-            message: format!("unknown preset source '{source}'"),
-        }),
-    }
-}
-
-/// `GET /v1/daemon/presets/{id}` — fetch preset manifest YAML.
-pub async fn get_preset(
-    State(state): State<WorkspaceState>,
-    Path(preset_id): Path<String>,
-) -> Result<Json<GetPresetResponse>, NexusApiError> {
-    let nexus_home = state.nexus_home();
-    let (source, path) = locate_preset(nexus_home, &preset_id)?;
-    let yaml = load_preset_yaml(nexus_home, &preset_id, &source, path.as_deref()).await?;
-
-    Ok(Json(GetPresetResponse {
-        id: preset_id,
-        source: super::wire_cast(source),
-        path: path.map(|p| p.display().to_string()),
-        yaml,
-    }))
-}
-
-/// `PATCH /v1/daemon/presets/{id}` — update user preset YAML.
-pub async fn update_preset(
-    State(state): State<WorkspaceState>,
-    Path(preset_id): Path<String>,
-    Json(req): Json<UpdatePresetRequest>,
-) -> Result<Json<UpdatePresetResponse>, NexusApiError> {
-    let nexus_home = state.nexus_home();
-    let (source, path) = locate_preset(nexus_home, &preset_id)?;
-
-    if source != "user" {
-        return Err(NexusApiError::BadRequest {
-            code: "preset_update_forbidden".to_string(),
-            message: format!("only user presets can be updated; '{preset_id}' is {source}"),
-        });
-    }
-
-    // Validate YAML before writing.
-    parse_and_check_manifest(&req.yaml)?;
-
-    let dir = path.ok_or_else(|| NexusApiError::Internal {
-        code: "PRESET_PATH_MISSING".to_string(),
-        message: format!("user preset '{preset_id}' has no path"),
-    })?;
-    let yaml_path = dir.join("preset.yaml");
-
-    tokio::fs::write(&yaml_path, req.yaml)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "FILE_WRITE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
-
-    Ok(Json(UpdatePresetResponse {
-        id: preset_id,
-        updated: true,
-    }))
-}
-
-/// `DELETE /v1/daemon/presets/{id}` — delete a user preset bundle.
-pub async fn delete_preset(
-    State(state): State<WorkspaceState>,
-    Path(preset_id): Path<String>,
-) -> Result<axum::http::StatusCode, NexusApiError> {
-    let nexus_home = state.nexus_home();
-    let (source, path) = locate_preset(nexus_home, &preset_id)?;
-
-    if source != "user" {
-        return Err(NexusApiError::BadRequest {
-            code: "preset_delete_forbidden".to_string(),
-            message: format!("only user presets can be deleted; '{preset_id}' is {source}"),
-        });
-    }
-
-    let dir = path.ok_or_else(|| NexusApiError::Internal {
-        code: "PRESET_PATH_MISSING".to_string(),
-        message: format!("user preset '{preset_id}' has no path"),
-    })?;
-
-    tokio::fs::remove_dir_all(&dir).await.map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            NexusApiError::NotFound(format!("Preset '{preset_id}' not found"))
-        } else {
-            NexusApiError::Internal {
-                code: "DIRECTORY_REMOVE_ERROR".to_string(),
-                message: e.to_string(),
-            }
-        }
-    })?;
-
-    Ok(axum::http::StatusCode::NO_CONTENT)
-}
-
-// ─── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn validate_preset_name_rejects_empty() {
-        assert!(validate_preset_name("").is_err());
+    async fn authoring_state(
+        nexus_home: std::path::PathBuf,
+        db_path: std::path::PathBuf,
+        workspace_path: Option<String>,
+    ) -> WorkspaceState {
+        let home = nexus_home.parent().expect("raw home");
+        std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+            home, "test_creator", "default",
+        )).expect("operational workspace");
+        std::fs::write(nexus_home.join("config.toml"),
+            "active_creator_id = \"test_creator\"\n[active_workspace_slug_by_creator]\ntest_creator = \"default\"\n"
+        ).expect("active principal configuration");
+        WorkspaceState::new_for_testing(nexus_home, db_path, workspace_path).await
     }
 
-    #[test]
-    fn validate_preset_name_rejects_slash() {
-        assert!(validate_preset_name("foo/bar").is_err());
+    async fn validate_for_test(request: ValidatePresetRequest) -> Result<Json<ValidatePresetResponse>, NexusApiError> {
+        let (_tmp, home, db) = crate::test_utils::create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(home, db, None).await;
+        validate_preset(State(state), Json(request)).await
     }
 
-    #[test]
-    fn validate_preset_name_rejects_system() {
-        assert!(validate_preset_name("_system").is_err());
-    }
 
-    #[test]
-    fn validate_preset_name_accepts_valid() {
-        assert!(validate_preset_name("my-strategy").is_ok());
-    }
 
     #[tokio::test]
     async fn scaffold_creates_bundle() {
@@ -715,7 +152,7 @@ mod tests {
         nexus_local_db::seed_versions(&pool).await.expect("seed");
 
         let state =
-            crate::workspace::WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None)
+            authoring_state(nexus_home.clone(), db_path, None)
                 .await;
 
         let req = ScaffoldPresetRequest {
@@ -742,7 +179,7 @@ mod tests {
         nexus_local_db::seed_versions(&pool).await.expect("seed");
 
         let state =
-            crate::workspace::WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None)
+            authoring_state(nexus_home.clone(), db_path, None)
                 .await;
 
         let req = ScaffoldPresetRequest {
@@ -792,7 +229,7 @@ states:
         let req = ValidatePresetRequest {
             path: yaml_path.to_str().expect("path").to_string(),
         };
-        let result = validate_preset(Json(req)).await;
+        let result = validate_for_test(req).await;
         assert!(result.is_ok());
         let resp = result.expect("ok");
         assert!(
@@ -828,7 +265,7 @@ states:
         let req = ValidatePresetRequest {
             path: yaml_path.to_str().expect("path").to_string(),
         };
-        validate_preset(Json(req)).await.expect("ok").0
+        validate_for_test(req).await.expect("ok").0
     }
 
     // ── W1: Invalid P1 parity fixtures ──────────────────────────────────
@@ -1214,7 +651,7 @@ states:
                 .await
                 .expect("migrate");
             nexus_local_db::seed_versions(&pool).await.expect("seed");
-            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await
+            authoring_state(nexus_home, db_path, None).await
         };
 
         let _ = scaffold_preset(
@@ -1247,7 +684,7 @@ states:
                 .await
                 .expect("migrate");
             nexus_local_db::seed_versions(&pool).await.expect("seed");
-            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await
+            authoring_state(nexus_home, db_path, None).await
         };
 
         let resp = get_preset(State(state), Path("novel-writing".to_string()))
@@ -1274,11 +711,11 @@ states:
                 .await
                 .expect("migrate");
             nexus_local_db::seed_versions(&pool).await.expect("seed");
-            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await
+            authoring_state(nexus_home, db_path, None).await
         };
 
         // First-start fallback creates `presets/_system/maintenance/` on disk.
-        nexus_orchestration::system_preset_dir::ensure_maintenance_preset(state.nexus_home())
+        nexus_preset::system_preset_dir::ensure_maintenance_preset(state.nexus_home())
             .expect("ensure maintenance preset");
 
         let resp = get_preset(State(state), Path("_system.maintenance".to_string()))
@@ -1304,10 +741,10 @@ states:
                 .await
                 .expect("migrate");
             nexus_local_db::seed_versions(&pool).await.expect("seed");
-            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await
+            authoring_state(nexus_home, db_path, None).await
         };
 
-        nexus_orchestration::system_preset_dir::ensure_maintenance_preset(state.nexus_home())
+        nexus_preset::system_preset_dir::ensure_maintenance_preset(state.nexus_home())
             .expect("ensure maintenance preset");
 
         let resp = reload_preset(State(state), Path("_system.maintenance:reload".to_string()))
@@ -1330,7 +767,7 @@ states:
                 .await
                 .expect("migrate");
             nexus_local_db::seed_versions(&pool).await.expect("seed");
-            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await
+            authoring_state(nexus_home, db_path, None).await
         };
 
         let _ = scaffold_preset(
@@ -1391,7 +828,7 @@ states:
                 .await
                 .expect("migrate");
             nexus_local_db::seed_versions(&pool).await.expect("seed");
-            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await
+            authoring_state(nexus_home, db_path, None).await
         };
 
         let result = update_preset(
@@ -1417,7 +854,7 @@ states:
                 .await
                 .expect("migrate");
             nexus_local_db::seed_versions(&pool).await.expect("seed");
-            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await
+            authoring_state(nexus_home, db_path, None).await
         };
 
         let _ = scaffold_preset(
@@ -1448,7 +885,7 @@ states:
                 .await
                 .expect("migrate");
             nexus_local_db::seed_versions(&pool).await.expect("seed");
-            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await
+            authoring_state(nexus_home, db_path, None).await
         };
 
         let result = delete_preset(State(state), Path("novel-writing".to_string())).await;

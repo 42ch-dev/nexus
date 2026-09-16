@@ -48,20 +48,21 @@ use nexus_agent_host::{
     DiscoverySource, HostError, HostOperationId, HostResult, HostSession, HostSessionId,
     LaunchStrategy, ProviderCatalog, ProviderCatalogEntry, SessionState, TrustLevel,
 };
-use nexus_daemon_runtime::preset_run::{
+use nexus_core::execution::{
     resume_driven_sessions, PresetRunConfig, PresetRunOutcome, ResumeDecision,
 };
 use nexus_daemon_runtime::test_utils;
 use nexus_orchestration::capability::DaemonToolDispatch;
 use nexus_orchestration::engine::{SessionId, SessionStatus, SessionSummary};
-use nexus_orchestration::preset::load_preset_from_str;
-use nexus_orchestration::preset::loader::build_wired_outer_graph;
+use nexus_preset::load_preset_from_str;
+use nexus_orchestration::preset_runtime::build_wired_outer_graph;
 use nexus_orchestration::run_state::WorkflowStateStore;
 use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
 use nexus_orchestration::{
     CapabilityError, CapabilityRegistry, CapabilityRegistryHolder, GraphFlowEngine,
-    OrchestrationEngine, PresetSourceIdentity,
+    OrchestrationEngine,
 };
+use nexus_preset::source_identity::PresetSourceIdentity;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::Path;
@@ -1346,7 +1347,8 @@ async fn restart_durable_status_nested_child_wait_preserved_and_never_auto_resum
 // ---------------------------------------------------------------------------
 // P3 T1 — daemon-level restart matrix (A7): production boot/attach path over
 // the SAME DB/HOME, driven through `LiveDaemon::restart()` (abort drives →
-// republish bundle → run_boot_recovery). Source-verified reattachment: the
+// republish bundle, which retires the prior execution owner and recovers the
+// durable runs through the new one). Source-verified reattachment: the
 // frozen source identity (manifest + referenced template bytes) is verified
 // at reconstruction; a changed/missing user preset preserves the human wait
 // and makes continue return `reconstruction_unavailable` (cancel-only).
@@ -1870,7 +1872,7 @@ async fn daemon_restart_missing_source_continue_refuses_cancel_only() {
 /// hash). `parent` selects the nested-child shape (parent session + inner
 /// graph name).
 fn memory_augmented_descriptor(parent: Option<(&str, &str)>) -> Vec<u8> {
-    let source = nexus_orchestration::preset::embedded_source_identity("memory-augmented")
+    let source = nexus_preset::embedded_source_identity("memory-augmented")
         .expect("memory-augmented embedded source identity");
     let (parent_session_id, graph_name) = match parent {
         Some((parent_sid, graph)) => (Some(parent_sid.to_string()), Some(graph.to_string())),
@@ -2390,7 +2392,7 @@ async fn daemon_restart_safe_boundary_is_reconstructed_and_redriven() {
     .await;
 
     // The exact production recovery seam boot/restart runs
-    // (`run_boot_recovery` → `recover_persisted`): reconstruction from the
+    // (`recover_persisted` inside `start_execution`): reconstruction from the
     // frozen source, classification, then the single-owner re-drive.
     let coordinator = daemon.state.run_coordinator().expect("coordinator wired");
     let sqlite = Arc::new(SqliteSessionStorage::new(Arc::new(daemon.pool.clone())));

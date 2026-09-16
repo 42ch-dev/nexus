@@ -1,0 +1,25 @@
+[package]
+name = "nexus-preset"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pure preset grammar, validation, discovery, and source identity"
+
+[lints]
+workspace = true
+
+[dependencies]
+nexus-contracts = { path = "../nexus-contracts" }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+serde_yaml.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+blake3.workspace = true
+include_dir = "0.7"
+
+[dev-dependencies]
+tempfile.workspace = true
+tracing-subscriber.workspace = true

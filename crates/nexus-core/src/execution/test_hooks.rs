@@ -5,8 +5,9 @@
 //! failure/race into a specific commit boundary so the recovery proofs are
 //! deterministic instead of timing-based.
 //!
-//! `cargo test -p nexus-daemon-runtime` enables them through this package's
-//! self dev-dependency on the `test-support` feature.
+//! `cargo test -p nexus-core` enables them through this package's self
+//! dev-dependency on the `execution` + `test-hooks` features; the daemon
+//! enables the same edge for its own tests through its dev-dependencies.
 
 use std::sync::{Arc, Mutex};
 

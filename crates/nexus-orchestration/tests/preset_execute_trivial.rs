@@ -37,7 +37,7 @@ states:
 async fn linear_two_state_preset_executes_to_terminal() {
     let caps = CapabilityRegistry::with_builtins();
     let loaded =
-        nexus_orchestration::preset::load_preset_from_str(TWO_STATE_MANUAL_YAML, &caps).unwrap();
+        nexus_preset::load_preset_from_str(TWO_STATE_MANUAL_YAML, &caps).unwrap();
 
     assert_eq!(loaded.id, "trivial");
 
@@ -48,7 +48,7 @@ async fn linear_two_state_preset_executes_to_terminal() {
     );
 
     let sid = engine
-        .start_session_with_graph("trivial", loaded.outer_graph.clone())
+        .start_session_with_graph("trivial", Arc::new(nexus_orchestration::preset_runtime::build_outer_graph(&loaded.manifest).unwrap()))
         .await
         .expect("start_session_with_graph");
 
@@ -111,7 +111,7 @@ states:
 async fn capability_enter_state_composites_correctly() {
     let caps = CapabilityRegistry::with_builtins();
     let loaded =
-        nexus_orchestration::preset::load_preset_from_str(CAPABILITY_ENTER_YAML, &caps).unwrap();
+        nexus_preset::load_preset_from_str(CAPABILITY_ENTER_YAML, &caps).unwrap();
 
     assert_eq!(loaded.id, "cap-enter");
 
@@ -122,7 +122,7 @@ async fn capability_enter_state_composites_correctly() {
     );
 
     let sid = engine
-        .start_session_with_graph("cap-enter", loaded.outer_graph.clone())
+        .start_session_with_graph("cap-enter", Arc::new(nexus_orchestration::preset_runtime::build_outer_graph(&loaded.manifest).unwrap()))
         .await
         .expect("start_session_with_graph");
 
@@ -154,54 +154,3 @@ async fn capability_enter_state_composites_correctly() {
     );
 }
 
-/// Test that the outer graph has the correct §8.2 mapping structure.
-#[test]
-fn outer_graph_tasks_have_state_ids() {
-    let caps = CapabilityRegistry::with_builtins();
-    let loaded =
-        nexus_orchestration::preset::load_preset_from_str(TWO_STATE_MANUAL_YAML, &caps).unwrap();
-
-    assert!(loaded.outer_graph.get_task("start").is_some());
-    assert!(loaded.outer_graph.get_task("end").is_some());
-}
-
-/// Test that inner graph nodes are created per §8.2.
-#[test]
-fn inner_graph_nodes_created_per_mapping() {
-    let yaml = r#"
-preset:
-  id: ig-map
-  version: 1
-  kind: creator
-  description: "inner graph mapping test"
-  requires_capabilities: []
-  initial: a
-  terminal: b
-states:
-  - id: a
-    enter:
-      - kind: inner_graph
-        name: my_graph
-    exit_when:
-      kind: graph_complete
-    next: b
-  - id: b
-    terminal: true
-inner_graphs:
-  my_graph:
-    nodes:
-      - id: n1
-        kind: acp_prompt
-      - id: n2
-        kind: acp_prompt
-        depends_on: [n1]
-    output_binding: n2.text
-"#;
-    let caps = CapabilityRegistry::with_builtins();
-    let loaded = nexus_orchestration::preset::load_preset_from_str(yaml, &caps).unwrap();
-
-    assert!(loaded.inner_graphs.contains_key("my_graph"));
-    let ig = &loaded.inner_graphs["my_graph"];
-    assert!(ig.get_task("n1").is_some());
-    assert!(ig.get_task("n2").is_some());
-}

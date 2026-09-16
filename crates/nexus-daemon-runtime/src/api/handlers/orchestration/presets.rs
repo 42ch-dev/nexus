@@ -3,22 +3,9 @@
 use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
 use axum::{extract::Path, extract::State, http::StatusCode, Json};
+use nexus_contracts::{OrchestrationPresetListResponse, PresetProfileResponse};
 use nexus_contracts::local::orchestration::http::ReloadPresetResponse;
-// The profile family types live scoped inside `preset_profile_response`
-// (typify emits the response's nested definitions per-module); the barrel
-// top-level duplicates are not the field types of `PresetProfileResponse`.
-use nexus_contracts::{OrchestrationPresetListResponse};
-use nexus_contracts::orchestration_presets::preset_profile_response::{
-    PresetProfileConditionalRule, PresetProfileEnterAction, PresetProfileExitWhen,
-    PresetProfileLabeledNext, PresetProfileLanes, PresetProfileNext, PresetProfileResponse,
-    PresetProfileRole, PresetProfileSignal, PresetProfileState,
-};
-use nexus_contracts::local::orchestration::preset::{
-    EnterAction, ExitWhen, NextTarget, PresetRoleDefinition, SignalActionKind, SignalBinding,
-    StateDefinition,
-};
-use nexus_orchestration::preset_ids::cron_role_preset_ids;
-use nexus_orchestration::system_preset_dir;
+
 
 /// `GET /v1/daemon/orchestration/presets`
 ///
@@ -26,19 +13,11 @@ use nexus_orchestration::system_preset_dir;
 /// from `~/.nexus42/presets/_system/<name>/`.
 pub async fn list_presets(
     State(state): State<WorkspaceState>,
-) -> (StatusCode, Json<OrchestrationPresetListResponse>) {
-    let mut presets = nexus_orchestration::preset::list_embedded_presets();
-
-    // Discover system presets from directory (WS-D).
-    let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
-    let scan_result = system_preset_dir::scan_system_presets(state.nexus_home(), &caps);
-    for id in system_preset_dir::list_system_preset_ids(&scan_result) {
-        if !presets.iter().any(|p| p == &id) {
-            presets.push(id);
-        }
-    }
-
-    (StatusCode::OK, Json(OrchestrationPresetListResponse { presets }))
+) -> Result<(StatusCode, Json<OrchestrationPresetListResponse>), NexusApiError> {
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let response = core.list_orchestration_presets(&principal).await?;
+    Ok((StatusCode::OK, Json(response)))
 }
 
 /// `POST /v1/daemon/orchestration/presets/:id`
@@ -70,7 +49,7 @@ pub async fn reload_preset(
 
     // Validate the preset exists by attempting to load it.
     let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
-    let loaded = nexus_orchestration::preset::load_embedded_preset(&preset_id, &caps)
+    let loaded = nexus_preset::load_embedded_preset(&preset_id, &caps)
         .map_err(|e| NexusApiError::NotFound(format!("preset '{preset_id}' not found: {e}")))?;
 
     // Compute the new source hash (blake3 hex).
@@ -113,270 +92,13 @@ pub async fn get_preset_profile(
     State(state): State<WorkspaceState>,
     Path(preset_id): Path<String>,
 ) -> Result<Json<PresetProfileResponse>, NexusApiError> {
-    let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
-    // F-003: O(1) direct-path lookup first (as `creator run` does); fall
-    // back to the full 3-tier scan for `_system.` ids and miss/load-error
-    // cases (AR-22).
-    let loaded = match nexus_orchestration::preset::lookup_preset_by_id(
-        &preset_id,
-        state.nexus_home(),
-        &caps,
-    ) {
-        Some(loaded) => loaded,
-        None => nexus_orchestration::preset::resolve_preset(&preset_id, state.nexus_home(), &caps)
-            .map_err(|e| NexusApiError::NotFound(format!("preset '{preset_id}' not found: {e}")))?,
-    };
-
-    let manifest = &loaded.manifest;
-    let states = manifest
-        .states
-        .iter()
-        .map(profile_state)
-        .collect::<Vec<_>>();
-    let roles = loaded.roles.iter().map(profile_role).collect::<Vec<_>>();
-    let signals = loaded
-        .signals
-        .iter()
-        .map(profile_signal)
-        .collect::<Vec<_>>();
-
-    let mut hash_hex = String::with_capacity(64);
-    for b in &loaded.source_hash {
-        use std::fmt::Write;
-        hash_hex
-            .write_fmt(format_args!("{b:02x}"))
-            .expect("write to String should succeed");
-    }
-
-    Ok(Json(PresetProfileResponse {
-        id: loaded.id.clone(),
-        version: loaded.version,
-        source_hash: hash_hex,
-        lanes: profile_lanes(&preset_id, !is_user_preset(&preset_id, state.nexus_home())),
-        states,
-        roles,
-        required_capabilities: manifest.preset.requires_capabilities.clone(),
-        signals,
-    }))
+    let core = state.core_or_uninit().await?;
+    let principal = core.active_principal().await?;
+    let response = core.get_preset_profile(&principal, preset_id).await?;
+    Ok(Json(response))
 }
 
-/// Trigger-lane classification (AR-21).
-///
-/// `cron` is derived from the shared works-cron role membership
-/// ([`cron_role_preset_ids`] — the brainstorm / write / review role presets
-/// per `RolesSchedule`; same source as
-/// `schedule::cron_supervisor::role_preset`), never a hand-maintained
-/// per-preset list (W-001/F-004).
-///
-/// `session` is honest per resolvability class (W-003/F-002): the
-/// session-start API (`POST /v1/daemon/orchestration/sessions`) loads
-/// embedded presets only (`load_embedded_preset`), so a **user** preset
-/// reports `session: false` — the lane claim must not overstate what the
-/// runtime can serve. System (`_system.`) and embedded presets report
-/// `session: true`.
-///
-/// `wall_clock` / `direct` are platform facts — the daemon schedule path
-/// resolves any resolvable preset id (`resolve_preset`), so every resolvable
-/// preset can fire on the wall-clock poller or via a direct run with an
-/// explicit payload.
-fn profile_lanes(preset_id: &str, session: bool) -> PresetProfileLanes {
-    PresetProfileLanes {
-        cron: cron_role_preset_ids().contains(&preset_id),
-        wall_clock: true,
-        session,
-        direct: true,
-    }
-}
 
-/// Is `preset_id` a user preset (3-tier resolvability class, AR-22)?
-///
-/// `_system.` qualified ids are system presets; otherwise a user bundle at
-/// `<nexus_home>/presets/<id>/preset.yaml` marks the user class. Used for
-/// the `session` lane honesty check (W-003/F-002).
-fn is_user_preset(preset_id: &str, nexus_home: &std::path::Path) -> bool {
-    !preset_id.starts_with("_system.")
-        && nexus_home
-            .join("presets")
-            .join(preset_id)
-            .join("preset.yaml")
-            .is_file()
-}
-
-/// Map one manifest state to its profile shape.
-fn profile_state(state: &StateDefinition) -> PresetProfileState {
-    PresetProfileState {
-        id: state.id.clone(),
-        description: state.description.clone(),
-        enter: state.enter.iter().map(profile_enter_action).collect(),
-        exit_when: state.exit_when.as_ref().map(profile_exit_when),
-        next: state.next.as_ref().map(profile_next),
-        terminal: state.terminal,
-    }
-}
-
-/// Map one enter action to its profile shape.
-fn profile_enter_action(action: &EnterAction) -> PresetProfileEnterAction {
-    match action {
-        EnterAction::Capability { name, .. } => PresetProfileEnterAction {
-            kind: "capability".to_string(),
-            name: name.clone(),
-        },
-        EnterAction::InnerGraph { name } => PresetProfileEnterAction {
-            kind: "inner_graph".to_string(),
-            name: name.clone(),
-        },
-        EnterAction::HostTool { tool_name, .. } => PresetProfileEnterAction {
-            kind: "host_tool".to_string(),
-            name: tool_name.clone(),
-        },
-    }
-}
-
-/// Map one exit condition to its profile shape.
-fn profile_exit_when(exit_when: &ExitWhen) -> PresetProfileExitWhen {
-    match exit_when {
-        ExitWhen::LlmJudge {
-            template_file,
-            judge_capability,
-            min_interval,
-        } => PresetProfileExitWhen {
-            kind: "llm_judge".to_string(),
-            template_file: template_file.clone(),
-            judge_capability: judge_capability.clone(),
-            min_interval: min_interval.clone(),
-            duration: None,
-        },
-        ExitWhen::Rule => PresetProfileExitWhen {
-            kind: "rule".to_string(),
-            template_file: None,
-            judge_capability: None,
-            min_interval: None,
-            duration: None,
-        },
-        ExitWhen::GraphComplete => PresetProfileExitWhen {
-            kind: "graph_complete".to_string(),
-            template_file: None,
-            judge_capability: None,
-            min_interval: None,
-            duration: None,
-        },
-        ExitWhen::Manual => PresetProfileExitWhen {
-            kind: "manual".to_string(),
-            template_file: None,
-            judge_capability: None,
-            min_interval: None,
-            duration: None,
-        },
-        ExitWhen::Timer { duration } => PresetProfileExitWhen {
-            kind: "timer".to_string(),
-            template_file: None,
-            judge_capability: None,
-            min_interval: None,
-            duration: duration.clone(),
-        },
-    }
-}
-
-/// Map one next-transition form to its profile shape.
-fn profile_next(next: &NextTarget) -> PresetProfileNext {
-    match next {
-        NextTarget::Linear(target) => PresetProfileNext {
-            kind: "linear".to_string(),
-            target: Some(target.clone()),
-            // The response-scoped generated type carries no Default derive;
-            // unused arms of the shape are spelled out.
-            branches: Vec::new(),
-            default: None,
-            go: None,
-            labeled: Vec::new(),
-            nogo: None,
-            rules: Vec::new(),
-        },
-        NextTarget::GoNogo(go_nogo) => PresetProfileNext {
-            kind: "goNogo".to_string(),
-            go: Some(go_nogo.go.clone()),
-            nogo: Some(go_nogo.nogo.clone()),
-            branches: Vec::new(),
-            default: None,
-            labeled: Vec::new(),
-            rules: Vec::new(),
-            target: None,
-        },
-        NextTarget::Labeled(edges) => PresetProfileNext {
-            kind: "labeled".to_string(),
-            labeled: edges
-                .iter()
-                .map(|e| PresetProfileLabeledNext {
-                    label: e.label.clone(),
-                    target: e.target.clone(),
-                })
-                .collect(),
-            branches: Vec::new(),
-            default: None,
-            go: None,
-            nogo: None,
-            rules: Vec::new(),
-            target: None,
-        },
-        NextTarget::Conditional(cond) => PresetProfileNext {
-            kind: "conditional".to_string(),
-            rules: cond
-                .rules
-                .iter()
-                .map(|r| PresetProfileConditionalRule {
-                    when: r.when.clone(),
-                    target: r.target.clone(),
-                })
-                .collect(),
-            default: Some(cond.default.clone()),
-            branches: Vec::new(),
-            go: None,
-            labeled: Vec::new(),
-            nogo: None,
-            target: None,
-        },
-        NextTarget::Branches(branches) => PresetProfileNext {
-            kind: "branches".to_string(),
-            branches: branches
-                .branches
-                .iter()
-                .map(|r| PresetProfileConditionalRule {
-                    when: r.when.clone(),
-                    target: r.target.clone(),
-                })
-                .collect(),
-            default: Some(branches.default.clone()),
-            go: None,
-            labeled: Vec::new(),
-            nogo: None,
-            rules: Vec::new(),
-            target: None,
-        },
-    }
-}
-
-/// Map one role definition to its profile shape.
-fn profile_role(role: &PresetRoleDefinition) -> PresetProfileRole {
-    PresetProfileRole {
-        id: role.id.clone(),
-        description: role.description.clone(),
-        system_prompt_file: role.system_prompt_file.clone(),
-        recommended_skills: role.recommended_skills.clone(),
-    }
-}
-
-/// Map one declared signal binding to its profile shape.
-fn profile_signal(signal: &SignalBinding) -> PresetProfileSignal {
-    let action = match signal.on_receive.action {
-        SignalActionKind::Pause => "pause",
-        SignalActionKind::ForceTransition => "force_transition",
-    };
-    PresetProfileSignal {
-        name: signal.name.clone(),
-        action: action.to_string(),
-        target: signal.on_receive.target.clone(),
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -393,7 +115,7 @@ mod tests {
         let state =
             crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
-        let (status, Json(resp)) = list_presets(State(state)).await;
+        let (status, Json(resp)) = list_presets(State(state)).await.expect("list presets");
         assert_eq!(status, StatusCode::OK);
         assert!(
             resp.presets.iter().any(|p| p == "novel-writing"),
@@ -554,7 +276,7 @@ states:
     async fn profile_resolves_system_preset() {
         let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         // First-start fallback creates `presets/_system/maintenance/` on disk.
-        nexus_orchestration::system_preset_dir::ensure_maintenance_preset(&nexus_home)
+        nexus_preset::system_preset_dir::ensure_maintenance_preset(&nexus_home)
             .expect("ensure maintenance preset");
         let state =
             crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
@@ -616,7 +338,7 @@ states:
         // W-003/F-002: embedded and system presets are loadable by the
         // session-start API, so they report `session: true`.
         let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
-        nexus_orchestration::system_preset_dir::ensure_maintenance_preset(&nexus_home)
+        nexus_preset::system_preset_dir::ensure_maintenance_preset(&nexus_home)
             .expect("ensure maintenance preset");
         let state =
             crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
@@ -642,7 +364,7 @@ states:
         let state =
             crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
-        for id in nexus_orchestration::preset_ids::cron_role_preset_ids() {
+        for id in nexus_preset::preset_ids::cron_role_preset_ids() {
             let result = get_preset_profile(State(state.clone()), Path(id.to_string())).await;
             let Json(profile) = result
                 .unwrap_or_else(|e| panic!("cron-role preset '{id}' profile should resolve: {e}"));
@@ -679,14 +401,6 @@ states:
         assert!(
             json.get("signals").is_none(),
             "empty signals serialize absent"
-        );
-        assert!(
-            json["states"]
-                .as_array()
-                .expect("states array")
-                .iter()
-                .all(|s| s.get("description").is_some() || s.get("description").is_none()),
-            "description optional per state"
         );
         // A state without enter/exit_when/next (terminal `done`) serializes
         // those fields absent, not as invented defaults.

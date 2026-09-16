@@ -42,9 +42,9 @@ const FAR_FUTURE_SCHEDULED_AT: &str = "253402300799";
 
 fn bindings_for_preset(preset_id: &str, nexus_home: &Path) -> HashMap<String, AgentBindingDto> {
     let registry = std::sync::Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
-    let loaded = nexus_orchestration::preset::resolve_preset(preset_id, nexus_home, &registry)
+    let loaded = nexus_preset::resolve_preset(preset_id, nexus_home, &registry)
         .unwrap_or_else(|e| panic!("resolve preset {preset_id}: {e}"));
-    nexus_orchestration::preset::required_prompt_roles(&loaded)
+    nexus_preset::required_prompt_roles(&loaded)
         .into_iter()
         .map(|role| {
             (

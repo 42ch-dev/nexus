@@ -14,7 +14,7 @@
 //! All errors are logged and the loop continues — a single failed tick must
 //! never crash the daemon. The task exits cleanly when `shutdown_notify` fires.
 //!
-//! This mirrors the [`crate::cron_supervisor`] / [`crate::stale_findings_watcher`]
+//! This mirrors the [`super::cron`] / [`super::stale_findings`]
 //! spawn pattern (V1.39 P4 / V1.50 T-A P1).
 //!
 //! ## Workspace path
