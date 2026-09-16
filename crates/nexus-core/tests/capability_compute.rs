@@ -346,7 +346,7 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
     // directly under it — an extra `capabilities/` level makes the scanner
     // look for `<root>/<name>/capability.json` and find nothing.
     let scan_root = f._tmp.path().join("usercaps");
-    let dir = scan_root.join("t3-requires-thing");
+    let dir = scan_root.join("t3.requires.thing");
     std::fs::create_dir_all(&dir).unwrap();
     let wasm = b"fake module bytes";
     let sha = {
