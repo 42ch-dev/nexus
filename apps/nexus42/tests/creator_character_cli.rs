@@ -18,7 +18,7 @@ fn stderr(out: &Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
-async fn activate_owner(d: &LiveDaemon) {
+async fn seed_owner_worlds(d: &LiveDaemon) {
     nexus_local_db::ensure_creator_row(&d.pool, OWNER, "Owner")
         .await
         .unwrap();
@@ -38,30 +38,12 @@ async fn activate_owner(d: &LiveDaemon) {
         .unwrap();
     }
 
-    let config_path = d.home.path().join(".nexus42").join("config.toml");
-    let existing = std::fs::read_to_string(&config_path).unwrap();
-    let daemon_url = existing
-        .lines()
-        .find_map(|l| l.strip_prefix("daemon_url = "))
-        .map(str::to_string)
-        .expect("daemon_url");
-    std::fs::write(
-        &config_path,
-        format!(
-            "active_creator_id = \"{OWNER}\"\n\
-             daemon_url = {daemon_url}\n\
-             \n\
-             [active_workspace_slug_by_creator]\n\
-             \"{OWNER}\" = \"default\"\n"
-        ),
-    )
-    .unwrap();
 }
 
 #[tokio::test]
 async fn create_bind_remove_journey_human_and_json() {
-    let d = LiveDaemon::start().await;
-    activate_owner(&d).await;
+    let d = LiveDaemon::start_for_creator(OWNER, "default").await;
+    seed_owner_worlds(&d).await;
 
     let created = d
         .cli(&[
@@ -167,8 +149,8 @@ async fn create_bind_remove_journey_human_and_json() {
 #[allow(clippy::too_many_lines, clippy::similar_names)] // e2e pagination proof (A/B pages)
 
 async fn binding_list_human_and_json_paginate() {
-    let d = LiveDaemon::start().await;
-    activate_owner(&d).await;
+    let d = LiveDaemon::start_for_creator(OWNER, "default").await;
+    seed_owner_worlds(&d).await;
 
     let created = d
         .cli(&[
@@ -306,8 +288,8 @@ async fn binding_list_human_and_json_paginate() {
 
 #[tokio::test]
 async fn knowledge_add_list_view_json_round_trip() {
-    let d = LiveDaemon::start().await;
-    activate_owner(&d).await;
+    let d = LiveDaemon::start_for_creator(OWNER, "default").await;
+    seed_owner_worlds(&d).await;
 
     let created = d
         .cli(&[
@@ -390,8 +372,8 @@ async fn knowledge_add_list_view_json_round_trip() {
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn edit_archive_restore_cli_honors_explicit_revision_cas() {
-    let d = LiveDaemon::start().await;
-    activate_owner(&d).await;
+    let d = LiveDaemon::start_for_creator(OWNER, "default").await;
+    seed_owner_worlds(&d).await;
 
     let created = d
         .cli(&[
@@ -505,8 +487,8 @@ async fn edit_archive_restore_cli_honors_explicit_revision_cas() {
 
 #[tokio::test]
 async fn edit_without_mutable_fields_is_invalid_input() {
-    let d = LiveDaemon::start().await;
-    activate_owner(&d).await;
+    let d = LiveDaemon::start_for_creator(OWNER, "default").await;
+    seed_owner_worlds(&d).await;
 
     let created = d
         .cli(&[
@@ -564,8 +546,8 @@ async fn seed_character_sheet(
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn binding_detail_edit_link_relink_clear_and_refusals() {
-    let d = LiveDaemon::start().await;
-    activate_owner(&d).await;
+    let d = LiveDaemon::start_for_creator(OWNER, "default").await;
+    seed_owner_worlds(&d).await;
     seed_character_sheet(&d, "kb_sheet_a", WORLD_A, "sheet_a").await;
     seed_character_sheet(&d, "kb_sheet_b", WORLD_A, "sheet_b").await;
 
@@ -752,8 +734,8 @@ async fn binding_detail_edit_link_relink_clear_and_refusals() {
 
 #[tokio::test]
 async fn binding_show_retained_after_archive() {
-    let d = LiveDaemon::start().await;
-    activate_owner(&d).await;
+    let d = LiveDaemon::start_for_creator(OWNER, "default").await;
+    seed_owner_worlds(&d).await;
     seed_character_sheet(&d, "kb_retained", WORLD_A, "retained").await;
 
     let created = d
@@ -854,8 +836,8 @@ async fn binding_show_retained_after_archive() {
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn knowledge_show_edit_remove_summary_journey() {
-    let d = LiveDaemon::start().await;
-    activate_owner(&d).await;
+    let d = LiveDaemon::start_for_creator(OWNER, "default").await;
+    seed_owner_worlds(&d).await;
 
     let created = d
         .cli(&[
@@ -982,8 +964,8 @@ async fn summary_file_over_byte_limit_rejects_via_metadata_precheck() {
     use nexus_local_db::ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES;
     use std::io::Write;
 
-    let d = LiveDaemon::start().await;
-    activate_owner(&d).await;
+    let d = LiveDaemon::start_for_creator(OWNER, "default").await;
+    seed_owner_worlds(&d).await;
 
     let created = d
         .cli(&[

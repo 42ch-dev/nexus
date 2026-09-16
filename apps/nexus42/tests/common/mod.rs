@@ -84,6 +84,16 @@ impl LiveDaemon {
         Self::start_with_optional_host(None).await
     }
 
+    /// Boot the daemon with a coherent creator/workspace identity from the
+    /// first line — the Profile home, `config.toml` selection and admitted
+    /// `state.db` all name the same creator. Tests that need a non-default
+    /// `ctr_…` creator MUST use this instead of rewriting `config.toml`
+    /// after `start()`: a post-hoc rewrite leaves the host's bound pool and
+    /// the config-resolved selection pointing at different databases.
+    pub async fn start_for_creator(creator_id: &str, workspace_slug: &str) -> Self {
+        Self::start_with_workspace_identity(creator_id, workspace_slug, None).await
+    }
+
     /// Boot the daemon with a deterministic `HostFacade` (Character run E2E).
     pub async fn start_with_agent_host(host: Arc<dyn HostFacade>) -> Self {
         Self::start_with_optional_host(Some(host)).await
@@ -486,7 +496,16 @@ impl LiveDaemon {
     }
 
     async fn start_with_optional_host(host: Option<Arc<dyn HostFacade>>) -> Self {
-        let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+        Self::start_with_workspace_identity("test_creator", "default", host).await
+    }
+
+    async fn start_with_workspace_identity(
+        creator_id: &str,
+        workspace_slug: &str,
+        host: Option<Arc<dyn HostFacade>>,
+    ) -> Self {
+        let (tmp, nexus_home, db_path) =
+            test_utils::create_test_workspace_for(creator_id, workspace_slug).await;
 
         // Bind the HTTP listener BEFORE writing `daemon_url` into config.
         let listener = TcpListener::bind("127.0.0.1:0")
@@ -501,11 +520,11 @@ impl LiveDaemon {
         // `[active_workspace_slug_by_creator]` would make it a table key).
         let config_path = nexus_home.join("config.toml");
         let config = format!(
-            "active_creator_id = \"test_creator\"\n\
+            "active_creator_id = \"{creator_id}\"\n\
              daemon_url = \"{http_url}\"\n\
              \n\
              [active_workspace_slug_by_creator]\n\
-             \"test_creator\" = \"default\"\n"
+             \"{creator_id}\" = \"{workspace_slug}\"\n"
         );
         std::fs::write(&config_path, config).expect("write config.toml");
 
@@ -514,7 +533,9 @@ impl LiveDaemon {
             state.set_agent_host(host);
         }
         let pool = state.pool().expect("pool").clone();
-        test_utils::seed_test_creator_and_world(&pool).await;
+        if creator_id == "test_creator" {
+            test_utils::seed_test_creator_and_world(&pool).await;
+        }
         let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool).await;
 
         let app = api::create_router(

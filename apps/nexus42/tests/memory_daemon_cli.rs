@@ -30,24 +30,6 @@ async fn seed_memory_creator(d: &LiveDaemon) {
     .await
     .expect("seed memory creator");
 
-    // Rewrite config.toml so the daemon's active-creator read resolves to
-    // the ctr_-prefixed creator (the fixture's `test_creator` fails the
-    // daemon's creator_id format validation).
-    let config_path = d.home.path().join(".nexus42").join("config.toml");
-    let existing = std::fs::read_to_string(&config_path).expect("read config");
-    let daemon_url = existing
-        .lines()
-        .find_map(|l| l.strip_prefix("daemon_url = "))
-        .map(str::to_string)
-        .expect("daemon_url in config");
-    let config = format!(
-        "active_creator_id = \"{MEMORY_CREATOR}\"\n\
-         daemon_url = {daemon_url}\n\
-         \n\
-         [active_workspace_slug_by_creator]\n\
-         \"{MEMORY_CREATOR}\" = \"default\"\n"
-    );
-    std::fs::write(&config_path, config).expect("rewrite config");
 }
 
 /// Seed `n` pending-review rows for [`MEMORY_CREATOR`].
@@ -100,7 +82,7 @@ async fn seed_pending_desc(d: &LiveDaemon, n: usize) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pending_count_reports_seeded_depth() {
-    let d = LiveDaemon::start().await;
+    let d = LiveDaemon::start_for_creator(MEMORY_CREATOR, "default").await;
     seed_memory_creator(&d).await;
     seed_pending(&d, 3).await;
 
@@ -112,7 +94,7 @@ async fn pending_count_reports_seeded_depth() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pending_count_json_emits_dto_verbatim() {
-    let d = LiveDaemon::start().await;
+    let d = LiveDaemon::start_for_creator(MEMORY_CREATOR, "default").await;
     seed_memory_creator(&d).await;
     seed_pending(&d, 2).await;
 
@@ -126,7 +108,7 @@ async fn pending_count_json_emits_dto_verbatim() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pending_count_zero_when_empty() {
-    let d = LiveDaemon::start().await;
+    let d = LiveDaemon::start_for_creator(MEMORY_CREATOR, "default").await;
     seed_memory_creator(&d).await;
     let out = d.cli(&["creator", "memory", "pending", "count"]).await;
     assert!(out.status.success(), "count failed: {}", stderr(&out));
@@ -138,7 +120,7 @@ async fn pending_count_zero_when_empty() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn review_drains_small_queue() {
-    let d = LiveDaemon::start().await;
+    let d = LiveDaemon::start_for_creator(MEMORY_CREATOR, "default").await;
     seed_memory_creator(&d).await;
     seed_pending(&d, 2).await;
 
@@ -151,7 +133,7 @@ async fn review_drains_small_queue() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn review_json_emits_cumulative_report() {
-    let d = LiveDaemon::start().await;
+    let d = LiveDaemon::start_for_creator(MEMORY_CREATOR, "default").await;
     seed_memory_creator(&d).await;
     seed_pending(&d, 1).await;
 
@@ -164,7 +146,7 @@ async fn review_json_emits_cumulative_report() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn review_empty_queue_prints_no_pending() {
-    let d = LiveDaemon::start().await;
+    let d = LiveDaemon::start_for_creator(MEMORY_CREATOR, "default").await;
     seed_memory_creator(&d).await;
     let out = d.cli(&["creator", "memory", "review"]).await;
     assert!(out.status.success(), "review failed: {}", stderr(&out));
@@ -176,7 +158,7 @@ async fn review_empty_queue_prints_no_pending() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pending_list_json_emits_dto_verbatim() {
-    let d = LiveDaemon::start().await;
+    let d = LiveDaemon::start_for_creator(MEMORY_CREATOR, "default").await;
     seed_memory_creator(&d).await;
     seed_pending(&d, 1).await;
 
@@ -198,7 +180,7 @@ async fn pending_list_json_emits_dto_verbatim() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fragments_json_emits_wrapper_dto() {
-    let d = LiveDaemon::start().await;
+    let d = LiveDaemon::start_for_creator(MEMORY_CREATOR, "default").await;
     seed_memory_creator(&d).await;
     sqlx::query(
         "INSERT INTO memory_fragments \
@@ -229,7 +211,7 @@ async fn fragments_json_emits_wrapper_dto() {
 /// the pages are exhausted instead of reporting not-found from page 1.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pending_show_finds_id_beyond_first_page() {
-    let d = LiveDaemon::start().await;
+    let d = LiveDaemon::start_for_creator(MEMORY_CREATOR, "default").await;
     seed_memory_creator(&d).await;
     // Row `pending_test_0` is newest → it lands on page 1; row 55 lands on
     // page 2 (newest-first DESC order, 50 rows/page).
@@ -252,7 +234,7 @@ async fn pending_show_finds_id_beyond_first_page() {
 /// does not exist anywhere (bounded loop — no infinite page following).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pending_show_missing_id_past_first_page_fails_closed() {
-    let d = LiveDaemon::start().await;
+    let d = LiveDaemon::start_for_creator(MEMORY_CREATOR, "default").await;
     seed_memory_creator(&d).await;
     seed_pending_desc(&d, 60).await;
 
