@@ -213,6 +213,41 @@ pub struct ToolContext {
 }
 
 impl ToolContext {
+    /// Compose a tool context from its owned inputs.
+    ///
+    /// The fields stay crate-private so a caller cannot mutate the authority
+    /// under a running dispatch; this constructor is the public composition
+    /// point a transport (or a test) uses.
+    #[must_use]
+    pub fn new(
+        pool: sqlx::SqlitePool,
+        nexus_home: std::path::PathBuf,
+        workspace_path: Option<String>,
+        runtime_facts: ToolRuntimeFacts,
+        core: Option<Arc<CoreService>>,
+        user_capabilities: Option<nexus_orchestration::CapabilityRegistryHolder>,
+    ) -> Self {
+        Self {
+            pool,
+            nexus_home,
+            workspace_path,
+            runtime_facts,
+            core,
+            user_capabilities,
+        }
+    }
+
+    /// Replace the live user-capability holder.
+    ///
+    /// A dispatch reads the holder LIVE, so swapping it here is visible to the
+    /// very next call — the same hot-reload discipline the engine uses.
+    pub fn set_user_capabilities(
+        &mut self,
+        holder: Option<nexus_orchestration::CapabilityRegistryHolder>,
+    ) {
+        self.user_capabilities = holder;
+    }
+
     /// The Creator DB pool.
     #[must_use]
     pub fn pool(&self) -> &sqlx::SqlitePool {

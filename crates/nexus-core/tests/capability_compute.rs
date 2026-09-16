@@ -36,11 +36,6 @@ const SLUG: &str = "default";
 const WORLD: &str = "wld_combat";
 const MODULE: &str = "basic-combat";
 
-/// The module used by the accept anchor: it emits exactly one state delta, one
-/// timeline event and no key blocks, so the response counts are unambiguous.
-const COMBAT_MANIFEST: &str = r#"{"module_id":"basic-combat","name":"Basic Combat","version":"1.0.0",
-  "nexus_abi_version":1,"required_key_block_types":["character"],"compute_export":"compute",
-  "init_export":"init","host_functions":[]}"#;
 
 struct Fixture {
     _tmp: TempDir,
@@ -102,19 +97,19 @@ async fn fixture() -> Fixture {
     seed_character(core.pool(), "kb_atk", "Striker", 20, 3, 100, 100).await;
     seed_character(core.pool(), "kb_def", "Guardian", 10, 5, 30, 50).await;
 
-    let context = ToolContext {
-        pool: core.pool().clone(),
-        nexus_home: home,
-        workspace_path: None,
-        runtime_facts: ToolRuntimeFacts {
+    let context = ToolContext::new(
+        core.pool().clone(),
+        home,
+        None,
+        ToolRuntimeFacts {
             is_initialized: true,
             lifecycle_state: "Running".to_string(),
             started_at: chrono::Utc::now().to_rfc3339(),
             ..ToolRuntimeFacts::default()
         },
-        core: None,
-        user_capabilities: None,
-    };
+        None,
+        None,
+    );
 
     let compute = ComputeContext {
         creator_id: CREATOR.to_string(),
@@ -358,10 +353,9 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
     );
 
     let mut context = f.context.clone();
-    context.user_capabilities =
-        Some(nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-            registry,
-        )));
+    context.set_user_capabilities(Some(
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(registry)),
+    ));
 
     let request = ToolExecuteRequest {
         tool_name: "t3.requires.thing".to_string(),
