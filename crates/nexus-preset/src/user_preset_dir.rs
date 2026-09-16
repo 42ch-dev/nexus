@@ -10,8 +10,10 @@
 //!
 //! Design: V1.9 WS-A — third-party preset loading.
 
-use crate::capability::CapabilityRegistry;
-use crate::preset::loader::{load_preset_from_str, LoadedPreset, PresetLoadError};
+use crate::capability_catalog::CapabilityCatalog;
+#[cfg(test)]
+use crate::capability_catalog::BuiltinCapabilityCatalog;
+use crate::loader::{load_preset_from_str, LoadedPreset, PresetLoadError};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -73,7 +75,7 @@ pub struct UserPresetWarning {
 /// skipped to avoid overlap with system presets and hidden files.
 ///
 /// The `nexus_home` parameter is typically `$HOME/.nexus42`.
-pub fn scan_user_presets(nexus_home: &Path, caps: &CapabilityRegistry) -> UserPresetScanResult {
+pub fn scan_user_presets(nexus_home: &Path, caps: &dyn CapabilityCatalog) -> UserPresetScanResult {
     let user_dir = nexus_home.join("presets");
 
     // Missing directory = no user presets (not an error).
@@ -170,7 +172,7 @@ pub fn scan_user_presets(nexus_home: &Path, caps: &CapabilityRegistry) -> UserPr
 pub fn load_user_preset_from_dir(
     bundle_dir: &Path,
     dir_name: &str,
-    caps: &CapabilityRegistry,
+    caps: &dyn CapabilityCatalog,
 ) -> Result<UserPresetEntry, UserPresetWarning> {
     let preset_yaml_path = bundle_dir.join("preset.yaml");
 
@@ -226,19 +228,13 @@ pub fn load_user_preset_from_dir(
                 message: format!("{e}"),
             });
         }
-        Err(PresetLoadError::GraphBuild(e)) => {
-            return Err(UserPresetWarning {
-                dir_name: dir_name.to_string(),
-                message: format!("graph build error: {e}"),
-            });
-        }
     };
 
     // A user preset is a directory bundle: it knows its source identity
     // (A2/A7) — content hash over the manifest + every referenced asset.
     let mut loaded = loaded;
     loaded.source_identity = Some(
-        crate::preset::loader::preset_source_identity(&loaded.manifest, Some(bundle_dir), None)
+        crate::loader::preset_source_identity(&loaded.manifest, Some(bundle_dir), None)
             .map_err(|e| UserPresetWarning {
                 dir_name: dir_name.to_string(),
                 message: format!("failed to compute source identity: {e}"),
@@ -359,7 +355,7 @@ states:
         let tmp = tempfile::tempdir().unwrap();
         let nexus_home = tmp.path();
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_user_presets(nexus_home, &caps);
 
         assert!(result.presets.is_empty());
@@ -377,7 +373,7 @@ states:
         fs::create_dir_all(&strategy_dir).unwrap();
         fs::write(strategy_dir.join("preset.yaml"), minimal_yaml()).unwrap();
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_user_presets(&nexus_home, &caps);
 
         assert_eq!(result.presets.len(), 1);
@@ -396,7 +392,7 @@ states:
         fs::create_dir_all(&system_dir).unwrap();
         fs::write(system_dir.join("preset.yaml"), "bogus").unwrap();
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_user_presets(&nexus_home, &caps);
 
         assert!(result.presets.is_empty());
@@ -414,7 +410,7 @@ states:
         fs::create_dir_all(&hidden_dir).unwrap();
         fs::write(hidden_dir.join("preset.yaml"), "bogus").unwrap();
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_user_presets(&nexus_home, &caps);
 
         assert!(result.presets.is_empty());
@@ -432,7 +428,7 @@ states:
         fs::create_dir_all(&broken_dir).unwrap();
         fs::write(broken_dir.join("preset.yaml"), "not valid yaml: [").unwrap();
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_user_presets(&nexus_home, &caps);
 
         assert!(result.presets.is_empty());
@@ -451,7 +447,7 @@ states:
         let empty_dir = base.join("empty");
         fs::create_dir_all(&empty_dir).unwrap();
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_user_presets(&nexus_home, &caps);
 
         assert!(result.presets.is_empty());
@@ -493,7 +489,7 @@ states:
         fs::create_dir_all(&dir_b).unwrap();
         fs::write(dir_b.join("preset.yaml"), yaml_b).unwrap();
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_user_presets(&nexus_home, &caps);
 
         assert_eq!(result.presets.len(), 2);
@@ -512,7 +508,7 @@ states:
         fs::create_dir_all(&strategy_dir).unwrap();
         fs::write(strategy_dir.join("preset.yaml"), minimal_yaml()).unwrap();
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_user_presets(&nexus_home, &caps);
         let ids = list_user_preset_ids(&result);
 
@@ -529,7 +525,7 @@ states:
         fs::create_dir_all(&strategy_dir).unwrap();
         fs::write(strategy_dir.join("preset.yaml"), minimal_yaml()).unwrap();
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_user_presets(&nexus_home, &caps);
 
         assert!(find_user_preset(&result, "my-strategy").is_some());
@@ -545,7 +541,7 @@ states:
         fs::create_dir_all(&bundle_dir).unwrap();
         fs::write(bundle_dir.join("preset.yaml"), minimal_yaml()).unwrap();
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let loaded = load_user_preset_from_dir(&bundle_dir, "test-strat", &caps).unwrap();
         assert_eq!(loaded.id, "test-strat");
         assert_eq!(loaded.loaded.id, "test-strategy");
@@ -567,7 +563,7 @@ states:
             fs::write(dir.join("preset.yaml"), yaml).unwrap();
         }
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_user_presets(&nexus_home, &caps);
 
         assert_eq!(result.presets.len(), 3);
@@ -597,7 +593,7 @@ states:
             fs::write(dir.join("preset.yaml"), yaml).unwrap();
         }
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_user_presets(&nexus_home, &caps);
 
         assert_eq!(result.presets.len(), 5);
@@ -615,7 +611,7 @@ states:
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("preset.yaml"), minimal_yaml()).unwrap();
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_user_presets(&nexus_home, &caps);
 
         assert!(
@@ -634,7 +630,7 @@ states:
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("preset.yaml"), minimal_yaml()).unwrap();
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_user_presets(&nexus_home, &caps);
         assert!(is_scan_cache_fresh(&result, &nexus_home));
 
@@ -659,7 +655,7 @@ states:
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("preset.yaml"), minimal_yaml()).unwrap();
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_user_presets(&nexus_home, &caps);
         assert!(is_scan_cache_fresh(&result, &nexus_home));
 
@@ -685,7 +681,7 @@ states:
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("preset.yaml"), minimal_yaml()).unwrap();
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_user_presets(&nexus_home, &caps);
         assert!(is_scan_cache_fresh(&result, &nexus_home));
 

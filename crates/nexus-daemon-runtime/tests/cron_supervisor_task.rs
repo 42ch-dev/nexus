@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use nexus_daemon_runtime::cron_supervisor;
+use nexus_core::execution::schedules::cron;
 use nexus_local_db::works::{self, WorkRecord};
 use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
 

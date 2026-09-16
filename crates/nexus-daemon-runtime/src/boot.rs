@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use crate::api;
 use crate::lifecycle::{Event, Lifecycle, StatigLifecycle, SubsystemKind};
-use crate::preset_run::WorkflowRunCoordinator;
+use nexus_core::execution::WorkflowRunCoordinator;
 use crate::tls;
 use crate::workspace::WorkspaceState;
 
@@ -64,9 +64,10 @@ use nexus_orchestration::{
     run_state::WorkflowStateStore,
     schedule::supervisor::{ScheduleRunStarter, ScheduleSupervisor, SupervisorError},
     storage::sqlite::SqliteSessionStorage,
-    system_preset_dir, CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps,
+    CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps,
     GraphFlowEngine,
 };
+use nexus_preset::system_preset_dir;
 use tracing_subscriber::EnvFilter;
 
 /// Daemon API transport configuration.
@@ -386,65 +387,6 @@ fn hot_rebuild_and_swap(
     outcome.admitted
 }
 
-/// WS2 R1 + A7: recover persisted non-terminal sessions into the in-memory
-/// tracker (runner reconstruction from the frozen source) and re-drive the
-/// eligible converge/merge class through the single coordinator owner.
-///
-/// Shared by the production boot path and the daemon-level restart helper
-/// so every restart runs the SAME A7 recovery order: each recovered session
-/// is classified by the durable v1 record (Terminal / Unreadable /
-/// Interrupted / `HumanWait` / `SafeBoundary` skip immediately; only
-/// `ConvergeMerge` is re-driven from its persisted position).
-///
-/// Runner reconstruction covers embedded AND user-directory presets through
-/// the frozen source identity (A7): a changed/missing source or corrupt
-/// child identity leaves the session runnerless (tracked-but-not-driven;
-/// on-demand reattachment is refused as `reconstruction_unavailable`).
-///
-/// The re-drive is bounded by `max_steps`, runs in the background so boot
-/// does not block, and is cancelled when `shutdown_notify` fires.
-///
-/// With a coordinator the work delegates to
-/// [`WorkflowRunCoordinator::recover_persisted`]; without one (Tier-0 boot
-/// with no Creator DB) only the engine-side tracker reconstruction runs —
-/// there is nothing to re-drive.
-#[allow(clippy::too_long_first_doc_paragraph)] // recovery ordering contract spans many invariants; compact phrasing is clearer than fragmenting
-pub async fn run_boot_recovery(
-    engine: &Arc<dyn OrchestrationEngine>,
-    sqlite_boot_storage: &Arc<SqliteSessionStorage>,
-    run_coordinator: Option<&Arc<WorkflowRunCoordinator>>,
-    shutdown_notify: Arc<tokio::sync::Notify>,
-) {
-    // Single production recovery seam (A7): reconstruct runners from the
-    // frozen source identity, classify every non-terminal session by the
-    // durable v1 record, and re-drive only the converge/merge class through
-    // the single coordinator owner. When no coordinator is wired (Tier-0
-    // boot without a Creator DB), the engine-side reconstruction still runs
-    // so recovered sessions are tracked; there is nothing to re-drive.
-    let Some(coordinator) = run_coordinator else {
-        match sqlite_boot_storage.list_non_terminal_sessions().await {
-            Ok(summaries) if !summaries.is_empty() => {
-                tracing::info!(
-                    "recovering {} persisted session(s) into in-memory tracker",
-                    summaries.len()
-                );
-                engine.recover_sessions(summaries).await;
-            }
-            Ok(_) => {}
-            Err(e) => {
-                tracing::warn!("failed to recover persisted sessions: {}", e);
-            }
-        }
-        return;
-    };
-    let decisions = coordinator
-        .recover_persisted(sqlite_boot_storage, Some(shutdown_notify))
-        .await;
-    for d in &decisions {
-        tracing::info!(decision = ?d, "resume re-drive decision");
-    }
-}
-
 /// Run the daemon runtime to completion.
 ///
 /// This is the main daemon entry point, extracted from the former standalone daemon
@@ -666,7 +608,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         std::sync::Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>,
     > = state.session_manager().and_then(|mgr| {
         state.workspace_path().map(|root| {
-            std::sync::Arc::new(crate::workspace::executor::DaemonWorkspaceExecutor::new(
+            std::sync::Arc::new(nexus_core::execution::executor::WorkspaceCommitExecutor::new(
                 mgr, root,
             )) as std::sync::Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>
         })
@@ -743,122 +685,165 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     state.set_daemon_tool_dispatch(tool_dispatch.clone());
     tracing::info!("Daemon tool dispatch adapter wired");
 
-    // Critical 2: when a creator DB is present, wire the durable
-    // WorkflowStateStore (the SQLite adapter implements both SessionStorage
-    // and WorkflowStateStore) into the engine so real daemon sessions are v1
-    // runs (authoritative status/descriptor/state persisted via start_run /
-    // commit_transition). The workspace root is frozen into every v1
-    // descriptor. When no creator DB is present (Tier-0 boot), fall back to
-    // the in-memory engine (no v1 persistence).
-    let mut concrete_engine = sqlite_boot_storage.as_ref().map_or_else(
-        || GraphFlowEngine::new_with_storage(session_storage.clone(), capability_holder.clone()),
-        |sqlite_storage| {
-            let workflow_store: Arc<dyn WorkflowStateStore> = sqlite_storage.clone();
-            let workspace_root = state
-                .workspace_path()
-                .map(std::path::PathBuf::from)
-                .unwrap_or_default();
-            GraphFlowEngine::new_with_storage_and_workflow_store_and_workspace(
-                session_storage.clone(),
-                workflow_store,
-                capability_holder.clone(),
-                workspace_root,
-            )
-        },
-    );
-
-    // DF-47 (V1.42 P3): wire the daemon tool dispatch into the engine so
-    // HostTool enter actions in preset graphs can invoke nexus.* tools.
-    concrete_engine.set_daemon_tool_dispatch(tool_dispatch.clone());
-    // A1 (V1.186 P1 T2): wire the production prompt executor + per-run
-    // cancellation tokens into the engine so inner graph `acp_prompt` nodes
-    // execute through the Host plane.
-    if let Some(executor) = &prompt_executor {
-        concrete_engine.set_prompt_executor(executor.clone(), session_cancels.clone());
-    }
-    // A2/A7: the engine resolves directory presets for source identity from
-    // the nexus home.
-    concrete_engine.set_nexus_home(state.nexus_home().clone());
-    // v1.188 P3: resolve `_context.workspace.*` from the SAME shared
-    // workspace authority the commit executor writes through, so preset
-    // conditional edges observe real durable state.
-    if let (Some(mgr), Some(root)) = (state.session_manager(), state.workspace_path()) {
-        concrete_engine.set_workspace_state_provider(std::sync::Arc::new(
-            crate::workspace::state_provider::DaemonWorkspaceStateProvider::new(mgr, root),
-        ));
-    }
-
-    let concrete_engine = Arc::new(concrete_engine);
-    let engine: Arc<dyn OrchestrationEngine> = concrete_engine.clone();
-
-    state.set_engine(engine);
-    state.set_capability_registry(capability_holder.clone());
-    tracing::info!("Orchestration engine wired");
-
-    // --- A3 (v1.186 P2 T1): the single public run coordinator ---
-    // One cancellation/join owner per (Creator DB, session) around the
-    // bounded `drive_preset_run` loop. Newly admitted creator runs and
-    // schedule admissions route through this coordinator; the schedule
-    // supervisor receives a Host-free `ScheduleRunStarter` seam over it.
-    // When no creator DB is present (Tier-0 boot), the coordinator is
-    // absent and pool-backed admission is deferred until Profile attach.
+    // --- Section 3a: the single execution owner (P3-T1) ---
+    // Engine construction, the run coordinator, prompt execution and A7
+    // recovery ordering live in `nexus_core::execution`. Boot supplies the
+    // transport collaborators as ports and keeps logging, HTTP binding, OS
+    // signals and the SPA for itself.
     //
-    // I-1: the coordinator is constructed BEFORE boot recovery so every
-    // production drive — including recovery that is eligible to step —
-    // registers its owner in the coordinator's drives map. There is exactly
-    // ONE production drive-owner path per Creator DB + session.
-    let run_coordinator: Option<Arc<WorkflowRunCoordinator>> = match &sqlite_boot_storage {
-        Some(_) => {
-            let mut coordinator_builder = WorkflowRunCoordinator::new(
-                concrete_engine.clone(),
-                session_storage.clone(),
-                Arc::new(state.pool().expect("creator pool present").clone()),
-                session_cancels.clone(),
-            );
-            // N-4: attach the Host plane so admission validates provider
-            // references in agent bindings before enqueue.
-            if let Some(host) = state.agent_host() {
-                coordinator_builder = coordinator_builder.with_agent_host(host);
-            }
-            // C-3: the sanctioned default binding provider for explicit
-            // legacy starts — the same config source the supervisor's
-            // internal insertion paths use.
-            if let Some(provider_id) = state
+    // Critical 2 preserved: when a creator DB is present the core builds the
+    // durable WorkflowStateStore engine (SQLite adapter implements both
+    // SessionStorage and WorkflowStateStore) so real daemon sessions are v1
+    // runs; the workspace root is frozen into every v1 descriptor. A Tier-0
+    // boot (no creator DB) keeps the in-memory engine — no execution owner is
+    // established, and pool-backed admission is deferred to Profile attach.
+    //
+    // I-1 preserved: the coordinator exists (and recovers) BEFORE any system
+    // preset session starts, so every production drive registers its owner in
+    // the single drives map. There is exactly ONE production drive-owner path
+    // per Creator DB + session, and the duplicate-start guard on the core
+    // service makes a second engine impossible.
+    let mut tier0_engine: Option<Arc<GraphFlowEngine>> = None;
+    let execution_handle: Option<Arc<nexus_core::execution::ExecutionHandle>> =
+        if sqlite_boot_storage.is_some() {
+            let core = state.core_or_uninit().await.map_err(|e| {
+                anyhow::anyhow!("execution core service unavailable at boot: {e}")
+            })?;
+            // N-4: the Host plane reaches the coordinator as a catalog port so
+            // admission validates provider references in agent bindings before
+            // enqueue; execution never names the host.
+            let provider_catalog = state
+                .agent_host()
+                .map(|host| {
+                    Arc::new(crate::execution_ports::DaemonProviderCatalogPort::new(host))
+                        as Arc<dyn nexus_core::execution::workflow::ProviderCatalogPort>
+                });
+            // C-3: the sanctioned default binding provider for explicit legacy
+            // starts — the same config source the supervisor's internal
+            // insertion paths use.
+            let binding_provider = state
                 .agent_host_config()
                 .providers
                 .iter()
                 .find(|p| p.enabled)
-                .map(|p| p.id.clone())
-            {
-                coordinator_builder = coordinator_builder.with_binding_provider(provider_id);
-            }
-            coordinator_builder = coordinator_builder
-                .with_run_events(state.run_event_registry())
-                .with_run_event_sinks(state.run_event_sinks());
-            let coordinator = Arc::new(coordinator_builder);
-            state.set_run_coordinator(coordinator.clone());
+                .map(|p| p.id.clone());
+            // P4 §6.3: the bounded per-run SSE rings stay a transport type; the
+            // execution layer reserves/publishes/releases through the port.
+            let run_events = Arc::new(crate::execution_ports::DaemonRunEventPort::new(
+                state.run_event_registry(),
+                state.run_event_sinks(),
+            )) as Arc<dyn nexus_core::execution::workflow::RunEventPort>;
+            let workspace_state_provider = match (state.session_manager(), state.workspace_path()) {
+                (Some(mgr), Some(root)) => Some(Arc::new(
+                    nexus_core::execution::state_provider::CoreWorkspaceStateProvider::new(mgr, root),
+                ) as Arc<dyn nexus_orchestration::capability::WorkspaceStateProvider>),
+                _ => None,
+            };
+            // The provider port is the P4 seam; the handle is established with
+            // it so no execution owner can exist without a provider contract.
+            let providers: Arc<dyn nexus_provider_ports::ProviderPort> =
+                Arc::new(nexus_agent_host::providers::port::ProviderPortAdapter::new(
+                    Arc::clone(&agent_host_facade),
+                ));
+            // P3-T2: the durable commit authority the handle commits through,
+            // bound to the SAME shared manager and canonical root the executor
+            // adapter uses. When no manager/root is published yet (Tier-0
+            // attach) the handle simply has no commit authority.
+            let workspace_commit = match (state.session_manager(), state.workspace_path()) {
+                (Some(mgr), Some(root)) => {
+                    Some(nexus_core::execution::workspace::WorkspaceCommitAuthority::new(
+                        mgr, root,
+                    ))
+                }
+                _ => None,
+            };
+            let deps = nexus_core::execution::RunnerDeps {
+                prompt_executor: prompt_executor.clone(),
+                daemon_tool_dispatch: Some(tool_dispatch.clone()),
+                workspace_executor: None,
+                capability_holder: Some(capability_holder.clone()),
+                session_cancels: Some(session_cancels.clone()),
+                workspace_state_provider,
+                provider_catalog,
+                binding_provider,
+                run_events: Some(run_events),
+                workspace_commit,
+                workspace_root: state.workspace_path().map(std::path::PathBuf::from),
+                nexus_home: Some(state.nexus_home().clone()),
+                shutdown_notify: Some(state.shutdown_notify()),
+                // T3: the daemon SHIPS compute (its own wasm-host edge and the
+                // /compute routes), so the owner reports its real process facts
+                // and the engine/cache it already registered on the state at
+                // startup. Passing None here would make the tool health
+                // surface claim `Starting` forever and would leave the
+                // handle's compute entry points permanently unavailable.
+                runtime_facts: Some(nexus_core::execution::capabilities::ToolRuntimeFacts {
+                    runtime_mode: state.runtime_mode().clone(),
+                    is_initialized: state.is_initialized(),
+                    lifecycle_state: state.lifecycle_state().to_string(),
+                    started_at: state.started_at().to_rfc3339(),
+                    uptime_seconds: state.uptime_seconds(),
+                }),
+                compute_cache: state.module_cache(),
+                compute_engine: state.wasm_engine(),
+                compute_serializer: Some(state.compute_serializer()),
+                // Production supplies no build-phase barrier; it exists for
+                // the C3 concurrency harness.
+                build_observer: None,
+            };
+            let handle = core
+                .start_execution(providers, deps)
+                .await
+                .map_err(|e| anyhow::anyhow!("failed to establish the execution owner: {e}"))?;
+            state.set_execution_handle(Arc::clone(&handle));
+            tracing::info!(
+                engine_epoch = handle.engine_epoch(),
+                "execution owner established (engine/coordinator/recovery in nexus-core)"
+            );
+            Some(handle)
+        } else {
+            // Tier-0: no creator DB. Build the in-memory engine the transport
+            // still needs for non-durable work, but start NO execution owner.
+            let mut engine = GraphFlowEngine::new_with_storage(
+                session_storage.clone(),
+                capability_holder.clone(),
+            );
+            engine.set_daemon_tool_dispatch(tool_dispatch.clone());
             if let Some(executor) = &prompt_executor {
-                state.set_prompt_executor(executor.clone());
+                engine.set_prompt_executor(executor.clone(), session_cancels.clone());
             }
-            Some(coordinator)
-        }
-        None => None,
-    };
+            let engine = Arc::new(engine);
+            state.set_engine(Arc::clone(&engine) as Arc<dyn OrchestrationEngine>);
+            state.set_capability_registry(capability_holder.clone());
+            tracing::info!(
+                "Tier-0 boot: in-memory engine only; no creator DB so no execution owner"
+            );
+            tier0_engine = Some(engine);
+            None
+        };
 
-    // WS2 R1: Recover persisted non-terminal sessions into in-memory tracker.
-    // Shared A7 recovery (runner reconstruction from frozen source + bounded
-    // converge/merge re-drive through the single coordinator owner) — the
-    // same production path the daemon-level restart helper invokes.
-    if let Some(sqlite_storage) = sqlite_boot_storage.clone() {
-        let engine_ref: Arc<dyn OrchestrationEngine> = concrete_engine.clone();
-        run_boot_recovery(
-            &engine_ref,
-            &sqlite_storage,
-            run_coordinator.as_ref(),
-            state.shutdown_notify(),
-        )
-        .await;
+    let concrete_engine: Arc<GraphFlowEngine> = match &execution_handle {
+        Some(handle) => handle.engine_concrete(),
+        None => tier0_engine.expect("Tier-0 boot wired an in-memory GraphFlowEngine"),
+    };
+    let engine: Arc<dyn OrchestrationEngine> = concrete_engine.clone();
+
+    if execution_handle.is_some() {
+        // `set_execution_handle` already published the coordinator view; the
+        // remaining slots are the ones the runtime bundle reads.
+        state.set_engine(Arc::clone(&engine));
+        state.set_capability_registry(capability_holder.clone());
+        if let Some(executor) = &prompt_executor {
+            state.set_prompt_executor(executor.clone());
+        }
+        tracing::info!(
+            "Orchestration engine + run coordinator wired from the execution owner"
+        );
     }
+
+    let run_coordinator: Option<Arc<WorkflowRunCoordinator>> = execution_handle
+        .as_ref()
+        .map(|handle| handle.coordinator());
 
     // --- WS-D: Discover and start system presets from directory ---
     let system_presets_dir = state.nexus_home().clone();
@@ -871,7 +856,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     let engine_ref: Arc<dyn OrchestrationEngine> = concrete_engine.clone();
     let scan_result = system_preset_dir::scan_system_presets(&system_presets_dir, &capabilities);
     for entry in &scan_result.presets {
-        let graph = nexus_orchestration::preset::loader::build_wired_outer_graph(
+        let graph = nexus_orchestration::preset_runtime::build_wired_outer_graph(
             &entry.loaded,
             &engine_ref.clone(),
             &capabilities.clone(),
@@ -1221,8 +1206,8 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             let watcher_pool = schedule_pool.clone();
             let watcher_shutdown = state.shutdown_notify();
             let watcher_config =
-                crate::stale_findings_watcher::StaleFindingsWatcherConfig::from_env();
-            let _watcher_handle = crate::stale_findings_watcher::spawn_stale_findings_watcher(
+                nexus_core::execution::schedules::stale_findings::StaleFindingsWatcherConfig::from_env();
+            let _watcher_handle = nexus_core::execution::schedules::stale_findings::spawn_stale_findings_watcher(
                 watcher_pool,
                 watcher_shutdown,
                 watcher_config,
@@ -1249,12 +1234,12 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             let cron_workspace = state.workspace_path().map(std::path::PathBuf::from);
             let cron_supervisor = schedule_supervisor.clone();
             let cron_shutdown = state.shutdown_notify();
-            let cron_config = crate::cron_supervisor::CronSupervisorConfig::from_env();
+            let cron_config = nexus_core::execution::schedules::cron::CronSupervisorConfig::from_env();
             // V1.51 T-B P0: pass workspace_dir for file-lock path construction.
             // If workspace_path is unset, use an empty path (defensive — a daemon
             // without a workspace should not have schedule_json-bearing Works).
             let cron_ws_path = cron_workspace.unwrap_or_default();
-            let _cron_handle = crate::cron_supervisor::spawn_cron_supervisor(
+            let _cron_handle = nexus_core::execution::schedules::cron::spawn_cron_supervisor(
                 cron_pool,
                 cron_ws_path,
                 cron_supervisor,
@@ -1275,8 +1260,8 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             let chron_pool = schedule_pool.clone();
             let chron_workspace = state.workspace_path().map(std::path::PathBuf::from);
             let chron_shutdown = state.shutdown_notify();
-            let chron_config = crate::auto_chronology::AutoChronologyConfig::from_env();
-            let _chron_handle = crate::auto_chronology::spawn_auto_chronology_tick(
+            let chron_config = nexus_core::execution::schedules::chronology::AutoChronologyConfig::from_env();
+            let _chron_handle = nexus_core::execution::schedules::chronology::spawn_auto_chronology_tick(
                 chron_pool,
                 chron_workspace,
                 chron_shutdown,
@@ -1294,8 +1279,8 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         {
             let refresh_pool = schedule_pool.clone();
             let refresh_shutdown = state.shutdown_notify();
-            let refresh_config = crate::refresh_scheduler::RefreshSchedulerConfig::from_env();
-            let _refresh_handle = crate::refresh_scheduler::spawn_refresh_scheduler(
+            let refresh_config = nexus_core::execution::schedules::refresh::RefreshSchedulerConfig::from_env();
+            let _refresh_handle = nexus_core::execution::schedules::refresh::spawn_refresh_scheduler(
                 refresh_pool,
                 refresh_shutdown,
                 refresh_config,
@@ -1374,6 +1359,20 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         tokio::spawn(async move {
             state_for_shutdown.shutdown_notify().notified().await;
             tracing::info!("Shutdown notify received — draining engine sessions and workers");
+
+            // P3-T1: settle the single execution owner first — no new drive is
+            // admitted, every owned token fires and every drive loop is joined
+            // before the session-level cancel sweep below runs against a
+            // quiescent task set.
+            if let Some(handle) = state_for_shutdown.execution_handle() {
+                match handle.close().await {
+                    Ok(report) => tracing::info!(
+                        cleanup_confirmed = report.cleanup_confirmed,
+                        "execution owner closed"
+                    ),
+                    Err(e) => tracing::warn!("failed to close the execution owner: {}", e),
+                }
+            }
 
             if let Some(supervisor) = state_for_shutdown.schedule_supervisor() {
                 match supervisor.resume_running_as_paused("daemon_shutdown").await {
@@ -1806,7 +1805,7 @@ async fn resume_auto_chain_work(
         return Err(format!("no preset mapping for stage '{stage}'"));
     };
     let bindings = if let Some(provider_id) = binding_provider {
-        match nexus_orchestration::preset::default_bindings_for_preset(preset_id, provider_id) {
+        match nexus_orchestration::preset_runtime::default_bindings_for_preset(preset_id, provider_id) {
             Some(bindings) => bindings,
             None => {
                 return Err(format!(
@@ -1816,9 +1815,9 @@ async fn resume_auto_chain_work(
         }
     } else {
         let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
-        match nexus_orchestration::preset::load_embedded_preset(preset_id, &caps) {
+        match nexus_preset::load_embedded_preset(preset_id, &caps) {
             Ok(loaded) => {
-                let roles = nexus_orchestration::preset::required_prompt_roles(&loaded);
+                let roles = nexus_preset::required_prompt_roles(&loaded);
                 if !roles.is_empty() {
                     return Err(format!(
                         "preset '{preset_id}' requires prompt roles but no binding \

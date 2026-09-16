@@ -20,30 +20,22 @@ use serde_json::Value;
 pub struct JudgeRule;
 
 #[async_trait]
-impl Capability for JudgeRule {
-    fn name(&self) -> &'static str {
-        "judge.rule"
-    }
-
-    fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"rule":{"type":"string"},"contextData":{}},"required":["rule","contextData"],"additionalProperties":false}"#
-    }
-
-    fn output_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"result":{"type":"boolean"},"reason":{"type":"string"}},"required":["result","reason"],"additionalProperties":false}"#
-    }
-
-    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let input: JudgeRuleInput = serde_json::from_value(input)
-            .map_err(|e| CapabilityError::InputInvalid(format!("judge.rule input: {e}")))?;
-
-        let (result, reason) = evaluate_rule(&input.rule, &input.context_data)?;
-
-        let output = JudgeRuleOutput { result, reason };
-        serde_json::to_value(output)
-            .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
-    }
+impl Capability for JudgeRule { fn name(&self) -> &'static str {
+    "judge.rule"
+} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::JUDGE_RULE_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
+    r#"{"type":"object","properties":{"result":{"type":"boolean"},"reason":{"type":"string"}},"required":["result","reason"],"additionalProperties":false}"#
 }
+
+async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+    let input: JudgeRuleInput = serde_json::from_value(input)
+        .map_err(|e| CapabilityError::InputInvalid(format!("judge.rule input: {e}")))?;
+
+    let (result, reason) = evaluate_rule(&input.rule, &input.context_data)?;
+
+    let output = JudgeRuleOutput { result, reason };
+    serde_json::to_value(output)
+        .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
+} }
 
 // ---------------------------------------------------------------------------
 // Rule evaluation engine

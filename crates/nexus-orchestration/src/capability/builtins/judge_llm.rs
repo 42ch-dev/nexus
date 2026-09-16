@@ -81,100 +81,91 @@ impl Default for JudgeLlm {
 }
 
 #[async_trait]
-impl Capability for JudgeLlm {
-    fn name(&self) -> &'static str {
-        "judge.llm"
-    }
+impl Capability for JudgeLlm { fn name(&self) -> &'static str {
+    "judge.llm"
+}
 
-    // Identity fields ("_creator_id", "_session_id") are injected by
-    // orchestration context, NOT accepted from user input (security:
-    // prevents cross-creator routing — SEC-V131-01).
+// Identity fields ("_creator_id", "_session_id") are injected by
+// orchestration context, NOT accepted from user input (security:
+// prevents cross-creator routing — SEC-V131-01).
     fn input_schema(&self) -> &'static str {
-        r#"{
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "required": ["prompt"],
-            "properties": {
-                "prompt": { "type": "string", "description": "The evaluation prompt for the judge" }
-            }
-        }"#
+        nexus_preset::capability_catalog::JUDGE_LLM_INPUT_SCHEMA
     }
 
     fn output_schema(&self) -> &'static str {
-        r#"{
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "required": ["result", "reason"],
-            "properties": {
-                "result": { "type": "boolean", "description": "true = go, false = nogo" },
-                "reason": { "type": "string", "description": "Human-readable explanation" }
-            }
-        }"#
-    }
-
-    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let prompt_text = input
-            .get("prompt")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| CapabilityError::InputInvalid("missing 'prompt' field".into()))?;
-
-        // Security: only accept context-injected identity fields (prefixed _).
-        // Raw `creator_id`/`session_id` from user/preset input are ignored
-        // to prevent cross-creator routing (IDOR). See SEC-V131-01.
-        //
-        // M-002: a missing trusted `_session_id` refuses with a typed error
-        // — never a magic `default` run id. The orchestration engine seeds
-        // the trusted `_session_id` at run admission; its absence means the
-        // capability is being invoked outside a trusted run context.
-        let session_id = input
-            .get("_session_id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                CapabilityError::Forbidden(
-                    "missing trusted _session_id: orchestration context must inject the run identity"
-                        .to_string(),
-                )
-            })?;
-
-        let executor = self
-            .executor
-            .as_ref()
-            .ok_or(CapabilityError::WorkerUnavailable)?;
-
-        // A1: resolve the coordinator cancellation token for this run from
-        // the shared per-run map. FAIL-CLOSED: a run with no registered
-        // token refuses with `CancellationUnavailable` — a fresh token would
-        // be uncancellable by any coordinator (never mint one here). The run
-        // admission path (engine start/spawn/recovery) registers the token.
-        let cancellation =
-            crate::capability::resolve_session_cancellation(&self.session_cancels, session_id)?;
-
-        // Build judge prompt with GO/NOGO framing.
-        let judge_prompt = format!(
-            "You are a judge. Evaluate the following and respond with GO or NOGO.\n\
-             Respond with ONLY 'GO' or 'NOGO' followed by a brief reason.\n\n\
-             {prompt_text}"
-        );
-
-        let result = executor
-            .execute(PromptRequest {
-                run_id: session_id.to_string(),
-                task_id: "judge.llm".to_string(),
-                agent_ref: None,
-                prompt: judge_prompt,
-                tool_policy: ToolPolicy::DenyAll,
-                cancellation,
-            })
-            .await?;
-
-        let (result, reason) = parse_judge_response(&result.full_text);
-
-        Ok(json!({
-            "result": result,
-            "reason": reason
-        }))
-    }
+    r#"{
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": ["result", "reason"],
+        "properties": {
+            "result": { "type": "boolean", "description": "true = go, false = nogo" },
+            "reason": { "type": "string", "description": "Human-readable explanation" }
+        }
+    }"#
 }
+
+async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+    let prompt_text = input
+        .get("prompt")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| CapabilityError::InputInvalid("missing 'prompt' field".into()))?;
+
+    // Security: only accept context-injected identity fields (prefixed _).
+    // Raw `creator_id`/`session_id` from user/preset input are ignored
+    // to prevent cross-creator routing (IDOR). See SEC-V131-01.
+    //
+    // M-002: a missing trusted `_session_id` refuses with a typed error
+    // — never a magic `default` run id. The orchestration engine seeds
+    // the trusted `_session_id` at run admission; its absence means the
+    // capability is being invoked outside a trusted run context.
+    let session_id = input
+        .get("_session_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            CapabilityError::Forbidden(
+                "missing trusted _session_id: orchestration context must inject the run identity"
+                    .to_string(),
+            )
+        })?;
+
+    let executor = self
+        .executor
+        .as_ref()
+        .ok_or(CapabilityError::WorkerUnavailable)?;
+
+    // A1: resolve the coordinator cancellation token for this run from
+    // the shared per-run map. FAIL-CLOSED: a run with no registered
+    // token refuses with `CancellationUnavailable` — a fresh token would
+    // be uncancellable by any coordinator (never mint one here). The run
+    // admission path (engine start/spawn/recovery) registers the token.
+    let cancellation =
+        crate::capability::resolve_session_cancellation(&self.session_cancels, session_id)?;
+
+    // Build judge prompt with GO/NOGO framing.
+    let judge_prompt = format!(
+        "You are a judge. Evaluate the following and respond with GO or NOGO.\n\
+         Respond with ONLY 'GO' or 'NOGO' followed by a brief reason.\n\n\
+         {prompt_text}"
+    );
+
+    let result = executor
+        .execute(PromptRequest {
+            run_id: session_id.to_string(),
+            task_id: "judge.llm".to_string(),
+            agent_ref: None,
+            prompt: judge_prompt,
+            tool_policy: ToolPolicy::DenyAll,
+            cancellation,
+        })
+        .await?;
+
+    let (result, reason) = parse_judge_response(&result.full_text);
+
+    Ok(json!({
+        "result": result,
+        "reason": reason
+    }))
+} }
 
 /// Parse a judge LLM response text into a boolean verdict.
 ///

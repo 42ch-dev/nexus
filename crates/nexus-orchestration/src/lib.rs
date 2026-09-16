@@ -11,9 +11,8 @@ pub mod embedded_skills;
 pub mod engine;
 pub mod findings_block;
 pub mod narrative_index;
-pub mod preset;
+pub mod preset_runtime;
 pub mod preset_gates;
-pub mod preset_ids;
 pub mod quality_loop;
 pub mod resume_rules;
 pub mod review_report;
@@ -29,9 +28,7 @@ pub mod state_delta;
 pub mod storage;
 pub mod sync_module;
 pub mod system_preset;
-pub mod system_preset_dir;
 pub mod tasks;
-pub mod user_preset_dir;
 
 pub use capability::{
     Capability, CapabilityError, CapabilityRegistry, CapabilityRegistryHolder,
@@ -42,10 +39,9 @@ pub use engine::{
     ChildSessionParams, EngineError, FailedStepWitness, FailurePersistenceDisposition,
     FailureSettlement, FailureSettlementSummary, GraphFlowEngine, OrchestrationEngine, SessionId,
 };
-pub use preset::resolve_preset;
 pub use run_state::{
     durable_cancel_outcome_accomplished, AgentBinding, ChildCheckpoint, OwnedProcessIdentity,
-    PresetSourceIdentity, PromptAttempt, PromptPhase, RunCheckpoint, RunDescriptorV1, RunFailure,
+    PromptAttempt, PromptPhase, RunCheckpoint, RunDescriptorV1, RunFailure,
     RunRecord, RunStateV1, SettlementResult, TerminalSettlementTarget, WaitKind, WaitRecord,
     WorkflowStateStore,
 };

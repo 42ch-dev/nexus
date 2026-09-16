@@ -78,104 +78,81 @@ impl Default for AcpPrompt {
 }
 
 #[async_trait]
-impl Capability for AcpPrompt {
-    fn name(&self) -> &'static str {
-        "acp.prompt"
-    }
-
-    fn input_schema(&self) -> &'static str {
-        r#"{
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "required": ["prompt"],
-            "properties": {
-                "prompt": { "type": "string", "description": "The prompt text to send to the ACP agent" },
-                "tool_policy": {
-                    "type": "string",
-                    "enum": ["auto_grant_all", "auto_grant_read_only", "deny_all", "request_policy"],
-                    "default": "auto_grant_read_only",
-                    "description": "Tool permission policy for this prompt"
-                }
-                // "_creator_id" and "_session_id" are injected by orchestration context,
-                // NOT accepted from user input (security: prevents cross-creator routing).
-            }
-        }"#
-    }
-
-    fn output_schema(&self) -> &'static str {
-        r#"{
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "required": ["full_text"],
-            "properties": {
-                "full_text": { "type": "string", "description": "The full response text from the ACP agent" }
-            }
-        }"#
-    }
-
-    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let prompt = input
-            .get("prompt")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| CapabilityError::InputInvalid("missing 'prompt' field".into()))?;
-
-        let tool_policy = input
-            .get("tool_policy")
-            .and_then(|v| v.as_str())
-            .map_or_else(
-                || Ok(ToolPolicy::AutoGrantReadOnly),
-                |s| std::str::FromStr::from_str(s).map_err(CapabilityError::InputInvalid),
-            )?;
-
-        // Security: only accept context-injected identity fields (prefixed _).
-        // Raw `creator_id`/`session_id` from user/preset input are ignored
-        // to prevent cross-creator routing (IDOR).
-        //
-        // M-002: a missing trusted `_session_id` refuses with a typed error
-        // — never a magic `default` run id. The orchestration engine seeds
-        // the trusted `_session_id` at run admission; its absence means the
-        // capability is being invoked outside a trusted run context.
-        let session_id = input
-            .get("_session_id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                CapabilityError::Forbidden(
-                    "missing trusted _session_id: orchestration context must inject the run identity"
-                        .to_string(),
-                )
-            })?;
-
-        let executor = self
-            .executor
-            .as_ref()
-            .ok_or(CapabilityError::WorkerUnavailable)?;
-
-        // A1: resolve the coordinator cancellation token for this run from
-        // the shared per-run map. FAIL-CLOSED: a run with no registered
-        // token refuses with `CancellationUnavailable` — a fresh token would
-        // be uncancellable by any coordinator (never mint one here). The run
-        // admission path (engine start/spawn/recovery) registers the token.
-        let cancellation =
-            crate::capability::resolve_session_cancellation(&self.session_cancels, session_id)?;
-
-        let result = executor
-            .execute(PromptRequest {
-                run_id: session_id.to_string(),
-                task_id: "acp.prompt".to_string(),
-                agent_ref: None,
-                prompt: prompt.to_string(),
-                tool_policy,
-                cancellation,
-            })
-            .await?;
-
-        Ok(json!({
-            "full_text": result.full_text,
-            "host_session_id": result.host_session_id,
-            "operation_id": result.operation_id,
-        }))
-    }
+impl Capability for AcpPrompt { fn name(&self) -> &'static str {
+    "acp.prompt"
+} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::ACP_PROMPT_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
+    r#"{
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": ["full_text"],
+        "properties": {
+            "full_text": { "type": "string", "description": "The full response text from the ACP agent" }
+        }
+    }"#
 }
+
+async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+    let prompt = input
+        .get("prompt")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| CapabilityError::InputInvalid("missing 'prompt' field".into()))?;
+
+    let tool_policy = input
+        .get("tool_policy")
+        .and_then(|v| v.as_str())
+        .map_or_else(
+            || Ok(ToolPolicy::AutoGrantReadOnly),
+            |s| std::str::FromStr::from_str(s).map_err(CapabilityError::InputInvalid),
+        )?;
+
+    // Security: only accept context-injected identity fields (prefixed _).
+    // Raw `creator_id`/`session_id` from user/preset input are ignored
+    // to prevent cross-creator routing (IDOR).
+    //
+    // M-002: a missing trusted `_session_id` refuses with a typed error
+    // — never a magic `default` run id. The orchestration engine seeds
+    // the trusted `_session_id` at run admission; its absence means the
+    // capability is being invoked outside a trusted run context.
+    let session_id = input
+        .get("_session_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            CapabilityError::Forbidden(
+                "missing trusted _session_id: orchestration context must inject the run identity"
+                    .to_string(),
+            )
+        })?;
+
+    let executor = self
+        .executor
+        .as_ref()
+        .ok_or(CapabilityError::WorkerUnavailable)?;
+
+    // A1: resolve the coordinator cancellation token for this run from
+    // the shared per-run map. FAIL-CLOSED: a run with no registered
+    // token refuses with `CancellationUnavailable` — a fresh token would
+    // be uncancellable by any coordinator (never mint one here). The run
+    // admission path (engine start/spawn/recovery) registers the token.
+    let cancellation =
+        crate::capability::resolve_session_cancellation(&self.session_cancels, session_id)?;
+
+    let result = executor
+        .execute(PromptRequest {
+            run_id: session_id.to_string(),
+            task_id: "acp.prompt".to_string(),
+            agent_ref: None,
+            prompt: prompt.to_string(),
+            tool_policy,
+            cancellation,
+        })
+        .await?;
+
+    Ok(json!({
+        "full_text": result.full_text,
+        "host_session_id": result.host_session_id,
+        "operation_id": result.operation_id,
+    }))
+} }
 
 #[cfg(test)]
 mod tests {

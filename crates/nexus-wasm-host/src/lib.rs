@@ -46,6 +46,9 @@ pub use error::{ComputeError, Result};
 pub use host::HostContext;
 pub use manifest::{HostFunction, ModuleManifest, ModuleSchemas};
 pub use module_cache::{hash_module_bytes, CachedModule, ModuleCache};
+pub use nexus_contracts::generated::daemon_api::compute::{
+    module_detail::ModuleDetail, module_summary::ModuleSummary,
+};
 pub use registry::{get_module, list_modules};
 pub use sandbox::SandboxConfig;
 

@@ -130,7 +130,7 @@ states:
     terminal: true
 "#;
     let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
-    let loaded = nexus_orchestration::preset::load_preset_from_str(yaml, &caps);
+    let loaded = nexus_preset::load_preset_from_str(yaml, &caps);
     assert!(
         loaded.is_ok(),
         "preset with acp.prompt + judge.llm must validate: {loaded:?}"

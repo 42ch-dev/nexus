@@ -37,15 +37,15 @@
 
 use assert_cmd::Command;
 use async_trait::async_trait;
-use nexus_daemon_runtime::preset_run::{
+use nexus_core::execution::{
     drive_preset_run, resume_driven_sessions, PresetRunConfig, PresetRunOutcome, ResumeDecision,
 };
 use nexus_daemon_runtime::test_utils;
 use nexus_daemon_runtime::workspace::WorkspaceState;
 use nexus_orchestration::capability::DaemonToolDispatch;
 use nexus_orchestration::engine::{SessionId, SessionStatus, SessionSummary};
-use nexus_orchestration::preset::load_preset_from_str;
-use nexus_orchestration::preset::loader::build_wired_outer_graph;
+use nexus_preset::load_preset_from_str;
+use nexus_orchestration::preset_runtime::build_wired_outer_graph;
 use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
 use nexus_orchestration::{
     CapabilityError, CapabilityRegistry, CapabilityRegistryHolder, GraphFlowEngine,

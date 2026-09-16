@@ -20,7 +20,7 @@ use std::sync::Arc;
 /// A terminal task that marks a graph as complete.
 ///
 /// Shared by the system graph and by preset inner graphs (see
-/// [`crate::preset::loader`]): graph-flow only reports `Completed` when a task
+/// [`crate::preset_runtime`]): graph-flow only reports `Completed` when a task
 /// returns `NextAction::End`, so every graph needs an explicit terminal node.
 pub(crate) struct EndTask {
     /// Response text recorded for the terminal step.

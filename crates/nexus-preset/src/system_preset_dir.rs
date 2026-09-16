@@ -8,8 +8,10 @@
 //! Design: v1.6 WS-D — replace hardcoded `_system.maintenance` with
 //! configurable directory scanning.
 
-use crate::capability::CapabilityRegistry;
-use crate::preset::loader::{load_preset_from_str, LoadedPreset, PresetLoadError};
+use crate::capability_catalog::CapabilityCatalog;
+#[cfg(test)]
+use crate::capability_catalog::BuiltinCapabilityCatalog;
+use crate::loader::{load_preset_from_str, LoadedPreset, PresetLoadError};
 use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------------------
@@ -69,7 +71,7 @@ pub struct SystemPresetWarning {
 /// - If the directory doesn't exist at all, return empty results (no error).
 ///
 /// The `nexus_home` parameter is typically `$HOME/.nexus42`.
-pub fn scan_system_presets(nexus_home: &Path, caps: &CapabilityRegistry) -> SystemPresetScanResult {
+pub fn scan_system_presets(nexus_home: &Path, caps: &dyn CapabilityCatalog) -> SystemPresetScanResult {
     let system_dir = system_preset_base_dir(nexus_home);
 
     // T4: missing directory = no system presets (not an error).
@@ -145,7 +147,7 @@ pub fn scan_system_presets(nexus_home: &Path, caps: &CapabilityRegistry) -> Syst
 pub fn load_system_preset_from_dir(
     bundle_dir: &Path,
     dir_name: &str,
-    caps: &CapabilityRegistry,
+    caps: &dyn CapabilityCatalog,
 ) -> Result<SystemPresetEntry, SystemPresetWarning> {
     let preset_yaml_path = bundle_dir.join("preset.yaml");
 
@@ -201,12 +203,6 @@ pub fn load_system_preset_from_dir(
                 message: format!("{e}"),
             });
         }
-        Err(PresetLoadError::GraphBuild(e)) => {
-            return Err(SystemPresetWarning {
-                dir_name: dir_name.to_string(),
-                message: format!("graph build error: {e}"),
-            });
-        }
     };
 
     // The qualified ID uses `_system.<dir_name>` convention.
@@ -216,7 +212,7 @@ pub fn load_system_preset_from_dir(
     // (A2/A7) — content hash over the manifest + every referenced asset.
     let mut loaded = loaded;
     loaded.source_identity = Some(
-        crate::preset::loader::preset_source_identity(&loaded.manifest, Some(bundle_dir), None)
+        crate::loader::preset_source_identity(&loaded.manifest, Some(bundle_dir), None)
             .map_err(|e| SystemPresetWarning {
                 dir_name: dir_name.to_string(),
                 message: format!("failed to compute source identity: {e}"),
@@ -371,7 +367,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let nexus_home = tmp.path();
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_system_presets(nexus_home, &caps);
 
         assert!(result.presets.is_empty());
@@ -393,7 +389,7 @@ mod tests {
         )
         .unwrap();
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_system_presets(&nexus_home, &caps);
 
         assert_eq!(result.presets.len(), 1);
@@ -438,7 +434,7 @@ states:
 "#;
         fs::write(health_dir.join("preset.yaml"), health_yaml).unwrap();
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_system_presets(&nexus_home, &caps);
 
         assert_eq!(result.presets.len(), 2);
@@ -462,7 +458,7 @@ states:
         fs::create_dir_all(&broken_dir).unwrap();
         fs::write(broken_dir.join("preset.yaml"), "not valid yaml: [").unwrap();
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_system_presets(&nexus_home, &caps);
 
         assert!(result.presets.is_empty());
@@ -481,7 +477,7 @@ states:
         let empty_dir = base.join("empty");
         fs::create_dir_all(&empty_dir).unwrap();
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_system_presets(&nexus_home, &caps);
 
         assert!(result.presets.is_empty());
@@ -500,7 +496,7 @@ states:
         fs::create_dir_all(&hidden_dir).unwrap();
         fs::write(hidden_dir.join("preset.yaml"), "bogus").unwrap();
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_system_presets(&nexus_home, &caps);
 
         assert!(result.presets.is_empty());
@@ -521,7 +517,7 @@ states:
         )
         .unwrap();
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_system_presets(&nexus_home, &caps);
         let ids = list_system_preset_ids(&result);
 
@@ -542,7 +538,7 @@ states:
         )
         .unwrap();
 
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = scan_system_presets(&nexus_home, &caps);
 
         assert!(find_system_preset(&result, "_system.maintenance").is_some());
@@ -590,7 +586,7 @@ states:
 
     #[test]
     fn embedded_maintenance_yaml_is_valid() {
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let loaded = load_preset_from_str(EMBEDDED_MAINTENANCE_YAML, &caps).unwrap();
         assert_eq!(loaded.id, "maintenance");
         assert_eq!(loaded.version, 1);
