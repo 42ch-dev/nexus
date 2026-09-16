@@ -340,8 +340,13 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
     // no executor. The scan is also the ONLY admission path — user
     // capabilities are never injected directly — so this fixture writes the
     // same bundle shape the daemon's boot scan consumes.
+    // The scanner's ROOT is the directory that CONTAINS the capability dirs
+    // (the daemon passes `nexus_home_layout::user_capabilities_dir`, which is
+    // already `<home>/.nexus42/capabilities`), so the bundle is written
+    // directly under it — an extra `capabilities/` level makes the scanner
+    // look for `<root>/<name>/capability.json` and find nothing.
     let scan_root = f._tmp.path().join("usercaps");
-    let dir = scan_root.join("capabilities").join("t3-requires-thing");
+    let dir = scan_root.join("t3-requires-thing");
     std::fs::create_dir_all(&dir).unwrap();
     let wasm = b"fake module bytes";
     let sha = {
