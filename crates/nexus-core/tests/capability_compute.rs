@@ -335,16 +335,53 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
     use nexus_orchestration::capability::{CapabilityRegistry, CapabilityRuntimeDeps};
 
     let f = fixture().await;
+    // The descriptor contract (AR-34) requires a `wasm` module ref: without it
+    // the scanner skips the directory rather than admitting a capability with
+    // no executor. The scan is also the ONLY admission path — user
+    // capabilities are never injected directly — so this fixture writes the
+    // same bundle shape the daemon's boot scan consumes.
     let scan_root = f._tmp.path().join("usercaps");
     let dir = scan_root.join("capabilities").join("t3-requires-thing");
     std::fs::create_dir_all(&dir).unwrap();
+    let wasm = b"fake module bytes";
+    let sha = {
+        use sha2::{Digest, Sha256};
+        use std::fmt::Write as _;
+        let mut hex = String::with_capacity(64);
+        for b in Sha256::digest(wasm) {
+            let _ = write!(hex, "{b:02x}");
+        }
+        hex
+    };
     std::fs::write(
         dir.join("capability.json"),
-        r#"{"name":"t3.requires.thing",
-            "inputSchema":"{\"type\":\"object\",\"required\":[\"thing\"],\"properties\":{\"thing\":{\"type\":\"string\"}}}",
-            "outputSchema":"{\"type\":\"object\"}"}"#,
+        format!(
+            r#"{{
+                "name": "t3.requires.thing",
+                "inputSchema": "{{\"type\":\"object\",\"required\":[\"thing\"],\"properties\":{{\"thing\":{{\"type\":\"string\"}}}}}}",
+                "outputSchema": "{{\"type\":\"object\"}}",
+                "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{sha}" }}
+            }}"#
+        ),
     )
     .unwrap();
+    std::fs::write(
+        dir.join("manifest.json"),
+        format!(
+            r#"{{
+                "module_id": "basic-combat",
+                "name": "Basic Combat",
+                "version": "1.0.0",
+                "nexus_abi_version": 1,
+                "required_key_block_types": [],
+                "compute_export": "compute",
+                "init_export": "",
+                "wasm_sha256": "{sha}"
+            }}"#
+        ),
+    )
+    .unwrap();
+    std::fs::write(dir.join("basic-combat.wasm"), wasm).unwrap();
 
     let deps = CapabilityRuntimeDeps {
         pool: Some(f.core.pool().clone()),
@@ -362,8 +399,8 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
                 .admitted
                 .iter()
                 .any(|c| c.name() == "t3.requires.thing"),
-            "the fixture capability must be admitted: {} skipped",
-            outcome.skipped.len()
+            "the fixture capability must be admitted: skipped={:?}",
+            outcome.skipped
         );
     }
 

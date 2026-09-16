@@ -20,7 +20,8 @@
 //!
 //! - **Registration/admission** ([`PeerToolRegistry::admit_and_register`]):
 //!   decides whether a tool id becomes DISPATCHABLE.
-//! - **Visibility** ([`VisibilityPolicy`]): decides whether a dispatchable
+//! - **Visibility** (the serving seam's own policy type, e.g. the daemon's
+//!   `connect::visibility::VisibilityPolicy`): decides whether a dispatchable
 //!   tool is LISTED to a consumer.
 //!
 //! A tool hidden by a visibility policy is still dispatchable — hiding is a
@@ -170,47 +171,6 @@ pub enum ToolRefusal {
     NotAllowlisted,
     /// Another peer already owns the id.
     DuplicatePeer,
-}
-
-/// Per-consumer visibility policy for a catalog.
-///
-/// This narrows what a consumer can SEE. It is never an authorization grant
-/// and never a revocation of dispatchability.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct VisibilityPolicy {
-    visible: Option<HashSet<String>>,
-}
-
-impl VisibilityPolicy {
-    /// Absent policy: every id visible (byte-identical to no policy).
-    #[must_use]
-    pub const fn absent() -> Self {
-        Self { visible: None }
-    }
-
-    /// A present policy over the given subset.
-    ///
-    /// An EMPTY subset is treated as absent: the additive default must not
-    /// flip the surface to deny-all.
-    #[must_use]
-    pub fn from_visible(ids: impl IntoIterator<Item = String>) -> Self {
-        let visible: HashSet<String> = ids.into_iter().collect();
-        if visible.is_empty() {
-            Self::absent()
-        } else {
-            Self {
-                visible: Some(visible),
-            }
-        }
-    }
-
-    /// Whether `tool_id` is visible to the consumer.
-    #[must_use]
-    pub fn is_visible(&self, tool_id: &str) -> bool {
-        self.visible
-            .as_ref()
-            .is_none_or(|visible| visible.contains(tool_id))
-    }
 }
 
 /// The peer tool registry.

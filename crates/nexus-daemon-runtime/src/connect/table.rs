@@ -25,7 +25,7 @@ use spoke_operations::{SpokeRejectCode, SpokeResult};
 
 pub use nexus_core::execution::peer_tools::{
     AdmissionOutcome, CollisionPolicy, PeerSessionTools, PeerToolEntry, PeerToolsConfig,
-    ToolRefusal, VisibilityPolicy, peer_tool_registry,
+    ToolRefusal, peer_tool_registry,
 };
 
 /// The core registry type, under the daemon's historical name.
