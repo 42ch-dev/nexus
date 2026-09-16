@@ -154,9 +154,21 @@ cargo sweep --time 30
 ```
 
   Optional dry-run: append `-d`. Do **not** use `cargo sweep -i N` for age-based cleanup — `-i` is `--installed` (boolean); age uses `--time` / `-t`.
-- **When to clean:** `$CARGO_TARGET_DIR/debug` (or local `target/debug` if unset) over ~50 GiB, filesystem slowness under the target dir, end of a large plan slice, or after deleting/renaming crates.
+**Merge gate — feature-branch target cleanup (HARD):** before merging a feature branch or worktree into the integration branch, the feature's `CARGO_TARGET_DIR` (direnv-shared or per-worktree) **must be cleaned or removed**. This is not optional housekeeping — parallel worktree target dirs compound silently (v1.190: six concurrent targets consumed 98 GiB of `/tmp` in a single iteration) and degraded the host. Concretely:
 
-**Anti-patterns:** Building without `CARGO_TARGET_DIR` / direnv (fills a per-checkout `target/` and breaks worktree sharing); running `cargo test --all` / `cargo clippy --all` on every small edit; skipping cleanup for months while agents run full-workspace builds; treating `target/` bloat as safe to commit (it is always gitignored — clean locally instead).
+```bash
+# Before merging: remove this feature's build cache
+rm -rf "${CARGO_TARGET_DIR:?}"          # direnv-managed shared dir
+# or, if the feature used a scoped per-worktree target:
+rm -rf "$CARGO_TARGET_DIR"              # the feature's own CARGO_TARGET_DIR
+# then remove the worktree:
+git worktree remove .worktrees/<name> && git worktree prune
+```
+
+Integration/target-dir verification (`cargo check --workspace`) is run from the integration worktree with its own `CARGO_TARGET_DIR` — it does not depend on the feature's cache. If the integration check needs rebuilding after cleanup, that rebuild cost is the price of not filling the disk.
+
+- **Cleanup (repo root; with direnv this is `$CARGO_TARGET_DIR` → `~/.cache/nexus-target`):**
+**Anti-patterns:** Building without `CARGO_TARGET_DIR` / direnv (fills a per-checkout `target/` and breaks worktree sharing); running `cargo test --all` / `cargo clippy --all` on every small edit; skipping cleanup for months while agents run full-workspace builds; treating `target/` bloat as safe to commit (it is always gitignored — clean locally instead); merging a feature branch without cleaning its `CARGO_TARGET_DIR` first.
 
 ### Git & repository hygiene
 
