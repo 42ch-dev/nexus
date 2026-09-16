@@ -122,7 +122,10 @@ export function WorldsPage() {
               ) : null}
               <ul className="flex flex-col gap-2" aria-label={t('listAriaLabel')}>
                 {worlds.data.map((world) => {
-                  const label = world.title ?? world.world_id;
+                  const label =
+                    world.title && world.title.trim().length > 0
+                      ? world.title
+                      : world.world_id;
                   const wld = overviewMap.get(world.world_id);
                   // v1.190 P5-T1: the narrative-worlds projection
                   // (NarrativeWorldState) has no `updated_at`, so without
