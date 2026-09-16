@@ -771,6 +771,22 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                 workspace_root: state.workspace_path().map(std::path::PathBuf::from),
                 nexus_home: Some(state.nexus_home().clone()),
                 shutdown_notify: Some(state.shutdown_notify()),
+                // T3: the daemon SHIPS compute (its own wasm-host edge and the
+                // /compute routes), so the owner reports its real process facts
+                // and the engine/cache it already registered on the state at
+                // startup. Passing None here would make the tool health
+                // surface claim `Starting` forever and would leave the
+                // handle's compute entry points permanently unavailable.
+                runtime_facts: Some(nexus_core::execution::capabilities::ToolRuntimeFacts {
+                    runtime_mode: state.runtime_mode().clone(),
+                    is_initialized: state.is_initialized(),
+                    lifecycle_state: state.lifecycle_state().to_string(),
+                    started_at: state.started_at().to_rfc3339(),
+                    uptime_seconds: state.uptime_seconds(),
+                }),
+                compute_cache: state.module_cache(),
+                compute_engine: state.wasm_engine(),
+                compute_serializer: Some(state.compute_serializer()),
                 // Production supplies no build-phase barrier; it exists for
                 // the C3 concurrency harness.
                 build_observer: None,

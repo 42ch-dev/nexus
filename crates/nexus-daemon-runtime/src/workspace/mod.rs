@@ -934,6 +934,21 @@ impl WorkspaceState {
                     workspace_root: self.workspace_path().map(std::path::PathBuf::from),
                     nexus_home: Some(self.nexus_home().clone()),
                     shutdown_notify: Some(self.shutdown_notify()),
+                    // T3: this lazy-attach path owns the same process facts
+                    // and the same engine/cache the boot path registered, so
+                    // the owner reports them here too (see the boot site).
+                    runtime_facts: Some(
+                        nexus_core::execution::capabilities::ToolRuntimeFacts {
+                            runtime_mode: self.runtime_mode().clone(),
+                            is_initialized: self.is_initialized(),
+                            lifecycle_state: self.lifecycle_state().to_string(),
+                            started_at: self.started_at().to_rfc3339(),
+                            uptime_seconds: self.uptime_seconds(),
+                        },
+                    ),
+                    compute_cache: self.module_cache(),
+                    compute_engine: self.wasm_engine(),
+                    compute_serializer: Some(self.compute_serializer()),
                     // Production supplies no build-phase barrier; it exists
                     // for the C3 concurrency harness.
                     build_observer: None,
