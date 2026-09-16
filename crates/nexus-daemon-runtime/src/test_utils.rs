@@ -7,6 +7,7 @@
 
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Wrapper around [`tempfile::TempDir`] so tests get a `must_use` reminder to keep the root alive.
 #[must_use = "Temporary directory is deleted when dropped; keep TestTempRoot in scope for the whole test."]
@@ -22,6 +23,20 @@ impl Deref for TestTempRoot {
 
 const TEST_CREATOR_ID: &str = "test_creator";
 const TEST_WORKSPACE_SLUG: &str = "default";
+
+/// Wire a fresh, unstarted [`nexus_agent_host::HostManager`] as the Agent Host
+/// facade on a test-built workspace state.
+///
+/// The lazy-attach seam (`ensure_creator_pool` → `publish_lazy_attach_bundle`)
+/// composes the production Host prompt executor and provider port, so it
+/// requires the facade the daemon boot always wires before serving. Tests that
+/// drive that seam MUST supply one. Tests asserting the facade's *absence*
+/// (e.g. the agent-host "not configured" health path) keep
+/// [`crate::workspace::WorkspaceState::new_for_testing`] untouched — it wires
+/// no facade on purpose.
+pub fn wire_test_agent_host(state: &mut crate::workspace::WorkspaceState) {
+    state.set_agent_host(Arc::new(nexus_agent_host::core::manager::HostManager::new()));
+}
 
 /// Create a temporary workspace directory with an initialized `SQLite` database (ADR-014 layout).
 ///

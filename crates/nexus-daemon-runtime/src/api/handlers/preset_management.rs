@@ -176,21 +176,11 @@ mod tests {
     use super::*;
 
     async fn authoring_state(
-        nexus_home: std::path::PathBuf,
-        db_path: std::path::PathBuf,
         workspace_path: Option<String>,
-    ) -> WorkspaceState {
-        let home = nexus_home.parent().expect("raw home");
-        std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
-            home,
-            "test_creator",
-            "default",
-        ))
-        .expect("operational workspace");
-        std::fs::write(nexus_home.join("config.toml"),
-            "active_creator_id = \"test_creator\"\n[active_workspace_slug_by_creator]\ntest_creator = \"default\"\n"
-        ).expect("active principal configuration");
-        WorkspaceState::new_for_testing(nexus_home, db_path, workspace_path).await
+    ) -> (crate::test_utils::TestTempRoot, WorkspaceState) {
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, workspace_path).await;
+        (tmp, state)
     }
 
     async fn validate_for_test(
@@ -203,42 +193,22 @@ mod tests {
 
     #[tokio::test]
     async fn scaffold_creates_bundle() {
-        let tmp = tempfile::TempDir::new().expect("temp dir");
-        let nexus_home = tmp.path().join(".nexus42");
-        std::fs::create_dir_all(&nexus_home).expect("create nexus_home dir");
-        let db_path = nexus_home.join("state.db");
-        let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("migrate");
-        nexus_local_db::seed_versions(&pool).await.expect("seed");
-
-        let state = authoring_state(nexus_home.clone(), db_path, None).await;
+        let (_tmp, state) = authoring_state(None).await;
 
         let req = ScaffoldPresetRequest {
             name: "test-strat".to_string(),
         };
-        let result = scaffold_preset(State(state), Json(req)).await;
+        let result = scaffold_preset(State(state.clone()), Json(req)).await;
         assert!(result.is_ok(), "scaffold should succeed: {result:?}");
 
         let resp = result.expect("ok");
         assert_eq!(resp.id, "test-strat");
-        assert!(bundle_dir_exists(&nexus_home, "test-strat"));
+        assert!(bundle_dir_exists(state.nexus_home(), "test-strat"));
     }
 
     #[tokio::test]
     async fn scaffold_rejects_duplicate() {
-        let tmp = tempfile::TempDir::new().expect("temp dir");
-        let nexus_home = tmp.path().join(".nexus42");
-        std::fs::create_dir_all(&nexus_home).expect("create nexus_home dir");
-        let db_path = nexus_home.join("state.db");
-        let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
-        nexus_local_db::run_migrations(&pool)
-            .await
-            .expect("migrate");
-        nexus_local_db::seed_versions(&pool).await.expect("seed");
-
-        let state = authoring_state(nexus_home.clone(), db_path, None).await;
+        let (_tmp, state) = authoring_state(None).await;
 
         let req = ScaffoldPresetRequest {
             name: "dup-strat".to_string(),
@@ -699,18 +669,7 @@ states:
 
     #[tokio::test]
     async fn get_preset_returns_user_bundle() {
-        let tmp = tempfile::TempDir::new().expect("temp dir");
-        let state = {
-            let nexus_home = tmp.path().join(".nexus42");
-            std::fs::create_dir_all(&nexus_home).expect("create nexus_home dir");
-            let db_path = nexus_home.join("state.db");
-            let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
-            nexus_local_db::run_migrations(&pool)
-                .await
-                .expect("migrate");
-            nexus_local_db::seed_versions(&pool).await.expect("seed");
-            authoring_state(nexus_home, db_path, None).await
-        };
+        let (_tmp, state) = authoring_state(None).await;
 
         let _ = scaffold_preset(
             State(state.clone()),
@@ -732,18 +691,7 @@ states:
 
     #[tokio::test]
     async fn get_preset_returns_embedded_preset() {
-        let tmp = tempfile::TempDir::new().expect("temp dir");
-        let state = {
-            let nexus_home = tmp.path().join(".nexus42");
-            std::fs::create_dir_all(&nexus_home).expect("create nexus_home dir");
-            let db_path = nexus_home.join("state.db");
-            let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
-            nexus_local_db::run_migrations(&pool)
-                .await
-                .expect("migrate");
-            nexus_local_db::seed_versions(&pool).await.expect("seed");
-            authoring_state(nexus_home, db_path, None).await
-        };
+        let (_tmp, state) = authoring_state(None).await;
 
         let resp = get_preset(State(state), Path("novel-writing".to_string()))
             .await
@@ -759,18 +707,7 @@ states:
     /// `list_presets` must resolve to `presets/_system/<name>/` on disk.
     #[tokio::test]
     async fn get_preset_returns_system_preset() {
-        let tmp = tempfile::TempDir::new().expect("temp dir");
-        let state = {
-            let nexus_home = tmp.path().join(".nexus42");
-            std::fs::create_dir_all(&nexus_home).expect("create nexus_home dir");
-            let db_path = nexus_home.join("state.db");
-            let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
-            nexus_local_db::run_migrations(&pool)
-                .await
-                .expect("migrate");
-            nexus_local_db::seed_versions(&pool).await.expect("seed");
-            authoring_state(nexus_home, db_path, None).await
-        };
+        let (_tmp, state) = authoring_state(None).await;
 
         // First-start fallback creates `presets/_system/maintenance/` on disk.
         nexus_preset::system_preset_dir::ensure_maintenance_preset(state.nexus_home())
@@ -789,18 +726,7 @@ states:
     /// Same qualified-id resolution bug class on the reload route.
     #[tokio::test]
     async fn reload_preset_accepts_qualified_system_id() {
-        let tmp = tempfile::TempDir::new().expect("temp dir");
-        let state = {
-            let nexus_home = tmp.path().join(".nexus42");
-            std::fs::create_dir_all(&nexus_home).expect("create nexus_home dir");
-            let db_path = nexus_home.join("state.db");
-            let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
-            nexus_local_db::run_migrations(&pool)
-                .await
-                .expect("migrate");
-            nexus_local_db::seed_versions(&pool).await.expect("seed");
-            authoring_state(nexus_home, db_path, None).await
-        };
+        let (_tmp, state) = authoring_state(None).await;
 
         nexus_preset::system_preset_dir::ensure_maintenance_preset(state.nexus_home())
             .expect("ensure maintenance preset");
@@ -815,18 +741,7 @@ states:
 
     #[tokio::test]
     async fn update_preset_mutates_user_yaml() {
-        let tmp = tempfile::TempDir::new().expect("temp dir");
-        let state = {
-            let nexus_home = tmp.path().join(".nexus42");
-            std::fs::create_dir_all(&nexus_home).expect("create nexus_home dir");
-            let db_path = nexus_home.join("state.db");
-            let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
-            nexus_local_db::run_migrations(&pool)
-                .await
-                .expect("migrate");
-            nexus_local_db::seed_versions(&pool).await.expect("seed");
-            authoring_state(nexus_home, db_path, None).await
-        };
+        let (_tmp, state) = authoring_state(None).await;
 
         let _ = scaffold_preset(
             State(state.clone()),
@@ -876,18 +791,7 @@ states:
 
     #[tokio::test]
     async fn update_preset_rejects_embedded() {
-        let tmp = tempfile::TempDir::new().expect("temp dir");
-        let state = {
-            let nexus_home = tmp.path().join(".nexus42");
-            std::fs::create_dir_all(&nexus_home).expect("create nexus_home dir");
-            let db_path = nexus_home.join("state.db");
-            let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
-            nexus_local_db::run_migrations(&pool)
-                .await
-                .expect("migrate");
-            nexus_local_db::seed_versions(&pool).await.expect("seed");
-            authoring_state(nexus_home, db_path, None).await
-        };
+        let (_tmp, state) = authoring_state(None).await;
 
         let result = update_preset(
             State(state),
@@ -902,18 +806,7 @@ states:
 
     #[tokio::test]
     async fn delete_preset_removes_user_bundle() {
-        let tmp = tempfile::TempDir::new().expect("temp dir");
-        let state = {
-            let nexus_home = tmp.path().join(".nexus42");
-            std::fs::create_dir_all(&nexus_home).expect("create nexus_home dir");
-            let db_path = nexus_home.join("state.db");
-            let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
-            nexus_local_db::run_migrations(&pool)
-                .await
-                .expect("migrate");
-            nexus_local_db::seed_versions(&pool).await.expect("seed");
-            authoring_state(nexus_home, db_path, None).await
-        };
+        let (_tmp, state) = authoring_state(None).await;
 
         let _ = scaffold_preset(
             State(state.clone()),
@@ -933,18 +826,7 @@ states:
 
     #[tokio::test]
     async fn delete_preset_rejects_embedded() {
-        let tmp = tempfile::TempDir::new().expect("temp dir");
-        let state = {
-            let nexus_home = tmp.path().join(".nexus42");
-            std::fs::create_dir_all(&nexus_home).expect("create nexus_home dir");
-            let db_path = nexus_home.join("state.db");
-            let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
-            nexus_local_db::run_migrations(&pool)
-                .await
-                .expect("migrate");
-            nexus_local_db::seed_versions(&pool).await.expect("seed");
-            authoring_state(nexus_home, db_path, None).await
-        };
+        let (_tmp, state) = authoring_state(None).await;
 
         let result = delete_preset(State(state), Path("novel-writing".to_string())).await;
         assert!(result.is_err(), "embedded preset delete must be rejected");

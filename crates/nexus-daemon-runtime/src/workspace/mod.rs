@@ -1926,7 +1926,10 @@ mod tests {
         let original_home = std::env::var("HOME").ok();
         std::env::set_var("HOME", user_home);
 
-        let state = WorkspaceState::initialize().await.expect("initialize");
+        let mut state = WorkspaceState::initialize().await.expect("initialize");
+        // The Profile attach under test drives the lazy-attach seam, which
+        // composes over the Host facade the daemon wires at boot.
+        crate::test_utils::wire_test_agent_host(&mut state);
         assert!(state.pool().is_none());
 
         let config_toml = format!("active_creator_id = \"{CREATOR_ID}\"\n");
@@ -1995,7 +1998,10 @@ mod tests {
         let original_home = std::env::var("HOME").ok();
         std::env::set_var("HOME", user_home);
 
-        let state = WorkspaceState::initialize().await.expect("initialize");
+        let mut state = WorkspaceState::initialize().await.expect("initialize");
+        // The Profile attach under test drives the lazy-attach seam, which
+        // composes over the Host facade the daemon wires at boot.
+        crate::test_utils::wire_test_agent_host(&mut state);
         let config_toml = format!("active_creator_id = \"{CREATOR_ID}\"\n");
         std::fs::write(nexus_home.join("config.toml"), config_toml).expect("config.toml");
 
@@ -2044,7 +2050,10 @@ mod tests {
         let original_home = std::env::var("HOME").ok();
         std::env::set_var("HOME", user_home);
 
-        let state = WorkspaceState::initialize().await.expect("initialize");
+        let mut state = WorkspaceState::initialize().await.expect("initialize");
+        // The Profile attach under test drives the lazy-attach seam, which
+        // composes over the Host facade the daemon wires at boot.
+        crate::test_utils::wire_test_agent_host(&mut state);
         assert!(state.pool().is_none(), "Tier-0 boot has no creator DB");
 
         // Profile attach: write the config the middleware would, then open

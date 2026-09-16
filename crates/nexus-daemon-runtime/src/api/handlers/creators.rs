@@ -553,9 +553,12 @@ mod tests {
 
         let _home_override = HomeOverride::set(user_home);
 
-        let state = crate::workspace::WorkspaceState::initialize()
+        let mut state = crate::workspace::WorkspaceState::initialize()
             .await
             .expect("initialize");
+        // `set_active_creator` attaches the Profile runtime, which composes
+        // over the Host facade the daemon wires at boot.
+        crate::test_utils::wire_test_agent_host(&mut state);
         assert!(state.pool().is_none());
 
         // The handler's `Json` response is #[must_use]; the test only checks
