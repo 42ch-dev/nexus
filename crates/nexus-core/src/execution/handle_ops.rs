@@ -266,6 +266,15 @@ impl ExecutionHandle {
                 resource: "tool execution requires an admitted principal".into(),
             });
         }
+        // The principal must belong to THIS owner's service, not merely be
+        // well-formed: `verify_principal` checks the open generation, creator
+        // and workspace against the service that established this handle, so
+        // a principal minted by a DIFFERENT core (another creator, or a stale
+        // open) is refused as `AuthRequired` before the context is built.
+        // Without this, a caller holding any valid principal could dispatch
+        // through this handle's context — the two halves of the authority
+        // would be independently obtainable.
+        self.linked_core()?.verify_principal(principal)?;
         let context = self.tool_context()?;
         let value = crate::execution::capabilities::execute_tool(&context, &request).await?;
         Ok(CoreToolExecuteResponse {
@@ -287,6 +296,9 @@ impl ExecutionHandle {
     ) -> CoreResult<nexus_contracts::generated::daemon_api::compute::run_response::RunResponse>
     {
         self.ensure_admitting()?;
+        // Same principal binding as `execute_tool`: the creator this call
+        // authorizes against must be the one THIS service was opened for.
+        self.linked_core()?.verify_principal(principal)?;
         let context = self.compute_context(principal)?;
         crate::execution::compute::compute_run(self.linked_core()?.as_ref(), &context, request).await
     }
@@ -304,6 +316,7 @@ impl ExecutionHandle {
     ) -> CoreResult<nexus_contracts::generated::daemon_api::compute::run_accept_response::RunAcceptResponse>
     {
         self.ensure_admitting()?;
+        self.linked_core()?.verify_principal(principal)?;
         crate::execution::compute::accept_compute_run(
             self.linked_core()?.as_ref(),
             principal,

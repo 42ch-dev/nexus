@@ -230,6 +230,38 @@ async fn run_succeeded(f: &Fixture, context: &ComputeContext) -> String {
     response.run_id.to_string()
 }
 
+/// Deterministic provider that never performs an effect.
+struct NullProvider;
+
+#[async_trait::async_trait]
+impl nexus_provider_ports::ProviderPort for NullProvider {
+    async fn call(
+        &self,
+        _request: nexus_contracts::ProviderCall,
+    ) -> nexus_provider_ports::ProviderResult<nexus_contracts::ProviderReply> {
+        Err(nexus_contracts::CoreError {
+            code: nexus_contracts::CoreErrorCode::Internal,
+            message: "null provider: no live model in this test".to_string(),
+            details: serde_json::Map::default(),
+            http_status: Some(500),
+        })
+    }
+
+    async fn next(
+        &self,
+        operation_id: String,
+        _max_events: u32,
+        _max_bytes: u32,
+    ) -> nexus_provider_ports::ProviderResult<nexus_contracts::ProviderEventBatch> {
+        Ok(nexus_contracts::ProviderEventBatch {
+            operation_id,
+            events: vec![],
+            has_more: false,
+            gap: None,
+        })
+    }
+}
+
 /// The acceptance anchor: accept applies the proposal AND creates its events,
 /// atomically, under the owner's authority.
 #[tokio::test]
@@ -463,4 +495,250 @@ async fn compute_without_an_engine_reports_a_real_error() {
     // And the world is untouched.
     assert_eq!(defender_hp(f.core.pool(), "kb_def").await, 30);
     assert_eq!(timeline_event_count(f.core.pool()).await, 0);
+}
+
+// ---------------------------------------------------------------------------
+// L2 review regressions (C1/C2/C3)
+// ---------------------------------------------------------------------------
+
+/// C1: a principal from ANOTHER core must be refused before any dispatch
+/// effect.
+///
+/// The two halves of the authority (a principal, and a handle) are
+/// independently obtainable, so a handle must prove the principal belongs to
+/// the service that established it. The refusal must land BEFORE the handler
+/// runs — so the audit row stays unwritten and the domain is untouched.
+#[tokio::test]
+#[serial_test::serial]
+async fn execute_tool_refuses_a_principal_from_another_core() {
+    let f = fixture().await;
+    let handle = f
+        .core
+        .start_execution(
+            Arc::new(NullProvider) as Arc<dyn nexus_provider_ports::ProviderPort>,
+            nexus_core::execution::RunnerDeps {
+                nexus_home: Some(f._tmp.path().join(".nexus42")),
+                ..nexus_core::execution::RunnerDeps::default()
+            },
+        )
+        .await
+        .expect("owner starts");
+
+    // A SECOND core over a DIFFERENT creator: its principal is well-formed but
+    // was minted by another service, so this handle must not accept it.
+    let other_home = f._tmp.path().join("other");
+    let other_nexus = other_home.join(".nexus42");
+    std::fs::create_dir_all(&other_nexus).unwrap();
+    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+        &other_home, "intruder", SLUG,
+    ))
+    .unwrap();
+    std::fs::write(
+        other_nexus.join("config.toml"),
+        "active_creator_id = \"intruder\"\n[active_workspace_slug_by_creator]\n\"intruder\" = \"default\"\n",
+    )
+    .unwrap();
+    let other_db = nexus_home_layout::workspace_state_db_path(&other_home, "intruder", SLUG);
+    {
+        let guarded = nexus_local_db::init_engine_pool(&other_db).await.unwrap();
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, \
+             cached_at, data) VALUES ('intruder', 'Other', 'active', datetime('now'), '{}')",
+        )
+        .execute(guarded.pool())
+        .await
+        .unwrap();
+        guarded.pool().close().await;
+        nexus_local_db::writer_protocol::release_retained_writer_guards(&other_db);
+    }
+    let other_core = CoreService::open(CoreOpenOptions {
+        user_home: other_home,
+        access: CoreAccess::EngineOwner,
+    })
+    .await
+    .expect("second core opens");
+    let foreign = other_core.active_principal().await.unwrap();
+
+    let request = ToolExecuteRequest {
+        tool_name: "nexus.workspace.info".to_string(),
+        parameters: json!({}),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    let err = handle
+        .execute_tool(&foreign, request)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, nexus_core::CoreError::AuthRequired),
+        "a foreign principal must be refused as AuthRequired, got {err:?}"
+    );
+
+    // The refusal precedes every effect: no audit row was written.
+    let audits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM acp_tool_audit_log")
+        .fetch_one(f.core.pool())
+        .await
+        .unwrap();
+    assert_eq!(audits, 0, "a refused principal must leave no audit row");
+}
+
+/// The owner's OWN principal still dispatches (the binding must not be a
+/// blanket refusal).
+#[tokio::test]
+#[serial_test::serial]
+async fn execute_tool_accepts_the_owners_own_principal() {
+    let f = fixture().await;
+    let handle = f
+        .core
+        .start_execution(
+            Arc::new(NullProvider) as Arc<dyn nexus_provider_ports::ProviderPort>,
+            nexus_core::execution::RunnerDeps {
+                nexus_home: Some(f._tmp.path().join(".nexus42")),
+                ..nexus_core::execution::RunnerDeps::default()
+            },
+        )
+        .await
+        .expect("owner starts");
+    let principal = f.core.active_principal().await.unwrap();
+
+    let request = ToolExecuteRequest {
+        tool_name: "nexus.workspace.info".to_string(),
+        parameters: json!({}),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    let response = handle
+        .execute_tool(&principal, request)
+        .await
+        .expect("the owner's own principal dispatches");
+    assert!(response.success);
+}
+
+/// C2: `nexus.research.query` is creator-scoped.
+///
+/// Both the direct-id lookup and the list must be scoped, and a foreign row
+/// must be indistinguishable from a missing one (NotFound, never Forbidden —
+/// a 403 would confirm the row exists).
+#[tokio::test]
+#[serial_test::serial]
+async fn research_query_is_scoped_to_the_creator() {
+    let f = fixture().await;
+
+    // Seed a reference source owned by ANOTHER creator, straight into the
+    // durable store the fixture's pool serves.
+    sqlx::query(
+        "INSERT OR IGNORE INTO reference_sources \
+         (reference_source_id, creator_id, workspace_id, title, uri, source_type, \
+          tags, scan_status, created_at, updated_at) \
+         VALUES ('ref_foreign', 'intruder', 'local', 'Foreign Source', \
+                 'https://example.invalid/f', 'web', '', 'pending', \
+                 datetime('now'), datetime('now'))",
+    )
+    .execute(f.core.pool())
+    .await
+    .unwrap();
+
+    // Direct id lookup of a FOREIGN row: NotFound, and no existence leak.
+    let request = ToolExecuteRequest {
+        tool_name: "nexus.research.query".to_string(),
+        parameters: json!({ "reference_source_id": "ref_foreign" }),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    let err = nexus_core::execution::capabilities::execute_tool(&f.context, &request)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, nexus_core::CoreError::NotFound { .. }),
+        "a foreign reference source must be NotFound, got {err:?}"
+    );
+
+    // The LIST must not surface the foreign row either.
+    let request = ToolExecuteRequest {
+        tool_name: "nexus.research.query".to_string(),
+        parameters: json!({}),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    let value = nexus_core::execution::capabilities::execute_tool(&f.context, &request)
+        .await
+        .expect("list succeeds");
+    let ids: Vec<String> = value["results"]
+        .as_array()
+        .expect("results array")
+        .iter()
+        .filter_map(|r| r["reference_source_id"].as_str().map(ToString::to_string))
+        .collect();
+    assert!(
+        !ids.contains(&"ref_foreign".to_string()),
+        "an unscoped list would leak a foreign row, got {ids:?}"
+    );
+}
+
+/// C3: `nexus.reference.refresh` is a WRITE tool.
+///
+/// It writes DB state, rewrites body.md and performs a network fetch, so a
+/// policy that grants reads only must refuse it — and the refusal must land
+/// before any of those effects.
+#[tokio::test]
+#[serial_test::serial]
+async fn reference_refresh_is_refused_under_a_read_only_policy() {
+    let f = fixture().await;
+
+    // A policy that grants READS (via `nexus.*.read`) but not writes. With
+    // `default = "ask"` the two paths differ observably: the read predicate
+    // consults `nexus.*.read` and grants, while the write predicate consults
+    // only the tool name and `nexus.*` and refuses. Under `default = "deny"`
+    // BOTH would refuse, so this test could not tell the fix from the bug.
+    let workspace_dir = f._tmp.path().join("policy-ws");
+    std::fs::create_dir_all(workspace_dir.join(".nexus42")).unwrap();
+    std::fs::write(
+        workspace_dir.join(".nexus42").join("permissions.toml"),
+        "default = \"ask\"\n[grant]\n\"nexus.*.read\" = true\n",
+    )
+    .unwrap();
+
+    let mut context = f.context.clone();
+    context.set_workspace_path(Some(workspace_dir.to_string_lossy().into_owned()));
+
+    let request = ToolExecuteRequest {
+        tool_name: "nexus.reference.refresh".to_string(),
+        parameters: json!({ "reference_source_id": "ref_any" }),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    let err = nexus_core::execution::capabilities::execute_tool(&context, &request)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, nexus_core::CoreError::Coded { ref code, .. } if code == "policy_blocked"),
+        "a read-only policy must refuse a write tool, got {err:?}"
+    );
+
+    // The refusal precedes the effects: the seeded row is untouched.
+    let status: Option<String> = sqlx::query_scalar(
+        "SELECT scan_status FROM reference_sources WHERE reference_source_id = 'ref_any'",
+    )
+    .fetch_optional(f.core.pool())
+    .await
+    .unwrap();
+    assert!(status.is_none(), "no refresh effect may have run");
+
+    // CONTROL: the same policy still ADMITS a read tool, so the refusal above
+    // is the write classification and not the policy denying everything.
+    let request = ToolExecuteRequest {
+        tool_name: "nexus.workspace.info".to_string(),
+        parameters: json!({}),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    nexus_core::execution::capabilities::execute_tool(&context, &request)
+        .await
+        .expect("a read tool still passes under the same policy");
 }

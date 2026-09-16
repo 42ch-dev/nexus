@@ -245,6 +245,15 @@ impl ToolContext {
         }
     }
 
+    /// Replace the active workspace path.
+    ///
+    /// The permission policy is read from `<workspace>/.nexus42/permissions.toml`,
+    /// so a caller that resolves a different workspace must be able to point
+    /// the context at it (a test also uses this to exercise a read-only policy).
+    pub fn set_workspace_path(&mut self, path: Option<String>) {
+        self.workspace_path = path;
+    }
+
     /// Replace the live user-capability holder.
     ///
     /// A dispatch reads the holder LIVE, so swapping it here is visible to the
@@ -450,6 +459,10 @@ fn check_nexus_tool_permission(
         "nexus.work.schedule.set",
         "nexus.finding.resolve",
         "nexus.pool.entry.manage",
+        // Writes DB state (refresh status + content hash), rewrites the
+        // on-disk `body.md`, and performs a network fetch — a read-policy
+        // grant must not authorize it.
+        "nexus.reference.refresh",
     ];
 
     let allowed = if NEXUS_WRITE_TOOLS.contains(&tool_name) {
@@ -2470,12 +2483,15 @@ fn execute_workspace_paths(
 async fn execute_research_query(
     req: &ToolExecuteRequest,
     context: &ToolContext,
-    _creator_id: &str,
+    creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
     // Direct lookup by reference_source_id takes precedence.
     let pool = context.pool();
     if let Some(id) = req.parameters["reference_source_id"].as_str() {
-        let row = nexus_local_db::reference_source::get_by_id(pool, id)
+        // Scoped lookup: a source belonging to another creator must be
+        // indistinguishable from one that does not exist, so the refusal is
+        // the SAME `NotFound` either way — a 403 would confirm existence.
+        let row = nexus_local_db::reference_source::find_by_id_for_creator(pool, id, creator_id)
             .await
             .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
             .ok_or_else(|| NexusApiError::NotFound { resource: id.to_string() })?;
@@ -2497,7 +2513,9 @@ async fn execute_research_query(
         .as_i64()
         .map_or(50, |v| v.clamp(1, 1000));
 
-    let rows = nexus_local_db::reference_source::list(pool, Some(limit), None, None)
+    // Scoped list: an unscoped call returns every creator's rows.
+    let rows =
+        nexus_local_db::reference_source::list(pool, Some(limit), None, Some(creator_id))
         .await
         .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?;
 
@@ -3659,7 +3677,7 @@ pub fn build_registry() -> CapabilityRegistry {
     reg.register(CapabilityRow {
         id: "nexus.reference.refresh",
         access: Access::Write,
-        admission: ADMISSION_READ_WORKSPACE,
+        admission: ADMISSION_WRITE_WORKSPACE,
         handler: registry_reference_refresh,
         catalog: CatalogDescriptor {
             description: "Refresh a reference source's body content and update its content hash.",
