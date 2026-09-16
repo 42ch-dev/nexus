@@ -22,7 +22,7 @@
 
 #![allow(clippy::unwrap_used)]
 
-use nexus_daemon_runtime::stale_findings_watcher::run_one_sweep;
+use nexus_core::execution::schedules::stale_findings::run_one_sweep;
 use nexus_daemon_runtime::test_utils;
 use nexus_local_db::findings::{create_finding, Finding};
 use nexus_local_db::works::{create_work_atomic, WorkRecord};

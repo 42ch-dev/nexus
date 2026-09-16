@@ -110,7 +110,7 @@ fn finding(
 /// Used to verify the `{{#if open_findings_block}}` guard emits/omits the
 /// section correctly.
 fn render_outline_prompt(preset_input: &serde_json::Value) -> String {
-    use nexus_orchestration::preset::read_embedded_template;
+    use nexus_preset::read_embedded_template;
     let raw = read_embedded_template("novel-writing", "prompts/outline-chapter.md")
         .expect("novel-writing outline-chapter.md must be embedded");
 

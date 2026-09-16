@@ -28,7 +28,7 @@ use std::hint::black_box;
 use std::time::Duration;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use nexus_orchestration::preset::expr::{evaluate, parse};
+use nexus_preset::expr::{evaluate, parse};
 
 /// V1.58 P0 fix-wave (QC3 F-004) pattern: explicit Criterion config instead
 /// of the default so the bench is CI-friendly (< 15s total) while keeping

@@ -6,7 +6,7 @@
 //! process: a live HTTP router over the daemon `WorkspaceState`, a real
 //! `orchestration_sessions` SQLite persistence, and the daemon engine the
 //! routes serve. The preset-run driver
-//! ([`nexus_daemon_runtime::preset_run`]) steps the session; the failure
+//! ([`nexus_core::execution`]) steps the session; the failure
 //! record asserts the typed `converge_timeout:` discriminator, the
 //! `on_timeout` reroute (`_join_timeout_note` + reroute target), and the
 //! absent-`on_timeout` typed-failure (never `WaitForInput` forever).
@@ -29,7 +29,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use common::LiveDaemon;
-use nexus_daemon_runtime::preset_run::{drive_preset_run, PresetRunConfig, PresetRunOutcome};
+use nexus_core::execution::{drive_preset_run, PresetRunConfig, PresetRunOutcome};
 use nexus_orchestration::engine::{SessionId, SessionStatus};
 use nexus_orchestration::CapabilityRegistry;
 
@@ -139,13 +139,13 @@ const PAST_DEADLINE_SLEEP: Duration = Duration::from_millis(500);
 /// Start a session on the DAEMON engine from a YAML preset string.
 async fn start_preset_session(d: &LiveDaemon, yaml: &str) -> SessionId {
     let caps = Arc::new(CapabilityRegistry::with_builtins());
-    let mut loaded = nexus_orchestration::preset::load_preset_from_str(yaml, &caps)
+    let mut loaded = nexus_preset::load_preset_from_str(yaml, &caps)
         .unwrap_or_else(|e| panic!("test preset must load: {e}"));
     // Raw-YAML loads carry no source identity (the loader cannot know the
     // origin); a v1 run requires one, so freeze an embedded identity over
     // the manifest exactly as `load_embedded_preset` does (A2/A7).
     loaded.source_identity = Some(
-        nexus_orchestration::preset::loader::preset_source_identity(
+        nexus_preset::loader::preset_source_identity(
             &loaded.manifest,
             None,
             Some(loaded.id.as_str()),

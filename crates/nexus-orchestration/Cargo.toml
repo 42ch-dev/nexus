@@ -33,6 +33,7 @@ serde_yaml = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 nexus-contracts = { path = "../nexus-contracts" }
+nexus-preset = { path = "../nexus-preset" }
 nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-knowledge = { path = "../nexus-knowledge" }
 # V1.145 P1a: narrative.compute converts WorldKbEntry↔spoke KnowledgeEntry via

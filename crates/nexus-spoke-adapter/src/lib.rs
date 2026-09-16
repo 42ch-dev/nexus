@@ -175,6 +175,16 @@ pub use spoke_operations::{
     ScopeQueryPort,
 };
 
+// v1.190 P3-T3 — the peer-tool spine's spoke primitives. The peer registry
+// moved into `nexus-core::execution` (one registry for every host), so a
+// consumer needs the tool-grammar and manifest validators WITHOUT taking a
+// direct `spoke-operations` edge. Re-exported here rather than widening the
+// registry's own dependency set: the adapter stays the single spoke import
+// boundary (call-boundary invariant above).
+pub use spoke_operations::{
+    parse_tool_capability_id, validate_manifest_tools, validate_tool_arguments, ToolDescriptor,
+};
+
 // V1.166 AR-1 — the world-scoped `orchestrate_check` seam (nexus semantics
 // at the spoke import boundary, spoke untouched): pre-expands empty
 // `rule_refs` to the check world's `status=active` rules and fail-closes on

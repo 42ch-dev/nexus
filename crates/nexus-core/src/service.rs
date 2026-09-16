@@ -67,6 +67,9 @@ pub struct CoreOpenOptions {
 
 pub(crate) struct CoreInner {
     pub(crate) pool: SqlitePool,
+    /// The workspace `state.db` this service serves. The execution owner
+    /// registry is keyed by it, so the single-owner fence spans every
+    /// `CoreService` opened over the same file in this process.
     pub(crate) db_path: PathBuf,
     _guarded: Option<GuardedPool>,
     /// Active creator this service was opened against (open-scoped).
@@ -88,6 +91,18 @@ pub(crate) struct CoreInner {
     /// `open_host` manager per open service — a second start is a typed busy
     /// rejection, never a second engine. Reset only by a confirmed close.
     pub(crate) host_authority_established: Mutex<bool>,
+    /// The execution owner slot for THIS service (v1.190 P3-T1). Empty until
+    /// `start_execution` succeeds.
+    ///
+    /// The authoritative single-owner fence is NOT this slot — it is the
+    /// process-wide registry in `execution::lifecycle`, keyed by the
+    /// workspace DB, because `CoreService::open` under `EngineOwner` joins
+    /// this process's retained engine admission and would otherwise let a
+    /// second core over the same file build a second engine.
+    #[cfg(feature = "execution")]
+    pub(crate) execution: std::sync::Mutex<
+        Option<Arc<crate::execution::ExecutionHandle>>,
+    >,
 }
 
 /// Cloneable handle: `inner` is already shared, so a clone is the same open
@@ -202,6 +217,8 @@ impl CoreService {
                 closing: AtomicBool::new(false),
                 host_authority_established: Mutex::new(false),
                 character_fences: ActorFenceTable::new(&db_path),
+                #[cfg(feature = "execution")]
+                execution: std::sync::Mutex::new(None),
             }),
         })
     }
@@ -218,6 +235,17 @@ impl CoreService {
             return Err(CoreError::Closing);
         }
         Ok(())
+    }
+
+    /// Read-only probe: whether this service has begun closing.
+    ///
+    /// The same predicate [`Self::ensure_open`] enforces, exposed so a caller
+    /// can OBSERVE the close barrier instead of inferring it from a later
+    /// refusal. Used by the concurrent close/start contract to force a close
+    /// into the mid-build window deterministically.
+    #[must_use]
+    pub fn is_closing(&self) -> bool {
+        self.inner.closing.load(Ordering::SeqCst)
     }
 
     /// Re-read the on-disk active creator/workspace and require it to still
@@ -390,9 +418,30 @@ impl CoreService {
                 reason: None,
             });
         }
+        // I4: settle the execution owner BEFORE the SQL pool closes. Drive
+        // cancellation, the bounded join and every final durable settlement
+        // run against a LIVE pool — closing the pool first would make the
+        // documented cleanup path fail against a dead connection.
+        #[cfg(feature = "execution")]
+        let execution_handle = self
+            .inner
+            .execution
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        #[cfg(feature = "execution")]
+        if let Some(handle) = &execution_handle {
+            handle.shutdown().await;
+        }
         self.inner.pool.close().await;
         if self.inner.access == CoreAccess::DirectWriter {
             release_retained_writer_guards(&self.inner.db_path);
+        }
+        // `take` returned the handle, so ownership is settled; release the
+        // per-DB fence so a later open of the same DB can claim it.
+        #[cfg(feature = "execution")]
+        if let Some(handle) = execution_handle {
+            crate::execution::lifecycle::release_owner_slot(&self.inner.db_path, &handle);
         }
         Ok(CoreCloseReport {
             state: nexus_contracts::CoreCloseReportState::Closed,

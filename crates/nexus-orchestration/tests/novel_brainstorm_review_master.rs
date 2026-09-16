@@ -4,8 +4,8 @@
 //! state advance to confirm the state machine wiring is correct.
 
 use nexus_orchestration::capability::CapabilityRegistry;
-use nexus_orchestration::preset::load_embedded_preset;
-use nexus_orchestration::preset::manifest;
+use nexus_preset::load_embedded_preset;
+use nexus_preset::manifest;
 
 /// AC1: Both presets load via `load_embedded_preset` and pass validator.
 #[test]

@@ -6,7 +6,13 @@ use nexus_local_db::works::{self, WorkListFilters, WorkPatch, WorkRecord};
 use uuid::Uuid;
 use crate::{CoreService, CoreAccess, CoreError, CoreResult, Principal};
 
-#[derive(Debug, Clone)]
+/// Serializes as the retained tool/Work wire shape.
+///
+/// `serde` is derived rather than hand-mapped because the field set IS the
+/// wire contract — the pre-extraction daemon kept a field-for-field copy
+/// (`WorkApiDto`) purely to add this derive, so the copy is retired and the
+/// domain projection is the single shape.
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct WorkDetails {
     pub work_id: String,
     pub status: String,

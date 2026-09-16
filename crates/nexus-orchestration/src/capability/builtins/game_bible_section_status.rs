@@ -276,102 +276,94 @@ impl Default for GameBibleSectionStatusUpdate {
 }
 
 #[async_trait]
-impl Capability for GameBibleSectionStatusUpdate {
-    fn name(&self) -> &'static str {
-        "game_bible.section_status.update"
-    }
-
-    fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"work_ref":{"type":"string"},"section_path":{"type":"string"},"new_status":{"type":"string","enum":["draft","reviewed","accepted"]},"reason":{"type":"string"},"works_root":{"type":"string"}},"required":["work_ref","section_path","new_status"],"additionalProperties":false}"#
-    }
-
-    fn output_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"updated":{"type":"boolean"},"new_section_status":{"type":"string"},"section_path":{"type":"string"}},"required":["updated","new_section_status","section_path"],"additionalProperties":false}"#
-    }
-
-    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let inp: SectionStatusInput = serde_json::from_value(input).map_err(|e| {
-            CapabilityError::InputInvalid(format!("game_bible.section_status.update input: {e}"))
-        })?;
-
-        // Validate work_ref against path traversal
-        let work_ref = validate_work_ref(&inp.work_ref)?;
-
-        // Resolve works_root
-        let root = inp
-            .works_root
-            .as_deref()
-            .map_or_else(|| self.works_root.clone(), PathBuf::from);
-
-        let work_dir = root.join(&work_ref);
-        let design_dir = work_dir.join("Design");
-        let section_full_path = design_dir.join(&inp.section_path);
-
-        // Guard against path-traversal in section_path (e.g. "../../.ssh/authorized_keys").
-        let design_dir_canonical = std::fs::canonicalize(&design_dir).map_err(|e| {
-            CapabilityError::InputInvalid(format!("cannot resolve design dir: {e}"))
-        })?;
-        let section_canonical = std::fs::canonicalize(&section_full_path).map_err(|_| {
-            CapabilityError::InputInvalid(format!(
-                "section not found: Design/{} under work '{work_ref}'",
-                inp.section_path
-            ))
-        })?;
-        if !section_canonical.starts_with(&design_dir_canonical) {
-            return Err(CapabilityError::InputInvalid(format!(
-                "section_path '{}' must be within the Design directory",
-                inp.section_path
-            )));
-        }
-
-        info!(
-            work_ref = %work_ref,
-            section_path = %inp.section_path,
-            new_status = %inp.new_status,
-            reason = ?inp.reason,
-            "game_bible.section_status.update: start"
-        );
-
-        // Read current content (use canonical path to close TOCTOU)
-        let content = std::fs::read_to_string(&section_canonical).map_err(|e| {
-            CapabilityError::Internal(format!(
-                "read section file {}: {e}",
-                section_full_path.display()
-            ))
-        })?;
-
-        // Parse frontmatter to extract current section_status
-        let current_status = extract_frontmatter_field(&content, "section_status")?;
-
-        // Validate transition
-        validate_transition(&current_status, &inp.new_status)?;
-
-        // Replace the section_status field
-        let updated_content =
-            replace_frontmatter_field(&content, "section_status", &inp.new_status)?;
-
-        // Atomic write via temp+rename (use canonical path)
-        atomic_write(&section_canonical, &updated_content)?;
-
-        info!(
-            work_ref = %work_ref,
-            section_path = %inp.section_path,
-            from = %current_status,
-            to = %inp.new_status,
-            "game_bible.section_status.update: done"
-        );
-
-        let output = SectionStatusOutput {
-            updated: true,
-            new_section_status: inp.new_status,
-            section_path: section_canonical.display().to_string(),
-        };
-
-        serde_json::to_value(output).map_err(|e| {
-            CapabilityError::Internal(format!("game_bible.section_status.update output: {e}"))
-        })
-    }
+impl Capability for GameBibleSectionStatusUpdate { fn name(&self) -> &'static str {
+    "game_bible.section_status.update"
+} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::GAME_BIBLE_SECTION_STATUS_UPDATE_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
+    r#"{"type":"object","properties":{"updated":{"type":"boolean"},"new_section_status":{"type":"string"},"section_path":{"type":"string"}},"required":["updated","new_section_status","section_path"],"additionalProperties":false}"#
 }
+
+async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+    let inp: SectionStatusInput = serde_json::from_value(input).map_err(|e| {
+        CapabilityError::InputInvalid(format!("game_bible.section_status.update input: {e}"))
+    })?;
+
+    // Validate work_ref against path traversal
+    let work_ref = validate_work_ref(&inp.work_ref)?;
+
+    // Resolve works_root
+    let root = inp
+        .works_root
+        .as_deref()
+        .map_or_else(|| self.works_root.clone(), PathBuf::from);
+
+    let work_dir = root.join(&work_ref);
+    let design_dir = work_dir.join("Design");
+    let section_full_path = design_dir.join(&inp.section_path);
+
+    // Guard against path-traversal in section_path (e.g. "../../.ssh/authorized_keys").
+    let design_dir_canonical = std::fs::canonicalize(&design_dir).map_err(|e| {
+        CapabilityError::InputInvalid(format!("cannot resolve design dir: {e}"))
+    })?;
+    let section_canonical = std::fs::canonicalize(&section_full_path).map_err(|_| {
+        CapabilityError::InputInvalid(format!(
+            "section not found: Design/{} under work '{work_ref}'",
+            inp.section_path
+        ))
+    })?;
+    if !section_canonical.starts_with(&design_dir_canonical) {
+        return Err(CapabilityError::InputInvalid(format!(
+            "section_path '{}' must be within the Design directory",
+            inp.section_path
+        )));
+    }
+
+    info!(
+        work_ref = %work_ref,
+        section_path = %inp.section_path,
+        new_status = %inp.new_status,
+        reason = ?inp.reason,
+        "game_bible.section_status.update: start"
+    );
+
+    // Read current content (use canonical path to close TOCTOU)
+    let content = std::fs::read_to_string(&section_canonical).map_err(|e| {
+        CapabilityError::Internal(format!(
+            "read section file {}: {e}",
+            section_full_path.display()
+        ))
+    })?;
+
+    // Parse frontmatter to extract current section_status
+    let current_status = extract_frontmatter_field(&content, "section_status")?;
+
+    // Validate transition
+    validate_transition(&current_status, &inp.new_status)?;
+
+    // Replace the section_status field
+    let updated_content =
+        replace_frontmatter_field(&content, "section_status", &inp.new_status)?;
+
+    // Atomic write via temp+rename (use canonical path)
+    atomic_write(&section_canonical, &updated_content)?;
+
+    info!(
+        work_ref = %work_ref,
+        section_path = %inp.section_path,
+        from = %current_status,
+        to = %inp.new_status,
+        "game_bible.section_status.update: done"
+    );
+
+    let output = SectionStatusOutput {
+        updated: true,
+        new_section_status: inp.new_status,
+        section_path: section_canonical.display().to_string(),
+    };
+
+    serde_json::to_value(output).map_err(|e| {
+        CapabilityError::Internal(format!("game_bible.section_status.update output: {e}"))
+    })
+} }
 
 /// Extract a frontmatter field value from YAML frontmatter content.
 ///

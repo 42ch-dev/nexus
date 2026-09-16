@@ -13,6 +13,8 @@ mod content;
 mod context;
 mod creators;
 mod error;
+#[cfg(feature = "execution")]
+pub mod execution;
 mod findings;
 mod forks;
 mod home;
@@ -20,6 +22,7 @@ mod knowledge;
 mod memory;
 mod memory_pipeline;
 mod outline;
+mod presets;
 mod principal;
 mod provider_journal;
 mod reading;
@@ -53,6 +56,7 @@ pub use memory::{
     CharacterTomBeliefRow, CharacterTomListQuery, CharacterTomPage, CharacterTomRecordInput,
     CharacterTomService,
 };
+pub use presets::PresetError;
 pub use principal::Principal;
 pub use service::{CoreAccess, CoreOpenOptions, CoreService};
 #[cfg(feature = "provider-host")]
@@ -64,6 +68,12 @@ pub use actor_sessions::{
 pub use host::HostHandle;
 pub use soul::CoreCharacterMind;
 pub use storage_status::{CoreStorageStatus, CoreStorageVersions};
+#[cfg(feature = "execution")]
+pub use execution::{
+    CancelOutcome, DriveDisposition, ExecutionBuildObserver, ExecutionHandle, ExecutionOpenError,
+    PresetRunConfig, PresetRunOutcome, ResumeDecision, RunControlError, RunControlResult, RunSignal,
+    RunnerDeps, WorkflowRunCoordinator,
+};
 pub use timeline::{CoreTimelineEventsQuery, CoreTimelineOverviewQuery};
 pub use chronology::CoreWorkChronology;
 pub use content::{CoreChapterContentQuery, resolve_guarded_path, resolve_guarded_path_async};

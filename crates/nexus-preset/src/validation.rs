@@ -16,8 +16,8 @@
 //! define utility graphs for future use without breaking validation. The caller
 //! may elevate to error in strict mode (future work).
 
-use crate::capability::CapabilityRegistry;
-use crate::preset::manifest::{
+use crate::capability_catalog::CapabilityCatalog;
+use crate::manifest::{
     EnterAction, ExitWhen, MergeKind, NextTarget, PresetKind, PresetManifest, RunIntent,
 };
 use std::collections::{HashMap, HashSet};
@@ -148,7 +148,7 @@ impl ValidationResult {
 #[must_use]
 pub fn validate_preset_semantic(
     manifest: &PresetManifest,
-    caps: &CapabilityRegistry,
+    caps: &dyn CapabilityCatalog,
 ) -> ValidationResult {
     let mut result = ValidationResult::default();
 
@@ -221,12 +221,12 @@ fn check_initial_to_terminal_reachability(
     let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
     for state in &manifest.states {
         match &state.next {
-            Some(crate::preset::manifest::NextTarget::Linear(target)) => {
+            Some(crate::manifest::NextTarget::Linear(target)) => {
                 if state_ids.contains(target.as_str()) {
                     adj.entry(&state.id).or_default().push(target.as_str());
                 }
             }
-            Some(crate::preset::manifest::NextTarget::GoNogo(gonogo)) => {
+            Some(crate::manifest::NextTarget::GoNogo(gonogo)) => {
                 if state_ids.contains(gonogo.go.as_str()) {
                     adj.entry(&state.id).or_default().push(gonogo.go.as_str());
                 }
@@ -234,7 +234,7 @@ fn check_initial_to_terminal_reachability(
                     adj.entry(&state.id).or_default().push(gonogo.nogo.as_str());
                 }
             }
-            Some(crate::preset::manifest::NextTarget::Labeled(labeled)) => {
+            Some(crate::manifest::NextTarget::Labeled(labeled)) => {
                 // V1.52 T-B P0: N-way labeled edges — each edge's target
                 // is a reachable state from the source.
                 for edge in labeled {
@@ -243,7 +243,7 @@ fn check_initial_to_terminal_reachability(
                     }
                 }
             }
-            Some(crate::preset::manifest::NextTarget::Conditional(next_cond)) => {
+            Some(crate::manifest::NextTarget::Conditional(next_cond)) => {
                 // V1.56 P2: legacy conditional edges — all rules + default are reachable.
                 for rule in &next_cond.rules {
                     if state_ids.contains(rule.target.as_str()) {
@@ -256,7 +256,7 @@ fn check_initial_to_terminal_reachability(
                         .push(next_cond.default.as_str());
                 }
             }
-            Some(crate::preset::manifest::NextTarget::Branches(branches)) => {
+            Some(crate::manifest::NextTarget::Branches(branches)) => {
                 // V1.56 P2: Form B multi-branch — all branches + default are reachable.
                 for rule in &branches.branches {
                     if state_ids.contains(rule.target.as_str()) {
@@ -690,7 +690,7 @@ pub(crate) fn collect_asset_file_references(manifest: &PresetManifest) -> Vec<(S
     }
 
     // initial_action template_file
-    if let Some(crate::preset::manifest::InitialAction::SeedExpansion {
+    if let Some(crate::manifest::InitialAction::SeedExpansion {
         template_file: Some(ref tf),
         ..
     }) = manifest.preset.initial_action
@@ -827,13 +827,13 @@ fn check_path_safety(manifest: &PresetManifest, result: &mut ValidationResult) {
 ///    diagnostic so the user knows not all checks were possible.
 fn check_capability_arg_compatibility(
     manifest: &PresetManifest,
-    caps: &CapabilityRegistry,
+    caps: &dyn CapabilityCatalog,
     result: &mut ValidationResult,
 ) {
     // Also check requires_capabilities (already done by loader, but we produce
     // richer diagnostics).
     for (i, req_cap) in manifest.preset.requires_capabilities.iter().enumerate() {
-        if caps.get(req_cap).is_none() {
+        if caps.input_schema(req_cap).is_none() {
             result.diagnostics.push(ValidationDiagnostic {
                 path: format!("preset.requires_capabilities[{i}]"),
                 message: format!("required capability '{req_cap}' not found in registry"),
@@ -851,7 +851,7 @@ fn check_capability_arg_compatibility(
             if let EnterAction::Capability { name, args } = enter {
                 let cap_path = format!("{enter_path}.name");
 
-                match caps.get(name) {
+                match caps.input_schema(name) {
                     None => {
                         result.diagnostics.push(ValidationDiagnostic {
                             path: cap_path,
@@ -860,9 +860,8 @@ fn check_capability_arg_compatibility(
                             category: DiagnosticCategory::MissingCapability,
                         });
                     }
-                    Some(cap) => {
+                    Some(schema_str) => {
                         // Try to parse the capability's input_schema to detect drift.
-                        let schema_str = cap.input_schema();
                         if let Ok(schema_value) =
                             serde_json::from_str::<serde_json::Value>(schema_str)
                         {
@@ -1185,7 +1184,7 @@ fn check_cli_args(manifest: &PresetManifest, result: &mut ValidationResult) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capability::CapabilityRegistry;
+    use crate::capability_catalog::BuiltinCapabilityCatalog;
 
     fn minimal_manifest() -> PresetManifest {
         let yaml = r"
@@ -1214,7 +1213,7 @@ states:
     #[test]
     fn valid_preset_passes_semantic_validation() {
         let manifest = minimal_manifest();
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             !result.has_errors(),
@@ -1249,7 +1248,7 @@ states:
     terminal: true
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.diagnostics.iter().any(|d| {
@@ -1284,7 +1283,7 @@ states:
     next: a
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.diagnostics.iter().any(|d| {
@@ -1318,7 +1317,7 @@ states:
     exit_when: { kind: manual }
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.diagnostics.iter().any(|d| {
@@ -1353,7 +1352,7 @@ states:
     terminal: true
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.diagnostics.iter().any(|d| {
@@ -1393,7 +1392,7 @@ states:
     terminal: true
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.diagnostics.iter().any(|d| {
@@ -1426,7 +1425,7 @@ states:
     terminal: true
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.diagnostics.iter().any(|d| {
@@ -1468,7 +1467,7 @@ inner_graphs:
         kind: acp_prompt
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.diagnostics.iter().any(|d| {
@@ -1510,7 +1509,7 @@ states:
     terminal: true
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.diagnostics.iter().any(|d| {
@@ -1624,7 +1623,7 @@ states:
     terminal: true
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.diagnostics.iter().any(|d| {
@@ -1659,7 +1658,7 @@ states:
     terminal: true
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.diagnostics.iter().any(|d| {
@@ -1674,7 +1673,7 @@ states:
     #[test]
     fn known_capability_passes() {
         let manifest = minimal_manifest();
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             !result.has_errors(),
@@ -1892,6 +1891,7 @@ pub fn validate_preset_for_stage(stage: &str, preset_id: &str) -> std::result::R
 #[cfg(test)]
 mod stage_tests {
     use super::*;
+    use crate::capability_catalog::BuiltinCapabilityCatalog;
 
     #[test]
     fn default_preset_for_known_stages() {
@@ -1995,7 +1995,7 @@ states:
     terminal: true
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             !result
@@ -2034,7 +2034,7 @@ states:
     terminal: true
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.errors().any(|d| {
@@ -2079,7 +2079,7 @@ states:
     terminal: true
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.errors().any(|d| {
@@ -2123,7 +2123,7 @@ states:
     terminal: true
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.errors().any(|d| {
@@ -2171,7 +2171,7 @@ states:
     terminal: true
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.errors().any(|d| {
@@ -2218,7 +2218,7 @@ states:
     terminal: true
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let caps = CapabilityRegistry::with_builtins();
+        let caps = BuiltinCapabilityCatalog;
         let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.errors().any(|d| {

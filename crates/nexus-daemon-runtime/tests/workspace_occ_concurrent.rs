@@ -12,13 +12,14 @@
 //!
 //! Note: the V1.58 plan's verification command referenced
 //! `cargo test -p nexus-orchestration --test workspace_session`, but the
-//! workspace session manager lives in `nexus-daemon-runtime` (orchestration
-//! does not depend on it). This is the correct home for the test.
+//! workspace session manager lives in `nexus_core::execution`
+//! (orchestration does not depend on it), so it is exercised here through the
+//! daemon's dependency on the core crate.
 
 #![allow(clippy::unwrap_used)]
 use base64::Engine;
 
-use nexus_daemon_runtime::workspace::session::{
+use nexus_core::execution::session::{
     compute_content_hashes, occ_conflict_total, ChangeEntry, ChangeOp, SessionError, SessionId,
     WorkspaceSessionManager,
 };

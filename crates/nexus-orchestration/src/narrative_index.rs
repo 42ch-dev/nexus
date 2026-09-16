@@ -795,7 +795,7 @@ mod tests {
     #[test]
     fn parse_foreshadowing_index_parses_scaffolded_template_verbatim() {
         // The actual scaffolded file (prose + table + trailing stub).
-        let content = include_str!("../embedded-presets/novel-writing/templates/foreshadowing.md");
+        let content = include_str!("../../nexus-preset/embedded-presets/novel-writing/templates/foreshadowing.md");
         let rows = parse_foreshadowing_index(content).unwrap();
         assert!(rows.is_empty(), "empty scaffold must parse to zero rows");
     }

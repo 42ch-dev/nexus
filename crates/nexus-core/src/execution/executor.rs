@@ -1,4 +1,10 @@
-//! Daemon-owned `WorkspaceExecutor` (v1.188 P3 L2).
+//! `WorkspaceExecutor` over the core-owned workspace commit authority
+//! (v1.190 P3-T2; moved from the daemon's `workspace::executor`).
+//!
+//! Binds the orchestration `WorkspaceExecutor` capability surface to the SAME
+//! shared [`super::session::WorkspaceSessionManager`] the durable commit path
+//! writes through, so a preset's `workspace.commit` observes real durable
+//! workspace state.
 
 use std::sync::Arc;
 
@@ -13,12 +19,12 @@ use nexus_orchestration::capability::{CapabilityError, WorkspaceExecutor};
 use super::session::{SessionError, SessionId, WorkspaceSessionManager};
 
 /// Production workspace executor bound to one canonical workspace root.
-pub struct DaemonWorkspaceExecutor {
+pub struct WorkspaceCommitExecutor {
     session_manager: Arc<WorkspaceSessionManager>,
     canonical_workspace_root: String,
 }
 
-impl DaemonWorkspaceExecutor {
+impl WorkspaceCommitExecutor {
     #[must_use]
     pub const fn new(
         session_manager: Arc<WorkspaceSessionManager>,
@@ -59,7 +65,7 @@ fn map_session_error(err: SessionError) -> CapabilityError {
 }
 
 #[async_trait]
-impl WorkspaceExecutor for DaemonWorkspaceExecutor {
+impl WorkspaceExecutor for WorkspaceCommitExecutor {
     async fn open(
         &self,
         input: WorkspaceOpenInput,

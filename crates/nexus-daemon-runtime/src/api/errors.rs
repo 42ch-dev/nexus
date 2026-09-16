@@ -260,7 +260,7 @@ pub enum NexusApiError {
     InputValidationFailed { details: serde_json::Value },
 }
 
-impl From<crate::preset_run::RunControlError> for NexusApiError {
+impl From<nexus_core::execution::RunControlError> for NexusApiError {
     /// The SINGLE projection of a coordinator control failure onto the
     /// public error surface (QC2 F-002).
     ///
@@ -268,8 +268,8 @@ impl From<crate::preset_run::RunControlError> for NexusApiError {
     /// other coordinator-routed signal share this mapping, so an identical
     /// durable outcome can never project two different envelopes — and a
     /// capacity refusal is a typed retryable 503, never a 500.
-    fn from(err: crate::preset_run::RunControlError) -> Self {
-        use crate::preset_run::RunControlError as E;
+    fn from(err: nexus_core::execution::RunControlError) -> Self {
+        use nexus_core::execution::RunControlError as E;
         match err {
             E::WaitConflict {
                 session_id,
@@ -771,6 +771,7 @@ impl From<nexus_core::CoreError> for NexusApiError {
             nexus_core::CoreError::InvalidInput { field, reason } => {
                 Self::InvalidInput { field, reason }
             }
+            nexus_core::CoreError::Preset(error) => error.into(),
             nexus_core::CoreError::OutlineConflict(details) => Self::OutlineConflict {
                 current_revision: details.current_revision,
                 node_id: details.node_id,
@@ -800,6 +801,27 @@ impl From<nexus_core::CoreError> for NexusApiError {
             nexus_core::CoreError::SchemaMismatch => Self::ConflictCoded {
                 code: "schema_mismatch".to_string(),
                 message: "schema mismatch".to_string(),
+            },
+            // The core names the refusal; the adapter renders the retained
+            // envelope. `conflict`/`invalid_state` are 409/422 in the daemon's
+            // own tables, so routing them through `Conflict`/`BadRequest`
+            // keeps the public surface identical to the pre-extraction
+            // handlers (which built these variants directly).
+            nexus_core::CoreError::Coded { code, message } if code == "conflict" => {
+                Self::Conflict(message)
+            }
+            nexus_core::CoreError::Coded { code, message } => Self::BadRequest { code, message },
+            // A peer's refusal: the spine's public code plus the peer's own
+            // finer code, rendered through the typed variant so the lowercase
+            // wire code survives verbatim in `details.wire_code`.
+            nexus_core::CoreError::PeerDenied {
+                code,
+                wire_code,
+                message,
+            } => Self::PeerToolDenied {
+                code,
+                wire_code,
+                message,
             },
             nexus_core::CoreError::Busy => Self::BadRequest {
                 code: "busy".to_string(),
@@ -874,6 +896,27 @@ fn resend_internal_category(category: &str) -> (String, String) {
         }
     }
     ("CORE_ERROR".to_string(), category.to_string())
+}
+
+impl From<nexus_core::PresetError> for NexusApiError {
+    fn from(error: nexus_core::PresetError) -> Self {
+        use nexus_core::PresetError;
+        match error {
+            PresetError::Rejected { code, message } => Self::BadRequest { code, message },
+            PresetError::InvalidInput { field, reason } => Self::InvalidInput { field, reason },
+            PresetError::NotFound(resource) => Self::NotFound(resource),
+            PresetError::Conflict(message) => Self::Conflict(message),
+            PresetError::Forbidden { resource, reason } => Self::Forbidden { resource, reason },
+            PresetError::Internal { code, message } => Self::Internal { code, message },
+            PresetError::StrategyConflict(conflict) => Self::strategy_conflict(
+                conflict.current_revision, &conflict.node_id,
+                &conflict.conflicting_path, &conflict.recovery_hint,
+            ),
+            PresetError::StrategyValidation(summary) => Self::strategy_validation_failed(
+                &summary.errors, &summary.warnings,
+            ),
+        }
+    }
 }
 
 // Note: These tests remain inline because they use `crate::test_utils::create_test_workspace`,
@@ -1131,7 +1174,7 @@ mod tests {
         // QC2 F-002: both cancel surfaces share this projection — a durable
         // wait conflict carries the A4 details, and a state conflict is the
         // 409 conflict code (never a 500 derived from an error string).
-        let wait = NexusApiError::from(crate::preset_run::RunControlError::WaitConflict {
+        let wait = NexusApiError::from(nexus_core::execution::RunControlError::WaitConflict {
             session_id: "s1".into(),
             status: "waiting_for_input".into(),
             current_wait_id: Some("w1".into()),
@@ -1142,7 +1185,7 @@ mod tests {
         assert_eq!(details["session_id"], "s1");
         assert_eq!(details["current_wait_id"], "w1");
 
-        let state = NexusApiError::from(crate::preset_run::RunControlError::StateConflict(
+        let state = NexusApiError::from(nexus_core::execution::RunControlError::StateConflict(
             "s1".into(),
             "revision moved".into(),
         ));
@@ -1151,7 +1194,7 @@ mod tests {
 
         // QC2 F-004: exhausting the per-run live-ring quota is a TYPED,
         // retryable capacity refusal — never a 500.
-        let capacity = NexusApiError::from(crate::preset_run::RunControlError::RunEventCapacity(
+        let capacity = NexusApiError::from(nexus_core::execution::RunControlError::RunEventCapacity(
             "s1".into(),
         ));
         assert_eq!(capacity.status_code(), StatusCode::SERVICE_UNAVAILABLE);
