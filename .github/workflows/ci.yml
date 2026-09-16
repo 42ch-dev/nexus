@@ -573,5 +573,13 @@ jobs:
           workspaces: .
           cache-all-crates: false
           cache-on-failure: false
+      - name: Setup monorepo for provider-acp tests
+        if: matrix.group == 'cli-hosts'
+        uses: ./.github/actions/setup-monorepo
+        with:
+          rust-toolchain: ""
+      - name: Build nexus-provider-acp test peer
+        if: matrix.group == 'cli-hosts'
+        run: pnpm --filter @42ch/nexus-provider-acp build
       - name: Run tests
         run: cargo test ${{ matrix.packages }}
