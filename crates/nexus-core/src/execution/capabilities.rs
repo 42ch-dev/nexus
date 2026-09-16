@@ -387,7 +387,7 @@ pub(crate) async fn admission_pipeline(
     if !is_nexus_tool && !req.tool_name.starts_with("fs/") {
         return Ok((String::new(), String::new()));
     }
-    let creator_id = read_active_creator_id(context.nexus_home);
+    let creator_id = read_active_creator_id(&context.nexus_home);
 
     // Gate 2: active creator (for nexus.* tools)
     if is_nexus_tool {
@@ -395,7 +395,7 @@ pub(crate) async fn admission_pipeline(
             resource: "tool_execution".to_string(),
             reason: "active creator required for nexus.* tools".to_string(),
         })?;
-        let workspace_slug = read_active_workspace_slug(context.nexus_home, &creator_id)
+        let workspace_slug = read_active_workspace_slug(&context.nexus_home, &creator_id)
             .ok_or_else(|| NexusApiError::Forbidden {
                 resource: "tool_execution".to_string(),
                 reason: "active workspace required for nexus.* tools".to_string(),
@@ -507,7 +507,7 @@ fn execute_context_whoami(
     creator_id: &str,
 ) -> serde_json::Value {
     let workspace_slug =
-        read_active_workspace_slug(context.nexus_home, creator_id).unwrap_or_default();
+        read_active_workspace_slug(&context.nexus_home, creator_id).unwrap_or_default();
     serde_json::json!({
         "creator_id": creator_id,
         "workspace_slug": workspace_slug
@@ -521,7 +521,7 @@ fn execute_workspace_info(
     creator_id: &str,
 ) -> serde_json::Value {
     let workspace_slug =
-        read_active_workspace_slug(context.nexus_home, creator_id).unwrap_or_default();
+        read_active_workspace_slug(&context.nexus_home, creator_id).unwrap_or_default();
     let workspace_path = context.workspace_path().unwrap_or_default();
     serde_json::json!({
         "creator_id": creator_id,
@@ -753,10 +753,9 @@ async fn execute_context_assemble(
         .unwrap_or(false);
 
     // Check platform_integration state
-    let runtime_mode = context.runtime_mode();
     if requires_platform
         && matches!(
-            runtime_mode,
+            context.runtime_mode(),
             nexus_contracts::local::domain::RuntimeMode::LocalOnly
         )
     {
@@ -1386,11 +1385,10 @@ async fn execute_reference_refresh(
     creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
     use nexus_orchestration::capability::Capability;
-    let home = context.nexus_home;
     let cap = nexus_orchestration::capability::builtins::ReferenceRefresh::with_pool(
-        context.pool(),
+        context.pool().clone(),
     )
-    .with_creator_context(home.clone(), creator_id.to_string());
+    .with_creator_context(context.nexus_home.clone(), creator_id.to_string());
 
     let input = req.parameters.clone();
     cap.run(input).await.map_err(|e| NexusApiError::Internal { category: format!("REFERENCE_REFRESH_FAILED: {}", format!("nexus.reference.refresh failed: {e}")) })
@@ -2041,7 +2039,7 @@ async fn execute_manuscript_list(
     creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
     let workspace_slug =
-        read_active_workspace_slug(context.nexus_home, creator_id).ok_or_else(|| {
+        read_active_workspace_slug(&context.nexus_home, creator_id).ok_or_else(|| {
             NexusApiError::Forbidden {
                 resource: "manuscript.list".to_string(),
                 reason: "active workspace required".to_string(),
@@ -2579,7 +2577,7 @@ fn execute_runtime_health(
     let reg = host_tool_registry();
     let runtime_mode = context.runtime_facts.runtime_mode_as_str();
     let cloud_enabled = !matches!(
-        context.runtime_mode(),
+        *context.runtime_mode(),
         nexus_contracts::local::domain::RuntimeMode::LocalOnly
     );
 
