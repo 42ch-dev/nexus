@@ -272,6 +272,27 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             details: serde_json::Map::from_iter([("wire_code".into(), Value::String(code.clone()))]),
             http_status: Some(coded_wire_status(&code)),
         },
+        // A peer-side tool refusal. The spine's public code is always
+        // `not_supported` (the sole raise site, `capabilities.rs`, sets it
+        // literally); the peer's own lowercase code rides in
+        // `details.wire_code`, verbatim — never re-parsed from the message.
+        // Mirrors `From<CoreError> for NexusApiError`, where
+        // `PeerDenied { code, wire_code, message }` becomes `PeerToolDenied`:
+        // `error_code()` returns the public `code`, `details` carry
+        // `wire_code`, and the status is `BAD_REQUEST`. The public code is
+        // consumed as the enum constant rather than the bound string because
+        // this surface types it as `CoreErrorCode`.
+        DomainError::PeerDenied {
+            wire_code, message, ..
+        } => CoreError {
+            code: CoreErrorCode::NotSupported,
+            message,
+            details: serde_json::Map::from_iter([(
+                "wire_code".into(),
+                Value::String(wire_code),
+            )]),
+            http_status: Some(400),
+        },
         DomainError::Busy => CoreError {
             code: CoreErrorCode::Busy,
             message: "busy".into(),
@@ -449,6 +470,26 @@ mod tests {
         assert_eq!(
             wire.details.get("category").and_then(|v| v.as_str()),
             Some("storage")
+        );
+    }
+
+    #[test]
+    fn peer_denied_keeps_the_public_code_and_the_peer_wire_code() {
+        let wire = wire_core_error_from_domain(DomainError::PeerDenied {
+            code: "not_supported".into(),
+            wire_code: "capability_missing".into(),
+            message: "peer does not expose that tool".into(),
+        });
+        // The public code is the spine's, never the peer's — the peer's own
+        // code must not become the classification a client branches on.
+        assert_eq!(wire.code, CoreErrorCode::NotSupported);
+        assert_eq!(wire.message, "peer does not expose that tool");
+        assert_eq!(wire.http_status, Some(400));
+        // The peer's code survives verbatim in details, where the daemon's
+        // `PeerToolDenied` also carries it.
+        assert_eq!(
+            wire.details.get("wire_code").and_then(|v| v.as_str()),
+            Some("capability_missing")
         );
     }
 
