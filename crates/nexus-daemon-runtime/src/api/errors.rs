@@ -771,6 +771,12 @@ impl From<nexus_core::CoreError> for NexusApiError {
             nexus_core::CoreError::InvalidInput { field, reason } => {
                 Self::InvalidInput { field, reason }
             }
+            // The core carries the structured per-entry detail; the retained
+            // envelope is the 422 `invalid_input` body with that object
+            // verbatim under `details`.
+            nexus_core::CoreError::InputValidation { details } => {
+                Self::InputValidationFailed { details }
+            }
             nexus_core::CoreError::Preset(error) => error.into(),
             nexus_core::CoreError::OutlineConflict(details) => Self::OutlineConflict {
                 current_revision: details.current_revision,
@@ -788,7 +794,12 @@ impl From<nexus_core::CoreError> for NexusApiError {
                 details.recovery_hint,
             ),
             nexus_core::CoreError::WorldKbValidation(details) => Self::WorldKbValidationFailed {
-                details: serde_json::to_value(&details.validation_summary).unwrap_or_default(),
+                // The retained wire shape is the schema's own payload object
+                // (`world-kb-validation-error.schema.json`:
+                // `{ "validation_summary": { "errors", "warnings" } }`), so the
+                // typed carrier is rendered whole. Flattening it to the inner
+                // summary dropped the wrapper every consumer reads.
+                details: serde_json::to_value(&details).unwrap_or_default(),
             },
             nexus_core::CoreError::OwnerBusy => Self::ConflictCoded {
                 code: "owner_busy".to_string(),

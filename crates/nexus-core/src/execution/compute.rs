@@ -237,6 +237,10 @@ pub async fn compute_run(
             // the refusal stays an honest coded error with per-entry detail —
             // invalid entries are never silently skipped.
             let entries_value = serde_json::to_value(&entries).unwrap_or_else(|_| json!([]));
+            // The persisted row and the response carry the SAME structured
+            // detail by construction, so `GET /runs/{id}` and the refusal
+            // agree on `details.invalid_entries`.
+            let details = json!({ "invalid_entries": entries_value });
             persist_failure(
                 pool,
                 &run_id,
@@ -246,18 +250,11 @@ pub async fn compute_run(
                         "compute input validation failed: {} invalid entry(ies); the run was not applied",
                         entries.len()
                     ),
-                    "details": { "invalid_entries": entries_value },
+                    "details": details,
                 }),
             )
             .await;
-            return Err(CoreError::InvalidInput {
-                field: "invalid_entries".to_string(),
-                reason: format!(
-                    "compute input validation failed: {} {}",
-                    entries.len(),
-                    entries_value
-                ),
-            });
+            return Err(CoreError::InputValidation { details });
         }
         Err(err) => {
             let error_code = compute_error_code(&err);

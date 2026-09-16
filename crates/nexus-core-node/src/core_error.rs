@@ -247,6 +247,23 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
                 http_status: Some(422),
             }
         }
+        // Compute input validation (V1.147 P3 F2): the core carries the
+        // structured per-entry object (`{"invalid_entries": […]}`) and the
+        // daemon renders it as the 422 `invalid_input` envelope with that
+        // object verbatim under `details`; mirror both here.
+        DomainError::InputValidation { details } => {
+            let detail_value = serde_json::to_value(&details).unwrap_or(Value::Null);
+            let details_map = match detail_value {
+                Value::Object(map) => map,
+                _ => Default::default(),
+            };
+            CoreError {
+                code: CoreErrorCode::InvalidInput,
+                message: "input validation failed".into(),
+                details: details_map,
+                http_status: Some(422),
+            }
+        }
         DomainError::OwnerBusy => CoreError {
             code: CoreErrorCode::OwnerBusy,
             message: "writer owner busy".into(),

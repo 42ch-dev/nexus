@@ -63,6 +63,14 @@ fn map_core_error(err: CoreError) -> CliError {
         CoreError::InvalidInput { field, reason } => {
             CliError::Other(format!("invalid input ({field}): {reason}"))
         }
+        // Compute input validation (V1.147 P3 F2): the core carries the
+        // structured per-entry object and the daemon renders it as a 422
+        // `invalid_input` envelope, so a direct-core caller reports the same
+        // status and code with the object verbatim.
+        CoreError::InputValidation { details } => CliError::Api {
+            status: coded_status("invalid_input"),
+            message: format!("[invalid_input] input validation failed: {details}"),
+        },
         CoreError::WorldKbConflict(conflict) => CliError::WorldKbConflict {
             current_version: conflict.current_version,
             expected_version: conflict.current_version,

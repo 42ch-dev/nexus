@@ -25,6 +25,17 @@ pub enum CoreError {
     NotFound { resource: String },
     #[error("invalid input: {field} — {reason}")]
     InvalidInput { field: String, reason: String },
+    /// Retained HTTP 422 input validation carrying per-entry detail.
+    ///
+    /// Distinct from [`Self::InvalidInput`]: that variant names a single
+    /// `field`/`reason` pair and the adapter renders `details` FROM them,
+    /// whereas this one carries the structured `details` object the retained
+    /// envelope promises verbatim (`details.invalid_entries`: entry id +
+    /// reason per failing entry). The compute manifest gate owns it — folding
+    /// its array into `reason` as a string would reproduce the status but not
+    /// the contract.
+    #[error("input validation failed")]
+    InputValidation { details: serde_json::Value },
     #[error(transparent)]
     Preset(#[from] crate::presets::PresetError),
     #[error("outline conflict")]
