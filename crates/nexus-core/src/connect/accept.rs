@@ -53,6 +53,7 @@ use crate::connect::watch::{
     PeerConfigSnapshot,
 };
 use crate::connect::ws_transport::{ws_config, WsTransport};
+use crate::error::{CoreError, CoreResult};
 use nexus_orchestration::CapabilityRegistryHolder;
 
 /// Poll interval for the close-observation fallback (`responder.state()`).
@@ -144,6 +145,44 @@ impl Transport for ObservedTransport {
 /// Panics if the static JSON shape fails to deserialize (programmer error —
 /// the shape is fixed at authoring time).
 #[must_use]
+/// Whether `host` is a loopback bind target (`localhost` or a loopback IP).
+/// Semantics verbatim from the daemon boot gate (P4-T3 moved into the core
+/// lane so the refusal lives with the lane that enforces it).
+#[must_use]
+pub fn is_loopback_host(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>()
+        .is_ok_and(|ip| ip.is_loopback())
+}
+
+/// Enforce the opt-in remote-bind gate for a non-loopback peer-tools bind.
+///
+/// A non-loopback bind is only permitted when both `NEXUS42_DAEMON_API_KEY`
+/// and `NEXUS_DAEMON_REMOTE_BIND=1` are present. Loopback binds are
+/// unaffected. Semantics verbatim from the daemon boot gate.
+///
+/// # Errors
+/// Returns [`CoreError::Internal`] when the remote-bind gate is closed.
+pub fn ensure_remote_bind_allowed(host: &str) -> CoreResult<()> {
+    if is_loopback_host(host) {
+        return Ok(());
+    }
+    let key_set = std::env::var("NEXUS42_DAEMON_API_KEY").is_ok();
+    let remote_allowed = std::env::var("NEXUS_DAEMON_REMOTE_BIND").as_deref() == Ok("1");
+    if !key_set || !remote_allowed {
+        return Err(CoreError::Internal {
+            category: format!(
+                "Refusing to bind peer-tools lane to non-loopback address {host}: \
+                 remote bind requires both NEXUS42_DAEMON_API_KEY and NEXUS_DAEMON_REMOTE_BIND=1"
+            ),
+        });
+    }
+    tracing::info!(host, "remote bind gate open for the peer-tools lane");
+    Ok(())
+}
+
 pub fn daemon_manifest(host_id: &str, tool_ids: &[String]) -> HostCapabilityManifest {
     let mut capabilities = vec!["spoke-baseline".to_owned()];
     capabilities.extend(tool_ids.iter().cloned());
@@ -473,13 +512,15 @@ pub async fn start_peer_tools_lane(
     home: &Path,
     shutdown: Arc<Notify>,
     capability_registry: Option<CapabilityRegistryHolder>,
-) -> anyhow::Result<PeerToolsLaneHandle> {
+) -> CoreResult<PeerToolsLaneHandle> {
     // DF-92: seed the digest baseline BEFORE the boot load — an edit
     // landing anywhere in the boot window diverges from the baseline and
     // the first poll reloads (never absorbed; the capability watcher's
     // W-B rule).
     let boot_digest = peer_config_digest(home);
-    let config = Arc::new(PeerToolsConfig::load(home)?);
+    let config = Arc::new(PeerToolsConfig::load(home).map_err(|e| CoreError::Internal {
+        category: format!("peer-tools config load: {e}"),
+    })?);
     // DF-91: wire the live config snapshot into the process-global table
     // so admission reads `collision_policy` + `peer_priority` at
     // admission time (live-derivation precedent: `live_reserved_tool_ids`
@@ -496,16 +537,22 @@ pub async fn start_peer_tools_lane(
     // start (warn-and-skip at boot — nothing is admitted). This check
     // runs BEFORE the remote-bind env gate so the lane always fails
     // closed for non-loopback binds, even when the gate is opened.
-    if !crate::boot::is_loopback_host(&config.host) {
-        anyhow::bail!(
-            "peer-tools lane refuses non-loopback bind {host}: the lane has no TLS support \
-             (plaintext only); set connect daemon.json host back to the loopback default \
-             127.0.0.1",
-            host = config.host,
-        );
+    if !is_loopback_host(&config.host) {
+        return Err(CoreError::Internal {
+            category: format!(
+                "peer-tools lane refuses non-loopback bind {host}: the lane has no TLS support \
+                 (plaintext only); set connect daemon.json host back to the loopback default \
+                 127.0.0.1",
+                host = config.host,
+            ),
+        });
     }
-    crate::boot::ensure_remote_bind_allowed(&config.host)?;
-    let identity_seed = identity::load_or_create_identity(home)?;
+    ensure_remote_bind_allowed(&config.host)?;
+    let identity_seed =
+        identity::load_or_create_identity(home)
+            .map_err(|e| CoreError::Internal {
+                category: format!("peer-tools identity: {e}"),
+            })?;
     let device_id = nexus_home_layout::device_id::get_or_create_device_id(home).map_err(|e| {
         IdentityError::Io {
             path: home.display().to_string(),
@@ -520,10 +567,20 @@ pub async fn start_peer_tools_lane(
     // source for every boot-scoped field (GC #7).
     let config_holder = PeerConfigHolder::new(PeerConfigSnapshot {
         config: Arc::clone(&config),
-        peer_keys: Arc::new(crate::connect::config::load_peer_keys(home)?),
+        peer_keys: Arc::new(crate::connect::config::load_peer_keys(home).map_err(
+            |e| CoreError::Internal {
+                category: format!("peer-tools key load: {e}"),
+            },
+        )?),
     });
-    let listener = TcpListener::bind((config.host.as_str(), config.port)).await?;
-    let addr = listener.local_addr()?;
+    let listener = TcpListener::bind((config.host.as_str(), config.port))
+        .await
+        .map_err(|e| CoreError::Internal {
+            category: format!("peer-tools bind {}: {e}", config.host),
+        })?;
+    let addr = listener.local_addr().map_err(|e| CoreError::Internal {
+        category: format!("peer-tools local addr: {e}"),
+    })?;
     let sessions = Arc::new(PeerSessionManager::new());
     let options = PeerResponderOptions {
         identity_seed,

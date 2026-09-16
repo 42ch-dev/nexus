@@ -18,7 +18,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::execution::peer_tools::{PeerInvokeError, PeerInvokeResult, PeerResponder};
+use crate::execution::peer_tools::{PeerInvokeError, PeerInvokeResult, PeerResponder, PeerToolRegistry};
 use nexus_orchestration::CapabilityRegistryHolder;
 use spoke_connect::remote::ConnectResponder;
 use nexus_spoke_adapter::{SpokeRejectCode, SpokeResult};
