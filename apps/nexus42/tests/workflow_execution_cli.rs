@@ -751,7 +751,7 @@ async fn admission_dependency_blocked_stays_pending() {
 /// creator stays pending while the first driven run is running.
 #[tokio::test]
 async fn admission_serial_blocked_stays_pending() {
-    let daemon = LiveDaemon::start().await;
+    let daemon = LiveDaemon::start_with_agent_host(MockHost::new()).await;
     let (status, body) = add_public(&daemon, "p2-t1-serial-first").await;
     assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
     let first_id = body["schedule_id"]
@@ -893,7 +893,7 @@ async fn admission_unknown_provider_refuses() {
 
 #[tokio::test]
 async fn admission_new_public_schedule_is_driven() {
-    let daemon = LiveDaemon::start().await;
+    let daemon = LiveDaemon::start_with_agent_host(MockHost::new()).await;
     let (status, body) = add_public(&daemon, "p2-t1-admission").await;
     assert_eq!(
         status,
@@ -989,7 +989,7 @@ async fn admission_system_maintenance_stays_inert() {
 
 #[tokio::test]
 async fn concurrent_start_yields_one_owned_session() {
-    let daemon = LiveDaemon::start().await;
+    let daemon = LiveDaemon::start_with_agent_host(MockHost::new()).await;
     let (status, body) = add_public(&daemon, "p2-t1-concurrent").await;
     assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
     let schedule_id = body["schedule_id"]
@@ -1461,7 +1461,7 @@ async fn admission_legacy_rows_inert_across_tick() {
 /// unowned.
 #[tokio::test]
 async fn admission_resume_ignores_legacy_running_capacity() {
-    let daemon = LiveDaemon::start().await;
+    let daemon = LiveDaemon::start_with_agent_host(MockHost::new()).await;
     let now = chrono::Utc::now().timestamp();
 
     // Historical legacy `Running` row (no owned session, migration default).
