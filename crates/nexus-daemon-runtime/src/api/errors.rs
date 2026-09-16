@@ -760,8 +760,8 @@ impl From<nexus_core::CoreError> for NexusApiError {
             nexus_core::CoreError::Uninitialized => Self::Uninitialized,
             nexus_core::CoreError::AuthRequired => Self::AuthRequired,
             nexus_core::CoreError::Forbidden { resource } => Self::Forbidden {
-                resource,
-                reason: "forbidden".to_string(),
+                resource: resource.clone(),
+                reason: resource,
             },
             nexus_core::CoreError::WorldOwnerDenied { world_id, reason } => Self::Forbidden {
                 resource: format!("world {world_id}"),
@@ -881,6 +881,7 @@ fn resend_internal_category(category: &str) -> (String, String) {
         nexus_core::KNOWLEDGE_WIRE_INVALID_PREFIX,
         nexus_core::KNOWLEDGE_INSERT_FAILED_PREFIX,
         "database_error",
+        "AUDIT_LOG_FAILED",
     ];
     for prefix in CATEGORY_PREFIXES
         .iter()
