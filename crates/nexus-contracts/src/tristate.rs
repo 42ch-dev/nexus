@@ -41,9 +41,13 @@ mod tests {
     #[derive(Debug, serde::Deserialize, serde::Serialize)]
     #[serde(deny_unknown_fields)]
     struct Probe {
-        #[serde(default, deserialize_with = "deserialize_presence")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_presence",
+            skip_serializing_if = "Option::is_none"
+        )]
         rule_suggestion: Option<serde_json::Value>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         status: Option<String>,
     }
 
