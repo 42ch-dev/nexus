@@ -87,31 +87,36 @@ impl ExecutionHandle {
             });
         }
 
-        // Resolve the preset ONCE: the same resolution supplies both the gate
-        // set that must pass and the frozen source identity, so policy and the
-        // frozen payload cannot disagree.
-        let loaded = self.resolve_preset(&request.preset_id)?;
-        let empty_gates: &[nexus_contracts::local::orchestration::preset_gate::Gate] = &[];
-        let gates = loaded
-            .as_ref()
-            .map_or(empty_gates, |preset| preset.manifest.preset.gates.as_slice());
-        let audit_reason = self.enforce_gate_policy(&request, gates).await?;
-
-        // A bypass is recorded BEFORE anything else can fail, and in particular
-        // before the insertion preconditions below. The daemon writes the audit
-        // and schedule rows in one transaction; this seam keeps ONE insertion
-        // authority (the supervisor, which owns the row+deps+seed transaction)
-        // and instead guarantees the audit trail is never missing — an audit row
-        // without a schedule records an ATTEMPTED bypass, which is the
-        // conservative side.
+        // The bypass reason is validated and the bypass AUDITED before anything
+        // else can fail. The daemon writes the audit and schedule rows in one
+        // transaction; this seam keeps ONE insertion authority (the supervisor,
+        // which owns the row+deps+seed transaction) and instead guarantees the
+        // audit trail is never missing — an audit row without a schedule records
+        // an ATTEMPTED bypass, which is the conservative side.
         //
         // Ordering is load-bearing: an audit written after a fallible
         // precondition would be silently skipped exactly when the operation is
         // refused, so a bypass attempt that never reached a row would leave no
-        // trace at all. Everything that can refuse the insert therefore runs
-        // AFTER the audit write.
+        // trace at all. Every step below this point can therefore refuse the
+        // insert and still leave the attempt recorded.
+        let audit_reason = validate_bypass_reason(&request)?;
         if let Some(reason) = &audit_reason {
             self.write_force_gates_audit(&request, reason).await?;
+        }
+
+        // Resolve the preset ONCE: the same resolution supplies both the gate
+        // set that must pass and the frozen source identity, so policy and the
+        // frozen payload cannot disagree.
+        let loaded = self.resolve_preset(&request.preset_id)?;
+
+        // A bypass skips gate evaluation entirely — it IS the audited override.
+        // A normal request must pass every gate the preset declares.
+        if audit_reason.is_none() {
+            let empty_gates: &[nexus_contracts::local::orchestration::preset_gate::Gate] = &[];
+            let gates = loaded
+                .as_ref()
+                .map_or(empty_gates, |preset| preset.manifest.preset.gates.as_slice());
+            self.enforce_gate_policy(&request, gates).await?;
         }
 
         let supervisor = self.schedule_supervisor()?;
@@ -323,43 +328,17 @@ impl ExecutionHandle {
             })
     }
 
-    /// Evaluate the preset's declared gates, returning the audit reason when
-    /// the caller asked to bypass them.
+    /// Evaluate the preset's declared gates, refusing when any gate fails.
+    ///
+    /// Only reached for a NON-bypass request: a `force_gates` call is the
+    /// audited override and skips evaluation entirely.
     async fn enforce_gate_policy(
         &self,
         request: &AddScheduleRequest,
         gates: &[nexus_contracts::local::orchestration::preset_gate::Gate],
-    ) -> CoreResult<Option<String>> {
-        if request.force_gates {
-            let raw = request.reason.as_deref().unwrap_or("");
-            if raw.is_empty() {
-                return Err(CoreError::InvalidInput {
-                    field: "reason".into(),
-                    reason: "force_gates requires a non-empty reason (audit-logged)".into(),
-                });
-            }
-            let sanitized = sanitize_reason(raw);
-            if sanitized.len() > MAX_REASON_LEN {
-                return Err(CoreError::InvalidInput {
-                    field: "reason".into(),
-                    reason: format!(
-                        "reason exceeds maximum length ({MAX_REASON_LEN} chars); got {} chars",
-                        sanitized.len()
-                    ),
-                });
-            }
-            if sanitized != raw {
-                return Err(CoreError::InvalidInput {
-                    field: "reason".into(),
-                    reason: "reason contains ANSI escape sequences or control characters"
-                        .to_string(),
-                });
-            }
-            return Ok(Some(raw.to_string()));
-        }
-
+    ) -> CoreResult<()> {
         if gates.is_empty() {
-            return Ok(None);
+            return Ok(());
         }
 
         // A gated preset ALWAYS requires work_id for evaluation. Failing closed
@@ -461,7 +440,7 @@ impl ExecutionHandle {
         )
         .await
         {
-            Ok(Ok(())) => Ok(None),
+            Ok(Ok(())) => Ok(()),
             Ok(Err(failure)) => Err(CoreError::Preset(PresetError::Rejected {
                 code: "preset_gates_failed".to_string(),
                 message: render_gate_failure(&failure),
@@ -786,6 +765,45 @@ fn render_gate_failure(failure: &PresetGatesFailed) -> String {
         ));
     }
     msg
+}
+
+/// Validate a `force_gates` bypass request, returning the audited reason.
+///
+/// Pure and free of I/O on purpose: it runs BEFORE any fallible precondition,
+/// so the decision to audit is made without touching the store. A non-bypass
+/// request validates nothing and yields `None`.
+///
+/// # Errors
+/// `InvalidInput` when a bypass is requested with a missing, oversized, or
+/// control-character-bearing reason — a silent bypass is never permitted.
+fn validate_bypass_reason(request: &AddScheduleRequest) -> CoreResult<Option<String>> {
+    if !request.force_gates {
+        return Ok(None);
+    }
+    let raw = request.reason.as_deref().unwrap_or("");
+    if raw.is_empty() {
+        return Err(CoreError::InvalidInput {
+            field: "reason".into(),
+            reason: "force_gates requires a non-empty reason (audit-logged)".into(),
+        });
+    }
+    let sanitized = sanitize_reason(raw);
+    if sanitized.len() > MAX_REASON_LEN {
+        return Err(CoreError::InvalidInput {
+            field: "reason".into(),
+            reason: format!(
+                "reason exceeds maximum length ({MAX_REASON_LEN} chars); got {} chars",
+                sanitized.len()
+            ),
+        });
+    }
+    if sanitized != raw {
+        return Err(CoreError::InvalidInput {
+            field: "reason".into(),
+            reason: "reason contains ANSI escape sequences or control characters".to_string(),
+        });
+    }
+    Ok(Some(raw.to_string()))
 }
 
 /// Strip ANSI escape sequences and control characters from a reason string.
