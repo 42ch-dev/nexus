@@ -1,17 +1,19 @@
 //! P3-T2 typed execution-operation contract.
 //!
-//! Proves the four behaviour classes the L2 review required:
+//! Proves the behaviour classes the L2 review required:
 //!
-//! 1. **Gate policy** — a gated preset is refused when its Work is missing or
-//!    foreign, and a `force_gates` bypass writes its audit row.
-//! 2. **Field passthrough** — the request's concurrency declaration and its
+//! 1. **Authorization** — a foreign creator is refused before any write.
+//! 2. **Bypass audit** — a `force_gates` request must carry a reason, and the
+//!    bypass row is written BEFORE every fallible precondition, so a refused
+//!    bypass attempt is still recorded.
+//! 3. **Field passthrough** — the request's concurrency declaration and its
 //!    explicit role bindings reach the durable row and the frozen descriptor.
-//! 3. **Owner fence** — every entry point refuses once the owner is closing.
-//! 4. **Frozen bindings** — the caller's explicit bindings reach the descriptor.
-//! 5. **Ownership** — a signal against a foreign schedule is refused.
+//! 4. **Ownership** — a signal against a foreign schedule is refused.
+//! 5. **Owner fence** — every entry point refuses once the owner is closing.
 //!
-//! The gate/ownership cases exercise the durable store directly (they need a
-//! `creator_schedules` row), while the fence case needs only a live handle.
+//! Each case drives a real engine-owner core over an admitted pool; the
+//! schedule supervisor is attached exactly as the daemon bundle attaches it,
+//! so the tests exercise the production insert path rather than its refusal.
 
 #![cfg(feature = "execution")]
 #![allow(clippy::unwrap_used)]
@@ -276,7 +278,38 @@ async fn force_gates_bypass_is_audited_even_when_the_insert_is_refused() {
     assert_eq!(scheduled, 0, "a refused insert must publish no schedule row");
 }
 
-/// 4. The request's concurrency declaration reaches the durable row.
+/// 4. The same invariant holds when the refusal comes from the OTHER fallible
+///    precondition: an unresolvable preset.
+///
+/// `resolve_preset` runs after the audit write, so a bypass naming a preset
+/// that cannot be loaded is still recorded. This is the second half of the
+/// ordering bug — the first fix only moved the supervisor lookup.
+#[tokio::test]
+#[serial_test::serial]
+async fn force_gates_bypass_is_audited_when_the_preset_cannot_resolve() {
+    let f = fixture().await;
+    let (core, handle) = open_handle(&f).await;
+    let principal = core.active_principal().await.unwrap();
+
+    let mut request = request_for(CREATOR, "no-such-preset-anywhere");
+    request.force_gates = true;
+    request.reason = Some("test bypass".to_string());
+    let err = handle.add_schedule(&principal, request).await.unwrap_err();
+    assert!(
+        matches!(err, CoreError::Internal { .. }),
+        "an unresolvable preset must be refused, got {err:?}"
+    );
+
+    let rows = nexus_local_db::list_force_gates_audit(core.pool(), CREATOR)
+        .await
+        .expect("audit rows");
+    assert!(
+        rows.iter().any(|r| r.preset_id == "no-such-preset-anywhere"),
+        "a bypass for an unresolvable preset must still be audited, got {rows:?}"
+    );
+}
+
+/// 5. The request's concurrency declaration reaches the durable row.
 #[tokio::test]
 #[serial_test::serial]
 async fn add_schedule_preserves_parallel_with_concurrency() {
@@ -318,7 +351,7 @@ async fn add_schedule_preserves_parallel_with_concurrency() {
     );
 }
 
-/// 5. The caller's explicit bindings are frozen into the descriptor, so
+/// 6. The caller's explicit bindings are frozen into the descriptor, so
 ///    admission cannot silently rebind a run to a different provider.
 #[tokio::test]
 #[serial_test::serial]
@@ -345,7 +378,7 @@ async fn add_schedule_freezes_explicit_agent_bindings() {
     );
 }
 
-/// 6. A signal against a foreign schedule is refused (ownership is enforced
+/// 7. A signal against a foreign schedule is refused (ownership is enforced
 ///    before mutation, and a foreign row is indistinguishable from absent).
 #[tokio::test]
 #[serial_test::serial]
@@ -393,7 +426,7 @@ async fn signal_schedule_refuses_foreign_owner() {
     assert_eq!(status, "pending", "a refused signal must not mutate the row");
 }
 
-/// 7. Every entry point refuses once the owner has begun closing.
+/// 8. Every entry point refuses once the owner has begun closing.
 #[tokio::test]
 #[serial_test::serial]
 async fn closing_owner_fences_every_entry_point() {
