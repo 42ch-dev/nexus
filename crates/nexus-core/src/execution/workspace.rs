@@ -55,7 +55,7 @@ pub struct WorkspaceCommitAuthority {
 impl WorkspaceCommitAuthority {
     /// Bind a session manager to the canonical root it commits against.
     #[must_use]
-    pub fn new(manager: Arc<WorkspaceSessionManager>, active_root: String) -> Self {
+    pub const fn new(manager: Arc<WorkspaceSessionManager>, active_root: String) -> Self {
         Self {
             manager,
             active_root,
@@ -64,7 +64,7 @@ impl WorkspaceCommitAuthority {
 
     /// The shared session manager (also used by the executor adapter).
     #[must_use]
-    pub fn manager(&self) -> &Arc<WorkspaceSessionManager> {
+    pub const fn manager(&self) -> &Arc<WorkspaceSessionManager> {
         &self.manager
     }
 

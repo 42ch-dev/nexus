@@ -268,7 +268,7 @@ enum PackImportError {
 
 /// Import a parsed pack into a world under a conflict policy.
 ///
-/// Private implementation: run_world_pack_import owns admission before entry.
+/// Private implementation: `run_world_pack_import` owns admission before entry.
 ///
 /// # Errors
 ///
@@ -1358,7 +1358,7 @@ async fn export_pack(
     req: PackExportRequest,
 ) -> CoreResult<PackExportResponse> {
     let world_title = resolve_world_title(pool, &world_id).await?;
-    let creator = resolve_creator_string(pool, &creator_id).await?;
+    let creator = resolve_creator_string(pool, creator_id).await?;
 
     let store = SqliteKbStore::new(pool.clone());
     let mut entries = if req.include_deprecated {

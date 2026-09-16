@@ -50,7 +50,7 @@ use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 use crate::error::{CoreError, CoreResult};
 
 /// Per-Character fence state owned by a [`crate::CoreService`].
-pub(crate) struct ActorFenceTable {
+pub struct ActorFenceTable {
     process: Mutex<HashMap<String, Arc<RwLock<()>>>>,
     locks_dir: PathBuf,
 }
@@ -99,7 +99,7 @@ impl ActorFenceTable {
         let mut fences = self
             .process
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         fences.retain(|_, fence| Arc::strong_count(fence) > 1);
         Arc::clone(
             fences
@@ -158,19 +158,19 @@ fn lock_error(character_id: &str, err: std::fs::TryLockError) -> CoreError {
 }
 
 /// Raw fence halves handed to the lease constructors.
-pub(crate) struct ActivityFenceParts {
+pub struct ActivityFenceParts {
     read: OwnedRwLockReadGuard<()>,
     os: OsSharedLock,
 }
 
 /// Raw transition fence halves handed to the lease constructors.
-pub(crate) struct TransitionFenceParts {
+pub struct TransitionFenceParts {
     write: OwnedRwLockWriteGuard<()>,
     os: OsExclusiveLock,
 }
 
 /// The retained `409 character_busy` refusal (verbatim daemon wording).
-pub(crate) fn busy_error(character_id: &str) -> CoreError {
+pub fn busy_error(character_id: &str) -> CoreError {
     CoreError::ActorConflict {
         code: "character_busy".to_string(),
         message: format!(

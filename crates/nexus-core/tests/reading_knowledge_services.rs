@@ -144,7 +144,7 @@ async fn annotation_create_list_patch_delete_round_trip() {
 
 /// Port of the legacy `reading_api.rs:261` null-note boundary: an empty note
 /// string clears the stored note, an absent field keeps it, and the scope
-/// isolation (unknown Work → NotFound, foreign-creator row → Forbidden)
+/// isolation (unknown Work → `NotFound`, foreign-creator row → Forbidden)
 /// survives the extraction.
 #[tokio::test]
 async fn annotation_note_clear_and_scope_isolation() {
@@ -221,7 +221,7 @@ async fn annotation_note_clear_and_scope_isolation() {
 }
 
 /// Findings cursor pagination (`v1:` opaque offset grammar, `limit + 1`
-/// has_more detection) and the legacy invalid-enum filter classification
+/// `has_more` detection) and the legacy invalid-enum filter classification
 /// survive the extraction.
 #[tokio::test]
 async fn findings_list_pagination_and_filter_parity() {
@@ -343,7 +343,7 @@ async fn findings_list_pagination_and_filter_parity() {
 }
 
 /// Batch triage semantics: empty/duplicate/cap guards, the absent-patch
-/// `updated: 0` contract, partial-success buckets (not_found / conflict) and
+/// `updated: 0` contract, partial-success buckets (`not_found` / conflict) and
 /// the lifecycle transition rules on the single PATCH path.
 #[tokio::test]
 async fn findings_update_and_batch_triage_semantics() {

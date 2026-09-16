@@ -35,7 +35,7 @@ use sqlx::Row;
 
 /// Maximum creator display name length accepted by this family — parity with
 /// the daemon handler rule (char count, so CJK / emoji count once).
-pub(crate) const MAX_DISPLAY_NAME_CHARS: usize = 256;
+pub const MAX_DISPLAY_NAME_CHARS: usize = 256;
 
 /// Wire-internal code carriers this family re-sends verbatim at the adapter:
 /// the daemon handler built `Internal { code, message }` envelopes for cache,
@@ -490,9 +490,7 @@ impl CoreHomeService {
     /// family paths (`None` before any workspace is selected — the daemon
     /// Tier-0 shape).
     fn active_workspace_db_path(&self) -> Option<std::path::PathBuf> {
-        if read_active_creator_id(&self.nexus_home).is_none() {
-            return None;
-        }
+        read_active_creator_id(&self.nexus_home)?;
         try_resolve_state_db_path(&self.user_home, &self.nexus_home)
             .filter(|db_path| db_path.exists())
     }
@@ -536,7 +534,7 @@ fn creator_detail_from_parts(
 /// Reject path segments that look like Google-AIP custom verbs (`id:verb`):
 /// those URLs share the `:creator_id` capture with logout; GET/PATCH must not
 /// treat `ctr_x:logout` as a valid creator id (ghost 200).
-pub(crate) fn reject_colon_verb_segment(creator_id: &str) -> CoreResult<()> {
+pub fn reject_colon_verb_segment(creator_id: &str) -> CoreResult<()> {
     if creator_id.contains(':') {
         return Err(CoreError::InvalidInput {
             field: "creator_id".to_string(),
@@ -612,13 +610,13 @@ fn enrich_profile(
 }
 
 #[derive(Clone)]
-pub(crate) struct IdentityEntry {
+pub struct IdentityEntry {
     pub(crate) handle: Option<String>,
     pub(crate) display_name: Option<String>,
 }
 
 /// Read the CLI config from `nexus_home`.
-pub(crate) fn read_cli_config(nexus_home: &Path) -> CoreResult<toml::Value> {
+pub fn read_cli_config(nexus_home: &Path) -> CoreResult<toml::Value> {
     let config_path = nexus_home.join("config.toml");
     if !config_path.exists() {
         return Ok(toml::Value::Table(toml::map::Map::new()));
@@ -632,7 +630,7 @@ pub(crate) fn read_cli_config(nexus_home: &Path) -> CoreResult<toml::Value> {
 }
 
 /// Write the CLI config to `nexus_home`.
-pub(crate) fn write_cli_config(nexus_home: &Path, config: &toml::Value) -> CoreResult<()> {
+pub fn write_cli_config(nexus_home: &Path, config: &toml::Value) -> CoreResult<()> {
     let config_path = nexus_home.join("config.toml");
     let toml_str =
         toml::to_string_pretty(config).map_err(|e| internal("CONFIG_SERIALIZE_ERROR", e))?;
@@ -640,7 +638,7 @@ pub(crate) fn write_cli_config(nexus_home: &Path, config: &toml::Value) -> CoreR
 }
 
 /// Set the active `creator_id` in the CLI config.
-pub(crate) fn set_active_creator_id(nexus_home: &Path, creator_id: &str) -> CoreResult<()> {
+pub fn set_active_creator_id(nexus_home: &Path, creator_id: &str) -> CoreResult<()> {
     validate_creator_id_safe(creator_id).map_err(|reason| CoreError::InvalidInput {
         field: "creator_id".to_string(),
         reason,
@@ -658,7 +656,7 @@ pub(crate) fn set_active_creator_id(nexus_home: &Path, creator_id: &str) -> Core
 
 /// Load the creator identity cache (`Value::Null` for missing/unparseable —
 /// treated as a missing cache).
-pub(crate) fn load_identity_cache(nexus_home: &Path) -> serde_json::Value {
+pub fn load_identity_cache(nexus_home: &Path) -> serde_json::Value {
     let cache_path = nexus_home.join("creator_identity_cache.json");
     if !cache_path.exists() {
         return serde_json::Value::Null;
@@ -671,7 +669,7 @@ pub(crate) fn load_identity_cache(nexus_home: &Path) -> serde_json::Value {
 
 /// Load the identity cache from disk, reporting parse/read errors instead of
 /// treating them as a missing cache.
-pub(crate) fn load_identity_cache_strict(cache_path: &Path) -> CoreResult<serde_json::Value> {
+pub fn load_identity_cache_strict(cache_path: &Path) -> CoreResult<serde_json::Value> {
     let content =
         std::fs::read_to_string(cache_path).map_err(|e| internal("CACHE_READ_ERROR", e))?;
     serde_json::from_str(&content).map_err(|e| internal("CACHE_PARSE_ERROR", e))
@@ -686,7 +684,7 @@ fn atomic_write(path: &Path, contents: &str) -> std::io::Result<()> {
 }
 
 /// Write the identity cache to disk with an atomic temp-file + rename.
-pub(crate) fn save_identity_cache(cache_path: &Path, cache: &serde_json::Value) -> CoreResult<()> {
+pub fn save_identity_cache(cache_path: &Path, cache: &serde_json::Value) -> CoreResult<()> {
     if let Some(parent) = cache_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| internal("CACHE_DIR_ERROR", e))?;
     }
@@ -756,7 +754,7 @@ async fn sql_creator_rows(pool: &sqlx::SqlitePool) -> CoreResult<Vec<NexusCreato
 }
 
 /// Get the identity cache entry for a creator.
-pub(crate) fn get_identity_entry(
+pub fn get_identity_entry(
     cache: &serde_json::Value,
     creator_id: &str,
 ) -> Option<IdentityEntry> {
@@ -776,7 +774,7 @@ pub(crate) fn get_identity_entry(
 
 /// Load the auth store to check credentials (`Value::Null` for
 /// missing/unparseable).
-pub(crate) fn load_auth_store(nexus_home: &Path) -> serde_json::Value {
+pub fn load_auth_store(nexus_home: &Path) -> serde_json::Value {
     let auth_path = nexus_home.join("auth.json");
     if !auth_path.exists() {
         return serde_json::Value::Null;

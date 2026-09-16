@@ -10,7 +10,7 @@ use nexus_contracts::{
 use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService};
 use nexus_local_db::open_pool_read_only;
 use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
-use sqlx::{Sqlite, SqlitePool};
+use sqlx::SqlitePool;
 use std::path::Path;
 use tempfile::TempDir;
 
@@ -389,7 +389,7 @@ async fn promote_relate_preserves_owner_and_cas() {
     assert_eq!(change_sequence_head(&reader_pool).await, after_mutations);
 
     second.close().await.unwrap();
-    let _ = reader_pool.close().await;
+    let () = reader_pool.close().await;
 }
 
 /// Reject/merge outcomes keep their CAS + fold contracts, and a replayed
@@ -461,7 +461,7 @@ async fn promote_reject_merge_and_idempotent_readopt() {
         replay.entity.as_ref().expect("replay").key_block_id
     );
 
-    let _ = pool.close().await;
+    let () = pool.close().await;
 }
 
 /// World lifecycle: title validation, create visibility, and the hard-delete
@@ -591,7 +591,7 @@ async fn world_lifecycle_create_delete_and_binding_guard() {
     );
 
     second.close().await.unwrap();
-    let _ = pool.close().await;
+    let () = pool.close().await;
 }
 
 /// Key-block state read: computable projection, non-computable null, and the

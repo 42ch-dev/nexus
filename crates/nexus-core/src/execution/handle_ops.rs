@@ -457,7 +457,7 @@ impl ExecutionHandle {
             reason: reason.to_string(),
             forced_at: chrono::Utc::now().to_rfc3339(),
         };
-        nexus_local_db::insert_force_gates_audit(&mut *conn, &params)
+        nexus_local_db::insert_force_gates_audit(&mut conn, &params)
             .await
             .map_err(|e| CoreError::Internal {
                 category: format!("failed to write force-gates audit row: {e}"),
@@ -833,7 +833,7 @@ pub fn run_event_page(
 
 /// Build a durable pending row from the generated add request.
 ///
-/// Every payload-bearing field crosses: creator/preset/label/scheduled_at and
+/// Every payload-bearing field crosses: `creator/preset/label/scheduled_at` and
 /// the dependency list verbatim, and the request's concurrency declaration
 /// (including a `parallel_with` whitelist) maps onto the stored concurrency.
 fn build_schedule(schedule_id: &str, request: &AddScheduleRequest) -> Schedule {

@@ -263,7 +263,7 @@ impl ExecutionHandle {
 
     /// The durable engine epoch this owner was admitted with.
     #[must_use]
-    pub fn engine_epoch(&self) -> i64 {
+    pub const fn engine_epoch(&self) -> i64 {
         self.engine_epoch
     }
 
@@ -289,7 +289,7 @@ impl ExecutionHandle {
     /// `commit_workspace` then reports `NotFound` rather than committing
     /// through a foreign root.
     #[must_use]
-    pub fn workspace_commit_authority(
+    pub const fn workspace_commit_authority(
         &self,
     ) -> Option<&crate::execution::workspace::WorkspaceCommitAuthority> {
         self.workspace_commit.as_ref()
@@ -315,7 +315,7 @@ impl ExecutionHandle {
     /// The process-level facts the tool health surface reports.
     #[must_use]
     #[cfg(feature = "execution")]
-    pub fn runtime_facts(&self) -> &crate::execution::capabilities::ToolRuntimeFacts {
+    pub const fn runtime_facts(&self) -> &crate::execution::capabilities::ToolRuntimeFacts {
         &self.runtime_facts
     }
 
@@ -415,7 +415,7 @@ impl ExecutionHandle {
     }
 }
 
-fn closed_report() -> CoreCloseReport {
+const fn closed_report() -> CoreCloseReport {
     CoreCloseReport {
         state: CoreCloseReportState::Closed,
         cleanup_confirmed: true,
@@ -668,23 +668,20 @@ impl CoreService {
         // The daemon owns the live holder (WASM singleton, user-cap scan,
         // hot-reload watcher). A core-only caller gets a bare builtin
         // registry so the engine still has a capability surface.
-        let capability_holder = match deps.capability_holder {
-            Some(holder) => holder,
-            None => {
-                let capabilities = Arc::new(CapabilityRegistry::with_runtime_deps(
-                    &CapabilityRuntimeDeps {
-                        pool: Some(pool.clone()),
-                        prompt_executor: deps.prompt_executor.clone(),
-                        session_cancels: Arc::clone(&session_cancels),
-                        daemon_tool_dispatch: deps.daemon_tool_dispatch.clone(),
-                        cdn_config: None,
-                        workspace_executor: deps.workspace_executor.clone(),
-                    },
-                ));
-                let holder = CapabilityRegistryHolder::new();
-                holder.swap(capabilities);
-                holder
-            }
+        let capability_holder = if let Some(holder) = deps.capability_holder { holder } else {
+            let capabilities = Arc::new(CapabilityRegistry::with_runtime_deps(
+                &CapabilityRuntimeDeps {
+                    pool: Some(pool.clone()),
+                    prompt_executor: deps.prompt_executor.clone(),
+                    session_cancels: Arc::clone(&session_cancels),
+                    daemon_tool_dispatch: deps.daemon_tool_dispatch.clone(),
+                    cdn_config: None,
+                    workspace_executor: deps.workspace_executor.clone(),
+                },
+            ));
+            let holder = CapabilityRegistryHolder::new();
+            holder.swap(capabilities);
+            holder
         };
 
         let workflow_store: Arc<dyn WorkflowStateStore> = sqlite_storage.clone();

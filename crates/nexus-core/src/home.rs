@@ -99,7 +99,7 @@ impl CoreHomeService {
         request: CoreRegisterCreatorRequest,
     ) -> CoreResult<CreatorDetail> {
         let display_name =
-            validated_display_name(request.display_name.as_deref().map(|s| s.as_str()))?;
+            validated_display_name(request.display_name.as_deref().map(std::string::String::as_str))?;
         if let Some(platform_id) = request.platform_creator_id.as_deref() {
             validate_creator_id_safe(platform_id).map_err(|reason| CoreError::InvalidInput {
                 field: "platform_creator_id".to_string(),
@@ -520,7 +520,7 @@ fn deny_foreign_workspace(op_dir: &Path, creator_id: &str, slug: &str) -> CoreRe
 /// registrations (ported from the daemon handler). Sorted by
 /// `(creator_id, workspace_slug)`; only workspaces with a `meta.json` count.
 #[must_use]
-pub(crate) fn scan_workspaces(nexus_home: &Path) -> Vec<NexusWorkspaceSummary> {
+pub fn scan_workspaces(nexus_home: &Path) -> Vec<NexusWorkspaceSummary> {
     let creators_root = nexus_home.join("creators");
     let mut items = Vec::new();
 
@@ -577,7 +577,7 @@ pub(crate) fn scan_workspaces(nexus_home: &Path) -> Vec<NexusWorkspaceSummary> {
 /// Read `creative_root` from operational `meta.json` (ported from the daemon
 /// handler). Returns `None` if the file doesn't exist or can't be parsed.
 #[must_use]
-pub(crate) fn read_meta_creative_root(op_dir: &Path) -> Option<String> {
+pub fn read_meta_creative_root(op_dir: &Path) -> Option<String> {
     let content = std::fs::read_to_string(op_dir.join("meta.json")).ok()?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
     json.get("local_root")
@@ -589,7 +589,7 @@ pub(crate) fn read_meta_creative_root(op_dir: &Path) -> Option<String> {
 /// (ported from the daemon handler). Returns `None` if the file doesn't exist
 /// or can't be parsed.
 #[must_use]
-pub(crate) fn read_workspace_display_name(creative_root: &Path) -> Option<String> {
+pub fn read_workspace_display_name(creative_root: &Path) -> Option<String> {
     let content =
         std::fs::read_to_string(creative_root.join(".nexus42").join("workspace.json")).ok()?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
@@ -601,7 +601,7 @@ pub(crate) fn read_workspace_display_name(creative_root: &Path) -> Option<String
 /// Write the active `creator_id` — and, when `workspace_slug` is `Some`, the
 /// per-creator active workspace slug — to `config.toml`, preserving every
 /// other key (ported from the daemon `write_active_selection`).
-pub(crate) fn write_active_selection(
+pub fn write_active_selection(
     nexus_home: &Path,
     creator_id: &str,
     workspace_slug: Option<&str>,
@@ -657,7 +657,7 @@ pub(crate) fn write_active_selection(
 /// Build a generated string newtype from a plain `str`; the generated
 /// newtypes validate their own bounds (e.g. non-emptiness), so a violating
 /// stored value is an honest internal failure.
-pub(crate) fn newtype_value<T>(value: &str) -> CoreResult<T>
+pub fn newtype_value<T>(value: &str) -> CoreResult<T>
 where
     T: std::str::FromStr,
     T::Err: std::fmt::Display,

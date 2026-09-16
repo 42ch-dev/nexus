@@ -93,7 +93,7 @@ fn error(code: CoreErrorCode, message: impl Into<String>, status: i64) -> CoreEr
     CoreError {
         code,
         message: message.into(),
-        details: Default::default(),
+        details: serde_json::Map::default(),
         http_status: Some(status),
     }
 }
@@ -308,9 +308,13 @@ impl MultiplexProviderPort {
                 closed: AtomicBool::new(false),
             }),
         );
+        // Release the routes guard with its last use: the reply is returned
+        // without holding the multiplexer lock.
+        drop(routes);
         Ok(reply)
     }
 
+    #[allow(clippy::too_many_lines)] // one linear admission -> register -> reply walk
     async fn execute(&self, request: ProviderCall) -> ProviderResult<ProviderReply> {
         let (session_id, session) = self.session(request.session_id.as_deref())?;
         let _gate = session
@@ -414,6 +418,8 @@ impl MultiplexProviderPort {
                 terminal: AtomicBool::new(false),
             }),
         );
+        // Same tightening as `launch`: the reply never holds the guard.
+        drop(routes);
         Ok(reply)
     }
 }

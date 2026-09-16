@@ -20,6 +20,12 @@ use serde::Deserialize;
 /// Always yields `Some(…)`: the `Option` layer is the *presence* layer
 /// (`#[serde(default)]` supplies `None` for an absent field), and the inner
 /// [`serde_json::Value`] carries the wire value verbatim — including `null`.
+///
+/// # Errors
+///
+/// Returns the deserializer's own error when the wire value is not valid JSON
+/// for [`serde_json::Value`] (malformed input, or a visitor failure raised by
+/// the underlying format).
 pub fn deserialize_presence<'de, D>(deserializer: D) -> Result<Option<serde_json::Value>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -32,7 +38,7 @@ mod tests {
     use super::deserialize_presence;
     use serde_json::json;
 
-    #[derive(Debug, serde::Deserialize)]
+    #[derive(Debug, serde::Deserialize, serde::Serialize)]
     #[serde(deny_unknown_fields)]
     struct Probe {
         #[serde(default, deserialize_with = "deserialize_presence")]

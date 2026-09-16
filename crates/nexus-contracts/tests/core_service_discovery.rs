@@ -36,6 +36,7 @@ fn ready_http_discovery() -> Value {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)] // one exhaustive closed-union rejection matrix
 fn discovery_and_stop_reject_ambiguous_identity() {
     // ── Exact identity round-trip (raw home + selected workspace) ─────────
     let record = ready_http_discovery();
@@ -161,7 +162,7 @@ fn discovery_and_stop_reject_ambiguous_identity() {
         "an uninitialized shell with selected identity must be rejected"
     );
 
-    let mut partly_populated_shell = shell.clone();
+    let mut partly_populated_shell = shell;
     partly_populated_shell["creator_id"] = json!("ctr_localabcdef123456");
     assert!(
         serde_json::from_value::<CoreServiceDiscovery>(partly_populated_shell).is_err(),

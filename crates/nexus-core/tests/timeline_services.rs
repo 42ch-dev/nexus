@@ -148,7 +148,7 @@ async fn seed_kb_block(
     .expect("seed kb block");
 }
 
-fn events_query(
+const fn events_query(
     branch_id: Option<String>,
     status: Option<String>,
     event_type: Option<String>,

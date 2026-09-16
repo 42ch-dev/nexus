@@ -88,7 +88,7 @@ pub enum AdmittedActor {
 impl AdmittedActor {
     /// The Character id when this admission is a Character; `None` for Creator.
     #[must_use]
-    pub fn character_id(&self) -> Option<&str> {
+    pub const fn character_id(&self) -> Option<&str> {
         match self {
             Self::Creator { .. } => None,
             Self::Character { character_id } => Some(character_id.as_str()),
@@ -142,14 +142,14 @@ fn invalid_input(message: impl Into<String>) -> CoreError {
 
 // ── Wire mapping (record → generated DTO) ───────────────────────────────
 
-pub(crate) fn wire_err(err: impl std::fmt::Display) -> CoreError {
+pub fn wire_err(err: impl std::fmt::Display) -> CoreError {
     CoreError::Internal {
         category: format!("{CHARACTER_WIRE_INVALID_PREFIX}: {err}"),
     }
 }
 
-pub(crate) fn parse_rfc3339(raw: &str) -> CoreResult<chrono::DateTime<chrono::Utc>> {
-    raw.parse().map_err(|err| wire_err(err))
+pub fn parse_rfc3339(raw: &str) -> CoreResult<chrono::DateTime<chrono::Utc>> {
+    raw.parse().map_err(wire_err)
 }
 
 fn parse_optional<T>(raw: Option<&str>) -> CoreResult<Option<T>>
@@ -157,10 +157,10 @@ where
     T: std::str::FromStr,
     T::Err: std::fmt::Display,
 {
-    raw.map(str::parse).transpose().map_err(|err| wire_err(err))
+    raw.map(str::parse).transpose().map_err(wire_err)
 }
 
-pub(crate) fn nexus_character_from_record(
+pub fn nexus_character_from_record(
     record: &CharacterRecord,
 ) -> CoreResult<DetailCharacterWire> {
     let persona: serde_json::Map<String, serde_json::Value> =
@@ -197,11 +197,11 @@ fn binding_wire_from_record(record: &ActorWorldBindingRecord) -> CoreResult<Deta
     )
 }
 
-pub(crate) fn build_wire<T, E: std::fmt::Display>(value: Result<T, E>) -> CoreResult<T> {
+pub fn build_wire<T, E: std::fmt::Display>(value: Result<T, E>) -> CoreResult<T> {
     value.map_err(wire_err)
 }
 
-pub(crate) fn pagination_wire(
+pub fn pagination_wire(
     limit: u32,
     has_more: bool,
     next_cursor: Option<String>,
@@ -215,7 +215,7 @@ pub(crate) fn pagination_wire(
     )
 }
 
-pub(crate) fn binding_pagination_wire(
+pub fn binding_pagination_wire(
     limit: u32,
     has_more: bool,
     next_cursor: Option<String>,
@@ -396,10 +396,10 @@ impl CoreService {
         lease.set_epoch(record.lifecycle_epoch);
         let character: nexus_contracts::generated::core::core_character_transition_response::NexusCharacter =
             map_wire_one(nexus_character_from_record(&record)?)?;
-        Ok(CoreCharacterTransitionResponse::builder()
+        CoreCharacterTransitionResponse::builder()
             .character(character)
             .try_into()
-            .map_err(wire_err)?)
+            .map_err(wire_err)
     }
 
     /// One-call Character lifecycle transition: exclusive lease acquisition
@@ -488,7 +488,7 @@ async fn require_admitted_ownership(
 
 /// Active owned World (PR #240 finding 1): foreign/missing → 404, owned but
 /// inactive → 409 `world_inactive`.
-pub(crate) async fn require_active_owned_world(
+pub async fn require_active_owned_world(
     pool: &SqlitePool,
     creator_id: &str,
     world_id: &str,
@@ -520,7 +520,7 @@ pub(crate) async fn require_active_owned_world(
 
 /// Active owned Character: foreign/missing → 404, owned but archived → 409
 /// `character_inactive`. Returns the stored record for epoch capture.
-pub(crate) async fn require_active_owned_character(
+pub async fn require_active_owned_character(
     pool: &SqlitePool,
     creator_id: &str,
     character_id: &str,
@@ -537,7 +537,7 @@ pub(crate) async fn require_active_owned_character(
 
 /// Ownership-scoped Character row or a 404 (foreign ids are not
 /// distinguished from missing).
-pub(crate) async fn require_character_row(
+pub async fn require_character_row(
     pool: &SqlitePool,
     creator_id: &str,
     character_id: &str,
@@ -551,7 +551,7 @@ pub(crate) async fn require_character_row(
 /// Active stored binding tuple: the binding exists, belongs to
 /// `character_id`, targets `world_id`, and is active; anything else is 404
 /// (existence hidden).
-pub(crate) async fn require_active_binding(
+pub async fn require_active_binding(
     pool: &SqlitePool,
     character_id: &str,
     binding_id: &str,
@@ -613,11 +613,11 @@ impl CoreService {
         let binding: DetailBindingWire = binding_wire_from_record(&created.binding)?;
         let character: CreatedCharacterWire = map_wire_one(character)?;
         let binding: CreatedBindingWire = map_wire_one(binding)?;
-        Ok(CreateCharacterResponse::builder()
+        CreateCharacterResponse::builder()
             .character(character)
             .binding(binding)
             .try_into()
-            .map_err(wire_err)?)
+            .map_err(wire_err)
     }
 
     /// List the principal's Characters, oldest first, with offset pagination.
@@ -648,11 +648,11 @@ impl CoreService {
             .map(nexus_character_from_record)
             .collect::<CoreResult<Vec<_>>>()?;
         let mapped: Vec<ListedCharacterWire> = map_wire_items(items)?;
-        Ok(ListCharactersResponse::builder()
+        ListCharactersResponse::builder()
             .items(mapped)
             .pagination(pagination_wire(limit, has_more, next_cursor)?)
             .try_into()
-            .map_err(wire_err)?)
+            .map_err(wire_err)
     }
 
     /// Project one owned Character; foreign/unknown ids are 404.
@@ -668,10 +668,10 @@ impl CoreService {
         self.verify_principal(principal)?;
         let row =
             require_character_row(&self.inner.pool, principal.creator_id(), &character_id).await?;
-        Ok(CharacterDetail::builder()
+        CharacterDetail::builder()
             .character(nexus_character_from_record(&row)?)
             .try_into()
-            .map_err(wire_err)?)
+            .map_err(wire_err)
     }
 
     /// Patch an owned, active Character behind the shared activity lease
@@ -707,10 +707,10 @@ impl CoreService {
         )
         .await
         .map_err(actor_db_err)?;
-        Ok(CharacterDetail::builder()
+        CharacterDetail::builder()
             .character(nexus_character_from_record(&record)?)
             .try_into()
-            .map_err(wire_err)?)
+            .map_err(wire_err)
     }
 
     /// Add one active `ActorWorldBinding` behind the shared activity lease.
@@ -749,10 +749,10 @@ impl CoreService {
         .map_err(actor_db_err)?;
         let wire: DetailBindingWire = binding_wire_from_record(&binding)?;
         let wire: NexusActorWorldBinding = map_wire_one(wire)?;
-        Ok(AddCharacterBindingResponse::builder()
+        AddCharacterBindingResponse::builder()
             .binding(wire)
             .try_into()
-            .map_err(wire_err)?)
+            .map_err(wire_err)
     }
 
     /// List one owned Character's bindings; foreign Characters are 404.
@@ -785,11 +785,11 @@ impl CoreService {
             .map(binding_wire_from_record)
             .collect::<CoreResult<Vec<_>>>()?;
         let mapped: Vec<ListedBindingWire> = map_wire_items(items)?;
-        Ok(ListCharacterBindingsResponse::builder()
+        ListCharacterBindingsResponse::builder()
             .items(mapped)
             .pagination(binding_pagination_wire(limit, has_more, next_cursor)?)
             .try_into()
-            .map_err(wire_err)?)
+            .map_err(wire_err)
     }
 
     /// Project one owned binding (retained reads tolerate archived
@@ -809,10 +809,10 @@ impl CoreService {
             .owned_binding_row(principal.creator_id(), &character_id, &binding_id)
             .await?
             .ok_or_else(|| not_found("binding", &binding_id))?;
-        Ok(CharacterBindingDetail::builder()
+        CharacterBindingDetail::builder()
             .binding(binding_wire_from_record(&row)?)
             .try_into()
-            .map_err(wire_err)?)
+            .map_err(wire_err)
     }
 
     /// Patch the optional `WorldSheet` link on an owned active binding behind
@@ -849,10 +849,10 @@ impl CoreService {
         )
         .await
         .map_err(actor_db_err)?;
-        Ok(CharacterBindingDetail::builder()
+        CharacterBindingDetail::builder()
             .binding(binding_wire_from_record(&record)?)
             .try_into()
-            .map_err(wire_err)?)
+            .map_err(wire_err)
     }
 
     /// Remove one active binding behind the shared activity lease. The last
@@ -915,7 +915,7 @@ fn optional_str(value: Option<&impl std::ops::Deref<Target = String>>) -> Option
 }
 
 /// Offset-backed page meta (retained `v1:` cursor convention).
-pub(crate) fn offset_page_meta(fetched: usize, limit: u32, offset: u32) -> (Option<String>, bool) {
+pub fn offset_page_meta(fetched: usize, limit: u32, offset: u32) -> (Option<String>, bool) {
     let limit_us = usize::try_from(limit).unwrap_or(usize::MAX);
     if fetched > limit_us {
         (Some(format!("v1:{}", offset.saturating_add(limit))), true)
@@ -926,7 +926,7 @@ pub(crate) fn offset_page_meta(fetched: usize, limit: u32, offset: u32) -> (Opti
 
 /// serde round-trip between the shared and response-local generated clones of
 /// a wire type (the retained `map_wire` translation, now core-side).
-pub(crate) fn map_wire_items<T: serde::Serialize, U: serde::de::DeserializeOwned>(
+pub fn map_wire_items<T: serde::Serialize, U: serde::de::DeserializeOwned>(
     items: Vec<T>,
 ) -> CoreResult<Vec<U>> {
     let value = serde_json::to_value(items).map_err(wire_err)?;
@@ -935,7 +935,7 @@ pub(crate) fn map_wire_items<T: serde::Serialize, U: serde::de::DeserializeOwned
 
 /// serde round-trip between the shared and response-local generated clones of
 /// a wire type (the retained `map_wire` translation, now core-side).
-pub(crate) fn map_wire_one<T: serde::Serialize, U: serde::de::DeserializeOwned>(
+pub fn map_wire_one<T: serde::Serialize, U: serde::de::DeserializeOwned>(
     value: T,
 ) -> CoreResult<U> {
     let json = serde_json::to_value(value).map_err(wire_err)?;

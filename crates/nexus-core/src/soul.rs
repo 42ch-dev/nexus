@@ -34,11 +34,11 @@ use nexus_moment_context_assembly::CharacterMindInput;
 use sqlx::SqlitePool;
 
 /// Maximum Unicode scalar chars persisted for a synthesized narrative.
-pub(crate) const SOUL_NARRATIVE_MAX_CHARS: usize = 16 * 1024;
+pub const SOUL_NARRATIVE_MAX_CHARS: usize = 16 * 1024;
 
 /// Insufficient-data gate thresholds (V1.81 G1).
-pub(crate) const MIN_SOUL_NARRATIVE_FRAGMENTS: i64 = 10;
-pub(crate) const MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS: i64 = 20;
+pub const MIN_SOUL_NARRATIVE_FRAGMENTS: i64 = 10;
+pub const MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS: i64 = 20;
 
 /// Forward-looking tokens checked by the narrative quality suffix heuristic.
 const FORWARD_LOOKING_TOKENS: &[&str] = &[
@@ -57,7 +57,7 @@ const FORWARD_LOOKING_BIGRAMS: &[(&str, &str)] = &[
 /// Internal reflect state (mapped to the wire `SoulNarrativeRequest` state in
 /// the wire mapping).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ReflectState {
+pub enum ReflectState {
     InsufficientData,
     Ungenerated,
     Current,
@@ -66,7 +66,7 @@ pub(crate) enum ReflectState {
 
 /// Outcome of a bearer-parameterized reflect run (pre-wire mapping).
 #[derive(Debug, Clone)]
-pub(crate) struct ReflectOutcome {
+pub struct ReflectOutcome {
     pub state: ReflectState,
     pub narrative: Option<String>,
     pub generated_at: Option<String>,
@@ -108,7 +108,7 @@ fn map_soul_narrative_memory_error(err: MemoryError) -> CoreError {
 /// 4. read/poll path (force=false) returns current/stale/ungenerated without
 ///    calling the synthesizer;
 /// 5. force=true synthesizes (on-demand only), validates/caps, persists.
-pub(crate) async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer>(
+pub async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer>(
     pool: &SqlitePool,
     ctx: &MemoryPipelineCtx,
     force: bool,
@@ -515,7 +515,7 @@ fn build_temporal_buckets(
 
 /// Truncate `summary` to at most `max_chars` Unicode scalar characters,
 /// appending `…` when truncating (UTF-8 safe; avoids mid-char byte panic).
-pub(crate) fn truncate_summary(summary: &str, max_chars: usize) -> String {
+pub fn truncate_summary(summary: &str, max_chars: usize) -> String {
     if summary.chars().count() <= max_chars {
         summary.to_string()
     } else {
@@ -625,7 +625,7 @@ fn format_tom_belief_line(row: &crate::memory::CharacterTomBeliefRow) -> String 
 ///
 /// Returns an internal/`DATABASE_ERROR`/validation [`CoreError`] on any
 /// projection read failure other than a recognised absent-data condition.
-pub(crate) async fn load_character_mind_projection(
+pub async fn load_character_mind_projection(
     pool: &SqlitePool,
     nexus_home: &Path,
     owner_creator_id: &str,
@@ -723,7 +723,7 @@ pub(crate) async fn load_character_mind_projection(
 }
 
 /// Load bounded SOUL/Memory plus L1-then-L2 `ToM` for an admitted Character run.
-pub(crate) async fn load_character_mind_projection_with_tom(
+pub async fn load_character_mind_projection_with_tom(
     pool: &SqlitePool,
     nexus_home: &Path,
     owner_creator_id: &str,
@@ -780,7 +780,7 @@ pub struct CoreCharacterMind {
 impl CoreCharacterMind {
     /// Bind the projection reader to a workspace pool and nexus home.
     #[must_use]
-    pub fn new(pool: SqlitePool, nexus_home: PathBuf) -> Self {
+    pub const fn new(pool: SqlitePool, nexus_home: PathBuf) -> Self {
         Self { pool, nexus_home }
     }
 
@@ -841,7 +841,7 @@ fn map_wire<T: serde::de::DeserializeOwned>(value: impl serde::Serialize) -> Cor
 }
 
 /// Map a bearer-agnostic reflect outcome to the Character wire response.
-pub(crate) fn character_reflect_wire(
+pub fn character_reflect_wire(
     character_id: &str,
     o: &ReflectOutcome,
 ) -> CoreResult<CharacterSoulNarrativeResponse> {
@@ -867,7 +867,7 @@ pub(crate) fn character_reflect_wire(
 }
 
 /// Map a bearer-agnostic reflect outcome to the Creator wire response.
-pub(crate) fn creator_reflect_wire(
+pub fn creator_reflect_wire(
     creator_id: String,
     o: ReflectOutcome,
 ) -> CoreResult<SoulNarrativeResponse> {

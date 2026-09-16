@@ -1092,6 +1092,7 @@ fn validate_skill_slug_format(s: &str) -> bool {
 /// semantics documented on `MergeKind`: a state with ≥1 incoming labeled
 /// edge is a merge node even without an explicit `merge:` (default
 /// wait-all).
+#[must_use]
 pub fn incoming_labeled_edge_counts(manifest: &PresetManifest) -> HashMap<&str, usize> {
     let mut incoming_labeled: HashMap<&str, usize> = HashMap::new();
     for state in &manifest.states {

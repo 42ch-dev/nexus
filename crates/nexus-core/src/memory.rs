@@ -160,10 +160,10 @@ impl CoreService {
         .await
         .map_err(map_local_db_error)?;
 
-        Ok(map_wire(json!({
+        map_wire(json!({
             "success": true,
             "pending_id": pending_id,
-        }))?)
+        }))
     }
 
     /// List one owned Character's pending reviews (retained read; any
@@ -220,10 +220,10 @@ impl CoreService {
                 }))
             })
             .collect::<CoreResult<_>>()?;
-        Ok(map_wire(json!({
+        map_wire(json!({
             "items": items,
             "pagination": pagination_info(limit, has_more, next_cursor.as_deref()),
-        }))?)
+        }))
     }
 
     /// Count one owned Character's pending reviews (retained read).
@@ -255,9 +255,9 @@ impl CoreService {
         )
         .await
         .map_err(map_local_db_error)?;
-        Ok(map_wire(json!({
+        map_wire(json!({
             "count": i64::try_from(count).unwrap_or(i64::MAX),
-        }))?)
+        }))
     }
 
     /// Delete one pending row from an owned Character's queue. Holds the
@@ -293,10 +293,10 @@ impl CoreService {
         if !deleted {
             return Err(not_found("pending review", &format!("'{pending_id}'")));
         }
-        Ok(map_wire(json!({
+        map_wire(json!({
             "success": true,
             "pending_id": pending_id,
-        }))?)
+        }))
     }
 
     /// List one owned Character's memory fragments (retained read),
@@ -342,10 +342,10 @@ impl CoreService {
             .take(limit as usize)
             .map(|r| character_fragment_info(&r))
             .collect::<CoreResult<_>>()?;
-        Ok(map_wire(json!({
+        map_wire(json!({
             "fragments": fragments,
             "pagination": pagination_info(limit, has_more, next_cursor.as_deref()),
-        }))?)
+        }))
     }
 
     /// Promote a binding-local Character fragment to shared Character memory
@@ -386,9 +386,9 @@ impl CoreService {
         )
         .await
         .map_err(map_promote_error)?;
-        Ok(map_wire(json!({
+        map_wire(json!({
             "fragment": character_fragment_info(&promoted)?,
-        }))?)
+        }))
     }
 
     /// Drain a bounded slice of an owned Character's pending-review queue
@@ -462,20 +462,20 @@ impl CoreService {
             .collect();
         let deadline = tokio::time::Instant::now() + REVIEW_CALL_TIMEOUT;
         let mut outcome =
-            process_bearer_review_batch(&inputs, &nexus_home, &ctx, pool, deadline).await?;
+            process_bearer_review_batch(&inputs, nexus_home, &ctx, pool, deadline).await?;
         drop(ctx);
         let deadline_stopped = outcome.processed < processing_slice;
         outcome.has_more = more_in_db || deadline_stopped || outcome.any_row_remained_pending;
         outcome.more_in_db = more_in_db;
         outcome.processing_slice = processing_slice;
 
-        Ok(map_wire(json!({
+        map_wire(json!({
             "promoted": outcome.promoted,
             "fragmented": outcome.fragmented,
             "dropped": outcome.dropped,
             "has_more": outcome.has_more,
             "processed": i64::try_from(outcome.processed).unwrap_or(i64::MAX),
-        }))?)
+        }))
     }
 }
 
@@ -793,7 +793,7 @@ impl CoreService {
             .collect();
         let ctx = MemoryPipelineCtx::creator(principal.creator_id(), None);
         let mut batch =
-            process_bearer_review_batch(&inputs, &nexus_home, &ctx, &self.inner.pool, deadline)
+            process_bearer_review_batch(&inputs, nexus_home, &ctx, &self.inner.pool, deadline)
                 .await?;
         drop(ctx);
 
@@ -2097,12 +2097,12 @@ impl CoreService {
         let (carrier_entry_id, revision, mind_state_id) = service
             .record(principal.creator_id(), &character_id, input)
             .await?;
-        Ok(RecordCharacterTomResponse::builder()
+        RecordCharacterTomResponse::builder()
             .carrier_entry_id(carrier_entry_id)
             .mind_state_id(mind_state_id)
             .revision(revision)
             .try_into()
-            .map_err(wire_err)?)
+            .map_err(wire_err)
     }
 
     /// List Character `ToM` belief rows from authorized carriers (retained
@@ -2140,14 +2140,14 @@ impl CoreService {
         let pagination: ListedPagination = ListedPagination::builder()
             .limit(i64::from(page.limit))
             .has_more(page.has_more)
-            .next_cursor(page.next_cursor.clone())
+            .next_cursor(page.next_cursor)
             .try_into()
             .map_err(wire_err)?;
-        Ok(ListCharacterTomResponse::builder()
+        ListCharacterTomResponse::builder()
             .items(items)
             .pagination(pagination)
             .try_into()
-            .map_err(wire_err)?)
+            .map_err(wire_err)
     }
 }
 

@@ -1803,6 +1803,7 @@ fn make_dummy_string(prop_def: &Value) -> Value {
 }
 
 /// Generate a dummy JSON value for a schema property definition.
+#[allow(clippy::too_many_lines)] // one recursive schema-shape dispatch table
 fn make_dummy_value(
     prop_def: &Value,
     schema_cache: &HashMap<String, Value>,

@@ -87,7 +87,7 @@ LEFT JOIN (
 ORDER BY nw.world_id ASC
 LIMIT ?";
 
-/// Overview projection query with a keyset cursor (`?1` = cursor world_id,
+/// Overview projection query with a keyset cursor (`?1` = cursor `world_id`,
 /// `?2` = bound fetch limit).
 const OVERVIEW_CURSOR_PAGE_SQL: &str = r"SELECT
     nw.world_id,

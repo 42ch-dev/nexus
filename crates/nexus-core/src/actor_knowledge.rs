@@ -421,7 +421,7 @@ fn not_found(resource: &str, id: &str) -> CoreError {
 /// Owned World with no status requirement (retained reads, durable §11.2):
 /// a World still owned but paused/archived keeps its retained history
 /// readable. Missing/foreign Worlds fail closed.
-pub(crate) async fn require_owned_world(
+pub async fn require_owned_world(
     pool: &SqlitePool,
     creator_id: &str,
     world_id: &str,
@@ -447,7 +447,7 @@ pub(crate) async fn require_owned_world(
 /// Owned Character with no status requirement (retained reads): an archived
 /// Character's authorized data stays readable, never filtered out.
 /// Foreign/missing Characters are 404.
-pub(crate) async fn require_owned_character(
+pub async fn require_owned_character(
     pool: &SqlitePool,
     creator_id: &str,
     character_id: &str,
@@ -465,7 +465,7 @@ pub(crate) async fn require_owned_character(
 /// binding exists, belongs to `character_id`, and targets `world_id`
 /// (durable §11.2). A cross-Character binding or missing binding fails
 /// closed; binding status is not a liveness gate for reads.
-pub(crate) async fn require_stored_binding_tuple(
+pub async fn require_stored_binding_tuple(
     pool: &SqlitePool,
     character_id: &str,
     binding_id: &str,
@@ -898,7 +898,7 @@ fn kb_insert_err(err: KbStoreError) -> CoreError {
     }
 }
 
-fn str_field<'a, T: std::ops::Deref<Target = String>>(value: Option<&'a T>) -> Option<&'a str> {
+fn str_field<T: std::ops::Deref<Target = String>>(value: Option<&T>) -> Option<&str> {
     value.map(|s| s.as_str())
 }
 

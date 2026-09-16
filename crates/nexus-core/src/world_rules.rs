@@ -1,6 +1,6 @@
 //! World structured rules and their advisory findings read projection.
 //! Carrier grammar stays in nexus-spoke-adapter; persistence stays in the
-//! existing spoke_rules/world_findings repositories. Validation ordering,
+//! existing `spoke_rules/world_findings` repositories. Validation ordering,
 //! open read vocabulary, whole-carrier replacement and 500-row caps are retained.
 
 use crate::world_kb::guards;

@@ -345,7 +345,7 @@ fn scan_creator_workspaces(
 
 /// Whether any other creator's workspaces hold `entry_file`. Keeps the
 /// slow-path fallback fail-closed: an entry that exists only under a foreign
-/// creator must classify Forbidden (`kb_owner:`), never a silent NotFound.
+/// creator must classify Forbidden (`kb_owner:`), never a silent `NotFound`.
 fn foreign_creator_holds_entry(
     creators_root: &std::path::Path,
     owner_id: &str,
@@ -627,7 +627,7 @@ impl CoreService {
     /// Get a single work-scope entry, via the O(1) entry index (QC3 W-005)
     /// with a filesystem-scan fallback for a stale index. Ownership is
     /// classified identically in both paths: a foreign entry is always
-    /// Forbidden, never hidden behind a cold/stale index as NotFound.
+    /// Forbidden, never hidden behind a cold/stale index as `NotFound`.
     ///
     /// # Errors
     /// Returns [`CoreError::InvalidInput`] for an unsafe `entry_id`,
@@ -993,7 +993,7 @@ mod kb_ownership_tests {
     /// GET/DELETE classify foreign vs missing entries identically whether the
     /// process-wide entry index resolves the entry (warm) or the filesystem
     /// scan answers instead (cold/stale): a foreign entry is always Forbidden
-    /// with the `kb_owner:` carrier, only a truly absent entry is NotFound.
+    /// with the `kb_owner:` carrier, only a truly absent entry is `NotFound`.
     #[tokio::test]
     async fn kb_get_delete_ownership_independent_of_index_temperature() {
         let temp = tempfile::tempdir().unwrap();

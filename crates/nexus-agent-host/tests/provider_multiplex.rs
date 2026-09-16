@@ -1,4 +1,4 @@
-//! Real maintained adapters and a Node ProviderCallbacks peer; no model calls.
+//! Real maintained adapters and a Node `ProviderCallbacks` peer; no model calls.
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -41,7 +41,7 @@ impl CallbackPort {
         // This peer is a test transport for the actual callback, not an ACP
         // implementation. Build the package in the serialized validation window.
         let script = format!(
-            r#"
+            r"
 import {{ createAcpProvider }} from {};
 import {{ createInterface }} from 'node:readline';
 const provider = createAcpProvider();
@@ -55,7 +55,7 @@ for await (const line of createInterface({{ input: process.stdin }})) {{
     process.stdout.write(JSON.stringify({{ error: String(error) }}) + '\n');
   }}
 }}
-"#,
+",
             serde_json::to_string(&module.to_string_lossy()).expect("module URL")
         );
         let mut child = Command::new("node")
@@ -77,6 +77,8 @@ for await (const line of createInterface({{ input: process.stdin }})) {{
 
     async fn exchange(&self, value: Value) -> ProviderResult<Value> {
         let mut peer = self.0.lock().await;
+        // The guard is released with its last use below (the lock is not held
+        // across the response envelope construction).
         let mut bytes = serde_json::to_vec(&value).expect("peer request");
         bytes.push(b'\n');
         peer.stdin
@@ -92,17 +94,19 @@ for await (const line of createInterface({{ input: process.stdin }})) {{
             .expect("peer read");
         assert_ne!(count, 0, "callback peer must not exit before replying");
         let response: Value = serde_json::from_str(&line).expect("callback response");
+        drop(peer);
         if let Some(error) = response.get("error") {
             return Err(CoreError {
                 code: CoreErrorCode::Internal,
                 message: error.to_string(),
-                details: Default::default(),
+                details: serde_json::Map::default(),
                 http_status: Some(500),
             });
         }
         Ok(response["value"].clone())
     }
 
+    #[allow(clippy::significant_drop_tightening)] // the guard owns the child across the wait
     async fn close(&self) {
         let mut peer = self.0.lock().await;
         // Drop the pipe writer to deliver EOF; shutdown alone retains the handle.
@@ -254,6 +258,7 @@ async fn host_with_acp_fixture(root: &Path, acp_fixture: &str) -> Arc<HostManage
     host
 }
 
+#[allow(clippy::needless_pass_by_value)] // callers build the payload inline
 fn call(
     method: ProviderCallMethod,
     session: Option<&str>,
@@ -326,6 +331,7 @@ async fn drain(port: &dyn ProviderPort, operation: &str) -> Vec<String> {
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)] // one end-to-end multiplex scenario
 async fn session_keeps_selected_provider_and_truthful_cancel() {
     let tmp = tempfile::tempdir().expect("workspace");
     let root = tmp.path().canonicalize().expect("canonical workspace");
@@ -467,6 +473,7 @@ async fn session_keeps_selected_provider_and_truthful_cancel() {
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)] // one end-to-end native-control scenario
 async fn native_control_cancel_uses_returned_id_and_preserves_completed_result() {
     let tmp = tempfile::tempdir().expect("workspace");
     let root = tmp.path().canonicalize().expect("canonical workspace");
@@ -628,7 +635,7 @@ impl ProviderPort for FailingPort {
         Err(CoreError {
             code: CoreErrorCode::Interrupted,
             message: "admitted effect failed".into(),
-            details: Default::default(),
+            details: serde_json::Map::default(),
             http_status: Some(503),
         })
     }
@@ -636,7 +643,7 @@ impl ProviderPort for FailingPort {
         Err(CoreError {
             code: CoreErrorCode::NotFound,
             message: "no operation".into(),
-            details: Default::default(),
+            details: serde_json::Map::default(),
             http_status: Some(404),
         })
     }

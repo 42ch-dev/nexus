@@ -30,7 +30,7 @@ use sqlx::SqlitePool;
 
 /// Internal wire-code carrier: `"{CODE}: {message}"` core categories the
 /// daemon adapter re-renders as the retained `Internal` envelopes.
-pub(crate) fn internal_err(code: &str, message: impl std::fmt::Display) -> CoreError {
+pub fn internal_err(code: &str, message: impl std::fmt::Display) -> CoreError {
     CoreError::Internal {
         category: format!("{code}: {message}"),
     }
@@ -39,7 +39,7 @@ pub(crate) fn internal_err(code: &str, message: impl std::fmt::Display) -> CoreE
 /// Map a local-db error to the retained bearer-memory envelope: a foreign or
 /// missing actor row stays the `character_memory` 403; everything else is the
 /// `DATABASE_ERROR` internal classification.
-pub(crate) fn map_local_db_error(e: LocalDbError) -> CoreError {
+pub fn map_local_db_error(e: LocalDbError) -> CoreError {
     match e {
         LocalDbError::ActorNotFound { .. } => CoreError::ForbiddenReason {
             resource: "character_memory".to_string(),
@@ -50,7 +50,7 @@ pub(crate) fn map_local_db_error(e: LocalDbError) -> CoreError {
 }
 
 /// Map a raw driver error (the daemon mapped `NexusApiError::from(sqlx)`).
-pub(crate) fn sqlx_internal(e: impl std::fmt::Display) -> CoreError {
+pub fn sqlx_internal(e: impl std::fmt::Display) -> CoreError {
     internal_err("database_error", e)
 }
 
@@ -86,7 +86,7 @@ enum BearerCapability {
 /// id; `None` = whole Creator / shared Character. The strings are **owned**
 /// so the context is never a borrow of host state (napi boundary rule).
 #[derive(Debug)]
-pub(crate) struct MemoryPipelineCtx {
+pub struct MemoryPipelineCtx {
     owner_creator_id: String,
     character_id: Option<String>,
     scope_id: Option<String>,
@@ -215,14 +215,14 @@ impl MemoryPipelineCtx {
 // ── Review pipeline ────────────────────────────────────────────────────────
 
 /// Maximum pending rows inspected per review call (V1.80 REL-01).
-pub(crate) const REVIEW_BATCH_LIMIT: i64 = 50;
+pub const REVIEW_BATCH_LIMIT: i64 = 50;
 
 /// Maximum allowed digest size in bytes (256 KiB). R-V133P4-06.
-pub(crate) const MAX_DIGEST_BYTES: usize = 256 * 1024;
+pub const MAX_DIGEST_BYTES: usize = 256 * 1024;
 
 /// Outcome of a bounded review batch (V1.80 REL-01).
 #[derive(Debug)]
-pub(crate) struct ReviewBatchOutcome {
+pub struct ReviewBatchOutcome {
     pub promoted: i64,
     pub fragmented: i64,
     pub dropped: i64,
@@ -262,7 +262,7 @@ struct RowActionCounts {
 /// storage. The deadline semantics (stop on expiry, partial progress,
 /// `any_row_remained_pending`) are identical to the pre-migration Creator
 /// logic.
-pub(crate) async fn process_bearer_review_batch(
+pub async fn process_bearer_review_batch(
     inputs: &[nexus_creator_memory::review::PendingReviewInput],
     nexus_home: &std::path::Path,
     ctx: &MemoryPipelineCtx,
@@ -614,7 +614,7 @@ async fn insert_fragment_and_delete_pending(
 
 /// Passthrough summarizer that returns the raw digest with a provenance
 /// header (V1.33 R-V133P4-03/06 behavior preserved for the Creator arm).
-pub(crate) struct PassthroughSummarizer {
+pub struct PassthroughSummarizer {
     /// Header key (`creator_id` or `character_id`) for the bearer.
     id_key: &'static str,
     /// Header value.

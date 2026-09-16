@@ -346,6 +346,10 @@ pub async fn soul_narrative_fragment_stats_readonly(
     ))
 }
 
+/// # Errors
+///
+/// Returns `LocalDbError` if the aggregate/fingerprint query or the cached
+/// row read fails.
 pub async fn soul_narrative_fragment_stats(
     pool: &SqlitePool,
     creator_id: &str,

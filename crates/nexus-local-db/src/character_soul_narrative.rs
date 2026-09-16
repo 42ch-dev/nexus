@@ -361,6 +361,10 @@ pub async fn character_soul_narrative_fragment_stats_readonly(
     ))
 }
 
+/// # Errors
+///
+/// Returns `LocalDbError` if the aggregate/fingerprint query or the cached
+/// row read fails.
 pub async fn character_soul_narrative_fragment_stats(
     pool: &SqlitePool,
     owner_creator_id: &str,

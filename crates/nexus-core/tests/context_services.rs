@@ -6,7 +6,6 @@
 //! never leaks state).
 
 use nexus_contracts::daemon_api::inspector::moment_directive_request::MomentDirectiveRequest;
-use nexus_contracts::generated::daemon_api::inspector::moment_inspect_request::MomentInspectRequest;
 use nexus_core::{
     CoreAccess, CoreError, CoreOpenOptions, CoreService, LocalDirectiveStore,
     ReadOnlyDirectiveStore,
@@ -379,7 +378,7 @@ async fn inspect_and_directives_stay_owner_scoped() {
 }
 
 /// Read-only inspect invariant: with an active directive in scope, the packet
-/// carries its status/metadata (scope_id + ttl_remaining) but **never** the
+/// carries its status/metadata (`scope_id` + `ttl_remaining`) but **never** the
 /// body (AC-I3), and inspecting leaves TTL, the scene anchor and the chapter
 /// anchors untouched (the inspector is an observation surface).
 #[tokio::test]

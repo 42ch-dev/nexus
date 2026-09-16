@@ -617,10 +617,10 @@ async fn is_work_owned(
     creator_id: &str,
     work_id: &str,
 ) -> CoreResult<bool> {
-    Ok(get_work(pool, creator_id, work_id)
+    get_work(pool, creator_id, work_id)
         .await
         .map(|row| row.is_some())
-        .map_err(|e| database_error(&e))?)
+        .map_err(|e| database_error(&e))
 }
 
 /// Map a directive row onto the typed response (the `Directive` oneOf branch).

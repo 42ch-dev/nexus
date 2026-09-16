@@ -66,7 +66,7 @@ impl From<ContentFault> for CoreError {
 
 /// Wire-equivalent typify copy conversion (see `works::wire_cast`); the legacy
 /// `CONTRACT_ERROR` code rides the shared internal category verbatim.
-pub(crate) fn wire_cast<T: serde::de::DeserializeOwned, S: serde::Serialize>(
+pub fn wire_cast<T: serde::de::DeserializeOwned, S: serde::Serialize>(
     value: S,
 ) -> Result<T, CoreError> {
     serde_json::to_value(value)
@@ -189,7 +189,7 @@ pub async fn resolve_guarded_path_async(
 
 /// Create the parent directories of a guarded target. Callers map the
 /// I/O failure to their legacy `DIRECTORY_CREATE_ERROR` message.
-pub(crate) async fn create_parent_dirs(parent: &Path) -> std::io::Result<()> {
+pub async fn create_parent_dirs(parent: &Path) -> std::io::Result<()> {
     tokio::fs::create_dir_all(parent).await
 }
 
@@ -197,7 +197,7 @@ pub(crate) async fn create_parent_dirs(parent: &Path) -> std::io::Result<()> {
 /// temp file + fsync + atomic rename + final-file fsync + parent-dir fsync.
 /// The caller owns path-guard resolution, parent-directory creation and the
 /// legacy error-code mapping; the temp file is cleaned up on failure.
-pub(crate) async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Result<()> {
+pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Result<()> {
     let tmp_extension = format!(
         "md.tmp.{}.{}",
         std::process::id(),
@@ -234,13 +234,13 @@ pub(crate) async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::i
 /// Per-Work advisory runtime lock (single-writer authoring contract, DF-60 §4)
 /// shared by the content and outline services. The low-level acquire/release
 /// primitives live in `nexus_local_db::runtime_lock`; this guard only carries
-/// the legacy locked/DATABASE_ERROR classification.
+/// the legacy `locked/DATABASE_ERROR` classification.
 ///
 /// `holder_kind` on [`WorkLock::acquire`] is the caller label riding the
 /// `cli:<kind>:<uuid>` holder format. The daemon content surface passes
 /// `http` so the observable 423 `Locked.reason` keeps the legacy
 /// `cli:http:<uuid>` holder string.
-pub(crate) struct WorkLock {
+pub struct WorkLock {
     pool: sqlx::SqlitePool,
     creator_id: String,
     work_id: String,
@@ -513,7 +513,7 @@ async fn read_guarded_file(
 ///
 /// Persist per-chapter outline prose to the `outline_path` markdown file with
 /// the same durability pattern as every chapter-file write path.
-pub(crate) async fn atomic_write_text(
+pub async fn atomic_write_text(
     workspace_root: &Path,
     rel_path: &str,
     content: &str,
@@ -795,7 +795,7 @@ async fn chapter_detail(
     let chapter = parse_chapter(chapter_id)?;
     let volume = chapter_volume(query);
     let record = load_chapter(service, work_id, chapter, volume).await?;
-    Ok(to_detail(&record, root)?)
+    to_detail(&record, root)
 }
 
 async fn chapter_outline(
@@ -979,5 +979,5 @@ async fn patch_chapter(
 
     lock.release().await;
     let record = updated?;
-    Ok(to_detail(&record, root)?)
+    to_detail(&record, root)
 }

@@ -1928,85 +1928,6 @@ fn scaffold_user_preset(
         path: bundle.display().to_string(),
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn yaml_write_failure_rolls_back_prompt_and_keeps_revision() {
-        fn fail_write(_: &Path, _: &mut serde_yaml::Value, _: u64) -> Result<(), PresetError> {
-            Err(preset_io(
-                "INJECTED_YAML_WRITE_ERROR",
-                "injected persistence failure",
-            ))
-        }
-        let tmp = tempfile::tempdir().unwrap();
-        let home = tmp.path().join(".nexus42");
-        let bundle = home.join("presets/rollback");
-        std::fs::create_dir_all(bundle.join("prompts")).unwrap();
-        let yaml = r#"revision: 1
-preset:
-  id: rollback
-  version: 1
-  kind: creator
-  description: Prompt rollback regression
-  run_intents: [work_init]
-  initial: start
-  terminal: end
-states:
-  - id: start
-    context_update:
-      op: { kind: append, body: "" }
-      template_file: prompts/original.md
-    next: end
-  - id: end
-    terminal: true
-"#;
-        let yaml_path = bundle.join("preset.yaml");
-        let prompt_path = bundle.join("prompts/original.md");
-        std::fs::write(&yaml_path, yaml).unwrap();
-        std::fs::write(&prompt_path, "Original").unwrap();
-        let request = serde_json::from_value(serde_json::json!({
-            "strategy_id": "rollback", "state_id": "start", "base_revision": 1,
-            "template_ref": "prompts/original.md", "set": {"body": "Replacement"}
-        }))
-        .unwrap();
-        let _lock = acquire_preset_lock(&home, "rollback").unwrap();
-        let error = patch_prompt_template_inner_with_writer(
-            &home, "rollback", "start", &request, fail_write,
-        )
-        .unwrap_err();
-        assert!(
-            matches!(&error, PresetError::Internal { code, .. } if code == "INJECTED_YAML_WRITE_ERROR")
-        );
-        assert_eq!(std::fs::read_to_string(&prompt_path).unwrap(), "Original");
-        assert_eq!(std::fs::read_to_string(&yaml_path).unwrap(), yaml);
-    }
-
-    #[test]
-    fn conditional_transition_rejects_duplicate_but_keeps_distinct_condition() {
-        let mut next = serde_yaml::Mapping::new();
-        let request: StrategyPatchTransitionRequest = serde_json::from_value(serde_json::json!({
-            "strategy_id": "strategy", "source_state_id": "start", "base_revision": 1,
-            "condition": "_context.ready", "op": "update"
-        }))
-        .unwrap();
-        append_conditional_rule(&mut next, &request, "end").unwrap();
-        let error = append_conditional_rule(&mut next, &request, "end").unwrap_err();
-        assert!(
-            matches!(&error, PresetError::Rejected { code, .. } if code == "strategy_transition_duplicate")
-        );
-        let different = StrategyPatchTransitionRequest {
-            condition: Some("_context.alternate".into()),
-            ..request
-        };
-        append_conditional_rule(&mut next, &different, "end").unwrap();
-        let rules = next["rules"].as_sequence().unwrap();
-        assert_eq!(rules[0]["when"].as_str(), Some("_context.ready"));
-        assert_eq!(rules[1]["when"].as_str(), Some("_context.alternate"));
-    }
-}
 /// Trigger-lane classification (AR-21).
 ///
 /// `cron` is derived from the shared works-cron role membership
@@ -2220,5 +2141,84 @@ fn profile_signal(signal: &SignalBinding) -> PresetProfileSignal {
         name: signal.name.clone(),
         action: action.to_string(),
         target: signal.on_receive.target.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn yaml_write_failure_rolls_back_prompt_and_keeps_revision() {
+        fn fail_write(_: &Path, _: &mut serde_yaml::Value, _: u64) -> Result<(), PresetError> {
+            Err(preset_io(
+                "INJECTED_YAML_WRITE_ERROR",
+                "injected persistence failure",
+            ))
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join(".nexus42");
+        let bundle = home.join("presets/rollback");
+        std::fs::create_dir_all(bundle.join("prompts")).unwrap();
+        let yaml = r#"revision: 1
+preset:
+  id: rollback
+  version: 1
+  kind: creator
+  description: Prompt rollback regression
+  run_intents: [work_init]
+  initial: start
+  terminal: end
+states:
+  - id: start
+    context_update:
+      op: { kind: append, body: "" }
+      template_file: prompts/original.md
+    next: end
+  - id: end
+    terminal: true
+"#;
+        let yaml_path = bundle.join("preset.yaml");
+        let prompt_path = bundle.join("prompts/original.md");
+        std::fs::write(&yaml_path, yaml).unwrap();
+        std::fs::write(&prompt_path, "Original").unwrap();
+        let request = serde_json::from_value(serde_json::json!({
+            "strategy_id": "rollback", "state_id": "start", "base_revision": 1,
+            "template_ref": "prompts/original.md", "set": {"body": "Replacement"}
+        }))
+        .unwrap();
+        let _lock = acquire_preset_lock(&home, "rollback").unwrap();
+        let error = patch_prompt_template_inner_with_writer(
+            &home, "rollback", "start", &request, fail_write,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&error, PresetError::Internal { code, .. } if code == "INJECTED_YAML_WRITE_ERROR")
+        );
+        assert_eq!(std::fs::read_to_string(&prompt_path).unwrap(), "Original");
+        assert_eq!(std::fs::read_to_string(&yaml_path).unwrap(), yaml);
+    }
+
+    #[test]
+    fn conditional_transition_rejects_duplicate_but_keeps_distinct_condition() {
+        let mut next = serde_yaml::Mapping::new();
+        let request: StrategyPatchTransitionRequest = serde_json::from_value(serde_json::json!({
+            "strategy_id": "strategy", "source_state_id": "start", "base_revision": 1,
+            "condition": "_context.ready", "op": "update"
+        }))
+        .unwrap();
+        append_conditional_rule(&mut next, &request, "end").unwrap();
+        let error = append_conditional_rule(&mut next, &request, "end").unwrap_err();
+        assert!(
+            matches!(&error, PresetError::Rejected { code, .. } if code == "strategy_transition_duplicate")
+        );
+        let different = StrategyPatchTransitionRequest {
+            condition: Some("_context.alternate".into()),
+            ..request
+        };
+        append_conditional_rule(&mut next, &different, "end").unwrap();
+        let rules = next["rules"].as_sequence().unwrap();
+        assert_eq!(rules[0]["when"].as_str(), Some("_context.ready"));
+        assert_eq!(rules[1]["when"].as_str(), Some("_context.alternate"));
     }
 }

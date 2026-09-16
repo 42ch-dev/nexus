@@ -182,7 +182,7 @@ fn derive_world_slug(title: &str) -> String {
     }
 }
 
-pub(crate) fn narrative_internal(what: &str, e: &nexus_narrative::NarrativeError) -> CoreError {
+pub fn narrative_internal(what: &str, e: &nexus_narrative::NarrativeError) -> CoreError {
     CoreError::Internal {
         category: format!("{what}: {e}"),
     }

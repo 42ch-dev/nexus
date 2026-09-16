@@ -50,6 +50,11 @@ pub fn default_bindings_for_preset(
 /// Note: template resolution is skipped here because `build_outer_graph` is
 /// used in test contexts where inline template strings are expected. Production
 /// code uses `build_wired_outer_graph` which resolves `template_file` paths.
+///
+/// # Errors
+///
+/// Returns `graph_flow::GraphError` when the manifest's states/edges cannot
+/// form a valid graph (unknown edge endpoints, malformed composite task).
 pub fn build_outer_graph(
     manifest: &PresetManifest,
 ) -> Result<graph_flow::Graph, graph_flow::GraphError> {

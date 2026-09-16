@@ -266,8 +266,7 @@ async fn published_chapter_mutation_blocked_and_content_survives() {
             patch_request(serde_json::json!({"slug": "new-slug"})),
         )
         .await
-        .err()
-        .expect("published structural edit must be blocked");
+        .expect_err("published structural edit must be blocked");
     let CoreError::InvalidInput { field, .. } = err else {
         panic!("expected legacy BadRequest carrier, got {err:?}");
     };
@@ -302,8 +301,7 @@ async fn published_chapter_mutation_blocked_and_content_survives() {
             })),
         )
         .await
-        .err()
-        .expect("published outline edit must be blocked");
+        .expect_err("published outline edit must be blocked");
     let CoreError::InvalidInput { field, .. } = err else {
         panic!("expected legacy BadRequest carrier, got {err:?}");
     };
@@ -335,8 +333,7 @@ async fn published_chapter_mutation_blocked_and_content_survives() {
             })),
         )
         .await
-        .err()
-        .expect("escaped write path must be denied");
+        .expect_err("escaped write path must be denied");
     let CoreError::InvalidInput { field, .. } = err else {
         panic!("expected legacy BadRequest carrier, got {err:?}");
     };
@@ -419,7 +416,7 @@ async fn chapter_patch_updates_slug_volume_and_rejects_title() {
         .await
         .unwrap();
     assert_eq!(
-        serde_json::to_value(&detail.status).unwrap(),
+        serde_json::to_value(detail.status).unwrap(),
         serde_json::json!("outlined")
     );
 
@@ -538,8 +535,7 @@ async fn outline_patch_conflict_and_locked_reread() {
             })),
         )
         .await
-        .err()
-        .expect("stale base_revision must conflict");
+        .expect_err("stale base_revision must conflict");
     let CoreError::OutlineConflict(details) = err else {
         panic!("expected typed outline conflict, got {err:?}");
     };
@@ -897,8 +893,7 @@ async fn locked_work_reports_http_holder_in_reason() {
             patch_request(serde_json::json!({"slug": "blocked-by-lock"})),
         )
         .await
-        .err()
-        .expect("locked Work must reject the patch");
+        .expect_err("locked Work must reject the patch");
     let CoreError::Forbidden { resource } = err else {
         panic!("expected locked carrier, got {err:?}");
     };
@@ -935,7 +930,7 @@ async fn locked_work_reports_http_holder_in_reason() {
     fx.core.close().await.unwrap();
 }
 
-/// Fix-round regression (database_error carrier): a real storage fault on the
+/// Fix-round regression (`database_error` carrier): a real storage fault on the
 /// Work-lookup path (`works` table dropped) rides the core lowercase
 /// `database_error: …` category that the daemon adapter re-classifies as the
 /// legacy `DATABASE_ERROR`.
@@ -955,8 +950,7 @@ async fn work_lookup_db_fault_rides_lowercase_carrier() {
             chapters_query(serde_json::json!({})),
         )
         .await
-        .err()
-        .expect("storage fault must fail the lookup");
+        .expect_err("storage fault must fail the lookup");
     let CoreError::Internal { category } = err else {
         panic!("expected internal carrier, got {err:?}");
     };
@@ -1005,8 +999,7 @@ async fn work_chronology_projects_flag_by_ref_or_id() {
         .core
         .work_chronology(&fx.principal, "no-such-work")
         .await
-        .err()
-        .expect("unknown ref must 404");
+        .expect_err("unknown ref must 404");
     let CoreError::NotFound { resource } = err else {
         panic!("expected NotFound, got {err:?}");
     };

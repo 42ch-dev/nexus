@@ -54,7 +54,7 @@ fn validation_summary(errors: &[String], warnings: &[String]) -> serde_json::Val
     serde_json::json!({ "errors": errors, "warnings": warnings })
 }
 
-pub(crate) fn project_entity(kb: &KnowledgeEntryRecord) -> WorldKbEntityProjection {
+pub fn project_entity(kb: &KnowledgeEntryRecord) -> WorldKbEntityProjection {
     let body_value = kb
         .body
         .as_ref()
@@ -136,13 +136,13 @@ fn project_candidate(
     }
 }
 
-pub(crate) mod guards {
+pub mod guards {
     use super::{db_err, Sqlite};
     use crate::error::{CoreError, CoreResult};
 
     /// Failure of the shared world-ownership guard: a storage error already
     /// mapped onto the core taxonomy, or a typed ownership denial.
-    pub(crate) enum WorldOwnerGuardFailure {
+    pub enum WorldOwnerGuardFailure {
         Db(CoreError),
         Denied(WorldOwnerDenial),
     }
@@ -172,7 +172,7 @@ pub(crate) mod guards {
     /// `narrative_worlds.owner_creator_id` guard. The world id and the
     /// refusal stay split so each transport family renders its retained
     /// envelope verbatim at the adapter boundary.
-    pub(crate) enum WorldOwnerDenial {
+    pub enum WorldOwnerDenial {
         /// No `narrative_worlds` row for the id.
         Missing { world_id: String },
         /// Row exists; `owner_creator_id` names another creator.
@@ -217,7 +217,7 @@ pub(crate) mod guards {
 
     /// Shared world-ownership guard: the world must exist and be owned by
     /// `creator_id`. One SQL authority; callers pick the family rendering.
-    pub(crate) async fn check_world_owner(
+    pub async fn check_world_owner(
         executor: impl sqlx::Executor<'_, Database = Sqlite>,
         world_id: &str,
         creator_id: &str,
@@ -243,7 +243,7 @@ pub(crate) mod guards {
     }
 
     /// World-KB family convenience wrapper over [`check_world_owner`].
-    pub(crate) async fn require_world_owner(
+    pub async fn require_world_owner(
         executor: impl sqlx::Executor<'_, Database = Sqlite>,
         world_id: &str,
         creator_id: &str,
@@ -2549,7 +2549,7 @@ pub mod relationship {
             .unwrap_or(0)
     }
 
-    /// Map a relationship CAS miss to a 409-shaped conflict; RowNotFound to
+    /// Map a relationship CAS miss to a 409-shaped conflict; `RowNotFound` to
     /// not-found; other DB errors to the storage mapping.
     fn map_relationship_cas_err(e: LocalDbError, relationship_id: &str) -> CoreError {
         match e {

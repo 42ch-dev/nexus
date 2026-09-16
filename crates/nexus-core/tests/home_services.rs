@@ -532,14 +532,14 @@ async fn select_workspace_failure_keeps_previous_selection_and_principal() {
         )
         .await;
     assert!(
-        matches!(result, Ok(_)),
+        result.is_ok(),
         "old principal must survive a failed selection"
     );
     core.close().await.expect("close");
 }
 
 /// Stale-selection contract across BOTH switch kinds: a principal minted
-/// before a workspace switch or an identity switch is AuthRequired (disk
+/// before a workspace switch or an identity switch is `AuthRequired` (disk
 /// re-read), and a fresh reopen against the new selection recovers.
 #[tokio::test]
 async fn stale_principal_after_workspace_and_identity_switch_recovers_on_reopen() {
@@ -562,7 +562,7 @@ async fn stale_principal_after_workspace_and_identity_switch_recovers_on_reopen(
     .await
     .expect("open core");
     let principal = core.active_principal().await.expect("principal");
-    assert!(matches!(probe_changes(&core, &principal).await, Ok(_)));
+    assert!(probe_changes(&core, &principal).await.is_ok());
 
     // Workspace switch: the old principal is AuthRequired on its next call.
     svc.select_workspace(SetActiveWorkspaceRequest {
@@ -591,7 +591,7 @@ async fn stale_principal_after_workspace_and_identity_switch_recovers_on_reopen(
         .active_principal()
         .await
         .expect("principal after reopen");
-    assert!(matches!(probe_changes(&core, &principal).await, Ok(_)));
+    assert!(probe_changes(&core, &principal).await.is_ok());
 
     // Identity switch: the old principal is AuthRequired again.
     let _creator_b = register_named(&svc, "Switch Successor").await;
@@ -625,11 +625,11 @@ async fn stale_principal_after_workspace_and_identity_switch_recovers_on_reopen(
     .await
     .expect("reopen core as b");
     let principal = core.active_principal().await.expect("principal as b");
-    assert!(matches!(probe_changes(&core, &principal).await, Ok(_)));
+    assert!(probe_changes(&core, &principal).await.is_ok());
     core.close().await.expect("close");
 }
 
-/// storage_status() regressions: read-only diagnostics never initialize or
+/// `storage_status()` regressions: read-only diagnostics never initialize or
 /// migrate the store, and faults are reported instead of faking health.
 #[tokio::test]
 async fn storage_status_never_initializes_and_reports_faults_honestly() {
@@ -697,7 +697,7 @@ async fn storage_status_never_initializes_and_reports_faults_honestly() {
     );
 }
 
-/// storage_status() on an initialized store: real versions, real health,
+/// `storage_status()` on an initialized store: real versions, real health,
 /// real tables.
 #[tokio::test]
 async fn storage_status_reports_healthy_initialized_store() {

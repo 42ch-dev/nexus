@@ -65,7 +65,7 @@ pub struct CoreOpenOptions {
     pub access: CoreAccess,
 }
 
-pub(crate) struct CoreInner {
+pub struct CoreInner {
     pub(crate) pool: SqlitePool,
     /// The workspace `state.db` this service serves. The execution owner
     /// registry is keyed by it, so the single-owner fence spans every
@@ -224,6 +224,20 @@ impl CoreService {
     /// The nexus root this service was opened against (`<user_home>/.nexus42`).
     /// Core family modules resolve bearer file paths (SOUL.md, long-term
     /// memory) through it; the field stays private to this module.
+    #[must_use]
+    /// The Creator DB pool, for crate-external integration tests only.
+    ///
+    /// Architecture §Cohorts keeps the pool out of the product API: this
+    /// accessor is compiled solely for test builds (`test-hooks` / `cfg(test)`)
+    /// and exists so the `crates/nexus-core/tests/*` acceptance targets can
+    /// seed and inspect the same guarded store the service writes. It is not a
+    /// second business truth and must not acquire production callers.
+    #[cfg(any(test, feature = "test-hooks"))]
+    #[must_use]
+    pub fn pool(&self) -> &SqlitePool {
+        &self.inner.pool
+    }
+
     pub fn nexus_home(&self) -> &std::path::Path {
         &self.inner.nexus_home
     }

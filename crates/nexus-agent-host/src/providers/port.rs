@@ -714,7 +714,7 @@ impl ProviderPortAdapter {
                 return Err(CoreError {
                     code: CoreErrorCode::NotSupported,
                     message: "provider does not support cancellation".into(),
-                    details: Default::default(),
+                    details: serde_json::Map::default(),
                     http_status: Some(400),
                 });
             }

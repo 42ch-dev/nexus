@@ -371,9 +371,9 @@ async fn review_both_arms_share_classification_and_isolate_storage() {
         )
         .await
         .expect("creator review batch");
-    assert_eq!(i64::from(creator_out.promoted), 1);
-    assert_eq!(i64::from(creator_out.fragmented), 1);
-    assert_eq!(i64::from(creator_out.dropped), 1);
+    assert_eq!(creator_out.promoted, 1);
+    assert_eq!(creator_out.fragmented, 1);
+    assert_eq!(creator_out.dropped, 1);
 
     let char_out = core
         .review_character_memory(
@@ -383,9 +383,9 @@ async fn review_both_arms_share_classification_and_isolate_storage() {
         )
         .await
         .expect("character review batch");
-    assert_eq!(i64::from(char_out.promoted), 1);
-    assert_eq!(i64::from(char_out.fragmented), 1);
-    assert_eq!(i64::from(char_out.dropped), 1);
+    assert_eq!(char_out.promoted, 1);
+    assert_eq!(char_out.fragmented, 1);
+    assert_eq!(char_out.dropped, 1);
 
     let pool = plain_pool(&env).await;
     assert_eq!(

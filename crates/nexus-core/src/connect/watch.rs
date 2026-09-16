@@ -535,6 +535,7 @@ async fn apply_reload(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::connect::table::ConnectResponderAdapter;
     use nexus_home_layout::{connect_daemon_config_path, connect_peer_keys_path};
     use nexus_spoke_adapter::HostCapabilityManifest;
     use spoke_connect::remote::{
@@ -993,7 +994,7 @@ mod tests {
         .expect("valid manifest")
     }
 
-    async fn responder() -> Arc<spoke_connect::remote::ConnectResponder> {
+    async fn responder() -> Arc<ConnectResponderAdapter> {
         let pair = loopback_transport_pair();
         let options = ConnectResponderOptions {
             transport: Arc::new(pair.server),
@@ -1008,7 +1009,11 @@ mod tests {
         // admission seam test we only need the handle (no dialer). Awaited
         // inside the caller's `#[tokio::test]` runtime — no nested
         // `block_on`.
-        connect_responder(options).await
+        //
+        // The core port is `ConnectResponderAdapter` (the type carrying the
+        // `PeerResponder` impl), not the bare wire responder.
+        let inner = connect_responder(options).await;
+        Arc::new(ConnectResponderAdapter::new(inner, "peer-a".to_owned()))
     }
 
     fn caps(ids: &[&str]) -> HashSet<String> {

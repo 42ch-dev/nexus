@@ -136,6 +136,12 @@ pub fn check_stage_advance(
 
 /// Remove the derived completion-lock artifact; the database remains authoritative.
 /// This is the existing idempotent filesystem release, not a scheduler operation.
+///
+/// # Errors
+///
+/// Returns the underlying [`std::io::Error`] when the lock file cannot be
+/// removed (permissions, I/O failure); a missing file is the idempotent
+/// success path, not an error.
 pub fn release_completion_lock(
     workspace_dir: &std::path::Path,
     work_ref: &str,

@@ -176,7 +176,7 @@ impl CoreError {
 }
 
 /// True for SQLite lock-contention errors (`SQLITE_BUSY` family).
-pub(crate) fn is_sqlite_busy(err: &sqlx::Error) -> bool {
+pub fn is_sqlite_busy(err: &sqlx::Error) -> bool {
     match err {
         sqlx::Error::Database(db) => {
             db.code().as_deref() == Some("5")
@@ -188,7 +188,7 @@ pub(crate) fn is_sqlite_busy(err: &sqlx::Error) -> bool {
 }
 
 /// Map a `nexus_local_db` storage error onto the core taxonomy.
-pub(crate) fn local_db_err(e: LocalDbError) -> CoreError {
+pub fn local_db_err(e: LocalDbError) -> CoreError {
     match e {
         LocalDbError::OwnerBusy { .. } | LocalDbError::Sqlx(sqlx::Error::PoolTimedOut) => {
             CoreError::OwnerBusy
@@ -204,7 +204,7 @@ pub(crate) fn local_db_err(e: LocalDbError) -> CoreError {
 
 /// Map a raw SQLite driver error onto the core taxonomy (M1 precedent:
 /// lock contention → `Busy`, pool timeout → `OwnerBusy`).
-pub(crate) fn db_err(e: &sqlx::Error) -> CoreError {
+pub fn db_err(e: &sqlx::Error) -> CoreError {
     if is_sqlite_busy(e) {
         CoreError::Busy
     } else if matches!(e, sqlx::Error::PoolTimedOut) {
@@ -220,7 +220,7 @@ pub(crate) fn db_err(e: &sqlx::Error) -> CoreError {
 /// the retained wire meaning per variant: stable contract conflicts keep
 /// their code + message, not-found keeps the daemon `"{resource} {id} not
 /// found"` message, and validation keeps the plain `invalid_input` message.
-pub(crate) fn actor_db_err(e: LocalDbError) -> CoreError {
+pub fn actor_db_err(e: LocalDbError) -> CoreError {
     match e {
         LocalDbError::ActorNotFound { resource, id } => CoreError::NotFound {
             resource: format!("{resource} {id} not found"),
@@ -238,7 +238,7 @@ pub(crate) fn actor_db_err(e: LocalDbError) -> CoreError {
 /// the insert path renders not-found WITHOUT the ` not found` suffix and
 /// treats constraint violations as plain `invalid_input` (retained daemon
 /// `map_local_db_insert_err` texture).
-pub(crate) fn actor_insert_db_err(e: LocalDbError) -> CoreError {
+pub fn actor_insert_db_err(e: LocalDbError) -> CoreError {
     if matches!(e, LocalDbError::ConstraintViolation { .. }) {
         return CoreError::ActorInput(e.to_string());
     }
