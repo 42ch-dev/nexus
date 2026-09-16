@@ -335,11 +335,13 @@ pub async fn execute_tool(
 
 /// The audit label for a refusal.
 ///
-/// A `Coded` refusal reports its own code; every other class reports the
-/// taxonomy category the audit table keys on.
-fn err_code(err: &CoreError) -> &'static str {
+/// The retained audit contract records the SAME lowercase code the caller
+/// receives (the daemon's `error_code()`), so a `Coded` refusal reports its own
+/// code rather than a generic bucket — an operator grepping the audit log for
+/// `not_supported` must find it.
+fn err_code(err: &CoreError) -> &str {
     match err {
-        CoreError::Coded { .. } => "coded",
+        CoreError::Coded { code, .. } | CoreError::PeerDenied { code, .. } => code,
         CoreError::Forbidden { .. } | CoreError::WorldOwnerDenied { .. } => "forbidden",
         CoreError::NotFound { .. } => "not_found",
         CoreError::InvalidInput { .. } => "invalid_input",
@@ -348,7 +350,6 @@ fn err_code(err: &CoreError) -> &'static str {
         CoreError::Busy | CoreError::OwnerBusy => "busy",
         CoreError::Closing => "closing",
         CoreError::Interrupted => "interrupted",
-        CoreError::PeerDenied { .. } => "peer_denied",
         _ => "internal",
     }
 }
