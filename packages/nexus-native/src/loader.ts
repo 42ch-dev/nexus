@@ -301,6 +301,35 @@ export interface NativeCoreBinding {
   reflectCreatorSoul(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
   inspectMoment(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
   momentDirective(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  // ── P5-T3 Execution / preset / strategy family surface ─────────────────────
+  startExecutionOwner(): Promise<Uint8Array>;
+  listPresets(principal: string): Promise<Uint8Array>;
+  getPreset(principal: string, presetId: string): Promise<Uint8Array>;
+  scaffoldPreset(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  validatePreset(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  updatePreset(principal: string, presetId: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  deletePreset(principal: string, presetId: string): Promise<void>;
+  listOrchestrationPresets(principal: string): Promise<Uint8Array>;
+  getPresetProfile(principal: string, presetId: string): Promise<Uint8Array>;
+  patchStrategyState(
+    principal: string,
+    strategyId: string,
+    stateId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  patchStrategyTransition(
+    principal: string,
+    strategyId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  patchStrategyPromptTemplate(
+    principal: string,
+    strategyId: string,
+    stateId: string,
+    requestJson: Uint8Array,
+  ): Promise<Uint8Array>;
+  addSchedule(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
+  signalSchedule(principal: string, scheduleId: string, requestJson: Uint8Array): Promise<Uint8Array>;
 }
 
 export interface NativeBinding {

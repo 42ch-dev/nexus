@@ -162,6 +162,24 @@ import type {
   MomentInspectResponse,
   MomentDirectiveRequest,
   MomentDirectiveResponse,
+  ListPresetsResponse,
+  GetPresetResponse,
+  ScaffoldPresetRequest,
+  ScaffoldPresetResponse,
+  ValidatePresetRequest,
+  ValidatePresetResponse,
+  UpdatePresetRequest,
+  UpdatePresetResponse,
+  OrchestrationPresetListResponse,
+  PresetProfileResponse,
+  CoreStrategyPatchResponse,
+  StrategyPatchStateRequest,
+  StrategyPatchTransitionRequest,
+  StrategyPatchPromptTemplateRequest,
+  AddScheduleRequest,
+  AddScheduleResponse,
+  SignalScheduleRequest,
+  SignalScheduleResponse,
 } from '@42ch/nexus-contracts';
 import {
   expectedPlatformPackage,
@@ -615,6 +633,52 @@ export interface NativeCore {
     principal: PrincipalHandle,
     request: MomentDirectiveRequest,
   ): Promise<MomentDirectiveResponse>;
+  // ── P5-T3 Execution / preset / strategy family surface ────────────────────
+  startExecutionOwner(): Promise<{ engine_epoch: number }>;
+  listPresets(principal: PrincipalHandle): Promise<ListPresetsResponse>;
+  getPreset(principal: PrincipalHandle, presetId: string): Promise<GetPresetResponse>;
+  scaffoldPreset(
+    principal: PrincipalHandle,
+    request: ScaffoldPresetRequest,
+  ): Promise<ScaffoldPresetResponse>;
+  validatePreset(
+    principal: PrincipalHandle,
+    request: ValidatePresetRequest,
+  ): Promise<ValidatePresetResponse>;
+  updatePreset(
+    principal: PrincipalHandle,
+    presetId: string,
+    request: UpdatePresetRequest,
+  ): Promise<UpdatePresetResponse>;
+  deletePreset(principal: PrincipalHandle, presetId: string): Promise<void>;
+  listOrchestrationPresets(principal: PrincipalHandle): Promise<OrchestrationPresetListResponse>;
+  getPresetProfile(principal: PrincipalHandle, presetId: string): Promise<PresetProfileResponse>;
+  patchStrategyState(
+    principal: PrincipalHandle,
+    strategyId: string,
+    stateId: string,
+    request: StrategyPatchStateRequest,
+  ): Promise<CoreStrategyPatchResponse>;
+  patchStrategyTransition(
+    principal: PrincipalHandle,
+    strategyId: string,
+    request: StrategyPatchTransitionRequest,
+  ): Promise<CoreStrategyPatchResponse>;
+  patchStrategyPromptTemplate(
+    principal: PrincipalHandle,
+    strategyId: string,
+    stateId: string,
+    request: StrategyPatchPromptTemplateRequest,
+  ): Promise<CoreStrategyPatchResponse>;
+  addSchedule(
+    principal: PrincipalHandle,
+    request: AddScheduleRequest,
+  ): Promise<AddScheduleResponse>;
+  signalSchedule(
+    principal: PrincipalHandle,
+    scheduleId: string,
+    request: SignalScheduleRequest,
+  ): Promise<SignalScheduleResponse>;
 }
 
 function wrapCore(inner: NativeCoreBinding): NativeCore {
@@ -798,6 +862,20 @@ type DomainSurface = Pick<
   | 'reflectCreatorSoul'
   | 'inspectMoment'
   | 'momentDirective'
+  | 'startExecutionOwner'
+  | 'listPresets'
+  | 'getPreset'
+  | 'scaffoldPreset'
+  | 'validatePreset'
+  | 'updatePreset'
+  | 'deletePreset'
+  | 'listOrchestrationPresets'
+  | 'getPresetProfile'
+  | 'patchStrategyState'
+  | 'patchStrategyTransition'
+  | 'patchStrategyPromptTemplate'
+  | 'addSchedule'
+  | 'signalSchedule'
 >;
 
 function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
@@ -1207,6 +1285,67 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
     },
     async momentDirective(principal, request) {
       return json(await inner.momentDirective(principal, wire(request, 'request')));
+    },
+    // ── P5-T3 Execution / preset / strategy family surface ──────────────────
+    async startExecutionOwner() {
+      return json(await inner.startExecutionOwner());
+    },
+    async listPresets(principal) {
+      return json(await inner.listPresets(principal));
+    },
+    async getPreset(principal, presetId) {
+      return json(await inner.getPreset(principal, presetId));
+    },
+    async scaffoldPreset(principal, request) {
+      return json(await inner.scaffoldPreset(principal, wire(request, 'request')));
+    },
+    async validatePreset(principal, request) {
+      return json(await inner.validatePreset(principal, wire(request, 'request')));
+    },
+    async updatePreset(principal, presetId, request) {
+      return json(await inner.updatePreset(principal, presetId, wire(request, 'request')));
+    },
+    async deletePreset(principal, presetId) {
+      await inner.deletePreset(principal, presetId);
+    },
+    async listOrchestrationPresets(principal) {
+      return json(await inner.listOrchestrationPresets(principal));
+    },
+    async getPresetProfile(principal, presetId) {
+      return json(await inner.getPresetProfile(principal, presetId));
+    },
+    async patchStrategyState(principal, strategyId, stateId, request) {
+      return json(
+        await inner.patchStrategyState(
+          principal,
+          strategyId,
+          stateId,
+          wire(request, 'request'),
+        ),
+      );
+    },
+    async patchStrategyTransition(principal, strategyId, request) {
+      return json(
+        await inner.patchStrategyTransition(principal, strategyId, wire(request, 'request')),
+      );
+    },
+    async patchStrategyPromptTemplate(principal, strategyId, stateId, request) {
+      return json(
+        await inner.patchStrategyPromptTemplate(
+          principal,
+          strategyId,
+          stateId,
+          wire(request, 'request'),
+        ),
+      );
+    },
+    async addSchedule(principal, request) {
+      return json(await inner.addSchedule(principal, wire(request, 'request')));
+    },
+    async signalSchedule(principal, scheduleId, request) {
+      return json(
+        await inner.signalSchedule(principal, scheduleId, wire(request, 'request')),
+      );
     },
   };
 }

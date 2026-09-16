@@ -30,6 +30,8 @@ import {
 import { ACTOR_ROUTES } from './actors.js';
 import { MEMORY_ROUTES } from './memory.js';
 import { CONTEXT_ROUTES } from './context.js';
+import { PRESET_ROUTES } from './presets.js';
+import { EXECUTION_ROUTES } from './execution.js';
 
 /**
  * The World/Work/content/knowledge families self-describe their retained
@@ -43,7 +45,9 @@ export type DomainFamily =
   | 'knowledge'
   | 'actors'
   | 'memory'
-  | 'context';
+  | 'context'
+  | 'presets'
+  | 'execution';
 
 /** One retained family identity: exact path pattern, verb, tier and handler. */
 export interface DomainRoute {
@@ -74,6 +78,8 @@ export const DOMAIN_ROUTES: readonly DomainRoute[] = [
   ...ACTOR_ROUTES,
   ...MEMORY_ROUTES,
   ...CONTEXT_ROUTES,
+  ...PRESET_ROUTES,
+  ...EXECUTION_ROUTES,
 ];
 
 export type RouteTier = 'unguarded' | 'tier1' | 'tier2' | 'provider_stream';

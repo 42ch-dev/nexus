@@ -11,6 +11,7 @@ mod cleanup_registry;
 mod core_error;
 mod domain;
 mod env_state;
+mod execution;
 mod host_query;
 mod lifecycle;
 mod runtime;

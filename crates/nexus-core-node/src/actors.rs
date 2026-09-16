@@ -57,7 +57,7 @@ use nexus_contracts::daemon_api::characters::{
 };
 use nexus_contracts::daemon_api::creators::{
     active_creator_response::ActiveCreatorResponse, list_creators_query::ListCreatorsQuery,
-    list_creators_response::ListCreatorsResponse, logout_response::LogoutResponse,
+    logout_response::LogoutResponse,
     set_active_creator_request::SetActiveCreatorRequest,
     set_active_creator_response::SetActiveCreatorResponse,
 };
@@ -73,7 +73,7 @@ use nexus_contracts::daemon_api::memory::{
     delete_pending_review_response::DeletePendingReviewResponse,
     list_memory_fragments_query::ListMemoryFragmentsQuery,
     list_pending_reviews_query::ListPendingReviewsQuery,
-    list_pending_reviews_response::ListPendingReviewsResponse, review_request::ReviewRequest,
+    review_request::ReviewRequest,
     review_response::ReviewResponse, soul_narrative_request::SoulNarrativeRequest,
 };
 use nexus_contracts::generated::core::CoreCharacterTransitionRequest;
