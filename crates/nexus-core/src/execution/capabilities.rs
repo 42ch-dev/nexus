@@ -3155,7 +3155,7 @@ async fn dispatch_user_cap(
 /// with `nexus.` and must not match the peer grammar `^tools\.…`; the
 /// declared `input_schema()` must parse as a JSON object. Fail-closed —
 /// a non-admitted capability is neither dispatchable nor listed.
-pub(crate) fn user_cap_catalog_admission(
+pub fn user_cap_catalog_admission(
     cap: Option<&dyn nexus_orchestration::capability::Capability>,
 ) -> Result<&dyn nexus_orchestration::capability::Capability, UserCapCatalogRefusal> {
     let cap = cap.ok_or(UserCapCatalogRefusal::NotUserCapability)?;
@@ -3188,7 +3188,7 @@ pub(crate) fn user_cap_catalog_admission(
 /// (MCP requires an object root; non-object outputs are omitted, never
 /// invented, never wrapped). Shared by the peer merge (connect-client) and
 /// the user-cap branch of the catalog.
-pub(crate) fn json_schema_has_object_root(raw: &str) -> bool {
+pub fn json_schema_has_object_root(raw: &str) -> bool {
     serde_json::from_str::<Value>(raw)
         .ok()
         .and_then(|v| {

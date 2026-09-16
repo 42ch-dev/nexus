@@ -57,7 +57,9 @@ pub mod directive;
 pub mod findings;
 pub mod fork;
 pub mod host_tool_executor;
-pub mod host_tool_handlers;
+// v1.190 P3-T3: `host_tool_handlers` was the moved dispatch body. It now
+// lives in `nexus_core::execution::capabilities`; the daemon keeps only the
+// thin `host_tool_executor` bridge, so there is no second spine.
 pub mod inspector;
 pub mod kb;
 pub mod memory;

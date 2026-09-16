@@ -12,7 +12,10 @@ workspace = true
 
 [dependencies]
 nexus-home-layout = { path = "../nexus-home-layout" }
-nexus-core = { path = "../nexus-core", features = ["execution"] }
+# `compute` is required: the daemon's compute routes are thin delegations onto
+# nexus-core::execution::compute, so the WASM lane now lives in core and the
+# daemon must enable the edge that compiles it.
+nexus-core = { path = "../nexus-core", features = ["execution", "compute"] }
 nexus-contracts = { path = "../nexus-contracts" }
 nexus-creator = { path = "../nexus-creator" }
 nexus-local-db = { path = "../nexus-local-db" }
