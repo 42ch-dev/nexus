@@ -144,9 +144,16 @@ async fn annotation_note_clear_and_scope_isolation() {
     ));
 
     // A foreign-creator annotation row is Forbidden, not silently editable.
+    let tamper = nexus_local_db::open_pool(&nexus_home_layout::workspace_state_db_path(
+        temp.path(),
+        "author",
+        "default",
+    ))
+    .await
+    .unwrap();
     sqlx::query("UPDATE reading_annotations SET creator_id = 'other_creator' WHERE annotation_id = ?1")
         .bind(&created.annotation_id)
-        .execute(core.pool())
+        .execute(&tamper)
         .await
         .unwrap();
     let patch: ReadingAnnotationPatchRequest =

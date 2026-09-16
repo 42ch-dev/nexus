@@ -1,0 +1,814 @@
+//! Shared MCP bridge core (V1.179 P0 T1, DF-88) — the rmcp `ServerHandler`
+//! surface extracted from `apps/nexus42/src/commands/mcp/mod.rs` (V1.174 P0
+//! T5, AR-70/71/72), generic over an [`McpBackend`].
+//!
+//! Two concrete backends exist:
+//! - **Model A** (stdio child, `apps/nexus42`): a `DaemonClient`-loopback-HTTP
+//!   adapter — every `tools/list` is a live `GET /v1/daemon/tools` and every
+//!   `tools/call` is a live `POST …/tool-executions` (AR-71).
+//! - **Model B** (embedded, `connect/mcp_embedded.rs`): an in-process adapter
+//!   over the same spine as direct function calls (DF-88).
+//!
+//! This module owns the catalog-row→`Tool` mapping, the permissive fallback
+//! schema, and the full AR-70 #4 refusal vocabulary (the [`ToolCallOutcome`]
+//! classification + the MCP result mapping). The extraction is justified by
+//! the 80-line duplication cap: the shareable surface (`ServerHandler` impl +
+//! call/list logic + mapping + error vocabulary) exceeds it; `nexus-contracts`
+//! is REJECTED as the home — it is the schema SSOT and must stay
+//! transport-free (rmcp server types must not enter the contracts graph).
+//!
+//! Error mapping (AR-70 #4):
+//! - Unroutable (never-admitted / evicted / allowlist-missing /
+//!   non-exposable id) → `Err(ErrorData)` `METHOD_NOT_FOUND` naming the
+//!   refusal class.
+//! - Backend transport failure (daemon unreachable / auth rejected) →
+//!   `Err(ErrorData)` `INTERNAL_ERROR` — the backend maps its own errors;
+//!   the message never reaches the client.
+//! - Executed-but-failed (invalid args, peer deny with its wire code,
+//!   invoke timeout, transport closed, user-cap `run()` error) →
+//!   `Ok(CallToolResult::error(...))` naming the spine code.
+//! - Success → text content + `structured_content` when the spine result is
+//!   a JSON object (matching the advertised output schema), else text-only.
+//!
+//! V1.180 P1 (RN-OGA-2) adds the visibility refusal class: a tool hidden
+//! by the per-consumer `VisibilityPolicy` is refused at the seam BEFORE
+//! the backend — `Err(ErrorData)` `METHOD_NOT_FOUND` with the
+//! `tool_not_authorized` discriminator (honest-discriminator convention).
+//! Distinct from unroutable: the spine may resolve the id fine; the
+//! consumer just cannot see it. Visible-but-denied (visible per policy but
+//! denied by the authz spine) stays spine-owned — the existing
+//! `ExecutedError` / `Unroutable` / `DaemonRefused` mapping is unchanged.
+//! Boundary (AR-72): the handler implements ONLY `get_info` / `list_tools` /
+//! `call_tool`. `prompts/list` and `resources/list` keep the rmcp defaults
+//! (empty lists — SDK reality, documented in the T5 report) and
+//! `prompts/get` / `resources/read` return `METHOD_NOT_FOUND`; no other
+//! handler overrides exist beyond the tools family + server info.
+
+use std::future::Future;
+use std::sync::Arc;
+
+use crate::connect::visibility::VisibilityPolicy;
+use rmcp::model::{
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode,
+    Implementation, ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
+};
+use rmcp::service::RequestContext;
+use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
+
+/// One catalog row from the spine catalog (wire shape mirrors
+/// `catalog-tool.schema.json`).
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct CatalogRow {
+    pub id: String,
+    pub description: String,
+    pub input_schema: String,
+    #[serde(default)]
+    pub output_schema: Option<String>,
+}
+
+/// `{ "items": [...] }` wrapper of the spine catalog route.
+#[derive(Debug, serde::Deserialize)]
+pub struct CatalogResponse {
+    pub items: Vec<CatalogRow>,
+}
+
+/// Structured outcome of one spine tool execution, preserving the daemon's
+/// wire code for the protocol mapping (AR-70 #4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolCallOutcome {
+    /// Spine success `{ success: true, result: <value> }`.
+    Success(serde_json::Value),
+    /// Executed-but-failed: spine code preserved (`invalid_input`,
+    /// `not_supported` + peer wire code, `service_unavailable`, ...).
+    ExecutedError {
+        code: String,
+        message: String,
+        wire_code: Option<String>,
+    },
+    /// Unroutable: never-admitted / evicted / allowlist-missing id.
+    Unroutable { code: String, message: String },
+    /// The spine refuses the caller itself (auth rejected) — an opaque
+    /// `INTERNAL_ERROR` per AR-70 #4, the message never reaches the client.
+    DaemonRefused { message: String },
+    /// Visibility refusal (V1.180 P1, RN-OGA-2): the consumer is not
+    /// authorized for this tool — hidden by the per-consumer
+    /// `VisibilityPolicy`, refused at the seam BEFORE the backend.
+    /// Distinct from `Unroutable` (the spine cannot resolve the id at
+    /// all): the tool may be perfectly spine-resolvable, but the
+    /// consumer cannot see it. Mapped to `METHOD_NOT_FOUND` with the
+    /// `tool_not_authorized` discriminator (honest-discriminator
+    /// convention, cf. `embedded_mcp_session_limit` / `converge_timeout`).
+    NotAuthorized { tool_name: String },
+}
+
+/// The spine face a concrete MCP backend adapts (AR-71 Model A loopback
+/// HTTP; DF-88 Model B in-process function calls).
+///
+/// The backend is responsible for resolving the live catalog and executing
+/// one tool through the spine, mapping the outcome into the
+/// [`ToolCallOutcome`] vocabulary. Transport-level failures (daemon
+/// unreachable, auth rejected) are returned as `McpError` — the handler
+/// surfaces them as bounded `INTERNAL_ERROR`s.
+///
+/// `advertise_tool_list_changed` reports whether the backend runs the AR-79
+/// catalog-watch loop and can deliver `notifications/tools/list_changed`.
+/// Model A (stdio child) overrides to `true`; the embedded server has no
+/// watcher (Model-A-only, AR-79 #5) and must not advertise a capability it
+/// never delivers.
+pub trait McpBackend: Send + Sync + 'static {
+    /// Resolve the live catalog rows (same shape as `GET /v1/daemon/tools`).
+    fn list_tools(&self) -> impl Future<Output = Result<Vec<CatalogRow>, McpError>> + Send;
+
+    /// Execute one tool through the spine, mapping the outcome into the
+    /// AR-70 #4 vocabulary.
+    fn call_tool(
+        &self,
+        tool_name: &str,
+        parameters: serde_json::Value,
+    ) -> impl Future<Output = Result<ToolCallOutcome, McpError>> + Send;
+
+    /// Whether this backend delivers `notifications/tools/list_changed`
+    /// (AR-79). Default `false` — only the stdio child's watcher overrides.
+    fn advertise_tool_list_changed(&self) -> bool {
+        false
+    }
+}
+
+/// The stateless MCP bridge handler (AR-70), generic over the spine backend.
+pub struct McpBridgeHandler<B> {
+    pub backend: B,
+    /// Per-consumer `tools/list` visibility policy (V1.180 P1, RN-OGA-2).
+    /// Absent ⇒ byte-identical current behavior; present ⇒ `tools/list` is
+    /// filtered to the configured subset and a hidden-tool `tools/call`
+    /// short-circuits at the seam before the backend.
+    pub policy: VisibilityPolicy,
+}
+
+impl<B: McpBackend> ServerHandler for McpBridgeHandler<B> {
+    fn get_info(&self) -> ServerInfo {
+        let mut capabilities = ServerCapabilities::builder().enable_tools();
+        if self.backend.advertise_tool_list_changed() {
+            // AR-79 #4 (F-6): order matters — `enable_tools()` must precede
+            // `enable_tool_list_changed()` (the builder only touches an
+            // existing `tools` capability).
+            capabilities = capabilities.enable_tool_list_changed();
+        }
+        ServerInfo::new(capabilities.build())
+            .with_server_info(Implementation::new("nexus42", env!("CARGO_PKG_VERSION")))
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> std::result::Result<ListToolsResult, McpError> {
+        let rows = self.backend.list_tools().await?;
+        // V1.180 P1 (RN-OGA-2): the visibility seam filters the catalog
+        // rows BEFORE the row→Tool mapping. Absent policy ⇒ identity
+        // (byte-identical current behavior).
+        let tools: Vec<Tool> = rows
+            .into_iter()
+            .filter(|row| self.policy.is_visible(&row.id))
+            .map(row_into_tool)
+            .collect();
+        Ok(ListToolsResult::with_all_items(tools))
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> std::result::Result<CallToolResponse, McpError> {
+        let name = request.name.to_string();
+        let parameters = serde_json::Value::Object(request.arguments.unwrap_or_default());
+
+        // V1.180 P1 (RN-OGA-2): the visibility seam short-circuits a
+        // hidden-tool call BEFORE the backend — a tool the consumer cannot
+        // see is refused at the seam, never dispatched. The refusal mints
+        // the `NotAuthorized` outcome (mapped per the AR-70 #4 classes to
+        // `METHOD_NOT_FOUND` with the `tool_not_authorized` discriminator),
+        // distinct from unroutable (the spine cannot resolve the id at
+        // all).
+        if !self.policy.is_visible(&name) {
+            return map_outcome(ToolCallOutcome::NotAuthorized { tool_name: name })
+                .map(CallToolResponse::from);
+        }
+
+        let outcome = self.backend.call_tool(&name, parameters).await?;
+        map_outcome(outcome).map(CallToolResponse::from)
+    }
+}
+
+/// Map one [`ToolCallOutcome`] to the MCP protocol result (AR-70 #4 +
+/// V1.180 P1 visibility refusal). Pure so it can be unit-pinned.
+fn map_outcome(outcome: ToolCallOutcome) -> std::result::Result<CallToolResult, McpError> {
+    match outcome {
+        ToolCallOutcome::Success(result) => Ok(success_result(result)),
+        ToolCallOutcome::ExecutedError {
+            code,
+            message,
+            wire_code,
+        } => {
+            // AR-70 #4: the daemon threads the peer wire code verbatim in
+            // `details.wire_code` (lowercase, e.g. `op_unsupported`);
+            // surface it exactly once, ahead of the message. Other
+            // executed-but-failed outcomes name the spine `code`.
+            Ok(CallToolResult::error(vec![ContentBlock::text(
+                executed_error_text(&code, &message, wire_code.as_deref()),
+            )]))
+        }
+        ToolCallOutcome::Unroutable { code, message } => Err(McpError::new(
+            ErrorCode::METHOD_NOT_FOUND,
+            format!("unroutable: {code}: {message}"),
+            None,
+        )),
+        ToolCallOutcome::DaemonRefused { message } => Err(McpError::internal_error(
+            format!("daemon refused tool call: {message}"),
+            None,
+        )),
+        ToolCallOutcome::NotAuthorized { tool_name } => Err(McpError::new(
+            ErrorCode::METHOD_NOT_FOUND,
+            format!("tool_not_authorized: {tool_name}"),
+            None,
+        )),
+    }
+}
+
+/// Typed unroutable discrimination (T4 review M-1).
+///
+/// `not_supported` without `details.wire_code` is unroutable
+/// (never-admitted / evicted / allowlist-missing — the daemon
+/// `BadRequest` path never supplies a wire code); `not_supported` WITH a
+/// wire code is always a peer deny (executed-but-failed). Pure so it can
+/// be unit-pinned.
+#[must_use]
+pub fn is_unroutable(code: &str, wire_code: Option<&str>) -> bool {
+    code == "not_supported" && wire_code.is_none()
+}
+
+/// Map one daemon catalog row to an rmcp `Tool` (AR-70 §3 schema mapping):
+/// `input_schema` carried verbatim; `output_schema` carried only when
+/// present (the catalog already omits non-root-object outputs).
+fn row_into_tool(row: CatalogRow) -> Tool {
+    let input = parse_schema(&row.input_schema).unwrap_or_else(default_object_schema);
+    let mut tool = Tool::new(row.id, row.description, Arc::new(input));
+    if let Some(out) = row.output_schema {
+        if let Some(map) = parse_schema(&out) {
+            tool = tool.with_raw_output_schema(Arc::new(map));
+        }
+    }
+    tool
+}
+
+/// The documented permissive fallback input schema (AR-70 §3 placeholder).
+fn default_object_schema() -> serde_json::Map<String, serde_json::Value> {
+    let mut map = serde_json::Map::new();
+    map.insert("type".into(), serde_json::Value::String("object".into()));
+    map
+}
+
+/// Parse a JSON-Schema string into an object, or `None` on failure.
+fn parse_schema(raw: &str) -> Option<serde_json::Map<String, serde_json::Value>> {
+    serde_json::from_str::<serde_json::Value>(raw)
+        .ok()
+        .and_then(|v| v.as_object().cloned())
+}
+
+/// Build the success result: `structured_content` when the spine result is
+/// a JSON object (matches the advertised output schema), text-only else.
+fn success_result(value: serde_json::Value) -> CallToolResult {
+    if value.is_object() {
+        CallToolResult::structured(value)
+    } else {
+        let text = serde_json::to_string(&value).unwrap_or_else(|_| "null".to_owned());
+        CallToolResult::success(vec![ContentBlock::text(text)])
+    }
+}
+
+/// Format the executed-but-failed content (AR-70 #4): the typed peer wire
+/// code (`details.wire_code`, lowercase e.g. `op_unsupported`) takes
+/// precedence when present; otherwise the spine `code` names the failure.
+fn executed_error_text(code: &str, message: &str, wire_code: Option<&str>) -> String {
+    let effective = wire_code.unwrap_or(code);
+    format!("{effective}: {message}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rmcp::model::ClientInfo;
+    use rmcp::{serve_client, serve_server, ServiceError};
+
+    #[test]
+    fn row_into_tool_carries_schemas_verbatim() {
+        let row = CatalogRow {
+            id: "tools.t5.echo".to_owned(),
+            description: "echo".to_owned(),
+            input_schema: r#"{"type":"object","required":["x"]}"#.to_owned(),
+            output_schema: Some(r#"{"type":"object","properties":{"echo":{}}}"#.to_owned()),
+        };
+        let tool = row_into_tool(row);
+        assert_eq!(tool.name, "tools.t5.echo");
+        assert_eq!(
+            tool.input_schema.get("required"),
+            Some(&serde_json::json!(["x"]))
+        );
+        let out = tool.output_schema.expect("output schema carried");
+        assert_eq!(
+            out.get("properties").and_then(|p| p.get("echo")),
+            Some(&serde_json::Value::Object(serde_json::Map::new()))
+        );
+    }
+
+    #[test]
+    fn unparseable_input_schema_falls_back_to_permissive_object() {
+        let row = CatalogRow {
+            id: "nexus.workspace.info".to_owned(),
+            description: "info".to_owned(),
+            input_schema: "not-json".to_owned(),
+            output_schema: None,
+        };
+        let tool = row_into_tool(row);
+        assert_eq!(
+            tool.input_schema.get("type"),
+            Some(&serde_json::Value::String("object".into()))
+        );
+        assert!(tool.output_schema.is_none());
+    }
+
+    #[test]
+    fn executed_error_text_surfaces_typed_wire_code_exactly_once() {
+        // AR-70 #4 fidelity: the daemon threads the ORIGINAL lowercase spoke
+        // wire code (`details.wire_code`, e.g. `op_unsupported`) — it must
+        // appear exactly once in the caller-visible content, and the message
+        // must not duplicate any uppercase re-derivation.
+        let text = executed_error_text(
+            "not_supported",
+            "tool tools.t4.ghost is not supported by this peer",
+            Some("op_unsupported"),
+        );
+        assert_eq!(
+            text,
+            "op_unsupported: tool tools.t4.ghost is not supported by this peer"
+        );
+        assert_eq!(text.matches("op_unsupported").count(), 1);
+        assert!(
+            !text.contains("OP_UNSUPPORTED"),
+            "uppercase re-derivation must be gone: {text}"
+        );
+    }
+
+    #[test]
+    fn unroutable_classification_is_typed_not_textual() {
+        // Unroutable: not_supported + NO wire code.
+        assert!(is_unroutable("not_supported", None));
+        // Peer deny: not_supported + typed wire code — executed failure,
+        // even when the message text contains the unroutable substring.
+        assert!(!is_unroutable("not_supported", Some("op_unsupported")));
+        // Other codes never classify unroutable regardless of wire code.
+        assert!(!is_unroutable("invalid_input", None));
+        assert!(!is_unroutable("internal", None));
+    }
+
+    #[test]
+    fn executed_error_text_falls_back_to_spine_code_without_wire_code() {
+        let text = executed_error_text("invalid_input", "missing required argument", None);
+        assert_eq!(text, "invalid_input: missing required argument");
+    }
+
+    #[test]
+    fn success_result_uses_structured_content_for_objects() {
+        let result = success_result(serde_json::json!({"ok": true}));
+        assert_eq!(result.is_error, Some(false));
+        assert_eq!(
+            result.structured_content,
+            Some(serde_json::json!({ "ok": true }))
+        );
+        let scalar = success_result(serde_json::json!("hello"));
+        assert!(scalar.structured_content.is_none());
+        assert_eq!(scalar.content.len(), 1);
+    }
+
+    /// Stub backend for the `get_info` advertisement pin.
+    struct StubBackend {
+        advertise: bool,
+    }
+
+    impl McpBackend for StubBackend {
+        fn list_tools(&self) -> impl Future<Output = Result<Vec<CatalogRow>, McpError>> + Send {
+            std::future::ready(Ok(Vec::new()))
+        }
+
+        fn call_tool(
+            &self,
+            _tool_name: &str,
+            _parameters: serde_json::Value,
+        ) -> impl Future<Output = Result<ToolCallOutcome, McpError>> + Send {
+            std::future::ready(Ok(ToolCallOutcome::Success(serde_json::Value::Null)))
+        }
+
+        fn advertise_tool_list_changed(&self) -> bool {
+            self.advertise
+        }
+    }
+
+    #[test]
+    fn get_info_advertises_list_changed_only_when_backend_delivers_it() {
+        // AR-79 #4 (F-6): the advertisement must carry
+        // `tools.listChanged: true` ONLY when the backend runs the catalog
+        // watcher. Model A (stdio child) overrides to `true`; the embedded
+        // server (no watcher) keeps the honest default `false`.
+        let watcher = McpBridgeHandler {
+            backend: StubBackend { advertise: true },
+            policy: VisibilityPolicy::absent(),
+        };
+        let info = watcher.get_info();
+        let tools = info
+            .capabilities
+            .tools
+            .as_ref()
+            .expect("tools capability advertised");
+        assert_eq!(
+            tools.list_changed,
+            Some(true),
+            "watcher backend advertises tools.listChanged (AR-79 #4)"
+        );
+        let wire = serde_json::to_value(&info).expect("ServerInfo serializes");
+        assert_eq!(
+            wire["capabilities"]["tools"]["listChanged"],
+            serde_json::json!(true),
+            "wire shape: capabilities.tools.listChanged == true"
+        );
+
+        let embedded = McpBridgeHandler {
+            backend: StubBackend { advertise: false },
+            policy: VisibilityPolicy::absent(),
+        };
+        let info = embedded.get_info();
+        let tools = info
+            .capabilities
+            .tools
+            .as_ref()
+            .expect("tools capability advertised");
+        assert_eq!(
+            tools.list_changed, None,
+            "embedded backend must not advertise a listChanged it never delivers"
+        );
+        let wire = serde_json::to_value(&info).expect("ServerInfo serializes");
+        assert_eq!(
+            wire["capabilities"]["tools"]["listChanged"],
+            serde_json::Value::Null,
+            "wire shape: no listChanged key for the embedded backend"
+        );
+    }
+
+    /// Stub backend with a fixed catalog and call recording for the
+    /// default-equivalence golden (V1.180 P1, RN-OGA-2). Cloneable so the
+    /// call log stays inspectable after the backend moves into the server
+    /// task.
+    #[derive(Clone)]
+    struct GoldenBackend {
+        rows: Vec<CatalogRow>,
+        calls: Arc<std::sync::Mutex<Vec<(String, serde_json::Value)>>>,
+    }
+
+    impl GoldenBackend {
+        fn new(rows: Vec<CatalogRow>) -> Self {
+            Self {
+                rows,
+                calls: Arc::new(std::sync::Mutex::new(Vec::new())),
+            }
+        }
+
+        fn called(&self) -> Vec<(String, serde_json::Value)> {
+            self.calls.lock().expect("call lock").clone()
+        }
+    }
+
+    impl McpBackend for GoldenBackend {
+        fn list_tools(&self) -> impl Future<Output = Result<Vec<CatalogRow>, McpError>> + Send {
+            let rows = self.rows.clone();
+            std::future::ready(Ok(rows))
+        }
+
+        fn call_tool(
+            &self,
+            tool_name: &str,
+            parameters: serde_json::Value,
+        ) -> impl Future<Output = Result<ToolCallOutcome, McpError>> + Send {
+            self.calls
+                .lock()
+                .expect("call lock")
+                .push((tool_name.to_owned(), parameters));
+            std::future::ready(Ok(ToolCallOutcome::Success(serde_json::json!({
+                "ok": true
+            }))))
+        }
+    }
+
+    /// Serve the handler over an in-process duplex pair and return the
+    /// client's `RunningService` — the same rmcp service layer the stdio
+    /// child and the embedded server use, so the golden exercises the real
+    /// wire path (no direct handler calls, no fabricated contexts).
+    async fn serve_handler<B: McpBackend>(
+        handler: McpBridgeHandler<B>,
+    ) -> rmcp::service::RunningService<rmcp::RoleClient, ClientInfo> {
+        let (client_io, server_io) = tokio::io::duplex(4096);
+        tokio::spawn(async move {
+            let service = serve_server(handler, server_io).await.expect("server init");
+            let _ = service.waiting().await;
+        });
+        serve_client(ClientInfo::default(), client_io)
+            .await
+            .expect("client init")
+    }
+
+    #[tokio::test]
+    async fn absent_policy_list_tools_is_byte_identical_to_unfiltered() {
+        // V1.180 P1 (RN-OGA-2): with NO visibility policy the seam must be
+        // byte-identical to the pre-seam behavior — every catalog row
+        // listed, in order, schemas verbatim. The golden JSON pins the
+        // exact wire shape (camelCase keys; absent `_meta`/`nextCursor`).
+        let rows = vec![
+            CatalogRow {
+                id: "nexus.workspace.info".to_owned(),
+                description: "workspace info".to_owned(),
+                input_schema: r#"{"type":"object","required":["x"]}"#.to_owned(),
+                output_schema: Some(r#"{"type":"object","properties":{"echo":{}}}"#.to_owned()),
+            },
+            CatalogRow {
+                id: "tools.t5.echo".to_owned(),
+                description: "echo".to_owned(),
+                input_schema: r#"{"type":"object"}"#.to_owned(),
+                output_schema: None,
+            },
+        ];
+        let running = serve_handler(McpBridgeHandler {
+            backend: GoldenBackend::new(rows),
+            policy: VisibilityPolicy::absent(),
+        })
+        .await;
+        let result = running.list_tools(None).await.expect("tools/list succeeds");
+        let wire = serde_json::to_value(&result).expect("ListToolsResult serializes");
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "tools": [
+                    {
+                        "name": "nexus.workspace.info",
+                        "description": "workspace info",
+                        "inputSchema": { "type": "object", "required": ["x"] },
+                        "outputSchema": { "type": "object", "properties": { "echo": {} } }
+                    },
+                    {
+                        "name": "tools.t5.echo",
+                        "description": "echo",
+                        "inputSchema": { "type": "object" }
+                    }
+                ]
+            }),
+            "absent policy ⇒ byte-identical tools/list (all rows, schemas verbatim)"
+        );
+    }
+
+    #[tokio::test]
+    async fn absent_policy_call_tool_dispatches_to_backend_unchanged() {
+        // V1.180 P1 (RN-OGA-2): with NO visibility policy the seam must
+        // dispatch every call to the backend exactly as before — the
+        // backend is invoked with the caller's name + arguments and the
+        // outcome maps identically (success → structured content).
+        let backend = GoldenBackend::new(Vec::new());
+        let running = serve_handler(McpBridgeHandler {
+            backend: backend.clone(),
+            policy: VisibilityPolicy::absent(),
+        })
+        .await;
+        let result = running
+            .call_tool(
+                CallToolRequestParams::new("nexus.workspace.info").with_arguments(
+                    serde_json::json!({ "k": "v" })
+                        .as_object()
+                        .expect("object")
+                        .clone(),
+                ),
+            )
+            .await
+            .expect("call succeeds");
+        assert_eq!(result.is_error, Some(false));
+        assert_eq!(
+            result.structured_content,
+            Some(serde_json::json!({ "ok": true }))
+        );
+        let calls = backend.called();
+        assert_eq!(calls.len(), 1, "backend invoked exactly once");
+        assert_eq!(calls[0].0, "nexus.workspace.info");
+        assert_eq!(calls[0].1, serde_json::json!({ "k": "v" }));
+    }
+
+    #[tokio::test]
+    async fn present_policy_list_tools_filters_to_visible_subset() {
+        // V1.180 P1 (RN-OGA-2): a present policy narrows `tools/list` to
+        // the operator-configured subset — unlisted rows are dropped
+        // BEFORE the row→Tool mapping, listed rows keep their verbatim
+        // schemas.
+        let rows = vec![
+            CatalogRow {
+                id: "nexus.workspace.info".to_owned(),
+                description: "workspace info".to_owned(),
+                input_schema: r#"{"type":"object","required":["x"]}"#.to_owned(),
+                output_schema: None,
+            },
+            CatalogRow {
+                id: "tools.t5.echo".to_owned(),
+                description: "echo".to_owned(),
+                input_schema: r#"{"type":"object"}"#.to_owned(),
+                output_schema: None,
+            },
+        ];
+        let running = serve_handler(McpBridgeHandler {
+            backend: GoldenBackend::new(rows),
+            policy: VisibilityPolicy::from_visible(["nexus.workspace.info".to_owned()]),
+        })
+        .await;
+        let result = running.list_tools(None).await.expect("tools/list succeeds");
+        let wire = serde_json::to_value(&result).expect("ListToolsResult serializes");
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "tools": [
+                    {
+                        "name": "nexus.workspace.info",
+                        "description": "workspace info",
+                        "inputSchema": { "type": "object", "required": ["x"] }
+                    }
+                ]
+            }),
+            "present policy ⇒ tools/list filtered to the visible subset"
+        );
+    }
+
+    #[tokio::test]
+    async fn present_policy_hidden_tool_call_short_circuits_before_backend() {
+        // V1.180 P1 (RN-OGA-2): a hidden-tool `tools/call` is refused at
+        // the visibility seam BEFORE the backend — the backend is never
+        // invoked, and the refusal is a distinct `tool_not_authorized` protocol
+        // error (not success, not a silent no-op, not unroutable).
+        let backend = GoldenBackend::new(Vec::new());
+        let running = serve_handler(McpBridgeHandler {
+            backend: backend.clone(),
+            policy: VisibilityPolicy::from_visible(["nexus.workspace.info".to_owned()]),
+        })
+        .await;
+        let err = running
+            .call_tool(CallToolRequestParams::new("tools.t5.echo"))
+            .await
+            .expect_err("hidden tool -> protocol error");
+        let ServiceError::McpError(data) = err else {
+            panic!("expected McpError, got {err:?}");
+        };
+        assert_eq!(
+            data.code,
+            ErrorCode::METHOD_NOT_FOUND,
+            "hidden tool refused with METHOD_NOT_FOUND"
+        );
+        assert!(
+            data.message.contains("tool_not_authorized"),
+            "refusal names the visibility class: {}",
+            data.message
+        );
+        assert!(
+            backend.called().is_empty(),
+            "hidden-tool call must never reach the backend"
+        );
+    }
+
+    #[test]
+    fn map_outcome_visible_but_denied_is_typed_refusal() {
+        // V1.180 P1 (RN-OGA-2): a tool VISIBLE per policy but denied by
+        // the authz spine (admission_pipeline Forbidden / peer deny wire
+        // code) maps to an executed-but-failed `CallToolResult::error`
+        // naming the spine code — never a silent drop, never a 500.
+        let result = map_outcome(ToolCallOutcome::ExecutedError {
+            code: "forbidden".to_owned(),
+            message: "Forbidden: fs/* tools require an active workspace with defined bounds"
+                .to_owned(),
+            wire_code: None,
+        })
+        .expect("executed-but-failed is a CallToolResult, not a protocol error");
+        assert_eq!(result.is_error, Some(true));
+        let text = result
+            .content
+            .iter()
+            .find_map(|c| c.as_text().map(|t| t.text.clone()))
+            .expect("text content");
+        assert_eq!(
+            text,
+            "forbidden: Forbidden: fs/* tools require an active workspace with defined bounds",
+            "spine-owned denial names the honest spine code ahead of the message"
+        );
+    }
+
+    #[test]
+    fn map_outcome_not_authorized_is_typed_refusal() {
+        // V1.180 P1 (RN-OGA-2): the visibility-seam refusal mints the
+        // `NotAuthorized` outcome, mapped per the AR-70 #4 classes to
+        // `METHOD_NOT_FOUND` with the `tool_not_authorized` discriminator
+        // (honest-discriminator convention) — distinct from unroutable.
+        let err = map_outcome(ToolCallOutcome::NotAuthorized {
+            tool_name: "tools.t5.echo".to_owned(),
+        })
+        .expect_err("not authorized is a protocol error");
+        let McpError { code, message, .. } = err;
+        assert_eq!(code, ErrorCode::METHOD_NOT_FOUND);
+        assert_eq!(message, "tool_not_authorized: tools.t5.echo");
+    }
+
+    /// T1 review gap 6: legacy negotiated-version wire proof. A raw
+    /// JSON-RPC client negotiates the OLDEST supported protocol version
+    /// (2024-11-05) over the real NDJSON transport; the negotiated
+    /// initialize result and the `tools/call` result must carry NO
+    /// `resultType` field (that discriminator belongs to the 3.2 MRTR
+    /// `InputRequired`/`Task` variants this handler never emits).
+    #[tokio::test]
+    async fn legacy_negotiated_version_wire_carries_no_result_type() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+
+        let rows = vec![CatalogRow {
+            id: "tools.t5.echo".to_owned(),
+            description: "echo".to_owned(),
+            input_schema: r#"{"type":"object"}"#.to_owned(),
+            output_schema: None,
+        }];
+        let handler = McpBridgeHandler {
+            backend: GoldenBackend::new(rows),
+            policy: VisibilityPolicy::absent(),
+        };
+        let (client_io, server_io) = tokio::io::duplex(4096);
+        tokio::spawn(async move {
+            let service = serve_server(handler, server_io).await.expect("server init");
+            let _ = service.waiting().await;
+        });
+
+        let (read_half, mut write_half) = tokio::io::split(client_io);
+        let mut lines = tokio::io::BufReader::new(read_half).lines();
+
+        // 1. initialize at the legacy version.
+        write_half
+            .write_all(
+                br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"legacy-probe","version":"0"}}}"#,
+            )
+            .await
+            .expect("write initialize");
+        write_half.write_all(b"\n").await.expect("newline");
+        let init_line = lines
+            .next_line()
+            .await
+            .expect("initialize response")
+            .expect("line present");
+        let init: serde_json::Value =
+            serde_json::from_str(&init_line).expect("initialize response parses");
+        assert_eq!(init["id"], serde_json::json!(1));
+        assert_eq!(
+            init["result"]["protocolVersion"],
+            serde_json::json!("2024-11-05"),
+            "server negotiates the requested legacy version"
+        );
+        assert!(
+            init.get("result")
+                .and_then(|r| r.get("resultType"))
+                .is_none(),
+            "initialize result must not carry resultType: {init_line}"
+        );
+
+        // 2. initialized notification, then a tools/call.
+        write_half
+            .write_all(br#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#)
+            .await
+            .expect("write initialized");
+        write_half.write_all(b"\n").await.expect("newline");
+        write_half
+            .write_all(
+                br#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tools.t5.echo","arguments":{"x":1}}}"#,
+            )
+            .await
+            .expect("write tools/call");
+        write_half.write_all(b"\n").await.expect("newline");
+        let call_line = lines
+            .next_line()
+            .await
+            .expect("tools/call response")
+            .expect("line present");
+        assert!(
+            !call_line.contains("resultType"),
+            "legacy-negotiated tools/call wire must not carry resultType: {call_line}"
+        );
+        let call: serde_json::Value =
+            serde_json::from_str(&call_line).expect("tools/call response parses");
+        assert_eq!(call["id"], serde_json::json!(2));
+        assert!(
+            call["result"]["isError"].is_null()
+                || call["result"]["isError"] == serde_json::json!(false),
+            "call executes successfully on the legacy wire: {call_line}"
+        );
+    }
+}

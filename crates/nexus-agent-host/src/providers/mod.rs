@@ -7,6 +7,7 @@
 //! correct adapter implementation.
 
 pub mod acp;
+pub mod multiplex;
 pub mod native_cli;
 pub mod port;
 pub mod recipe_admission;

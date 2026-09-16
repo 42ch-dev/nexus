@@ -3,7 +3,7 @@
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use nexus_contracts::{
     CoreChangesRequest, CoreChangesResponse, CoreCloseReport, WorldKbCandidatesResponse,
@@ -87,6 +87,10 @@ pub(crate) struct CoreInner {
     /// Per-Character activity/transition fences (v1.190 P2-T1), Host-free
     /// and separate from any process session registry.
     pub(crate) character_fences: ActorFenceTable,
+    /// Established-owner slot for the Host authority (P4-T2): at most one
+    /// `open_host` manager per open service — a second start is a typed busy
+    /// rejection, never a second engine. Reset only by a confirmed close.
+    pub(crate) host_authority_established: Mutex<bool>,
     /// The execution owner slot for THIS service (v1.190 P3-T1). Empty until
     /// `start_execution` succeeds.
     ///
@@ -101,6 +105,9 @@ pub(crate) struct CoreInner {
     >,
 }
 
+/// Cloneable handle: `inner` is already shared, so a clone is the same open
+/// service (P4-T2: `open_host` hands a clone to the `HostHandle`).
+#[derive(Clone)]
 pub struct CoreService {
     pub(crate) inner: Arc<CoreInner>,
 }
@@ -208,6 +215,7 @@ impl CoreService {
                 generation: AtomicU64::new(1),
                 access: options.access,
                 closing: AtomicBool::new(false),
+                host_authority_established: Mutex::new(false),
                 character_fences: ActorFenceTable::new(&db_path),
                 #[cfg(feature = "execution")]
                 execution: std::sync::Mutex::new(None),
@@ -389,16 +397,6 @@ impl CoreService {
         read_changes(&self.inner.pool, request).await
     }
 
-    /// Transitional pool access for the native provider-callback bridge and
-    /// the `hostQuery` fallback (LIFE-3); it is not a second business truth.
-    /// Deletion owner: P4-T2, once bridge consumers use the owned journal
-    /// methods (`provider_operation`, `journal_provider_operation`,
-    /// `settle_provider_orphans`). This escape hatch must not acquire new
-    /// callers.
-    #[must_use]
-    pub fn pool(&self) -> &SqlitePool {
-        &self.inner.pool
-    }
 
     /// Close the pool and release writer guards exactly once; repeated calls
     /// report the already-closed state.

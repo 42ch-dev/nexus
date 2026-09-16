@@ -188,6 +188,10 @@ connect-client = [
     "dep:spoke-schemas",
     "dep:getrandom",
     "dep:rmcp",
+    # P4-T3: the peer/MCP session/visibility/transport/watcher stack moved
+    # into nexus-core::connect; the daemon's cohort feature switches the
+    # core cohort on.
+    "nexus-core/connect-client",
 ]
 # V1.179 P0 T1 (DF-88): embedded MCP server (Model B) — nested cargo
 # feature under `connect-client`. `--features connect-client` compiles the
@@ -196,7 +200,7 @@ connect-client = [
 # compiles both. Deps: `dep:futures-channel` (the sink/stream transport
 # channels) — rmcp 3.2's `transport::sink_stream` is an ungated core
 # module, no extra rmcp features.
-embedded-mcp = ["connect-client", "dep:futures-channel"]
+embedded-mcp = ["connect-client", "dep:futures-channel", "nexus-core/embedded-mcp"]
 # V1.153 P2 (DF-73): embedded Web UI (rust-embed SPA bytes) — default ON so
 # the creator-facing daemon is unchanged; OFF (`--no-default-features`)
 # compiles the SPA serving stack out of the `nexus-runtime` artifact.

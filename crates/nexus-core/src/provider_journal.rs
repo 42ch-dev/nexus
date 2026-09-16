@@ -141,3 +141,86 @@ impl CoreService {
             .map_err(local_db_err)
     }
 }
+
+impl CoreService {
+    /// Internal effect-boundary seam (P4-T2): the environment's admitting
+    /// provider port journals at the provider effect boundary, where no
+    /// per-request principal exists. The write is guarded by the open/closing
+    /// state and write access only — never by a principal re-verification,
+    /// so the LIFE-3 durable mirror cannot be silenced by a later on-disk
+    /// selection change mid-session.
+    ///
+    /// # Errors
+    /// Returns [`CoreError::Closing`] when the service is closing and the
+    /// mapped storage error otherwise.
+    /// NOTE: `pub` visibility is the P4-T2 environment-boundary seam; do not
+    /// acquire new callers.
+    pub async fn journal_provider_write_internal(
+        &self,
+        operation_id: &str,
+        session_id: &str,
+        provider_id: &str,
+        status: &str,
+    ) -> CoreResult<()> {
+        self.ensure_open()?;
+        self.require_write_access("provider_journal_write")?;
+        js_provider_journal::upsert_operation(
+            &self.inner.pool,
+            operation_id,
+            session_id,
+            provider_id,
+            status,
+        )
+        .await
+        .map_err(local_db_err)
+    }
+
+    /// Internal read seam mirroring [`Self::journal_provider_write_internal`]:
+    /// raw stored row fields for the `hostQuery` restart fallback, without a
+    /// per-request principal. Returns the stored `(operation_id, session_id,
+    /// provider_id, status)` verbatim; no terminal is ever fabricated and the
+    /// write-once identity stays observable to the owning transport.
+    ///
+    /// # Errors
+    /// Returns [`CoreError::Closing`] when the service is closing and the
+    /// mapped storage error otherwise.
+    /// NOTE: `pub` visibility is the P4-T2 environment-boundary seam; do not
+    /// acquire new callers.
+    pub async fn provider_operation_row_internal(
+        &self,
+        operation_id: &str,
+    ) -> CoreResult<Option<(String, String, String, String)>> {
+        self.ensure_open()?;
+        Ok(
+            js_provider_journal::get_operation(&self.inner.pool, operation_id)
+                .await
+                .map_err(local_db_err)?
+                .map(|row| {
+                    (
+                        row.operation_id,
+                        row.session_id,
+                        row.provider_id,
+                        row.status,
+                    )
+                }),
+        )
+    }
+
+    /// Internal delete seam for a cleanly shut-down session's journal rows.
+    ///
+    /// # Errors
+    /// Returns [`CoreError::Closing`] when the service is closing and the
+    /// mapped storage error otherwise.
+    /// NOTE: `pub` visibility is the P4-T2 environment-boundary seam; do not
+    /// acquire new callers.
+    pub async fn forget_provider_session_internal(
+        &self,
+        session_id: &str,
+    ) -> CoreResult<()> {
+        self.ensure_open()?;
+        self.require_write_access("provider_journal_forget")?;
+        js_provider_journal::forget_session(&self.inner.pool, session_id)
+            .await
+            .map_err(local_db_err)
+    }
+}

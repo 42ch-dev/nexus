@@ -1,6 +1,12 @@
 //! Transport-neutral core service (v1.189 P1 → v1.190 P2).
 
 mod actor_fence;
+#[cfg(feature = "provider-host")]
+pub mod actor_sessions;
+#[cfg(feature = "provider-host")]
+pub mod host;
+#[cfg(feature = "connect-client")]
+pub mod connect;
 mod actor_knowledge;
 mod actors;
 mod changes;
@@ -55,6 +61,13 @@ pub use memory::{
 pub use presets::PresetError;
 pub use principal::Principal;
 pub use service::{CoreAccess, CoreOpenOptions, CoreService};
+#[cfg(feature = "provider-host")]
+pub use actor_sessions::{
+    echo_actor_pair, ActorSessionKind, ActorSessionRegistry, ActorSessionKey,
+    CharacterOperationSnapshot,
+};
+#[cfg(feature = "provider-host")]
+pub use host::HostHandle;
 pub use soul::CoreCharacterMind;
 pub use storage_status::{CoreStorageStatus, CoreStorageVersions};
 #[cfg(feature = "execution")]

@@ -218,6 +218,12 @@ pub struct ExecutionHandle {
     /// Set when `close()` has finished: every owned drive was cancelled and
     /// joined (C1). Only a SETTLED owner may be superseded in the registry.
     settled: AtomicBool,
+    /// The peer-control lane this execution owner admits (v1.190 P4-T3).
+    /// Empty until `start_peer_control` succeeds; closed with the owner.
+    #[cfg(feature = "connect-client")]
+    pub(crate) peer_control: std::sync::Mutex<
+        Option<Arc<crate::connect::PeerControlLane>>,
+    >,
 }
 
 impl ExecutionHandle {
@@ -765,6 +771,8 @@ impl CoreService {
             engine_epoch,
             closing: AtomicBool::new(false),
             settled: AtomicBool::new(false),
+            #[cfg(feature = "connect-client")]
+            peer_control: std::sync::Mutex::new(None),
         }))
     }
 }
