@@ -50,6 +50,7 @@ impl NativeCore {
     /// JS-provider port. Refuses when the core is not the execution owner
     /// (`NotEngineOwner`) or an owner already exists (`AlreadyOwned`) — the
     /// same single-owner fence the daemon boot obeys.
+    #[napi]
     pub async fn start_execution_owner(&self) -> Result<Buffer> {
         self.deny_service_only()?;
         let core = self
@@ -93,6 +94,7 @@ impl NativeCore {
     }
 
     /// `POST /v1/daemon/orchestration/schedules` (201 at the adapter).
+    #[napi]
     pub async fn add_schedule(
         &self,
         principal_handle: String,
@@ -109,6 +111,7 @@ impl NativeCore {
     }
 
     /// `POST /v1/daemon/orchestration/schedules/{schedule_id}/signal`.
+    #[napi]
     pub async fn signal_schedule(
         &self,
         principal_handle: String,
@@ -129,6 +132,7 @@ impl NativeCore {
     // ── Preset authoring (P3 authority) ─────────────────────────────────────
 
     /// `GET /v1/daemon/presets`.
+    #[napi]
     pub async fn list_presets(&self, principal_handle: String) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
             core.list_presets(&principal).await
@@ -137,6 +141,7 @@ impl NativeCore {
     }
 
     /// `GET /v1/daemon/presets/{id}`.
+    #[napi]
     pub async fn get_preset(&self, principal_handle: String, preset_id: String) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
             let response: GetPresetResponse = core.get_preset(&principal, preset_id).await?;
@@ -146,6 +151,7 @@ impl NativeCore {
     }
 
     /// `POST /v1/daemon/presets` — scaffold (201 at the adapter).
+    #[napi]
     pub async fn scaffold_preset(
         &self,
         principal_handle: String,
@@ -159,6 +165,7 @@ impl NativeCore {
     }
 
     /// `POST /v1/daemon/presets:validate`.
+    #[napi]
     pub async fn validate_preset(
         &self,
         principal_handle: String,
@@ -174,6 +181,7 @@ impl NativeCore {
     }
 
     /// `PATCH /v1/daemon/presets/{id}`.
+    #[napi]
     pub async fn update_preset(
         &self,
         principal_handle: String,
@@ -190,6 +198,7 @@ impl NativeCore {
     }
 
     /// `DELETE /v1/daemon/presets/{id}` — 204 at the adapter.
+    #[napi]
     pub async fn delete_preset(&self, principal_handle: String, preset_id: String) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
             core.delete_preset(&principal, preset_id).await?;
@@ -199,6 +208,7 @@ impl NativeCore {
     }
 
     /// `GET /v1/daemon/orchestration/presets`.
+    #[napi]
     pub async fn list_orchestration_presets(&self, principal_handle: String) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
             core.list_orchestration_presets(&principal).await
@@ -207,6 +217,7 @@ impl NativeCore {
     }
 
     /// `GET /v1/daemon/orchestration/presets/{id}/profile`.
+    #[napi]
     pub async fn get_preset_profile(
         &self,
         principal_handle: String,
@@ -221,6 +232,7 @@ impl NativeCore {
     // ── Strategy edits (P3 authority) ───────────────────────────────────────
 
     /// `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/patch`.
+    #[napi]
     pub async fn patch_strategy_state(
         &self,
         principal_handle: String,
@@ -239,6 +251,7 @@ impl NativeCore {
     }
 
     /// `POST /v1/daemon/strategies/{strategy_id}/transitions/patch`.
+    #[napi]
     pub async fn patch_strategy_transition(
         &self,
         principal_handle: String,
@@ -256,6 +269,7 @@ impl NativeCore {
     }
 
     /// `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/prompt/patch`.
+    #[napi]
     pub async fn patch_strategy_prompt_template(
         &self,
         principal_handle: String,

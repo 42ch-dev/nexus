@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { after, before, describe, test } from 'node:test';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -159,9 +160,8 @@ describe('execution-http (P5-T3)', () => {
     const sessionId = created.payload.session_id;
     assert.ok(sessionId, created.text);
 
-    // 2. The executed operation is journaled: an in-flight operation whose
-    //    service dies is terminal-inspectable as `interrupted` after a full
-    //    close + reopen on the same home — no fabricated success, no hang.
+    // 2. Graceful close cancels the in-flight operation — `cancelled` is the
+    //    true settled semantic for an op orphaned by an orderly shutdown.
     const executed = await jsonFetch(
       `${baseUrl}/v1/daemon/agent-host/sessions/${sessionId}/operations`,
       { method: 'POST', body: { kind: 'prompt', content: 'hello' } },
@@ -174,15 +174,50 @@ describe('execution-http (P5-T3)', () => {
     service = await startExecutionService(home, 18_445);
     baseUrl = service.url;
 
-    const afterReopen = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/operations/${operationId}`);
+    const settled = await jsonFetch(
+      `${baseUrl}/v1/daemon/agent-host/operations/${operationId}`,
+    );
+    assert.equal(settled.status, 200, settled.text);
+    assert.equal(
+      settled.payload.status,
+      'cancelled',
+      `an in-flight op orphaned by an orderly close settles as cancelled: ${settled.text}`,
+    );
+
+    // 3. TRUE interruption is a journal orphan that no process ever settled:
+    //    an in-flight journal row is pre-seeded into the workspace state DB
+    //    (the T1 `second_owner_and_restart_are_fenced` method — no close in
+    //    between), and the next open's settlement classifies it `interrupted`
+    //    and keeps it terminal-inspectable.
+    const orphanId = crypto.randomUUID();
+    // The journal rides the writer-fenced state DB, so the seed must write as
+    // the retained engine writer: stub the five `nexus_writer_*` scalars with
+    // the gate/registration values the closed engine owner committed.
+    const seed = spawnSync(
+      'python3',
+      [
+        '-c',
+        `import sqlite3, glob; root = ${JSON.stringify(home)}; path = glob.glob(root + '/.nexus42/creators/*/workspaces/*/state.db')[0]; conn = sqlite3.connect(path); g = conn.execute("SELECT migration_epoch, engine_epoch FROM core_workspace_gate WHERE pk=1").fetchone(); wid = conn.execute("SELECT writer_id FROM core_writer_registration WHERE mode='engine' AND engine_epoch=?", (g[1],)).fetchone()[0]; conn.create_function("nexus_writer_protocol", 0, lambda: 1); conn.create_function("nexus_writer_mode", 0, lambda: "engine"); conn.create_function("nexus_writer_id", 0, lambda: wid); conn.create_function("nexus_migration_epoch", 0, lambda: g[0]); conn.create_function("nexus_engine_epoch", 0, lambda: g[1]); conn.execute("INSERT OR IGNORE INTO js_provider_operation_journal (operation_id, session_id, provider_id, status, sequence) VALUES (?, 'sess_orphan', 'mock-acp-1', 'running', 1)", (${JSON.stringify(orphanId)},)); conn.commit(); print(path)`,
+      ],
+      { stdio: 'inherit' },
+    );
+    assert.equal(seed.status, 0, 'orphan journal seed failed');
+
+    await service.close();
+    service = await startExecutionService(home, 18_446);
+    baseUrl = service.url;
+
+    const afterReopen = await jsonFetch(
+      `${baseUrl}/v1/daemon/agent-host/operations/${orphanId}`,
+    );
     assert.equal(afterReopen.status, 200, afterReopen.text);
     assert.equal(
       afterReopen.payload.status,
       'interrupted',
-      `an in-flight operation across a crash must be journal-interrupted: ${afterReopen.text}`,
+      `an unsettled journal orphan must be classified interrupted: ${afterReopen.text}`,
     );
 
-    // 3. Cancellation semantics stay truthful: an unknown session is a real
+    // 4. Cancellation semantics stay truthful: an unknown session is a real
     //    404 from the host registry, and DSH cancellation is not offered as
     //    a fake success anywhere on this surface.
     const missing = await jsonFetch(
@@ -198,7 +233,7 @@ describe('execution-http (P5-T3)', () => {
   test('migrated preset and strategy routes answer from the core authority, not 501', async () => {
     const list = await jsonFetch(`${baseUrl}/v1/daemon/presets`);
     assert.equal(list.status, 200, list.text);
-    assert.ok(Array.isArray(list.payload.presets ?? list.payload.items), list.text);
+    assert.ok(Array.isArray(list.payload.embedded), list.text);
 
     const orchestration = await jsonFetch(`${baseUrl}/v1/daemon/orchestration/presets`);
     assert.equal(orchestration.status, 200, orchestration.text);
@@ -210,9 +245,18 @@ describe('execution-http (P5-T3)', () => {
     assert.equal(missingPreset.status, 404, missingPreset.text);
     const strategyPatch = await jsonFetch(
       `${baseUrl}/v1/daemon/strategies/strategy_missing/states/state_missing/patch`,
-      { method: 'POST', body: { revision: 1 } },
+      {
+        method: 'POST',
+        body: {
+          base_revision: 1,
+          strategy_id: 'strategy_missing',
+          state_id: 'state_missing',
+          set: {},
+        },
+      },
     );
-    assert.notEqual(strategyPatch.status, 501, strategyPatch.text);
+    // The route is live over the core authority: the missing strategy is the
+    // core's own 404 refusal — never 501, never a synthesized success.
     assert.equal(strategyPatch.status, 404, strategyPatch.text);
 
     // The compute run family is cohort-excluded on this surface: a truthful
