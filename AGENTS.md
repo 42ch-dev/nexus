@@ -122,12 +122,16 @@ UI work in this repo follows a **studio-first** routing rule. The visual proving
 
 **Rust `target/` disk hygiene:** `target/debug` is gitignored but grows without bound on macOS/Linux when the workspace is rebuilt often. Stale `.o` files under `target/debug/deps` and old `target/debug/incremental/*` hashes (e.g. after `pnpm run codegen`, crate renames, or repeated `cargo * --all`) are the usual cause — not a single bug. CI uses ephemeral runners + `rust-cache`; **local developers and agents must not mirror CI’s `--all` cadence during iteration.**
 
-**Preferred layout — repo [`.envrc`](.envrc) + [direnv](https://direnv.net/):** this is the supported way to relocate and share the Rust build cache. It exports `CARGO_TARGET_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/nexus-target"` **only inside this repository**, so the main checkout and every `.worktrees/*` worktree reuse one cache instead of each growing a local `target/`.
+**Preferred layout — repo [`.envrc`](.envrc) + [direnv](https://direnv.net/):** this is the supported way to relocate and share the Rust build cache. The `.envrc` auto-detects context: the **main checkout** and the **integration worktree** share the canonical `~/.cache/nexus-target` (no suffix); each **feature worktree** (`.worktrees/v1190-*`) gets an **isolated** `~/.cache/nexus-target-<dirname>` that is cleaned after merge.
 
 ```bash
 # After clone or `git worktree add` (once per checkout root):
 direnv allow
-# Confirm cargo sees the shared dir (should print under ~/.cache/nexus-target):
+# Confirm cargo sees the correct scoped dir:
+#
+#   main checkout:            ~/.cache/nexus-target
+#   integration worktree:     ~/.cache/nexus-target
+#   feature worktree <name>:  ~/.cache/nexus-target-<name>
 cargo metadata --no-deps --format-version 1 | jq -r .target_directory
 ```
 
@@ -154,21 +158,26 @@ cargo sweep --time 30
 ```
 
   Optional dry-run: append `-d`. Do **not** use `cargo sweep -i N` for age-based cleanup — `-i` is `--installed` (boolean); age uses `--time` / `-t`.
-**Merge gate — feature-branch target cleanup (HARD):** before merging a feature branch or worktree into the integration branch, the feature's `CARGO_TARGET_DIR` (direnv-shared or per-worktree) **must be cleaned or removed**. This is not optional housekeeping — parallel worktree target dirs compound silently (v1.190: six concurrent targets consumed 98 GiB of `/tmp` in a single iteration) and degraded the host. Concretely:
+**Merge gate — feature-branch target cleanup (HARD):** before merging a feature branch or worktree into the integration branch, the feature's scoped `CARGO_TARGET_DIR` **must be removed**. With the scoped `.envrc` layout this is a precise one-liner — no guesswork about which dir belongs to which feature. This is not optional housekeeping — parallel worktree target dirs compound silently (v1.190: six concurrent targets consumed 98 GiB of `/tmp` in a single iteration) and degraded the host. Concretely:
 
 ```bash
-# Before merging: remove this feature's build cache
-rm -rf "${CARGO_TARGET_DIR:?}"          # direnv-managed shared dir
-# or, if the feature used a scoped per-worktree target:
-rm -rf "$CARGO_TARGET_DIR"              # the feature's own CARGO_TARGET_DIR
-# then remove the worktree:
+# Before merging: remove this feature's scoped build cache (precise, by name)
+rm -rf ~/.cache/nexus-target-<dirname>
+#
+# Or clean ALL feature targets at once (canonical nexus-target is untouched):
+rm -rf ~/.cache/nexus-target-*
+#
+# Then remove the worktree:
 git worktree remove .worktrees/<name> && git worktree prune
 ```
 
-Integration/target-dir verification (`cargo check --workspace`) is run from the integration worktree with its own `CARGO_TARGET_DIR` — it does not depend on the feature's cache. If the integration check needs rebuilding after cleanup, that rebuild cost is the price of not filling the disk.
+Integration verification (`cargo check --workspace`) runs from the integration worktree with the canonical `~/.cache/nexus-target` — it does not depend on any feature's cache.
+
+**Quick stats:** `du -sh ~/.cache/nexus-target-*` shows every feature's cache size at a glance.
+
 
 - **Cleanup (repo root; with direnv this is `$CARGO_TARGET_DIR` → `~/.cache/nexus-target`):**
-**Anti-patterns:** Building without `CARGO_TARGET_DIR` / direnv (fills a per-checkout `target/` and breaks worktree sharing); running `cargo test --all` / `cargo clippy --all` on every small edit; skipping cleanup for months while agents run full-workspace builds; treating `target/` bloat as safe to commit (it is always gitignored — clean locally instead); merging a feature branch without cleaning its `CARGO_TARGET_DIR` first.
+- **Anti-patterns:** Building without `CARGO_TARGET_DIR` / direnv (fills a per-checkout `target/` and breaks worktree sharing); running `cargo test --all` / `cargo clippy --all` on every small edit; skipping cleanup for months while agents run full-workspace builds; treating `target/` bloat as safe to commit (it is always gitignored — clean locally instead); merging a feature branch without cleaning its scoped target dir first; storing feature target dirs inside the worktree itself (they belong in `~/.cache/nexus-target-<name>` for centralized cleanup and statistics).
 
 ### Git & repository hygiene
 
