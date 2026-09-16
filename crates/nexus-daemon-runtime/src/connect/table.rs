@@ -83,6 +83,7 @@ impl ConnectResponderAdapter {
     }
 }
 
+#[async_trait::async_trait]
 impl PeerResponder for ConnectResponderAdapter {
     async fn invoke_tool(&self, tool_id: &str, arguments: serde_json::Value) -> PeerInvokeResult {
         match self.inner.invoke_tool(tool_id, arguments).await {

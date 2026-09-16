@@ -2939,7 +2939,7 @@ impl CapabilityRegistry {
     ///
     /// # Errors
     ///
-    /// Returns `NexusApiError::BadRequest` with code `not_supported`
+    /// Returns a `Coded` refusal with code `not_supported`
     /// if the tool is not registered. Individual handlers may return
     /// other error variants (e.g. `Forbidden`, `InvalidInput`).
     pub async fn dispatch(
