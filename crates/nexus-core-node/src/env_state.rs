@@ -426,6 +426,29 @@ impl EnvState {
     /// Clone the open core for the effect-boundary journal seam (P4-T2). The
     /// durable JS-provider journal is owned by [`CoreService`]; no pool handle
     /// is stored or exposed on the environment any more.
+    /// Project a domain [`nexus_core::CoreError`] onto the wire taxonomy at
+    /// the environment boundary. The journal-relevant arms keep their honest
+    /// codes; anything else is the bounded internal fallback.
+    fn wire_domain_error(err: nexus_core::CoreError) -> CoreError {
+        use nexus_core::CoreError as Domain;
+        let (code, http_status) = match &err {
+            Domain::Closing => (CoreErrorCode::Closing, Some(503)),
+            Domain::Busy | Domain::OwnerBusy => (CoreErrorCode::Busy, Some(503)),
+            Domain::Forbidden { .. } | Domain::ForbiddenReason { .. } => {
+                (CoreErrorCode::Forbidden, Some(403))
+            }
+            Domain::WriterFenced => (CoreErrorCode::WriterFenced, Some(409)),
+            Domain::SchemaMismatch => (CoreErrorCode::SchemaMismatch, Some(409)),
+            _ => (CoreErrorCode::Internal, Some(500)),
+        };
+        CoreError {
+            code,
+            message: err.to_string(),
+            details: Default::default(),
+            http_status,
+        }
+    }
+
     pub(crate) fn journal_core(&self) -> Option<Arc<CoreService>> {
         self.core.lock().ok().and_then(|slot| slot.clone())
     }
@@ -452,6 +475,7 @@ impl EnvState {
         };
         core.journal_provider_write_internal(operation_id, session_id, provider_id, status)
             .await
+            .map_err(Self::wire_domain_error)
     }
 
     /// Inspect the actual delivered provider events WITHOUT mutating state:
@@ -538,6 +562,7 @@ impl EnvState {
             .unwrap_or_default();
         core.journal_provider_write_internal(operation_id, &session_id, &provider_id, status)
             .await
+            .map_err(Self::wire_domain_error)
     }
 
     /// Drop journaled operations for a cleanly shut-down session through the
@@ -550,7 +575,9 @@ impl EnvState {
         let Some(core) = self.journal_core() else {
             return Ok(());
         };
-        core.forget_provider_session_internal(session_id).await
+        core.forget_provider_session_internal(session_id)
+            .await
+            .map_err(Self::wire_domain_error)
     }
 
     pub fn lifecycle_phase(&self) -> EnvLifecyclePhase {
