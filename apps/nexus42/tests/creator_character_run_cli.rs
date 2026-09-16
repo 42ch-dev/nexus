@@ -222,7 +222,7 @@ fn run_args<'a>(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn character_run_authorized_view_empty_headings_human_json() {
     let host = MockHost::new();
-    let d = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let d = LiveDaemon::start_for_creator_with_agent_host(common::rn_act4::FIXTURE_CREATOR, "default", host.clone()).await;
     let g = seed(&d).await;
 
     let json_run = d
@@ -284,7 +284,7 @@ async fn character_run_authorized_view_empty_headings_human_json() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn character_run_deny_matrix_moves_no_host_counters() {
     let host = MockHost::new();
-    let d = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let d = LiveDaemon::start_for_creator_with_agent_host(common::rn_act4::FIXTURE_CREATOR, "default", host.clone()).await;
     let g = seed(&d).await;
 
     let missing = d
@@ -329,7 +329,7 @@ async fn character_run_deny_matrix_moves_no_host_counters() {
 )]
 async fn character_run_isolation_and_legacy_outside_lookup() {
     let host = MockHost::new();
-    let d = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let d = LiveDaemon::start_for_creator_with_agent_host(common::rn_act4::FIXTURE_CREATOR, "default", host.clone()).await;
     let g = seed(&d).await;
     let cwd_a = d.home.path().join("cwd-a");
 
@@ -569,7 +569,7 @@ async fn cli_ok(d: &LiveDaemon, args: &[&str]) -> Output {
 #[allow(clippy::too_many_lines)] // single P0-P4 full-mind dogfood proof
 async fn character_tom_full_mind_p0_p4_dogfood() {
     let host = MockHost::new();
-    let d = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let d = LiveDaemon::start_for_creator_with_agent_host(common::rn_act4::FIXTURE_CREATOR, "default", host.clone()).await;
     let g = seed(&d).await;
     let chr = g.character_a.as_str();
     let carrier = seed_tom_carrier_run(&d, chr).await;
@@ -885,7 +885,7 @@ async fn character_tom_full_mind_p0_p4_dogfood() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn restored_character_run_mints_fresh_session_after_archive() {
     let host = MockHost::new();
-    let d = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let d = LiveDaemon::start_for_creator_with_agent_host(common::rn_act4::FIXTURE_CREATOR, "default", host.clone()).await;
     let g = seed(&d).await;
 
     let pre = json_out(
@@ -955,7 +955,7 @@ async fn restored_character_run_mints_fresh_session_after_archive() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn character_run_includes_edited_summary_and_shared_ke_across_worlds() {
     let host = MockHost::new();
-    let d = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let d = LiveDaemon::start_for_creator_with_agent_host(common::rn_act4::FIXTURE_CREATOR, "default", host.clone()).await;
     let g = seed(&d).await;
 
     let edited = d
@@ -1181,7 +1181,7 @@ async fn cli_run_fast_grace(d: &LiveDaemon, args: &[&str]) -> Output {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn character_run_remember_captures_pending_json() {
     let host = P3MockHost::new(P3RunScript::Standard);
-    let d = LiveDaemon::start_with_agent_host(host).await;
+    let d = LiveDaemon::start_for_creator_with_agent_host(common::rn_act4::FIXTURE_CREATOR, "default", host).await;
     let g = seed(&d).await;
 
     let out = cli_run_fast_grace(
@@ -1203,7 +1203,7 @@ async fn character_run_remember_captures_pending_json() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn character_run_opt_out_capture_disabled() {
     let host = P3MockHost::new(P3RunScript::Standard);
-    let d = LiveDaemon::start_with_agent_host(host).await;
+    let d = LiveDaemon::start_for_creator_with_agent_host(common::rn_act4::FIXTURE_CREATOR, "default", host).await;
     let g = seed(&d).await;
 
     let out = d
@@ -1217,7 +1217,7 @@ async fn character_run_opt_out_capture_disabled() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn character_run_wrong_op_terminal_ignored() {
     let host = P3MockHost::new(P3RunScript::WrongOpTerminalFirst);
-    let d = LiveDaemon::start_with_agent_host(host).await;
+    let d = LiveDaemon::start_for_creator_with_agent_host(common::rn_act4::FIXTURE_CREATOR, "default", host).await;
     let g = seed(&d).await;
 
     let out = d
@@ -1248,7 +1248,7 @@ async fn character_run_wrong_op_terminal_ignored() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn character_run_max_tokens_remember_nonzero() {
     let host = P3MockHost::new(P3RunScript::MaxTokens);
-    let d = LiveDaemon::start_with_agent_host(host).await;
+    let d = LiveDaemon::start_for_creator_with_agent_host(common::rn_act4::FIXTURE_CREATOR, "default", host).await;
     let g = seed(&d).await;
 
     let out = cli_run_fast_grace(
@@ -1266,7 +1266,7 @@ async fn character_run_max_tokens_remember_nonzero() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn character_run_missed_sse_preserves_outcome() {
     let host = P3MockHost::new(P3RunScript::MissedSseTerminal);
-    let d = LiveDaemon::start_with_agent_host(host).await;
+    let d = LiveDaemon::start_for_creator_with_agent_host(common::rn_act4::FIXTURE_CREATOR, "default", host).await;
     let g = seed(&d).await;
 
     let out = cli_run_fast_grace(

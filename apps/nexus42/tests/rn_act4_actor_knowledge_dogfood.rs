@@ -11,7 +11,7 @@ use common::LiveDaemon;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[allow(clippy::too_many_lines)] // dogfood proof
 async fn rn_act4_five_views_share_row_identity_without_copies() {
-    let d = LiveDaemon::start().await;
+    let d = LiveDaemon::start_for_creator(common::rn_act4::FIXTURE_CREATOR, "default").await;
     let g = seed(&d).await;
 
     let a_w1 = view_character_cli(&d, &g.character_a, &g.world_w1, &g.bind_a_w1).await;

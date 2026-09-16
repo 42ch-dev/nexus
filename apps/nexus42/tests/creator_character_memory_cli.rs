@@ -202,7 +202,7 @@ fn fragment_digest(marker: &str) -> String {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[allow(clippy::too_many_lines)] // single lifecycle parity proof
 async fn character_memory_lifecycle_json_and_human_parity() {
-    let d = LiveDaemon::start().await;
+    let d = LiveDaemon::start_for_creator(common::rn_act4::FIXTURE_CREATOR, "default").await;
     let g = seed(&d).await;
     let chr = g.character_a.as_str();
 
@@ -465,7 +465,7 @@ async fn character_memory_lifecycle_json_and_human_parity() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[allow(clippy::too_many_lines)] // fail-closed proof
 async fn character_memory_fail_closed_no_mutation() {
-    let d = LiveDaemon::start().await;
+    let d = LiveDaemon::start_for_creator(common::rn_act4::FIXTURE_CREATOR, "default").await;
     let g = seed(&d).await;
 
     // Foreign (missing) character id: every memory verb fails.
@@ -589,7 +589,7 @@ async fn character_memory_fail_closed_no_mutation() {
 #[allow(clippy::too_many_lines)] // single admitted-projection proof
 async fn character_run_projects_only_admitted_soul_and_memory() {
     let host = MockHost::new();
-    let d = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let d = LiveDaemon::start_for_creator_with_agent_host(common::rn_act4::FIXTURE_CREATOR, "default", host.clone()).await;
     let g = seed(&d).await;
     let chr = g.character_a.as_str();
 
@@ -791,7 +791,7 @@ async fn run_remember_json(d: &LiveDaemon, g: &common::rn_act4::RnAct4Graph, chr
 #[allow(clippy::too_many_lines)]
 async fn character_run_remember_review_promote_journey() {
     let host = MockHost::new();
-    let d = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let d = LiveDaemon::start_for_creator_with_agent_host(common::rn_act4::FIXTURE_CREATOR, "default", host.clone()).await;
     let g = seed(&d).await;
     let chr = g.character_a.as_str();
 

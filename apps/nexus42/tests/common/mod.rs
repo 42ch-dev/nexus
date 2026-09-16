@@ -94,6 +94,16 @@ impl LiveDaemon {
         Self::start_with_workspace_identity(creator_id, workspace_slug, None).await
     }
 
+    /// Boot with a coherent `ctr_…` creator identity and a caller `HostFacade`.
+    pub async fn start_for_creator_with_agent_host(
+        creator_id: &str,
+        workspace_slug: &str,
+        host: Arc<dyn HostFacade>,
+    ) -> Self {
+        Self::start_with_workspace_identity(creator_id, workspace_slug, Some(host)).await
+    }
+
+
     /// Boot the daemon with a deterministic `HostFacade` (Character run E2E).
     pub async fn start_with_agent_host(host: Arc<dyn HostFacade>) -> Self {
         Self::start_with_optional_host(Some(host)).await
@@ -535,6 +545,10 @@ impl LiveDaemon {
         let pool = state.pool().expect("pool").clone();
         if creator_id == "test_creator" {
             test_utils::seed_test_creator_and_world(&pool).await;
+        } else {
+            nexus_local_db::ensure_creator_row(&pool, creator_id, "Fixture Creator")
+                .await
+                .expect("seed fixture creator row");
         }
         let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool).await;
 
