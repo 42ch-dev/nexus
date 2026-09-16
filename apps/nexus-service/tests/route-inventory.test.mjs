@@ -213,7 +213,9 @@ describe('route-inventory (P5-T5)', () => {
   ['PUT', '/v1/daemon/creators/active', 'tier1', 'actors'],
   ['PUT', '/v1/daemon/reading/progress', 'tier2', 'knowledge'],
     ];
-    const liveKeys = new Set(LIVE_INVENTORY.map(([m, p]) => `${m} ${p}`));
+    const liveKeys = new Set(
+      LIVE_INVENTORY.map(([m, p, tier, family]) => `${m} ${p} ${tier} ${family}`),
+    );
 
     // Normalized live inventory: the retained daemon route identities the
     // standalone service owns, derived from create_router + the P0–P4 family
@@ -224,7 +226,9 @@ describe('route-inventory (P5-T5)', () => {
       tier: route.tier,
       family: route.family,
     }));
-    const mountedKeys = new Set(mounted.map((r) => `${r.method} ${r.path}`));
+    const mountedKeys = new Set(
+      mounted.map((r) => `${r.method} ${r.path} ${r.tier} ${r.family}`),
+    );
 
     // Handler dispatch is total: every /v1/daemon identity must be composer-
     // routed (family), so a hand-written branch leaking outside the composer
