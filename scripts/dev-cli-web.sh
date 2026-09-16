@@ -43,12 +43,17 @@ if [ ! -f "${SERVICE_ROOT}/dist/main.js" ]; then
 fi
 
 SERVICE_PID=""
+# Health must be the standalone TS service, not any old daemon: the
+# unguarded daemon/status envelope carries the TS-only implementation_scope.
 health_ok() {
   node --input-type=module -e "
     const base = process.argv[1];
     try {
-      const res = await fetch(base + '/v1/daemon/runtime/health');
-      process.exit(res.ok ? 0 : 1);
+      const res = await fetch(base + '/v1/daemon/daemon/status');
+      if (!res.ok) process.exit(1);
+      const status = await res.json();
+      const scope = String(status.implementation_scope ?? '');
+      process.exit(scope.startsWith('standalone-service') ? 0 : 1);
     } catch { process.exit(1); }
   " "${BASE_URL}"
 }
@@ -69,13 +74,18 @@ else
   echo "    service healthy (pid ${SERVICE_PID})"
 fi
 
-echo "==> validating running service compatibility"
+echo "==> validating running service identity"
 node --input-type=module -e "
 const base = process.argv[1];
-const res = await fetch(base + '/v1/daemon/runtime/status');
-const status = await res.json();
+const res = await fetch(base + '/v1/daemon/daemon/status');
 if (!res.ok) { console.error('service status failed'); process.exit(1); }
-console.log('    standalone service compatible (runtime_mode ' + status.runtime_mode + ')');
+const status = await res.json();
+const scope = String(status.implementation_scope ?? '');
+if (!scope.startsWith('standalone-service')) {
+  console.error('refusing: the running endpoint is not the standalone TS service (' + scope + ')');
+  process.exit(1);
+}
+console.log('    standalone TS service compatible (runtime identity confirmed)');
 " "${BASE_URL}"
 
 echo "==> starting web dev server (http://localhost:5173)"

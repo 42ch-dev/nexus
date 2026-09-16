@@ -66,6 +66,8 @@ export interface DomainRoute {
   readonly family: DomainFamily;
   /** Non-200 success status the retained surface keeps (201/204). */
   readonly status?: number;
+  /** Declared capture name: the first pattern group publishes under this key. */
+  readonly capture?: 'sessionId' | 'operationId' | 'worldId';
   readonly handle: (
     service: ServiceCore,
     params: string[],
@@ -106,10 +108,15 @@ export function matchRoute(method: string, pathname: string): RouteMatch | null 
     if (route.method !== method) continue;
     const match = pathname.match(route.pattern);
     if (match) {
+      const captured: Partial<Record<'sessionId' | 'operationId' | 'worldId', string>> = {};
+      if (route.capture !== undefined && match[1] !== undefined) {
+        captured[route.capture] = match[1];
+      }
       return {
         tier: route.tier,
         family: route.family,
         params: match.slice(1),
+        ...captured,
         ...(route.status !== undefined ? { status: route.status } : {}),
         ...(route.tier === 'unguarded'
           ? {}
@@ -162,64 +169,6 @@ export async function handleRoute(
   throw routeNotMigrated(pathname);
 }
 
-function handleUnguarded(service: ServiceCore, pathname: string): unknown {
-  if (pathname === '/v1/daemon/runtime/health') {
-    return { status: 'ok', version: '0.1.0' };
-  }
-  if (pathname === '/v1/daemon/runtime/status') {
-    return {
-      version: '0.1.0',
-      uptime_seconds: Math.floor((Date.now() - Date.parse(service.startedAt)) / 1000),
-      workspace_initialized: service.workspaceInitialized,
-      acp: {
-        tool_execution_enabled:
-          service.workspaceInitialized && !service.domainOnly && service.providerReady,
-        active_sessions: 0,
-        total_tool_executions: 0,
-      },
-      runtime_mode: runtimeMode(service),
-    };
-  }
-  if (pathname === '/v1/daemon/runtime/cert-fingerprint') {
-    if (!service.tlsFingerprint) {
-      return {
-        fingerprint: '',
-        algorithm: 'sha256',
-      };
-    }
-    return service.tlsFingerprint;
-  }
-  if (pathname === '/v1/daemon/daemon/status') {
-    const degraded = degradedSubsystems(service);
-    return {
-      schema_version: 2,
-      lifecycle_state: 'running',
-      version: '0.1.0',
-      implementation_scope: 'standalone-service (P4-T1)',
-      uptime_ms: Date.now() - Date.parse(service.startedAt),
-      started_at: service.startedAt,
-      pid: process.pid,
-      degraded: {
-        subsystems: degraded,
-        reasons: degraded.map((name) => `${name} not ready`),
-      },
-      subsystems: {
-        http: { status: 'up', last_check_ms: 0 },
-        db: { status: service.workspaceInitialized ? 'up' : 'down', last_check_ms: 0 },
-        engine: {
-          status:
-            service.workspaceInitialized && !service.domainOnly && service.providerReady
-              ? 'up'
-              : 'down',
-          last_check_ms: 0,
-        },
-      },
-      exit_code: null,
-      last_error: null,
-    };
-  }
-  throw routeNotMigrated(pathname);
-}
 
 /**
  * The embedded host is optional in the domain-only profile: "host not started"
@@ -383,6 +332,7 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
     pattern: /^\/v1\/daemon\/agent-host\/sessions\/([^/]+)$/,
     tier: 'tier2',
     family: 'host',
+    capture: 'sessionId',
     handle: async (service, params) => {
       const session = await lookupProviderSession(service, params[0]);
       if (!session) {
@@ -398,6 +348,7 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
     pattern: /^\/v1\/daemon\/agent-host\/operations\/([^/]+)$/,
     tier: 'tier2',
     family: 'host',
+    capture: 'operationId',
     handle: async (service, params) => {
       const operation = await lookupProviderOperation(service, params[0]);
       if (!operation) {
@@ -430,6 +381,7 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
     pattern: /^\/v1\/daemon\/agent-host\/sessions\/([^/]+)$/,
     tier: 'provider_stream',
     family: 'host',
+    capture: 'sessionId',
     handle: async (service, params) => ({
       body: await shutdownProviderSession(service, params[0]),
     }),
@@ -439,6 +391,7 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
     pattern: /^\/v1\/daemon\/agent-host\/sessions\/([^/]+)\/operations$/,
     tier: 'provider_stream',
     family: 'host',
+    capture: 'sessionId',
     handle: async (service, params, _search, body) => ({
       body: await executeProviderOperation(service, params[0], body),
     }),
@@ -448,6 +401,7 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
     pattern: /^\/v1\/daemon\/agent-host\/operations\/([^/]+)$/,
     tier: 'provider_stream',
     family: 'host',
+    capture: 'operationId',
     handle: async (service, params) => ({
       body: await cancelProviderOperation(service, params[0]),
     }),
@@ -457,6 +411,7 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
     pattern: /^\/v1\/daemon\/agent-host\/sessions\/([^/]+)\/events$/,
     tier: 'provider_stream',
     family: 'host',
+    capture: 'sessionId',
     handle: async (service, params, search) => {
       const sessionId = params[0];
       return {
