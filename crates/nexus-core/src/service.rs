@@ -3,7 +3,9 @@
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+#[cfg(feature = "provider-host")]
+use std::sync::Mutex;
 
 use nexus_contracts::{
     CoreChangesRequest, CoreChangesResponse, CoreCloseReport, WorldKbCandidatesResponse,
@@ -90,6 +92,7 @@ pub struct CoreInner {
     /// Established-owner slot for the Host authority (P4-T2): at most one
     /// `open_host` manager per open service — a second start is a typed busy
     /// rejection, never a second engine. Reset only by a confirmed close.
+    #[cfg(feature = "provider-host")]
     pub(crate) host_authority_established: Mutex<bool>,
     /// The execution owner slot for THIS service (v1.190 P3-T1). Empty until
     /// `start_execution` succeeds.
@@ -213,6 +216,7 @@ impl CoreService {
                 generation: AtomicU64::new(1),
                 access: options.access,
                 closing: AtomicBool::new(false),
+                #[cfg(feature = "provider-host")]
                 host_authority_established: Mutex::new(false),
                 character_fences: ActorFenceTable::new(&db_path),
                 #[cfg(feature = "execution")]
