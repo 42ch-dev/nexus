@@ -99,6 +99,87 @@ import type {
   ReferenceGetResponse,
   NarrativeWorldsListResponse,
   NarrativeWorldResponse,
+  ListCharactersQuery,
+  ListCharactersResponse,
+  CreateCharacterRequest,
+  CreateCharacterResponse,
+  CharacterDetail,
+  UpdateCharacterRequest,
+  CharacterLifecycleRequest,
+  AddCharacterBindingRequest,
+  AddCharacterBindingResponse,
+  ListCharacterBindingsQuery,
+  ListCharacterBindingsResponse,
+  CharacterBindingDetail,
+  UpdateCharacterBindingRequest,
+  ViewRequest,
+  ViewResponse,
+  AddKnowledgeEntryRequest,
+  AddKnowledgeEntryResponse,
+  ListCharacterKnowledgeQuery,
+  ListCharacterKnowledgeResponse,
+  KnowledgeEntryDetail,
+  UpdateKnowledgeEntryRequest,
+  ListCreatorsQuery,
+  ListCreatorsResponse,
+  CreatorDetail,
+  SetActiveCreatorRequest,
+  SetActiveCreatorResponse,
+  ActiveCreatorResponse,
+  LogoutResponse,
+  CaptureCharacterPendingReviewRequest,
+  CaptureCharacterPendingReviewResponse,
+  ListCharacterPendingReviewsQuery,
+  ListCharacterPendingReviewsResponse,
+  CountCharacterPendingReviewsQuery,
+  CountCharacterPendingReviewsResponse,
+  DeleteCharacterPendingReviewResponse,
+  ReviewCharacterMemoryRequest,
+  ReviewCharacterMemoryResponse,
+  ListCharacterMemoryFragmentsQuery,
+  ListCharacterMemoryFragmentsResponse,
+  PromoteCharacterFragmentRequest,
+  PromoteCharacterFragmentResponse,
+  CharacterSoulNarrativeRequest,
+  CharacterSoulNarrativeResponse,
+  RecordCharacterTomRequest,
+  RecordCharacterTomResponse,
+  ListCharacterTomQuery,
+  ListCharacterTomResponse,
+  ListPendingReviewsQuery,
+  ListPendingReviewsResponse,
+  CountPendingReviewsResponse,
+  CountPendingReviewsQuery,
+  DeletePendingReviewResponse,
+  DeletePendingReviewQuery,
+  ReviewRequest,
+  ReviewResponse,
+  ListMemoryFragmentsQuery,
+  ListMemoryFragmentsResponse,
+  SoulNarrativeRequest,
+  SoulNarrativeResponse,
+  MomentInspectRequest,
+  MomentInspectResponse,
+  MomentDirectiveRequest,
+  MomentDirectiveResponse,
+  ListPresetsResponse,
+  GetPresetResponse,
+  ScaffoldPresetRequest,
+  ScaffoldPresetResponse,
+  ValidatePresetRequest,
+  ValidatePresetResponse,
+  UpdatePresetRequest,
+  UpdatePresetResponse,
+  OrchestrationPresetListResponse,
+  PresetProfileResponse,
+  CoreStrategyPatchResponse,
+  StrategyPatchStateRequest,
+  StrategyPatchTransitionRequest,
+  StrategyPatchPromptTemplateRequest,
+  AddScheduleRequest,
+  AddScheduleResponse,
+  SignalScheduleRequest,
+  SignalScheduleResponse,
 } from '@42ch/nexus-contracts';
 import {
   expectedPlatformPackage,
@@ -396,6 +477,208 @@ export interface NativeCore {
   deleteAnnotation(principal: PrincipalHandle, annotationId: string): Promise<void>;
   listReferences(principal: PrincipalHandle): Promise<ReferenceListResponse>;
   getReference(principal: PrincipalHandle, referenceId: string): Promise<ReferenceGetResponse>;
+  // ── P5-T2 Actor / memory / context family surface ─────────────────────────
+  // Same owned-JSON-payload policy as the P5-T1 block above: the stored
+  // Principal is minted natively, the handle only proves it, and every
+  // payload schema is the wire SSOT.
+  listCharacters(principal: PrincipalHandle, query: ListCharactersQuery): Promise<ListCharactersResponse>;
+  createCharacter(
+    principal: PrincipalHandle,
+    request: CreateCharacterRequest,
+  ): Promise<CreateCharacterResponse>;
+  getCharacter(principal: PrincipalHandle, characterId: string): Promise<CharacterDetail>;
+  patchCharacter(
+    principal: PrincipalHandle,
+    characterId: string,
+    request: UpdateCharacterRequest,
+  ): Promise<CharacterDetail>;
+  archiveCharacter(
+    principal: PrincipalHandle,
+    characterId: string,
+    request: CharacterLifecycleRequest,
+  ): Promise<CharacterDetail>;
+  restoreCharacter(
+    principal: PrincipalHandle,
+    characterId: string,
+    request: CharacterLifecycleRequest,
+  ): Promise<CharacterDetail>;
+  addCharacterBinding(
+    principal: PrincipalHandle,
+    characterId: string,
+    request: AddCharacterBindingRequest,
+  ): Promise<AddCharacterBindingResponse>;
+  listCharacterBindings(
+    principal: PrincipalHandle,
+    characterId: string,
+    query: ListCharacterBindingsQuery,
+  ): Promise<ListCharacterBindingsResponse>;
+  getCharacterBinding(
+    principal: PrincipalHandle,
+    characterId: string,
+    bindingId: string,
+  ): Promise<CharacterBindingDetail>;
+  patchCharacterBinding(
+    principal: PrincipalHandle,
+    characterId: string,
+    bindingId: string,
+    request: UpdateCharacterBindingRequest,
+  ): Promise<CharacterBindingDetail>;
+  removeCharacterBinding(principal: PrincipalHandle, characterId: string, bindingId: string): Promise<void>;
+  actorKnowledgeView(principal: PrincipalHandle, request: ViewRequest): Promise<ViewResponse>;
+  addActorKnowledgeEntry(
+    principal: PrincipalHandle,
+    request: AddKnowledgeEntryRequest,
+  ): Promise<AddKnowledgeEntryResponse>;
+  listCharacterKnowledge(
+    principal: PrincipalHandle,
+    characterId: string,
+    query: ListCharacterKnowledgeQuery,
+  ): Promise<ListCharacterKnowledgeResponse>;
+  getKnowledgeEntry(
+    principal: PrincipalHandle,
+    characterId: string,
+    entryId: string,
+  ): Promise<KnowledgeEntryDetail>;
+  patchKnowledgeEntry(
+    principal: PrincipalHandle,
+    characterId: string,
+    entryId: string,
+    request: UpdateKnowledgeEntryRequest,
+  ): Promise<KnowledgeEntryDetail>;
+  deleteKnowledgeEntry(
+    principal: PrincipalHandle,
+    characterId: string,
+    entryId: string,
+    expectedRevision: number,
+  ): Promise<void>;
+  listCreators(query: ListCreatorsQuery): Promise<ListCreatorsResponse>;
+  createCreator(displayName: string): Promise<CreatorDetail>;
+  getCreator(creatorId: string): Promise<CreatorDetail>;
+  patchCreator(creatorId: string, displayName?: string): Promise<CreatorDetail>;
+  setActiveCreator(request: SetActiveCreatorRequest): Promise<SetActiveCreatorResponse>;
+  getActiveCreator(): Promise<ActiveCreatorResponse>;
+  logoutCreator(creatorId: string): Promise<LogoutResponse>;
+  captureCharacterPendingReview(
+    principal: PrincipalHandle,
+    characterId: string,
+    request: CaptureCharacterPendingReviewRequest,
+  ): Promise<CaptureCharacterPendingReviewResponse>;
+  listCharacterPendingReviews(
+    principal: PrincipalHandle,
+    characterId: string,
+    query: ListCharacterPendingReviewsQuery,
+  ): Promise<ListCharacterPendingReviewsResponse>;
+  countCharacterPendingReviews(
+    principal: PrincipalHandle,
+    characterId: string,
+    query: CountCharacterPendingReviewsQuery,
+  ): Promise<CountCharacterPendingReviewsResponse>;
+  deleteCharacterPendingReview(
+    principal: PrincipalHandle,
+    characterId: string,
+    pendingId: string,
+  ): Promise<DeleteCharacterPendingReviewResponse>;
+  reviewCharacterMemory(
+    principal: PrincipalHandle,
+    characterId: string,
+    request: ReviewCharacterMemoryRequest,
+  ): Promise<ReviewCharacterMemoryResponse>;
+  listCharacterMemoryFragments(
+    principal: PrincipalHandle,
+    characterId: string,
+    query: ListCharacterMemoryFragmentsQuery,
+  ): Promise<ListCharacterMemoryFragmentsResponse>;
+  promoteCharacterFragment(
+    principal: PrincipalHandle,
+    characterId: string,
+    fragmentId: string,
+    request: PromoteCharacterFragmentRequest,
+  ): Promise<PromoteCharacterFragmentResponse>;
+  reflectCharacterSoul(
+    principal: PrincipalHandle,
+    characterId: string,
+    request: CharacterSoulNarrativeRequest,
+  ): Promise<CharacterSoulNarrativeResponse>;
+  recordCharacterTom(
+    principal: PrincipalHandle,
+    characterId: string,
+    request: RecordCharacterTomRequest,
+  ): Promise<RecordCharacterTomResponse>;
+  listCharacterTom(
+    principal: PrincipalHandle,
+    characterId: string,
+    query: ListCharacterTomQuery,
+  ): Promise<ListCharacterTomResponse>;
+  listPendingReviews(principal: PrincipalHandle, query: ListPendingReviewsQuery): Promise<ListPendingReviewsResponse>;
+  countPendingReviews(
+    principal: PrincipalHandle,
+    query: CountPendingReviewsQuery,
+  ): Promise<CountPendingReviewsResponse>;
+  deletePendingReview(
+    principal: PrincipalHandle,
+    pendingId: string,
+    query: DeletePendingReviewQuery,
+  ): Promise<DeletePendingReviewResponse>;
+  reviewMemory(principal: PrincipalHandle, request: ReviewRequest): Promise<ReviewResponse>;
+  listMemoryFragments(
+    principal: PrincipalHandle,
+    query: ListMemoryFragmentsQuery,
+  ): Promise<ListMemoryFragmentsResponse>;
+  reflectCreatorSoul(
+    principal: PrincipalHandle,
+    request: SoulNarrativeRequest,
+  ): Promise<SoulNarrativeResponse>;
+  inspectMoment(principal: PrincipalHandle, request: MomentInspectRequest): Promise<MomentInspectResponse>;
+  momentDirective(
+    principal: PrincipalHandle,
+    request: MomentDirectiveRequest,
+  ): Promise<MomentDirectiveResponse>;
+  // ── P5-T3 Execution / preset / strategy family surface ────────────────────
+  startExecutionOwner(): Promise<{ engine_epoch: number }>;
+  listPresets(principal: PrincipalHandle): Promise<ListPresetsResponse>;
+  getPreset(principal: PrincipalHandle, presetId: string): Promise<GetPresetResponse>;
+  scaffoldPreset(
+    principal: PrincipalHandle,
+    request: ScaffoldPresetRequest,
+  ): Promise<ScaffoldPresetResponse>;
+  validatePreset(
+    principal: PrincipalHandle,
+    request: ValidatePresetRequest,
+  ): Promise<ValidatePresetResponse>;
+  updatePreset(
+    principal: PrincipalHandle,
+    presetId: string,
+    request: UpdatePresetRequest,
+  ): Promise<UpdatePresetResponse>;
+  deletePreset(principal: PrincipalHandle, presetId: string): Promise<void>;
+  listOrchestrationPresets(principal: PrincipalHandle): Promise<OrchestrationPresetListResponse>;
+  getPresetProfile(principal: PrincipalHandle, presetId: string): Promise<PresetProfileResponse>;
+  patchStrategyState(
+    principal: PrincipalHandle,
+    strategyId: string,
+    stateId: string,
+    request: StrategyPatchStateRequest,
+  ): Promise<CoreStrategyPatchResponse>;
+  patchStrategyTransition(
+    principal: PrincipalHandle,
+    strategyId: string,
+    request: StrategyPatchTransitionRequest,
+  ): Promise<CoreStrategyPatchResponse>;
+  patchStrategyPromptTemplate(
+    principal: PrincipalHandle,
+    strategyId: string,
+    stateId: string,
+    request: StrategyPatchPromptTemplateRequest,
+  ): Promise<CoreStrategyPatchResponse>;
+  addSchedule(
+    principal: PrincipalHandle,
+    request: AddScheduleRequest,
+  ): Promise<AddScheduleResponse>;
+  signalSchedule(
+    principal: PrincipalHandle,
+    scheduleId: string,
+    request: SignalScheduleRequest,
+  ): Promise<SignalScheduleResponse>;
 }
 
 function wrapCore(inner: NativeCoreBinding): NativeCore {
@@ -537,6 +820,62 @@ type DomainSurface = Pick<
   | 'deleteAnnotation'
   | 'listReferences'
   | 'getReference'
+  | 'listCharacters'
+  | 'createCharacter'
+  | 'getCharacter'
+  | 'patchCharacter'
+  | 'archiveCharacter'
+  | 'restoreCharacter'
+  | 'addCharacterBinding'
+  | 'listCharacterBindings'
+  | 'getCharacterBinding'
+  | 'patchCharacterBinding'
+  | 'removeCharacterBinding'
+  | 'actorKnowledgeView'
+  | 'addActorKnowledgeEntry'
+  | 'listCharacterKnowledge'
+  | 'getKnowledgeEntry'
+  | 'patchKnowledgeEntry'
+  | 'deleteKnowledgeEntry'
+  | 'listCreators'
+  | 'createCreator'
+  | 'getCreator'
+  | 'patchCreator'
+  | 'setActiveCreator'
+  | 'getActiveCreator'
+  | 'logoutCreator'
+  | 'captureCharacterPendingReview'
+  | 'listCharacterPendingReviews'
+  | 'countCharacterPendingReviews'
+  | 'deleteCharacterPendingReview'
+  | 'reviewCharacterMemory'
+  | 'listCharacterMemoryFragments'
+  | 'promoteCharacterFragment'
+  | 'reflectCharacterSoul'
+  | 'recordCharacterTom'
+  | 'listCharacterTom'
+  | 'listPendingReviews'
+  | 'countPendingReviews'
+  | 'deletePendingReview'
+  | 'reviewMemory'
+  | 'listMemoryFragments'
+  | 'reflectCreatorSoul'
+  | 'inspectMoment'
+  | 'momentDirective'
+  | 'startExecutionOwner'
+  | 'listPresets'
+  | 'getPreset'
+  | 'scaffoldPreset'
+  | 'validatePreset'
+  | 'updatePreset'
+  | 'deletePreset'
+  | 'listOrchestrationPresets'
+  | 'getPresetProfile'
+  | 'patchStrategyState'
+  | 'patchStrategyTransition'
+  | 'patchStrategyPromptTemplate'
+  | 'addSchedule'
+  | 'signalSchedule'
 >;
 
 function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
@@ -759,6 +1098,254 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
     },
     async getReference(principal, referenceId) {
       return json(await inner.getReference(principal, referenceId));
+    },
+    // ── P5-T2 Actor / memory / context family surface ────────────────────────
+    async listCharacters(principal, query) {
+      return json(await inner.listCharacters(principal, wire(query, 'query')));
+    },
+    async createCharacter(principal, request) {
+      return json(await inner.createCharacter(principal, wire(request, 'request')));
+    },
+    async getCharacter(principal, characterId) {
+      return json(await inner.getCharacter(principal, characterId));
+    },
+    async patchCharacter(principal, characterId, request) {
+      return json(await inner.patchCharacter(principal, characterId, wire(request, 'request')));
+    },
+    async archiveCharacter(principal, characterId, request) {
+      return json(await inner.archiveCharacter(principal, characterId, wire(request, 'request')));
+    },
+    async restoreCharacter(principal, characterId, request) {
+      return json(await inner.restoreCharacter(principal, characterId, wire(request, 'request')));
+    },
+    async addCharacterBinding(principal, characterId, request) {
+      return json(
+        await inner.addCharacterBinding(principal, characterId, wire(request, 'request')),
+      );
+    },
+    async listCharacterBindings(principal, characterId, query) {
+      return json(
+        await inner.listCharacterBindings(principal, characterId, wire(query, 'query')),
+      );
+    },
+    async getCharacterBinding(principal, characterId, bindingId) {
+      return json(await inner.getCharacterBinding(principal, characterId, bindingId));
+    },
+    async patchCharacterBinding(principal, characterId, bindingId, request) {
+      return json(
+        await inner.patchCharacterBinding(
+          principal,
+          characterId,
+          bindingId,
+          wire(request, 'request'),
+        ),
+      );
+    },
+    async removeCharacterBinding(principal, characterId, bindingId) {
+      await inner.removeCharacterBinding(principal, characterId, bindingId);
+    },
+    async actorKnowledgeView(principal, request) {
+      return json(await inner.actorKnowledgeView(principal, wire(request, 'request')));
+    },
+    async addActorKnowledgeEntry(principal, request) {
+      return json(await inner.addActorKnowledgeEntry(principal, wire(request, 'request')));
+    },
+    async listCharacterKnowledge(principal, characterId, query) {
+      return json(
+        await inner.listCharacterKnowledge(principal, characterId, wire(query, 'query')),
+      );
+    },
+    async getKnowledgeEntry(principal, characterId, entryId) {
+      return json(await inner.getKnowledgeEntry(principal, characterId, entryId));
+    },
+    async patchKnowledgeEntry(principal, characterId, entryId, request) {
+      return json(
+        await inner.patchKnowledgeEntry(
+          principal,
+          characterId,
+          entryId,
+          wire(request, 'request'),
+        ),
+      );
+    },
+    async deleteKnowledgeEntry(principal, characterId, entryId, expectedRevision) {
+      await inner.deleteKnowledgeEntry(
+        principal,
+        characterId,
+        entryId,
+        expectedRevision,
+      );
+    },
+    async listCreators(query) {
+      return json(await inner.listCreators(wire(query, 'query')));
+    },
+    async createCreator(displayName) {
+      return json(await inner.createCreator(displayName));
+    },
+    async getCreator(creatorId) {
+      return json(await inner.getCreator(creatorId));
+    },
+    async patchCreator(creatorId, displayName) {
+      return json(await inner.patchCreator(creatorId, displayName ?? null));
+    },
+    async setActiveCreator(request) {
+      return json(await inner.setActiveCreator(wire(request, 'request')));
+    },
+    async getActiveCreator() {
+      return json(await inner.getActiveCreator());
+    },
+    async logoutCreator(creatorId) {
+      return json(await inner.logoutCreator(creatorId));
+    },
+    async captureCharacterPendingReview(principal, characterId, request) {
+      return json(
+        await inner.captureCharacterPendingReview(
+          principal,
+          characterId,
+          wire(request, 'request'),
+        ),
+      );
+    },
+    async listCharacterPendingReviews(principal, characterId, query) {
+      return json(
+        await inner.listCharacterPendingReviews(
+          principal,
+          characterId,
+          wire(query, 'query'),
+        ),
+      );
+    },
+    async countCharacterPendingReviews(principal, characterId, query) {
+      return json(
+        await inner.countCharacterPendingReviews(
+          principal,
+          characterId,
+          wire(query, 'query'),
+        ),
+      );
+    },
+    async deleteCharacterPendingReview(principal, characterId, pendingId) {
+      return json(await inner.deleteCharacterPendingReview(principal, characterId, pendingId));
+    },
+    async reviewCharacterMemory(principal, characterId, request) {
+      return json(
+        await inner.reviewCharacterMemory(principal, characterId, wire(request, 'request')),
+      );
+    },
+    async listCharacterMemoryFragments(principal, characterId, query) {
+      return json(
+        await inner.listCharacterMemoryFragments(
+          principal,
+          characterId,
+          wire(query, 'query'),
+        ),
+      );
+    },
+    async promoteCharacterFragment(principal, characterId, fragmentId, request) {
+      return json(
+        await inner.promoteCharacterFragment(
+          principal,
+          characterId,
+          fragmentId,
+          wire(request, 'request'),
+        ),
+      );
+    },
+    async reflectCharacterSoul(principal, characterId, request) {
+      return json(
+        await inner.reflectCharacterSoul(principal, characterId, wire(request, 'request')),
+      );
+    },
+    async recordCharacterTom(principal, characterId, request) {
+      return json(await inner.recordCharacterTom(principal, characterId, wire(request, 'request')));
+    },
+    async listCharacterTom(principal, characterId, query) {
+      return json(await inner.listCharacterTom(principal, characterId, wire(query, 'query')));
+    },
+    async listPendingReviews(principal, query) {
+      return json(await inner.listPendingReviews(principal, wire(query, 'query')));
+    },
+    async countPendingReviews(principal, query) {
+      return json(await inner.countPendingReviews(principal, wire(query, 'query')));
+    },
+    async deletePendingReview(principal, pendingId, query) {
+      return json(await inner.deletePendingReview(principal, pendingId, wire(query, 'query')));
+    },
+    async reviewMemory(principal, request) {
+      return json(await inner.reviewMemory(principal, wire(request, 'request')));
+    },
+    async listMemoryFragments(principal, query) {
+      return json(await inner.listMemoryFragments(principal, wire(query, 'query')));
+    },
+    async reflectCreatorSoul(principal, request) {
+      return json(await inner.reflectCreatorSoul(principal, wire(request, 'request')));
+    },
+    async inspectMoment(principal, request) {
+      return json(await inner.inspectMoment(principal, wire(request, 'request')));
+    },
+    async momentDirective(principal, request) {
+      return json(await inner.momentDirective(principal, wire(request, 'request')));
+    },
+    // ── P5-T3 Execution / preset / strategy family surface ──────────────────
+    async startExecutionOwner() {
+      return json(await inner.startExecutionOwner());
+    },
+    async listPresets(principal) {
+      return json(await inner.listPresets(principal));
+    },
+    async getPreset(principal, presetId) {
+      return json(await inner.getPreset(principal, presetId));
+    },
+    async scaffoldPreset(principal, request) {
+      return json(await inner.scaffoldPreset(principal, wire(request, 'request')));
+    },
+    async validatePreset(principal, request) {
+      return json(await inner.validatePreset(principal, wire(request, 'request')));
+    },
+    async updatePreset(principal, presetId, request) {
+      return json(await inner.updatePreset(principal, presetId, wire(request, 'request')));
+    },
+    async deletePreset(principal, presetId) {
+      await inner.deletePreset(principal, presetId);
+    },
+    async listOrchestrationPresets(principal) {
+      return json(await inner.listOrchestrationPresets(principal));
+    },
+    async getPresetProfile(principal, presetId) {
+      return json(await inner.getPresetProfile(principal, presetId));
+    },
+    async patchStrategyState(principal, strategyId, stateId, request) {
+      return json(
+        await inner.patchStrategyState(
+          principal,
+          strategyId,
+          stateId,
+          wire(request, 'request'),
+        ),
+      );
+    },
+    async patchStrategyTransition(principal, strategyId, request) {
+      return json(
+        await inner.patchStrategyTransition(principal, strategyId, wire(request, 'request')),
+      );
+    },
+    async patchStrategyPromptTemplate(principal, strategyId, stateId, request) {
+      return json(
+        await inner.patchStrategyPromptTemplate(
+          principal,
+          strategyId,
+          stateId,
+          wire(request, 'request'),
+        ),
+      );
+    },
+    async addSchedule(principal, request) {
+      return json(await inner.addSchedule(principal, wire(request, 'request')));
+    },
+    async signalSchedule(principal, scheduleId, request) {
+      return json(
+        await inner.signalSchedule(principal, scheduleId, wire(request, 'request')),
+      );
     },
   };
 }

@@ -311,6 +311,60 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             details: Default::default(),
             http_status: Some(503),
         },
+        DomainError::ActorInput(message) => CoreError {
+            code: CoreErrorCode::InvalidInput,
+            message,
+            details: Default::default(),
+            http_status: Some(400),
+        },
+        // Retained bearer-memory 403 wire shape: the core carries the split
+        // resource + reason; render the daemon's combined forbidden message.
+        DomainError::ForbiddenReason { resource, reason } => CoreError {
+            code: CoreErrorCode::Forbidden,
+            message: format!("forbidden: {resource} — {reason}"),
+            details: serde_json::Map::from_iter([
+                ("resource".into(), Value::String(resource)),
+                ("reason".into(), Value::String(reason)),
+            ]),
+            http_status: Some(403),
+        },
+        // Truthful no-provider/capability 503 (e.g. SOUL synthesis demanded
+        // with no capability registry).
+        DomainError::ServiceUnavailable(message) => CoreError {
+            code: CoreErrorCode::Busy,
+            message,
+            details: Default::default(),
+            http_status: Some(503),
+        },
+        // Narrative-quality rejection: the daemon's BadRequest
+        // `narrative_generation_failed` rides the generated invalid_input
+        // vocabulary with the carrier code in details.
+        DomainError::NarrativeRejected(message) => CoreError {
+            code: CoreErrorCode::InvalidInput,
+            message: message.clone(),
+            details: serde_json::Map::from_iter([(
+                "carrier_code".into(),
+                Value::String("narrative_generation_failed".into()),
+            )]),
+            http_status: Some(400),
+        },
+        // Generic domain conflict (409); the generated vocabulary has no
+        // generic `conflict` code yet, so `owner_busy` carries the 409
+        // envelope with the message verbatim.
+        DomainError::Conflict(message) => CoreError {
+            code: CoreErrorCode::OwnerBusy,
+            message,
+            details: Default::default(),
+            http_status: Some(409),
+        },
+        // Stable actor-family wire conflicts (durable §11.1 codes): the 409
+        // rides `owner_busy` with the retained stable code in details.
+        DomainError::ActorConflict { code, message } => CoreError {
+            code: CoreErrorCode::OwnerBusy,
+            message,
+            details: serde_json::Map::from_iter([("conflict_code".into(), Value::String(code))]),
+            http_status: Some(409),
+        },
         DomainError::Internal { category } => CoreError {
             code: CoreErrorCode::Internal,
             message: "internal error".into(),

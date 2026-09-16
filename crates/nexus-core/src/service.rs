@@ -226,7 +226,7 @@ impl CoreService {
     /// The nexus root this service was opened against (`<user_home>/.nexus42`).
     /// Core family modules resolve bearer file paths (SOUL.md, long-term
     /// memory) through it; the field stays private to this module.
-    pub(crate) fn nexus_home(&self) -> &std::path::Path {
+    pub fn nexus_home(&self) -> &std::path::Path {
         &self.inner.nexus_home
     }
 
