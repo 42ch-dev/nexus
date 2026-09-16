@@ -146,7 +146,7 @@ pub async fn compute_run(
     context: &ComputeContext,
     request: RunRequest,
 ) -> CoreResult<RunResponse> {
-    let pool = core.pool();
+    let pool = &core.inner.pool;
     let creator_id = context.creator_id.as_str();
 
     ensure_world_owned(pool, creator_id, &request.world_id).await?;
@@ -363,7 +363,7 @@ pub async fn accept_compute_run(
     run_id: &str,
     request: RunAcceptRequest,
 ) -> CoreResult<RunAcceptResponse> {
-    let pool = core.pool();
+    let pool = &core.inner.pool;
     let creator_id = principal.creator_id();
 
     let run = compute_runs::get_run(pool, run_id)
@@ -534,7 +534,7 @@ pub async fn discard_compute_run(
     principal: &Principal,
     run_id: &str,
 ) -> CoreResult<()> {
-    let pool = core.pool();
+    let pool = &core.inner.pool;
     let creator_id = principal.creator_id();
 
     let run = compute_runs::get_run(pool, run_id)
@@ -567,7 +567,7 @@ pub async fn list_compute_runs(
     principal: &Principal,
     query: ComputeRunListQuery,
 ) -> CoreResult<RunListResponse> {
-    let pool = core.pool();
+    let pool = &core.inner.pool;
     let creator_id = principal.creator_id();
 
     let owned_worlds = list_owned_world_ids(pool, creator_id).await?;
@@ -622,7 +622,7 @@ pub async fn get_compute_run(
     principal: &Principal,
     run_id: &str,
 ) -> CoreResult<RunDetail> {
-    let pool = core.pool();
+    let pool = &core.inner.pool;
 
     let run = compute_runs::get_run(pool, run_id)
         .await
