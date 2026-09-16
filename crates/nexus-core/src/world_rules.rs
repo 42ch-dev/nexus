@@ -11,7 +11,11 @@ impl CoreService {
     /// List the first 500 rules in canonical-name/id order.
     /// # Errors
     /// Returns principal, World ownership or storage errors.
-    pub async fn list_world_rules(&self, principal: &Principal, world_id: String) -> CoreResult<WorldRulesListResponse> {
+    pub async fn list_world_rules(
+        &self,
+        principal: &Principal,
+        world_id: String,
+    ) -> CoreResult<WorldRulesListResponse> {
         self.verify_principal(principal)?;
         guards::require_world_owner(&self.inner.pool, &world_id, principal.creator_id()).await?;
         list_world_rules(&self.inner.pool, world_id).await
@@ -20,7 +24,12 @@ impl CoreService {
     /// Create a structured rule after member-aware carrier validation.
     /// # Errors
     /// Returns principal, write-access, World ownership, validation or storage errors.
-    pub async fn create_world_rule(&self, principal: &Principal, world_id: String, request: WorldRuleCreateRequest) -> CoreResult<WorldRuleResponse> {
+    pub async fn create_world_rule(
+        &self,
+        principal: &Principal,
+        world_id: String,
+        request: WorldRuleCreateRequest,
+    ) -> CoreResult<WorldRuleResponse> {
         self.verify_principal(principal)?;
         require_write_access(self)?;
         guards::require_world_owner(&self.inner.pool, &world_id, principal.creator_id()).await?;
@@ -30,7 +39,13 @@ impl CoreService {
     /// Update only supplied fields; replace the entire constraint carrier.
     /// # Errors
     /// Returns principal, write-access, World/rule ownership, validation or storage errors.
-    pub async fn update_world_rule(&self, principal: &Principal, world_id: String, rule_id: String, request: WorldRuleUpdateRequest) -> CoreResult<WorldRuleResponse> {
+    pub async fn update_world_rule(
+        &self,
+        principal: &Principal,
+        world_id: String,
+        rule_id: String,
+        request: WorldRuleUpdateRequest,
+    ) -> CoreResult<WorldRuleResponse> {
         self.verify_principal(principal)?;
         require_write_access(self)?;
         guards::require_world_owner(&self.inner.pool, &world_id, principal.creator_id()).await?;
@@ -40,7 +55,11 @@ impl CoreService {
     /// Read the newest 500 advisory World findings, with an honest cap flag.
     /// # Errors
     /// Returns principal, World ownership or storage errors.
-    pub async fn list_world_findings(&self, principal: &Principal, world_id: String) -> CoreResult<WorldFindingsListResponse> {
+    pub async fn list_world_findings(
+        &self,
+        principal: &Principal,
+        world_id: String,
+    ) -> CoreResult<WorldFindingsListResponse> {
         self.verify_principal(principal)?;
         guards::require_world_owner(&self.inner.pool, &world_id, principal.creator_id()).await?;
         findings::list_world_findings(&self.inner.pool, world_id).await
@@ -49,7 +68,9 @@ impl CoreService {
 
 fn require_write_access(service: &CoreService) -> CoreResult<()> {
     if service.inner.access == CoreAccess::ReadOnly {
-        return Err(CoreError::Forbidden { resource: "world_rule_write: read-only core access".to_string() });
+        return Err(CoreError::Forbidden {
+            resource: "world_rule_write: read-only core access".to_string(),
+        });
     }
     Ok(())
 }
@@ -86,14 +107,14 @@ async fn list_world_rules(
     pool: &sqlx::SqlitePool,
     world_id: String,
 ) -> CoreResult<WorldRulesListResponse> {
-
     // Fetch one past the cap (501): the store bounds the read SQL-side via
     // `LIMIT ?` (Bugbot 4bad2fca) — the +1 probe returns the single row
     // just beyond the cap so `truncated` below stays honest without ever
     // loading the full set.
     let rows = list_rules_by_world_limited(pool, &world_id, WORLD_RULES_PROBE)
         .await
-        .map_err(|e| CoreError::Internal { category: e.to_string(),
+        .map_err(|e| CoreError::Internal {
+            category: e.to_string(),
         })?;
 
     // Honest truncation flag: more stored rows than the cap → `truncated:
@@ -218,7 +239,6 @@ async fn create_world_rule(
     world_id: String,
     req: WorldRuleCreateRequest,
 ) -> CoreResult<WorldRuleResponse> {
-
     // AR-2 seam: the carrier grammar lives in the spoke adapter (sole
     // consumer) — the daemon never parses carriers itself. The
     // member-aware error projects onto the closed `constraint.*` envelope
@@ -314,7 +334,8 @@ async fn create_world_rule(
         statement: Some(statement),
         description: None,
         target_entry_types_json: serde_json::to_string(&req.target_entry_types).map_err(|e| {
-            CoreError::Internal { category: e.to_string(),
+            CoreError::Internal {
+                category: e.to_string(),
             }
         })?,
         severity_hint: req.severity_hint.clone(),
@@ -328,7 +349,8 @@ async fn create_world_rule(
     };
     insert_rule(pool, &row)
         .await
-        .map_err(|e| CoreError::Internal { category: e.to_string(),
+        .map_err(|e| CoreError::Internal {
+            category: e.to_string(),
         })?;
 
     Ok(item_to_response(row_to_item(row)))
@@ -359,17 +381,19 @@ async fn update_world_rule(
     rule_id: String,
     req: WorldRuleUpdateRequest,
 ) -> CoreResult<WorldRuleResponse> {
-
     // AR-5 order: addressing precedes payload. The pre-fetch is
     // world-scoped (filter below): a rule_id owned by a different world —
     // even another world of the same creator — is 404 naming only the id,
     // with no existence leak (AR-6).
     let rows = get_spoke_rules_by_ids(pool, std::slice::from_ref(&rule_id))
         .await
-        .map_err(|e| CoreError::Internal { category: e.to_string(),
+        .map_err(|e| CoreError::Internal {
+            category: e.to_string(),
         })?;
     let Some(current) = rows.into_iter().find(|row| row.world_id == world_id) else {
-        return Err(CoreError::NotFound { resource: format!("rule {rule_id}") });
+        return Err(CoreError::NotFound {
+            resource: format!("rule {rule_id}"),
+        });
     };
 
     // AR-3: empty PATCH (no mutable field present) → 400 field=`patch` —
@@ -511,7 +535,8 @@ async fn update_world_rule(
             .target_entry_types
             .as_ref()
             .map(|v| {
-                serde_json::to_string(v).map_err(|e| CoreError::Internal { category: e.to_string(),
+                serde_json::to_string(v).map_err(|e| CoreError::Internal {
+                    category: e.to_string(),
                 })
             })
             .transpose()?,
@@ -527,8 +552,7 @@ async fn update_world_rule(
     if !req.constraint.is_empty() {
         update.extensions_json = Some(
             replace_constraint_in_extensions(current.extensions_json.as_str(), &req.constraint)
-                .map_err(|e| CoreError::Internal { category: e,
-                })?,
+                .map_err(|e| CoreError::Internal { category: e })?,
         );
     }
 
@@ -536,19 +560,24 @@ async fn update_world_rule(
     // distinguish) → 404 naming only the id (AR-6).
     if !update_rule(pool, &world_id, &rule_id, &update)
         .await
-        .map_err(|e| CoreError::Internal { category: e.to_string(),
+        .map_err(|e| CoreError::Internal {
+            category: e.to_string(),
         })?
     {
-        return Err(CoreError::NotFound { resource: format!("rule {rule_id}") });
+        return Err(CoreError::NotFound {
+            resource: format!("rule {rule_id}"),
+        });
     }
 
     // Re-read for the response item (AR-4: no new fetch fn).
     let rows = get_spoke_rules_by_ids(pool, std::slice::from_ref(&rule_id))
         .await
-        .map_err(|e| CoreError::Internal { category: e.to_string(),
+        .map_err(|e| CoreError::Internal {
+            category: e.to_string(),
         })?;
     let Some(row) = rows.into_iter().next() else {
-        return Err(CoreError::Internal { category: format!("rule {rule_id} vanished after a matched update"),
+        return Err(CoreError::Internal {
+            category: format!("rule {rule_id} vanished after a matched update"),
         });
     };
 
@@ -589,18 +618,18 @@ mod findings {
     use nexus_local_db::world_findings::{list_world_findings_by_world, WorldFindingRow};
     use serde_json::{Map, Value};
     use std::num::NonZeroU64;
-    
+
     /// Safety cap on the read surface: the newest 500 findings per world
     /// (AR-3). Pagination lands with the Control Room panel — roadmap.
     const WORLD_FINDINGS_CAP: usize = 500;
-    
+
     /// SQL-side probe bound for the store query: one past
     /// [`WORLD_FINDINGS_CAP`], so the `LIMIT ?` returns the overflow row and
     /// `truncated` stays honest without loading the full set (Bugbot
     /// 4bad2fca). Derived from the cap so the two cannot drift.
     #[allow(clippy::cast_possible_wrap)] // const-evaluated literal (500): always fits i64
     const WORLD_FINDINGS_PROBE: i64 = WORLD_FINDINGS_CAP as i64 + 1;
-    
+
     /// `GET /v1/daemon/worlds/:world_id/findings` — list world-attached
     /// check findings, newest-first, capped at [`WORLD_FINDINGS_CAP`].
     #[allow(clippy::missing_errors_doc)]
@@ -608,16 +637,16 @@ mod findings {
         pool: &sqlx::SqlitePool,
         world_id: String,
     ) -> CoreResult<WorldFindingsListResponse> {
-    
         // Fetch one past the cap (501): the store bounds the read SQL-side via
         // `LIMIT ?` (Bugbot 4bad2fca) — the +1 probe returns the single row
         // just beyond the cap so `truncated` below stays honest without ever
         // loading the full set.
         let rows = list_world_findings_by_world(pool, &world_id, WORLD_FINDINGS_PROBE)
             .await
-            .map_err(|e| CoreError::Internal { category: e.to_string(),
+            .map_err(|e| CoreError::Internal {
+                category: e.to_string(),
             })?;
-    
+
         // Honest truncation flag: more stored rows than the cap → `truncated:
         // true`, response carries the newest 500 (store order is newest-first).
         let truncated = rows.len() > WORLD_FINDINGS_CAP;
@@ -626,13 +655,13 @@ mod findings {
             .take(WORLD_FINDINGS_CAP)
             .map(row_to_item)
             .collect();
-    
+
         Ok(WorldFindingsListResponse {
             findings,
             truncated,
         })
     }
-    
+
     /// Project one `world_findings` row onto the wire item.
     ///
     /// JSON columns are parsed leniently (malformed stored JSON degrades to
@@ -656,7 +685,8 @@ mod findings {
                 .and_then(|s| serde_json::from_str(s).ok()),
             suggested_fix: r.suggested_fix,
             // The column is NOT NULL DEFAULT '{}' — verbatim spoke Map.
-            text_position: parse_json_object(Some(r.text_position_json.as_str())).unwrap_or_default(),
+            text_position: parse_json_object(Some(r.text_position_json.as_str()))
+                .unwrap_or_default(),
             // The column is NOT NULL DEFAULT '{}' — verbatim spoke ExtensionMap
             // (incl. the stamped `extensions.nexus.world_id` / `creator_id`).
             extensions: parse_json_object(Some(r.extensions_json.as_str())).unwrap_or_default(),
@@ -664,13 +694,13 @@ mod findings {
             updated_at: epoch_to_rfc3339(r.updated_at),
         }
     }
-    
+
     /// Parse a stored JSON object column leniently (`None` when absent or
     /// malformed) — same idiom as `timeline_events::parse_json_object`.
     fn parse_json_object(raw: Option<&str>) -> Option<Map<String, Value>> {
         raw.and_then(|s| serde_json::from_str::<Map<String, Value>>(s).ok())
     }
-    
+
     /// Convert Unix-epoch seconds to an RFC 3339 UTC datetime (`None` for
     /// out-of-range epochs — the column is NOT NULL, so valid rows always map).
     const fn epoch_to_rfc3339(epoch: i64) -> Option<chrono::DateTime<chrono::Utc>> {

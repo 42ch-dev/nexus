@@ -22,23 +22,23 @@ use nexus_contracts::generated::daemon_api::inspector::{
     moment_inspect_request::MomentInspectRequest, moment_inspect_response::MomentInspectResponse,
 };
 use nexus_local_db::moment_directive::{
-    MomentDirectiveRow, NewMomentDirective, clear, clear_on_scene_change, decrement_ttl_by,
-    get_active_for_work, get_active_for_world, get_by_id, get_chapter_anchor, scope_kind,
-    set_active, update_lifecycle_anchor, upsert_chapter_anchor,
+    clear, clear_on_scene_change, decrement_ttl_by, get_active_for_work, get_active_for_world,
+    get_by_id, get_chapter_anchor, scope_kind, set_active, update_lifecycle_anchor,
+    upsert_chapter_anchor, MomentDirectiveRow, NewMomentDirective,
 };
 use nexus_local_db::narrative_gateway::SqliteNarrativeGateway;
 use nexus_local_db::{
-    LocalDbError, SqliteKnowledgeStore, get_work, is_novel_profile, narrative_write,
+    get_work, is_novel_profile, narrative_write, LocalDbError, SqliteKnowledgeStore,
 };
 use nexus_moment_context_assembly::directive::{
     ActiveDirective, DirectiveDepth, DirectiveStore, DirectiveTtlKind,
 };
 use nexus_moment_context_assembly::{
-    GenerationStage, MomentRequest, Stage0Assembly, assemble_moment_with_directive,
-    build_inspector_packet,
+    assemble_moment_with_directive, build_inspector_packet, GenerationStage, MomentRequest,
+    Stage0Assembly,
 };
-use nexus_spoke_adapter::SpokeBackedKbStore;
 use nexus_spoke_adapter::adapter::NexusAdapter;
+use nexus_spoke_adapter::SpokeBackedKbStore;
 use sqlx::SqlitePool;
 
 use crate::actors::ActorViewpoint;
@@ -83,9 +83,11 @@ fn map_narrative_write_error(e: nexus_local_db::narrative_write::NarrativeWriteE
         nexus_local_db::narrative_write::NarrativeWriteError::Database(_) => {
             internal_err("database_error", e)
         }
-        nexus_local_db::narrative_write::NarrativeWriteError::InvalidId { field, value, reason } => {
-            invalid_input(field, &format!("invalid {field} '{value}': {reason}"))
-        }
+        nexus_local_db::narrative_write::NarrativeWriteError::InvalidId {
+            field,
+            value,
+            reason,
+        } => invalid_input(field, &format!("invalid {field} '{value}': {reason}")),
         nexus_local_db::narrative_write::NarrativeWriteError::FkNotFound { table, id } => {
             CoreError::NotFound {
                 resource: format!("referenced {table} '{id}' not found"),

@@ -197,7 +197,17 @@ async fn cursor_pagination() {
     let f = fixture().await;
     seed_world(&f.pool, WORLD, CREATOR, Some(ROOT)).await;
     for seq in 0..5 {
-        seed_event(&f.pool, WORLD, ROOT, "story_advance", "canon", seq, None, None).await;
+        seed_event(
+            &f.pool,
+            WORLD,
+            ROOT,
+            "story_advance",
+            "canon",
+            seq,
+            None,
+            None,
+        )
+        .await;
     }
 
     let page1 = list(
@@ -254,14 +264,70 @@ async fn cursor_pagination() {
 async fn cursor_pages_preserve_filters() {
     let f = fixture().await;
     seed_world(&f.pool, WORLD, CREATOR, Some(ROOT)).await;
-    seed_event(&f.pool, WORLD, ROOT, "story_advance", "canon", 0, None, None).await;
-    seed_event(&f.pool, WORLD, ROOT, "story_advance", "provisional", 1, None, None).await;
-    seed_event(&f.pool, WORLD, ROOT, "compute_result", "canon", 2, None, None).await;
-    seed_event(&f.pool, WORLD, ROOT, "story_advance", "canon", 3, None, None).await;
-    seed_event(&f.pool, WORLD, ROOT, "compute_result", "provisional", 4, None, None).await;
+    seed_event(
+        &f.pool,
+        WORLD,
+        ROOT,
+        "story_advance",
+        "canon",
+        0,
+        None,
+        None,
+    )
+    .await;
+    seed_event(
+        &f.pool,
+        WORLD,
+        ROOT,
+        "story_advance",
+        "provisional",
+        1,
+        None,
+        None,
+    )
+    .await;
+    seed_event(
+        &f.pool,
+        WORLD,
+        ROOT,
+        "compute_result",
+        "canon",
+        2,
+        None,
+        None,
+    )
+    .await;
+    seed_event(
+        &f.pool,
+        WORLD,
+        ROOT,
+        "story_advance",
+        "canon",
+        3,
+        None,
+        None,
+    )
+    .await;
+    seed_event(
+        &f.pool,
+        WORLD,
+        ROOT,
+        "compute_result",
+        "provisional",
+        4,
+        None,
+        None,
+    )
+    .await;
 
     // Default status filter is `canon`.
-    let canon = list(&f.core, &f.principal, WORLD, events_query(None, None, None, None, None)).await;
+    let canon = list(
+        &f.core,
+        &f.principal,
+        WORLD,
+        events_query(None, None, None, None, None),
+    )
+    .await;
     assert_eq!(sequences(&canon), vec![0, 2, 3]);
     // Explicit provisional filter selects only provisional rows.
     let provisional = list(
@@ -306,7 +372,13 @@ async fn cursor_pages_preserve_filters() {
         &f.core,
         &f.principal,
         WORLD,
-        events_query(None, Some("canon".into()), None, Some(2), page1.next_cursor.clone()),
+        events_query(
+            None,
+            Some("canon".into()),
+            None,
+            Some(2),
+            page1.next_cursor.clone(),
+        ),
     )
     .await;
     assert_eq!(sequences(&page2), vec![3]);
@@ -335,7 +407,17 @@ async fn cursor_pages_preserve_filters() {
 async fn malformed_cursors_are_invalid_input() {
     let f = fixture().await;
     seed_world(&f.pool, WORLD, CREATOR, Some(ROOT)).await;
-    seed_event(&f.pool, WORLD, ROOT, "story_advance", "canon", 0, None, None).await;
+    seed_event(
+        &f.pool,
+        WORLD,
+        ROOT,
+        "story_advance",
+        "canon",
+        0,
+        None,
+        None,
+    )
+    .await;
 
     let long = format!("ev1:{}", "a".repeat(600));
     for bad in [
@@ -407,7 +489,17 @@ async fn limit_zero_returns_no_more_pages() {
     let f = fixture().await;
     seed_world(&f.pool, WORLD, CREATOR, Some(ROOT)).await;
     for seq in 0..3 {
-        seed_event(&f.pool, WORLD, ROOT, "story_advance", "canon", seq, None, None).await;
+        seed_event(
+            &f.pool,
+            WORLD,
+            ROOT,
+            "story_advance",
+            "canon",
+            seq,
+            None,
+            None,
+        )
+        .await;
     }
 
     let page = list(
@@ -432,11 +524,36 @@ async fn limit_zero_returns_no_more_pages() {
 async fn branch_filter_narrows_and_defaults_to_world_current_branch() {
     let f = fixture().await;
     seed_world(&f.pool, WORLD, CREATOR, Some("fbk_main")).await;
-    seed_event(&f.pool, WORLD, "fbk_main", "story_advance", "canon", 0, None, None).await;
-    seed_event(&f.pool, WORLD, OTHER_BRANCH, "story_advance", "canon", 0, None, None).await;
+    seed_event(
+        &f.pool,
+        WORLD,
+        "fbk_main",
+        "story_advance",
+        "canon",
+        0,
+        None,
+        None,
+    )
+    .await;
+    seed_event(
+        &f.pool,
+        WORLD,
+        OTHER_BRANCH,
+        "story_advance",
+        "canon",
+        0,
+        None,
+        None,
+    )
+    .await;
 
-    let default_page =
-        list(&f.core, &f.principal, WORLD, events_query(None, None, None, None, None)).await;
+    let default_page = list(
+        &f.core,
+        &f.principal,
+        WORLD,
+        events_query(None, None, None, None, None),
+    )
+    .await;
     assert_eq!(sequences(&default_page), vec![0]);
     assert_eq!(default_page.items[0].branch_id, "fbk_main");
 
@@ -452,9 +569,24 @@ async fn branch_filter_narrows_and_defaults_to_world_current_branch() {
 
     // A world with no recorded root branch falls back to `fbk_root`.
     seed_world(&f.pool, "wld_tl_noroot", CREATOR, None).await;
-    seed_event(&f.pool, "wld_tl_noroot", ROOT, "story_advance", "canon", 0, None, None).await;
-    let fallback =
-        list(&f.core, &f.principal, "wld_tl_noroot", events_query(None, None, None, None, None)).await;
+    seed_event(
+        &f.pool,
+        "wld_tl_noroot",
+        ROOT,
+        "story_advance",
+        "canon",
+        0,
+        None,
+        None,
+    )
+    .await;
+    let fallback = list(
+        &f.core,
+        &f.principal,
+        "wld_tl_noroot",
+        events_query(None, None, None, None, None),
+    )
+    .await;
     assert_eq!(sequences(&fallback), vec![0]);
     assert_eq!(fallback.items[0].branch_id, ROOT);
 
@@ -468,7 +600,17 @@ async fn branch_filter_narrows_and_defaults_to_world_current_branch() {
 async fn modules_and_extensions_are_carried_verbatim() {
     let f = fixture().await;
     seed_world(&f.pool, WORLD, CREATOR, Some(ROOT)).await;
-    seed_event(&f.pool, WORLD, ROOT, "story_advance", "canon", 0, None, None).await;
+    seed_event(
+        &f.pool,
+        WORLD,
+        ROOT,
+        "story_advance",
+        "canon",
+        0,
+        None,
+        None,
+    )
+    .await;
     seed_event(
         &f.pool,
         WORLD,
@@ -492,11 +634,20 @@ async fn modules_and_extensions_are_carried_verbatim() {
     )
     .await;
 
-    let page = list(&f.core, &f.principal, WORLD, events_query(None, None, None, None, None)).await;
+    let page = list(
+        &f.core,
+        &f.principal,
+        WORLD,
+        events_query(None, None, None, None, None),
+    )
+    .await;
     assert_eq!(page.items.len(), 3);
 
     let plain = &page.items[0];
-    assert!(plain.modules.is_empty(), "unrecorded modules degrade to empty");
+    assert!(
+        plain.modules.is_empty(),
+        "unrecorded modules degrade to empty"
+    );
     assert!(plain.extensions.is_none());
 
     let compute = &page.items[1];
@@ -509,7 +660,10 @@ async fn modules_and_extensions_are_carried_verbatim() {
         observed.modules["observation"]["observers"],
         serde_json::json!(["kb_char_1", "kb_char_2"])
     );
-    assert_eq!(observed.modules["observation"]["access"]["line_of_sight"], true);
+    assert_eq!(
+        observed.modules["observation"]["access"]["line_of_sight"],
+        true
+    );
 
     f.core.close().await.expect("close");
     f.pool.close().await;
@@ -563,16 +717,60 @@ async fn overview_counts_exclude_retired_blocks_and_parse_last_event() {
     seed_world(&f.pool, "wld_a", CREATOR, Some(ROOT)).await;
     seed_world(&f.pool, "wld_b", CREATOR, Some(ROOT)).await;
     seed_world(&f.pool, "wld_c", CREATOR, Some(ROOT)).await;
-    seed_kb_block(&f.pool, "wld_a", "the_fall", "era", "confirmed", "2026-06-01T00:00:00Z").await;
-    seed_kb_block(&f.pool, "wld_a", "the_war", "era", "confirmed", "2026-06-02T00:00:00Z").await;
-    seed_kb_block(&f.pool, "wld_a", "first_blood", "event", "confirmed", "2026-06-03T00:00:00Z").await;
-    seed_kb_block(&f.pool, "wld_a", "the_fall", "era", "deleted", "2026-06-05T00:00:00Z").await;
-    seed_kb_block(&f.pool, "wld_b", "last_rite", "event", "confirmed", "2026-06-04T00:00:00Z").await;
+    seed_kb_block(
+        &f.pool,
+        "wld_a",
+        "the_fall",
+        "era",
+        "confirmed",
+        "2026-06-01T00:00:00Z",
+    )
+    .await;
+    seed_kb_block(
+        &f.pool,
+        "wld_a",
+        "the_war",
+        "era",
+        "confirmed",
+        "2026-06-02T00:00:00Z",
+    )
+    .await;
+    seed_kb_block(
+        &f.pool,
+        "wld_a",
+        "first_blood",
+        "event",
+        "confirmed",
+        "2026-06-03T00:00:00Z",
+    )
+    .await;
+    seed_kb_block(
+        &f.pool,
+        "wld_a",
+        "the_fall",
+        "era",
+        "deleted",
+        "2026-06-05T00:00:00Z",
+    )
+    .await;
+    seed_kb_block(
+        &f.pool,
+        "wld_b",
+        "last_rite",
+        "event",
+        "confirmed",
+        "2026-06-04T00:00:00Z",
+    )
+    .await;
 
     let resp = overview(&f.core, &f.principal, None).await;
     assert_eq!(resp.total_worlds, 3);
 
-    let wld_a = resp.worlds.iter().find(|w| w.world_id == "wld_a").expect("wld_a");
+    let wld_a = resp
+        .worlds
+        .iter()
+        .find(|w| w.world_id == "wld_a")
+        .expect("wld_a");
     assert_eq!(wld_a.era_count, 2, "deleted era must be excluded");
     assert_eq!(wld_a.event_count, 1);
     assert_eq!(
@@ -580,7 +778,11 @@ async fn overview_counts_exclude_retired_blocks_and_parse_last_event() {
         Some("2026-06-03T00:00:00Z".parse().expect("timestamp"))
     );
 
-    let wld_b = resp.worlds.iter().find(|w| w.world_id == "wld_b").expect("wld_b");
+    let wld_b = resp
+        .worlds
+        .iter()
+        .find(|w| w.world_id == "wld_b")
+        .expect("wld_b");
     assert_eq!(wld_b.era_count, 0);
     assert_eq!(wld_b.event_count, 1);
     assert_eq!(
@@ -588,7 +790,11 @@ async fn overview_counts_exclude_retired_blocks_and_parse_last_event() {
         Some("2026-06-04T00:00:00Z".parse().expect("timestamp"))
     );
 
-    let wld_c = resp.worlds.iter().find(|w| w.world_id == "wld_c").expect("wld_c");
+    let wld_c = resp
+        .worlds
+        .iter()
+        .find(|w| w.world_id == "wld_c")
+        .expect("wld_c");
     assert_eq!(wld_c.era_count, 0);
     assert_eq!(wld_c.event_count, 0);
     assert!(wld_c.last_event_at.is_none());
@@ -605,10 +811,14 @@ async fn overview_cursor_errors_are_invalid_input() {
 
     let long = format!("tl:{}", "a".repeat(1000));
     let err = overview_err(&f, Some(long)).await;
-    assert!(matches!(err, CoreError::InvalidInput { ref field, ref reason } if field == "cursor" && reason == "cursor too long"));
+    assert!(
+        matches!(err, CoreError::InvalidInput { ref field, ref reason } if field == "cursor" && reason == "cursor too long")
+    );
 
     let err = overview_err(&f, Some("tl:".to_string())).await;
-    assert!(matches!(err, CoreError::InvalidInput { ref field, ref reason } if field == "cursor" && reason == "cursor is empty"));
+    assert!(
+        matches!(err, CoreError::InvalidInput { ref field, ref reason } if field == "cursor" && reason == "cursor is empty")
+    );
 
     let err = overview_err(&f, Some("invalid-cursor".to_string())).await;
     assert!(matches!(err, CoreError::InvalidInput { ref field, .. } if field == "cursor"));

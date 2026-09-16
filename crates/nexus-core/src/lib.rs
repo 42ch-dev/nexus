@@ -1,16 +1,14 @@
 //! Transport-neutral core service (v1.189 P1 → v1.190 P2).
 
 mod actor_fence;
+mod actor_knowledge;
 #[cfg(feature = "provider-host")]
 pub mod actor_sessions;
-#[cfg(feature = "provider-host")]
-pub mod host;
-#[cfg(feature = "connect-client")]
-pub mod connect;
-mod actor_knowledge;
 mod actors;
 mod changes;
 mod chronology;
+#[cfg(feature = "connect-client")]
+pub mod connect;
 mod content;
 mod context;
 mod creators;
@@ -20,6 +18,8 @@ pub mod execution;
 mod findings;
 mod forks;
 mod home;
+#[cfg(feature = "provider-host")]
+pub mod host;
 mod knowledge;
 mod memory;
 mod memory_pipeline;
@@ -34,11 +34,11 @@ mod soul;
 mod storage_status;
 mod sync;
 mod timeline;
+mod works;
 mod world_kb;
 mod world_pack;
 mod world_rules;
 mod worlds;
-mod works;
 
 pub use actor_fence::{ActorActivityLease, CharacterTransitionLease};
 pub use actor_knowledge::{
@@ -46,50 +46,49 @@ pub use actor_knowledge::{
     KNOWLEDGE_INSERT_FAILED_PREFIX, KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX,
     KNOWLEDGE_WIRE_INVALID_PREFIX,
 };
-pub use actors::{
-    ActorPairMode, ActorViewpoint, AdmittedActor, AdmittedActorContext,
-    CHARACTER_WIRE_INVALID_PREFIX, CoreActorAdmission, classify_pair,
+#[cfg(feature = "provider-host")]
+pub use actor_sessions::{
+    echo_actor_pair, ActorSessionKey, ActorSessionKind, ActorSessionRegistry,
+    CharacterOperationSnapshot,
 };
+pub use actors::{
+    classify_pair, ActorPairMode, ActorViewpoint, AdmittedActor, AdmittedActorContext,
+    CoreActorAdmission, CHARACTER_WIRE_INVALID_PREFIX,
+};
+pub use chronology::CoreWorkChronology;
+pub use content::{resolve_guarded_path, resolve_guarded_path_async, CoreChapterContentQuery};
 pub use context::{LocalDirectiveStore, ReadOnlyDirectiveStore};
 pub use creators::CREATOR_INTERNAL_CODES;
 pub use error::{CoreError, CoreResult, MEMORY_INTERNAL_CODES};
+#[cfg(feature = "execution")]
+pub use execution::{
+    CancelOutcome, DriveDisposition, ExecutionBuildObserver, ExecutionHandle, ExecutionOpenError,
+    PresetRunConfig, PresetRunOutcome, ResumeDecision, RunControlError, RunControlResult,
+    RunSignal, RunnerDeps, WorkflowRunCoordinator,
+};
+pub use findings::{
+    format_routing_hint, CreateFindingRequest, ListFindingsQuery, ListFindingsResponse,
+    PruneFindingsOutcome, StaleFindingEntry, StaleFindingsResponse, UpdateFindingRequest,
+};
 pub use home::CoreHomeService;
+#[cfg(feature = "provider-host")]
+pub use host::HostHandle;
 pub use memory::{
     CharacterTomBeliefRow, CharacterTomListQuery, CharacterTomPage, CharacterTomRecordInput,
     CharacterTomService,
 };
 pub use presets::PresetError;
 pub use principal::Principal;
+pub use references::{GetReferenceResponse, ListReferencesResponse, ReferenceInfo};
 pub use service::{CoreAccess, CoreOpenOptions, CoreService};
-#[cfg(feature = "provider-host")]
-pub use actor_sessions::{
-    echo_actor_pair, ActorSessionKind, ActorSessionRegistry, ActorSessionKey,
-    CharacterOperationSnapshot,
-};
-#[cfg(feature = "provider-host")]
-pub use host::HostHandle;
 pub use soul::CoreCharacterMind;
 pub use storage_status::{CoreStorageStatus, CoreStorageVersions};
-#[cfg(feature = "execution")]
-pub use execution::{
-    CancelOutcome, DriveDisposition, ExecutionBuildObserver, ExecutionHandle, ExecutionOpenError,
-    PresetRunConfig, PresetRunOutcome, ResumeDecision, RunControlError, RunControlResult, RunSignal,
-    RunnerDeps, WorkflowRunCoordinator,
-};
 pub use timeline::{CoreTimelineEventsQuery, CoreTimelineOverviewQuery};
-pub use chronology::CoreWorkChronology;
-pub use content::{CoreChapterContentQuery, resolve_guarded_path, resolve_guarded_path_async};
-pub use findings::{
-    format_routing_hint, CreateFindingRequest, ListFindingsQuery, ListFindingsResponse,
-    PruneFindingsOutcome, StaleFindingEntry, StaleFindingsResponse, UpdateFindingRequest,
-};
-pub use references::{GetReferenceResponse, ListReferencesResponse, ReferenceInfo};
 pub use works::{
-    WorkDetails, WorkPatchRequest, WorkPoolEntry, WorkInspirationItem,
-    SetPoolActiveRequest, ReconcileDryRunQuery, ListPoolQuery, ListPoolResponse,
-    PromotePoolRequest, ArchivePoolRequest, AddInspirationRequest, AddInspirationResponse,
-    ListInspirationQuery, ListInspirationResponse, PromoteInspirationRequest,
-    PromoteInspirationResponse, ArchiveInspirationRequest,
-    WorkReconcileReport,
+    AddInspirationRequest, AddInspirationResponse, ArchiveInspirationRequest, ArchivePoolRequest,
+    ListInspirationQuery, ListInspirationResponse, ListPoolQuery, ListPoolResponse,
+    PromoteInspirationRequest, PromoteInspirationResponse, PromotePoolRequest,
+    ReconcileDryRunQuery, SetPoolActiveRequest, WorkDetails, WorkInspirationItem, WorkPatchRequest,
+    WorkPoolEntry, WorkReconcileReport,
 };
 pub use worlds::DELETE_WORLD_BLOCKED_BY_BINDINGS;

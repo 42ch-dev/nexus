@@ -431,9 +431,7 @@ pub async fn invoke_peer_tool(
     entry: &PeerToolEntry,
     arguments: serde_json::Value,
 ) -> PeerInvokeResult {
-    if let SpokeResult::Reject(reject) =
-        validate_tool_arguments(&entry.descriptor, &arguments)
-    {
+    if let SpokeResult::Reject(reject) = validate_tool_arguments(&entry.descriptor, &arguments) {
         return Err(PeerInvokeError::Denied {
             wire_code: None,
             message: reject.message,

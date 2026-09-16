@@ -78,9 +78,16 @@ pub async fn list(
 ) -> Result<Json<ListReferencesResponse>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let result = core.list_references(&principal).await.map_err(references_error)?;
+    let result = core
+        .list_references(&principal)
+        .await
+        .map_err(references_error)?;
     Ok(Json(ListReferencesResponse {
-        references: result.references.into_iter().map(ReferenceInfo::from).collect(),
+        references: result
+            .references
+            .into_iter()
+            .map(ReferenceInfo::from)
+            .collect(),
     }))
 }
 
@@ -95,5 +102,7 @@ pub async fn get(
         .get_reference(&principal, reference_id)
         .await
         .map_err(references_error)?;
-    Ok(Json(GetReferenceResponse { reference: ReferenceInfo::from(result.reference) }))
+    Ok(Json(GetReferenceResponse {
+        reference: ReferenceInfo::from(result.reference),
+    }))
 }

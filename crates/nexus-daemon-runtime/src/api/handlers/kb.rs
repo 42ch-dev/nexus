@@ -56,7 +56,6 @@ pub struct KbEntrySummary {
     pub created_at: String,
 }
 
-
 #[derive(Debug, Serialize)]
 pub struct ListKbEntriesResponse {
     pub items: Vec<KbEntrySummary>,
@@ -121,7 +120,10 @@ fn kb_error(error: nexus_core::CoreError) -> NexusApiError {
                         | "DIR_READ_ERROR"
                 ) =>
             {
-                NexusApiError::Internal { code: code.to_owned(), message: message.to_owned() }
+                NexusApiError::Internal {
+                    code: code.to_owned(),
+                    message: message.to_owned(),
+                }
             }
             Some(("database_error", message)) => NexusApiError::Internal {
                 code: "DATABASE_ERROR".to_owned(),
@@ -140,7 +142,9 @@ fn to_core_query(query: ListKbEntriesQuery) -> CoreListKbEntriesQuery {
         workspace_slug: query.workspace_slug,
         scope: query.scope,
         q: query.q,
-        limit: query.limit.map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
+        limit: query
+            .limit
+            .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
         cursor: query.cursor,
     }
 }
@@ -182,7 +186,10 @@ pub async fn add_entry(
         title: req.title,
         workspace_slug: req.workspace_slug,
     };
-    let response = core.add_kb_entry(&principal, request).await.map_err(kb_error)?;
+    let response = core
+        .add_kb_entry(&principal, request)
+        .await
+        .map_err(kb_error)?;
     Ok(Json(response))
 }
 
@@ -196,7 +203,10 @@ pub async fn get_entry(
 ) -> Result<Json<GetKbEntryResponse>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let response = core.get_kb_entry(&principal, entry_id).await.map_err(kb_error)?;
+    let response = core
+        .get_kb_entry(&principal, entry_id)
+        .await
+        .map_err(kb_error)?;
     Ok(Json(response))
 }
 
@@ -210,6 +220,9 @@ pub async fn delete_entry(
 ) -> Result<Json<DeleteKbEntryResponse>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let response = core.delete_kb_entry(&principal, entry_id).await.map_err(kb_error)?;
+    let response = core
+        .delete_kb_entry(&principal, entry_id)
+        .await
+        .map_err(kb_error)?;
     Ok(Json(response))
 }

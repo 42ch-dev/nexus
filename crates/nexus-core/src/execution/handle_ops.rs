@@ -37,20 +37,20 @@ use nexus_contracts::local::schedule::{
 };
 use nexus_contracts::CoreRunEventsRequest;
 use nexus_orchestration::preset_gates::{
-    GateEvalError, PreviousPresetLookup, PreviousPresetResult, PresetInput, WorkSnapshot,
-    evaluate_gates,
+    evaluate_gates, GateEvalError, PresetInput, PreviousPresetLookup, PreviousPresetResult,
+    WorkSnapshot,
 };
 
 use crate::error::{CoreError, CoreResult};
-use crate::execution::lifecycle::ExecutionHandle;
-use crate::execution::run_events::PageError;
-use crate::execution::workflow::RunEventPort;
 use crate::execution::capabilities::{ToolContext, ToolExecuteRequest};
 #[cfg(feature = "compute")]
 use crate::execution::compute::ComputeContext;
-use nexus_contracts::generated::core::core_tool_execute_response::CoreToolExecuteResponse;
+use crate::execution::lifecycle::ExecutionHandle;
+use crate::execution::run_events::PageError;
+use crate::execution::workflow::RunEventPort;
 use crate::principal::Principal;
 use crate::PresetError;
+use nexus_contracts::generated::core::core_tool_execute_response::CoreToolExecuteResponse;
 
 /// Default page size for a cursorless run-event read.
 const DEFAULT_RUN_EVENT_LIMIT: usize = 64;
@@ -117,9 +117,9 @@ impl ExecutionHandle {
         // A normal request must pass every gate the preset declares.
         if audit_reason.is_none() {
             let empty_gates: &[nexus_contracts::local::orchestration::preset_gate::Gate] = &[];
-            let gates = loaded
-                .as_ref()
-                .map_or(empty_gates, |preset| preset.manifest.preset.gates.as_slice());
+            let gates = loaded.as_ref().map_or(empty_gates, |preset| {
+                preset.manifest.preset.gates.as_slice()
+            });
             self.enforce_gate_policy(&request, gates).await?;
         }
 
@@ -245,7 +245,7 @@ impl ExecutionHandle {
         })
     }
 
-        /// Dispatch one host tool through the spine.
+    /// Dispatch one host tool through the spine.
     ///
     /// The handle supplies the narrow owned context (pool, home, workspace
     /// path, lifecycle scalars, and the live capability holder) and then runs
@@ -300,7 +300,8 @@ impl ExecutionHandle {
         // authorizes against must be the one THIS service was opened for.
         self.linked_core()?.verify_principal(principal)?;
         let context = self.compute_context(principal)?;
-        crate::execution::compute::compute_run(self.linked_core()?.as_ref(), &context, request).await
+        crate::execution::compute::compute_run(self.linked_core()?.as_ref(), &context, request)
+            .await
     }
 
     /// Accept a succeeded compute run's proposals, atomically.
@@ -313,8 +314,9 @@ impl ExecutionHandle {
         principal: &Principal,
         run_id: String,
         request: nexus_contracts::generated::daemon_api::compute::run_accept_request::RunAcceptRequest,
-    ) -> CoreResult<nexus_contracts::generated::daemon_api::compute::run_accept_response::RunAcceptResponse>
-    {
+    ) -> CoreResult<
+        nexus_contracts::generated::daemon_api::compute::run_accept_response::RunAcceptResponse,
+    > {
         self.ensure_admitting()?;
         self.linked_core()?.verify_principal(principal)?;
         crate::execution::compute::accept_compute_run(
@@ -375,7 +377,7 @@ impl ExecutionHandle {
             serializer: self.compute_serializer(),
         })
     }
-/// Read a bounded page of a run's retained events.
+    /// Read a bounded page of a run's retained events.
     ///
     /// # Errors
     /// `Closing` when the owner is shutting down, `NotFound` when this owner
@@ -387,9 +389,12 @@ impl ExecutionHandle {
         request: CoreRunEventsRequest,
     ) -> CoreResult<CoreRunEventsResponse> {
         self.ensure_admitting()?;
-        let port = self.coordinator().run_event_port().ok_or_else(|| CoreError::NotFound {
-            resource: "run event ring (no execution owner attached)".into(),
-        })?;
+        let port = self
+            .coordinator()
+            .run_event_port()
+            .ok_or_else(|| CoreError::NotFound {
+                resource: "run event ring (no execution owner attached)".into(),
+            })?;
         run_event_page(&port, request)
     }
 
@@ -436,10 +441,7 @@ impl ExecutionHandle {
         reason: &str,
     ) -> CoreResult<()> {
         let pool = self.coordinator().pool();
-        let mut conn = pool
-            .acquire()
-            .await
-            .map_err(|e| crate::error::db_err(&e))?;
+        let mut conn = pool.acquire().await.map_err(|e| crate::error::db_err(&e))?;
         let params = nexus_local_db::ForceGatesAuditParams {
             audit_id: format!("fga_{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f")),
             preset_id: request.preset_id.clone(),
@@ -600,10 +602,7 @@ impl ExecutionHandle {
     ///
     /// A resolution failure is reported, never swallowed: a preset that cannot
     /// be loaded cannot have its gates evaluated, so it must not be enqueued.
-    fn resolve_preset(
-        &self,
-        preset_id: &str,
-    ) -> CoreResult<Option<nexus_preset::LoadedPreset>> {
+    fn resolve_preset(&self, preset_id: &str) -> CoreResult<Option<nexus_preset::LoadedPreset>> {
         // `_system.*` presets are never admitted and carry no gates.
         if preset_id.starts_with("_system.") {
             return Ok(None);
@@ -619,10 +618,8 @@ impl ExecutionHandle {
             })?;
         nexus_preset::resolve_preset(preset_id, home, &registry)
             .map(Some)
-            .map_err(|e| {
-                CoreError::Internal {
-                    category: format!("failed to resolve preset '{preset_id}': {e}"),
-                }
+            .map_err(|e| CoreError::Internal {
+                category: format!("failed to resolve preset '{preset_id}': {e}"),
             })
     }
 
@@ -799,24 +796,24 @@ pub fn run_event_page(
     // `kind` is a minLength-1 newtype. The ring only ever writes non-empty
     // event names, so a conversion failure is a ring bug worth surfacing rather
     // than papering over with a fabricated kind.
-    let events = page
-        .frames
-        .into_iter()
-        .map(|frame| {
-            let kind = CoreRunEventsResponseEventsItemKind::try_from(frame.kind.as_str())
-                .map_err(|err| CoreError::Internal {
-                    category: format!("run-event kind encode: {err}"),
-                })?;
-            Ok(CoreRunEventsResponseEventsItem {
-                sequence: frame.sequence,
-                kind,
-                payload: serde_json::from_str::<serde_json::Value>(&frame.data)
-                    .ok()
-                    .and_then(|v| v.as_object().cloned())
-                    .unwrap_or_default(),
+    let events =
+        page.frames
+            .into_iter()
+            .map(|frame| {
+                let kind = CoreRunEventsResponseEventsItemKind::try_from(frame.kind.as_str())
+                    .map_err(|err| CoreError::Internal {
+                        category: format!("run-event kind encode: {err}"),
+                    })?;
+                Ok(CoreRunEventsResponseEventsItem {
+                    sequence: frame.sequence,
+                    kind,
+                    payload: serde_json::from_str::<serde_json::Value>(&frame.data)
+                        .ok()
+                        .and_then(|v| v.as_object().cloned())
+                        .unwrap_or_default(),
+                })
             })
-        })
-        .collect::<CoreResult<Vec<_>>>()?;
+            .collect::<CoreResult<Vec<_>>>()?;
     Ok(CoreRunEventsResponse {
         run_id: CoreRunEventsResponseRunId::try_from(run_id).map_err(|err| {
             CoreError::InvalidInput {

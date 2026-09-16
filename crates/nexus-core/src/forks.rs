@@ -2,12 +2,12 @@
 //! The storage write is the shared narrative repository operation; no branch
 //! registry, history copy or community/social fork is introduced here.
 
-use nexus_contracts::daemon_api::{CreateForkRequest, CreateForkResponse};
-use nexus_local_db::narrative_write;
-use serde_json::json;
 use crate::error::db_err;
 use crate::world_kb::guards;
 use crate::{CoreAccess, CoreError, CoreResult, CoreService, Principal};
+use nexus_contracts::daemon_api::{CreateForkRequest, CreateForkResponse};
+use nexus_local_db::narrative_write;
+use serde_json::json;
 
 impl CoreService {
     /// Create a local branch at an existing event in an owned World.
@@ -48,7 +48,10 @@ impl CoreService {
         }
 
         let branch_id = format!("fbk_{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
-        let label = request.label.map(String::from).unwrap_or_else(|| "fork".to_string());
+        let label = request
+            .label
+            .map(String::from)
+            .unwrap_or_else(|| "fork".to_string());
         let summary = format!(
             "forked from {}/{} ({label})",
             request.parent_branch_id, request.forked_from_event_id
@@ -59,12 +62,21 @@ impl CoreService {
                 "forked_from_event_id": request.forked_from_event_id,
                 "label": label,
             }
-        }).to_string();
+        })
+        .to_string();
         let marker = narrative_write::append_event_canon_with_extensions(
-            pool, &world_id, &branch_id, "fork_created", Some(&label), Some(&summary), &lineage,
+            pool,
+            &world_id,
+            &branch_id,
+            "fork_created",
+            Some(&label),
+            Some(&summary),
+            &lineage,
         )
         .await
-        .map_err(|e| CoreError::Internal { category: format!("fork marker append: {e}") })?;
+        .map_err(|e| CoreError::Internal {
+            category: format!("fork marker append: {e}"),
+        })?;
 
         // The generated response owns the timestamp format validation.
         serde_json::from_value(json!({
@@ -73,6 +85,8 @@ impl CoreService {
             "forked_from_event_id": request.forked_from_event_id,
             "created_at": marker.created_at,
         }))
-        .map_err(|e| CoreError::Internal { category: format!("fork response: {e}") })
+        .map_err(|e| CoreError::Internal {
+            category: format!("fork response: {e}"),
+        })
     }
 }

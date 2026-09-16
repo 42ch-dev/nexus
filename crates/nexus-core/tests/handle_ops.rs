@@ -22,9 +22,11 @@ use async_trait::async_trait;
 use nexus_contracts::local::schedule::http::{
     AddScheduleRequest, AgentBindingDto, ScheduleConcurrencyRequest, SignalScheduleRequest,
 };
-use nexus_contracts::{CoreError as WireCoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply};
+use nexus_contracts::{
+    CoreError as WireCoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply,
+};
 use nexus_core::execution::ExecutionHandle;
-use nexus_core::{CoreAccess, CoreOpenOptions, CoreError, CoreService, RunnerDeps};
+use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, RunnerDeps};
 use nexus_orchestration::capability::{
     CapabilityError, PromptExecutor, PromptRequest, PromptResult,
 };
@@ -70,11 +72,10 @@ struct NullPromptExecutor;
 
 #[async_trait]
 impl PromptExecutor for NullPromptExecutor {
-    async fn execute(
-        &self,
-        _request: PromptRequest,
-    ) -> Result<PromptResult, CapabilityError> {
-        Err(CapabilityError::Internal("no prompt executor in this test".into()))
+    async fn execute(&self, _request: PromptRequest) -> Result<PromptResult, CapabilityError> {
+        Err(CapabilityError::Internal(
+            "no prompt executor in this test".into(),
+        ))
     }
 }
 
@@ -147,9 +148,11 @@ async fn open_handle_bare(f: &Fixture) -> (CoreService, Arc<ExecutionHandle>) {
     .expect("engine-owner core open");
     let deps = RunnerDeps {
         prompt_executor: Some(Arc::new(NullPromptExecutor) as Arc<dyn PromptExecutor>),
-        workspace_root: Some(
-            nexus_home_layout::operational_workspace_dir(f.tmp.path(), CREATOR, SLUG),
-        ),
+        workspace_root: Some(nexus_home_layout::operational_workspace_dir(
+            f.tmp.path(),
+            CREATOR,
+            SLUG,
+        )),
         nexus_home: Some(f.tmp.path().join(".nexus42")),
         ..RunnerDeps::default()
     };
@@ -275,7 +278,10 @@ async fn force_gates_bypass_is_audited_even_when_the_insert_is_refused() {
             .fetch_one(core.pool())
             .await
             .unwrap();
-    assert_eq!(scheduled, 0, "a refused insert must publish no schedule row");
+    assert_eq!(
+        scheduled, 0,
+        "a refused insert must publish no schedule row"
+    );
 }
 
 /// 4. The same invariant holds when the refusal comes from the OTHER fallible
@@ -304,7 +310,8 @@ async fn force_gates_bypass_is_audited_when_the_preset_cannot_resolve() {
         .await
         .expect("audit rows");
     assert!(
-        rows.iter().any(|r| r.preset_id == "no-such-preset-anywhere"),
+        rows.iter()
+            .any(|r| r.preset_id == "no-such-preset-anywhere"),
         "a bypass for an unresolvable preset must still be audited, got {rows:?}"
     );
 }
@@ -327,13 +334,12 @@ async fn add_schedule_preserves_parallel_with_concurrency() {
         .await
         .expect("a fully-specified request must be admitted");
 
-    let kind: String = sqlx::query_scalar(
-        "SELECT concurrency_kind FROM creator_schedules WHERE schedule_id = ?",
-    )
-    .bind(&response.schedule_id)
-    .fetch_one(core.pool())
-    .await
-    .unwrap();
+    let kind: String =
+        sqlx::query_scalar("SELECT concurrency_kind FROM creator_schedules WHERE schedule_id = ?")
+            .bind(&response.schedule_id)
+            .fetch_one(core.pool())
+            .await
+            .unwrap();
     assert_eq!(
         kind, "parallel_with",
         "the request's concurrency must be stored, not silently serialized"
@@ -346,7 +352,10 @@ async fn add_schedule_preserves_parallel_with_concurrency() {
     .await
     .unwrap();
     assert!(
-        whitelist.as_deref().unwrap_or_default().contains("SCH-other"),
+        whitelist
+            .as_deref()
+            .unwrap_or_default()
+            .contains("SCH-other"),
         "the parallel_with whitelist must be preserved, got {whitelist:?}"
     );
 }
@@ -371,7 +380,8 @@ async fn add_schedule_freezes_explicit_agent_bindings() {
     .fetch_one(core.pool())
     .await
     .unwrap();
-    let descriptor = String::from_utf8(raw.expect("a driven_v1 row must carry a descriptor")).unwrap();
+    let descriptor =
+        String::from_utf8(raw.expect("a driven_v1 row must carry a descriptor")).unwrap();
     assert!(
         descriptor.contains("test-provider"),
         "the frozen descriptor must carry the caller's binding, got {descriptor}"
@@ -423,7 +433,10 @@ async fn signal_schedule_refuses_foreign_owner() {
     .fetch_one(core.pool())
     .await
     .unwrap();
-    assert_eq!(status, "pending", "a refused signal must not mutate the row");
+    assert_eq!(
+        status, "pending",
+        "a refused signal must not mutate the row"
+    );
 }
 
 /// 8. Every entry point refuses once the owner has begun closing.

@@ -29,8 +29,8 @@ async fn run_expression_route(
     context_values: &[(&str, serde_json::Value)],
 ) -> NextAction {
     let caps = CapabilityRegistry::with_builtins();
-    let loaded =
-        nexus_preset::load_preset_from_str(yaml, &caps).expect("preset YAML should load successfully");
+    let loaded = nexus_preset::load_preset_from_str(yaml, &caps)
+        .expect("preset YAML should load successfully");
 
     let start_id = loaded.manifest.preset.initial.as_str();
     let graph = nexus_orchestration::preset_runtime::build_outer_graph(&loaded.manifest).unwrap();

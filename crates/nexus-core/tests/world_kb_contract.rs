@@ -623,14 +623,24 @@ async fn provider_journal_contract_write_read_settle() {
     fx.core
         .journal_provider_operation(
             &fx.principal,
-            journal_write("op_a", "sess_a", "mock-acp", CoreProviderJournalWriteStatus::Running),
+            journal_write(
+                "op_a",
+                "sess_a",
+                "mock-acp",
+                CoreProviderJournalWriteStatus::Running,
+            ),
         )
         .await
         .unwrap();
     fx.core
         .journal_provider_operation(
             &fx.principal,
-            journal_write("op_b", "sess_b", "mock-acp", CoreProviderJournalWriteStatus::Running),
+            journal_write(
+                "op_b",
+                "sess_b",
+                "mock-acp",
+                CoreProviderJournalWriteStatus::Running,
+            ),
         )
         .await
         .unwrap();
@@ -667,7 +677,12 @@ async fn provider_journal_contract_write_read_settle() {
     fx.core
         .journal_provider_operation(
             &fx.principal,
-            journal_write("op_b", "sess_b", "mock-acp", CoreProviderJournalWriteStatus::Cancelled),
+            journal_write(
+                "op_b",
+                "sess_b",
+                "mock-acp",
+                CoreProviderJournalWriteStatus::Cancelled,
+            ),
         )
         .await
         .unwrap();
@@ -706,11 +721,19 @@ async fn provider_journal_contract_write_read_settle() {
         .await
         .unwrap()
         .expect("read-only access reads the durable journal");
-    assert!(matches!(ro_a.status, CoreProviderOperationStatus::Interrupted));
+    assert!(matches!(
+        ro_a.status,
+        CoreProviderOperationStatus::Interrupted
+    ));
     let err = ro
         .journal_provider_operation(
             &ro_principal,
-            journal_write("op_ro", "sess_a", "mock-acp", CoreProviderJournalWriteStatus::Running),
+            journal_write(
+                "op_ro",
+                "sess_a",
+                "mock-acp",
+                CoreProviderJournalWriteStatus::Running,
+            ),
         )
         .await
         .unwrap_err();

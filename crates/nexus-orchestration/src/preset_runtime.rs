@@ -1,9 +1,9 @@
 //! Execution-only preset graph construction and provider binding creation.
 
 use crate::capability::CapabilityRegistry;
-use nexus_preset::{load_embedded_preset, required_prompt_roles, LoadedPreset};
 use nexus_preset::loader::incoming_labeled_edge_counts;
 use nexus_preset::manifest::{NextTarget, PresetManifest};
+use nexus_preset::{load_embedded_preset, required_prompt_roles, LoadedPreset};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -330,8 +330,8 @@ fn build_inner_graphs(
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
 ) -> Result<HashMap<String, Arc<graph_flow::Graph>>, graph_flow::GraphError> {
-    use nexus_preset::manifest::GraphNodeKind;
     use crate::tasks::InnerGraphNodeTask;
+    use nexus_preset::manifest::GraphNodeKind;
 
     let mut result = HashMap::new();
 
@@ -616,12 +616,12 @@ states:
              incoming_labeled_edge_counts scan; got: {response}"
         );
     }
-
 }
 
-    #[test]
-    fn gonogo_routing_uses_judge_result() {
-        let manifest: PresetManifest = serde_yaml::from_str(r"
+#[test]
+fn gonogo_routing_uses_judge_result() {
+    let manifest: PresetManifest = serde_yaml::from_str(
+        r"
 preset:
   id: routing
   version: 1
@@ -637,12 +637,23 @@ states:
     next: judge
   - id: done
     terminal: true
-").unwrap();
-        let graph = build_outer_graph(&manifest).unwrap();
-        let context = graph_flow::Context::new();
-        assert_eq!(graph.find_next_task("judge", &context).as_deref(), Some("retry"));
-        context.set("_judge_result", true).unwrap();
-        assert_eq!(graph.find_next_task("judge", &context).as_deref(), Some("done"));
-        context.set("_judge_result", false).unwrap();
-        assert_eq!(graph.find_next_task("judge", &context).as_deref(), Some("retry"));
-    }
+",
+    )
+    .unwrap();
+    let graph = build_outer_graph(&manifest).unwrap();
+    let context = graph_flow::Context::new();
+    assert_eq!(
+        graph.find_next_task("judge", &context).as_deref(),
+        Some("retry")
+    );
+    context.set("_judge_result", true).unwrap();
+    assert_eq!(
+        graph.find_next_task("judge", &context).as_deref(),
+        Some("done")
+    );
+    context.set("_judge_result", false).unwrap();
+    assert_eq!(
+        graph.find_next_task("judge", &context).as_deref(),
+        Some("retry")
+    );
+}

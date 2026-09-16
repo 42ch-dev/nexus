@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{CoreError, CoreResult};
 use crate::memory::CharacterTomService;
-use crate::memory_pipeline::{MemoryPipelineCtx, internal_err, map_local_db_error, sqlx_internal};
+use crate::memory_pipeline::{internal_err, map_local_db_error, sqlx_internal, MemoryPipelineCtx};
 use crate::principal::Principal;
 use crate::service::CoreService;
 use nexus_contracts::generated::daemon_api::characters::soul::character_soul_narrative_request::CharacterSoulNarrativeRequest;

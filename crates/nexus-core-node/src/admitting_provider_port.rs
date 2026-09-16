@@ -602,12 +602,9 @@ mod tests {
              \"creator-journal\" = \"default\"",
         )
         .expect("config");
-        let core = nexus_core::CoreService::open(nexus_core::CoreOpenOptions {
-            user_home,
-            access,
-        })
-        .await
-        .expect("core open");
+        let core = nexus_core::CoreService::open(nexus_core::CoreOpenOptions { user_home, access })
+            .await
+            .expect("core open");
         let core = Arc::new(core);
         *state.core.lock().expect("core mutex") = Some(core.clone());
         (tmp, core)
@@ -832,7 +829,8 @@ mod tests {
         // The journal recovers: the retry journals first, settles memory,
         // re-delivers the exact batch once, and clears the cache.
         // The journal recovers: an engine-owner core accepts the write.
-        let (_dir_ok, core_ok) = install_journal_core(&state, nexus_core::CoreAccess::EngineOwner).await;
+        let (_dir_ok, core_ok) =
+            install_journal_core(&state, nexus_core::CoreAccess::EngineOwner).await;
         let batch = port
             .next("op-j".to_string(), 10, 64_000)
             .await

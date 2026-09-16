@@ -23,8 +23,7 @@ fn update_finding_rule_suggestion_keeps_all_three_states() {
 
     // Value → Some(Value::String) (set).
     let set: UpdateFindingRequest =
-        serde_json::from_str(r#"{"rule_suggestion":"prefer scene breaks"}"#)
-            .expect("set parses");
+        serde_json::from_str(r#"{"rule_suggestion":"prefer scene breaks"}"#).expect("set parses");
     assert_eq!(
         set.rule_suggestion,
         Some(serde_json::Value::String("prefer scene breaks".into()))
@@ -63,6 +62,12 @@ fn patch_work_binding_fields_keep_all_three_states() {
 
     let set: PatchWorkRequest =
         serde_json::from_str(r#"{"world_id":"wld_owned","story_ref":"ref-1"}"#).expect("parses");
-    assert_eq!(set.world_id, Some(serde_json::Value::String("wld_owned".into())));
-    assert_eq!(set.story_ref, Some(serde_json::Value::String("ref-1".into())));
+    assert_eq!(
+        set.world_id,
+        Some(serde_json::Value::String("wld_owned".into()))
+    );
+    assert_eq!(
+        set.story_ref,
+        Some(serde_json::Value::String("ref-1".into()))
+    );
 }

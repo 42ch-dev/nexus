@@ -66,8 +66,10 @@ impl PeerControlLane {
             active_peers: active_peers
                 .into_iter()
                 .filter_map(|id| {
-                    nexus_contracts::generated::core::CorePeerControlStateActivePeersItem::try_from(id)
-                        .ok()
+                    nexus_contracts::generated::core::CorePeerControlStateActivePeersItem::try_from(
+                        id,
+                    )
+                    .ok()
                 })
                 .collect(),
         }
@@ -161,10 +163,8 @@ impl ExecutionHandle {
                 lane.allow(operation);
             }
             "evict" => {
-                let evicted = crate::execution::peer_tools::peer_tool_registry().evict_peer(
-                    &request.peer_id,
-                    None,
-                );
+                let evicted = crate::execution::peer_tools::peer_tool_registry()
+                    .evict_peer(&request.peer_id, None);
                 if !evicted {
                     return Err(CoreError::NotFound {
                         resource: format!("peer {}", &*request.peer_id),

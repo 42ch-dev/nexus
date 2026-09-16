@@ -24,7 +24,10 @@ pub async fn get_work_outline(
 ) -> Result<Json<WorkOutline>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let outline = core.work_outline(&principal, work_id).await.map_err(super::chapters::content_error)?;
+    let outline = core
+        .work_outline(&principal, work_id)
+        .await
+        .map_err(super::chapters::content_error)?;
     Ok(Json(outline))
 }
 

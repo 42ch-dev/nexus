@@ -21,9 +21,10 @@ use std::path::{Path, PathBuf};
 /// generic conversion.
 fn map_guard_error(error: nexus_core::CoreError) -> NexusApiError {
     match error {
-        nexus_core::CoreError::InvalidInput { field, reason } => {
-            NexusApiError::BadRequest { code: field, message: reason }
-        }
+        nexus_core::CoreError::InvalidInput { field, reason } => NexusApiError::BadRequest {
+            code: field,
+            message: reason,
+        },
         nexus_core::CoreError::Internal { category } => match category.split_once(": ") {
             Some(("PATH_GUARD_PANIC", message)) => NexusApiError::Internal {
                 code: "PATH_GUARD_PANIC".to_string(),
@@ -72,8 +73,7 @@ pub fn resolve_guarded_path(
     rel_path: &str,
     must_exist: bool,
 ) -> Result<PathBuf, NexusApiError> {
-    nexus_core::resolve_guarded_path(workspace_root, rel_path, must_exist)
-        .map_err(map_guard_error)
+    nexus_core::resolve_guarded_path(workspace_root, rel_path, must_exist).map_err(map_guard_error)
 }
 
 #[cfg(test)]
@@ -188,8 +188,7 @@ mod tests {
             ("creatable-parent", "Works/w/Outlines/v2/ch01.md", false),
         ];
         for (name, rel, must_exist) in cases {
-            let core =
-                nexus_core::resolve_guarded_path(&root, rel, *must_exist);
+            let core = nexus_core::resolve_guarded_path(&root, rel, *must_exist);
             let daemon = resolve_guarded_path(&root, rel, *must_exist);
             assert_eq!(core_code(core), daemon_code(daemon), "case {name}");
         }
@@ -197,7 +196,11 @@ mod tests {
         // The rejected cases must actually be rejections, not accidental
         // `ok`/`ok` agreement, and the creatable write must be permitted.
         assert_eq!(
-            daemon_code(resolve_guarded_path(&root, "../creative-evil/evil.md", true)),
+            daemon_code(resolve_guarded_path(
+                &root,
+                "../creative-evil/evil.md",
+                true
+            )),
             "chapter_path_forbidden"
         );
         #[cfg(unix)]
@@ -206,19 +209,21 @@ mod tests {
             "chapter_path_forbidden"
         );
         assert_eq!(
-            daemon_code(resolve_guarded_path(&root, "Works/w/Outlines/v2/ch01.md", false)),
+            daemon_code(resolve_guarded_path(
+                &root,
+                "Works/w/Outlines/v2/ch01.md",
+                false
+            )),
             "ok"
         );
 
         // The async daemon wrapper delegates to the core async wrapper.
-        assert!(
-            resolve_guarded_path_async(
-                root.clone(),
-                "../creative-evil/evil.md".to_string(),
-                true
-            )
-            .await
-            .is_err()
-        );
+        assert!(resolve_guarded_path_async(
+            root.clone(),
+            "../creative-evil/evil.md".to_string(),
+            true
+        )
+        .await
+        .is_err());
     }
 }

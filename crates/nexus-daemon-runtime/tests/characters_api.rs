@@ -1472,10 +1472,16 @@ async fn config_selection_drift_is_refused_without_opening_a_second_database() {
 
     // A second, complete creator workspace exists on disk and is now selected.
     let other_db_path = test_utils::materialize_workspace_for(tmp.path(), OTHER, "default").await;
-    assert!(other_db_path.exists(), "fixture: second database must exist");
+    assert!(
+        other_db_path.exists(),
+        "fixture: second database must exist"
+    );
     assert_ne!(other_db_path, db_path);
 
-    let server = TestServer::new(api::create_router(state.clone(), DaemonApiConfig::keyless()));
+    let server = TestServer::new(api::create_router(
+        state.clone(),
+        DaemonApiConfig::keyless(),
+    ));
     let resp = server.get("/v1/daemon/characters").await;
 
     // Refused rather than served from the second database.
@@ -1483,5 +1489,8 @@ async fn config_selection_drift_is_refused_without_opening_a_second_database() {
     assert_eq!(resp.json::<Value>()["error"]["code"], "auth_required");
     // The process was not re-bound to the newly selected creator: the host's
     // binding still names the database it was opened against.
-    assert_eq!(state.database_path_buf().as_deref(), Some(db_path.as_path()));
+    assert_eq!(
+        state.database_path_buf().as_deref(),
+        Some(db_path.as_path())
+    );
 }

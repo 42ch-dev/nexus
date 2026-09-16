@@ -16,11 +16,11 @@
 //! crate resolves it via `CARGO_MANIFEST_DIR` so the test passes regardless of
 //! the invoking working directory.
 
+use nexus_orchestration::CapabilityRegistry;
 use nexus_preset::manifest::{EnterAction, ExitWhen, NextTarget};
 use nexus_preset::{
     expr, load_preset, validate_assets_in_bundle, validate_path_safety, validate_preset_semantic,
 };
-use nexus_orchestration::CapabilityRegistry;
 
 /// Repo-root-relative path to the bundled game-narrative sample.
 fn sample_bundle_root() -> std::path::PathBuf {
@@ -150,15 +150,24 @@ fn game_narrative_sample_validates_clean() {
     // (the scan/judge lives in the scheduled_sweep state).
     let sweep_graph = &loaded.manifest.inner_graphs.as_ref().unwrap()["sweep_graph"];
     assert!(
-        sweep_graph.nodes.iter().any(|node| node.id == "extract_worldview"),
+        sweep_graph
+            .nodes
+            .iter()
+            .any(|node| node.id == "extract_worldview"),
         "sweep_graph must contain extract_worldview"
     );
     assert!(
-        sweep_graph.nodes.iter().any(|node| node.id == "extract_characters"),
+        sweep_graph
+            .nodes
+            .iter()
+            .any(|node| node.id == "extract_characters"),
         "sweep_graph must contain extract_characters"
     );
     assert!(
-        !sweep_graph.nodes.iter().any(|node| node.id == "sweep_inventory"),
+        !sweep_graph
+            .nodes
+            .iter()
+            .any(|node| node.id == "sweep_inventory"),
         "the inventory scan must NOT be a node of the extraction graph \
          (it lives in the scheduled_sweep state)"
     );

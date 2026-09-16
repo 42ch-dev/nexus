@@ -5,48 +5,65 @@ use crate::api::handlers::raw_user_home;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, State};
 use axum::Json;
-use nexus_contracts::{
-    GetPresetResponse, ScaffoldPresetRequest, ScaffoldPresetResponse,
-    UpdatePresetRequest, UpdatePresetResponse, ValidatePresetRequest, ValidatePresetResponse,
-};
 use nexus_contracts::generated::daemon_api::preset_management::{
-    list_presets_response::ListPresetsResponse,
-    reload_preset_response::ReloadPresetResponse,
+    list_presets_response::ListPresetsResponse, reload_preset_response::ReloadPresetResponse,
+};
+use nexus_contracts::{
+    GetPresetResponse, ScaffoldPresetRequest, ScaffoldPresetResponse, UpdatePresetRequest,
+    UpdatePresetResponse, ValidatePresetRequest, ValidatePresetResponse,
 };
 use nexus_home_layout::user_preset_bundle_dir;
 use tracing::info;
 
-pub async fn list_presets(State(state): State<WorkspaceState>) -> Result<Json<ListPresetsResponse>, NexusApiError> {
+pub async fn list_presets(
+    State(state): State<WorkspaceState>,
+) -> Result<Json<ListPresetsResponse>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
     Ok(Json(core.list_presets(&principal).await?))
 }
 
-pub async fn scaffold_preset(State(state): State<WorkspaceState>, Json(request): Json<ScaffoldPresetRequest>) -> Result<Json<ScaffoldPresetResponse>, NexusApiError> {
+pub async fn scaffold_preset(
+    State(state): State<WorkspaceState>,
+    Json(request): Json<ScaffoldPresetRequest>,
+) -> Result<Json<ScaffoldPresetResponse>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
     Ok(Json(core.scaffold_preset(&principal, request).await?))
 }
 
-pub async fn validate_preset(State(state): State<WorkspaceState>, Json(request): Json<ValidatePresetRequest>) -> Result<Json<ValidatePresetResponse>, NexusApiError> {
+pub async fn validate_preset(
+    State(state): State<WorkspaceState>,
+    Json(request): Json<ValidatePresetRequest>,
+) -> Result<Json<ValidatePresetResponse>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
     Ok(Json(core.validate_preset(&principal, request).await?))
 }
 
-pub async fn get_preset(State(state): State<WorkspaceState>, Path(id): Path<String>) -> Result<Json<GetPresetResponse>, NexusApiError> {
+pub async fn get_preset(
+    State(state): State<WorkspaceState>,
+    Path(id): Path<String>,
+) -> Result<Json<GetPresetResponse>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
     Ok(Json(core.get_preset(&principal, id).await?))
 }
 
-pub async fn update_preset(State(state): State<WorkspaceState>, Path(id): Path<String>, Json(request): Json<UpdatePresetRequest>) -> Result<Json<UpdatePresetResponse>, NexusApiError> {
+pub async fn update_preset(
+    State(state): State<WorkspaceState>,
+    Path(id): Path<String>,
+    Json(request): Json<UpdatePresetRequest>,
+) -> Result<Json<UpdatePresetResponse>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
     Ok(Json(core.update_preset(&principal, id, request).await?))
 }
 
-pub async fn delete_preset(State(state): State<WorkspaceState>, Path(id): Path<String>) -> Result<axum::http::StatusCode, NexusApiError> {
+pub async fn delete_preset(
+    State(state): State<WorkspaceState>,
+    Path(id): Path<String>,
+) -> Result<axum::http::StatusCode, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
     core.delete_preset(&principal, id).await?;
@@ -123,21 +140,24 @@ mod tests {
     ) -> WorkspaceState {
         let home = nexus_home.parent().expect("raw home");
         std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
-            home, "test_creator", "default",
-        )).expect("operational workspace");
+            home,
+            "test_creator",
+            "default",
+        ))
+        .expect("operational workspace");
         std::fs::write(nexus_home.join("config.toml"),
             "active_creator_id = \"test_creator\"\n[active_workspace_slug_by_creator]\ntest_creator = \"default\"\n"
         ).expect("active principal configuration");
         WorkspaceState::new_for_testing(nexus_home, db_path, workspace_path).await
     }
 
-    async fn validate_for_test(request: ValidatePresetRequest) -> Result<Json<ValidatePresetResponse>, NexusApiError> {
+    async fn validate_for_test(
+        request: ValidatePresetRequest,
+    ) -> Result<Json<ValidatePresetResponse>, NexusApiError> {
         let (_tmp, home, db) = crate::test_utils::create_test_workspace().await;
         let state = WorkspaceState::new_for_testing(home, db, None).await;
         validate_preset(State(state), Json(request)).await
     }
-
-
 
     #[tokio::test]
     async fn scaffold_creates_bundle() {
@@ -151,9 +171,7 @@ mod tests {
             .expect("migrate");
         nexus_local_db::seed_versions(&pool).await.expect("seed");
 
-        let state =
-            authoring_state(nexus_home.clone(), db_path, None)
-                .await;
+        let state = authoring_state(nexus_home.clone(), db_path, None).await;
 
         let req = ScaffoldPresetRequest {
             name: "test-strat".to_string(),
@@ -178,9 +196,7 @@ mod tests {
             .expect("migrate");
         nexus_local_db::seed_versions(&pool).await.expect("seed");
 
-        let state =
-            authoring_state(nexus_home.clone(), db_path, None)
-                .await;
+        let state = authoring_state(nexus_home.clone(), db_path, None).await;
 
         let req = ScaffoldPresetRequest {
             name: "dup-strat".to_string(),

@@ -1087,7 +1087,10 @@ mod tests {
         // guarantee a bounded page by rejecting non-positive limits.
         for limit in [0, -1, -100] {
             assert!(
-                matches!(outbox.list_page(limit).await, Err(SyncError::InvalidInput(_))),
+                matches!(
+                    outbox.list_page(limit).await,
+                    Err(SyncError::InvalidInput(_))
+                ),
                 "limit {limit} must be rejected"
             );
         }

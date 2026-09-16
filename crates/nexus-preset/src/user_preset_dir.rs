@@ -10,9 +10,9 @@
 //!
 //! Design: V1.9 WS-A — third-party preset loading.
 
-use crate::capability_catalog::CapabilityCatalog;
 #[cfg(test)]
 use crate::capability_catalog::BuiltinCapabilityCatalog;
+use crate::capability_catalog::CapabilityCatalog;
 use crate::loader::{load_preset_from_str, LoadedPreset, PresetLoadError};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -234,11 +234,12 @@ pub fn load_user_preset_from_dir(
     // (A2/A7) — content hash over the manifest + every referenced asset.
     let mut loaded = loaded;
     loaded.source_identity = Some(
-        crate::loader::preset_source_identity(&loaded.manifest, Some(bundle_dir), None)
-            .map_err(|e| UserPresetWarning {
+        crate::loader::preset_source_identity(&loaded.manifest, Some(bundle_dir), None).map_err(
+            |e| UserPresetWarning {
                 dir_name: dir_name.to_string(),
                 message: format!("failed to compute source identity: {e}"),
-            })?,
+            },
+        )?,
     );
 
     Ok(UserPresetEntry {

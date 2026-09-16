@@ -269,7 +269,10 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
         DomainError::Coded { code, message } => CoreError {
             code: CoreErrorCode::InvalidInput,
             message: message.clone(),
-            details: serde_json::Map::from_iter([("wire_code".into(), Value::String(code.clone()))]),
+            details: serde_json::Map::from_iter([(
+                "wire_code".into(),
+                Value::String(code.clone()),
+            )]),
             http_status: Some(coded_wire_status(&code)),
         },
         // A peer-side tool refusal. The spine's public code is always
@@ -287,10 +290,7 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
         } => CoreError {
             code: CoreErrorCode::NotSupported,
             message,
-            details: serde_json::Map::from_iter([(
-                "wire_code".into(),
-                Value::String(wire_code),
-            )]),
+            details: serde_json::Map::from_iter([("wire_code".into(), Value::String(wire_code))]),
             http_status: Some(400),
         },
         DomainError::Busy => CoreError {
@@ -398,10 +398,7 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
         DomainError::ActorInput(message) => CoreError {
             code: CoreErrorCode::InvalidInput,
             message: message.clone(),
-            details: serde_json::Map::from_iter([(
-                "reason".into(),
-                Value::String(message),
-            )]),
+            details: serde_json::Map::from_iter([("reason".into(), Value::String(message))]),
             http_status: Some(400),
         },
         DomainError::Conflict(message) => CoreError {
@@ -439,7 +436,10 @@ fn wire_core_error_from_preset(error: nexus_core::PresetError) -> CoreError {
         PresetError::Rejected { code, message } => CoreError {
             code: CoreErrorCode::InvalidInput,
             message: message.clone(),
-            details: serde_json::Map::from_iter([("wire_code".into(), Value::String(code.clone()))]),
+            details: serde_json::Map::from_iter([(
+                "wire_code".into(),
+                Value::String(code.clone()),
+            )]),
             // `Rejected` is the daemon's `BadRequest`, whose status comes from
             // its own code table: the semantic-validation codes are 422 and
             // everything else 400.
@@ -484,7 +484,10 @@ fn wire_core_error_from_preset(error: nexus_core::PresetError) -> CoreError {
             code: CoreErrorCode::Internal,
             message: "internal error".into(),
             details: serde_json::Map::from_iter([
-                ("bucket".into(), Value::String(internal_error_bucket(&message).into())),
+                (
+                    "bucket".into(),
+                    Value::String(internal_error_bucket(&message).into()),
+                ),
                 ("wire_code".into(), Value::String(code)),
             ]),
             http_status: Some(500),
@@ -493,10 +496,19 @@ fn wire_core_error_from_preset(error: nexus_core::PresetError) -> CoreError {
             code: CoreErrorCode::InvalidInput,
             message: format!("strategy conflict: {}", conflict.conflicting_path),
             details: serde_json::Map::from_iter([
-                ("current_revision".into(), Value::from(conflict.current_revision)),
+                (
+                    "current_revision".into(),
+                    Value::from(conflict.current_revision),
+                ),
                 ("node_id".into(), Value::String(conflict.node_id)),
-                ("conflicting_path".into(), Value::String(conflict.conflicting_path)),
-                ("recovery_hint".into(), Value::String(conflict.recovery_hint)),
+                (
+                    "conflicting_path".into(),
+                    Value::String(conflict.conflicting_path),
+                ),
+                (
+                    "recovery_hint".into(),
+                    Value::String(conflict.recovery_hint),
+                ),
             ]),
             http_status: Some(409),
         },

@@ -122,7 +122,17 @@ async fn setup() -> Fixture {
         let pool = guarded.clone_pool();
         seed_world(&pool, OWNED_WORLD, CREATOR).await;
         seed_world(&pool, FOREIGN_WORLD, "other_creator").await;
-        seed_kb(&pool, "kb_tgt", OWNED_WORLD, "Target", "confirmed", Some(1), None, None).await;
+        seed_kb(
+            &pool,
+            "kb_tgt",
+            OWNED_WORLD,
+            "Target",
+            "confirmed",
+            Some(1),
+            None,
+            None,
+        )
+        .await;
         seed_kb(
             &pool,
             "kb_comp",
@@ -134,9 +144,30 @@ async fn setup() -> Fixture {
             None,
         )
         .await;
-        seed_pending(&pool, "xj_job1", OWNED_WORLD, "Cand1", "2020-01-01T00:00:01Z").await;
-        seed_pending(&pool, "xj_job2", OWNED_WORLD, "Cand2", "2020-01-01T00:00:02Z").await;
-        seed_pending(&pool, "xj_job3", OWNED_WORLD, "Cand3", "2020-01-01T00:00:03Z").await;
+        seed_pending(
+            &pool,
+            "xj_job1",
+            OWNED_WORLD,
+            "Cand1",
+            "2020-01-01T00:00:01Z",
+        )
+        .await;
+        seed_pending(
+            &pool,
+            "xj_job2",
+            OWNED_WORLD,
+            "Cand2",
+            "2020-01-01T00:00:02Z",
+        )
+        .await;
+        seed_pending(
+            &pool,
+            "xj_job3",
+            OWNED_WORLD,
+            "Cand3",
+            "2020-01-01T00:00:03Z",
+        )
+        .await;
         pool.close().await;
     }
 
@@ -154,7 +185,12 @@ async fn setup() -> Fixture {
     }
 }
 
-fn promote_req(job_id: &str, action: &str, expected_version: u64, merge_target: Option<&str>) -> WorldKbPromoteCandidateRequest {
+fn promote_req(
+    job_id: &str,
+    action: &str,
+    expected_version: u64,
+    merge_target: Option<&str>,
+) -> WorldKbPromoteCandidateRequest {
     serde_json::from_value(serde_json::json!({
         "job_id": job_id,
         "candidate_id": job_id,
@@ -269,7 +305,12 @@ async fn promote_relate_preserves_owner_and_cas() {
         .unwrap();
     assert_eq!(adopted.version, 1);
     assert_eq!(adopted.job.status, "confirmed");
-    let adopted_id = adopted.entity.as_ref().expect("adopted entity").key_block_id.clone();
+    let adopted_id = adopted
+        .entity
+        .as_ref()
+        .expect("adopted entity")
+        .key_block_id
+        .clone();
 
     let related = fx
         .core
@@ -316,13 +357,11 @@ async fn promote_relate_preserves_owner_and_cas() {
     );
 
     // The adopt produced a durable core_changes row (same-transaction outbox).
-    let outbox: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM core_changes WHERE resource_id = ?",
-    )
-    .bind(&adopted_id)
-    .fetch_one(&reader_pool)
-    .await
-    .unwrap();
+    let outbox: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM core_changes WHERE resource_id = ?")
+        .bind(&adopted_id)
+        .fetch_one(&reader_pool)
+        .await
+        .unwrap();
     assert!(outbox >= 1, "adopt emitted a core_changes row");
 
     // ── Stale relationship update leaves rows and sequence untouched ───────
@@ -443,8 +482,8 @@ async fn world_lifecycle_create_delete_and_binding_guard() {
     let write_pool = engine.clone_pool();
 
     // Title validation: empty after trim is rejected with the retained reason.
-    let bad: CreateWorldRequest = serde_json::from_value(serde_json::json!({"title": "   "}))
-        .unwrap();
+    let bad: CreateWorldRequest =
+        serde_json::from_value(serde_json::json!({"title": "   "})).unwrap();
     let err = fx.core.create_world(&fx.principal, bad).await.unwrap_err();
     let CoreError::InvalidInput { field, reason } = err else {
         panic!("expected invalid input, got {err:?}")
@@ -563,7 +602,11 @@ async fn key_block_state_read_guards() {
 
     let state = fx
         .core
-        .world_kb_key_block_state(&fx.principal, OWNED_WORLD.to_string(), "kb_comp".to_string())
+        .world_kb_key_block_state(
+            &fx.principal,
+            OWNED_WORLD.to_string(),
+            "kb_comp".to_string(),
+        )
         .await
         .unwrap();
     assert!(state.is_computable);
@@ -583,14 +626,22 @@ async fn key_block_state_read_guards() {
 
     let err = fx
         .core
-        .world_kb_key_block_state(&fx.principal, OWNED_WORLD.to_string(), "kb_missing".to_string())
+        .world_kb_key_block_state(
+            &fx.principal,
+            OWNED_WORLD.to_string(),
+            "kb_missing".to_string(),
+        )
         .await
         .unwrap_err();
     assert!(matches!(err, CoreError::NotFound { .. }));
 
     let err = fx
         .core
-        .world_kb_key_block_state(&fx.principal, FOREIGN_WORLD.to_string(), "kb_comp".to_string())
+        .world_kb_key_block_state(
+            &fx.principal,
+            FOREIGN_WORLD.to_string(),
+            "kb_comp".to_string(),
+        )
         .await
         .unwrap_err();
     assert!(matches!(err, CoreError::WorldOwnerDenied { .. }));

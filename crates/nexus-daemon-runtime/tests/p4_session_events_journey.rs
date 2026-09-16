@@ -9,9 +9,9 @@
 use axum::http::StatusCode;
 use axum_test::TestServer;
 use nexus_agent_host::config::{AgentHostConfig, ProviderConfig};
+use nexus_core::execution::run_events::RunEventRegistry;
 use nexus_daemon_runtime::api;
 use nexus_daemon_runtime::api::auth_middleware::DaemonApiConfig;
-use nexus_core::execution::run_events::RunEventRegistry;
 use nexus_daemon_runtime::test_utils;
 use nexus_daemon_runtime::test_utils::TestTempRoot;
 use nexus_daemon_runtime::workspace::WorkspaceState;

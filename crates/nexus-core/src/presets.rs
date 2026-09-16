@@ -2,10 +2,10 @@
 
 use crate::{CoreAccess, CoreError, CoreResult, CoreService, Principal};
 use nexus_contracts::{
-    CoreStrategyPatchResponse, CoreStrategyPatchResponseValidationSummary,
-    GetPresetResponse, ScaffoldPresetRequest, ScaffoldPresetResponse,
-    StrategyConflictError, StrategyPatchPromptTemplateRequest, StrategyPatchStateRequest,
-    StrategyPatchTransitionRequest, ValidatePresetRequest, ValidatePresetResponse,
+    CoreStrategyPatchResponse, CoreStrategyPatchResponseValidationSummary, GetPresetResponse,
+    ScaffoldPresetRequest, ScaffoldPresetResponse, StrategyConflictError,
+    StrategyPatchPromptTemplateRequest, StrategyPatchStateRequest, StrategyPatchTransitionRequest,
+    ValidatePresetRequest, ValidatePresetResponse,
 };
 use nexus_contracts::{UpdatePresetRequest, UpdatePresetResponse};
 // The canonical preset profile DTOs live in the generated `preset_profile_response`
@@ -18,17 +18,17 @@ use nexus_contracts::generated::core::orchestration_presets::preset_profile_resp
     PresetProfileLabeledNext, PresetProfileLanes, PresetProfileNext, PresetProfileResponse,
     PresetProfileRole, PresetProfileSignal, PresetProfileState,
 };
-use nexus_contracts::OrchestrationPresetListResponse;
-use nexus_contracts::local::orchestration::preset::{
-    EnterAction, ExitWhen, NextTarget, PresetRoleDefinition, SignalActionKind,
-    SignalBinding, StateDefinition,
-};
-use nexus_preset::preset_ids::cron_role_preset_ids;
 use nexus_contracts::generated::daemon_api::preset_management::list_presets_response::{
     ListPresetsResponse, NexusPresetSummary, NexusPresetSummarySource,
 };
-use nexus_preset::capability_catalog::BuiltinCapabilityCatalog;
+use nexus_contracts::local::orchestration::preset::{
+    EnterAction, ExitWhen, NextTarget, PresetRoleDefinition, SignalActionKind, SignalBinding,
+    StateDefinition,
+};
+use nexus_contracts::OrchestrationPresetListResponse;
 use nexus_home_layout::{user_preset_base_dir, user_preset_bundle_dir};
+use nexus_preset::capability_catalog::BuiltinCapabilityCatalog;
+use nexus_preset::preset_ids::cron_role_preset_ids;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -55,7 +55,12 @@ pub enum PresetError {
 }
 
 impl PresetError {
-    fn strategy_conflict(current_revision: u64, node_id: &str, conflicting_path: &str, recovery_hint: &str) -> Self {
+    fn strategy_conflict(
+        current_revision: u64,
+        node_id: &str,
+        conflicting_path: &str,
+        recovery_hint: &str,
+    ) -> Self {
         Self::StrategyConflict(StrategyConflictError {
             current_revision,
             node_id: node_id.to_string(),
@@ -66,44 +71,62 @@ impl PresetError {
 
     fn strategy_validation_failed(errors: &[String], warnings: &[String]) -> Self {
         Self::StrategyValidation(CoreStrategyPatchResponseValidationSummary {
-            errors: errors.to_vec(), warnings: warnings.to_vec(),
+            errors: errors.to_vec(),
+            warnings: warnings.to_vec(),
         })
     }
 }
 
 fn raw_user_home(nexus_home: &Path) -> Result<&Path, PresetError> {
     nexus_home.parent().ok_or_else(|| PresetError::Internal {
-        code: "HOME_PATH_ERROR".into(), message: "Nexus home has no parent".into(),
+        code: "HOME_PATH_ERROR".into(),
+        message: "Nexus home has no parent".into(),
     })
 }
 
 fn preset_io(code: &str, error: impl std::fmt::Display) -> PresetError {
-    PresetError::Internal { code: code.to_string(), message: error.to_string() }
+    PresetError::Internal {
+        code: code.to_string(),
+        message: error.to_string(),
+    }
 }
 
 /// Resolve existing ancestors before any file effect, including a new template
 /// below a symlinked parent. Lexical traversal is rejected by the caller.
 fn confined_path(root: &Path, path: &Path) -> Result<PathBuf, PresetError> {
-    let canonical_root = root.canonicalize().map_err(|e| preset_io("PATH_CANONICALIZE_ERROR", e))?;
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|e| preset_io("PATH_CANONICALIZE_ERROR", e))?;
     let mut ancestor = path;
     let mut missing = Vec::new();
     loop {
         match std::fs::symlink_metadata(ancestor) {
             Ok(_) => break,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                missing.push(ancestor.file_name().ok_or_else(|| preset_io("PATH_INVALID", "missing file name"))?);
-                ancestor = ancestor.parent().ok_or_else(|| preset_io("PATH_INVALID", "missing parent"))?;
+                missing.push(
+                    ancestor
+                        .file_name()
+                        .ok_or_else(|| preset_io("PATH_INVALID", "missing file name"))?,
+                );
+                ancestor = ancestor
+                    .parent()
+                    .ok_or_else(|| preset_io("PATH_INVALID", "missing parent"))?;
             }
             Err(e) => return Err(preset_io("PATH_METADATA_ERROR", e)),
         }
     }
-    let mut resolved = ancestor.canonicalize().map_err(|e| preset_io("PATH_CANONICALIZE_ERROR", e))?;
+    let mut resolved = ancestor
+        .canonicalize()
+        .map_err(|e| preset_io("PATH_CANONICALIZE_ERROR", e))?;
     if !resolved.starts_with(&canonical_root) {
         return Err(PresetError::Forbidden {
-            resource: "preset_path".into(), reason: "path resolves outside the preset root".into(),
+            resource: "preset_path".into(),
+            reason: "path resolves outside the preset root".into(),
         });
     }
-    for component in missing.into_iter().rev() { resolved.push(component); }
+    for component in missing.into_iter().rev() {
+        resolved.push(component);
+    }
     Ok(resolved)
 }
 
@@ -116,118 +139,225 @@ fn acquire_preset_lock(nexus_home: &Path, id: &str) -> Result<std::fs::File, Pre
     let lock_dir = confined_path(&root, &root.join(".locks"))?;
     std::fs::create_dir_all(&lock_dir).map_err(|e| preset_io("DIR_CREATE_ERROR", e))?;
     let lock_path = confined_path(&root, &lock_dir.join(format!("{id}.lock")))?;
-    let file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false)
-        .open(lock_path).map_err(|e| preset_io("LOCK_OPEN_ERROR", e))?;
-    file.lock().map_err(|e| preset_io("LOCK_ACQUIRE_ERROR", e))?;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(lock_path)
+        .map_err(|e| preset_io("LOCK_OPEN_ERROR", e))?;
+    file.lock()
+        .map_err(|e| preset_io("LOCK_ACQUIRE_ERROR", e))?;
     Ok(file)
 }
 
 impl CoreService {
     async fn preset_write<T: Send + 'static>(
-        &self, principal: &Principal, id: String,
+        &self,
+        principal: &Principal,
+        id: String,
         operation: impl FnOnce(&Path, &str) -> Result<T, PresetError> + Send + 'static,
     ) -> CoreResult<T> {
         self.verify_principal(principal)?;
         if self.inner.access == CoreAccess::ReadOnly {
-            return Err(CoreError::Forbidden { resource: "preset authoring: read-only core access".into() });
+            return Err(CoreError::Forbidden {
+                resource: "preset authoring: read-only core access".into(),
+            });
         }
         validate_strategy_id(&id).map_err(CoreError::from)?;
-        let service = Self { inner: Arc::clone(&self.inner) };
+        let service = Self {
+            inner: Arc::clone(&self.inner),
+        };
         let principal = principal.clone();
         tokio::task::spawn_blocking(move || {
-            let _lock = acquire_preset_lock(&service.inner.nexus_home, &id).map_err(CoreError::from)?;
+            let _lock =
+                acquire_preset_lock(&service.inner.nexus_home, &id).map_err(CoreError::from)?;
             service.verify_principal(&principal)?;
             operation(&service.inner.nexus_home, &id).map_err(CoreError::from)
-        }).await.map_err(|e| CoreError::Internal { category: format!("preset_task: {e}") })?
+        })
+        .await
+        .map_err(|e| CoreError::Internal {
+            category: format!("preset_task: {e}"),
+        })?
     }
 
-    pub async fn patch_strategy_state(&self, principal: &Principal, strategy_id: String,
-        state_id: String, request: StrategyPatchStateRequest) -> CoreResult<CoreStrategyPatchResponse> {
+    pub async fn patch_strategy_state(
+        &self,
+        principal: &Principal,
+        strategy_id: String,
+        state_id: String,
+        request: StrategyPatchStateRequest,
+    ) -> CoreResult<CoreStrategyPatchResponse> {
         self.verify_principal(principal)?;
-        ensure_id_matches(&strategy_id, &request.strategy_id, "strategy_id").map_err(CoreError::from)?;
+        ensure_id_matches(&strategy_id, &request.strategy_id, "strategy_id")
+            .map_err(CoreError::from)?;
         ensure_id_matches(&state_id, &request.state_id, "state_id").map_err(CoreError::from)?;
-        self.preset_write(principal, strategy_id, move |home, id| patch_state_inner(home, id, &state_id, &request)).await
+        self.preset_write(principal, strategy_id, move |home, id| {
+            patch_state_inner(home, id, &state_id, &request)
+        })
+        .await
     }
 
-    pub async fn patch_strategy_transition(&self, principal: &Principal, strategy_id: String,
-        request: StrategyPatchTransitionRequest) -> CoreResult<CoreStrategyPatchResponse> {
+    pub async fn patch_strategy_transition(
+        &self,
+        principal: &Principal,
+        strategy_id: String,
+        request: StrategyPatchTransitionRequest,
+    ) -> CoreResult<CoreStrategyPatchResponse> {
         self.verify_principal(principal)?;
-        ensure_id_matches(&strategy_id, &request.strategy_id, "strategy_id").map_err(CoreError::from)?;
-        self.preset_write(principal, strategy_id, move |home, id| patch_transition_inner(home, id, &request)).await
+        ensure_id_matches(&strategy_id, &request.strategy_id, "strategy_id")
+            .map_err(CoreError::from)?;
+        self.preset_write(principal, strategy_id, move |home, id| {
+            patch_transition_inner(home, id, &request)
+        })
+        .await
     }
 
-    pub async fn patch_strategy_prompt_template(&self, principal: &Principal, strategy_id: String,
-        state_id: String, request: StrategyPatchPromptTemplateRequest) -> CoreResult<CoreStrategyPatchResponse> {
+    pub async fn patch_strategy_prompt_template(
+        &self,
+        principal: &Principal,
+        strategy_id: String,
+        state_id: String,
+        request: StrategyPatchPromptTemplateRequest,
+    ) -> CoreResult<CoreStrategyPatchResponse> {
         self.verify_principal(principal)?;
-        ensure_id_matches(&strategy_id, &request.strategy_id, "strategy_id").map_err(CoreError::from)?;
+        ensure_id_matches(&strategy_id, &request.strategy_id, "strategy_id")
+            .map_err(CoreError::from)?;
         ensure_id_matches(&state_id, &request.state_id, "state_id").map_err(CoreError::from)?;
-        self.preset_write(principal, strategy_id, move |home, id| patch_prompt_template_inner(home, id, &state_id, &request)).await
+        self.preset_write(principal, strategy_id, move |home, id| {
+            patch_prompt_template_inner(home, id, &state_id, &request)
+        })
+        .await
     }
 
-    pub async fn scaffold_preset(&self, principal: &Principal, request: ScaffoldPresetRequest) -> CoreResult<ScaffoldPresetResponse> {
+    pub async fn scaffold_preset(
+        &self,
+        principal: &Principal,
+        request: ScaffoldPresetRequest,
+    ) -> CoreResult<ScaffoldPresetResponse> {
         self.verify_principal(principal)?;
         validate_strategy_id(&request.name).map_err(|error| match error {
             PresetError::InvalidInput { reason, .. } => PresetError::InvalidInput {
-                field: "name".into(), reason,
+                field: "name".into(),
+                reason,
             },
             error => error,
         })?;
-        self.preset_write(principal, request.name, scaffold_user_preset).await
+        self.preset_write(principal, request.name, scaffold_user_preset)
+            .await
     }
 
     pub async fn delete_preset(&self, principal: &Principal, preset_id: String) -> CoreResult<()> {
         self.preset_write(principal, preset_id, |home, id| {
             let (source, path) = locate_preset(home, id)?;
             if source != "user" {
-                return Err(PresetError::Rejected { code: "preset_delete_forbidden".into(),
-                    message: format!("only user presets can be deleted; '{id}' is {source}") });
+                return Err(PresetError::Rejected {
+                    code: "preset_delete_forbidden".into(),
+                    message: format!("only user presets can be deleted; '{id}' is {source}"),
+                });
             }
             let path = path.ok_or_else(|| preset_io("PRESET_PATH_MISSING", id))?;
             std::fs::remove_dir_all(path).map_err(|e| preset_io("DIRECTORY_REMOVE_ERROR", e))
-        }).await
+        })
+        .await
     }
 
-    pub async fn get_preset(&self, principal: &Principal, preset_id: String) -> CoreResult<GetPresetResponse> {
+    pub async fn get_preset(
+        &self,
+        principal: &Principal,
+        preset_id: String,
+    ) -> CoreResult<GetPresetResponse> {
         self.verify_principal(principal)?;
-        let (source, path) = locate_preset(&self.inner.nexus_home, &preset_id).map_err(CoreError::from)?;
-        let yaml = load_preset_yaml(&self.inner.nexus_home, &preset_id, &source, path.as_deref()).map_err(CoreError::from)?;
-        Ok(GetPresetResponse { id: preset_id, source: source.parse().map_err(|e| CoreError::Internal { category: format!("preset_source: {e}") })?,
-            path: path.map(|p| p.display().to_string()), yaml })
+        let (source, path) =
+            locate_preset(&self.inner.nexus_home, &preset_id).map_err(CoreError::from)?;
+        let yaml = load_preset_yaml(&self.inner.nexus_home, &preset_id, &source, path.as_deref())
+            .map_err(CoreError::from)?;
+        Ok(GetPresetResponse {
+            id: preset_id,
+            source: source.parse().map_err(|e| CoreError::Internal {
+                category: format!("preset_source: {e}"),
+            })?,
+            path: path.map(|p| p.display().to_string()),
+            yaml,
+        })
     }
 
     pub async fn list_presets(&self, principal: &Principal) -> CoreResult<ListPresetsResponse> {
         self.verify_principal(principal)?;
         let caps = BuiltinCapabilityCatalog;
-        let embedded = nexus_preset::list_embedded_presets().into_iter().map(|id| {
-            let run_intents = nexus_preset::load_embedded_preset(&id, &caps).ok().map_or_else(Vec::new, |loaded| {
-                loaded.manifest.preset.run_intents.iter().map(|intent| {
-                    use nexus_preset::manifest::RunIntent;
-                    match intent {
-                        RunIntent::WorkInit => "work_init",
-                        RunIntent::WorkContinue => "work_continue",
-                        RunIntent::KnowledgeIngest => "knowledge_ingest",
-                        RunIntent::WorkMaintenance => "work_maintenance",
-                        RunIntent::SystemMaintenance => "system_maintenance",
-                    }.to_string()
-                }).collect()
-            });
-            NexusPresetSummary { id, source: NexusPresetSummarySource::Embedded, run_intents }
-        }).collect();
-        let system = nexus_preset::system_preset_dir::scan_system_presets(&self.inner.nexus_home, &caps)
-            .presets.into_iter().map(|entry| NexusPresetSummary { id: entry.qualified_id, source: NexusPresetSummarySource::System, run_intents: vec![] }).collect();
-        let user = nexus_home_layout::list_user_preset_ids(raw_user_home(&self.inner.nexus_home).map_err(CoreError::from)?)
-            .into_iter().map(|id| NexusPresetSummary { id, source: NexusPresetSummarySource::User, run_intents: vec![] }).collect();
-        Ok(ListPresetsResponse { embedded, system, user })
+        let embedded = nexus_preset::list_embedded_presets()
+            .into_iter()
+            .map(|id| {
+                let run_intents = nexus_preset::load_embedded_preset(&id, &caps)
+                    .ok()
+                    .map_or_else(Vec::new, |loaded| {
+                        loaded
+                            .manifest
+                            .preset
+                            .run_intents
+                            .iter()
+                            .map(|intent| {
+                                use nexus_preset::manifest::RunIntent;
+                                match intent {
+                                    RunIntent::WorkInit => "work_init",
+                                    RunIntent::WorkContinue => "work_continue",
+                                    RunIntent::KnowledgeIngest => "knowledge_ingest",
+                                    RunIntent::WorkMaintenance => "work_maintenance",
+                                    RunIntent::SystemMaintenance => "system_maintenance",
+                                }
+                                .to_string()
+                            })
+                            .collect()
+                    });
+                NexusPresetSummary {
+                    id,
+                    source: NexusPresetSummarySource::Embedded,
+                    run_intents,
+                }
+            })
+            .collect();
+        let system =
+            nexus_preset::system_preset_dir::scan_system_presets(&self.inner.nexus_home, &caps)
+                .presets
+                .into_iter()
+                .map(|entry| NexusPresetSummary {
+                    id: entry.qualified_id,
+                    source: NexusPresetSummarySource::System,
+                    run_intents: vec![],
+                })
+                .collect();
+        let user = nexus_home_layout::list_user_preset_ids(
+            raw_user_home(&self.inner.nexus_home).map_err(CoreError::from)?,
+        )
+        .into_iter()
+        .map(|id| NexusPresetSummary {
+            id,
+            source: NexusPresetSummarySource::User,
+            run_intents: vec![],
+        })
+        .collect();
+        Ok(ListPresetsResponse {
+            embedded,
+            system,
+            user,
+        })
     }
 
-    pub async fn validate_preset(&self, principal: &Principal, request: ValidatePresetRequest) -> CoreResult<ValidatePresetResponse> {
+    pub async fn validate_preset(
+        &self,
+        principal: &Principal,
+        request: ValidatePresetRequest,
+    ) -> CoreResult<ValidatePresetResponse> {
         self.verify_principal(principal)?;
         validate_preset_file(&request).map_err(CoreError::from)
     }
 
     /// Replace user YAML without changing the retained request or revision policy.
     pub async fn update_preset(
-        &self, principal: &Principal, preset_id: String, request: UpdatePresetRequest,
+        &self,
+        principal: &Principal,
+        preset_id: String,
+        request: UpdatePresetRequest,
     ) -> CoreResult<UpdatePresetResponse> {
         self.preset_write(principal, preset_id, move |home, id| {
             let (source, path) = locate_preset(home, id)?;
@@ -243,28 +373,38 @@ impl CoreService {
             let temporary = dir.join(format!(".preset.yaml.{}.tmp", uuid::Uuid::new_v4()));
             atomic_write_with_dir_fsync(&target, &temporary, request.yaml.as_bytes())
                 .map_err(|error| preset_io("FILE_WRITE_ERROR", error))?;
-            Ok(UpdatePresetResponse { id: id.to_string(), updated: true })
-        }).await
+            Ok(UpdatePresetResponse {
+                id: id.to_string(),
+                updated: true,
+            })
+        })
+        .await
     }
 
     /// Retained orchestration listing: embedded IDs followed by unique system IDs.
     pub async fn list_orchestration_presets(
-        &self, principal: &Principal,
+        &self,
+        principal: &Principal,
     ) -> CoreResult<OrchestrationPresetListResponse> {
         self.verify_principal(principal)?;
         let mut presets = nexus_preset::list_embedded_presets();
         let scan = nexus_preset::system_preset_dir::scan_system_presets(
-            &self.inner.nexus_home, &BuiltinCapabilityCatalog,
+            &self.inner.nexus_home,
+            &BuiltinCapabilityCatalog,
         );
         for id in nexus_preset::system_preset_dir::list_system_preset_ids(&scan) {
-            if !presets.contains(&id) { presets.push(id); }
+            if !presets.contains(&id) {
+                presets.push(id);
+            }
         }
         Ok(OrchestrationPresetListResponse { presets })
     }
 
     /// Read the profile using the retained user/system/embedded resolution order.
     pub async fn get_preset_profile(
-        &self, principal: &Principal, preset_id: String,
+        &self,
+        principal: &Principal,
+        preset_id: String,
     ) -> CoreResult<PresetProfileResponse> {
         self.verify_principal(principal)?;
         validate_strategy_id(&preset_id).map_err(CoreError::from)?;
@@ -272,8 +412,9 @@ impl CoreService {
         let caps = BuiltinCapabilityCatalog;
         let loaded = match nexus_preset::lookup_preset_by_id(&preset_id, home, &caps) {
             Some(loaded) => loaded,
-            None => nexus_preset::resolve_preset(&preset_id, home, &caps)
-                .map_err(|error| PresetError::NotFound(format!("preset '{preset_id}' not found: {error}")))?,
+            None => nexus_preset::resolve_preset(&preset_id, home, &caps).map_err(|error| {
+                PresetError::NotFound(format!("preset '{preset_id}' not found: {error}"))
+            })?,
         };
         let mut hash_hex = String::with_capacity(64);
         for byte in &loaded.source_hash {
@@ -345,7 +486,10 @@ fn load_user_preset_yaml(
     let bundle_dir = user_preset_bundle_dir(raw_home, strategy_id);
     let yaml_path = bundle_dir.join("preset.yaml");
     if strategy_id.starts_with("_system.") {
-        return Err(PresetError::Rejected { code: "strategy_update_forbidden".into(), message: format!("system preset '{strategy_id}' is read-only") });
+        return Err(PresetError::Rejected {
+            code: "strategy_update_forbidden".into(),
+            message: format!("system preset '{strategy_id}' is read-only"),
+        });
     }
     if !yaml_path.is_file() {
         // Reject embedded/system presets explicitly so callers get a clear
@@ -573,11 +717,10 @@ fn validate_preset_yaml(
 
     let caps = BuiltinCapabilityCatalog;
 
-    let mut errors: Vec<String> =
-        nexus_preset::loader_validate_manifest_compat(&manifest, &caps)
-            .iter()
-            .map(|p| format!("{}: {}", p.path, p.error))
-            .collect();
+    let mut errors: Vec<String> = nexus_preset::loader_validate_manifest_compat(&manifest, &caps)
+        .iter()
+        .map(|p| format!("{}: {}", p.path, p.error))
+        .collect();
 
     let sem = nexus_preset::validate_preset_semantic(&manifest, &caps);
     for d in sem.errors() {
@@ -585,8 +728,7 @@ fn validate_preset_yaml(
     }
 
     let path_result = nexus_preset::validate_path_safety(&manifest);
-    let asset_result =
-        nexus_preset::validate_assets_in_bundle(&manifest, bundle_root);
+    let asset_result = nexus_preset::validate_assets_in_bundle(&manifest, bundle_root);
     for d in path_result.errors().chain(asset_result.errors()) {
         errors.push(format!("{}: {}", d.path, d.message));
     }
@@ -798,7 +940,6 @@ fn patch_state_inner(
     state_id: &str,
     req: &StrategyPatchStateRequest,
 ) -> Result<CoreStrategyPatchResponse, PresetError> {
-
     // Load the canonical YAML while holding the lock so the revision check is
     // not subject to TOCTOU.
     let (mut yaml_value, bundle_dir, current_revision) =
@@ -862,17 +1003,23 @@ fn patch_state_inner(
 
     let (errors, warnings) = validate_preset_yaml(&bundle_dir, &yaml_value)?;
     if !errors.is_empty() {
-        return Err(PresetError::strategy_validation_failed(
-            &errors, &warnings,
-        ));
+        return Err(PresetError::strategy_validation_failed(&errors, &warnings));
     }
 
-    let new_revision = current_revision.checked_add(1).ok_or_else(|| PresetError::Rejected { code: "strategy_revision_exhausted".into(), message: "strategy revision exhausted".into() })?;
+    let new_revision = current_revision
+        .checked_add(1)
+        .ok_or_else(|| PresetError::Rejected {
+            code: "strategy_revision_exhausted".into(),
+            message: "strategy revision exhausted".into(),
+        })?;
     write_preset_yaml(&bundle_dir, &mut yaml_value, new_revision)?;
 
     Ok(CoreStrategyPatchResponse {
         new_revision: std::num::NonZeroU64::new(new_revision).unwrap_or(std::num::NonZeroU64::MIN),
-        validation_summary: CoreStrategyPatchResponseValidationSummary { errors: vec![], warnings },
+        validation_summary: CoreStrategyPatchResponseValidationSummary {
+            errors: vec![],
+            warnings,
+        },
         side_effects,
     })
 }
@@ -1223,7 +1370,6 @@ fn patch_transition_inner(
     // and silently fall through to the update path (Greptile Issue 5).
     validate_transition_op(req.op.as_str())?;
 
-
     let (mut yaml_value, bundle_dir, current_revision) =
         load_user_preset_yaml(nexus_home, strategy_id)?;
 
@@ -1324,17 +1470,23 @@ fn patch_transition_inner(
 
     let (errors, warnings) = validate_preset_yaml(&bundle_dir, &yaml_value)?;
     if !errors.is_empty() {
-        return Err(PresetError::strategy_validation_failed(
-            &errors, &warnings,
-        ));
+        return Err(PresetError::strategy_validation_failed(&errors, &warnings));
     }
 
-    let new_revision = current_revision.checked_add(1).ok_or_else(|| PresetError::Rejected { code: "strategy_revision_exhausted".into(), message: "strategy revision exhausted".into() })?;
+    let new_revision = current_revision
+        .checked_add(1)
+        .ok_or_else(|| PresetError::Rejected {
+            code: "strategy_revision_exhausted".into(),
+            message: "strategy revision exhausted".into(),
+        })?;
     write_preset_yaml(&bundle_dir, &mut yaml_value, new_revision)?;
 
     Ok(CoreStrategyPatchResponse {
         new_revision: std::num::NonZeroU64::new(new_revision).unwrap_or(std::num::NonZeroU64::MIN),
-        validation_summary: CoreStrategyPatchResponseValidationSummary { errors: vec![], warnings },
+        validation_summary: CoreStrategyPatchResponseValidationSummary {
+            errors: vec![],
+            warnings,
+        },
         side_effects,
     })
 }
@@ -1365,7 +1517,6 @@ fn patch_prompt_template_inner_with_writer(
     req: &StrategyPatchPromptTemplateRequest,
     write_yaml: PresetYamlWriter,
 ) -> Result<CoreStrategyPatchResponse, PresetError> {
-
     let (mut yaml_value, bundle_dir, current_revision) =
         load_user_preset_yaml(nexus_home, strategy_id)?;
 
@@ -1377,15 +1528,20 @@ fn patch_prompt_template_inner_with_writer(
             "refetch the Strategy and reapply your edit",
         ));
     }
-    let new_revision = current_revision.checked_add(1).ok_or_else(|| PresetError::Rejected { code: "strategy_revision_exhausted".into(), message: "strategy revision exhausted".into() })?;
+    let new_revision = current_revision
+        .checked_add(1)
+        .ok_or_else(|| PresetError::Rejected {
+            code: "strategy_revision_exhausted".into(),
+            message: "strategy revision exhausted".into(),
+        })?;
 
     // Validate the template path is safe before touching the filesystem.
-    nexus_preset::loader::assert_template_file_safe(&req.template_ref).map_err(
-        |reason| PresetError::Rejected {
+    nexus_preset::loader::assert_template_file_safe(&req.template_ref).map_err(|reason| {
+        PresetError::Rejected {
             code: "strategy_template_path_unsafe".to_string(),
             message: reason,
-        },
-    )?;
+        }
+    })?;
 
     let canonical_template = confined_path(&bundle_dir, &bundle_dir.join(&req.template_ref))?;
 
@@ -1431,9 +1587,7 @@ fn patch_prompt_template_inner_with_writer(
     };
     if !errors.is_empty() {
         rollback_template_write(&canonical_template, backup, &tmp_path);
-        return Err(PresetError::strategy_validation_failed(
-            &errors, &warnings,
-        ));
+        return Err(PresetError::strategy_validation_failed(&errors, &warnings));
     }
 
     // Persist the YAML revision only after the template file has been
@@ -1449,7 +1603,10 @@ fn patch_prompt_template_inner_with_writer(
 
     Ok(CoreStrategyPatchResponse {
         new_revision: std::num::NonZeroU64::new(new_revision).unwrap_or(std::num::NonZeroU64::MIN),
-        validation_summary: CoreStrategyPatchResponseValidationSummary { errors: vec![], warnings },
+        validation_summary: CoreStrategyPatchResponseValidationSummary {
+            errors: vec![],
+            warnings,
+        },
         side_effects,
     })
 }
@@ -1551,12 +1708,24 @@ fn locate_preset(
 
     let user_dir = user_preset_bundle_dir(raw_user_home(nexus_home)?, preset_id);
     if user_dir.join("preset.yaml").exists() {
-        return Ok(("user".to_string(), Some(confined_path(&user_preset_base_dir(raw_user_home(nexus_home)?), &user_dir)?)));
+        return Ok((
+            "user".to_string(),
+            Some(confined_path(
+                &user_preset_base_dir(raw_user_home(nexus_home)?),
+                &user_dir,
+            )?),
+        ));
     }
 
     let system_dir = system_preset_dir_for_id(nexus_home, preset_id);
     if system_dir.join("preset.yaml").exists() {
-        return Ok(("system".to_string(), Some(confined_path(&nexus_home.join("presets/_system"), &system_dir)?)));
+        return Ok((
+            "system".to_string(),
+            Some(confined_path(
+                &nexus_home.join("presets/_system"),
+                &system_dir,
+            )?),
+        ));
     }
 
     Err(PresetError::NotFound(format!(
@@ -1574,11 +1743,12 @@ fn load_preset_yaml(
     match source {
         "embedded" => {
             let caps = BuiltinCapabilityCatalog;
-            let loaded = nexus_preset::load_embedded_preset(preset_id, &caps)
-                .map_err(|e| PresetError::Internal {
+            let loaded = nexus_preset::load_embedded_preset(preset_id, &caps).map_err(|e| {
+                PresetError::Internal {
                     code: "PRESET_LOAD_ERROR".to_string(),
                     message: e.to_string(),
-                })?;
+                }
+            })?;
             serde_yaml::to_string(&loaded.manifest).map_err(|e| PresetError::Internal {
                 code: "YAML_SERIALIZE_ERROR".to_string(),
                 message: e.to_string(),
@@ -1608,7 +1778,9 @@ fn load_preset_yaml(
     }
 }
 
-fn validate_preset_file(req: &ValidatePresetRequest) -> Result<ValidatePresetResponse, PresetError> {
+fn validate_preset_file(
+    req: &ValidatePresetRequest,
+) -> Result<ValidatePresetResponse, PresetError> {
     let file_path = std::path::Path::new(&req.path);
 
     if !file_path.exists() {
@@ -1651,8 +1823,7 @@ fn validate_preset_file(req: &ValidatePresetRequest) -> Result<ValidatePresetRes
     // C2: Run loader-equivalent structural validation so the daemon endpoint
     //     rejects the same defects the runtime loader would reject.
     let caps = BuiltinCapabilityCatalog;
-    let structural_problems =
-        nexus_preset::loader_validate_manifest_compat(&manifest, &caps);
+    let structural_problems = nexus_preset::loader_validate_manifest_compat(&manifest, &caps);
     if !structural_problems.is_empty() {
         let errors: Vec<String> = structural_problems
             .iter()
@@ -1662,7 +1833,9 @@ fn validate_preset_file(req: &ValidatePresetRequest) -> Result<ValidatePresetRes
             valid: false,
             id: Some(manifest.preset.id.clone()),
             version: Some(i64::from(manifest.preset.version)),
-            state_count: Some(i64::try_from(manifest.states.len()).expect("bounded YAML state count")),
+            state_count: Some(
+                i64::try_from(manifest.states.len()).expect("bounded YAML state count"),
+            ),
             errors,
             warnings: Vec::new(),
         });
@@ -1675,12 +1848,10 @@ fn validate_preset_file(req: &ValidatePresetRequest) -> Result<ValidatePresetRes
     let sem_result = nexus_preset::validate_preset_semantic(&manifest, &caps);
 
     // A3: If the path points into a bundle directory, also run asset checks.
-    let asset_result = infer_bundle_root(file_path).map_or_else(
-        nexus_preset::ValidationResult::default,
-        |bundle_root| {
+    let asset_result = infer_bundle_root(file_path)
+        .map_or_else(nexus_preset::ValidationResult::default, |bundle_root| {
             nexus_preset::validate_assets_in_bundle(&manifest, &bundle_root)
-        },
-    );
+        });
 
     // Combine diagnostics from path safety + semantic + asset checks
     let mut errors: Vec<String> = Vec::new();
@@ -1717,13 +1888,29 @@ fn validate_preset_file(req: &ValidatePresetRequest) -> Result<ValidatePresetRes
 }
 
 fn invalid_validation(errors: &[String]) -> ValidatePresetResponse {
-    ValidatePresetResponse { valid: false, id: None, version: None, state_count: None, errors: errors.to_vec(), warnings: vec![] }
+    ValidatePresetResponse {
+        valid: false,
+        id: None,
+        version: None,
+        state_count: None,
+        errors: errors.to_vec(),
+        warnings: vec![],
+    }
 }
 
-fn scaffold_user_preset(nexus_home: &Path, id: &str) -> Result<ScaffoldPresetResponse, PresetError> {
-    let bundle = confined_path(&user_preset_base_dir(raw_user_home(nexus_home)?), &user_preset_bundle_dir(raw_user_home(nexus_home)?, id))?;
+fn scaffold_user_preset(
+    nexus_home: &Path,
+    id: &str,
+) -> Result<ScaffoldPresetResponse, PresetError> {
+    let bundle = confined_path(
+        &user_preset_base_dir(raw_user_home(nexus_home)?),
+        &user_preset_bundle_dir(raw_user_home(nexus_home)?, id),
+    )?;
     if bundle.exists() {
-        return Err(PresetError::Conflict(format!("Preset '{id}' already exists at {}", bundle.display())));
+        return Err(PresetError::Conflict(format!(
+            "Preset '{id}' already exists at {}",
+            bundle.display()
+        )));
     }
     // Encode the identifier as a YAML scalar rather than interpolating YAML syntax.
     let quoted = serde_json::to_string(id).map_err(|e| preset_io("YAML_SERIALIZE_ERROR", e))?;
@@ -1732,10 +1919,14 @@ fn scaffold_user_preset(nexus_home: &Path, id: &str) -> Result<ScaffoldPresetRes
     std::fs::create_dir(&bundle).map_err(|e| preset_io("DIR_CREATE_ERROR", e))?;
     let prompts = bundle.join("prompts");
     std::fs::create_dir(&prompts).map_err(|e| preset_io("DIR_CREATE_ERROR", e))?;
-    std::fs::write(prompts.join("start.md"), PROMPT_INIT_CONTENT).map_err(|e| preset_io("FILE_WRITE_ERROR", e))?;
+    std::fs::write(prompts.join("start.md"), PROMPT_INIT_CONTENT)
+        .map_err(|e| preset_io("FILE_WRITE_ERROR", e))?;
     let tmp = bundle.join(format!("preset.yaml.tmp.{}", uuid::Uuid::new_v4()));
     atomic_write_with_dir_fsync(&bundle.join("preset.yaml"), &tmp, yaml.as_bytes())?;
-    Ok(ScaffoldPresetResponse { id: id.to_string(), path: bundle.display().to_string() })
+    Ok(ScaffoldPresetResponse {
+        id: id.to_string(),
+        path: bundle.display().to_string(),
+    })
 }
 
 #[cfg(test)]
@@ -1745,7 +1936,10 @@ mod tests {
     #[test]
     fn yaml_write_failure_rolls_back_prompt_and_keeps_revision() {
         fn fail_write(_: &Path, _: &mut serde_yaml::Value, _: u64) -> Result<(), PresetError> {
-            Err(preset_io("INJECTED_YAML_WRITE_ERROR", "injected persistence failure"))
+            Err(preset_io(
+                "INJECTED_YAML_WRITE_ERROR",
+                "injected persistence failure",
+            ))
         }
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join(".nexus42");
@@ -1776,10 +1970,16 @@ states:
         let request = serde_json::from_value(serde_json::json!({
             "strategy_id": "rollback", "state_id": "start", "base_revision": 1,
             "template_ref": "prompts/original.md", "set": {"body": "Replacement"}
-        })).unwrap();
+        }))
+        .unwrap();
         let _lock = acquire_preset_lock(&home, "rollback").unwrap();
-        let error = patch_prompt_template_inner_with_writer(&home, "rollback", "start", &request, fail_write).unwrap_err();
-        assert!(matches!(&error, PresetError::Internal { code, .. } if code == "INJECTED_YAML_WRITE_ERROR"));
+        let error = patch_prompt_template_inner_with_writer(
+            &home, "rollback", "start", &request, fail_write,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&error, PresetError::Internal { code, .. } if code == "INJECTED_YAML_WRITE_ERROR")
+        );
         assert_eq!(std::fs::read_to_string(&prompt_path).unwrap(), "Original");
         assert_eq!(std::fs::read_to_string(&yaml_path).unwrap(), yaml);
     }
@@ -1790,12 +1990,16 @@ states:
         let request: StrategyPatchTransitionRequest = serde_json::from_value(serde_json::json!({
             "strategy_id": "strategy", "source_state_id": "start", "base_revision": 1,
             "condition": "_context.ready", "op": "update"
-        })).unwrap();
+        }))
+        .unwrap();
         append_conditional_rule(&mut next, &request, "end").unwrap();
         let error = append_conditional_rule(&mut next, &request, "end").unwrap_err();
-        assert!(matches!(&error, PresetError::Rejected { code, .. } if code == "strategy_transition_duplicate"));
+        assert!(
+            matches!(&error, PresetError::Rejected { code, .. } if code == "strategy_transition_duplicate")
+        );
         let different = StrategyPatchTransitionRequest {
-            condition: Some("_context.alternate".into()), ..request
+            condition: Some("_context.alternate".into()),
+            ..request
         };
         append_conditional_rule(&mut next, &different, "end").unwrap();
         let rules = next["rules"].as_sequence().unwrap();

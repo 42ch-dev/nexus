@@ -280,20 +280,27 @@ async fn overview_page(
         category: "timeline_overview: page size overflow".to_string(),
     })?;
     let rows: Vec<WorldOverviewRow> = match decode_overview_cursor(query.cursor.as_deref())? {
-        Some(after_world_id) => sqlx::query_as(OVERVIEW_CURSOR_PAGE_SQL)
-            .bind(after_world_id)
-            .bind(fetch_limit)
-            .fetch_all(pool)
-            .await,
-        None => sqlx::query_as(OVERVIEW_PAGE_SQL)
-            .bind(fetch_limit)
-            .fetch_all(pool)
-            .await,
+        Some(after_world_id) => {
+            sqlx::query_as(OVERVIEW_CURSOR_PAGE_SQL)
+                .bind(after_world_id)
+                .bind(fetch_limit)
+                .fetch_all(pool)
+                .await
+        }
+        None => {
+            sqlx::query_as(OVERVIEW_PAGE_SQL)
+                .bind(fetch_limit)
+                .fetch_all(pool)
+                .await
+        }
     }
     .map_err(|e| db_err(&e))?;
 
     let has_more = rows.len() > OVERVIEW_PAGE_SIZE;
-    let worlds = rows.into_iter().take(OVERVIEW_PAGE_SIZE).collect::<Vec<_>>();
+    let worlds = rows
+        .into_iter()
+        .take(OVERVIEW_PAGE_SIZE)
+        .collect::<Vec<_>>();
 
     let cursor = if has_more {
         worlds.last().map(|w| encode_overview_cursor(&w.world_id))
@@ -346,12 +353,12 @@ fn decode_overview_cursor(raw: Option<&str>) -> CoreResult<Option<String>> {
             reason: "cursor too long".to_string(),
         });
     }
-    let world_id = raw
-        .strip_prefix(OVERVIEW_CURSOR_PREFIX)
-        .ok_or_else(|| CoreError::InvalidInput {
-            field: "cursor".to_string(),
-            reason: "invalid cursor format".to_string(),
-        })?;
+    let world_id =
+        raw.strip_prefix(OVERVIEW_CURSOR_PREFIX)
+            .ok_or_else(|| CoreError::InvalidInput {
+                field: "cursor".to_string(),
+                reason: "invalid cursor format".to_string(),
+            })?;
     if world_id.is_empty() {
         return Err(CoreError::InvalidInput {
             field: "cursor".to_string(),
@@ -376,19 +383,18 @@ fn decode_events_cursor(raw: &str) -> CoreResult<(String, i64)> {
             reason: "cursor too long".to_string(),
         });
     }
-    let payload = raw
-        .strip_prefix(EVENTS_CURSOR_PREFIX)
-        .ok_or_else(|| CoreError::InvalidInput {
-            field: "cursor".to_string(),
-            reason: "invalid cursor format".to_string(),
-        })?;
-    let (branch_id, seq_str) =
-        payload
-            .rsplit_once(':')
+    let payload =
+        raw.strip_prefix(EVENTS_CURSOR_PREFIX)
             .ok_or_else(|| CoreError::InvalidInput {
                 field: "cursor".to_string(),
                 reason: "invalid cursor format".to_string(),
             })?;
+    let (branch_id, seq_str) = payload
+        .rsplit_once(':')
+        .ok_or_else(|| CoreError::InvalidInput {
+            field: "cursor".to_string(),
+            reason: "invalid cursor format".to_string(),
+        })?;
     if branch_id.is_empty() {
         return Err(CoreError::InvalidInput {
             field: "cursor".to_string(),

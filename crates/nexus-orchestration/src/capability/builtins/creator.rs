@@ -293,35 +293,41 @@ impl Default for CreatorReadMemory {
 }
 
 #[async_trait]
-impl Capability for CreatorReadMemory { fn name(&self) -> &'static str {
-    "creator.read_memory"
-} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::CREATOR_READ_MEMORY_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
-    r#"{"type":"object","properties":{"count":{"type":"integer","minimum":0}},"required":["count"],"additionalProperties":false}"#
+impl Capability for CreatorReadMemory {
+    fn name(&self) -> &'static str {
+        "creator.read_memory"
+    }
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::CREATOR_READ_MEMORY_INPUT_SCHEMA
+    }
+    fn output_schema(&self) -> &'static str {
+        r#"{"type":"object","properties":{"count":{"type":"integer","minimum":0}},"required":["count"],"additionalProperties":false}"#
+    }
+
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        let parsed: CreatorReadMemoryInput =
+            serde_json::from_value(input.clone()).map_err(|e| {
+                CapabilityError::InputInvalid(format!("creator.read_memory input: {e}"))
+            })?;
+
+        let Some(store) = &self.store else {
+            // Standalone/test mode — return zero count
+            let output = CreatorReadMemoryOutput { count: 0 };
+            return serde_json::to_value(output)
+                .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")));
+        };
+
+        let creator_id = store.resolve_creator_id(&input).await?;
+        let keyword = parsed.keyword.as_deref();
+        let limit = parsed.limit;
+
+        let count = store.read_memory(&creator_id, keyword, limit).await?;
+
+        let output = CreatorReadMemoryOutput { count };
+        serde_json::to_value(output)
+            .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
+    }
 }
-
-async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-    let parsed: CreatorReadMemoryInput =
-        serde_json::from_value(input.clone()).map_err(|e| {
-            CapabilityError::InputInvalid(format!("creator.read_memory input: {e}"))
-        })?;
-
-    let Some(store) = &self.store else {
-        // Standalone/test mode — return zero count
-        let output = CreatorReadMemoryOutput { count: 0 };
-        return serde_json::to_value(output)
-            .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")));
-    };
-
-    let creator_id = store.resolve_creator_id(&input).await?;
-    let keyword = parsed.keyword.as_deref();
-    let limit = parsed.limit;
-
-    let count = store.read_memory(&creator_id, keyword, limit).await?;
-
-    let output = CreatorReadMemoryOutput { count };
-    serde_json::to_value(output)
-        .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
-} }
 
 // ---------------------------------------------------------------------------
 // creator.write_memory
@@ -357,43 +363,49 @@ impl Default for CreatorWriteMemory {
 }
 
 #[async_trait]
-impl Capability for CreatorWriteMemory { fn name(&self) -> &'static str {
-    "creator.write_memory"
-} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::CREATOR_WRITE_MEMORY_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
-    r#"{"type":"object","properties":{"fragmentId":{"type":"string"}},"required":["fragmentId"],"additionalProperties":false}"#
-}
+impl Capability for CreatorWriteMemory {
+    fn name(&self) -> &'static str {
+        "creator.write_memory"
+    }
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::CREATOR_WRITE_MEMORY_INPUT_SCHEMA
+    }
+    fn output_schema(&self) -> &'static str {
+        r#"{"type":"object","properties":{"fragmentId":{"type":"string"}},"required":["fragmentId"],"additionalProperties":false}"#
+    }
 
-async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-    let parsed: CreatorWriteMemoryInput =
-        serde_json::from_value(input.clone()).map_err(|e| {
-            CapabilityError::InputInvalid(format!("creator.write_memory input: {e}"))
-        })?;
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        let parsed: CreatorWriteMemoryInput =
+            serde_json::from_value(input.clone()).map_err(|e| {
+                CapabilityError::InputInvalid(format!("creator.write_memory input: {e}"))
+            })?;
 
-    let Some(store) = &self.store else {
-        // Standalone/test mode — return stub
-        let output = CreatorWriteMemoryOutput {
-            fragment_id: "stub-fragment-id".to_string(),
+        let Some(store) = &self.store else {
+            // Standalone/test mode — return stub
+            let output = CreatorWriteMemoryOutput {
+                fragment_id: "stub-fragment-id".to_string(),
+            };
+            return serde_json::to_value(output)
+                .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")));
         };
-        return serde_json::to_value(output)
-            .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")));
-    };
 
-    let creator_id = store.resolve_creator_id(&input).await?;
-    let source_session_id = input.get("_session_id").and_then(|v| v.as_str());
+        let creator_id = store.resolve_creator_id(&input).await?;
+        let source_session_id = input.get("_session_id").and_then(|v| v.as_str());
 
-    let fragment_id = store
-        .write_memory(
-            &creator_id,
-            &parsed.content,
-            &parsed.keywords,
-            source_session_id,
-        )
-        .await?;
+        let fragment_id = store
+            .write_memory(
+                &creator_id,
+                &parsed.content,
+                &parsed.keywords,
+                source_session_id,
+            )
+            .await?;
 
-    let output = CreatorWriteMemoryOutput { fragment_id };
-    serde_json::to_value(output)
-        .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
-} }
+        let output = CreatorWriteMemoryOutput { fragment_id };
+        serde_json::to_value(output)
+            .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
+    }
+}
 
 // ---------------------------------------------------------------------------
 // creator.inject_prompt
@@ -430,50 +442,56 @@ impl Default for CreatorInjectPrompt {
 }
 
 #[async_trait]
-impl Capability for CreatorInjectPrompt { fn name(&self) -> &'static str {
-    "creator.inject_prompt"
-} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::CREATOR_INJECT_PROMPT_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
-    r#"{"type":"object","properties":{"queued":{"type":"boolean"}},"required":["queued"],"additionalProperties":false}"#
-}
-
-async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-    let parsed: CreatorInjectPromptInput =
-        serde_json::from_value(input.clone()).map_err(|e| {
-            CapabilityError::InputInvalid(format!("creator.inject_prompt input: {e}"))
-        })?;
-
-    // Validate prompt is non-empty
-    if parsed.prompt.trim().is_empty() {
-        return Err(CapabilityError::InputInvalid(
-            "prompt must not be empty".into(),
-        ));
+impl Capability for CreatorInjectPrompt {
+    fn name(&self) -> &'static str {
+        "creator.inject_prompt"
+    }
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::CREATOR_INJECT_PROMPT_INPUT_SCHEMA
+    }
+    fn output_schema(&self) -> &'static str {
+        r#"{"type":"object","properties":{"queued":{"type":"boolean"}},"required":["queued"],"additionalProperties":false}"#
     }
 
-    let Some(store) = &self.store else {
-        // Standalone/test mode — return stub
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        let parsed: CreatorInjectPromptInput =
+            serde_json::from_value(input.clone()).map_err(|e| {
+                CapabilityError::InputInvalid(format!("creator.inject_prompt input: {e}"))
+            })?;
+
+        // Validate prompt is non-empty
+        if parsed.prompt.trim().is_empty() {
+            return Err(CapabilityError::InputInvalid(
+                "prompt must not be empty".into(),
+            ));
+        }
+
+        let Some(store) = &self.store else {
+            // Standalone/test mode — return stub
+            let output = CreatorInjectPromptOutput { queued: true };
+            return serde_json::to_value(output)
+                .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")));
+        };
+
+        let creator_id = store.resolve_creator_id(&input).await?;
+        let session_id = CreatorCapabilityStore::resolve_session_id(&input);
+        let source_schedule_id = input.get("_schedule_id").and_then(|v| v.as_str());
+
+        store
+            .enqueue_prompt(
+                &creator_id,
+                &session_id,
+                &parsed.prompt,
+                parsed.priority,
+                source_schedule_id,
+            )
+            .await?;
+
         let output = CreatorInjectPromptOutput { queued: true };
-        return serde_json::to_value(output)
-            .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")));
-    };
-
-    let creator_id = store.resolve_creator_id(&input).await?;
-    let session_id = CreatorCapabilityStore::resolve_session_id(&input);
-    let source_schedule_id = input.get("_schedule_id").and_then(|v| v.as_str());
-
-    store
-        .enqueue_prompt(
-            &creator_id,
-            &session_id,
-            &parsed.prompt,
-            parsed.priority,
-            source_schedule_id,
-        )
-        .await?;
-
-    let output = CreatorInjectPromptOutput { queued: true };
-    serde_json::to_value(output)
-        .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
-} }
+        serde_json::to_value(output)
+            .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
+    }
+}
 
 // ---------------------------------------------------------------------------
 // creator.write_brief
@@ -611,64 +629,70 @@ impl Default for CreatorWriteBrief {
 }
 
 #[async_trait]
-impl Capability for CreatorWriteBrief { fn name(&self) -> &'static str {
-    "creator.write_brief"
-} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::CREATOR_WRITE_BRIEF_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
-    r#"{"type":"object","properties":{"written":{"type":"boolean"},"intakeStatus":{"type":"string"}},"required":["written","intakeStatus"],"additionalProperties":false}"#
-}
+impl Capability for CreatorWriteBrief {
+    fn name(&self) -> &'static str {
+        "creator.write_brief"
+    }
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::CREATOR_WRITE_BRIEF_INPUT_SCHEMA
+    }
+    fn output_schema(&self) -> &'static str {
+        r#"{"type":"object","properties":{"written":{"type":"boolean"},"intakeStatus":{"type":"string"}},"required":["written","intakeStatus"],"additionalProperties":false}"#
+    }
 
-async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-    let parsed: CreatorWriteBriefInput =
-        serde_json::from_value(input.clone()).map_err(|e| {
-            CapabilityError::InputInvalid(format!("creator.write_brief input: {e}"))
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        let parsed: CreatorWriteBriefInput =
+            serde_json::from_value(input.clone()).map_err(|e| {
+                CapabilityError::InputInvalid(format!("creator.write_brief input: {e}"))
+            })?;
+
+        // Parse brief_text as JSON
+        let brief: serde_json::Value = serde_json::from_str(&parsed.brief_text).map_err(|e| {
+            CapabilityError::InputInvalid(format!("brief_text is not valid JSON: {e}"))
         })?;
 
-    // Parse brief_text as JSON
-    let brief: serde_json::Value = serde_json::from_str(&parsed.brief_text).map_err(|e| {
-        CapabilityError::InputInvalid(format!("brief_text is not valid JSON: {e}"))
-    })?;
+        // Validate against §4 schema
+        validate_creative_brief(&brief).map_err(CapabilityError::InputInvalid)?;
 
-    // Validate against §4 schema
-    validate_creative_brief(&brief).map_err(CapabilityError::InputInvalid)?;
+        let Some(store) = &self.store else {
+            // Standalone/test mode — return stub
+            let output = CreatorWriteBriefOutput {
+                written: true,
+                intake_status: "complete".to_string(),
+            };
+            return serde_json::to_value(output)
+                .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")));
+        };
 
-    let Some(store) = &self.store else {
-        // Standalone/test mode — return stub
+        let creator_id = store.resolve_creator_id(&input).await?;
+        let brief_json = serde_json::to_string(&brief)
+            .map_err(|e| CapabilityError::Internal(format!("serialize brief: {e}")))?;
+        let now = chrono::Utc::now().to_rfc3339();
+
+        let patch = nexus_local_db::WorkPatch {
+            creative_brief: Some(Some(brief_json)),
+            intake_status: Some("complete".to_string()),
+            ..Default::default()
+        };
+
+        nexus_local_db::patch_work(
+            store.pool.as_ref(),
+            &creator_id,
+            &parsed.work_id,
+            &patch,
+            &now,
+        )
+        .await
+        .map_err(|e| CapabilityError::Internal(format!("write_brief patch_work: {e}")))?;
+
         let output = CreatorWriteBriefOutput {
             written: true,
             intake_status: "complete".to_string(),
         };
-        return serde_json::to_value(output)
-            .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")));
-    };
-
-    let creator_id = store.resolve_creator_id(&input).await?;
-    let brief_json = serde_json::to_string(&brief)
-        .map_err(|e| CapabilityError::Internal(format!("serialize brief: {e}")))?;
-    let now = chrono::Utc::now().to_rfc3339();
-
-    let patch = nexus_local_db::WorkPatch {
-        creative_brief: Some(Some(brief_json)),
-        intake_status: Some("complete".to_string()),
-        ..Default::default()
-    };
-
-    nexus_local_db::patch_work(
-        store.pool.as_ref(),
-        &creator_id,
-        &parsed.work_id,
-        &patch,
-        &now,
-    )
-    .await
-    .map_err(|e| CapabilityError::Internal(format!("write_brief patch_work: {e}")))?;
-
-    let output = CreatorWriteBriefOutput {
-        written: true,
-        intake_status: "complete".to_string(),
-    };
-    serde_json::to_value(output)
-        .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
-} }
+        serde_json::to_value(output)
+            .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Tests

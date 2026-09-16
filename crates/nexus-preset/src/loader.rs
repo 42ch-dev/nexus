@@ -5,9 +5,9 @@
 //!
 //! Design: `orchestration-engine.md` §8.1.
 
-use crate::capability_catalog::CapabilityCatalog;
 #[cfg(test)]
 use crate::capability_catalog::BuiltinCapabilityCatalog;
+use crate::capability_catalog::CapabilityCatalog;
 use crate::manifest::{
     ContextUpdateOp, ExitWhen, InitialAction, InnerGraph, NextTarget, PresetManifest,
 };
@@ -51,7 +51,6 @@ pub struct LoadedPreset {
     /// caller must supply the identity before starting a v1 run.
     pub source_identity: Option<PresetSourceIdentity>,
 }
-
 
 // ---------------------------------------------------------------------------
 // PresetLoadError
@@ -791,8 +790,7 @@ fn validate_manifest(
         // V1.52 T-B P1: validate merge field
         if let Some(ref merge_kind) = state.merge {
             match merge_kind {
-                crate::manifest::MergeKind::All
-                | crate::manifest::MergeKind::Any => {
+                crate::manifest::MergeKind::All | crate::manifest::MergeKind::Any => {
                     // All and Any are always valid.
                 }
                 crate::manifest::MergeKind::Quorum { n, m } => {
@@ -1122,7 +1120,6 @@ fn extract_output_bindings(manifest: &PresetManifest) -> HashMap<String, String>
     }
     bindings
 }
-
 
 // ---------------------------------------------------------------------------
 // YAML depth measurement
@@ -1626,7 +1623,6 @@ states:
             "expected terminal state 'next' problem: {problems:?}"
         );
     }
-
 
     #[test]
     fn reject_unknown_depends_on_in_inner_graph() {
@@ -2747,7 +2743,6 @@ states:
         let preset = loaded.unwrap();
         assert_eq!(preset.id, "gonogo-test");
     }
-
 
     #[test]
     fn reject_gonogo_on_non_llm_judge_state() {

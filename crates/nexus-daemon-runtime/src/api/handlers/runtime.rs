@@ -3,14 +3,16 @@
 //! Runtime handlers — health check and status
 
 use crate::workspace::WorkspaceState;
-use std::sync::OnceLock;
 use axum::{extract::State, Json};
 use nexus_contracts::local::acp_runtime::daemon_status_v2::{
     DaemonStatusV2, DegradedInfo, HealthStatus, LifecycleState, SubsystemHealth,
     SubsystemHealthEntry,
 };
-use nexus_contracts::{CertFingerprintResponse, CoreServiceStopRequest, RuntimeApi, RuntimeApiStatus};
+use nexus_contracts::{
+    CertFingerprintResponse, CoreServiceStopRequest, RuntimeApi, RuntimeApiStatus,
+};
 use serde::Serialize;
+use std::sync::OnceLock;
 use tracing::info;
 
 #[derive(Serialize)]

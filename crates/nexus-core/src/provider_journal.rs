@@ -42,8 +42,8 @@ const fn status_wire(status: &CoreProviderJournalWriteStatus) -> &'static str {
 /// so a row that fails projection means the stored journal was tampered with;
 /// the error is `internal`, never a fabricated success.
 fn project_operation(row: JournaledOperation) -> CoreResult<CoreProviderOperation> {
-    let sequence = u64::try_from(row.sequence)
-        .map_err(|_| journal_internal("sequence", row.sequence))?;
+    let sequence =
+        u64::try_from(row.sequence).map_err(|_| journal_internal("sequence", row.sequence))?;
     Ok(CoreProviderOperation {
         operation_id: row
             .operation_id
@@ -213,10 +213,7 @@ impl CoreService {
     /// mapped storage error otherwise.
     /// NOTE: `pub` visibility is the P4-T2 environment-boundary seam; do not
     /// acquire new callers.
-    pub async fn forget_provider_session_internal(
-        &self,
-        session_id: &str,
-    ) -> CoreResult<()> {
+    pub async fn forget_provider_session_internal(&self, session_id: &str) -> CoreResult<()> {
         self.ensure_open()?;
         self.require_write_access("provider_journal_forget")?;
         js_provider_journal::forget_session(&self.inner.pool, session_id)

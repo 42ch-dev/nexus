@@ -28,10 +28,15 @@ use serde_json::{json, Value};
 pub struct SoulExperienceAggregate;
 
 #[async_trait]
-impl Capability for SoulExperienceAggregate { fn name(&self) -> &'static str {
-    "soul.experience.aggregate"
-} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::SOUL_EXPERIENCE_AGGREGATE_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
-    r#"{
+impl Capability for SoulExperienceAggregate {
+    fn name(&self) -> &'static str {
+        "soul.experience.aggregate"
+    }
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::SOUL_EXPERIENCE_AGGREGATE_INPUT_SCHEMA
+    }
+    fn output_schema(&self) -> &'static str {
+        r#"{
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "required": ["memories_processed", "experience_markdown"],
@@ -48,39 +53,40 @@ impl Capability for SoulExperienceAggregate { fn name(&self) -> &'static str {
         },
         "additionalProperties": false
     }"#
+    }
+
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        let creator_id = input
+            .get("creator_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                CapabilityError::InputInvalid("missing 'creator_id' field".to_string())
+            })?;
+
+        let home_dir = input
+            .get("home_dir")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| CapabilityError::InputInvalid("missing 'home_dir' field".to_string()))?;
+
+        let home = std::path::Path::new(home_dir);
+
+        // Use the preview function (no SOUL.md write) so the capability is
+        // side-effect-free. The preset orchestrator or CLI is responsible for
+        // writing the result to SOUL.md.
+        let result = nexus_creator_memory::experience_aggregation::aggregate_experience_preview(
+            home,
+            MemoryBearerRef::Creator(creator_id),
+            None, // Deterministic path only — no LLM synthesizer
+        )
+        .await
+        .map_err(|e| CapabilityError::Internal(format!("experience aggregation failed: {e}")))?;
+
+        Ok(json!({
+            "memories_processed": result.memories_processed,
+            "experience_markdown": result.experience_markdown
+        }))
+    }
 }
-
-async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-    let creator_id = input
-        .get("creator_id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            CapabilityError::InputInvalid("missing 'creator_id' field".to_string())
-        })?;
-
-    let home_dir = input
-        .get("home_dir")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| CapabilityError::InputInvalid("missing 'home_dir' field".to_string()))?;
-
-    let home = std::path::Path::new(home_dir);
-
-    // Use the preview function (no SOUL.md write) so the capability is
-    // side-effect-free. The preset orchestrator or CLI is responsible for
-    // writing the result to SOUL.md.
-    let result = nexus_creator_memory::experience_aggregation::aggregate_experience_preview(
-        home,
-        MemoryBearerRef::Creator(creator_id),
-        None, // Deterministic path only — no LLM synthesizer
-    )
-    .await
-    .map_err(|e| CapabilityError::Internal(format!("experience aggregation failed: {e}")))?;
-
-    Ok(json!({
-        "memories_processed": result.memories_processed,
-        "experience_markdown": result.experience_markdown
-    }))
-} }
 
 #[cfg(test)]
 mod tests {

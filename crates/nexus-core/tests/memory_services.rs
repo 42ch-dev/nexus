@@ -14,9 +14,9 @@ use nexus_creator_memory::errors::MemoryError;
 use nexus_creator_memory::soul_narrative::{
     SoulNarrativeDraft, SoulNarrativeSynthesisInput, SoulNarrativeSynthesizer,
 };
-use nexus_local_db::writer_protocol::{GuardedPoolOptions, init_engine_pool};
+use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
 use nexus_local_db::{
-    CreateCharacterParams, create_character_with_initial_binding, ensure_creator_row,
+    create_character_with_initial_binding, ensure_creator_row, CreateCharacterParams,
 };
 use sqlx::SqlitePool;
 use std::path::PathBuf;

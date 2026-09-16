@@ -54,7 +54,6 @@ pub struct AgentBinding {
     pub model: Option<String>,
 }
 
-
 /// Admission matrix snapshot for a schedule (N-1).
 ///
 /// The store re-checks due-time, dependency satisfaction, and the

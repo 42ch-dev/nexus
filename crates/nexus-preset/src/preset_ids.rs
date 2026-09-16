@@ -168,9 +168,7 @@ mod tests {
         // enqueues schedules with these ids).
         for id in cron_role_preset_ids() {
             assert!(
-                crate::list_embedded_presets()
-                    .iter()
-                    .any(|e| e == id),
+                crate::list_embedded_presets().iter().any(|e| e == id),
                 "cron-role preset '{id}' must exist in the embedded preset tree"
             );
         }

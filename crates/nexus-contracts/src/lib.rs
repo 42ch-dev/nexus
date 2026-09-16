@@ -6,10 +6,10 @@
 //! Hand-written local types live in `local/` — see `schemas-boundary.md` §3.
 
 pub mod common_types;
-pub mod tristate;
 pub mod enum_conversions;
 pub mod generated;
 pub mod local;
+pub mod tristate;
 
 // Re-export all generated types at crate root (includes wire types only)
 pub use generated::*;

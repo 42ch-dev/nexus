@@ -27,12 +27,16 @@ use nexus_contracts::{
 /// other internal category keeps the shared `CORE_ERROR` shape.
 pub(crate) fn content_error(error: nexus_core::CoreError) -> NexusApiError {
     match error {
-        nexus_core::CoreError::InvalidInput { field, reason } => {
-            NexusApiError::BadRequest { code: field, message: reason }
-        }
+        nexus_core::CoreError::InvalidInput { field, reason } => NexusApiError::BadRequest {
+            code: field,
+            message: reason,
+        },
         nexus_core::CoreError::NotFound { resource } => NexusApiError::NotFound(resource),
         nexus_core::CoreError::Forbidden { resource } if resource.starts_with("work_locked:") => {
-            NexusApiError::Locked { resource: "work".into(), reason: resource[12..].to_owned() }
+            NexusApiError::Locked {
+                resource: "work".into(),
+                reason: resource[12..].to_owned(),
+            }
         }
         nexus_core::CoreError::OutlineConflict(details) => NexusApiError::OutlineConflict {
             current_revision: details.current_revision,
@@ -58,7 +62,10 @@ pub(crate) fn content_error(error: nexus_core::CoreError) -> NexusApiError {
                         | "PATH_GUARD_PANIC"
                 ) =>
             {
-                NexusApiError::Internal { code: code.to_owned(), message: message.to_owned() }
+                NexusApiError::Internal {
+                    code: code.to_owned(),
+                    message: message.to_owned(),
+                }
             }
             // Work-lookup storage failures ride the core `local_db_err`
             // lowercase carrier (`database_error: …`); the legacy surface
@@ -81,7 +88,10 @@ pub async fn list_chapters(
 ) -> Result<Json<ListChaptersResponse>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let response = core.list_chapters(&principal, work_id, query).await.map_err(content_error)?;
+    let response = core
+        .list_chapters(&principal, work_id, query)
+        .await
+        .map_err(content_error)?;
     Ok(Json(response))
 }
 
@@ -94,7 +104,12 @@ pub async fn get_chapter(
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
     let detail = core
-        .chapter_detail(&principal, work_id, n, nexus_core::CoreChapterContentQuery::from(query))
+        .chapter_detail(
+            &principal,
+            work_id,
+            n,
+            nexus_core::CoreChapterContentQuery::from(query),
+        )
         .await
         .map_err(content_error)?;
     Ok(Json(detail))
@@ -109,7 +124,12 @@ pub async fn get_chapter_outline(
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
     let outline = core
-        .chapter_outline(&principal, work_id, n, nexus_core::CoreChapterContentQuery::from(query))
+        .chapter_outline(
+            &principal,
+            work_id,
+            n,
+            nexus_core::CoreChapterContentQuery::from(query),
+        )
         .await
         .map_err(content_error)?;
     Ok(Json(outline))
@@ -149,7 +169,12 @@ pub async fn get_chapter_body(
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
     let body = core
-        .chapter_body(&principal, work_id, n, nexus_core::CoreChapterContentQuery::from(query))
+        .chapter_body(
+            &principal,
+            work_id,
+            n,
+            nexus_core::CoreChapterContentQuery::from(query),
+        )
         .await
         .map_err(content_error)?;
     Ok(Json(body))
@@ -208,11 +233,10 @@ mod tests {
             );
         }
 
-        let validation =
-            content_error(nexus_core::CoreError::outline_validation_failed(
-                &["slug 'X' must be kebab-case".into()],
-                &[],
-            ));
+        let validation = content_error(nexus_core::CoreError::outline_validation_failed(
+            &["slug 'X' must be kebab-case".into()],
+            &[],
+        ));
         assert_eq!(validation.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(validation.error_code(), "outline_validation_failed");
 
@@ -227,8 +251,9 @@ mod tests {
             "WORK_REF_MISSING: no ref",
             "PATH_GUARD_PANIC: panic",
         ] {
-            let migrated =
-                content_error(nexus_core::CoreError::Internal { category: category.into() });
+            let migrated = content_error(nexus_core::CoreError::Internal {
+                category: category.into(),
+            });
             let NexusApiError::Internal { code, message } = &migrated else {
                 panic!("internal category must stay Internal, got {migrated:?}");
             };
@@ -250,8 +275,9 @@ mod tests {
         assert_eq!(message, "no such table: works");
 
         // Non-legacy internal categories keep the shared CORE_ERROR fallback.
-        let fallback =
-            content_error(nexus_core::CoreError::Internal { category: "workspace metadata: boom".into() });
+        let fallback = content_error(nexus_core::CoreError::Internal {
+            category: "workspace metadata: boom".into(),
+        });
         let NexusApiError::Internal { code, .. } = &fallback else {
             panic!("fallback must stay Internal");
         };

@@ -343,10 +343,7 @@ async fn test_reconcile_chapters_releases_lock_on_error() {
     // status (`finalized`) CONFLICTS with the DB row (`not_started`). This
     // makes compute emit a `ResyncFileStatus` op, which apply will attempt to
     // execute.
-    let stories_dir = creative_root
-        .join("Works")
-        .join(work_ref)
-        .join("Stories");
+    let stories_dir = creative_root.join("Works").join(work_ref).join("Stories");
     std::fs::create_dir_all(&stories_dir).unwrap();
     std::fs::write(
         stories_dir.join("ch01-intro.md"),
@@ -431,10 +428,7 @@ async fn test_reconcile_chapters_read_phase_runs_unlocked() {
         .unwrap();
 
     // Stories/ exists with one chapter (no DB row) — would be a CreateChapter.
-    let stories_dir = creative_root
-        .join("Works")
-        .join(work_ref)
-        .join("Stories");
+    let stories_dir = creative_root.join("Works").join(work_ref).join("Stories");
     std::fs::create_dir_all(&stories_dir).unwrap();
     std::fs::write(
         stories_dir.join("ch01-intro.md"),
@@ -522,10 +516,7 @@ async fn test_reconcile_chapters_dry_run_makes_zero_mutations() {
 
     // One chapter file whose frontmatter would create a new DB row in the
     // mutating path (no existing row for chapter 1).
-    let stories_dir = creative_root
-        .join("Works")
-        .join(work_ref)
-        .join("Stories");
+    let stories_dir = creative_root.join("Works").join(work_ref).join("Stories");
     std::fs::create_dir_all(&stories_dir).unwrap();
     let chapter_path = stories_dir.join("ch01-intro.md");
     let original_body = "---\nchapter: 1\nstatus: finalized\nword_count: 1234\n---\nBody";

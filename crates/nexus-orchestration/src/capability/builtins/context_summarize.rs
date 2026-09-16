@@ -78,19 +78,20 @@ impl Default for ContextSummarize {
 }
 
 #[async_trait]
-impl Capability for ContextSummarize { fn name(&self) -> &'static str {
-    "context.summarize"
-}
+impl Capability for ContextSummarize {
+    fn name(&self) -> &'static str {
+        "context.summarize"
+    }
 
-// Identity fields ("_creator_id", "_session_id") are injected by
-// orchestration context, NOT accepted from user input (security:
-// prevents cross-creator routing — SEC-V131-01).
+    // Identity fields ("_creator_id", "_session_id") are injected by
+    // orchestration context, NOT accepted from user input (security:
+    // prevents cross-creator routing — SEC-V131-01).
     fn input_schema(&self) -> &'static str {
         nexus_preset::capability_catalog::CONTEXT_SUMMARIZE_INPUT_SCHEMA
     }
 
     fn output_schema(&self) -> &'static str {
-    r#"{
+        r#"{
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "required": ["summary", "prompt_hash"],
@@ -105,71 +106,72 @@ impl Capability for ContextSummarize { fn name(&self) -> &'static str {
             }
         }
     }"#
-}
+    }
 
-async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-    let content = input
-        .get("content")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| CapabilityError::InputInvalid("missing 'content' field".into()))?;
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        let content = input
+            .get("content")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| CapabilityError::InputInvalid("missing 'content' field".into()))?;
 
-    let executor = self
-        .executor
-        .as_ref()
-        .ok_or(CapabilityError::WorkerUnavailable)?;
+        let executor = self
+            .executor
+            .as_ref()
+            .ok_or(CapabilityError::WorkerUnavailable)?;
 
-    // Security: only accept context-injected identity fields (prefixed _).
-    // Raw `creator_id`/`session_id` from user/preset input are ignored
-    // to prevent cross-creator routing (IDOR). See SEC-V131-01.
-    //
-    // M-002: a missing trusted `_session_id` refuses with a typed error
-    // — never a magic `default` run id. The orchestration engine seeds
-    // the trusted `_session_id` at run admission; its absence means the
-    // capability is being invoked outside a trusted run context.
-    let session_id = input
-        .get("_session_id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            CapabilityError::Forbidden(
+        // Security: only accept context-injected identity fields (prefixed _).
+        // Raw `creator_id`/`session_id` from user/preset input are ignored
+        // to prevent cross-creator routing (IDOR). See SEC-V131-01.
+        //
+        // M-002: a missing trusted `_session_id` refuses with a typed error
+        // — never a magic `default` run id. The orchestration engine seeds
+        // the trusted `_session_id` at run admission; its absence means the
+        // capability is being invoked outside a trusted run context.
+        let session_id = input
+            .get("_session_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                CapabilityError::Forbidden(
                 "missing trusted _session_id: orchestration context must inject the run identity"
                     .to_string(),
             )
-        })?;
+            })?;
 
-    let trace = input.get("trace").and_then(|v| v.as_str()).unwrap_or("");
-    let template = input.get("template").and_then(|v| v.as_str()).unwrap_or("");
+        let trace = input.get("trace").and_then(|v| v.as_str()).unwrap_or("");
+        let template = input.get("template").and_then(|v| v.as_str()).unwrap_or("");
 
-    // Build summarization prompt.
-    let prompt = build_summary_prompt(content, trace, template);
+        // Build summarization prompt.
+        let prompt = build_summary_prompt(content, trace, template);
 
-    // Compute blake3 hash of the prompt actually sent.
-    let prompt_hash = blake3::hash(prompt.as_bytes()).to_hex().to_string();
+        // Compute blake3 hash of the prompt actually sent.
+        let prompt_hash = blake3::hash(prompt.as_bytes()).to_hex().to_string();
 
-    // A1: resolve the coordinator cancellation token for this run from
-    // the shared per-run map. FAIL-CLOSED: a run with no registered
-    // token refuses with `CancellationUnavailable` — a fresh token would
-    // be uncancellable by any coordinator (never mint one here). The run
-    // admission path (engine start/spawn/recovery) registers the token.
-    let cancellation =
-        crate::capability::resolve_session_cancellation(&self.session_cancels, session_id)?;
+        // A1: resolve the coordinator cancellation token for this run from
+        // the shared per-run map. FAIL-CLOSED: a run with no registered
+        // token refuses with `CancellationUnavailable` — a fresh token would
+        // be uncancellable by any coordinator (never mint one here). The run
+        // admission path (engine start/spawn/recovery) registers the token.
+        let cancellation =
+            crate::capability::resolve_session_cancellation(&self.session_cancels, session_id)?;
 
-    // Execute through the Host plane.
-    let result = executor
-        .execute(PromptRequest {
-            run_id: session_id.to_string(),
-            task_id: "context.summarize".to_string(),
-            agent_ref: None,
-            prompt,
-            tool_policy: ToolPolicy::DenyAll,
-            cancellation,
-        })
-        .await?;
+        // Execute through the Host plane.
+        let result = executor
+            .execute(PromptRequest {
+                run_id: session_id.to_string(),
+                task_id: "context.summarize".to_string(),
+                agent_ref: None,
+                prompt,
+                tool_policy: ToolPolicy::DenyAll,
+                cancellation,
+            })
+            .await?;
 
-    Ok(json!({
-        "summary": result.full_text,
-        "prompt_hash": prompt_hash
-    }))
-} }
+        Ok(json!({
+            "summary": result.full_text,
+            "prompt_hash": prompt_hash
+        }))
+    }
+}
 
 /// Default maximum content size passed to the LLM (256 KiB).
 /// TD-V131-04: Content exceeding this limit is truncated with a marker.

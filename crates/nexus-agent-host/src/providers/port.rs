@@ -658,21 +658,25 @@ impl ProviderPortAdapter {
                 .into_iter()
                 .find(|session| session.id == session_id)
                 .and_then(|session| session.active_op_id)
-                .ok_or_else(|| Self::internal_error("control operation has no active host identity"))?,
+                .ok_or_else(|| {
+                    Self::internal_error("control operation has no active host identity")
+                })?,
         };
         // ACP controls generate their own terminal ID after the synchronous
         // RPC. Correlate it after HostManager applies its lifecycle transition.
         let stream = if control {
             let wire_id = op_id.clone();
-            Box::pin(stream.map(move |event| event.map(|mut event| {
-                match &mut event {
-                    HostEvent::OpStarted(event) => event.op_id = wire_id.clone(),
-                    HostEvent::OpFinished(event) => event.op_id = wire_id.clone(),
-                    HostEvent::OpFailed(event) => event.op_id = wire_id.clone(),
-                    _ => {}
-                }
-                event
-            }))) as HostEventStream
+            Box::pin(stream.map(move |event| {
+                event.map(|mut event| {
+                    match &mut event {
+                        HostEvent::OpStarted(event) => event.op_id = wire_id.clone(),
+                        HostEvent::OpFinished(event) => event.op_id = wire_id.clone(),
+                        HostEvent::OpFailed(event) => event.op_id = wire_id.clone(),
+                        _ => {}
+                    }
+                    event
+                })
+            })) as HostEventStream
         } else {
             stream
         };
@@ -697,8 +701,15 @@ impl ProviderPortAdapter {
         let op_id_str = op_id.to_string();
         // Check negotiated capability before HostManager can transition the
         // session to Cancelling. DSH's adapter-level no-op is not cancellation.
-        let sessions = self.host.list_sessions().await.map_err(|err| Self::map_host_error(&err))?;
-        if let Some(session) = sessions.iter().find(|session| session.active_op_id.as_ref() == Some(&op_id)) {
+        let sessions = self
+            .host
+            .list_sessions()
+            .await
+            .map_err(|err| Self::map_host_error(&err))?;
+        if let Some(session) = sessions
+            .iter()
+            .find(|session| session.active_op_id.as_ref() == Some(&op_id))
+        {
             if !session.negotiated_capabilities.cancellation {
                 return Err(CoreError {
                     code: CoreErrorCode::NotSupported,
@@ -940,7 +951,6 @@ mod tests {
             reason: FinishReason::EndTurn,
         })
     }
-
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrent_same_operation_pull_is_busy_and_flag_resets() {

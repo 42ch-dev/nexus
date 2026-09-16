@@ -909,12 +909,14 @@ impl From<nexus_core::PresetError> for NexusApiError {
             PresetError::Forbidden { resource, reason } => Self::Forbidden { resource, reason },
             PresetError::Internal { code, message } => Self::Internal { code, message },
             PresetError::StrategyConflict(conflict) => Self::strategy_conflict(
-                conflict.current_revision, &conflict.node_id,
-                &conflict.conflicting_path, &conflict.recovery_hint,
+                conflict.current_revision,
+                &conflict.node_id,
+                &conflict.conflicting_path,
+                &conflict.recovery_hint,
             ),
-            PresetError::StrategyValidation(summary) => Self::strategy_validation_failed(
-                &summary.errors, &summary.warnings,
-            ),
+            PresetError::StrategyValidation(summary) => {
+                Self::strategy_validation_failed(&summary.errors, &summary.warnings)
+            }
         }
     }
 }
@@ -1194,9 +1196,9 @@ mod tests {
 
         // QC2 F-004: exhausting the per-run live-ring quota is a TYPED,
         // retryable capacity refusal — never a 500.
-        let capacity = NexusApiError::from(nexus_core::execution::RunControlError::RunEventCapacity(
-            "s1".into(),
-        ));
+        let capacity = NexusApiError::from(
+            nexus_core::execution::RunControlError::RunEventCapacity("s1".into()),
+        );
         assert_eq!(capacity.status_code(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(capacity.error_code(), "service_unavailable");
         assert!(
@@ -1283,8 +1285,8 @@ mod tests {
         use crate::api::handlers::workspace::init_workspace;
         use crate::test_utils::create_test_workspace;
         use crate::workspace::WorkspaceState;
-        use axum::Json;
         use axum::extract::State;
+        use axum::Json;
 
         let (_tmp, nexus_home, db_path) = create_test_workspace().await;
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
@@ -1318,8 +1320,8 @@ mod tests {
     /// (`require_workspace`), not by the handler itself.
     #[tokio::test]
     async fn creators_lists_ssot_profile_homes_without_sql_rows() {
-        use crate::api::handlers::creators::ListCreatorsQuery;
         use crate::api::handlers::creators::list;
+        use crate::api::handlers::creators::ListCreatorsQuery;
         use crate::test_utils::create_test_workspace;
         use crate::workspace::WorkspaceState;
         use axum::extract::State;

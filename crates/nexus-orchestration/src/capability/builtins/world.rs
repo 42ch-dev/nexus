@@ -181,78 +181,84 @@ impl Default for WorldStateQuery {
 }
 
 #[async_trait]
-impl Capability for WorldStateQuery { fn name(&self) -> &'static str {
-    "nexus.world.state.query"
-} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::NEXUS_WORLD_STATE_QUERY_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
-    r#"{"type":"object","properties":{"world_id":{"type":"string"},"world":{"type":"object"},"kb_blocks":{"type":"array"},"timeline":{"type":"array"},"generated_at":{"type":"string","format":"date-time"}},"required":["world_id","generated_at"],"additionalProperties":false}"#
+impl Capability for WorldStateQuery {
+    fn name(&self) -> &'static str {
+        "nexus.world.state.query"
+    }
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::NEXUS_WORLD_STATE_QUERY_INPUT_SCHEMA
+    }
+    fn output_schema(&self) -> &'static str {
+        r#"{"type":"object","properties":{"world_id":{"type":"string"},"world":{"type":"object"},"kb_blocks":{"type":"array"},"timeline":{"type":"array"},"generated_at":{"type":"string","format":"date-time"}},"required":["world_id","generated_at"],"additionalProperties":false}"#
+    }
+
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        let parsed: WorldStateQueryInput = serde_json::from_value(input)
+            .map_err(|e| CapabilityError::InputInvalid(format!("world.state.query input: {e}")))?;
+
+        let pool = self
+            .pool
+            .as_ref()
+            .ok_or(CapabilityError::WorkerUnavailable)?;
+
+        tracing::info!(
+            world_id = %parsed.world_id,
+            slice = ?parsed.slice,
+            "world.state.query admitted"
+        );
+
+        // Admission gate: creator must own the world.
+        ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
+
+        let slice = parsed.slice.as_deref().unwrap_or("all");
+        let want_kb = matches!(slice, "kb" | "all");
+        let want_timeline = matches!(slice, "timeline" | "all");
+
+        let gw = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new((**pool).clone());
+
+        // World metadata (always returned).
+        let world = gw
+            .get_world_state(&parsed.world_id)
+            .await
+            .map_err(|e| CapabilityError::Internal(format!("world state read: {e}")))?;
+        let world_json =
+            serde_json::to_value(&world).map_err(|e| CapabilityError::Internal(e.to_string()))?;
+
+        // KB slice.
+        let kb_blocks = if want_kb {
+            let store = nexus_local_db::kb_store::SqliteKbStore::new((**pool).clone());
+            store
+                .list_by_world(&parsed.world_id)
+                .await
+                .map_err(|e| CapabilityError::Internal(format!("kb list: {e}")))?
+                .into_iter()
+                .filter_map(|kb| serde_json::to_value(&kb).ok())
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        // Timeline slice.
+        let timeline = if want_timeline {
+            gw.get_timeline(&parsed.world_id, parsed.branch_id.as_deref(), parsed.limit)
+                .await
+                .map_err(|e| CapabilityError::Internal(format!("timeline read: {e}")))?
+                .into_iter()
+                .filter_map(|evt| serde_json::to_value(&evt).ok())
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        Ok(json!({
+            "world_id": parsed.world_id,
+            "world": world_json,
+            "kb_blocks": kb_blocks,
+            "timeline": timeline,
+            "generated_at": chrono::Utc::now().to_rfc3339(),
+        }))
+    }
 }
-
-async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-    let parsed: WorldStateQueryInput = serde_json::from_value(input)
-        .map_err(|e| CapabilityError::InputInvalid(format!("world.state.query input: {e}")))?;
-
-    let pool = self
-        .pool
-        .as_ref()
-        .ok_or(CapabilityError::WorkerUnavailable)?;
-
-    tracing::info!(
-        world_id = %parsed.world_id,
-        slice = ?parsed.slice,
-        "world.state.query admitted"
-    );
-
-    // Admission gate: creator must own the world.
-    ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
-
-    let slice = parsed.slice.as_deref().unwrap_or("all");
-    let want_kb = matches!(slice, "kb" | "all");
-    let want_timeline = matches!(slice, "timeline" | "all");
-
-    let gw = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new((**pool).clone());
-
-    // World metadata (always returned).
-    let world = gw
-        .get_world_state(&parsed.world_id)
-        .await
-        .map_err(|e| CapabilityError::Internal(format!("world state read: {e}")))?;
-    let world_json =
-        serde_json::to_value(&world).map_err(|e| CapabilityError::Internal(e.to_string()))?;
-
-    // KB slice.
-    let kb_blocks = if want_kb {
-        let store = nexus_local_db::kb_store::SqliteKbStore::new((**pool).clone());
-        store
-            .list_by_world(&parsed.world_id)
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("kb list: {e}")))?
-            .into_iter()
-            .filter_map(|kb| serde_json::to_value(&kb).ok())
-            .collect::<Vec<_>>()
-    } else {
-        Vec::new()
-    };
-
-    // Timeline slice.
-    let timeline = if want_timeline {
-        gw.get_timeline(&parsed.world_id, parsed.branch_id.as_deref(), parsed.limit)
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("timeline read: {e}")))?
-            .into_iter()
-            .filter_map(|evt| serde_json::to_value(&evt).ok())
-            .collect::<Vec<_>>()
-    } else {
-        Vec::new()
-    };
-
-    Ok(json!({
-        "world_id": parsed.world_id,
-        "world": world_json,
-        "kb_blocks": kb_blocks,
-        "timeline": timeline,
-        "generated_at": chrono::Utc::now().to_rfc3339(),
-    }))
-} }
 
 // ─── Capability: nexus.world.delta.propose ─────────────────────────────────
 
@@ -283,86 +289,92 @@ impl Default for WorldDeltaPropose {
 }
 
 #[async_trait]
-impl Capability for WorldDeltaPropose { fn name(&self) -> &'static str {
-    "nexus.world.delta.propose"
-} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::NEXUS_WORLD_DELTA_PROPOSE_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
-    r#"{"type":"object","properties":{"schema_version":{"type":"integer"},"policy_context":{"type":"object"},"proposed_changes":{"type":"array"},"atomic":{"type":"boolean"}},"required":["schema_version","policy_context","proposed_changes","atomic"],"additionalProperties":false}"#
-}
-
-async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-    let parsed: WorldDeltaProposeInput = serde_json::from_value(input).map_err(|e| {
-        CapabilityError::InputInvalid(format!("world.delta.propose input: {e}"))
-    })?;
-
-    let pool = self
-        .pool
-        .as_ref()
-        .ok_or(CapabilityError::WorkerUnavailable)?;
-
-    tracing::info!(
-        world_id = %parsed.world_id,
-        changes = parsed.changeset.len(),
-        "world.delta.propose admitted"
-    );
-
-    // Admission gate.
-    ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
-
-    let slug = workspace_slug_for(pool, &parsed.world_id).await;
-    let store = nexus_local_db::kb_store::SqliteKbStore::new((**pool).clone());
-    let mut proposed: Vec<Value> = Vec::with_capacity(parsed.changeset.len());
-    for ch in parsed.changeset {
-        // V1.60 supports kb_key_block (create/update) + world_metadata title.
-        let old_value = match (ch.entity.as_str(), ch.entity_id.as_deref()) {
-            ("kb_key_block", Some(kid)) => {
-                let existing = store.get_knowledge_entry(kid).await.ok();
-                existing.and_then(|kb| serde_json::to_value(field_of(&kb, &ch.field)).ok())
-            }
-            ("kb_key_block", None) => {
-                // Create path — no prior value.
-                Some(Value::Null)
-            }
-            ("world_metadata", _) if ch.field == "title" => {
-                // Read current title from the world row.
-                sqlx::query_scalar::<_, String>(
-                    "SELECT title FROM narrative_worlds WHERE world_id = ?",
-                )
-                .bind(&parsed.world_id)
-                .fetch_optional(&**pool)
-                .await
-                .ok()
-                .flatten()
-                .map(Value::String)
-            }
-            (other_entity, _) => {
-                return Err(CapabilityError::InputInvalid(format!(
-                    "unsupported entity '{other_entity}' (V1.60: kb_key_block, world_metadata)"
-                )));
-            }
-        };
-
-        proposed.push(json!({
-            "entity": ch.entity,
-            "entity_id": ch.entity_id,
-            "field": ch.field,
-            "old_value": old_value,
-            "new_value": ch.new_value,
-            "rationale": ch.rationale,
-        }));
+impl Capability for WorldDeltaPropose {
+    fn name(&self) -> &'static str {
+        "nexus.world.delta.propose"
+    }
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::NEXUS_WORLD_DELTA_PROPOSE_INPUT_SCHEMA
+    }
+    fn output_schema(&self) -> &'static str {
+        r#"{"type":"object","properties":{"schema_version":{"type":"integer"},"policy_context":{"type":"object"},"proposed_changes":{"type":"array"},"atomic":{"type":"boolean"}},"required":["schema_version","policy_context","proposed_changes","atomic"],"additionalProperties":false}"#
     }
 
-    Ok(json!({
-        "schema_version": 1,
-        "policy_context": {
-            "world_id": parsed.world_id,
-            "creator_id": parsed.creator_id,
-            "source_work_id": "wrk_local",
-            "workspace_slug": slug,
-        },
-        "proposed_changes": proposed,
-        "atomic": true,
-    }))
-} }
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        let parsed: WorldDeltaProposeInput = serde_json::from_value(input).map_err(|e| {
+            CapabilityError::InputInvalid(format!("world.delta.propose input: {e}"))
+        })?;
+
+        let pool = self
+            .pool
+            .as_ref()
+            .ok_or(CapabilityError::WorkerUnavailable)?;
+
+        tracing::info!(
+            world_id = %parsed.world_id,
+            changes = parsed.changeset.len(),
+            "world.delta.propose admitted"
+        );
+
+        // Admission gate.
+        ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
+
+        let slug = workspace_slug_for(pool, &parsed.world_id).await;
+        let store = nexus_local_db::kb_store::SqliteKbStore::new((**pool).clone());
+        let mut proposed: Vec<Value> = Vec::with_capacity(parsed.changeset.len());
+        for ch in parsed.changeset {
+            // V1.60 supports kb_key_block (create/update) + world_metadata title.
+            let old_value = match (ch.entity.as_str(), ch.entity_id.as_deref()) {
+                ("kb_key_block", Some(kid)) => {
+                    let existing = store.get_knowledge_entry(kid).await.ok();
+                    existing.and_then(|kb| serde_json::to_value(field_of(&kb, &ch.field)).ok())
+                }
+                ("kb_key_block", None) => {
+                    // Create path — no prior value.
+                    Some(Value::Null)
+                }
+                ("world_metadata", _) if ch.field == "title" => {
+                    // Read current title from the world row.
+                    sqlx::query_scalar::<_, String>(
+                        "SELECT title FROM narrative_worlds WHERE world_id = ?",
+                    )
+                    .bind(&parsed.world_id)
+                    .fetch_optional(&**pool)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(Value::String)
+                }
+                (other_entity, _) => {
+                    return Err(CapabilityError::InputInvalid(format!(
+                        "unsupported entity '{other_entity}' (V1.60: kb_key_block, world_metadata)"
+                    )));
+                }
+            };
+
+            proposed.push(json!({
+                "entity": ch.entity,
+                "entity_id": ch.entity_id,
+                "field": ch.field,
+                "old_value": old_value,
+                "new_value": ch.new_value,
+                "rationale": ch.rationale,
+            }));
+        }
+
+        Ok(json!({
+            "schema_version": 1,
+            "policy_context": {
+                "world_id": parsed.world_id,
+                "creator_id": parsed.creator_id,
+                "source_work_id": "wrk_local",
+                "workspace_slug": slug,
+            },
+            "proposed_changes": proposed,
+            "atomic": true,
+        }))
+    }
+}
 
 /// Extract a serializable field value from a `KnowledgeEntryRecord` for the lost-update guard.
 fn field_of(
@@ -415,327 +427,335 @@ impl Default for WorldDeltaApply {
 const KB_PREFETCH_CHUNK_SIZE: usize = 500;
 
 #[async_trait]
-impl Capability for WorldDeltaApply { fn name(&self) -> &'static str {
-    "nexus.world.delta.apply"
-} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::NEXUS_WORLD_DELTA_APPLY_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
-    r#"{"type":"object","properties":{"applied":{"type":"array"},"atomic_applied":{"type":"boolean"}},"required":["applied","atomic_applied"],"additionalProperties":false}"#
-}
-
-#[allow(clippy::too_many_lines)]
-async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-    let parsed: WorldDeltaApplyInput = serde_json::from_value(input)
-        .map_err(|e| CapabilityError::InputInvalid(format!("world.delta.apply input: {e}")))?;
-
-    let pool = self
-        .pool
-        .as_ref()
-        .ok_or(CapabilityError::WorkerUnavailable)?;
-
-    let world_id = parsed.policy_context.world_id.clone();
-    let creator_id = parsed.policy_context.creator_id.clone();
-
-    tracing::info!(
-        world_id = %world_id,
-        changes = parsed.proposed_changes.len(),
-        atomic = parsed.atomic,
-        "world.delta.apply admitted"
-    );
-
-    // Atomic apply: the whole package runs in one transaction. `atomic:false`
-    // is accepted but V1.60 still applies transactionally (partial commit is
-    // post-1.0); the output reports `atomic_applied: true`.
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(|e| CapabilityError::Internal(format!("begin tx: {e}")))?;
-
-    // TOCTOU guard: re-verify ownership inside the transaction.
-    // SAFETY: ownership check against known narrative_worlds schema.
-    let owned: Option<String> = sqlx::query_scalar(
-        "SELECT world_id FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?",
-    )
-    .bind(&world_id)
-    .bind(&creator_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|e| CapabilityError::Internal(format!("world ownership (tx): {e}")))?;
-    if owned.is_none() {
-        return Err(CapabilityError::Forbidden(
-            "world not found or not owned by creator".into(),
-        ));
+impl Capability for WorldDeltaApply {
+    fn name(&self) -> &'static str {
+        "nexus.world.delta.apply"
+    }
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::NEXUS_WORLD_DELTA_APPLY_INPUT_SCHEMA
+    }
+    fn output_schema(&self) -> &'static str {
+        r#"{"type":"object","properties":{"applied":{"type":"array"},"atomic_applied":{"type":"boolean"}},"required":["applied","atomic_applied"],"additionalProperties":false}"#
     }
 
-    let mut results: Vec<Value> = Vec::with_capacity(parsed.proposed_changes.len());
-    let mut all_applied = true;
+    #[allow(clippy::too_many_lines)]
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        let parsed: WorldDeltaApplyInput = serde_json::from_value(input)
+            .map_err(|e| CapabilityError::InputInvalid(format!("world.delta.apply input: {e}")))?;
 
-    // V1.67 P2 (R-V160P0-QC3-W001 / W-002): pre-fetch current body_json
-    // for all kb_key_block update targets in chunked, deduplicated
-    // IN-lists, replacing the per-change SELECT + UPDATE N+1 pattern
-    // while bounding the SQL size regardless of caller input.
-    let update_kids: Vec<&str> = parsed
-        .proposed_changes
-        .iter()
-        .filter_map(|ch| {
-            if ch.entity == "kb_key_block" && ch.entity_id.is_some() {
-                ch.entity_id.as_deref()
-            } else {
-                None
-            }
-        })
-        .collect();
+        let pool = self
+            .pool
+            .as_ref()
+            .ok_or(CapabilityError::WorkerUnavailable)?;
 
-    let mut live_body_map: HashMap<String, Option<String>> = HashMap::new();
-    if !update_kids.is_empty() {
-        // Dedupe ids so duplicate entity_id entries do not inflate bind
-        // counts or generate redundant IN-list chunks.
-        let mut seen = HashSet::with_capacity(update_kids.len());
-        let unique_update_kids: Vec<&str> = update_kids
-            .into_iter()
-            .filter(|kid| seen.insert(*kid))
+        let world_id = parsed.policy_context.world_id.clone();
+        let creator_id = parsed.policy_context.creator_id.clone();
+
+        tracing::info!(
+            world_id = %world_id,
+            changes = parsed.proposed_changes.len(),
+            atomic = parsed.atomic,
+            "world.delta.apply admitted"
+        );
+
+        // Atomic apply: the whole package runs in one transaction. `atomic:false`
+        // is accepted but V1.60 still applies transactionally (partial commit is
+        // post-1.0); the output reports `atomic_applied: true`.
+        let mut tx = pool
+            .begin()
+            .await
+            .map_err(|e| CapabilityError::Internal(format!("begin tx: {e}")))?;
+
+        // TOCTOU guard: re-verify ownership inside the transaction.
+        // SAFETY: ownership check against known narrative_worlds schema.
+        let owned: Option<String> = sqlx::query_scalar(
+            "SELECT world_id FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?",
+        )
+        .bind(&world_id)
+        .bind(&creator_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| CapabilityError::Internal(format!("world ownership (tx): {e}")))?;
+        if owned.is_none() {
+            return Err(CapabilityError::Forbidden(
+                "world not found or not owned by creator".into(),
+            ));
+        }
+
+        let mut results: Vec<Value> = Vec::with_capacity(parsed.proposed_changes.len());
+        let mut all_applied = true;
+
+        // V1.67 P2 (R-V160P0-QC3-W001 / W-002): pre-fetch current body_json
+        // for all kb_key_block update targets in chunked, deduplicated
+        // IN-lists, replacing the per-change SELECT + UPDATE N+1 pattern
+        // while bounding the SQL size regardless of caller input.
+        let update_kids: Vec<&str> = parsed
+            .proposed_changes
+            .iter()
+            .filter_map(|ch| {
+                if ch.entity == "kb_key_block" && ch.entity_id.is_some() {
+                    ch.entity_id.as_deref()
+                } else {
+                    None
+                }
+            })
             .collect();
 
-        for chunk in unique_update_kids.chunks(KB_PREFETCH_CHUNK_SIZE) {
-            // SAFETY: column/table names are string literals; key_block_id
-            // values are bound as parameters. Dynamic IN-list length is the
-            // only non-static aspect.
-            let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-            let sql = format!(
+        let mut live_body_map: HashMap<String, Option<String>> = HashMap::new();
+        if !update_kids.is_empty() {
+            // Dedupe ids so duplicate entity_id entries do not inflate bind
+            // counts or generate redundant IN-list chunks.
+            let mut seen = HashSet::with_capacity(update_kids.len());
+            let unique_update_kids: Vec<&str> = update_kids
+                .into_iter()
+                .filter(|kid| seen.insert(*kid))
+                .collect();
+
+            for chunk in unique_update_kids.chunks(KB_PREFETCH_CHUNK_SIZE) {
+                // SAFETY: column/table names are string literals; key_block_id
+                // values are bound as parameters. Dynamic IN-list length is the
+                // only non-static aspect.
+                let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+                let sql = format!(
                 "SELECT key_block_id, body_json FROM kb_key_blocks WHERE key_block_id IN ({placeholders})"
             );
-            let mut q = sqlx::query_as::<_, (String, Option<String>)>(sqlx::AssertSqlSafe(sql));
-            for kid in chunk {
-                q = q.bind(*kid);
-            }
-            let rows = q
-                .fetch_all(&mut *tx)
-                .await
-                .map_err(|e| CapabilityError::Internal(format!("kb batch read (tx): {e}")))?;
-            for (kid, body) in rows {
-                live_body_map.insert(kid, body);
+                let mut q = sqlx::query_as::<_, (String, Option<String>)>(sqlx::AssertSqlSafe(sql));
+                for kid in chunk {
+                    q = q.bind(*kid);
+                }
+                let rows = q
+                    .fetch_all(&mut *tx)
+                    .await
+                    .map_err(|e| CapabilityError::Internal(format!("kb batch read (tx): {e}")))?;
+                for (kid, body) in rows {
+                    live_body_map.insert(kid, body);
+                }
             }
         }
-    }
 
-    for ch in parsed.proposed_changes {
-        // Capture the rationale for the audit trail before `ch` is consumed.
-        let rationale = ch.rationale.clone();
-        match (ch.entity.as_str(), ch.entity_id.as_deref()) {
-            ("kb_key_block", Some(kid)) => {
-                // Update path with lost-update guard.
-                // body_json is a nullable column → scalar type is Option<String>.
-                // V1.67 P2 (R-V160P0-QC3-W001): value was pre-fetched in
-                // bulk above instead of issuing one SELECT per change.
-                let live_body = live_body_map.get(kid).cloned().unwrap_or(None);
+        for ch in parsed.proposed_changes {
+            // Capture the rationale for the audit trail before `ch` is consumed.
+            let rationale = ch.rationale.clone();
+            match (ch.entity.as_str(), ch.entity_id.as_deref()) {
+                ("kb_key_block", Some(kid)) => {
+                    // Update path with lost-update guard.
+                    // body_json is a nullable column → scalar type is Option<String>.
+                    // V1.67 P2 (R-V160P0-QC3-W001): value was pre-fetched in
+                    // bulk above instead of issuing one SELECT per change.
+                    let live_body = live_body_map.get(kid).cloned().unwrap_or(None);
 
-                let live = live_body
-                    .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-                    .unwrap_or(Value::Null);
+                    let live = live_body
+                        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                        .unwrap_or(Value::Null);
 
-                if let Some(expected) = &ch.old_value {
-                    if &live != expected {
-                        all_applied = false;
-                        results.push(json!({
-                            "entity": ch.entity,
-                            "entity_id": kid,
-                            "field": ch.field,
-                            "status": "conflict",
-                            "live_value": live,
-                            "rationale": rationale,
-                        }));
-                        continue;
+                    if let Some(expected) = &ch.old_value {
+                        if &live != expected {
+                            all_applied = false;
+                            results.push(json!({
+                                "entity": ch.entity,
+                                "entity_id": kid,
+                                "field": ch.field,
+                                "status": "conflict",
+                                "live_value": live,
+                                "rationale": rationale,
+                            }));
+                            continue;
+                        }
                     }
-                }
 
-                // Apply the field update. V1.60 supports body_json + status.
-                // SAFETY: UPDATE against known kb_key_blocks schema.
-                match ch.field.as_str() {
-                    "body_json" => {
-                        let body_str = serde_json::to_string(&ch.new_value)
-                            .map_err(|e| CapabilityError::Internal(e.to_string()))?;
-                        sqlx::query(
-                            "UPDATE kb_key_blocks SET body_json = ?, updated_at = ? \
+                    // Apply the field update. V1.60 supports body_json + status.
+                    // SAFETY: UPDATE against known kb_key_blocks schema.
+                    match ch.field.as_str() {
+                        "body_json" => {
+                            let body_str = serde_json::to_string(&ch.new_value)
+                                .map_err(|e| CapabilityError::Internal(e.to_string()))?;
+                            sqlx::query(
+                                "UPDATE kb_key_blocks SET body_json = ?, updated_at = ? \
                              WHERE key_block_id = ?",
-                        )
-                        .bind(&body_str)
-                        .bind(chrono::Utc::now().to_rfc3339())
-                        .bind(kid)
-                        .execute(&mut *tx)
-                        .await
-                        .map_err(|e| CapabilityError::Internal(format!("kb update: {e}")))?;
-                    }
-                    "status" => {
-                        let new_status = ch.new_value.as_str().ok_or_else(|| {
-                            CapabilityError::InputInvalid(
-                                "status new_value must be a string".into(),
                             )
-                        })?;
-                        sqlx::query(
-                            "UPDATE kb_key_blocks SET status = ?, updated_at = ? \
+                            .bind(&body_str)
+                            .bind(chrono::Utc::now().to_rfc3339())
+                            .bind(kid)
+                            .execute(&mut *tx)
+                            .await
+                            .map_err(|e| CapabilityError::Internal(format!("kb update: {e}")))?;
+                        }
+                        "status" => {
+                            let new_status = ch.new_value.as_str().ok_or_else(|| {
+                                CapabilityError::InputInvalid(
+                                    "status new_value must be a string".into(),
+                                )
+                            })?;
+                            sqlx::query(
+                                "UPDATE kb_key_blocks SET status = ?, updated_at = ? \
                              WHERE key_block_id = ?",
-                        )
-                        .bind(new_status)
-                        .bind(chrono::Utc::now().to_rfc3339())
-                        .bind(kid)
-                        .execute(&mut *tx)
-                        .await
-                        .map_err(|e| CapabilityError::Internal(format!("kb status: {e}")))?;
-                    }
-                    other => {
-                        return Err(CapabilityError::InputInvalid(format!(
+                            )
+                            .bind(new_status)
+                            .bind(chrono::Utc::now().to_rfc3339())
+                            .bind(kid)
+                            .execute(&mut *tx)
+                            .await
+                            .map_err(|e| CapabilityError::Internal(format!("kb status: {e}")))?;
+                        }
+                        other => {
+                            return Err(CapabilityError::InputInvalid(format!(
                             "unsupported kb_key_block field '{other}' (V1.60: body_json, status)"
                         )));
+                        }
                     }
-                }
 
-                results.push(json!({
-                    "entity": ch.entity,
-                    "entity_id": kid,
-                    "field": ch.field,
-                    "status": "applied",
-                    "rationale": rationale,
-                }));
-            }
-            ("kb_key_block", None) => {
-                // Create path: insert a new provisional key block via the
-                // proper DAO method (`insert_key_block_in_tx`), which shares
-                // this handler's transaction so the create rolls back
-                // atomically with sibling changes.
-                //
-                // R-V160P0-QC1-W001: the prior hand-written INSERT
-                // referenced a non-existent `metadata_json` column and
-                // defaulted `block_type` to the invalid literal "concept".
-                // Routing through the DAO issues the correct INSERT, runs
-                // canonical_name + body validation, and reuses the canonical
-                // `KnowledgeEntryRecord::new` defaults (status = provisional).
-                let canonical = ch
-                    .new_value
-                    .get("canonical_name")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        CapabilityError::InputInvalid(
-                            "create kb_key_block requires new_value.canonical_name".into(),
-                        )
-                    })?;
-                // Parse `block_type` into the enum (snake_case wire form).
-                // Defaults to `BlockType::Character` (the canonical default)
-                // when absent or unrecognised; the prior "concept" literal
-                // was never a valid variant.
-                let block_type = ch
-                    .new_value
-                    .get("block_type")
-                    .and_then(|v| {
-                        serde_json::from_value::<nexus_contracts::BlockType>(v.clone()).ok()
-                    })
-                    .unwrap_or(nexus_contracts::BlockType::Character);
-                let mut kb =
-                    nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
-                        &world_id, block_type, canonical,
-                    );
-                if let Some(body) = ch.new_value.get("body_json").and_then(|v| {
-                    serde_json::from_value::<
-                        nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody,
-                    >(v.clone())
-                    .ok()
-                }) {
-                    kb.body = Some(body);
+                    results.push(json!({
+                        "entity": ch.entity,
+                        "entity_id": kid,
+                        "field": ch.field,
+                        "status": "applied",
+                        "rationale": rationale,
+                    }));
                 }
+                ("kb_key_block", None) => {
+                    // Create path: insert a new provisional key block via the
+                    // proper DAO method (`insert_key_block_in_tx`), which shares
+                    // this handler's transaction so the create rolls back
+                    // atomically with sibling changes.
+                    //
+                    // R-V160P0-QC1-W001: the prior hand-written INSERT
+                    // referenced a non-existent `metadata_json` column and
+                    // defaulted `block_type` to the invalid literal "concept".
+                    // Routing through the DAO issues the correct INSERT, runs
+                    // canonical_name + body validation, and reuses the canonical
+                    // `KnowledgeEntryRecord::new` defaults (status = provisional).
+                    let canonical = ch
+                        .new_value
+                        .get("canonical_name")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| {
+                            CapabilityError::InputInvalid(
+                                "create kb_key_block requires new_value.canonical_name".into(),
+                            )
+                        })?;
+                    // Parse `block_type` into the enum (snake_case wire form).
+                    // Defaults to `BlockType::Character` (the canonical default)
+                    // when absent or unrecognised; the prior "concept" literal
+                    // was never a valid variant.
+                    let block_type = ch
+                        .new_value
+                        .get("block_type")
+                        .and_then(|v| {
+                            serde_json::from_value::<nexus_contracts::BlockType>(v.clone()).ok()
+                        })
+                        .unwrap_or(nexus_contracts::BlockType::Character);
+                    let mut kb =
+                        nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
+                            &world_id, block_type, canonical,
+                        );
+                    if let Some(body) = ch.new_value.get("body_json").and_then(|v| {
+                        serde_json::from_value::<
+                            nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody,
+                        >(v.clone())
+                        .ok()
+                    }) {
+                        kb.body = Some(body);
+                    }
 
-                let kb_store = nexus_local_db::kb_store::SqliteKbStore::new((**pool).clone());
-                let insert_result = kb_store
-                    .insert_key_block_in_tx(&mut tx, kb)
-                    .await
-                    .map_err(|e| match e {
+                    let kb_store = nexus_local_db::kb_store::SqliteKbStore::new((**pool).clone());
+                    let insert_result =
+                        kb_store.insert_key_block_in_tx(&mut tx, kb).await.map_err(
+                            |e| {
+                                match e {
                         nexus_knowledge::world_kb::store::KbStoreError::Validation(_)
                         | nexus_knowledge::world_kb::store::KbStoreError::ValidationLegacy(_) => {
                             CapabilityError::InputInvalid(format!("kb insert: {e}"))
                         }
                         other => CapabilityError::Internal(format!("kb insert: {other}")),
-                    })?;
-
-                results.push(json!({
-                    "entity": ch.entity,
-                    "entity_id": insert_result.entry_id,
-                    "field": ch.field,
-                    "status": "applied",
-                    "rationale": rationale,
-                }));
-            }
-            ("world_metadata", _) if ch.field == "title" => {
-                // Lost-update guard: compare old_value (if supplied) to the
-                // live title before applying. SAFETY: SELECT against known
-                // narrative_worlds schema.
-                let live_title: Option<String> =
-                    sqlx::query_scalar("SELECT title FROM narrative_worlds WHERE world_id = ?")
-                        .bind(&world_id)
-                        .fetch_optional(&mut *tx)
-                        .await
-                        .map_err(|e| {
-                            CapabilityError::Internal(format!("title read (tx): {e}"))
-                        })?;
-                if let Some(expected) = &ch.old_value {
-                    let live = live_title.map_or(Value::Null, Value::String);
-                    if &live != expected {
-                        all_applied = false;
-                        results.push(json!({
-                            "entity": ch.entity,
-                            "entity_id": world_id,
-                            "field": ch.field,
-                            "status": "conflict",
-                            "live_value": live,
-                            "rationale": rationale,
-                        }));
-                        continue;
                     }
+                            },
+                        )?;
+
+                    results.push(json!({
+                        "entity": ch.entity,
+                        "entity_id": insert_result.entry_id,
+                        "field": ch.field,
+                        "status": "applied",
+                        "rationale": rationale,
+                    }));
                 }
+                ("world_metadata", _) if ch.field == "title" => {
+                    // Lost-update guard: compare old_value (if supplied) to the
+                    // live title before applying. SAFETY: SELECT against known
+                    // narrative_worlds schema.
+                    let live_title: Option<String> =
+                        sqlx::query_scalar("SELECT title FROM narrative_worlds WHERE world_id = ?")
+                            .bind(&world_id)
+                            .fetch_optional(&mut *tx)
+                            .await
+                            .map_err(|e| {
+                                CapabilityError::Internal(format!("title read (tx): {e}"))
+                            })?;
+                    if let Some(expected) = &ch.old_value {
+                        let live = live_title.map_or(Value::Null, Value::String);
+                        if &live != expected {
+                            all_applied = false;
+                            results.push(json!({
+                                "entity": ch.entity,
+                                "entity_id": world_id,
+                                "field": ch.field,
+                                "status": "conflict",
+                                "live_value": live,
+                                "rationale": rationale,
+                            }));
+                            continue;
+                        }
+                    }
 
-                let new_title = ch.new_value.as_str().ok_or_else(|| {
-                    CapabilityError::InputInvalid("title new_value must be a string".into())
-                })?;
-                // SAFETY: UPDATE against known narrative_worlds schema.
-                sqlx::query(
-                    "UPDATE narrative_worlds SET title = ?, updated_at = ? WHERE world_id = ?",
-                )
-                .bind(new_title)
-                .bind(chrono::Utc::now().to_rfc3339())
-                .bind(&world_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| CapabilityError::Internal(format!("world title update: {e}")))?;
+                    let new_title = ch.new_value.as_str().ok_or_else(|| {
+                        CapabilityError::InputInvalid("title new_value must be a string".into())
+                    })?;
+                    // SAFETY: UPDATE against known narrative_worlds schema.
+                    sqlx::query(
+                        "UPDATE narrative_worlds SET title = ?, updated_at = ? WHERE world_id = ?",
+                    )
+                    .bind(new_title)
+                    .bind(chrono::Utc::now().to_rfc3339())
+                    .bind(&world_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| CapabilityError::Internal(format!("world title update: {e}")))?;
 
-                results.push(json!({
-                    "entity": ch.entity,
-                    "entity_id": world_id,
-                    "field": ch.field,
-                    "status": "applied",
-                    "rationale": rationale,
-                }));
-            }
-            (other_entity, _) => {
-                return Err(CapabilityError::InputInvalid(format!(
-                    "unsupported entity '{other_entity}' (V1.60: kb_key_block, world_metadata)"
-                )));
+                    results.push(json!({
+                        "entity": ch.entity,
+                        "entity_id": world_id,
+                        "field": ch.field,
+                        "status": "applied",
+                        "rationale": rationale,
+                    }));
+                }
+                (other_entity, _) => {
+                    return Err(CapabilityError::InputInvalid(format!(
+                        "unsupported entity '{other_entity}' (V1.60: kb_key_block, world_metadata)"
+                    )));
+                }
             }
         }
+
+        // Commit the atomic batch.
+        tx.commit()
+            .await
+            .map_err(|e| CapabilityError::TransientExternal(format!("commit: {e}")))?;
+
+        tracing::info!(
+            world_id = %world_id,
+            applied = results.len(),
+            all_applied,
+            "world.delta.apply committed"
+        );
+
+        Ok(json!({
+            "applied": results,
+            "atomic_applied": all_applied,
+            "source_work_id": parsed.policy_context.source_work_id,
+        }))
     }
-
-    // Commit the atomic batch.
-    tx.commit()
-        .await
-        .map_err(|e| CapabilityError::TransientExternal(format!("commit: {e}")))?;
-
-    tracing::info!(
-        world_id = %world_id,
-        applied = results.len(),
-        all_applied,
-        "world.delta.apply committed"
-    );
-
-    Ok(json!({
-        "applied": results,
-        "atomic_applied": all_applied,
-        "source_work_id": parsed.policy_context.source_work_id,
-    }))
-} }
+}
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
 

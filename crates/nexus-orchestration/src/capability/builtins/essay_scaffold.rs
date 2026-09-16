@@ -251,40 +251,45 @@ impl Default for EssayProjectScaffold {
 }
 
 #[async_trait]
-impl Capability for EssayProjectScaffold { fn name(&self) -> &'static str {
-    "essay.project_scaffold"
-} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::ESSAY_PROJECT_SCAFFOLD_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
-    r#"{"type":"object","properties":{"scaffold_root":{"type":"string"},"files_created":{"type":"array","items":{"type":"string"}},"dirs_created":{"type":"array","items":{"type":"string"}}},"required":["scaffold_root","files_created","dirs_created"],"additionalProperties":false}"#
-}
+impl Capability for EssayProjectScaffold {
+    fn name(&self) -> &'static str {
+        "essay.project_scaffold"
+    }
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::ESSAY_PROJECT_SCAFFOLD_INPUT_SCHEMA
+    }
+    fn output_schema(&self) -> &'static str {
+        r#"{"type":"object","properties":{"scaffold_root":{"type":"string"},"files_created":{"type":"array","items":{"type":"string"}},"dirs_created":{"type":"array","items":{"type":"string"}}},"required":["scaffold_root","files_created","dirs_created"],"additionalProperties":false}"#
+    }
 
-async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-    let inp: ScaffoldInput = serde_json::from_value(input).map_err(|e| {
-        CapabilityError::InputInvalid(format!("essay.project_scaffold input: {e}"))
-    })?;
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        let inp: ScaffoldInput = serde_json::from_value(input).map_err(|e| {
+            CapabilityError::InputInvalid(format!("essay.project_scaffold input: {e}"))
+        })?;
 
-    // ── FIX (V1.63 P0): validate work_ref against path traversal ──
-    let work_ref = validate_work_ref(&inp.work_ref)?;
+        // ── FIX (V1.63 P0): validate work_ref against path traversal ──
+        let work_ref = validate_work_ref(&inp.work_ref)?;
 
-    info!(
-        work_id = %inp.work_id,
-        work_ref = %work_ref,
-        world_id = ?inp.world_id,
-        "essay.project_scaffold: start"
-    );
+        info!(
+            work_id = %inp.work_id,
+            work_ref = %work_ref,
+            world_id = ?inp.world_id,
+            "essay.project_scaffold: start"
+        );
 
-    let work_dir = self.works_root.join(&work_ref);
-    let title = inp.title.clone();
-    let work_id_for_fs = inp.work_id.clone();
+        let work_dir = self.works_root.join(&work_ref);
+        let title = inp.title.clone();
+        let work_id_for_fs = inp.work_id.clone();
 
-    // FS operations are wrapped in `spawn_blocking` to avoid blocking
-    // the tokio worker thread pool. `ScaffoldTransaction` is inherently
-    // synchronous (Drop-based rollback cannot be async), so the entire
-    // FS batch runs on a blocking thread and returns the guard.
-    // If the subsequent DB PATCH fails, the guard's Drop rolls back all
-    // FS writes — atomicity is preserved.
-    let mut tx = {
-        let work_dir = work_dir.clone();
-        tokio::task::spawn_blocking(
+        // FS operations are wrapped in `spawn_blocking` to avoid blocking
+        // the tokio worker thread pool. `ScaffoldTransaction` is inherently
+        // synchronous (Drop-based rollback cannot be async), so the entire
+        // FS batch runs on a blocking thread and returns the guard.
+        // If the subsequent DB PATCH fails, the guard's Drop rolls back all
+        // FS writes — atomicity is preserved.
+        let mut tx = {
+            let work_dir = work_dir.clone();
+            tokio::task::spawn_blocking(
             move || -> Result<ScaffoldTransaction, CapabilityError> {
                 let outlines_dir = work_dir.join("Outlines");
                 let drafts_dir = work_dir.join("Drafts");
@@ -331,49 +336,50 @@ async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
         .map_err(|e| {
             CapabilityError::Internal(format!("scaffold blocking task panicked: {e}"))
         })??
-    };
+        };
 
-    // PATCH works row: set work_profile and work_ref
-    if let Some(ref pool) = self.pool {
-        sqlx::query("UPDATE works SET work_profile = 'essay', work_ref = ? WHERE work_id = ?")
-            .bind(&work_ref)
-            .bind(&inp.work_id)
-            .execute(pool)
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("patch works row: {e}")))?;
+        // PATCH works row: set work_profile and work_ref
+        if let Some(ref pool) = self.pool {
+            sqlx::query("UPDATE works SET work_profile = 'essay', work_ref = ? WHERE work_id = ?")
+                .bind(&work_ref)
+                .bind(&inp.work_id)
+                .execute(pool)
+                .await
+                .map_err(|e| CapabilityError::Internal(format!("patch works row: {e}")))?;
+        }
+
+        // All FS + DB writes succeeded — commit the transaction guard
+        tx.commit();
+
+        // Output diagnostics use new file lists
+        let files_created: Vec<String> = tx
+            .created_files
+            .iter()
+            .chain(tx.overwritten_files.iter().map(|(p, _)| p))
+            .map(|p| p.strip_prefix(&work_dir).unwrap_or(p).display().to_string())
+            .collect();
+        let dirs_created: Vec<String> = tx
+            .created_dirs
+            .iter()
+            .map(|d| d.strip_prefix(&work_dir).unwrap_or(d).display().to_string())
+            .collect();
+
+        let output = ScaffoldOutput {
+            scaffold_root: work_dir.display().to_string(),
+            files_created,
+            dirs_created,
+        };
+
+        info!(
+            work_id = %inp.work_id,
+            files = ?output.files_created,
+            "essay.project_scaffold: done"
+        );
+
+        serde_json::to_value(output)
+            .map_err(|e| CapabilityError::Internal(format!("essay.project_scaffold output: {e}")))
     }
-
-    // All FS + DB writes succeeded — commit the transaction guard
-    tx.commit();
-
-    // Output diagnostics use new file lists
-    let files_created: Vec<String> = tx
-        .created_files
-        .iter()
-        .chain(tx.overwritten_files.iter().map(|(p, _)| p))
-        .map(|p| p.strip_prefix(&work_dir).unwrap_or(p).display().to_string())
-        .collect();
-    let dirs_created: Vec<String> = tx
-        .created_dirs
-        .iter()
-        .map(|d| d.strip_prefix(&work_dir).unwrap_or(d).display().to_string())
-        .collect();
-
-    let output = ScaffoldOutput {
-        scaffold_root: work_dir.display().to_string(),
-        files_created,
-        dirs_created,
-    };
-
-    info!(
-        work_id = %inp.work_id,
-        files = ?output.files_created,
-        "essay.project_scaffold: done"
-    );
-
-    serde_json::to_value(output)
-        .map_err(|e| CapabilityError::Internal(format!("essay.project_scaffold output: {e}")))
-} }
+}
 
 #[cfg(test)]
 mod tests {

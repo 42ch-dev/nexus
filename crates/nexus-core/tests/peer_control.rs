@@ -18,9 +18,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use nexus_core::connect::table::peer_tool_table;
 use nexus_core::connect::visibility::VisibilityPolicy;
-use nexus_core::execution::peer_tools::{
-    invoke_peer_tool, AdmissionOutcome, PeerResponder,
-};
+use nexus_core::execution::peer_tools::{invoke_peer_tool, AdmissionOutcome, PeerResponder};
 use nexus_spoke_adapter::HostCapabilityManifest;
 
 const PEER: &str = "peer-gen-1";
@@ -119,7 +117,10 @@ async fn visible_peer_tool_still_requires_authorization() {
         panic!("admission must succeed for the anchor peer");
     };
     assert_eq!(tool_ids, vec![TOOL.to_string()]);
-    assert!(registry.get(TOOL).is_some(), "the admitted tool is visible in the registry");
+    assert!(
+        registry.get(TOOL).is_some(),
+        "the admitted tool is visible in the registry"
+    );
 
     // An operator visibility policy that does NOT name the peer tool hides
     // it from the consumer: the seam refuses the call BEFORE the backend —
@@ -147,7 +148,10 @@ async fn visible_peer_tool_still_requires_authorization() {
 
     // Session close clears visibility: eviction removes the dispatchable
     // rows, so a later invoke is an honest not-found, never a dispatch.
-    let evicted = registry.evict_peer(PEER, Some(&(Arc::clone(&responder) as Arc<dyn PeerResponder>)));
+    let evicted = registry.evict_peer(
+        PEER,
+        Some(&(Arc::clone(&responder) as Arc<dyn PeerResponder>)),
+    );
     assert!(evicted, "the live session's own close evicts its rows");
     assert!(
         registry.get(TOOL).is_none(),

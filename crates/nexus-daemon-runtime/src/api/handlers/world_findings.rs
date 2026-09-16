@@ -9,8 +9,14 @@ use axum::extract::{Path, State};
 use axum::Json;
 use nexus_contracts::daemon_api::WorldFindingsListResponse;
 
-pub async fn list_world_findings(State(state): State<WorkspaceState>, Path(world_id): Path<String>) -> Result<Json<WorldFindingsListResponse>, NexusApiError> {
+pub async fn list_world_findings(
+    State(state): State<WorkspaceState>,
+    Path(world_id): Path<String>,
+) -> Result<Json<WorldFindingsListResponse>, NexusApiError> {
     require_creator(&state)?;
     let (core, principal) = resolve_core_principal(&state).await?;
-    core.list_world_findings(&principal, world_id).await.map(Json).map_err(NexusApiError::from)
+    core.list_world_findings(&principal, world_id)
+        .await
+        .map(Json)
+        .map_err(NexusApiError::from)
 }

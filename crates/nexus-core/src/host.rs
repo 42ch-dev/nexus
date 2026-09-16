@@ -12,9 +12,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use nexus_agent_host::capability::model::HostOperation;
 use nexus_agent_host::capability::model::{HostStartConfig, SessionOwner};
 use nexus_agent_host::capability::CreateSessionRequest as HostCreateRequest;
-use nexus_agent_host::capability::model::HostOperation;
 use nexus_agent_host::config::{
     agent_host_config_path, load_config_from_path, validate_workspace_path, AgentHostConfig,
 };
@@ -47,7 +47,9 @@ use uuid::Uuid;
 use crate::actor_sessions::{
     echo_actor_pair, ActorSessionKey, ActorSessionRegistry, CharacterOperationSnapshot,
 };
-use crate::actors::{classify_pair, AdmittedActor, ActorPairMode, ActorViewpoint, CoreActorAdmission};
+use crate::actors::{
+    classify_pair, ActorPairMode, ActorViewpoint, AdmittedActor, CoreActorAdmission,
+};
 use crate::error::{CoreError, CoreResult};
 use crate::principal::Principal;
 use crate::service::CoreService;
@@ -193,8 +195,7 @@ impl HostHandle {
     ) -> CoreResult<SessionResponse> {
         self.core.ensure_open()?;
         self.core.verify_principal(principal)?;
-        let pair =
-            classify_pair(request.actor_ref.is_some(), request.viewpoint.is_some())?;
+        let pair = classify_pair(request.actor_ref.is_some(), request.viewpoint.is_some())?;
         let creator_id = principal.creator_id().to_string();
         let canonical_root = session_cwd(&request, &self.core)?;
         if pair == ActorPairMode::Actor {
@@ -250,13 +251,12 @@ impl HostHandle {
                 request.mode.clone(),
                 &ctx,
             )?;
-            let host_req = self.host_create_request(&request, &canonical_root, &ctx.owner_creator_id);
+            let host_req =
+                self.host_create_request(&request, &canonical_root, &ctx.owner_creator_id);
             let host_for_create = self.host.clone();
-            let session = self.registry.resolve_or_create(
-                key,
-                ctx.clone(),
-                self.host.as_ref(),
-                move || {
+            let session = self
+                .registry
+                .resolve_or_create(key, ctx.clone(), self.host.as_ref(), move || {
                     let host_for_create = host_for_create;
                     let host_req = host_req;
                     async move {
@@ -265,8 +265,8 @@ impl HostHandle {
                             .await
                             .map_err(host_err)
                     }
-                },
-            ).await?;
+                })
+                .await?;
             drop(lease);
             let (actor_ref, viewpoint) = echo_actor_pair(&ctx)?;
             return Ok(session_wire(
@@ -281,11 +281,7 @@ impl HostHandle {
         }
         let host_req = self.host_create_request(&request, &canonical_root, &creator_id);
         let model = request.model.clone();
-        let session = self
-            .host
-            .create_session(host_req)
-            .await
-            .map_err(host_err)?;
+        let session = self.host.create_session(host_req).await.map_err(host_err)?;
         Ok(session_wire(
             session.id.to_string(),
             session.provider_id.to_string(),
@@ -353,16 +349,16 @@ impl HostHandle {
                     ));
                 }
                 let (assembled, _lease) = if is_character {
-                    let ctx = self.registry.context_for(&sid).ok_or_else(|| {
-                        actor_session_stale(&sid.to_string())
-                    })?;
+                    let ctx = self
+                        .registry
+                        .context_for(&sid)
+                        .ok_or_else(|| actor_session_stale(&sid.to_string()))?;
                     if ctx.owner_creator_id != principal.creator_id() {
                         return Err(CoreError::NotFound {
                             resource: format!("session {sid}"),
                         });
                     }
-                    let admission =
-                        CoreActorAdmission::new(self.core.inner.pool.clone());
+                    let admission = CoreActorAdmission::new(self.core.inner.pool.clone());
                     // Activity admission BEFORE MCA/Host so an archive cannot
                     // race the prompt into a stale session. The lease is held
                     // through terminal capture in the server-owned drain.
@@ -414,9 +410,11 @@ impl HostHandle {
                 };
                 let host_op = HostOperation::Prompt {
                     op_id: op_id.clone(),
-                    content: vec![nexus_agent_host::capability::model::HostContentBlock::Text {
-                        text: assembled,
-                    }],
+                    content: vec![
+                        nexus_agent_host::capability::model::HostContentBlock::Text {
+                            text: assembled,
+                        },
+                    ],
                     permission_scope: None,
                 };
                 let stream = match self.host.exec(sid.clone(), host_op).await {
@@ -445,20 +443,12 @@ impl HostHandle {
                 });
             }
             ExecuteOperationRequest::SetModel { model } => {
-                self.exec_non_prompt(
-                    sid,
-                    HostOperation::SetModel { model },
-                    op_id,
-                )
-                .await
+                self.exec_non_prompt(sid, HostOperation::SetModel { model }, op_id)
+                    .await
             }
             ExecuteOperationRequest::SetMode { mode } => {
-                self.exec_non_prompt(
-                    sid,
-                    HostOperation::SetMode { mode },
-                    op_id,
-                )
-                .await
+                self.exec_non_prompt(sid, HostOperation::SetMode { mode }, op_id)
+                    .await
             }
         }
     }
@@ -528,8 +518,7 @@ impl HostHandle {
                 let format = request.format.unwrap_or(CoreHostQueryFormat::Catalog);
                 match format {
                     CoreHostQueryFormat::Catalog => {
-                        let mut catalog =
-                            self.host.provider_catalog().await.map_err(host_err)?;
+                        let mut catalog = self.host.provider_catalog().await.map_err(host_err)?;
                         catalog.entries.sort_by_key(|a| a.provider_id.to_string());
                         Ok(CoreHostQueryResponse {
                             catalog: Some(CoreHostQueryResponseCatalog {
@@ -556,8 +545,7 @@ impl HostHandle {
                             .map(|path| std::env::split_paths(&path).collect())
                             .unwrap_or_default();
                         let native_entries =
-                            path_scan::scan_path_in(&config, &[], &probe_dirs)
-                                .map_err(host_err)?;
+                            path_scan::scan_path_in(&config, &[], &probe_dirs).map_err(host_err)?;
                         let entries: Vec<NexusAgentScanEntry> = native_entries
                             .into_iter()
                             .map(|entry| {
@@ -644,18 +632,13 @@ impl HostHandle {
                     .ok_or_else(|| invalid("session_id", "get_session requires session_id"))?;
                 if let Ok(uuid) = Uuid::parse_str(raw) {
                     let native = self.sorted_sessions().await?;
-                    if let Some(session) = native
-                        .iter()
-                        .find(|s| {
-                            s.id == HostSessionId(uuid)
-                                && self
-                                    .registry
-                                    .stored_session_owner(&s.id)
-                                    .map_or(true, |(owner, _, _)| {
-                                        owner == principal.creator_id()
-                                    })
-                        })
-                    {
+                    if let Some(session) = native.iter().find(|s| {
+                        s.id == HostSessionId(uuid)
+                            && self
+                                .registry
+                                .stored_session_owner(&s.id)
+                                .map_or(true, |(owner, _, _)| owner == principal.creator_id())
+                    }) {
                         return Ok(CoreHostQueryResponse {
                             session: Some(session_response_wire(session)),
                             health: None,
@@ -671,25 +654,19 @@ impl HostHandle {
                 })
             }
             CoreHostQueryQuery::GetOperation => {
-                let raw = request
-                    .operation_id
-                    .as_deref()
-                    .ok_or_else(|| invalid("operation_id", "get_operation requires operation_id"))?;
+                let raw = request.operation_id.as_deref().ok_or_else(|| {
+                    invalid("operation_id", "get_operation requires operation_id")
+                })?;
                 if let Ok(uuid) = Uuid::parse_str(raw) {
                     let op_id = HostOperationId(uuid);
                     let native = self.sorted_sessions().await?;
-                    if let Some(session) = native
-                        .iter()
-                        .find(|s| {
-                            s.state.active_op_id() == Some(&op_id)
-                                && self
-                                    .registry
-                                    .stored_session_owner(&s.id)
-                                    .map_or(true, |(owner, _, _)| {
-                                        owner == principal.creator_id()
-                                    })
-                        })
-                    {
+                    if let Some(session) = native.iter().find(|s| {
+                        s.state.active_op_id() == Some(&op_id)
+                            && self
+                                .registry
+                                .stored_session_owner(&s.id)
+                                .map_or(true, |(owner, _, _)| owner == principal.creator_id())
+                    }) {
                         return Ok(CoreHostQueryResponse {
                             operation: Some(NexusAgentHostOperationResponse {
                                 operation_id: op_id.to_string(),
@@ -914,11 +891,11 @@ fn session_response_wire(session: &RegistryHostSession) -> NexusAgentHostSession
 async fn drain_character_operation(
     registry: ActorSessionRegistry,
     mut stream: impl futures_util::Stream<
-        Item = Result<
-            nexus_agent_host::capability::model::HostEvent,
-            nexus_agent_host::HostError,
-        >,
-    > + Unpin,
+            Item = Result<
+                nexus_agent_host::capability::model::HostEvent,
+                nexus_agent_host::HostError,
+            >,
+        > + Unpin,
     snapshot: CharacterOperationSnapshot,
     _lease: Option<crate::actor_fence::ActorActivityLease>,
 ) {
@@ -944,11 +921,11 @@ async fn drain_character_operation(
 /// HostManager, draining drives the state machine.
 async fn drain_plain(
     mut stream: impl futures_util::Stream<
-        Item = Result<
-            nexus_agent_host::capability::model::HostEvent,
-            nexus_agent_host::HostError,
-        >,
-    > + Unpin,
+            Item = Result<
+                nexus_agent_host::capability::model::HostEvent,
+                nexus_agent_host::HostError,
+            >,
+        > + Unpin,
     _lease: Option<crate::actor_fence::ActorActivityLease>,
 ) {
     use futures_util::StreamExt;

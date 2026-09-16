@@ -151,10 +151,15 @@ fn parse_block_type(s: &str) -> Result<nexus_contracts::BlockType, CapabilityErr
 // Single-pass claim→extract→insert→finalize pipeline; splitting would obscure the state machine.
 #[allow(clippy::too_many_lines)]
 #[async_trait]
-impl Capability for KbExtractWork { fn name(&self) -> &'static str {
-    "kb.extract_work"
-} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::KB_EXTRACT_WORK_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
-    r#"{
+impl Capability for KbExtractWork {
+    fn name(&self) -> &'static str {
+        "kb.extract_work"
+    }
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::KB_EXTRACT_WORK_INPUT_SCHEMA
+    }
+    fn output_schema(&self) -> &'static str {
+        r#"{
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "required": ["job_id", "status"],
@@ -169,233 +174,234 @@ impl Capability for KbExtractWork { fn name(&self) -> &'static str {
             "prompt_length": { "type": "integer" }
         }
     }"#
-}
-
-async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-    let pool = self
-        .pool
-        .as_ref()
-        .ok_or(CapabilityError::WorkerUnavailable)?;
-
-    let creator_id = input
-        .get("creator_id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| CapabilityError::InputInvalid("missing 'creator_id'".into()))?;
-
-    // QC1/2 W-002: Guard against worldless Works — when world_id is absent
-    // or empty (legacy V1.39 worldless Works), return a success no-op so
-    // the preset state machine can cleanly transition to done.
-    let world_id_input = input.get("world_id").and_then(|v| v.as_str()).unwrap_or("");
-    if world_id_input.is_empty() {
-        return Ok(json!({
-            "job_id": null,
-            "status": "skipped",
-            "reason": "world_id absent — worldless Work, no KB extraction needed"
-        }));
     }
 
-    // ── Phase 1: Load or claim job ──────────────────────────────
-    let job = if let Some(job_id) = input.get("job_id").and_then(|v| v.as_str()) {
-        // Load specific job
-        let job = nexus_local_db::get_extract_job(pool, job_id)
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("Failed to load job: {e}")))?
-            .ok_or_else(|| {
-                CapabilityError::InputInvalid(format!("Job '{job_id}' not found"))
-            })?;
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        let pool = self
+            .pool
+            .as_ref()
+            .ok_or(CapabilityError::WorkerUnavailable)?;
 
-        // QC2 W-005: Re-validate creator ownership on explicit job_id path.
-        if job.creator_id != creator_id {
-            return Err(CapabilityError::InputInvalid("job creator mismatch".into()));
+        let creator_id = input
+            .get("creator_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| CapabilityError::InputInvalid("missing 'creator_id'".into()))?;
+
+        // QC1/2 W-002: Guard against worldless Works — when world_id is absent
+        // or empty (legacy V1.39 worldless Works), return a success no-op so
+        // the preset state machine can cleanly transition to done.
+        let world_id_input = input.get("world_id").and_then(|v| v.as_str()).unwrap_or("");
+        if world_id_input.is_empty() {
+            return Ok(json!({
+                "job_id": null,
+                "status": "skipped",
+                "reason": "world_id absent — worldless Work, no KB extraction needed"
+            }));
         }
 
-        // Reject wrong status
-        if job.status != "queued" && job.status != "running" {
-            return Err(CapabilityError::InputInvalid(format!(
-                "Job '{}' has status '{}', expected 'queued' or 'running'",
-                job.job_id, job.status
-            )));
-        }
-        job
-    } else {
-        // Claim next queued job for this creator
-        // WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P3-S1
-        // — cross-creator job_id claim test gap: claim path only tested for
-        // same-creator; cross-creator race condition not exercised in CI.
-        // WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P3-S2
-        // — failure-injection test gap: no integration test exercises the
-        // insert-key-block failure path in the extract pipeline.
-        nexus_local_db::next_queued_extract_job(pool, creator_id)
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("Failed to claim job: {e}")))?
-            .ok_or_else(|| {
-                CapabilityError::InputInvalid(
-                    "No queued extract jobs available for this creator".into(),
-                )
-            })?
-    };
+        // ── Phase 1: Load or claim job ──────────────────────────────
+        let job = if let Some(job_id) = input.get("job_id").and_then(|v| v.as_str()) {
+            // Load specific job
+            let job = nexus_local_db::get_extract_job(pool, job_id)
+                .await
+                .map_err(|e| CapabilityError::Internal(format!("Failed to load job: {e}")))?
+                .ok_or_else(|| {
+                    CapabilityError::InputInvalid(format!("Job '{job_id}' not found"))
+                })?;
 
-    let job_id = job.job_id.clone();
-    let world_id = input
-        .get("world_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or(&job.world_id)
-        .to_string();
-    let work_entry_id = input
-        .get("work_entry_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or(&job.work_entry_id)
-        .to_string();
-
-    // ── Phase 2: Load work content ──────────────────────────────
-    let work_content = input
-        .get("work_content")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-
-    if work_content.is_empty() {
-        // Return prompt-phase data so the outer flow can load content
-        // and call acp.prompt before finalizing.
-        return Ok(json!({
-            "job_id": job_id,
-            "status": "running",
-            "creator_id": creator_id,
-            "world_id": world_id,
-            "work_entry_id": work_entry_id,
-            "prompt_length": 0,
-            "needs_content": true
-        }));
-    }
-
-    // ── Phase 3: Check for LLM response ─────────────────────────
-    let llm_response = input.get("llm_response").and_then(|v| v.as_str());
-
-    let Some(response_text) = llm_response else {
-        // Build and return the extraction prompt for acp.prompt execution
-        let prompt = extraction_prompt(work_content);
-        let prompt_length = prompt.len();
-        return Ok(json!({
-            "job_id": job_id,
-            "status": "running",
-            "creator_id": creator_id,
-            "world_id": world_id,
-            "work_entry_id": work_entry_id,
-            "prompt": prompt,
-            "prompt_length": prompt_length
-        }));
-    };
-
-    // ── Phase 4: Parse LLM response → KnowledgeEntryRecord insert ───────────
-    let extract = match parse_extraction_response(response_text) {
-        Ok(resp) => resp,
-        Err(e) => {
-            // Mark job as failed
-            let _ = nexus_local_db::mark_extract_job_failed(
-                pool,
-                &job_id,
-                &format!("LLM response parse error: {e}"),
-            )
-            .await;
-            return Err(e);
-        }
-    };
-
-    let block_type = match parse_block_type(&extract.block_type) {
-        Ok(bt) => bt,
-        Err(e) => {
-            let _ = nexus_local_db::mark_extract_job_failed(
-                pool,
-                &job_id,
-                &format!("Invalid block type: {e}"),
-            )
-            .await;
-            return Err(e);
-        }
-    };
-
-    // Determine validation mode from profile_hint (V1.40 P3).
-    let profile_hint = input
-        .get("profile_hint")
-        .and_then(|v| v.as_str())
-        .unwrap_or("generic");
-    let validation_mode = if profile_hint == "novel" {
-        nexus_knowledge::world_kb::ValidationMode::Novel
-    } else {
-        nexus_knowledge::world_kb::ValidationMode::Generic
-    };
-
-    // Build body from LLM response.
-    let body: nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody =
-        if let Ok(parsed) = serde_json::from_str(&extract.body) {
-            parsed
-        } else {
-            nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
-                summary: Some(extract.body.clone()),
-                attributes: None,
-                tags: None,
-                ..Default::default()
+            // QC2 W-005: Re-validate creator ownership on explicit job_id path.
+            if job.creator_id != creator_id {
+                return Err(CapabilityError::InputInvalid("job creator mismatch".into()));
             }
+
+            // Reject wrong status
+            if job.status != "queued" && job.status != "running" {
+                return Err(CapabilityError::InputInvalid(format!(
+                    "Job '{}' has status '{}', expected 'queued' or 'running'",
+                    job.job_id, job.status
+                )));
+            }
+            job
+        } else {
+            // Claim next queued job for this creator
+            // WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P3-S1
+            // — cross-creator job_id claim test gap: claim path only tested for
+            // same-creator; cross-creator race condition not exercised in CI.
+            // WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P3-S2
+            // — failure-injection test gap: no integration test exercises the
+            // insert-key-block failure path in the extract pipeline.
+            nexus_local_db::next_queued_extract_job(pool, creator_id)
+                .await
+                .map_err(|e| CapabilityError::Internal(format!("Failed to claim job: {e}")))?
+                .ok_or_else(|| {
+                    CapabilityError::InputInvalid(
+                        "No queued extract jobs available for this creator".into(),
+                    )
+                })?
         };
 
-    // Build source anchor from artifact locator.
-    let source_locator = input
-        .get("source_locator")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let source_anchor = if source_locator.is_empty() {
-        nexus_knowledge::world_kb::source_anchor::SourceAnchor::from_excerpt(
-            &extract.body.chars().take(256).collect::<String>(),
-        )
-    } else {
-        nexus_knowledge::world_kb::source_anchor::SourceAnchor::from_excerpt(source_locator)
-    };
+        let job_id = job.job_id.clone();
+        let world_id = input
+            .get("world_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&job.world_id)
+            .to_string();
+        let work_entry_id = input
+            .get("work_entry_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&job.work_entry_id)
+            .to_string();
 
-    let finalize_input = nexus_knowledge::world_kb::ExtractFinalizeInput {
-        world_id: world_id.clone(),
-        block_type,
-        canonical_name: extract.canonical_name.clone(),
-        body,
-        source_anchor,
-        validation_mode,
-    };
+        // ── Phase 2: Load work content ──────────────────────────────
+        let work_content = input
+            .get("work_content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
-    // ── Phase 4b: Insert KnowledgeEntryRecord BEFORE marking job done ──────────
-    // Insert first; only mark done on success. On insert failure,
-    // mark the job as failed so the preset state machine can surface
-    // or retry. This prevents "done job with no KnowledgeEntryRecord" data loss.
-    let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.as_ref().clone());
-    let insert_result =
-        match nexus_knowledge::world_kb::finalize_extract(&store, finalize_input).await {
-            Ok(r) => r,
+        if work_content.is_empty() {
+            // Return prompt-phase data so the outer flow can load content
+            // and call acp.prompt before finalizing.
+            return Ok(json!({
+                "job_id": job_id,
+                "status": "running",
+                "creator_id": creator_id,
+                "world_id": world_id,
+                "work_entry_id": work_entry_id,
+                "prompt_length": 0,
+                "needs_content": true
+            }));
+        }
+
+        // ── Phase 3: Check for LLM response ─────────────────────────
+        let llm_response = input.get("llm_response").and_then(|v| v.as_str());
+
+        let Some(response_text) = llm_response else {
+            // Build and return the extraction prompt for acp.prompt execution
+            let prompt = extraction_prompt(work_content);
+            let prompt_length = prompt.len();
+            return Ok(json!({
+                "job_id": job_id,
+                "status": "running",
+                "creator_id": creator_id,
+                "world_id": world_id,
+                "work_entry_id": work_entry_id,
+                "prompt": prompt,
+                "prompt_length": prompt_length
+            }));
+        };
+
+        // ── Phase 4: Parse LLM response → KnowledgeEntryRecord insert ───────────
+        let extract = match parse_extraction_response(response_text) {
+            Ok(resp) => resp,
             Err(e) => {
-                // Mark job as failed so the content loss window is closed.
+                // Mark job as failed
                 let _ = nexus_local_db::mark_extract_job_failed(
                     pool,
                     &job_id,
-                    &format!("KnowledgeEntryRecord insert failed: {e}"),
+                    &format!("LLM response parse error: {e}"),
                 )
                 .await;
-                return Err(CapabilityError::Internal(format!(
-                    "KnowledgeEntryRecord insert failed: {e}"
-                )));
+                return Err(e);
             }
         };
 
-    // Mark done only after the KnowledgeEntryRecord was successfully inserted.
-    nexus_local_db::mark_extract_job_done(pool, &job_id)
-        .await
-        .map_err(|e| CapabilityError::Internal(format!("Failed to mark job done: {e}")))?;
+        let block_type = match parse_block_type(&extract.block_type) {
+            Ok(bt) => bt,
+            Err(e) => {
+                let _ = nexus_local_db::mark_extract_job_failed(
+                    pool,
+                    &job_id,
+                    &format!("Invalid block type: {e}"),
+                )
+                .await;
+                return Err(e);
+            }
+        };
 
-    Ok(json!({
-        "job_id": job_id,
-        "status": "done",
-        "key_block_id": insert_result.entry_id,
-        "owner": insert_result.owner,
-        "block_type": extract.block_type,
-        "canonical_name": extract.canonical_name,
-        "created_at": insert_result.created_at
-    }))
-} }
+        // Determine validation mode from profile_hint (V1.40 P3).
+        let profile_hint = input
+            .get("profile_hint")
+            .and_then(|v| v.as_str())
+            .unwrap_or("generic");
+        let validation_mode = if profile_hint == "novel" {
+            nexus_knowledge::world_kb::ValidationMode::Novel
+        } else {
+            nexus_knowledge::world_kb::ValidationMode::Generic
+        };
+
+        // Build body from LLM response.
+        let body: nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody =
+            if let Ok(parsed) = serde_json::from_str(&extract.body) {
+                parsed
+            } else {
+                nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
+                    summary: Some(extract.body.clone()),
+                    attributes: None,
+                    tags: None,
+                    ..Default::default()
+                }
+            };
+
+        // Build source anchor from artifact locator.
+        let source_locator = input
+            .get("source_locator")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let source_anchor = if source_locator.is_empty() {
+            nexus_knowledge::world_kb::source_anchor::SourceAnchor::from_excerpt(
+                &extract.body.chars().take(256).collect::<String>(),
+            )
+        } else {
+            nexus_knowledge::world_kb::source_anchor::SourceAnchor::from_excerpt(source_locator)
+        };
+
+        let finalize_input = nexus_knowledge::world_kb::ExtractFinalizeInput {
+            world_id: world_id.clone(),
+            block_type,
+            canonical_name: extract.canonical_name.clone(),
+            body,
+            source_anchor,
+            validation_mode,
+        };
+
+        // ── Phase 4b: Insert KnowledgeEntryRecord BEFORE marking job done ──────────
+        // Insert first; only mark done on success. On insert failure,
+        // mark the job as failed so the preset state machine can surface
+        // or retry. This prevents "done job with no KnowledgeEntryRecord" data loss.
+        let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.as_ref().clone());
+        let insert_result =
+            match nexus_knowledge::world_kb::finalize_extract(&store, finalize_input).await {
+                Ok(r) => r,
+                Err(e) => {
+                    // Mark job as failed so the content loss window is closed.
+                    let _ = nexus_local_db::mark_extract_job_failed(
+                        pool,
+                        &job_id,
+                        &format!("KnowledgeEntryRecord insert failed: {e}"),
+                    )
+                    .await;
+                    return Err(CapabilityError::Internal(format!(
+                        "KnowledgeEntryRecord insert failed: {e}"
+                    )));
+                }
+            };
+
+        // Mark done only after the KnowledgeEntryRecord was successfully inserted.
+        nexus_local_db::mark_extract_job_done(pool, &job_id)
+            .await
+            .map_err(|e| CapabilityError::Internal(format!("Failed to mark job done: {e}")))?;
+
+        Ok(json!({
+            "job_id": job_id,
+            "status": "done",
+            "key_block_id": insert_result.entry_id,
+            "owner": insert_result.owner,
+            "block_type": extract.block_type,
+            "canonical_name": extract.canonical_name,
+            "created_at": insert_result.created_at
+        }))
+    }
+}
 
 #[cfg(test)]
 mod tests {

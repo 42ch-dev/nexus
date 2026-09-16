@@ -429,14 +429,12 @@ impl LiveDaemon {
         state.set_engine(engine_arc.clone() as Arc<dyn nexus_orchestration::OrchestrationEngine>);
         state.set_capability_registry(holder.clone());
 
-        let coordinator = Arc::new(
-            nexus_core::execution::WorkflowRunCoordinator::new(
-                engine_arc.clone(),
-                storage.clone(),
-                pool_arc.clone(),
-                state.session_cancels(),
-            ),
-        );
+        let coordinator = Arc::new(nexus_core::execution::WorkflowRunCoordinator::new(
+            engine_arc.clone(),
+            storage.clone(),
+            pool_arc.clone(),
+            state.session_cancels(),
+        ));
         state.set_run_coordinator(coordinator.clone());
 
         let mut supervisor_builder =

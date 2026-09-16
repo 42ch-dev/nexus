@@ -46,84 +46,90 @@ impl Default for OutboxFlush {
 }
 
 #[async_trait]
-impl Capability for OutboxFlush { fn name(&self) -> &'static str {
-    "outbox.flush"
-} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::OUTBOX_FLUSH_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
-    r#"{"type":"object","properties":{"flushed":{"type":"integer","minimum":0}},"required":["flushed"],"additionalProperties":false}"#
-}
+impl Capability for OutboxFlush {
+    fn name(&self) -> &'static str {
+        "outbox.flush"
+    }
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::OUTBOX_FLUSH_INPUT_SCHEMA
+    }
+    fn output_schema(&self) -> &'static str {
+        r#"{"type":"object","properties":{"flushed":{"type":"integer","minimum":0}},"required":["flushed"],"additionalProperties":false}"#
+    }
 
-async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-    let pool = self.pool.as_ref().ok_or_else(|| {
-        CapabilityError::Internal(
-            "outbox.flush: no database pool — use with_pool()".to_string(),
-        )
-    })?;
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        let pool = self.pool.as_ref().ok_or_else(|| {
+            CapabilityError::Internal(
+                "outbox.flush: no database pool — use with_pool()".to_string(),
+            )
+        })?;
 
-    let limit: i64 = input
-        .get("limit")
-        .and_then(serde_json::Value::as_i64)
-        .unwrap_or(0);
+        let limit: i64 = input
+            .get("limit")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0);
 
-    let now = chrono::Utc::now().to_rfc3339();
+        let now = chrono::Utc::now().to_rfc3339();
 
-    let flushed = if limit > 0 {
-        // Limit the number of entries flushed in this batch.
-        // SQLite does not support LIMIT in UPDATE with ORDER BY directly,
-        // so we use a subquery to select the IDs to update.
-        let rows = sqlx::query_scalar!(
-            "SELECT outbox_entry_id as \"outbox_entry_id!\" FROM outbox_entries
+        let flushed = if limit > 0 {
+            // Limit the number of entries flushed in this batch.
+            // SQLite does not support LIMIT in UPDATE with ORDER BY directly,
+            // so we use a subquery to select the IDs to update.
+            let rows = sqlx::query_scalar!(
+                "SELECT outbox_entry_id as \"outbox_entry_id!\" FROM outbox_entries
                  WHERE delivery_state IN ('staged', 'ready')
                  ORDER BY created_at ASC
                  LIMIT ?",
-            limit
-        )
-        .fetch_all(pool)
-        .await
-        .map_err(|e| CapabilityError::Internal(format!("outbox.flush select failed: {e}")))?;
+                limit
+            )
+            .fetch_all(pool)
+            .await
+            .map_err(|e| CapabilityError::Internal(format!("outbox.flush select failed: {e}")))?;
 
-        if rows.is_empty() {
-            0u64
-        } else {
-            // Build parameter list: collect owned values first to avoid lifetime issues.
-            let placeholders: Vec<String> = rows.iter().map(|_| "?".to_string()).collect();
-            // SAFETY: dynamic SQL for batch UPDATE with variable number of placeholders;
-            // values are string literals from the database (outbox_entry_id), not user input.
-            let sql = format!(
-                "UPDATE outbox_entries SET delivery_state = 'acked', updated_at = ?
+            if rows.is_empty() {
+                0u64
+            } else {
+                // Build parameter list: collect owned values first to avoid lifetime issues.
+                let placeholders: Vec<String> = rows.iter().map(|_| "?".to_string()).collect();
+                // SAFETY: dynamic SQL for batch UPDATE with variable number of placeholders;
+                // values are string literals from the database (outbox_entry_id), not user input.
+                let sql = format!(
+                    "UPDATE outbox_entries SET delivery_state = 'acked', updated_at = ?
                  WHERE outbox_entry_id IN ({})",
-                placeholders.join(",")
-            );
+                    placeholders.join(",")
+                );
 
-            // Bind timestamp + each entry ID as owned values.
-            let mut query = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(now);
-            for id in &rows {
-                query = query.bind(id.clone());
+                // Bind timestamp + each entry ID as owned values.
+                let mut query = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(now);
+                for id in &rows {
+                    query = query.bind(id.clone());
+                }
+                let result = query.execute(pool).await.map_err(|e| {
+                    CapabilityError::Internal(format!("outbox.flush update failed: {e}"))
+                })?;
+
+                result.rows_affected()
             }
-            let result = query.execute(pool).await.map_err(|e| {
-                CapabilityError::Internal(format!("outbox.flush update failed: {e}"))
-            })?;
-
-            result.rows_affected()
-        }
-    } else {
-        // No limit: flush ALL pending entries.
-        let result = sqlx::query!(
-            "UPDATE outbox_entries
+        } else {
+            // No limit: flush ALL pending entries.
+            let result = sqlx::query!(
+                "UPDATE outbox_entries
                  SET delivery_state = 'acked', updated_at = ?
                  WHERE delivery_state IN ('staged', 'ready')",
-            now
-        )
-        .execute(pool)
-        .await
-        .map_err(|e| CapabilityError::Internal(format!("outbox.flush update failed: {e}")))?;
+                now
+            )
+            .execute(pool)
+            .await
+            .map_err(|e| CapabilityError::Internal(format!("outbox.flush update failed: {e}")))?;
 
-        result.rows_affected()
-    };
+            result.rows_affected()
+        };
 
-    tracing::info!(flushed = flushed, limit = limit, "outbox.flush completed");
+        tracing::info!(flushed = flushed, limit = limit, "outbox.flush completed");
 
-    Ok(serde_json::json!({"flushed": flushed}))
-} }
+        Ok(serde_json::json!({"flushed": flushed}))
+    }
+}
 
 // ---------------------------------------------------------------------------
 // outbox.compact
@@ -164,62 +170,68 @@ impl Default for OutboxCompact {
 const DEFAULT_RETENTION_DAYS: i64 = 7;
 
 #[async_trait]
-impl Capability for OutboxCompact { fn name(&self) -> &'static str {
-    "outbox.compact"
-} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::OUTBOX_COMPACT_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
-    r#"{"type":"object","properties":{"removed":{"type":"integer","minimum":0},"retained":{"type":"integer","minimum":0}},"required":["removed","retained"],"additionalProperties":false}"#
-}
+impl Capability for OutboxCompact {
+    fn name(&self) -> &'static str {
+        "outbox.compact"
+    }
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::OUTBOX_COMPACT_INPUT_SCHEMA
+    }
+    fn output_schema(&self) -> &'static str {
+        r#"{"type":"object","properties":{"removed":{"type":"integer","minimum":0},"retained":{"type":"integer","minimum":0}},"required":["removed","retained"],"additionalProperties":false}"#
+    }
 
-async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-    let pool = self.pool.as_ref().ok_or_else(|| {
-        CapabilityError::Internal(
-            "outbox.compact: no database pool — use with_pool()".to_string(),
-        )
-    })?;
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        let pool = self.pool.as_ref().ok_or_else(|| {
+            CapabilityError::Internal(
+                "outbox.compact: no database pool — use with_pool()".to_string(),
+            )
+        })?;
 
-    let retention_days: i64 = input
-        .get("retentionDays")
-        .and_then(serde_json::Value::as_i64)
-        .unwrap_or(DEFAULT_RETENTION_DAYS)
-        .max(0); // Clamp to non-negative; 0 means "remove all acked"
+        let retention_days: i64 = input
+            .get("retentionDays")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(DEFAULT_RETENTION_DAYS)
+            .max(0); // Clamp to non-negative; 0 means "remove all acked"
 
-    // Compute cutoff timestamp.
-    let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);
-    let cutoff_str = cutoff.to_rfc3339();
+        // Compute cutoff timestamp.
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);
+        let cutoff_str = cutoff.to_rfc3339();
 
-    // Delete old acked entries.
-    let removed = sqlx::query!(
-        "DELETE FROM outbox_entries
+        // Delete old acked entries.
+        let removed = sqlx::query!(
+            "DELETE FROM outbox_entries
              WHERE delivery_state = 'acked'
                AND (updated_at IS NULL OR updated_at < ?)",
-        cutoff_str
-    )
-    .execute(pool)
-    .await
-    .map_err(|e| CapabilityError::Internal(format!("outbox.compact delete failed: {e}")))?
-    .rows_affected();
+            cutoff_str
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| CapabilityError::Internal(format!("outbox.compact delete failed: {e}")))?
+        .rows_affected();
 
-    // Count remaining acked entries.
-    let retained: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) as \"count!\" FROM outbox_entries WHERE delivery_state = 'acked'"
-    )
-    .fetch_one(pool)
-    .await
-    .map_err(|e| CapabilityError::Internal(format!("outbox.compact count failed: {e}")))?;
+        // Count remaining acked entries.
+        let retained: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) as \"count!\" FROM outbox_entries WHERE delivery_state = 'acked'"
+        )
+        .fetch_one(pool)
+        .await
+        .map_err(|e| CapabilityError::Internal(format!("outbox.compact count failed: {e}")))?;
 
-    // SAFETY: COUNT(*) returns a non-negative integer; usize is at least u32 on all targets.
-    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-    let retained = usize::try_from(retained).unwrap_or(usize::MAX);
+        // SAFETY: COUNT(*) returns a non-negative integer; usize is at least u32 on all targets.
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+        let retained = usize::try_from(retained).unwrap_or(usize::MAX);
 
-    tracing::info!(
-        removed = removed,
-        retained = retained,
-        retention_days = retention_days,
-        "outbox.compact completed"
-    );
+        tracing::info!(
+            removed = removed,
+            retained = retained,
+            retention_days = retention_days,
+            "outbox.compact completed"
+        );
 
-    Ok(serde_json::json!({"removed": removed, "retained": retained}))
-} }
+        Ok(serde_json::json!({"removed": removed, "retained": retained}))
+    }
+}
 
 #[cfg(test)]
 mod tests {

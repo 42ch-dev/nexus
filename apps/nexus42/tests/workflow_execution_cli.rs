@@ -235,8 +235,8 @@ async fn load_drive_row(daemon: &LiveDaemon, schedule_id: &str) -> ScheduleDrive
 /// REAL content-addressed source identity (never a zero hash) plus a valid
 /// `default` binding so admission's binding-completeness gate passes.
 fn seeded_descriptor_json() -> Vec<u8> {
-    let source = nexus_preset::embedded_source_identity(PUBLIC_PRESET)
-        .expect("embedded source identity");
+    let source =
+        nexus_preset::embedded_source_identity(PUBLIC_PRESET).expect("embedded source identity");
     serde_json::to_vec(&serde_json::json!({
         "creator_id": "test_creator",
         "work_id": null,
@@ -1725,8 +1725,11 @@ async fn admission_internal_insertion_branches_durable() {
         "wrk_chain",
         "novel-brainstorm",
         "brainstorm",
-        nexus_orchestration::preset_runtime::default_bindings_for_preset("novel-brainstorm", MOCK_PROVIDER)
-            .expect("novel-brainstorm preset resolves"),
+        nexus_orchestration::preset_runtime::default_bindings_for_preset(
+            "novel-brainstorm",
+            MOCK_PROVIDER,
+        )
+        .expect("novel-brainstorm preset resolves"),
     )
     .await
     .expect("enqueue cron schedule");

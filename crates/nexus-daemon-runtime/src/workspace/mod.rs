@@ -15,10 +15,10 @@ use crate::db::pool::{DbPool, PoolConfig};
 use crate::db::SqliteNarrativeGateway;
 use crate::lifecycle::{Lifecycle, LifecycleState, StatigLifecycle};
 use crate::workspace::actor_sessions::ActorSessionRegistry;
-use nexus_core::execution::session::WorkspaceSessionManager;
 use nexus_agent_host::config::AgentHostConfig;
 use nexus_contracts::local::domain::RuntimeMode;
 use nexus_contracts::CertFingerprintResponse;
+use nexus_core::execution::session::WorkspaceSessionManager;
 use nexus_orchestration::{
     engine::OrchestrationEngine, run_state::WorkflowStateStore,
     schedule::supervisor::ScheduleSupervisor, storage::sqlite::SqliteSessionStorage,
@@ -829,9 +829,9 @@ impl WorkspaceState {
                 Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>,
             > = self.session_manager().and_then(|mgr| {
                 self.workspace_path().map(|root| {
-                    Arc::new(nexus_core::execution::executor::WorkspaceCommitExecutor::new(
-                        mgr, root,
-                    ))
+                    Arc::new(
+                        nexus_core::execution::executor::WorkspaceCommitExecutor::new(mgr, root),
+                    )
                         as Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>
                 })
             });
@@ -887,7 +887,8 @@ impl WorkspaceState {
         let workspace_state_provider = match (self.session_manager(), self.workspace_path()) {
             (Some(mgr), Some(root)) => Some(Arc::new(
                 nexus_core::execution::state_provider::CoreWorkspaceStateProvider::new(mgr, root),
-            ) as Arc<dyn nexus_orchestration::capability::WorkspaceStateProvider>),
+            )
+                as Arc<dyn nexus_orchestration::capability::WorkspaceStateProvider>),
             _ => None,
         };
         let provider_catalog = self.agent_host().map(|host| {
@@ -937,15 +938,13 @@ impl WorkspaceState {
                     // T3: this lazy-attach path owns the same process facts
                     // and the same engine/cache the boot path registered, so
                     // the owner reports them here too (see the boot site).
-                    runtime_facts: Some(
-                        nexus_core::execution::capabilities::ToolRuntimeFacts {
-                            runtime_mode: self.runtime_mode().clone(),
-                            is_initialized: self.is_initialized(),
-                            lifecycle_state: self.lifecycle_state().to_string(),
-                            started_at: self.started_at().to_rfc3339(),
-                            uptime_seconds: self.uptime_seconds(),
-                        },
-                    ),
+                    runtime_facts: Some(nexus_core::execution::capabilities::ToolRuntimeFacts {
+                        runtime_mode: self.runtime_mode().clone(),
+                        is_initialized: self.is_initialized(),
+                        lifecycle_state: self.lifecycle_state().to_string(),
+                        started_at: self.started_at().to_rfc3339(),
+                        uptime_seconds: self.uptime_seconds(),
+                    }),
                     compute_cache: self.module_cache(),
                     compute_engine: self.wasm_engine(),
                     compute_serializer: Some(self.compute_serializer()),
@@ -955,7 +954,9 @@ impl WorkspaceState {
                 },
             )
             .await
-            .map_err(|e| anyhow::anyhow!("lazy attach: failed to establish the execution owner: {e}"))?;
+            .map_err(|e| {
+                anyhow::anyhow!("lazy attach: failed to establish the execution owner: {e}")
+            })?;
         self.set_execution_handle(Arc::clone(&handle));
         let engine_arc = handle.engine_concrete();
         let coordinator = handle.coordinator();
@@ -1118,7 +1119,10 @@ impl WorkspaceState {
     /// owns one cancellation/join handle per (Creator DB, session) around
     /// the bounded `drive_preset_run` loop; schedule admission and session
     /// POST route through it.
-    pub fn set_run_coordinator(&self, coordinator: Arc<nexus_core::execution::WorkflowRunCoordinator>) {
+    pub fn set_run_coordinator(
+        &self,
+        coordinator: Arc<nexus_core::execution::WorkflowRunCoordinator>,
+    ) {
         *self
             .run_coordinator
             .write()
@@ -1134,8 +1138,7 @@ impl WorkspaceState {
         *self
             .run_coordinator
             .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            Some(handle.coordinator());
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(handle.coordinator());
         *self
             .execution_handle
             .write()

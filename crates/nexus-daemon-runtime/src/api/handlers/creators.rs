@@ -129,7 +129,9 @@ fn creator_detail_from_core(detail: nexus_contracts::CreatorDetail) -> CreatorDe
     }
 }
 
-fn creator_info_from_core(item: nexus_contracts::generated::daemon_api::creators::list_creators_response::NexusCreatorInfo) -> CreatorInfo {
+fn creator_info_from_core(
+    item: nexus_contracts::generated::daemon_api::creators::list_creators_response::NexusCreatorInfo,
+) -> CreatorInfo {
     CreatorInfo {
         creator_id: item.creator_id,
         display_name: item.display_name,
@@ -206,7 +208,9 @@ pub async fn get_creator(
     info!(creator_id = %creator_id, "Getting creator detail");
 
     let home = home_service(&state)?;
-    let detail = home.creator_detail(&creator_id).map_err(NexusApiError::from)?;
+    let detail = home
+        .creator_detail(&creator_id)
+        .map_err(NexusApiError::from)?;
     Ok(Json(creator_detail_from_core(detail)))
 }
 

@@ -16,12 +16,11 @@
 
 use std::path::{Path, PathBuf};
 
-use nexus_contracts::CreatorDetail;
 use nexus_contracts::generated::daemon_api::workspace::{
     list_workspaces_response::{NexusPaginationInfo, NexusWorkspaceSummary},
-    ListWorkspacesResponse, SetActiveWorkspaceRequest,
-    SetActiveWorkspaceResponse,
+    ListWorkspacesResponse, SetActiveWorkspaceRequest, SetActiveWorkspaceResponse,
 };
+use nexus_contracts::CreatorDetail;
 use nexus_contracts::{CoreHomeConfiguration, CoreRegisterCreatorRequest};
 use nexus_home_layout::active_context::{read_active_creator_id, CliConfigSnapshot};
 use nexus_home_layout::{
@@ -150,7 +149,9 @@ impl CoreHomeService {
         std::fs::create_dir_all(&self.nexus_home).map_err(|e| CoreError::Internal {
             category: format!("home_dir_create: {e}"),
         })?;
-        let pool = nexus_local_db::init_pool(&global_db).await.map_err(local_db_err)?;
+        let pool = nexus_local_db::init_pool(&global_db)
+            .await
+            .map_err(local_db_err)?;
         let creator_id = mint_local_creator_id();
         let created_at = chrono::Utc::now().to_rfc3339();
         let inserted = nexus_local_db::create_local_identity(
@@ -318,7 +319,9 @@ impl CoreHomeService {
         let db_path =
             workspace_state_db_path(&self.user_home, &creator_id, &request.workspace_slug);
         let row_display_name = self.resolved_display_name(&creator_id).await;
-        let pool = nexus_local_db::init_pool(&db_path).await.map_err(local_db_err)?;
+        let pool = nexus_local_db::init_pool(&db_path)
+            .await
+            .map_err(local_db_err)?;
         let materialized =
             nexus_local_db::ensure_creator_row(&pool, &creator_id, &row_display_name).await;
         pool.close().await;
@@ -480,8 +483,7 @@ fn mint_local_creator_id() -> String {
 /// Validate a workspace slug: non-empty, single path segment, no `.` / `..`
 /// (retained daemon `validate_slug` rule, core error type).
 fn validate_workspace_slug(slug: &str) -> CoreResult<()> {
-    if slug.is_empty() || slug.contains('/') || slug.contains('\\') || slug == "." || slug == ".."
-    {
+    if slug.is_empty() || slug.contains('/') || slug.contains('\\') || slug == "." || slug == ".." {
         return Err(CoreError::InvalidInput {
             field: "workspace_slug".to_string(),
             reason: "must be a single path segment".to_string(),
@@ -501,9 +503,11 @@ fn deny_foreign_workspace(op_dir: &Path, creator_id: &str, slug: &str) -> CoreRe
         return Ok(());
     };
     let meta_creator = json.get("creator_id").and_then(serde_json::Value::as_str);
-    let meta_slug = json.get("workspace_slug").and_then(serde_json::Value::as_str);
-    let foreign = meta_creator.is_some_and(|mc| mc != creator_id)
-        || meta_slug.is_some_and(|ms| ms != slug);
+    let meta_slug = json
+        .get("workspace_slug")
+        .and_then(serde_json::Value::as_str);
+    let foreign =
+        meta_creator.is_some_and(|mc| mc != creator_id) || meta_slug.is_some_and(|ms| ms != slug);
     if foreign {
         return Err(CoreError::NotFound {
             resource: format!("Workspace {slug} does not exist for creator {creator_id}"),
@@ -605,8 +609,9 @@ pub(crate) fn write_active_selection(
     let config_path = nexus_home.join("config.toml");
 
     let mut config: toml::Table = if config_path.exists() {
-        let content = std::fs::read_to_string(&config_path)
-            .map_err(|e| CoreError::Internal { category: format!("config_read: {e}") })?;
+        let content = std::fs::read_to_string(&config_path).map_err(|e| CoreError::Internal {
+            category: format!("config_read: {e}"),
+        })?;
         if content.trim().is_empty() {
             toml::Table::new()
         } else {
@@ -639,10 +644,12 @@ pub(crate) fn write_active_selection(
         );
     }
 
-    let toml_str = toml::to_string_pretty(&config)
-        .map_err(|e| CoreError::Internal { category: format!("config_serialize: {e}") })?;
-    std::fs::write(&config_path, toml_str)
-        .map_err(|e| CoreError::Internal { category: format!("config_write: {e}") })?;
+    let toml_str = toml::to_string_pretty(&config).map_err(|e| CoreError::Internal {
+        category: format!("config_serialize: {e}"),
+    })?;
+    std::fs::write(&config_path, toml_str).map_err(|e| CoreError::Internal {
+        category: format!("config_write: {e}"),
+    })?;
 
     Ok(())
 }
@@ -655,7 +662,7 @@ where
     T: std::str::FromStr,
     T::Err: std::fmt::Display,
 {
-    value
-        .parse::<T>()
-        .map_err(|e| CoreError::Internal { category: format!("field_newtype: {e}") })
+    value.parse::<T>().map_err(|e| CoreError::Internal {
+        category: format!("field_newtype: {e}"),
+    })
 }

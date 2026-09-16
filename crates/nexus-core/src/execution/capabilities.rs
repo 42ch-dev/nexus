@@ -59,18 +59,18 @@ use crate::{
     ArchivePoolRequest, PromotePoolRequest, UpdateFindingRequest, WorkDetails, WorkPatchRequest,
 };
 use nexus_home_layout::active_context::{read_active_creator_id, read_active_workspace_slug};
-use nexus_spoke_adapter::{SpokeResult, parse_tool_capability_id};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::collections::HashMap;
-use std::sync::LazyLock;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::works;
 use nexus_narrative::NarrativeGateway;
+use nexus_spoke_adapter::{parse_tool_capability_id, SpokeResult};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::LazyLock;
 
 /// A tool invocation request.
 ///
@@ -392,7 +392,10 @@ pub(crate) async fn admission_pipeline(
     // NOT_SUPPORTED exactly like an unknown builtin.
     let reg = host_tool_registry();
     if !reg.spine_resolves(context, &req.tool_name) {
-        return Err(NexusApiError::Coded { code: "not_supported".to_string(), message: format!("unsupported tool: {}", req.tool_name) });
+        return Err(NexusApiError::Coded {
+            code: "not_supported".to_string(),
+            message: format!("unsupported tool: {}", req.tool_name),
+        });
     }
 
     // Peer tools (`tools.*`) and user capabilities are dispatched without
@@ -408,9 +411,21 @@ pub(crate) async fn admission_pipeline(
 
     // Gate 2: active creator (for nexus.* tools)
     if is_nexus_tool {
-        let creator_id = creator_id.ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "tool_execution".to_string(), "active creator required for nexus.* tools".to_string(),) })?;
+        let creator_id = creator_id.ok_or_else(|| NexusApiError::Forbidden {
+            resource: format!(
+                "{}: {}",
+                "tool_execution".to_string(),
+                "active creator required for nexus.* tools".to_string(),
+            ),
+        })?;
         let workspace_slug = read_active_workspace_slug(&context.nexus_home, &creator_id)
-            .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "tool_execution".to_string(), "active workspace required for nexus.* tools".to_string(),) })?;
+            .ok_or_else(|| NexusApiError::Forbidden {
+                resource: format!(
+                    "{}: {}",
+                    "tool_execution".to_string(),
+                    "active workspace required for nexus.* tools".to_string(),
+                ),
+            })?;
 
         // Gate 3: workspace bounds — verified per-handler for entity lookups
         // (Work, schedule, etc. include creator/workspace predicates in SQL).
@@ -431,7 +446,13 @@ pub(crate) async fn admission_pipeline(
     let workspace_path = context.workspace_path();
     let workspace_path_str = workspace_path.unwrap_or_default();
     if workspace_path_str.is_empty() {
-        return Err(NexusApiError::Forbidden { resource: format!("{}: {}", "tool_execution".to_string(), "fs/* tools require an active workspace with defined bounds".to_string(),) });
+        return Err(NexusApiError::Forbidden {
+            resource: format!(
+                "{}: {}",
+                "tool_execution".to_string(),
+                "fs/* tools require an active workspace with defined bounds".to_string(),
+            ),
+        });
     }
 
     // Gate 4: permissions
@@ -485,7 +506,10 @@ fn check_nexus_tool_permission(
         "no nexus read grant"
     };
 
-    Err(NexusApiError::Coded { code: "policy_blocked".to_string(), message: format!("tool '{tool_name}' denied by permissions.toml policy ({reason})") })
+    Err(NexusApiError::Coded {
+        code: "policy_blocked".to_string(),
+        message: format!("tool '{tool_name}' denied by permissions.toml policy ({reason})"),
+    })
 }
 
 /// Check permission for `fs/*` tools (V1.33 baseline behavior).
@@ -503,9 +527,12 @@ fn check_fs_tool_permission(
         return Ok(());
     }
 
-    Err(NexusApiError::Coded { code: "policy_blocked".to_string(), message: format!(
+    Err(NexusApiError::Coded {
+        code: "policy_blocked".to_string(),
+        message: format!(
             "tool '{tool_name}' denied by permissions.toml policy (missing '{category}' grant)"
-        ) })
+        ),
+    })
 }
 
 // ─── nexus.* Handlers ─────────────────────────────────────────────────────
@@ -565,10 +592,18 @@ async fn execute_work_get(
     // Entity lookup includes creator predicate (spec §12.5)
     let record = works::get_work(context.pool(), creator_id, work_id)
         .await
-        .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
+        .map_err(|e| NexusApiError::Internal {
+            category: format!("DATABASE_ERROR: {}", e.to_string()),
+        })?
         .ok_or_else(|| {
             // Could be not found OR cross-creator — return FORBIDDEN for safety
-            NexusApiError::Forbidden { resource: format!("{}: {}", "work".to_string(), "work not found or cross-creator access denied".to_string(),) }
+            NexusApiError::Forbidden {
+                resource: format!(
+                    "{}: {}",
+                    "work".to_string(),
+                    "work not found or cross-creator access denied".to_string(),
+                ),
+            }
         })?;
 
     let dto = WorkDetails::from(record);
@@ -613,10 +648,16 @@ async fn execute_work_patch(
             continue; // work_id is a parameter, not a patch field
         }
         if PATCH_REJECTED_FIELDS.contains(&key.as_str()) {
-            return Err(NexusApiError::Coded { code: "invalid_input".to_string(), message: format!("field '{key}' is not allowed in nexus.work.patch (spec §4.4)") });
+            return Err(NexusApiError::Coded {
+                code: "invalid_input".to_string(),
+                message: format!("field '{key}' is not allowed in nexus.work.patch (spec §4.4)"),
+            });
         }
         if !PATCH_ALLOWED_FIELDS.contains(&key.as_str()) {
-            return Err(NexusApiError::Coded { code: "invalid_input".to_string(), message: format!("unknown patch field '{key}'") });
+            return Err(NexusApiError::Coded {
+                code: "invalid_input".to_string(),
+                message: format!("unknown patch field '{key}'"),
+            });
         }
     }
 
@@ -645,10 +686,11 @@ async fn execute_work_patch(
                 &principal,
                 work_id.to_string(),
                 "http",
-                nexus_contracts::AppendInspirationRequest { note: note.to_string() },
+                nexus_contracts::AppendInspirationRequest {
+                    note: note.to_string(),
+                },
             )
-            .await
-            ?;
+            .await?;
         }
     }
 
@@ -674,8 +716,7 @@ async fn execute_work_patch(
                 ..Default::default()
             },
         )
-        .await
-        ?;
+        .await?;
     }
 
     // Handle stage_metadata patch — validate sub-field allowlist (spec §4.4).
@@ -695,10 +736,13 @@ async fn execute_work_patch(
                     ) });
             }
             if !STAGE_METADATA_ALLOWED_KEYS.contains(&key.as_str()) {
-                return Err(NexusApiError::Coded { code: "invalid_input".to_string(), message: format!(
+                return Err(NexusApiError::Coded {
+                    code: "invalid_input".to_string(),
+                    message: format!(
                         "stage_metadata key '{key}' is not in the allowed list (spec §4.4: {})",
                         STAGE_METADATA_ALLOWED_KEYS.join(", ")
-                    ) });
+                    ),
+                });
             }
         }
 
@@ -712,8 +756,7 @@ async fn execute_work_patch(
             "http",
             nexus_contracts::AppendInspirationRequest { note },
         )
-        .await
-        ?;
+        .await?;
     }
 
     // Return the updated Work through the same core authority.
@@ -739,8 +782,15 @@ async fn execute_schedule_status(
     // Verify work ownership first
     let record = works::get_work(context.pool(), creator_id, work_id)
         .await
-        .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
-        .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "work", "work not found or cross-creator access denied") })?;
+        .map_err(|e| NexusApiError::Internal {
+            category: format!("DATABASE_ERROR: {}", e.to_string()),
+        })?
+        .ok_or_else(|| NexusApiError::Forbidden {
+            resource: format!(
+                "{}: {}",
+                "work", "work not found or cross-creator access denied"
+            ),
+        })?;
 
     let schedule_ids: Vec<serde_json::Value> =
         serde_json::from_str(&record.schedule_ids).unwrap_or_default();
@@ -769,16 +819,26 @@ async fn execute_context_assemble(
             nexus_contracts::local::domain::RuntimeMode::LocalOnly
         )
     {
-        return Err(NexusApiError::Coded { code: "policy_blocked".to_string(), message: "PLATFORM_PAUSED: platform-only assembly not available in local-only mode"
-                .to_string() });
+        return Err(NexusApiError::Coded {
+            code: "policy_blocked".to_string(),
+            message: "PLATFORM_PAUSED: platform-only assembly not available in local-only mode"
+                .to_string(),
+        });
     }
 
     // If work_id is provided, verify ownership
     if let Some(work_id) = req.parameters["work_id"].as_str() {
         let _record = works::get_work(context.pool(), creator_id, work_id)
             .await
-            .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
-            .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "work", "work not found or cross-creator access denied") })?;
+            .map_err(|e| NexusApiError::Internal {
+                category: format!("DATABASE_ERROR: {}", e.to_string()),
+            })?
+            .ok_or_else(|| NexusApiError::Forbidden {
+                resource: format!(
+                    "{}: {}",
+                    "work", "work not found or cross-creator access denied"
+                ),
+            })?;
     }
 
     // Local-only assembly subset
@@ -809,7 +869,12 @@ async fn execute_read_file(
 
     let workspace_path_str = context
         .workspace_path()
-        .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "tool_execution", "fs/* tools require an active workspace") })?;
+        .ok_or_else(|| NexusApiError::Forbidden {
+            resource: format!(
+                "{}: {}",
+                "tool_execution", "fs/* tools require an active workspace"
+            ),
+        })?;
 
     let workspace_path = Path::new(&workspace_path_str).to_path_buf();
     let resolved = resolve_guarded_path_async(workspace_path, path_str.clone(), true)
@@ -826,8 +891,18 @@ async fn execute_read_file(
         move || std::fs::read_to_string(&resolved)
     })
     .await
-    .map_err(|e| NexusApiError::Internal { category: format!("FILE_READ_PANIC: {}", format!("file read task panicked: {e}")) })?
-    .map_err(|e| NexusApiError::Internal { category: format!("FILE_READ_FAILED: {}", format!("failed to read file {}: {e}", resolved.display())) })?;
+    .map_err(|e| NexusApiError::Internal {
+        category: format!(
+            "FILE_READ_PANIC: {}",
+            format!("file read task panicked: {e}")
+        ),
+    })?
+    .map_err(|e| NexusApiError::Internal {
+        category: format!(
+            "FILE_READ_FAILED: {}",
+            format!("failed to read file {}: {e}", resolved.display())
+        ),
+    })?;
 
     Ok(serde_json::json!({
         "content": content
@@ -860,7 +935,12 @@ async fn execute_write_file(
 
     let workspace_path_str = context
         .workspace_path()
-        .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "tool_execution", "fs/* tools require an active workspace") })?;
+        .ok_or_else(|| NexusApiError::Forbidden {
+            resource: format!(
+                "{}: {}",
+                "tool_execution", "fs/* tools require an active workspace"
+            ),
+        })?;
 
     let workspace_path = Path::new(&workspace_path_str).to_path_buf();
     let resolved = resolve_guarded_path_async(workspace_path, path_str.clone(), false)
@@ -874,12 +954,27 @@ async fn execute_write_file(
 
     let write_result = tokio::task::spawn_blocking(move || {
         if let Some(parent) = resolved.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| NexusApiError::Internal { category: format!("DIR_CREATE_FAILED: {}", format!("failed to create directory {}: {}", parent.display(), e)) })?;
+            std::fs::create_dir_all(parent).map_err(|e| NexusApiError::Internal {
+                category: format!(
+                    "DIR_CREATE_FAILED: {}",
+                    format!("failed to create directory {}: {}", parent.display(), e)
+                ),
+            })?;
         }
-        std::fs::write(&resolved, content).map_err(|e| NexusApiError::Internal { category: format!("FILE_WRITE_FAILED: {}", format!("failed to write file {}: {e}", resolved.display())) })
+        std::fs::write(&resolved, content).map_err(|e| NexusApiError::Internal {
+            category: format!(
+                "FILE_WRITE_FAILED: {}",
+                format!("failed to write file {}: {e}", resolved.display())
+            ),
+        })
     })
     .await
-    .map_err(|e| NexusApiError::Internal { category: format!("FILE_WRITE_PANIC: {}", format!("file write task panicked: {e}")) })?;
+    .map_err(|e| NexusApiError::Internal {
+        category: format!(
+            "FILE_WRITE_PANIC: {}",
+            format!("file write task panicked: {e}")
+        ),
+    })?;
     write_result?;
 
     Ok(serde_json::json!({
@@ -1038,7 +1133,12 @@ pub(crate) async fn audit_tool_execution(
     .bind(&session_id)
     .execute(context.pool())
     .await
-    .map_err(|e| NexusApiError::Internal { category: format!("AUDIT_LOG_FAILED: {}", format!("failed to write audit log: {e}")) })?;
+    .map_err(|e| NexusApiError::Internal {
+        category: format!(
+            "AUDIT_LOG_FAILED: {}",
+            format!("failed to write audit log: {e}")
+        ),
+    })?;
 
     Ok(())
 }
@@ -1059,8 +1159,16 @@ async fn ensure_world_accessible_for_creator(
 ) -> Result<(), NexusApiError> {
     match nexus_local_db::narrative_write::is_world_owned(pool, creator_id, world_id).await {
         Ok(true) => Ok(()),
-        Ok(false) => Err(NexusApiError::Forbidden { resource: format!("{}: {}", "world".to_string(), "world not found or cross-creator access denied".to_string(),) }),
-        Err(e) => Err(NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", format!("world ownership check: {e}")) }),
+        Ok(false) => Err(NexusApiError::Forbidden {
+            resource: format!(
+                "{}: {}",
+                "world".to_string(),
+                "world not found or cross-creator access denied".to_string(),
+            ),
+        }),
+        Err(e) => Err(NexusApiError::Internal {
+            category: format!("DATABASE_ERROR: {}", format!("world ownership check: {e}")),
+        }),
     }
 }
 
@@ -1088,9 +1196,13 @@ async fn execute_world_snapshot_get(
             .await
             .map_err(|e: nexus_narrative::NarrativeError| {
                 if e.to_string().contains("not found") {
-                    NexusApiError::NotFound { resource: world_id.to_string() }
+                    NexusApiError::NotFound {
+                        resource: world_id.to_string(),
+                    }
                 } else {
-                    NexusApiError::Internal { category: format!("NARRATIVE_ERROR: {}", e.to_string()) }
+                    NexusApiError::Internal {
+                        category: format!("NARRATIVE_ERROR: {}", e.to_string()),
+                    }
                 }
             })?;
 
@@ -1124,7 +1236,9 @@ async fn execute_timeline_recent_get(
     // so the core composes its own rather than reaching into a transport.
     let gw = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(context.pool().clone());
     let mut events = gw.get_timeline(world_id, None, Some(limit)).await.map_err(
-        |e: nexus_narrative::NarrativeError| NexusApiError::Internal { category: format!("NARRATIVE_ERROR: {}", e.to_string()) },
+        |e: nexus_narrative::NarrativeError| NexusApiError::Internal {
+            category: format!("NARRATIVE_ERROR: {}", e.to_string()),
+        },
     )?;
 
     // SQL returns DESC order when limit is set; reverse to ASC for display.
@@ -1152,7 +1266,9 @@ async fn execute_kb_snapshot_read(
 
     let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
     let blocks = kb_store.list_by_world(world_id).await.map_err(
-        |e: nexus_knowledge::world_kb::store::KbStoreError| NexusApiError::Internal { category: format!("KB_STORE_ERROR: {}", e.to_string()) },
+        |e: nexus_knowledge::world_kb::store::KbStoreError| NexusApiError::Internal {
+            category: format!("KB_STORE_ERROR: {}", e.to_string()),
+        },
     )?;
 
     Ok(serde_json::to_value(&blocks).unwrap_or_else(|_| serde_json::json!([])))
@@ -1193,12 +1309,22 @@ async fn execute_manuscript_chapter_get(
     // Verify work ownership first (reuse existing pattern from execute_work_get)
     let _record = works::get_work(pool, creator_id, work_id)
         .await
-        .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
-        .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "work".to_string(), "work not found or cross-creator access denied".to_string(),) })?;
+        .map_err(|e| NexusApiError::Internal {
+            category: format!("DATABASE_ERROR: {}", e.to_string()),
+        })?
+        .ok_or_else(|| NexusApiError::Forbidden {
+            resource: format!(
+                "{}: {}",
+                "work".to_string(),
+                "work not found or cross-creator access denied".to_string(),
+            ),
+        })?;
 
     let chapter_record = nexus_local_db::work_chapters::get_chapter(pool, work_id, chapter, volume)
         .await
-        .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?;
+        .map_err(|e| NexusApiError::Internal {
+            category: format!("DATABASE_ERROR: {}", e.to_string()),
+        })?;
 
     chapter_record.map_or_else(
         || {
@@ -1388,7 +1514,12 @@ async fn execute_reference_refresh(
     .with_creator_context(context.nexus_home.clone(), creator_id.to_string());
 
     let input = req.parameters.clone();
-    cap.run(input).await.map_err(|e| NexusApiError::Internal { category: format!("REFERENCE_REFRESH_FAILED: {}", format!("nexus.reference.refresh failed: {e}")) })
+    cap.run(input).await.map_err(|e| NexusApiError::Internal {
+        category: format!(
+            "REFERENCE_REFRESH_FAILED: {}",
+            format!("nexus.reference.refresh failed: {e}")
+        ),
+    })
 }
 
 pub(crate) fn registry_reference_refresh<'a>(
@@ -1410,7 +1541,12 @@ async fn execute_registry_refresh(
     use nexus_orchestration::capability::Capability;
     let cap = nexus_orchestration::capability::builtins::RegistryRefresh::new();
     let input = serde_json::json!({"force": false});
-    cap.run(input).await.map_err(|e| NexusApiError::Internal { category: format!("REGISTRY_REFRESH_FAILED: {}", format!("registry.refresh failed: {e}")) })
+    cap.run(input).await.map_err(|e| NexusApiError::Internal {
+        category: format!(
+            "REGISTRY_REFRESH_FAILED: {}",
+            format!("registry.refresh failed: {e}")
+        ),
+    })
 }
 
 pub(crate) fn registry_registry_refresh<'a>(
@@ -1453,7 +1589,9 @@ async fn execute_kb_snapshot_write(
 
     let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
     let mut written: usize = 0;
-    let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?;
+    let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal {
+        category: format!("DATABASE_ERROR: {}", e.to_string()),
+    })?;
 
     for block_val in blocks {
         let kb: nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord =
@@ -1464,21 +1602,31 @@ async fn execute_kb_snapshot_write(
         // C-001: reject blocks whose embedded world_id does not match the
         // request-level world_id (prevents cross-world block payload bypass).
         if kb.world_id() != Some(world_id) {
-            return Err(NexusApiError::Forbidden { resource: format!("{}: {}", "knowledge_entry.world_id".to_string(), format!(
-                    "block {} targets world '{}' but request targets world '{}'",
-                    kb.entry_id,
-                    kb.world_id().unwrap_or_default(),
-                    world_id
-                ),) });
+            return Err(NexusApiError::Forbidden {
+                resource: format!(
+                    "{}: {}",
+                    "knowledge_entry.world_id".to_string(),
+                    format!(
+                        "block {} targets world '{}' but request targets world '{}'",
+                        kb.entry_id,
+                        kb.world_id().unwrap_or_default(),
+                        world_id
+                    ),
+                ),
+            });
         }
         kb_store
             .insert_key_block_in_tx(&mut tx, kb)
             .await
-            .map_err(|e| NexusApiError::Internal { category: format!("KB_STORE_ERROR: {}", e.to_string()) })?;
+            .map_err(|e| NexusApiError::Internal {
+                category: format!("KB_STORE_ERROR: {}", e.to_string()),
+            })?;
         written += 1;
     }
 
-    tx.commit().await.map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?;
+    tx.commit().await.map_err(|e| NexusApiError::Internal {
+        category: format!("DATABASE_ERROR: {}", e.to_string()),
+    })?;
 
     Ok(serde_json::json!({
         "written": written,
@@ -1521,13 +1669,23 @@ async fn execute_manuscript_chapter_update(
     // Verify work ownership first (keep record for work_ref used in W-003 path).
     let work_record = works::get_work(pool, creator_id, work_id)
         .await
-        .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
-        .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "work".to_string(), "work not found or cross-creator access denied".to_string(),) })?;
+        .map_err(|e| NexusApiError::Internal {
+            category: format!("DATABASE_ERROR: {}", e.to_string()),
+        })?
+        .ok_or_else(|| NexusApiError::Forbidden {
+            resource: format!(
+                "{}: {}",
+                "work".to_string(),
+                "work not found or cross-creator access denied".to_string(),
+            ),
+        })?;
 
     // Check chapter exists
     let chapter_exists = nexus_local_db::work_chapters::get_chapter(pool, work_id, chapter, volume)
         .await
-        .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?;
+        .map_err(|e| NexusApiError::Internal {
+            category: format!("DATABASE_ERROR: {}", e.to_string()),
+        })?;
 
     if chapter_exists.is_none() {
         return Err(NexusApiError::NotFound {
@@ -1540,7 +1698,12 @@ async fn execute_manuscript_chapter_update(
     let body_path: Option<String> = if let Some(content) = req.parameters["content"].as_str() {
         let workspace_root = context
             .workspace_path()
-            .ok_or_else(|| NexusApiError::Internal { category: format!("WORKSPACE_PATH_ERROR: {}", "workspace path not available".to_string()) })?;
+            .ok_or_else(|| NexusApiError::Internal {
+                category: format!(
+                    "WORKSPACE_PATH_ERROR: {}",
+                    "workspace path not available".to_string()
+                ),
+            })?;
         // W-003: use the canonical body_path from the existing chapter record
         // (set by seed_chapters), which follows Works/{work_ref}/Stories/{slug}.md.
         // Fall back to constructing the path if the chapter has no body_path yet.
@@ -1576,7 +1739,12 @@ async fn execute_manuscript_chapter_update(
             // C-002: use tokio::fs to avoid blocking the async runtime.
             tokio::fs::create_dir_all(parent)
                 .await
-                .map_err(|e| NexusApiError::Internal { category: format!("DIR_CREATE_FAILED: {}", format!("failed to create chapter dir: {e}")) })?;
+                .map_err(|e| NexusApiError::Internal {
+                    category: format!(
+                        "DIR_CREATE_FAILED: {}",
+                        format!("failed to create chapter dir: {e}")
+                    ),
+                })?;
         }
         // C-002: write to a temp file first, then atomically rename within a
         // DB transaction to prevent orphaned files on crash between write and
@@ -1584,16 +1752,31 @@ async fn execute_manuscript_chapter_update(
         let tmp_file = body_file.with_extension("md.tmp");
         tokio::fs::write(&tmp_file, content)
             .await
-            .map_err(|e| NexusApiError::Internal { category: format!("FILE_WRITE_FAILED: {}", format!("failed to write chapter body: {e}")) })?;
+            .map_err(|e| NexusApiError::Internal {
+                category: format!(
+                    "FILE_WRITE_FAILED: {}",
+                    format!("failed to write chapter body: {e}")
+                ),
+            })?;
         // Durability: fsync temp file before the atomic rename.
         let tmp_handle =
             tokio::fs::File::open(&tmp_file)
                 .await
-                .map_err(|e| NexusApiError::Internal { category: format!("FILE_SYNC_FAILED: {}", format!("failed to open temp file for fsync: {e}")) })?;
+                .map_err(|e| NexusApiError::Internal {
+                    category: format!(
+                        "FILE_SYNC_FAILED: {}",
+                        format!("failed to open temp file for fsync: {e}")
+                    ),
+                })?;
         tmp_handle
             .sync_all()
             .await
-            .map_err(|e| NexusApiError::Internal { category: format!("FILE_SYNC_FAILED: {}", format!("failed to fsync temp file: {e}")) })?;
+            .map_err(|e| NexusApiError::Internal {
+                category: format!(
+                    "FILE_SYNC_FAILED: {}",
+                    format!("failed to fsync temp file: {e}")
+                ),
+            })?;
         // W-003: store the relative canonical path in the DB, matching
         // the seed_chapters convention (Works/{work_ref}/Stories/{slug}.md).
         Some(canonical_path)
@@ -1611,12 +1794,19 @@ async fn execute_manuscript_chapter_update(
         // bypassed.
         let workspace_root = context
             .workspace_path()
-            .ok_or_else(|| NexusApiError::Internal { category: format!("WORKSPACE_PATH_ERROR: {}", "workspace path not available".to_string()) })?;
+            .ok_or_else(|| NexusApiError::Internal {
+                category: format!(
+                    "WORKSPACE_PATH_ERROR: {}",
+                    "workspace path not available".to_string()
+                ),
+            })?;
         let abs_body =
             resolve_guarded_path_async(Path::new(&workspace_root).to_path_buf(), bp.clone(), false)
                 .await
                 .map_err(|e| match e {
-                    NexusApiError::InvalidInput { field, .. } if field == "chapter_path_forbidden" => {
+                    NexusApiError::InvalidInput { field, .. }
+                        if field == "chapter_path_forbidden" =>
+                    {
                         NexusApiError::InvalidInput {
                             field: "body_path".into(),
                             reason: "body path outside workspace root".into(),
@@ -1628,7 +1818,12 @@ async fn execute_manuscript_chapter_update(
         let word_count = req.parameters["content"]
             .as_str()
             .map_or(0, |c| c.split_whitespace().count());
-        let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", format!("chapter update tx begin: {e}")) })?;
+        let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal {
+            category: format!(
+                "DATABASE_ERROR: {}",
+                format!("chapter update tx begin: {e}")
+            ),
+        })?;
         // SAFETY: dynamic SQL for chapter update — runtime fields.
         sqlx::query(
             "UPDATE work_chapters SET body_path = ?, actual_word_count = ?, updated_at = ? \
@@ -1636,7 +1831,12 @@ async fn execute_manuscript_chapter_update(
         )
         .bind(bp)
         .bind(
-            i64::try_from(word_count).map_err(|_| NexusApiError::Internal { category: format!("WORK_WORD_COUNT_OVERFLOW: {}", format!("word_count {word_count} exceeds i64")) })?,
+            i64::try_from(word_count).map_err(|_| NexusApiError::Internal {
+                category: format!(
+                    "WORK_WORD_COUNT_OVERFLOW: {}",
+                    format!("word_count {word_count} exceeds i64")
+                ),
+            })?,
         )
         .bind(&now)
         .bind(work_id)
@@ -1644,38 +1844,72 @@ async fn execute_manuscript_chapter_update(
         .bind(volume)
         .execute(&mut *tx)
         .await
-        .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", format!("chapter update: {e}")) })?;
+        .map_err(|e| NexusApiError::Internal {
+            category: format!("DATABASE_ERROR: {}", format!("chapter update: {e}")),
+        })?;
         // Atomically rename temp → final (after DB update succeeds inside tx).
         tokio::fs::rename(&abs_tmp, &abs_body).await.map_err(|e| {
             // Best-effort cleanup: remove temp file on rename failure.
             let _ = std::fs::remove_file(&abs_tmp);
-            NexusApiError::Internal { category: format!("FILE_RENAME_FAILED: {}", format!("failed to finalize chapter file: {e}")) }
+            NexusApiError::Internal {
+                category: format!(
+                    "FILE_RENAME_FAILED: {}",
+                    format!("failed to finalize chapter file: {e}")
+                ),
+            }
         })?;
         // Durability: fsync the final file after the atomic rename so a crash
         // after rename() returns does not leave the rename unflushed.
         let final_handle =
             tokio::fs::File::open(&abs_body)
                 .await
-                .map_err(|e| NexusApiError::Internal { category: format!("FILE_SYNC_FAILED: {}", format!("failed to open final file for fsync: {e}")) })?;
+                .map_err(|e| NexusApiError::Internal {
+                    category: format!(
+                        "FILE_SYNC_FAILED: {}",
+                        format!("failed to open final file for fsync: {e}")
+                    ),
+                })?;
         final_handle
             .sync_all()
             .await
-            .map_err(|e| NexusApiError::Internal { category: format!("FILE_SYNC_FAILED: {}", format!("failed to fsync final file: {e}")) })?;
+            .map_err(|e| NexusApiError::Internal {
+                category: format!(
+                    "FILE_SYNC_FAILED: {}",
+                    format!("failed to fsync final file: {e}")
+                ),
+            })?;
         // Durability: fsync the parent directory so the renamed entry is
         // committed to disk (QC3-S3).
         if let Some(parent) = abs_body.parent() {
             let dir = tokio::fs::File::open(parent)
                 .await
-                .map_err(|e| NexusApiError::Internal { category: format!("DIR_SYNC_FAILED: {}", format!("failed to open parent dir for fsync: {e}")) })?;
-            dir.sync_all().await.map_err(|e| NexusApiError::Internal { category: format!("DIR_SYNC_FAILED: {}", format!("failed to fsync parent dir: {e}")) })?;
+                .map_err(|e| NexusApiError::Internal {
+                    category: format!(
+                        "DIR_SYNC_FAILED: {}",
+                        format!("failed to open parent dir for fsync: {e}")
+                    ),
+                })?;
+            dir.sync_all().await.map_err(|e| NexusApiError::Internal {
+                category: format!(
+                    "DIR_SYNC_FAILED: {}",
+                    format!("failed to fsync parent dir: {e}")
+                ),
+            })?;
         }
-        tx.commit().await.map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", format!("chapter update tx commit: {e}")) })?;
+        tx.commit().await.map_err(|e| NexusApiError::Internal {
+            category: format!(
+                "DATABASE_ERROR: {}",
+                format!("chapter update tx commit: {e}")
+            ),
+        })?;
     }
 
     // Read back updated chapter
     let updated = nexus_local_db::work_chapters::get_chapter(pool, work_id, chapter, volume)
         .await
-        .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?;
+        .map_err(|e| NexusApiError::Internal {
+            category: format!("DATABASE_ERROR: {}", e.to_string()),
+        })?;
 
     updated.map_or_else(
         || {
@@ -1724,7 +1958,9 @@ async fn execute_world_configure(
             .bind(world_id)
             .execute(pool)
             .await
-            .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", format!("world title update: {e}")) })?;
+            .map_err(|e| NexusApiError::Internal {
+                category: format!("DATABASE_ERROR: {}", format!("world title update: {e}")),
+            })?;
         updated = true;
     }
 
@@ -1746,7 +1982,12 @@ async fn execute_world_configure(
         .bind(world_id)
         .execute(pool)
         .await
-        .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", format!("world visibility update: {e}")) })?;
+        .map_err(|e| NexusApiError::Internal {
+            category: format!(
+                "DATABASE_ERROR: {}",
+                format!("world visibility update: {e}")
+            ),
+        })?;
         updated = true;
     }
 
@@ -1768,7 +2009,12 @@ async fn execute_world_configure(
         .bind(world_id)
         .execute(pool)
         .await
-        .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", format!("world time_policy update: {e}")) })?;
+        .map_err(|e| NexusApiError::Internal {
+            category: format!(
+                "DATABASE_ERROR: {}",
+                format!("world time_policy update: {e}")
+            ),
+        })?;
         updated = true;
     }
 
@@ -1829,8 +2075,7 @@ async fn execute_work_schedule_set(
             ..Default::default()
         },
     )
-    .await
-    ?;
+    .await?;
 
     Ok(serde_json::json!({
         "work_id": work_id,
@@ -1871,8 +2116,7 @@ async fn execute_finding_resolve(
             ..Default::default()
         },
     )
-    .await
-    ?;
+    .await?;
 
     Ok(serde_json::json!({
         "finding_id": finding_id,
@@ -1915,8 +2159,7 @@ async fn execute_pool_entry_manage(
                     set_default: None,
                 },
             )
-            .await
-            ?;
+            .await?;
         }
         "remove" | "archive" => {
             // Creator-scoped read at the boundary resolves the entry id; the
@@ -1927,15 +2170,20 @@ async fn execute_pool_entry_manage(
                 work_id,
             )
             .await
-            .map_err(|e| NexusApiError::Internal { category: format!("POOL_ERROR: {}", e.to_string()) })?
-            .ok_or_else(|| NexusApiError::NotFound { resource: work_id.to_string() })?;
+            .map_err(|e| NexusApiError::Internal {
+                category: format!("POOL_ERROR: {}", e.to_string()),
+            })?
+            .ok_or_else(|| NexusApiError::NotFound {
+                resource: work_id.to_string(),
+            })?;
 
             core.archive_work_pool_entry(
                 &principal,
-                ArchivePoolRequest { entry_id: entry.entry_id },
+                ArchivePoolRequest {
+                    entry_id: entry.entry_id,
+                },
             )
-            .await
-            ?;
+            .await?;
         }
         _ => {
             return Err(NexusApiError::InvalidInput {
@@ -2035,18 +2283,21 @@ async fn execute_manuscript_list(
 ) -> Result<serde_json::Value, NexusApiError> {
     let workspace_slug =
         read_active_workspace_slug(&context.nexus_home, creator_id).ok_or_else(|| {
-            NexusApiError::Forbidden { resource: format!("{}: {}", "manuscript.list".to_string(), "active workspace required".to_string(),) }
+            NexusApiError::Forbidden {
+                resource: format!(
+                    "{}: {}",
+                    "manuscript.list".to_string(),
+                    "active workspace required".to_string(),
+                ),
+            }
         })?;
 
     let filters = works::WorkListFilters::default();
-    let records = works::list_works(
-        context.pool(),
-        creator_id,
-        &workspace_slug,
-        &filters,
-    )
-    .await
-    .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?;
+    let records = works::list_works(context.pool(), creator_id, &workspace_slug, &filters)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            category: format!("DATABASE_ERROR: {}", e.to_string()),
+        })?;
 
     let manuscripts: Vec<serde_json::Value> = records
         .iter()
@@ -2104,12 +2355,22 @@ async fn execute_manuscript_read_range(
     let pool = context.pool();
     let _work = works::get_work(pool, creator_id, work_id)
         .await
-        .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
-        .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "work".to_string(), "work not found or cross-creator access denied".to_string(),) })?;
+        .map_err(|e| NexusApiError::Internal {
+            category: format!("DATABASE_ERROR: {}", e.to_string()),
+        })?
+        .ok_or_else(|| NexusApiError::Forbidden {
+            resource: format!(
+                "{}: {}",
+                "work".to_string(),
+                "work not found or cross-creator access denied".to_string(),
+            ),
+        })?;
 
     let chapter_record = nexus_local_db::work_chapters::get_chapter(pool, work_id, chapter, volume)
         .await
-        .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
+        .map_err(|e| NexusApiError::Internal {
+            category: format!("DATABASE_ERROR: {}", e.to_string()),
+        })?
         .ok_or_else(|| NexusApiError::NotFound {
             resource: format!("{work_id}/ch{chapter}"),
         })?;
@@ -2122,7 +2383,12 @@ async fn execute_manuscript_read_range(
 
     let workspace_root = context
         .workspace_path()
-        .ok_or_else(|| NexusApiError::Internal { category: format!("WORKSPACE_PATH_ERROR: {}", "workspace path not available".to_string()) })?;
+        .ok_or_else(|| NexusApiError::Internal {
+            category: format!(
+                "WORKSPACE_PATH_ERROR: {}",
+                "workspace path not available".to_string()
+            ),
+        })?;
     let workspace_root_path = Path::new(&workspace_root);
     let abs_body = workspace_root_path.join(&body_path);
 
@@ -2152,7 +2418,12 @@ async fn execute_manuscript_read_range(
     let content =
         tokio::fs::read_to_string(&abs_body)
             .await
-            .map_err(|e| NexusApiError::Internal { category: format!("FILE_READ_FAILED: {}", format!("failed to read manuscript body: {e}")) })?;
+            .map_err(|e| NexusApiError::Internal {
+                category: format!(
+                    "FILE_READ_FAILED: {}",
+                    format!("failed to read manuscript body: {e}")
+                ),
+            })?;
 
     // Apply optional line range [start_line, end_line] (1-indexed inclusive).
     let start_line = req.parameters["start_line"]
@@ -2245,24 +2516,44 @@ async fn execute_manuscript_write(
     let pool = context.pool();
     let _work = works::get_work(pool, creator_id, work_id)
         .await
-        .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
-        .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "work".to_string(), "work not found or cross-creator access denied".to_string(),) })?;
+        .map_err(|e| NexusApiError::Internal {
+            category: format!("DATABASE_ERROR: {}", e.to_string()),
+        })?
+        .ok_or_else(|| NexusApiError::Forbidden {
+            resource: format!(
+                "{}: {}",
+                "work".to_string(),
+                "work not found or cross-creator access denied".to_string(),
+            ),
+        })?;
 
     // Chapter must exist (manuscript.write does not create chapters).
     let chapter_record = nexus_local_db::work_chapters::get_chapter(pool, work_id, chapter, volume)
         .await
-        .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
+        .map_err(|e| NexusApiError::Internal {
+            category: format!("DATABASE_ERROR: {}", e.to_string()),
+        })?
         .ok_or_else(|| NexusApiError::NotFound {
             resource: format!("{work_id}/ch{chapter}"),
         })?;
 
     let body_path = chapter_record
         .body_path
-        .ok_or_else(|| NexusApiError::Internal { category: format!("CHAPTER_BODY_MISSING: {}", format!("chapter {work_id}/ch{chapter} has no body_path")) })?;
+        .ok_or_else(|| NexusApiError::Internal {
+            category: format!(
+                "CHAPTER_BODY_MISSING: {}",
+                format!("chapter {work_id}/ch{chapter} has no body_path")
+            ),
+        })?;
 
     let workspace_root = context
         .workspace_path()
-        .ok_or_else(|| NexusApiError::Internal { category: format!("WORKSPACE_PATH_ERROR: {}", "workspace path not available".to_string()) })?;
+        .ok_or_else(|| NexusApiError::Internal {
+            category: format!(
+                "WORKSPACE_PATH_ERROR: {}",
+                "workspace path not available".to_string()
+            ),
+        })?;
     let workspace_root_path = Path::new(&workspace_root);
 
     // W-002: defense-in-depth path guard — ensure body_path (DB-sourced) resolves
@@ -2285,23 +2576,43 @@ async fn execute_manuscript_write(
     if let Some(parent) = abs_body.parent() {
         tokio::fs::create_dir_all(parent)
             .await
-            .map_err(|e| NexusApiError::Internal { category: format!("DIR_CREATE_FAILED: {}", format!("failed to create manuscript dir: {e}")) })?;
+            .map_err(|e| NexusApiError::Internal {
+                category: format!(
+                    "DIR_CREATE_FAILED: {}",
+                    format!("failed to create manuscript dir: {e}")
+                ),
+            })?;
     }
 
     // Stage content in a temp file (not durable until rename succeeds).
     let tmp_file = abs_body.with_extension("md.tmp");
     tokio::fs::write(&tmp_file, content)
         .await
-        .map_err(|e| NexusApiError::Internal { category: format!("FILE_WRITE_FAILED: {}", format!("failed to write manuscript body: {e}")) })?;
+        .map_err(|e| NexusApiError::Internal {
+            category: format!(
+                "FILE_WRITE_FAILED: {}",
+                format!("failed to write manuscript body: {e}")
+            ),
+        })?;
     // Durability: fsync temp file before the atomic rename.
     let tmp_handle =
         tokio::fs::File::open(&tmp_file)
             .await
-            .map_err(|e| NexusApiError::Internal { category: format!("FILE_SYNC_FAILED: {}", format!("failed to open temp file for fsync: {e}")) })?;
+            .map_err(|e| NexusApiError::Internal {
+                category: format!(
+                    "FILE_SYNC_FAILED: {}",
+                    format!("failed to open temp file for fsync: {e}")
+                ),
+            })?;
     tmp_handle
         .sync_all()
         .await
-        .map_err(|e| NexusApiError::Internal { category: format!("FILE_SYNC_FAILED: {}", format!("failed to fsync temp file: {e}")) })?;
+        .map_err(|e| NexusApiError::Internal {
+            category: format!(
+                "FILE_SYNC_FAILED: {}",
+                format!("failed to fsync temp file: {e}")
+            ),
+        })?;
 
     // W-001: wrap the DB word-count update + atomic rename in a single
     // transaction so the metadata update only commits when the final file is in
@@ -2310,14 +2621,24 @@ async fn execute_manuscript_write(
     // dropped transaction rolls back the word-count UPDATE.
     let word_count = content.split_whitespace().count();
     let now = chrono::Utc::now().to_rfc3339();
-    let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", format!("manuscript.write tx begin: {e}")) })?;
+    let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal {
+        category: format!(
+            "DATABASE_ERROR: {}",
+            format!("manuscript.write tx begin: {e}")
+        ),
+    })?;
     // SAFETY: UPDATE against work_chapters — runtime query.
     sqlx::query(
         "UPDATE work_chapters SET actual_word_count = ?, updated_at = ? \
          WHERE work_id = ? AND chapter = ? AND volume = ?",
     )
     .bind(
-        i64::try_from(word_count).map_err(|_| NexusApiError::Internal { category: format!("WORK_WORD_COUNT_OVERFLOW: {}", format!("word_count {word_count} exceeds i64")) })?,
+        i64::try_from(word_count).map_err(|_| NexusApiError::Internal {
+            category: format!(
+                "WORK_WORD_COUNT_OVERFLOW: {}",
+                format!("word_count {word_count} exceeds i64")
+            ),
+        })?,
     )
     .bind(&now)
     .bind(work_id)
@@ -2325,33 +2646,68 @@ async fn execute_manuscript_write(
     .bind(volume)
     .execute(&mut *tx)
     .await
-    .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", format!("manuscript.write word-count update: {e}")) })?;
+    .map_err(|e| NexusApiError::Internal {
+        category: format!(
+            "DATABASE_ERROR: {}",
+            format!("manuscript.write word-count update: {e}")
+        ),
+    })?;
     // Atomically rename temp → final inside the tx (after the UPDATE succeeds).
     tokio::fs::rename(&tmp_file, &abs_body).await.map_err(|e| {
         // Best-effort cleanup: remove temp file on rename failure; the dropped
         // tx rolls back the word-count UPDATE above.
         let _ = std::fs::remove_file(&tmp_file);
-        NexusApiError::Internal { category: format!("FILE_RENAME_FAILED: {}", format!("failed to finalize manuscript file: {e}")) }
+        NexusApiError::Internal {
+            category: format!(
+                "FILE_RENAME_FAILED: {}",
+                format!("failed to finalize manuscript file: {e}")
+            ),
+        }
     })?;
     // Durability: fsync the final file after the atomic rename so a crash
     // after rename() returns does not leave the rename unflushed.
     let final_handle =
         tokio::fs::File::open(&abs_body)
             .await
-            .map_err(|e| NexusApiError::Internal { category: format!("FILE_SYNC_FAILED: {}", format!("failed to open final file for fsync: {e}")) })?;
+            .map_err(|e| NexusApiError::Internal {
+                category: format!(
+                    "FILE_SYNC_FAILED: {}",
+                    format!("failed to open final file for fsync: {e}")
+                ),
+            })?;
     final_handle
         .sync_all()
         .await
-        .map_err(|e| NexusApiError::Internal { category: format!("FILE_SYNC_FAILED: {}", format!("failed to fsync final file: {e}")) })?;
+        .map_err(|e| NexusApiError::Internal {
+            category: format!(
+                "FILE_SYNC_FAILED: {}",
+                format!("failed to fsync final file: {e}")
+            ),
+        })?;
     // Durability: fsync the parent directory so the renamed entry is committed
     // to disk (QC3-S3).
     if let Some(parent) = abs_body.parent() {
         let dir = tokio::fs::File::open(parent)
             .await
-            .map_err(|e| NexusApiError::Internal { category: format!("DIR_SYNC_FAILED: {}", format!("failed to open parent dir for fsync: {e}")) })?;
-        dir.sync_all().await.map_err(|e| NexusApiError::Internal { category: format!("DIR_SYNC_FAILED: {}", format!("failed to fsync parent dir: {e}")) })?;
+            .map_err(|e| NexusApiError::Internal {
+                category: format!(
+                    "DIR_SYNC_FAILED: {}",
+                    format!("failed to open parent dir for fsync: {e}")
+                ),
+            })?;
+        dir.sync_all().await.map_err(|e| NexusApiError::Internal {
+            category: format!(
+                "DIR_SYNC_FAILED: {}",
+                format!("failed to fsync parent dir: {e}")
+            ),
+        })?;
     }
-    tx.commit().await.map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", format!("manuscript.write tx commit: {e}")) })?;
+    tx.commit().await.map_err(|e| NexusApiError::Internal {
+        category: format!(
+            "DATABASE_ERROR: {}",
+            format!("manuscript.write tx commit: {e}")
+        ),
+    })?;
 
     Ok(serde_json::json!({
         "written": true,
@@ -2377,11 +2733,18 @@ async fn execute_manuscript_phase_get(
                 reason: "must be a string".into(),
             })?;
 
-    let (current_stage, stage_status) =
-        works::get_work_stage(context.pool(), creator_id, work_id)
-            .await
-            .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
-            .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "work".to_string(), "work not found or cross-creator access denied".to_string(),) })?;
+    let (current_stage, stage_status) = works::get_work_stage(context.pool(), creator_id, work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            category: format!("DATABASE_ERROR: {}", e.to_string()),
+        })?
+        .ok_or_else(|| NexusApiError::Forbidden {
+            resource: format!(
+                "{}: {}",
+                "work".to_string(),
+                "work not found or cross-creator access denied".to_string(),
+            ),
+        })?;
 
     Ok(serde_json::json!({
         "work_id": work_id,
@@ -2424,8 +2787,16 @@ async fn execute_manuscript_phase_set(
 
     let (current_stage, _stage_status) = works::get_work_stage(pool, creator_id, work_id)
         .await
-        .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
-        .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "work".to_string(), "work not found or cross-creator access denied".to_string(),) })?;
+        .map_err(|e| NexusApiError::Internal {
+            category: format!("DATABASE_ERROR: {}", e.to_string()),
+        })?
+        .ok_or_else(|| NexusApiError::Forbidden {
+            resource: format!(
+                "{}: {}",
+                "work".to_string(),
+                "work not found or cross-creator access denied".to_string(),
+            ),
+        })?;
 
     let previous_phase = current_stage.clone();
 
@@ -2444,7 +2815,9 @@ async fn execute_manuscript_phase_set(
     let now = chrono::Utc::now().to_rfc3339();
     let updated = works::update_work_stage(pool, creator_id, work_id, new_phase, "active", &now)
         .await
-        .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?;
+        .map_err(|e| NexusApiError::Internal {
+            category: format!("DATABASE_ERROR: {}", e.to_string()),
+        })?;
 
     Ok(serde_json::json!({
         "work_id": work_id,
@@ -2497,8 +2870,12 @@ async fn execute_research_query(
         // the SAME `NotFound` either way — a 403 would confirm existence.
         let row = nexus_local_db::reference_source::find_by_id_for_creator(pool, id, creator_id)
             .await
-            .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
-            .ok_or_else(|| NexusApiError::NotFound { resource: id.to_string() })?;
+            .map_err(|e| NexusApiError::Internal {
+                category: format!("DATABASE_ERROR: {}", e.to_string()),
+            })?
+            .ok_or_else(|| NexusApiError::NotFound {
+                resource: id.to_string(),
+            })?;
 
         return Ok(serde_json::json!({
             "results": [serde_json::json!({
@@ -2518,10 +2895,11 @@ async fn execute_research_query(
         .map_or(50, |v| v.clamp(1, 1000));
 
     // Scoped list: an unscoped call returns every creator's rows.
-    let rows =
-        nexus_local_db::reference_source::list(pool, Some(limit), None, Some(creator_id))
+    let rows = nexus_local_db::reference_source::list(pool, Some(limit), None, Some(creator_id))
         .await
-        .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?;
+        .map_err(|e| NexusApiError::Internal {
+            category: format!("DATABASE_ERROR: {}", e.to_string()),
+        })?;
 
     // Optional client-side tag filter.
     let tag_filter: Option<&str> = req.parameters["tags"].as_str();
@@ -2698,9 +3076,6 @@ pub(crate) fn registry_trace_correlation<'a>(
     let result = execute_trace_correlation(req, context, creator_id);
     Box::pin(async move { Ok(result) })
 }
-
-
-
 
 // ---------------------------------------------------------------------------
 // The capability registry (builtin rows + spine)
@@ -3043,19 +3418,23 @@ async fn dispatch_peer_tool(
         Ok(value) => Ok(value),
         // A structural argument refusal never reached the peer; it is a
         // plain client-input error.
-        Err(PeerInvokeError::Denied { wire_code: None, message }) => Err(NexusApiError::Coded {
+        Err(PeerInvokeError::Denied {
+            wire_code: None,
+            message,
+        }) => Err(NexusApiError::Coded {
             code: "invalid_input".to_string(),
             message,
         }),
         // A peer-side deny keeps the peer's own lowercase code verbatim while
         // the public code stays the spine's `not_supported`.
-        Err(PeerInvokeError::Denied { wire_code: Some(wire_code), message }) => {
-            Err(NexusApiError::PeerDenied {
-                code: "not_supported".to_string(),
-                wire_code,
-                message,
-            })
-        }
+        Err(PeerInvokeError::Denied {
+            wire_code: Some(wire_code),
+            message,
+        }) => Err(NexusApiError::PeerDenied {
+            code: "not_supported".to_string(),
+            wire_code,
+            message,
+        }),
         Err(PeerInvokeError::Timeout { message }) => Err(NexusApiError::Internal {
             category: format!("PEER_TOOL_TIMEOUT: {message}"),
         }),
@@ -3129,10 +3508,20 @@ async fn dispatch_user_cap(
             code: "invalid_input".to_string(),
             message: msg,
         },
-        CapabilityError::Forbidden(msg) => NexusApiError::Forbidden { resource: format!("{}: {}", "tool_execution".to_string(), msg,) },
-        CapabilityError::WorkerUnavailable => NexusApiError::Internal { category: format!("SERVICE_UNAVAILABLE: {}", format!("capability '{}' has no executor wired", cap.name()),) },
+        CapabilityError::Forbidden(msg) => NexusApiError::Forbidden {
+            resource: format!("{}: {}", "tool_execution".to_string(), msg,),
+        },
+        CapabilityError::WorkerUnavailable => NexusApiError::Internal {
+            category: format!(
+                "SERVICE_UNAVAILABLE: {}",
+                format!("capability '{}' has no executor wired", cap.name()),
+            ),
+        },
         other => NexusApiError::Internal {
-            category: format!("CAPABILITY_RUN_FAILED: capability '{}' failed: {other}", cap.name()),
+            category: format!(
+                "CAPABILITY_RUN_FAILED: capability '{}' failed: {other}",
+                cap.name()
+            ),
         },
     })
 }
@@ -3279,7 +3668,6 @@ pub fn host_tool_registry() -> &'static CapabilityRegistry {
 #[must_use]
 #[allow(clippy::too_many_lines)]
 pub fn build_registry() -> CapabilityRegistry {
-    
     let mut reg = CapabilityRegistry::new();
 
     // ── nexus.* tools (V1.34) ──
@@ -3944,5 +4332,3 @@ pub fn build_registry() -> CapabilityRegistry {
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
-
-

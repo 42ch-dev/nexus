@@ -25,8 +25,8 @@ use thiserror::Error;
 use crate::capability::CapabilityError;
 use crate::capability::CapabilityRegistry;
 use crate::run_state::{
-    ChildCheckpoint, RunCheckpoint, RunDescriptorV1, RunFailure, RunRecord,
-    RunStateV1, SettlementResult, TerminalSettlementTarget, WorkflowStateStore,
+    ChildCheckpoint, RunCheckpoint, RunDescriptorV1, RunFailure, RunRecord, RunStateV1,
+    SettlementResult, TerminalSettlementTarget, WorkflowStateStore,
 };
 use nexus_preset::source_identity::PresetSourceIdentity;
 
@@ -3669,8 +3669,13 @@ impl GraphFlowEngine {
         // position) would otherwise miss the reattachment lookup and make
         // `InnerGraphTask` spawn a fresh child and replay the work.
         {
-            let valid_inner: std::collections::HashSet<&str> =
-                loaded.manifest.inner_graphs.iter().flat_map(|graphs| graphs.keys()).map(String::as_str).collect();
+            let valid_inner: std::collections::HashSet<&str> = loaded
+                .manifest
+                .inner_graphs
+                .iter()
+                .flat_map(|graphs| graphs.keys())
+                .map(String::as_str)
+                .collect();
             // Snapshot the closure first so no children-map lock is held
             // across the storage awaits below.
             let snapshot: Vec<(SessionId, Vec<crate::run_state::ChildCheckpoint>)> = {

@@ -7,9 +7,9 @@
 //! - `build_schedule_for_stage` — builds a correctly-shaped `AddScheduleRequest`
 //!   for the FL-E stage schedule, ensuring contract alignment with the daemon.
 
+use nexus_contracts::local::schedule::http::AddScheduleRequest;
 #[cfg(test)]
 use nexus_local_db::work_stage::{check_stage_advance, WorkStageState};
-use nexus_contracts::local::schedule::http::AddScheduleRequest;
 
 /// Format a chapter number as a zero-padded label for path construction.
 ///
@@ -393,7 +393,6 @@ pub fn build_schedule_for_stage(
         agent_bindings: None,
     })
 }
-
 
 #[cfg(test)]
 mod tests {

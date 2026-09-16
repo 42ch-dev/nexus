@@ -11,7 +11,7 @@ use nexus_contracts::generated::core::{
 };
 use nexus_contracts::BlockType;
 use nexus_core::{
-    classify_pair, AdmittedActor, ActorViewpoint, CoreActorAdmission, CoreAccess, CoreError,
+    classify_pair, ActorViewpoint, AdmittedActor, CoreAccess, CoreActorAdmission, CoreError,
     CoreOpenOptions, CoreService,
 };
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
@@ -95,10 +95,7 @@ async fn seed_character(
     )
     .await
     .unwrap();
-    (
-        created.character.character_id,
-        created.binding.binding_id,
-    )
+    (created.character.character_id, created.binding.binding_id)
 }
 
 /// Materialize the workspace shell and seed stored rows through one engine
@@ -133,11 +130,15 @@ async fn seed_env() -> Env {
         seed_world(&pool, WORLD, CREATOR).await;
         seed_world(&pool, WORLD_B, CREATOR).await;
         seed_world(&pool, FOREIGN_WORLD, OTHER).await;
-        let (character_id, binding_id) =
-            seed_character(&pool, CREATOR, WORLD, "Ada").await;
+        let (character_id, binding_id) = seed_character(&pool, CREATOR, WORLD, "Ada").await;
         let (foreign_character_id, foreign_binding_id) =
             seed_character(&pool, OTHER, FOREIGN_WORLD, "Foreign").await;
-        (character_id, binding_id, foreign_character_id, foreign_binding_id)
+        (
+            character_id,
+            binding_id,
+            foreign_character_id,
+            foreign_binding_id,
+        )
     };
 
     Env {
@@ -169,10 +170,7 @@ async fn plain_pool(env: &Env) -> SqlitePool {
     nexus_local_db::open_pool(&env.db_path).await.unwrap()
 }
 
-async fn character_row(
-    env: &Env,
-    character_id: &str,
-) -> (String, i64, i64) {
+async fn character_row(env: &Env, character_id: &str) -> (String, i64, i64) {
     let pool = plain_pool(env).await;
     let (status, revision, epoch): (String, i64, i64) = sqlx::query_as(
         "SELECT status, revision, lifecycle_epoch FROM characters WHERE character_id = ?",
@@ -346,13 +344,12 @@ async fn duplicate_active_binding_and_last_binding_are_stable_conflicts() {
     assert_conflict(last, "last_active_actor_world_binding");
 
     let pool = plain_pool(&env).await;
-    let remaining: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM actor_world_bindings WHERE character_id = ?",
-    )
-    .bind(&env.character_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let remaining: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM actor_world_bindings WHERE character_id = ?")
+            .bind(&env.character_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     pool.close().await;
     assert_eq!(remaining, 1, "the refused removal must not mutate");
 }
@@ -396,13 +393,12 @@ async fn foreign_owner_routes_are_not_found_and_do_not_mutate() {
     assert_not_found(err);
 
     let pool = plain_pool(&env).await;
-    let remaining: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM actor_world_bindings WHERE character_id = ?",
-    )
-    .bind(foreign)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let remaining: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM actor_world_bindings WHERE character_id = ?")
+            .bind(foreign)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     pool.close().await;
     assert_eq!(remaining, 1, "foreign routes must not mutate");
 }
@@ -430,7 +426,9 @@ async fn admission_deny_matrix_world_character_binding_mismatches() {
     let ctx = admission
         .admit(
             CREATOR,
-            AdmittedActor::Character { character_id: chr.clone() },
+            AdmittedActor::Character {
+                character_id: chr.clone(),
+            },
             viewpoint(WORLD, Some(bid)),
         )
         .await
@@ -444,7 +442,9 @@ async fn admission_deny_matrix_world_character_binding_mismatches() {
     let err = admission
         .admit(
             CREATOR,
-            AdmittedActor::Creator { creator_id: OTHER.to_string() },
+            AdmittedActor::Creator {
+                creator_id: OTHER.to_string(),
+            },
             viewpoint(WORLD, None),
         )
         .await
@@ -454,7 +454,9 @@ async fn admission_deny_matrix_world_character_binding_mismatches() {
     let err = admission
         .admit(
             CREATOR,
-            AdmittedActor::Creator { creator_id: CREATOR.to_string() },
+            AdmittedActor::Creator {
+                creator_id: CREATOR.to_string(),
+            },
             viewpoint(WORLD, Some(bid)),
         )
         .await
@@ -469,7 +471,13 @@ async fn admission_deny_matrix_world_character_binding_mismatches() {
 
     // Missing/foreign World → 404; owned archived World → 409 world_inactive.
     let err = admission
-        .admit(CREATOR, AdmittedActor::Character { character_id: chr.clone() }, viewpoint("wld_missing", Some(bid)))
+        .admit(
+            CREATOR,
+            AdmittedActor::Character {
+                character_id: chr.clone(),
+            },
+            viewpoint("wld_missing", Some(bid)),
+        )
         .await
         .expect_err("missing world");
     assert_not_found(err);
@@ -480,7 +488,13 @@ async fn admission_deny_matrix_world_character_binding_mismatches() {
         .await
         .unwrap();
     let err = admission
-        .admit(CREATOR, AdmittedActor::Character { character_id: chr.clone() }, viewpoint(WORLD, Some(bid)))
+        .admit(
+            CREATOR,
+            AdmittedActor::Character {
+                character_id: chr.clone(),
+            },
+            viewpoint(WORLD, Some(bid)),
+        )
         .await
         .expect_err("inactive world");
     assert_conflict(err, "world_inactive");
@@ -497,7 +511,13 @@ async fn admission_deny_matrix_world_character_binding_mismatches() {
         .await
         .unwrap();
     let err = admission
-        .admit(CREATOR, AdmittedActor::Character { character_id: chr.clone() }, viewpoint(WORLD, Some(bid)))
+        .admit(
+            CREATOR,
+            AdmittedActor::Character {
+                character_id: chr.clone(),
+            },
+            viewpoint(WORLD, Some(bid)),
+        )
         .await
         .expect_err("archived character");
     assert_conflict(err, "character_inactive");
@@ -514,7 +534,13 @@ async fn admission_deny_matrix_world_character_binding_mismatches() {
         .await
         .unwrap();
     let err = admission
-        .admit(CREATOR, AdmittedActor::Character { character_id: chr.clone() }, viewpoint(WORLD, Some(bid)))
+        .admit(
+            CREATOR,
+            AdmittedActor::Character {
+                character_id: chr.clone(),
+            },
+            viewpoint(WORLD, Some(bid)),
+        )
         .await
         .expect_err("inactive binding");
     assert_not_found(err);
@@ -528,7 +554,9 @@ async fn admission_deny_matrix_world_character_binding_mismatches() {
     let err = admission
         .admit(
             CREATOR,
-            AdmittedActor::Character { character_id: chr.clone() },
+            AdmittedActor::Character {
+                character_id: chr.clone(),
+            },
             viewpoint(WORLD, Some(&env.foreign_binding_id)),
         )
         .await
@@ -538,7 +566,9 @@ async fn admission_deny_matrix_world_character_binding_mismatches() {
     let err = admission
         .admit(
             CREATOR,
-            AdmittedActor::Character { character_id: chr.clone() },
+            AdmittedActor::Character {
+                character_id: chr.clone(),
+            },
             viewpoint(FOREIGN_WORLD, Some(bid)),
         )
         .await
@@ -551,11 +581,7 @@ async fn admission_deny_matrix_world_character_binding_mismatches() {
 async fn insert_world_entries(pool: &SqlitePool, n: usize) {
     let store = SqliteKbStore::new(pool.clone());
     for i in 0..n {
-        let mut row = KnowledgeEntryRecord::new(
-            WORLD,
-            BlockType::Item,
-            &format!("WorldRow{i:03}"),
-        );
+        let mut row = KnowledgeEntryRecord::new(WORLD, BlockType::Item, &format!("WorldRow{i:03}"));
         let minute = i / 60;
         let second = i % 60;
         row.created_at = format!("2026-01-01T00:{minute:02}:{second:02}Z");
@@ -573,7 +599,9 @@ async fn admitted_view_follows_pages_under_cap() {
     let ctx = admission
         .admit(
             CREATOR,
-            AdmittedActor::Character { character_id: env.character_id.clone() },
+            AdmittedActor::Character {
+                character_id: env.character_id.clone(),
+            },
             ActorViewpoint {
                 world_id: WORLD.to_string(),
                 binding_id: Some(env.binding_id.clone()),
@@ -599,7 +627,9 @@ async fn admitted_view_rejects_when_hard_cap_exceeded() {
     let err = admission
         .admit(
             CREATOR,
-            AdmittedActor::Character { character_id: env.character_id.clone() },
+            AdmittedActor::Character {
+                character_id: env.character_id.clone(),
+            },
             ActorViewpoint {
                 world_id: WORLD.to_string(),
                 binding_id: Some(env.binding_id.clone()),

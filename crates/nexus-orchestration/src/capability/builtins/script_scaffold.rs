@@ -288,111 +288,117 @@ impl Default for ScriptProjectScaffold {
 }
 
 #[async_trait]
-impl Capability for ScriptProjectScaffold { fn name(&self) -> &'static str {
-    "script.project_scaffold"
-} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::SCRIPT_PROJECT_SCAFFOLD_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
-    r#"{"type":"object","properties":{"scaffold_root":{"type":"string"},"files_created":{"type":"array","items":{"type":"string"}},"dirs_created":{"type":"array","items":{"type":"string"}}},"required":["scaffold_root","files_created","dirs_created"],"additionalProperties":false}"#
+impl Capability for ScriptProjectScaffold {
+    fn name(&self) -> &'static str {
+        "script.project_scaffold"
+    }
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::SCRIPT_PROJECT_SCAFFOLD_INPUT_SCHEMA
+    }
+    fn output_schema(&self) -> &'static str {
+        r#"{"type":"object","properties":{"scaffold_root":{"type":"string"},"files_created":{"type":"array","items":{"type":"string"}},"dirs_created":{"type":"array","items":{"type":"string"}}},"required":["scaffold_root","files_created","dirs_created"],"additionalProperties":false}"#
+    }
+
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        let inp: ScaffoldInput = serde_json::from_value(input).map_err(|e| {
+            CapabilityError::InputInvalid(format!("script.project_scaffold input: {e}"))
+        })?;
+
+        // ── FIX (qc2 C-001): validate work_ref against path traversal ──
+        let work_ref = validate_work_ref(&inp.work_ref)?;
+
+        info!(
+            work_id = %inp.work_id,
+            work_ref = %work_ref,
+            world_id = ?inp.world_id,
+            "script.project_scaffold: start"
+        );
+
+        let work_dir = self.works_root.join(&work_ref);
+        let scripts_dir = work_dir.join("Scripts");
+        let beats_dir = work_dir.join("Beats");
+        let characters_dir = work_dir.join("Characters");
+        let logs_dir = work_dir.join("Logs");
+        let logs_write_dir = logs_dir.join("write");
+        let logs_review_dir = logs_dir.join("review");
+
+        let mut tx = ScaffoldTransaction::new();
+
+        // Create directory structure (idempotent — only tracks newly created dirs)
+        for dir in [
+            &work_dir,
+            &scripts_dir,
+            &beats_dir,
+            &characters_dir,
+            &logs_dir,
+            &logs_write_dir,
+            &logs_review_dir,
+        ] {
+            tx.create_dir(dir)?;
+        }
+
+        // Write README.md (atomic: temp+rename; tracks create vs overwrite)
+        let readme_content = format!(
+            "# {title}\n\nScript project.\n\n- **Work ID**: {work_id}\n- **Profile**: script\n",
+            title = inp.title,
+            work_id = inp.work_id,
+        );
+        tx.write_file(&work_dir.join("README.md"), &readme_content)?;
+
+        // Write Scripts/script.md
+        let script_content = render_template(&SCRIPT_TEMPLATES[0]);
+        tx.write_file(&scripts_dir.join("script.md"), &script_content)?;
+
+        // Write Beats/beat-sheet.md
+        let beat_content = render_template(&SCRIPT_TEMPLATES[1]);
+        tx.write_file(&beats_dir.join("beat-sheet.md"), &beat_content)?;
+
+        // Write Characters/characters.md
+        let characters_content = render_template(&SCRIPT_TEMPLATES[2]);
+        tx.write_file(&characters_dir.join("characters.md"), &characters_content)?;
+
+        // PATCH works row: set work_profile and work_ref
+        if let Some(ref pool) = self.pool {
+            sqlx::query("UPDATE works SET work_profile = 'script', work_ref = ? WHERE work_id = ?")
+                .bind(&work_ref)
+                .bind(&inp.work_id)
+                .execute(pool)
+                .await
+                .map_err(|e| CapabilityError::Internal(format!("patch works row: {e}")))?;
+        }
+
+        // All FS + DB writes succeeded — commit the transaction guard
+        tx.commit();
+
+        // Output diagnostics use new file lists
+        let files_created: Vec<String> = tx
+            .created_files
+            .iter()
+            .chain(tx.overwritten_files.iter().map(|(p, _)| p))
+            .map(|p| p.strip_prefix(&work_dir).unwrap_or(p).display().to_string())
+            .collect();
+        let dirs_created: Vec<String> = tx
+            .created_dirs
+            .iter()
+            .map(|d| d.strip_prefix(&work_dir).unwrap_or(d).display().to_string())
+            .collect();
+
+        let output = ScaffoldOutput {
+            scaffold_root: work_dir.display().to_string(),
+            files_created,
+            dirs_created,
+        };
+
+        info!(
+            work_id = %inp.work_id,
+            files = ?output.files_created,
+            "script.project_scaffold: done"
+        );
+
+        serde_json::to_value(output)
+            .map_err(|e| CapabilityError::Internal(format!("script.project_scaffold output: {e}")))
+    }
 }
-
-async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-    let inp: ScaffoldInput = serde_json::from_value(input).map_err(|e| {
-        CapabilityError::InputInvalid(format!("script.project_scaffold input: {e}"))
-    })?;
-
-    // ── FIX (qc2 C-001): validate work_ref against path traversal ──
-    let work_ref = validate_work_ref(&inp.work_ref)?;
-
-    info!(
-        work_id = %inp.work_id,
-        work_ref = %work_ref,
-        world_id = ?inp.world_id,
-        "script.project_scaffold: start"
-    );
-
-    let work_dir = self.works_root.join(&work_ref);
-    let scripts_dir = work_dir.join("Scripts");
-    let beats_dir = work_dir.join("Beats");
-    let characters_dir = work_dir.join("Characters");
-    let logs_dir = work_dir.join("Logs");
-    let logs_write_dir = logs_dir.join("write");
-    let logs_review_dir = logs_dir.join("review");
-
-    let mut tx = ScaffoldTransaction::new();
-
-    // Create directory structure (idempotent — only tracks newly created dirs)
-    for dir in [
-        &work_dir,
-        &scripts_dir,
-        &beats_dir,
-        &characters_dir,
-        &logs_dir,
-        &logs_write_dir,
-        &logs_review_dir,
-    ] {
-        tx.create_dir(dir)?;
-    }
-
-    // Write README.md (atomic: temp+rename; tracks create vs overwrite)
-    let readme_content = format!(
-        "# {title}\n\nScript project.\n\n- **Work ID**: {work_id}\n- **Profile**: script\n",
-        title = inp.title,
-        work_id = inp.work_id,
-    );
-    tx.write_file(&work_dir.join("README.md"), &readme_content)?;
-
-    // Write Scripts/script.md
-    let script_content = render_template(&SCRIPT_TEMPLATES[0]);
-    tx.write_file(&scripts_dir.join("script.md"), &script_content)?;
-
-    // Write Beats/beat-sheet.md
-    let beat_content = render_template(&SCRIPT_TEMPLATES[1]);
-    tx.write_file(&beats_dir.join("beat-sheet.md"), &beat_content)?;
-
-    // Write Characters/characters.md
-    let characters_content = render_template(&SCRIPT_TEMPLATES[2]);
-    tx.write_file(&characters_dir.join("characters.md"), &characters_content)?;
-
-    // PATCH works row: set work_profile and work_ref
-    if let Some(ref pool) = self.pool {
-        sqlx::query("UPDATE works SET work_profile = 'script', work_ref = ? WHERE work_id = ?")
-            .bind(&work_ref)
-            .bind(&inp.work_id)
-            .execute(pool)
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("patch works row: {e}")))?;
-    }
-
-    // All FS + DB writes succeeded — commit the transaction guard
-    tx.commit();
-
-    // Output diagnostics use new file lists
-    let files_created: Vec<String> = tx
-        .created_files
-        .iter()
-        .chain(tx.overwritten_files.iter().map(|(p, _)| p))
-        .map(|p| p.strip_prefix(&work_dir).unwrap_or(p).display().to_string())
-        .collect();
-    let dirs_created: Vec<String> = tx
-        .created_dirs
-        .iter()
-        .map(|d| d.strip_prefix(&work_dir).unwrap_or(d).display().to_string())
-        .collect();
-
-    let output = ScaffoldOutput {
-        scaffold_root: work_dir.display().to_string(),
-        files_created,
-        dirs_created,
-    };
-
-    info!(
-        work_id = %inp.work_id,
-        files = ?output.files_created,
-        "script.project_scaffold: done"
-    );
-
-    serde_json::to_value(output)
-        .map_err(|e| CapabilityError::Internal(format!("script.project_scaffold output: {e}")))
-} }
 
 #[cfg(test)]
 mod tests {

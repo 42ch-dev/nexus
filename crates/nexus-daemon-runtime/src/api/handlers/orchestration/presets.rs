@@ -3,9 +3,8 @@
 use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
 use axum::{extract::Path, extract::State, http::StatusCode, Json};
-use nexus_contracts::{OrchestrationPresetListResponse, PresetProfileResponse};
 use nexus_contracts::local::orchestration::http::ReloadPresetResponse;
-
+use nexus_contracts::{OrchestrationPresetListResponse, PresetProfileResponse};
 
 /// `GET /v1/daemon/orchestration/presets`
 ///
@@ -97,8 +96,6 @@ pub async fn get_preset_profile(
     let response = core.get_preset_profile(&principal, preset_id).await?;
     Ok(Json(response))
 }
-
-
 
 // ---------------------------------------------------------------------------
 // Tests

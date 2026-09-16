@@ -90,6 +90,8 @@ impl CoreService {
             .ok_or_else(|| crate::CoreError::NotFound {
                 resource: format!("reference_source: {reference_id}"),
             })?;
-        Ok(GetReferenceResponse { reference: ReferenceInfo::from(row) })
+        Ok(GetReferenceResponse {
+            reference: ReferenceInfo::from(row),
+        })
     }
 }

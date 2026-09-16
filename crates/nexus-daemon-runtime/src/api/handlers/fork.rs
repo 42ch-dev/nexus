@@ -10,14 +10,21 @@ use axum::Json;
 use nexus_contracts::daemon_api::{CreateForkRequest, CreateForkResponse};
 use serde_json::json;
 
-pub async fn create_fork(State(state): State<WorkspaceState>, Path(world_id): Path<String>, Json(req): Json<CreateForkRequest>) -> Result<Json<CreateForkResponse>, NexusApiError> {
+pub async fn create_fork(
+    State(state): State<WorkspaceState>,
+    Path(world_id): Path<String>,
+    Json(req): Json<CreateForkRequest>,
+) -> Result<Json<CreateForkResponse>, NexusApiError> {
     require_creator(&state)?;
     let (core, principal) = resolve_core_principal(&state).await?;
-    let response = core.create_fork(&principal, world_id, req).await.map_err(|e| match e {
-        nexus_core::CoreError::InvalidInput { .. } => NexusApiError::InputValidationFailed {
-            details: json!({ "fork_point": "fork point not found on parent branch" }),
-        },
-        other => NexusApiError::from(other),
-    })?;
+    let response = core
+        .create_fork(&principal, world_id, req)
+        .await
+        .map_err(|e| match e {
+            nexus_core::CoreError::InvalidInput { .. } => NexusApiError::InputValidationFailed {
+                details: json!({ "fork_point": "fork point not found on parent branch" }),
+            },
+            other => NexusApiError::from(other),
+        })?;
     Ok(Json(response))
 }

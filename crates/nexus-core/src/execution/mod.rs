@@ -35,13 +35,13 @@ pub mod bounds;
 // (v1.190 P3-T3). `capabilities` and `peer_tools` join the execution cohort;
 // `compute` additionally requires the WASM edge, so it is gated separately.
 pub mod capabilities;
-pub mod peer_tools;
+pub mod commit_fs;
 #[cfg(feature = "compute")]
 pub mod compute;
-pub mod commit_fs;
 pub mod executor;
 pub mod handle_ops;
 pub mod lifecycle;
+pub mod peer_tools;
 pub mod run_events;
 pub mod schedules;
 pub mod scope;
@@ -55,14 +55,14 @@ pub mod test_hooks;
 pub mod workflow;
 pub mod workspace;
 
+pub use handle_ops::run_event_page;
 pub use lifecycle::{ExecutionBuildObserver, ExecutionHandle, ExecutionOpenError, RunnerDeps};
 pub use schedules::{
     AutoChronologyConfig, CronSupervisorConfig, RefreshSchedulerConfig, StaleFindingsWatcherConfig,
 };
-pub use handle_ops::run_event_page;
-pub use workspace::commit_workspace;
 pub use workflow::{
-    CancelOutcome, DriveDisposition, PresetRunConfig, PresetRunOutcome, ResumeDecision,
-    RunControlError, RunControlResult, RunSignal, WorkflowRunCoordinator, drive_preset_run,
-    resume_driven_sessions,
+    drive_preset_run, resume_driven_sessions, CancelOutcome, DriveDisposition, PresetRunConfig,
+    PresetRunOutcome, ResumeDecision, RunControlError, RunControlResult, RunSignal,
+    WorkflowRunCoordinator,
 };
+pub use workspace::commit_workspace;

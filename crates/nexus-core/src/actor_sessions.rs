@@ -18,8 +18,9 @@ use std::sync::{Arc, Mutex};
 
 use nexus_agent_host::{HostFacade, HostOperationId, HostSession, HostSessionId, SessionState};
 use nexus_contracts::generated::daemon_api::agent_host::character_operation_result::{
-    CharacterOperationResult, CharacterOperationResultFinishReason, CharacterOperationResultRunStatus,
-    NexusCharacterRunCaptureOutcome, NexusCharacterRunCaptureOutcomeStatus,
+    CharacterOperationResult, CharacterOperationResultFinishReason,
+    CharacterOperationResultRunStatus, NexusCharacterRunCaptureOutcome,
+    NexusCharacterRunCaptureOutcomeStatus,
 };
 use nexus_contracts::generated::daemon_api::agent_host::session_response::{
     NexusActorRef, NexusSessionViewpoint, NexusSessionViewpointBindingId,
@@ -199,11 +200,12 @@ impl ActorSessionRegistry {
     /// Returns `invalid_input` when the path is relative, traverses, or
     /// cannot be resolved.
     pub fn canonicalize_cwd(cwd: &Path) -> CoreResult<PathBuf> {
-        nexus_agent_host::config::validate_workspace_path(cwd)
-            .map_err(|e| CoreError::InvalidInput {
+        nexus_agent_host::config::validate_workspace_path(cwd).map_err(|e| {
+            CoreError::InvalidInput {
                 field: "cwd".into(),
                 reason: e.to_string(),
-            })
+            }
+        })
     }
 
     /// Build the exact tuple key from an admitted Actor context.
@@ -345,12 +347,12 @@ impl ActorSessionRegistry {
         operation_id: &HostOperationId,
     ) -> CoreResult<CharacterOperationResult> {
         let maps = self.maps();
-        let record = maps
-            .character_operations
-            .get(operation_id)
-            .ok_or_else(|| CoreError::NotFound {
-                resource: format!("operation {operation_id}"),
-            })?;
+        let record =
+            maps.character_operations
+                .get(operation_id)
+                .ok_or_else(|| CoreError::NotFound {
+                    resource: format!("operation {operation_id}"),
+                })?;
         if record.owner_creator_id != owner_creator_id {
             drop(maps);
             return Err(CoreError::NotFound {
@@ -396,10 +398,12 @@ impl ActorSessionRegistry {
                 Ok(())
             }
             OperationPhase::CancelRequested => Ok(()),
-            OperationPhase::Finalizing | OperationPhase::Terminal => Err(CoreError::ActorConflict {
-                code: "actor_operation_finished".into(),
-                message: format!("operation {operation_id} already finished"),
-            }),
+            OperationPhase::Finalizing | OperationPhase::Terminal => {
+                Err(CoreError::ActorConflict {
+                    code: "actor_operation_finished".into(),
+                    message: format!("operation {operation_id} already finished"),
+                })
+            }
         };
         drop(maps);
         result
@@ -746,10 +750,7 @@ impl ActorSessionRegistry {
             maps.by_key.get(&key).cloned()
         };
         if let Some(existing) = existing {
-            let listed = host
-                .list_sessions()
-                .await
-                .map_err(|e| host_err(&e))?;
+            let listed = host.list_sessions().await.map_err(|e| host_err(&e))?;
             {
                 let maps = self.maps();
                 if let Err(err) = Self::reject_if_closed(&maps) {
@@ -841,13 +842,8 @@ impl ActorSessionRegistry {
             return;
         }
         maps.by_key.insert(key.clone(), session_id.clone());
-        maps.by_session.insert(
-            session_id,
-            IndexedActorSession {
-                key,
-                ctx,
-            },
-        );
+        maps.by_session
+            .insert(session_id, IndexedActorSession { key, ctx });
     }
 
     async fn teardown_minted_host(
@@ -902,12 +898,15 @@ fn echo_retired_pair(
                 .map_err(|e: ConversionError| echo_conversion("ACTOR_REF_ECHO", e))?,
         },
     };
-    Ok((Some(actor_ref), Some(viewpoint_from_parts(
-        &tombstone.world_id,
-        tombstone.binding_id.as_deref(),
-        tombstone.branch_id.as_deref(),
-        tombstone.event_id.as_deref(),
-    )?)))
+    Ok((
+        Some(actor_ref),
+        Some(viewpoint_from_parts(
+            &tombstone.world_id,
+            tombstone.binding_id.as_deref(),
+            tombstone.branch_id.as_deref(),
+            tombstone.event_id.as_deref(),
+        )?),
+    ))
 }
 
 /// # Errors
@@ -935,12 +934,15 @@ pub fn echo_actor_pair(
                 .map_err(|e: ConversionError| echo_conversion("ACTOR_REF_ECHO", e))?,
         },
     };
-    Ok((Some(actor_ref), Some(viewpoint_from_parts(
-        &ctx.world_id,
-        ctx.binding_id.as_deref(),
-        ctx.branch_id.as_deref(),
-        ctx.event_id.as_deref(),
-    )?)))
+    Ok((
+        Some(actor_ref),
+        Some(viewpoint_from_parts(
+            &ctx.world_id,
+            ctx.binding_id.as_deref(),
+            ctx.branch_id.as_deref(),
+            ctx.event_id.as_deref(),
+        )?),
+    ))
 }
 
 fn viewpoint_from_parts(
@@ -951,16 +953,25 @@ fn viewpoint_from_parts(
 ) -> CoreResult<NexusSessionViewpoint> {
     use nexus_contracts::generated::daemon_api::agent_host::session_response::error::ConversionError;
     let parse = |v: Option<&str>| -> CoreResult<Option<NexusSessionViewpointBindingId>> {
-        v.map(|id| id.parse().map_err(|e: ConversionError| echo_conversion("VIEWPOINT_ECHO", e)))
-            .transpose()
+        v.map(|id| {
+            id.parse()
+                .map_err(|e: ConversionError| echo_conversion("VIEWPOINT_ECHO", e))
+        })
+        .transpose()
     };
     let parse_branch = |v: Option<&str>| -> CoreResult<Option<NexusSessionViewpointBranchId>> {
-        v.map(|id| id.parse().map_err(|e: ConversionError| echo_conversion("VIEWPOINT_ECHO", e)))
-            .transpose()
+        v.map(|id| {
+            id.parse()
+                .map_err(|e: ConversionError| echo_conversion("VIEWPOINT_ECHO", e))
+        })
+        .transpose()
     };
     let parse_event = |v: Option<&str>| -> CoreResult<Option<NexusSessionViewpointEventId>> {
-        v.map(|id| id.parse().map_err(|e: ConversionError| echo_conversion("VIEWPOINT_ECHO", e)))
-            .transpose()
+        v.map(|id| {
+            id.parse()
+                .map_err(|e: ConversionError| echo_conversion("VIEWPOINT_ECHO", e))
+        })
+        .transpose()
     };
     Ok(NexusSessionViewpoint {
         world_id: world_id

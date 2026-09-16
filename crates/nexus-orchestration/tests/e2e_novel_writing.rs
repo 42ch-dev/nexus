@@ -498,9 +498,8 @@ fn novel_writing_finalize_exit_prompt_referenced() {
         .find(|s| s.id == "finalize")
         .expect("finalize state should exist");
 
-    if let Some(nexus_preset::manifest::ExitWhen::LlmJudge {
-        template_file, ..
-    }) = &finalize.exit_when
+    if let Some(nexus_preset::manifest::ExitWhen::LlmJudge { template_file, .. }) =
+        &finalize.exit_when
     {
         assert_eq!(
             template_file.as_deref(),

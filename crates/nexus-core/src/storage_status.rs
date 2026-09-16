@@ -77,12 +77,11 @@ impl CoreHomeService {
             Err(e) => (None, Some(e.to_string())),
         };
 
-        let tables_raw: Vec<Option<String>> = sqlx::query_scalar!(
-            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-        )
-        .fetch_all(&pool)
-        .await
-        .map_err(|e| crate::error::db_err(&e))?;
+        let tables_raw: Vec<Option<String>> =
+            sqlx::query_scalar!("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+                .fetch_all(&pool)
+                .await
+                .map_err(|e| crate::error::db_err(&e))?;
         let tables: Vec<String> = tables_raw.into_iter().flatten().collect();
 
         // SAFETY: PRAGMA statements — no table schema to validate against

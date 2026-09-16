@@ -52,8 +52,8 @@ use sqlx::SqlitePool;
 use crate::actors::AdmittedActor;
 use crate::error::{CoreError, CoreResult};
 use crate::memory_pipeline::{
-    MemoryPipelineCtx, REVIEW_BATCH_LIMIT, internal_err, map_local_db_error,
-    process_bearer_review_batch, sqlx_internal,
+    internal_err, map_local_db_error, process_bearer_review_batch, sqlx_internal,
+    MemoryPipelineCtx, REVIEW_BATCH_LIMIT,
 };
 use crate::principal::Principal;
 use crate::service::CoreService;

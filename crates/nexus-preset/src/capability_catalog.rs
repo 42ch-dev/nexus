@@ -204,7 +204,8 @@ pub const OUTBOX_COMPACT_INPUT_SCHEMA: &str = r#"{"type":"object","properties":{
 pub const OUTBOX_FLUSH_INPUT_SCHEMA: &str = r#"{"type":"object","properties":{"limit":{"type":"integer","minimum":0,"default":0}},"required":[],"additionalProperties":false}"#;
 
 /// Input schema for `registry.refresh`.
-pub const REGISTRY_REFRESH_INPUT_SCHEMA: &str = r#"{"type":"object","properties":{},"required":[],"additionalProperties":false}"#;
+pub const REGISTRY_REFRESH_INPUT_SCHEMA: &str =
+    r#"{"type":"object","properties":{},"required":[],"additionalProperties":false}"#;
 
 /// Input schema for `script.project_scaffold`.
 pub const SCRIPT_PROJECT_SCAFFOLD_INPUT_SCHEMA: &str = r#"{"type":"object","properties":{"creator_id":{"type":"string"},"work_id":{"type":"string"},"work_ref":{"type":"string"},"title":{"type":"string"},"world_id":{"type":["string","null"]}},"required":["creator_id","work_id","work_ref","title"],"additionalProperties":false}"#;
@@ -241,4 +242,3 @@ pub const WORKSPACE_COMMIT_INPUT_SCHEMA: &str = r#"{"type":"object","properties"
 
 /// Input schema for `workspace.open`.
 pub const WORKSPACE_OPEN_INPUT_SCHEMA: &str = r#"{"type":"object","properties":{"path":{"type":"string","minLength":1,"maxLength":4096,"pattern":"^(?!/)(?!.*\.\.)[^/]+(?:/[^/]+)*$"}},"required":["path"],"additionalProperties":false}"#;
-

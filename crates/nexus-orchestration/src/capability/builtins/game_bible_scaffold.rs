@@ -308,102 +308,108 @@ impl Default for GameBibleProjectScaffold {
 }
 
 #[async_trait]
-impl Capability for GameBibleProjectScaffold { fn name(&self) -> &'static str {
-    "game_bible.project_scaffold"
-} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::GAME_BIBLE_PROJECT_SCAFFOLD_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
-    r#"{"type":"object","properties":{"scaffold_root":{"type":"string"},"files_created":{"type":"array","items":{"type":"string"}},"dirs_created":{"type":"array","items":{"type":"string"}}},"required":["scaffold_root","files_created","dirs_created"],"additionalProperties":false}"#
-}
-
-async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-    let inp: ScaffoldInput = serde_json::from_value(input).map_err(|e| {
-        CapabilityError::InputInvalid(format!("game_bible.project_scaffold input: {e}"))
-    })?;
-
-    // ── FIX (P3 fix-wave): validate work_ref against path traversal ──
-    let work_ref = validate_work_ref(&inp.work_ref)?;
-
-    info!(
-        work_id = %inp.work_id,
-        work_ref = %work_ref,
-        world_id = ?inp.world_id,
-        "game_bible.project_scaffold: start"
-    );
-
-    let work_dir = self.works_root.join(&work_ref);
-    let design_dir = work_dir.join("Design");
-    let logs_dir = work_dir.join("Logs");
-    let logs_design_dir = logs_dir.join("design");
-    let logs_review_dir = logs_dir.join("review");
-
-    let mut tx = ScaffoldTransaction::new();
-
-    // Create directory structure (idempotent)
-    for dir in [
-        &work_dir,
-        &design_dir,
-        &logs_dir,
-        &logs_design_dir,
-        &logs_review_dir,
-    ] {
-        tx.create_dir(dir)?;
+impl Capability for GameBibleProjectScaffold {
+    fn name(&self) -> &'static str {
+        "game_bible.project_scaffold"
+    }
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::GAME_BIBLE_PROJECT_SCAFFOLD_INPUT_SCHEMA
+    }
+    fn output_schema(&self) -> &'static str {
+        r#"{"type":"object","properties":{"scaffold_root":{"type":"string"},"files_created":{"type":"array","items":{"type":"string"}},"dirs_created":{"type":"array","items":{"type":"string"}}},"required":["scaffold_root","files_created","dirs_created"],"additionalProperties":false}"#
     }
 
-    // Write README.md (atomic: temp+rename; tracks create vs overwrite)
-    let readme_content = format!(
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        let inp: ScaffoldInput = serde_json::from_value(input).map_err(|e| {
+            CapabilityError::InputInvalid(format!("game_bible.project_scaffold input: {e}"))
+        })?;
+
+        // ── FIX (P3 fix-wave): validate work_ref against path traversal ──
+        let work_ref = validate_work_ref(&inp.work_ref)?;
+
+        info!(
+            work_id = %inp.work_id,
+            work_ref = %work_ref,
+            world_id = ?inp.world_id,
+            "game_bible.project_scaffold: start"
+        );
+
+        let work_dir = self.works_root.join(&work_ref);
+        let design_dir = work_dir.join("Design");
+        let logs_dir = work_dir.join("Logs");
+        let logs_design_dir = logs_dir.join("design");
+        let logs_review_dir = logs_dir.join("review");
+
+        let mut tx = ScaffoldTransaction::new();
+
+        // Create directory structure (idempotent)
+        for dir in [
+            &work_dir,
+            &design_dir,
+            &logs_dir,
+            &logs_design_dir,
+            &logs_review_dir,
+        ] {
+            tx.create_dir(dir)?;
+        }
+
+        // Write README.md (atomic: temp+rename; tracks create vs overwrite)
+        let readme_content = format!(
         "# {title}\n\nGame design bible.\n\n- **Work ID**: {work_id}\n- **Profile**: game_bible\n\n## Core Pillars\n\n<!-- Genre, tone, target audience, and key design constraints -->\n",
         title = inp.title,
         work_id = inp.work_id,
     );
-    tx.write_file(&work_dir.join("README.md"), &readme_content)?;
+        tx.write_file(&work_dir.join("README.md"), &readme_content)?;
 
-    // Write 12 Design/*.md template files
-    for tmpl in DESIGN_TEMPLATES {
-        let content = render_template(tmpl);
-        tx.write_file(&design_dir.join(tmpl.filename), &content)?;
+        // Write 12 Design/*.md template files
+        for tmpl in DESIGN_TEMPLATES {
+            let content = render_template(tmpl);
+            tx.write_file(&design_dir.join(tmpl.filename), &content)?;
+        }
+
+        // PATCH works row: set work_profile and work_ref
+        if let Some(ref pool) = self.pool {
+            sqlx::query(
+                "UPDATE works SET work_profile = 'game_bible', work_ref = ? WHERE work_id = ?",
+            )
+            .bind(&work_ref)
+            .bind(&inp.work_id)
+            .execute(pool)
+            .await
+            .map_err(|e| CapabilityError::Internal(format!("patch works row: {e}")))?;
+        }
+
+        tx.commit();
+
+        let files_created: Vec<String> = tx
+            .created_files
+            .iter()
+            .chain(tx.overwritten_files.iter().map(|(p, _)| p))
+            .map(|p| p.strip_prefix(&work_dir).unwrap_or(p).display().to_string())
+            .collect();
+        let dirs_created: Vec<String> = tx
+            .created_dirs
+            .iter()
+            .map(|d| d.strip_prefix(&work_dir).unwrap_or(d).display().to_string())
+            .collect();
+
+        let output = ScaffoldOutput {
+            scaffold_root: work_dir.display().to_string(),
+            files_created,
+            dirs_created,
+        };
+
+        info!(
+            work_id = %inp.work_id,
+            files = ?output.files_created,
+            "game_bible.project_scaffold: done"
+        );
+
+        serde_json::to_value(output).map_err(|e| {
+            CapabilityError::Internal(format!("game_bible.project_scaffold output: {e}"))
+        })
     }
-
-    // PATCH works row: set work_profile and work_ref
-    if let Some(ref pool) = self.pool {
-        sqlx::query(
-            "UPDATE works SET work_profile = 'game_bible', work_ref = ? WHERE work_id = ?",
-        )
-        .bind(&work_ref)
-        .bind(&inp.work_id)
-        .execute(pool)
-        .await
-        .map_err(|e| CapabilityError::Internal(format!("patch works row: {e}")))?;
-    }
-
-    tx.commit();
-
-    let files_created: Vec<String> = tx
-        .created_files
-        .iter()
-        .chain(tx.overwritten_files.iter().map(|(p, _)| p))
-        .map(|p| p.strip_prefix(&work_dir).unwrap_or(p).display().to_string())
-        .collect();
-    let dirs_created: Vec<String> = tx
-        .created_dirs
-        .iter()
-        .map(|d| d.strip_prefix(&work_dir).unwrap_or(d).display().to_string())
-        .collect();
-
-    let output = ScaffoldOutput {
-        scaffold_root: work_dir.display().to_string(),
-        files_created,
-        dirs_created,
-    };
-
-    info!(
-        work_id = %inp.work_id,
-        files = ?output.files_created,
-        "game_bible.project_scaffold: done"
-    );
-
-    serde_json::to_value(output).map_err(|e| {
-        CapabilityError::Internal(format!("game_bible.project_scaffold output: {e}"))
-    })
-} }
+}
 
 #[cfg(test)]
 mod tests {

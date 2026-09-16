@@ -136,8 +136,16 @@ pub fn check_stage_advance(
 
 /// Remove the derived completion-lock artifact; the database remains authoritative.
 /// This is the existing idempotent filesystem release, not a scheduler operation.
-pub fn release_completion_lock(workspace_dir: &std::path::Path, work_ref: &str) -> Result<(), std::io::Error> {
-    let path = workspace_dir.join("Works").join(work_ref).join(".completion-lock.json");
-    if path.exists() { std::fs::remove_file(&path)?; }
+pub fn release_completion_lock(
+    workspace_dir: &std::path::Path,
+    work_ref: &str,
+) -> Result<(), std::io::Error> {
+    let path = workspace_dir
+        .join("Works")
+        .join(work_ref)
+        .join(".completion-lock.json");
+    if path.exists() {
+        std::fs::remove_file(&path)?;
+    }
     Ok(())
 }

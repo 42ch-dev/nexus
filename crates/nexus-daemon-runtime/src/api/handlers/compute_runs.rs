@@ -195,8 +195,8 @@ pub async fn delete_runs(
     Query(params): Query<DeleteRunsQuery>,
 ) -> Result<Json<Value>, NexusApiError> {
     let pool = state.pool_or_uninit()?;
-    let creator_id =
-        crate::config::read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+    let creator_id = crate::config::read_active_creator_id(state.nexus_home())
+        .ok_or(NexusApiError::AuthRequired)?;
 
     let world_id = params
         .world_id

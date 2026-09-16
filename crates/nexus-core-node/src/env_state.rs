@@ -553,9 +553,8 @@ impl EnvState {
         let (session_id, provider_id) = self
             .with_js_state(|s| {
                 s.operation(operation_id).and_then(|op| {
-                    s.session(&op.session_id).map(|rec| {
-                        (op.session_id.clone(), rec.provider_id.clone())
-                    })
+                    s.session(&op.session_id)
+                        .map(|rec| (op.session_id.clone(), rec.provider_id.clone()))
                 })
             })
             .flatten()

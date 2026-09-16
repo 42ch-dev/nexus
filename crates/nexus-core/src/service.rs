@@ -100,9 +100,7 @@ pub(crate) struct CoreInner {
     /// this process's retained engine admission and would otherwise let a
     /// second core over the same file build a second engine.
     #[cfg(feature = "execution")]
-    pub(crate) execution: std::sync::Mutex<
-        Option<Arc<crate::execution::ExecutionHandle>>,
-    >,
+    pub(crate) execution: std::sync::Mutex<Option<Arc<crate::execution::ExecutionHandle>>>,
 }
 
 /// Cloneable handle: `inner` is already shared, so a clone is the same open
@@ -397,7 +395,6 @@ impl CoreService {
         read_changes(&self.inner.pool, request).await
     }
 
-
     /// Close the pool and release writer guards exactly once; repeated calls
     /// report the already-closed state.
     ///
@@ -451,4 +448,3 @@ impl CoreService {
         })
     }
 }
-

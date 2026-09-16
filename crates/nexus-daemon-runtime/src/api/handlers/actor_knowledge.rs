@@ -36,9 +36,7 @@ use nexus_contracts::daemon_api::actor_knowledge::{
         ViewResponse,
     },
 };
-use nexus_knowledge::world_kb::knowledge_entry::{
-    parse_stored_created_at, KnowledgeEntryRecord,
-};
+use nexus_knowledge::world_kb::knowledge_entry::{parse_stored_created_at, KnowledgeEntryRecord};
 use nexus_local_db::FieldPatch;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -391,12 +389,7 @@ pub async fn delete_knowledge_entry(
 ) -> Result<StatusCode, NexusApiError> {
     let expected_revision = parse_delete_expected_revision(&uri)?;
     let (core, principal) = resolve_core_principal(&state).await?;
-    core.delete_actor_knowledge_entry(
-        &principal,
-        character_id,
-        entry_id,
-        expected_revision,
-    )
-    .await?;
+    core.delete_actor_knowledge_entry(&principal, character_id, entry_id, expected_revision)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }

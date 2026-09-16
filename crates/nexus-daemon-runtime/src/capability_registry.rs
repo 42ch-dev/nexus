@@ -11,7 +11,7 @@
 //! the peer set drift apart, which is the failure this cutover removes.
 
 pub use nexus_core::execution::capabilities::{
-    AdmissionGate, Access, CatalogDescriptor, CapabilityRegistry, CapabilityRow, FailureMode,
-    NAMED_PLACEHOLDER_INPUT, TestVector, UserCapCatalogRefusal, build_registry,
-    host_tool_registry, json_schema_has_object_root, user_cap_catalog_admission,
+    build_registry, host_tool_registry, json_schema_has_object_root, user_cap_catalog_admission,
+    Access, AdmissionGate, CapabilityRegistry, CapabilityRow, CatalogDescriptor, FailureMode,
+    TestVector, UserCapCatalogRefusal, NAMED_PLACEHOLDER_INPUT,
 };

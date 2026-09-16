@@ -14,10 +14,10 @@ use nexus_local_db::narrative_write;
 use nexus_narrative::{NarrativeGateway, WorldState};
 use sqlx::SqlitePool;
 
+use crate::error::db_err;
 use crate::error::{local_db_err, CoreError, CoreResult};
 use crate::principal::Principal;
 use crate::service::CoreService;
-use crate::error::db_err;
 use crate::CoreAccess;
 
 /// `CoreError::Forbidden.resource` marker for a World hard-delete blocked by

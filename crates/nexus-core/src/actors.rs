@@ -47,9 +47,9 @@ use sqlx::SqlitePool;
 
 use crate::actor_knowledge::ActorKnowledgePage;
 use crate::error::{actor_db_err, db_err, CoreError, CoreResult};
-use sqlx::Row;
 use crate::principal::Principal;
 use crate::service::CoreService;
+use sqlx::Row;
 
 /// Wire-mapping failure carrier: the daemon adapter re-sends the retained
 /// `CHARACTER_WIRE_INVALID` internal code from this exact category prefix.
@@ -181,9 +181,7 @@ pub(crate) fn nexus_character_from_record(
     )
 }
 
-fn binding_wire_from_record(
-    record: &ActorWorldBindingRecord,
-) -> CoreResult<DetailBindingWire> {
+fn binding_wire_from_record(record: &ActorWorldBindingRecord) -> CoreResult<DetailBindingWire> {
     build_wire(
         DetailBindingWire::builder()
             .schema_version(1u64)
@@ -252,13 +250,8 @@ impl CoreService {
         self.verify_principal(principal)?;
         let actor = admit_actor_token(principal.creator_id(), request.actor_ref)?;
         let viewpoint = admit_viewpoint(request.viewpoint)?;
-        require_admitted_ownership(
-            &self.inner.pool,
-            principal.creator_id(),
-            &actor,
-            &viewpoint,
-        )
-        .await?;
+        require_admitted_ownership(&self.inner.pool, principal.creator_id(), &actor, &viewpoint)
+            .await?;
         Ok(actor)
     }
 
@@ -292,9 +285,7 @@ impl CoreService {
     ) -> CoreResult<crate::actor_fence::ActorActivityLease> {
         self.verify_principal(principal)?;
         let Some(character_id) = actor.character_id() else {
-            return Err(invalid_input(
-                "activity leases fence Character actors only",
-            ));
+            return Err(invalid_input("activity leases fence Character actors only"));
         };
         let pool = &self.inner.pool;
         // Owner-check before allocating a fence (no fence state leaks existence).
@@ -502,17 +493,15 @@ pub(crate) async fn require_active_owned_world(
     creator_id: &str,
     world_id: &str,
 ) -> CoreResult<()> {
-    let row = sqlx::query(
-        "SELECT owner_creator_id, status FROM narrative_worlds WHERE world_id = ?",
-    )
-    .bind(world_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| db_err(&e))?;
+    let row =
+        sqlx::query("SELECT owner_creator_id, status FROM narrative_worlds WHERE world_id = ?")
+            .bind(world_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| db_err(&e))?;
     match row {
         Some(stored) => {
-            let owner: String =
-                stored.try_get("owner_creator_id").map_err(|e| db_err(&e))?;
+            let owner: String = stored.try_get("owner_creator_id").map_err(|e| db_err(&e))?;
             let status: String = stored.try_get("status").map_err(|e| db_err(&e))?;
             if owner == creator_id && status == "active" {
                 Ok(())
@@ -677,8 +666,8 @@ impl CoreService {
         character_id: String,
     ) -> CoreResult<CharacterDetail> {
         self.verify_principal(principal)?;
-        let row = require_character_row(&self.inner.pool, principal.creator_id(), &character_id)
-            .await?;
+        let row =
+            require_character_row(&self.inner.pool, principal.creator_id(), &character_id).await?;
         Ok(CharacterDetail::builder()
             .character(nexus_character_from_record(&row)?)
             .try_into()
@@ -906,14 +895,9 @@ impl CoreService {
         character_id: &str,
         binding_id: &str,
     ) -> CoreResult<Option<ActorWorldBindingRecord>> {
-        nexus_local_db::get_actor_world_binding(
-            &self.inner.pool,
-            owner,
-            character_id,
-            binding_id,
-        )
-        .await
-        .map_err(actor_db_err)
+        nexus_local_db::get_actor_world_binding(&self.inner.pool, owner, character_id, binding_id)
+            .await
+            .map_err(actor_db_err)
     }
 }
 
@@ -929,7 +913,6 @@ fn require_write_access(service: &CoreService, what: &str) -> CoreResult<()> {
 fn optional_str(value: Option<&impl std::ops::Deref<Target = String>>) -> Option<&str> {
     value.map(|s| s.as_str())
 }
-
 
 /// Offset-backed page meta (retained `v1:` cursor convention).
 pub(crate) fn offset_page_meta(fetched: usize, limit: u32, offset: u32) -> (Option<String>, bool) {

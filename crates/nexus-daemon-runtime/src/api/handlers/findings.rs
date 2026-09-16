@@ -8,7 +8,6 @@
 #![allow(clippy::missing_errors_doc)]
 
 use crate::api::errors::NexusApiError;
-use nexus_core::execution::schedules::stale_findings::{DEFAULT_STALE_THRESHOLD_SECS, ENV_STALE_THRESHOLD_SECS};
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -16,6 +15,9 @@ use axum::Json;
 use nexus_contracts::{
     BatchUpdateFindingsRequest, BatchUpdateFindingsResponse, FindingDetailResponse, PaginationInfo,
     UpdateFindingRequest,
+};
+use nexus_core::execution::schedules::stale_findings::{
+    DEFAULT_STALE_THRESHOLD_SECS, ENV_STALE_THRESHOLD_SECS,
 };
 use serde::{Deserialize, Serialize};
 
@@ -126,7 +128,11 @@ fn update_finding_request_into_core(
                 code: "invalid_input".into(),
                 message: format!(
                     "invalid rule_suggestion: expected a string, null, or omission, got {}",
-                    if other.is_null() { "null" } else { "a non-string JSON value" }
+                    if other.is_null() {
+                        "null"
+                    } else {
+                        "a non-string JSON value"
+                    }
                 ),
             });
         }
@@ -183,15 +189,17 @@ pub struct ListFindingsResponse {
 /// `CORE_ERROR` shape.
 pub(crate) fn findings_error(error: nexus_core::CoreError) -> NexusApiError {
     match error {
-        nexus_core::CoreError::InvalidInput { field, reason } => {
-            NexusApiError::BadRequest { code: field, message: reason }
-        }
+        nexus_core::CoreError::InvalidInput { field, reason } => NexusApiError::BadRequest {
+            code: field,
+            message: reason,
+        },
         nexus_core::CoreError::NotFound { resource } => NexusApiError::NotFound(resource),
         nexus_core::CoreError::Internal { category } => match category.split_once(": ") {
-            Some((code, message))
-                if matches!(code, "DATABASE_ERROR" | "FINDING_CREATE_FAILED") =>
-            {
-                NexusApiError::Internal { code: code.to_owned(), message: message.to_owned() }
+            Some((code, message)) if matches!(code, "DATABASE_ERROR" | "FINDING_CREATE_FAILED") => {
+                NexusApiError::Internal {
+                    code: code.to_owned(),
+                    message: message.to_owned(),
+                }
             }
             // Work-lookup storage failures ride the core `local_db_err`
             // lowercase carrier (`database_error: …`); the legacy surface
@@ -279,7 +287,10 @@ pub async fn get_finding_creator_scoped_handler(
 ) -> Result<Json<FindingApiDto>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let f = core.get_finding(&principal, finding_id).await.map_err(findings_error)?;
+    let f = core
+        .get_finding(&principal, finding_id)
+        .await
+        .map_err(findings_error)?;
     Ok(Json(f.into()))
 }
 
@@ -301,7 +312,9 @@ pub async fn update_finding_handler(
     let principal = core.active_principal().await?;
     // Work-ownership precheck stays on the `{work_id}` route; the core update
     // itself is creator-scoped.
-    core.get_work(&principal, work_id).await.map_err(findings_error)?;
+    core.get_work(&principal, work_id)
+        .await
+        .map_err(findings_error)?;
     let update = update_finding_request_into_core(body)?;
     let f = core
         .update_finding(&principal, finding_id, update)
@@ -333,7 +346,10 @@ pub async fn batch_update_findings_handler(
             message: format!("invalid request body: {e}"),
         })?;
 
-    let response = core.batch_update_findings(&principal, body).await.map_err(findings_error)?;
+    let response = core
+        .batch_update_findings(&principal, body)
+        .await
+        .map_err(findings_error)?;
     Ok(Json(response))
 }
 
@@ -380,8 +396,12 @@ pub async fn delete_finding_handler(
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
     // Work-ownership precheck stays on the `{work_id}` route.
-    core.get_work(&principal, work_id).await.map_err(findings_error)?;
-    core.delete_finding(&principal, finding_id).await.map_err(findings_error)?;
+    core.get_work(&principal, work_id)
+        .await
+        .map_err(findings_error)?;
+    core.delete_finding(&principal, finding_id)
+        .await
+        .map_err(findings_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -516,7 +536,11 @@ pub async fn prune_findings_handler(
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
     let outcome = core
-        .prune_findings(&principal, query.older_than_days, query.dry_run.unwrap_or(false))
+        .prune_findings(
+            &principal,
+            query.older_than_days,
+            query.dry_run.unwrap_or(false),
+        )
         .await
         .map_err(findings_error)?;
     Ok(Json(PruneFindingsResponse {

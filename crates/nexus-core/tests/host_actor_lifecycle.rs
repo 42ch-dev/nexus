@@ -8,13 +8,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use nexus_contracts::{ProviderCall, ProviderEventBatch, ProviderReply};
 use nexus_core::{
-    AdmittedActor, ActorSessionKey, ActorSessionRegistry, ActorViewpoint, CoreActorAdmission,
-    CoreAccess, CoreError, CoreOpenOptions, CoreService, HostHandle,
+    ActorSessionKey, ActorSessionRegistry, ActorViewpoint, AdmittedActor, CoreAccess,
+    CoreActorAdmission, CoreError, CoreOpenOptions, CoreService, HostHandle,
 };
 use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
 use nexus_local_db::{ensure_creator_row, CreateCharacterParams};
-use nexus_contracts::{ProviderCall, ProviderEventBatch, ProviderReply};
 use nexus_provider_ports::{ProviderPort, ProviderResult};
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -42,9 +42,7 @@ async fn seed_env_as(creator: &str) -> Env {
     let nexus_home = user_home.join(".nexus42");
     std::fs::create_dir_all(&nexus_home).unwrap();
     std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
-        &user_home,
-        creator,
-        "default",
+        &user_home, creator, "default",
     ))
     .unwrap();
     std::fs::write(
@@ -210,23 +208,27 @@ async fn stale_actor_and_journal_failure_never_redispatch() {
     let ctx = admit_character(&core, &principal, &env).await;
     let key = registry_key(handle.actor_sessions(), &ctx, &env.user_home);
     let session_id = Uuid::new_v4();
-    handle
-        .actor_sessions()
-        .insert_indexed_entry(key, ctx, nexus_agent_host::HostSessionId(session_id));
+    handle.actor_sessions().insert_indexed_entry(
+        key,
+        ctx,
+        nexus_agent_host::HostSessionId(session_id),
+    );
 
     // Material transition: bump the stored epoch behind the registry.
     {
         let pool = plain_pool(&env).await;
-        sqlx::query("UPDATE characters SET lifecycle_epoch = lifecycle_epoch + 1 WHERE character_id = ?1")
-            .bind(&env.character_id)
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "UPDATE characters SET lifecycle_epoch = lifecycle_epoch + 1 WHERE character_id = ?1",
+        )
+        .bind(&env.character_id)
+        .execute(&pool)
+        .await
+        .unwrap();
     }
 
-    let request = serde_json::from_value::<nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest>(
-        serde_json::json!({ "kind": "prompt", "content": "hello" }),
-    )
+    let request = serde_json::from_value::<
+        nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest,
+    >(serde_json::json!({ "kind": "prompt", "content": "hello" }))
     .unwrap();
     let err = handle
         .execute(&principal, session_id.to_string(), request)
@@ -267,7 +269,10 @@ async fn stale_actor_and_journal_failure_never_redispatch() {
         .await
         .unwrap()
         .expect("the journaled op stays queryable after restart");
-    assert_eq!(operation.status, nexus_contracts::CoreProviderOperationStatus::Interrupted);
+    assert_eq!(
+        operation.status,
+        nexus_contracts::CoreProviderOperationStatus::Interrupted
+    );
     assert_eq!(
         port.call_count(),
         0,
@@ -314,16 +319,17 @@ async fn host_authority_admits_only_verified_principals() {
     // creator identity, so verify_principal must reject it.
     let foreign = seed_env_as("ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").await;
     let (_, foreign_principal) = open_core(&foreign).await;
-    let request = serde_json::from_value::<nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest>(
-        serde_json::json!({ "kind": "prompt", "content": "hello" }),
-    )
+    let request = serde_json::from_value::<
+        nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest,
+    >(serde_json::json!({ "kind": "prompt", "content": "hello" }))
     .unwrap();
     let mut denials = Vec::new();
     denials.push(
         handle
-            .create_session(&foreign_principal, serde_json::from_value(
-                serde_json::json!({ "provider_id": "mock-acp" }),
-            ).unwrap())
+            .create_session(
+                &foreign_principal,
+                serde_json::from_value(serde_json::json!({ "provider_id": "mock-acp" })).unwrap(),
+            )
             .await
             .unwrap_err(),
     );
@@ -335,9 +341,10 @@ async fn host_authority_admits_only_verified_principals() {
     );
     denials.push(
         handle
-            .query(&foreign_principal, serde_json::from_value(
-                serde_json::json!({ "query": "list_sessions" }),
-            ).unwrap())
+            .query(
+                &foreign_principal,
+                serde_json::from_value(serde_json::json!({ "query": "list_sessions" })).unwrap(),
+            )
             .await
             .unwrap_err(),
     );
@@ -369,9 +376,9 @@ async fn host_authority_admits_only_verified_principals() {
         ),
     )
     .unwrap();
-    let request = serde_json::from_value::<nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest>(
-        serde_json::json!({ "kind": "prompt", "content": "hello" }),
-    )
+    let request = serde_json::from_value::<
+        nexus_contracts::generated::daemon_api::agent_host::ExecuteOperationRequest,
+    >(serde_json::json!({ "kind": "prompt", "content": "hello" }))
     .unwrap();
     let err = handle
         .execute(&principal, Uuid::new_v4().to_string(), request)
@@ -393,9 +400,10 @@ async fn host_authority_admits_only_verified_principals() {
     )
     .unwrap();
     let list = handle
-        .query(&principal, serde_json::from_value(
-            serde_json::json!({ "query": "list_sessions" }),
-        ).unwrap())
+        .query(
+            &principal,
+            serde_json::from_value(serde_json::json!({ "query": "list_sessions" })).unwrap(),
+        )
         .await
         .unwrap();
     assert!(
@@ -449,5 +457,4 @@ async fn journal_status_update_preserves_stored_identity() {
     assert_eq!(row.1, "sess-i", "stored session_id is write-once");
     assert_eq!(row.2, "mock-acp", "stored provider_id is write-once");
     assert_eq!(row.3, "cancelled", "the status update still lands");
-
 }

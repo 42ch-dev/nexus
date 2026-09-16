@@ -25,8 +25,8 @@
 //! manually write the converge-arrivals context key.**
 
 use graph_flow::{Context, NextAction, Task};
-use nexus_preset::manifest::{ConvergeConfig, ConvergeStrategy, NextTarget};
 use nexus_orchestration::tasks::StateCompositeTask;
+use nexus_preset::manifest::{ConvergeConfig, ConvergeStrategy, NextTarget};
 use std::collections::HashSet;
 
 /// Build a converge task with the given strategy and no exit condition.
@@ -279,21 +279,19 @@ async fn converge_no_predecessors_skips_gate() {
 #[tokio::test]
 async fn converge_non_converge_state_skips_gate() {
     // A state without converge config should not be affected.
-    let task = StateCompositeTask::from_manifest(
-        &nexus_preset::manifest::StateDefinition {
-            id: "normal_state".to_string(),
-            description: None,
-            enter: vec![],
-            exit_when: None,
-            next: Some(NextTarget::Linear("done".to_string())),
-            terminal: false,
-            context_update: None,
-            merge: None,
-            timeout_ms: None,
-            on_timeout: None,
-            converge: None,
-        },
-    );
+    let task = StateCompositeTask::from_manifest(&nexus_preset::manifest::StateDefinition {
+        id: "normal_state".to_string(),
+        description: None,
+        enter: vec![],
+        exit_when: None,
+        next: Some(NextTarget::Linear("done".to_string())),
+        terminal: false,
+        context_update: None,
+        merge: None,
+        timeout_ms: None,
+        on_timeout: None,
+        converge: None,
+    });
     let ctx = Context::new();
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
@@ -302,4 +300,3 @@ async fn converge_non_converge_state_skips_gate() {
         result.next_action
     );
 }
-

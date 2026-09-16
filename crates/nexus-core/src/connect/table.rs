@@ -18,14 +18,16 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::execution::peer_tools::{PeerInvokeError, PeerInvokeResult, PeerResponder, PeerToolRegistry};
+use crate::execution::peer_tools::{
+    PeerInvokeError, PeerInvokeResult, PeerResponder, PeerToolRegistry,
+};
 use nexus_orchestration::CapabilityRegistryHolder;
-use spoke_connect::remote::ConnectResponder;
 use nexus_spoke_adapter::{SpokeRejectCode, SpokeResult};
+use spoke_connect::remote::ConnectResponder;
 
 pub use crate::execution::peer_tools::{
-    AdmissionOutcome, CollisionPolicy, PeerSessionTools, PeerToolEntry, PeerToolsConfig,
-    ToolRefusal, peer_tool_registry,
+    peer_tool_registry, AdmissionOutcome, CollisionPolicy, PeerSessionTools, PeerToolEntry,
+    PeerToolsConfig, ToolRefusal,
 };
 
 /// The core registry type, under the daemon's historical name.

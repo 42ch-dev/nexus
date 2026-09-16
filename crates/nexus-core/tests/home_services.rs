@@ -102,7 +102,10 @@ async fn uninitialized_home_can_register_and_select_without_engine() {
 
     // Configuration reflects the selected creator, pre-workspace.
     let config = svc.configuration().await.expect("configuration");
-    assert_eq!(config.active_creator_id.as_deref(), Some(creator_id.as_str()));
+    assert_eq!(
+        config.active_creator_id.as_deref(),
+        Some(creator_id.as_str())
+    );
     assert_eq!(config.active_workspace_slug.as_deref(), Some("default"));
 
     // Select the chosen workspace: initialize only it.
@@ -118,29 +121,24 @@ async fn uninitialized_home_can_register_and_select_without_engine() {
     assert_eq!(selected.workspace_slug, "default");
 
     // Only the chosen workspace was initialized: guarded state DB + creators row.
-    let db_path =
-        nexus_home_layout::workspace_state_db_path(&user_home, &creator_id, "default");
+    let db_path = nexus_home_layout::workspace_state_db_path(&user_home, &creator_id, "default");
     assert!(db_path.exists());
     let ro = nexus_local_db::open_pool_read_only(&db_path).await.unwrap();
     let creators: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM creators")
         .fetch_one(&ro)
         .await
         .unwrap();
-    let creator_rows: (String,) =
-        sqlx::query_as("SELECT creator_id FROM creators LIMIT 1")
-            .fetch_one(&ro)
-            .await
-            .unwrap();
+    let creator_rows: (String,) = sqlx::query_as("SELECT creator_id FROM creators LIMIT 1")
+        .fetch_one(&ro)
+        .await
+        .unwrap();
     ro.close().await;
     assert_eq!(creators, 1);
     assert_eq!(creator_rows.0, creator_id);
 
     // No provider/engine started: the engine lock file for this DB is absent.
-    let engine_lock = nexus_home_layout::workspace_state_db_path(
-        &user_home,
-        &creator_id,
-        "default",
-    );
+    let engine_lock =
+        nexus_home_layout::workspace_state_db_path(&user_home, &creator_id, "default");
     let engine_lock = std::path::PathBuf::from(format!("{}.engine.lock", engine_lock.display()));
     assert!(!engine_lock.exists());
 
@@ -302,8 +300,7 @@ async fn outbox_status_and_resolve_operate_on_the_workspace_outbox() {
 
     // Seed two stuck entries directly (fixture-level, mirroring a real
     // conflicted/failed queue left behind by an interrupted push).
-    let db_path =
-        nexus_home_layout::workspace_state_db_path(&user_home, &creator, "default");
+    let db_path = nexus_home_layout::workspace_state_db_path(&user_home, &creator, "default");
     let pool = nexus_cloud_sync::pool::OutboxPool::new(
         &db_path,
         nexus_cloud_sync::pool::DEFAULT_POOL_SIZE,
@@ -401,7 +398,6 @@ async fn outbox_status_and_resolve_operate_on_the_workspace_outbox() {
     assert!(query.creator_id.is_none());
 }
 
-
 /// Concurrent double-registration of the same display name: the loser of the
 /// mint race (TOCTOU unique violation) must surface the byte-exact collision
 /// error — never an internal storage failure — and the store must end with
@@ -459,7 +455,9 @@ async fn concurrent_same_name_registration_surfaces_collision_not_internal_failu
             "registrations must converge to a single identity, got {winner_ids:?}"
         );
         let global_db = tmp.path().join(".nexus42/state.db");
-        let ro = nexus_local_db::open_pool_read_only(&global_db).await.unwrap();
+        let ro = nexus_local_db::open_pool_read_only(&global_db)
+            .await
+            .unwrap();
         let rows = nexus_local_db::list_local_identities(&ro).await.unwrap();
         ro.close().await;
         let persistent_named = rows
@@ -468,7 +466,10 @@ async fn concurrent_same_name_registration_surfaces_collision_not_internal_failu
                 r.identity_type == "persistent" && r.display_name.as_deref() == Some(display)
             })
             .count();
-        assert_eq!(persistent_named, 1, "exactly one persistent row for {display}");
+        assert_eq!(
+            persistent_named, 1,
+            "exactly one persistent row for {display}"
+        );
     }
 }
 
@@ -571,7 +572,10 @@ async fn stale_principal_after_workspace_and_identity_switch_recovers_on_reopen(
     .await
     .expect("select second");
     assert!(
-        matches!(probe_changes(&core, &principal).await, Err(CoreError::AuthRequired)),
+        matches!(
+            probe_changes(&core, &principal).await,
+            Err(CoreError::AuthRequired)
+        ),
         "workspace switch must invalidate the old principal"
     );
     core.close().await.expect("close");
@@ -592,7 +596,10 @@ async fn stale_principal_after_workspace_and_identity_switch_recovers_on_reopen(
     // Identity switch: the old principal is AuthRequired again.
     let _creator_b = register_named(&svc, "Switch Successor").await;
     assert!(
-        matches!(probe_changes(&core, &principal).await, Err(CoreError::AuthRequired)),
+        matches!(
+            probe_changes(&core, &principal).await,
+            Err(CoreError::AuthRequired)
+        ),
         "identity switch must invalidate the old principal"
     );
     core.close().await.expect("close");
@@ -671,9 +678,15 @@ async fn storage_status_never_initializes_and_reports_faults_honestly() {
         .expect("create empty store");
     empty.close().await;
     let status = svc.storage_status().await.expect("empty store status");
-    assert!(!status.healthy, "store without schema must not read healthy");
+    assert!(
+        !status.healthy,
+        "store without schema must not read healthy"
+    );
     assert!(status.health_error.is_some(), "fault must carry a reason");
-    assert!(status.versions.is_none(), "unmigrated store has no versions");
+    assert!(
+        status.versions.is_none(),
+        "unmigrated store has no versions"
+    );
 
     // A corrupt (non-sqlite) file is a hard diagnostic error, not a faked
     // healthy/empty report.

@@ -423,14 +423,13 @@ pub async fn accept_compute_run(
 
     // Every delta target must resolve inside the run's world — a foreign
     // target rejects the whole accept (full rollback on drop).
-    let state_delta_count =
-        nexus_orchestration::state_delta::apply_state_delta_in_tx(
-            &mut tx,
-            &run.world_id,
-            &output.state_delta,
-        )
-        .await
-        .map_err(map_delta_error)?;
+    let state_delta_count = nexus_orchestration::state_delta::apply_state_delta_in_tx(
+        &mut tx,
+        &run.world_id,
+        &output.state_delta,
+    )
+    .await
+    .map_err(map_delta_error)?;
 
     let new_entries_created =
         create_key_blocks_in_tx(&mut tx, &run.world_id, &output.new_key_blocks).await?;
@@ -832,7 +831,8 @@ fn select_event_indices(
 /// returning the ORIGINAL error, and replacing it with a storage error would
 /// hide the real cause.
 async fn persist_failure(pool: &sqlx::SqlitePool, run_id: &str, error: Value) {
-    let payload = serde_json::to_string(&error).unwrap_or_else(|_| r#"{"code":"internal"}"#.to_string());
+    let payload =
+        serde_json::to_string(&error).unwrap_or_else(|_| r#"{"code":"internal"}"#.to_string());
     if let Err(db_err) = compute_runs::set_run_failed(pool, run_id, &payload).await {
         tracing::error!(
             run_id = %run_id,

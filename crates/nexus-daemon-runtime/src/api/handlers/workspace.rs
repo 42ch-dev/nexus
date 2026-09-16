@@ -3,10 +3,10 @@
 //! Workspace handlers
 
 use crate::api::errors::NexusApiError;
-use nexus_core::execution::session::{SessionError, WorkspaceSessionManager};
 use crate::workspace::WorkspaceState;
 use axum::extract::State;
 use axum::Json;
+use nexus_core::execution::session::{SessionError, WorkspaceSessionManager};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 

@@ -320,13 +320,11 @@ impl CharacterTransitionLease {
     /// comparing against the pre-commit value.
     #[must_use]
     pub fn epoch(&self) -> i64 {
-        self.epoch
-            .load(std::sync::atomic::Ordering::SeqCst)
+        self.epoch.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     pub(crate) fn set_epoch(&self, epoch: i64) {
-        self.epoch
-            .store(epoch, std::sync::atomic::Ordering::SeqCst);
+        self.epoch.store(epoch, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -339,4 +337,3 @@ impl std::fmt::Debug for CharacterTransitionLease {
             .finish_non_exhaustive()
     }
 }
-

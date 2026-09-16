@@ -79,101 +79,107 @@ fn generate_fork_branch_id() -> String {
 }
 
 #[async_trait]
-impl Capability for ForkCreate { fn name(&self) -> &'static str {
-    "nexus.fork.create"
-} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::NEXUS_FORK_CREATE_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
-    r#"{"type":"object","properties":{"branch_id":{"type":"string"},"parent_branch_id":{"type":"string"},"forked_from_event_id":{"type":"string"},"created_at":{"type":"string","format":"date-time"}},"required":["branch_id","parent_branch_id","forked_from_event_id","created_at"],"additionalProperties":false}"#
-}
-
-async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-    let parsed: ForkCreateInput = serde_json::from_value(input)
-        .map_err(|e| CapabilityError::InputInvalid(format!("fork.create input: {e}")))?;
-
-    let pool = self
-        .pool
-        .as_ref()
-        .ok_or(CapabilityError::WorkerUnavailable)?;
-
-    tracing::info!(
-        world_id = %parsed.world_id,
-        parent_branch = %parsed.parent_branch_id,
-        "fork.create admitted"
-    );
-
-    // Admission gate: creator must own the world.
-    ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
-
-    // Validate the fork point event exists and belongs to the parent branch.
-    // SAFETY: SELECT against known narrative_timeline_events schema.
-    let event_ok: Option<String> = sqlx::query_scalar(
-        "SELECT timeline_event_id FROM narrative_timeline_events \
-         WHERE timeline_event_id = ? AND world_id = ? AND branch_id = ?",
-    )
-    .bind(&parsed.forked_from_event_id)
-    .bind(&parsed.world_id)
-    .bind(&parsed.parent_branch_id)
-    .fetch_optional(&**pool)
-    .await
-    .map_err(|e| CapabilityError::Internal(format!("fork point check: {e}")))?;
-    if event_ok.is_none() {
-        return Err(CapabilityError::InputInvalid(format!(
-            "fork point event '{}' not found on branch '{}' in world '{}'",
-            parsed.forked_from_event_id, parsed.parent_branch_id, parsed.world_id
-        )));
+impl Capability for ForkCreate {
+    fn name(&self) -> &'static str {
+        "nexus.fork.create"
+    }
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::NEXUS_FORK_CREATE_INPUT_SCHEMA
+    }
+    fn output_schema(&self) -> &'static str {
+        r#"{"type":"object","properties":{"branch_id":{"type":"string"},"parent_branch_id":{"type":"string"},"forked_from_event_id":{"type":"string"},"created_at":{"type":"string","format":"date-time"}},"required":["branch_id","parent_branch_id","forked_from_event_id","created_at"],"additionalProperties":false}"#
     }
 
-    // Allocate the new branch id.
-    let new_branch_id = generate_fork_branch_id();
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        let parsed: ForkCreateInput = serde_json::from_value(input)
+            .map_err(|e| CapabilityError::InputInvalid(format!("fork.create input: {e}")))?;
 
-    // Materialize the fork by appending a `fork_created` marker event on the
-    // new branch at sequence_no 0. This establishes the branch in storage
-    // (lazy forks are otherwise invisible until the first real event).
-    let label = parsed.label.clone().unwrap_or_else(|| "fork".to_string());
-    let marker_summary = format!(
-        "forked from {}/{} ({label})",
-        parsed.parent_branch_id, parsed.forked_from_event_id
-    );
-    // Carrier B (plan 2026-08-12-v1.162-p1-fork-backend-foundation): the
-    // marker is written `status=canon` with structured lineage in
-    // `extensions_nexus_json` (`fork_lineage`). Canon status reflects that
-    // a fork creation is a committed structural fact and makes the marker
-    // findable in the canon-default timeline read; lineage surfaces via
-    // `TimelineEventInfo.extensions` on the existing timeline-events route.
-    let lineage_json = json!({
-        "fork_lineage": {
-            "parent_branch_id": &parsed.parent_branch_id,
-            "forked_from_event_id": &parsed.forked_from_event_id,
-            "label": &label,
+        let pool = self
+            .pool
+            .as_ref()
+            .ok_or(CapabilityError::WorkerUnavailable)?;
+
+        tracing::info!(
+            world_id = %parsed.world_id,
+            parent_branch = %parsed.parent_branch_id,
+            "fork.create admitted"
+        );
+
+        // Admission gate: creator must own the world.
+        ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
+
+        // Validate the fork point event exists and belongs to the parent branch.
+        // SAFETY: SELECT against known narrative_timeline_events schema.
+        let event_ok: Option<String> = sqlx::query_scalar(
+            "SELECT timeline_event_id FROM narrative_timeline_events \
+         WHERE timeline_event_id = ? AND world_id = ? AND branch_id = ?",
+        )
+        .bind(&parsed.forked_from_event_id)
+        .bind(&parsed.world_id)
+        .bind(&parsed.parent_branch_id)
+        .fetch_optional(&**pool)
+        .await
+        .map_err(|e| CapabilityError::Internal(format!("fork point check: {e}")))?;
+        if event_ok.is_none() {
+            return Err(CapabilityError::InputInvalid(format!(
+                "fork point event '{}' not found on branch '{}' in world '{}'",
+                parsed.forked_from_event_id, parsed.parent_branch_id, parsed.world_id
+            )));
         }
-    })
-    .to_string();
-    let marker = nexus_local_db::narrative_write::append_event_canon_with_extensions(
-        pool,
-        &parsed.world_id,
-        &new_branch_id,
-        "fork_created",
-        Some(&label),
-        Some(&marker_summary),
-        &lineage_json,
-    )
-    .await
-    .map_err(|e| CapabilityError::Internal(format!("fork marker append: {e}")))?;
 
-    tracing::info!(
-        world_id = %parsed.world_id,
-        new_branch = %new_branch_id,
-        parent_branch = %parsed.parent_branch_id,
-        marker_event = %marker.event_id,
-        "fork.create: local timeline fork established"
-    );
+        // Allocate the new branch id.
+        let new_branch_id = generate_fork_branch_id();
 
-    Ok(json!({
-        "branch_id": new_branch_id,
-        "parent_branch_id": parsed.parent_branch_id,
-        "forked_from_event_id": parsed.forked_from_event_id,
-        "created_at": marker.created_at,
-    }))
-} }
+        // Materialize the fork by appending a `fork_created` marker event on the
+        // new branch at sequence_no 0. This establishes the branch in storage
+        // (lazy forks are otherwise invisible until the first real event).
+        let label = parsed.label.clone().unwrap_or_else(|| "fork".to_string());
+        let marker_summary = format!(
+            "forked from {}/{} ({label})",
+            parsed.parent_branch_id, parsed.forked_from_event_id
+        );
+        // Carrier B (plan 2026-08-12-v1.162-p1-fork-backend-foundation): the
+        // marker is written `status=canon` with structured lineage in
+        // `extensions_nexus_json` (`fork_lineage`). Canon status reflects that
+        // a fork creation is a committed structural fact and makes the marker
+        // findable in the canon-default timeline read; lineage surfaces via
+        // `TimelineEventInfo.extensions` on the existing timeline-events route.
+        let lineage_json = json!({
+            "fork_lineage": {
+                "parent_branch_id": &parsed.parent_branch_id,
+                "forked_from_event_id": &parsed.forked_from_event_id,
+                "label": &label,
+            }
+        })
+        .to_string();
+        let marker = nexus_local_db::narrative_write::append_event_canon_with_extensions(
+            pool,
+            &parsed.world_id,
+            &new_branch_id,
+            "fork_created",
+            Some(&label),
+            Some(&marker_summary),
+            &lineage_json,
+        )
+        .await
+        .map_err(|e| CapabilityError::Internal(format!("fork marker append: {e}")))?;
+
+        tracing::info!(
+            world_id = %parsed.world_id,
+            new_branch = %new_branch_id,
+            parent_branch = %parsed.parent_branch_id,
+            marker_event = %marker.event_id,
+            "fork.create: local timeline fork established"
+        );
+
+        Ok(json!({
+            "branch_id": new_branch_id,
+            "parent_branch_id": parsed.parent_branch_id,
+            "forked_from_event_id": parsed.forked_from_event_id,
+            "created_at": marker.created_at,
+        }))
+    }
+}
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
 

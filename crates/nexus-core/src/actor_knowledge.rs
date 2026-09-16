@@ -8,13 +8,6 @@
 //! themselves; invalid ownership or any failed component query returns an
 //! error and no partial page.
 
-use nexus_knowledge::world_kb::knowledge_entry::{
-    stored_created_at_order_millis, KnowledgeEntryRecord, KnowledgeOwnerRef,
-};
-use nexus_knowledge::world_kb::store::{KbStore, KbStoreError};
-use nexus_local_db::kb_store::SqliteKbStore;
-use sqlx::Row;
-use sqlx::SqlitePool;
 use crate::actors::{
     map_wire_one, require_active_binding, require_active_owned_character,
     require_active_owned_world, AdmittedActor,
@@ -22,6 +15,13 @@ use crate::actors::{
 use crate::error::{actor_db_err, actor_insert_db_err, db_err, CoreError, CoreResult};
 use crate::principal::Principal;
 use crate::service::CoreService;
+use nexus_knowledge::world_kb::knowledge_entry::{
+    stored_created_at_order_millis, KnowledgeEntryRecord, KnowledgeOwnerRef,
+};
+use nexus_knowledge::world_kb::store::{KbStore, KbStoreError};
+use nexus_local_db::kb_store::SqliteKbStore;
+use sqlx::Row;
+use sqlx::SqlitePool;
 
 const DEFAULT_LIMIT: u32 = 50;
 const MAX_LIMIT: u32 = 100;
@@ -30,8 +30,7 @@ const CURSOR_SEP: char = '\u{1f}';
 
 /// Wire-mapping failure carrier prefixes the daemon adapter re-sends as the
 /// retained internal codes.
-pub const KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX: &str =
-    "actor_knowledge_view_component_failed";
+pub const KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX: &str = "actor_knowledge_view_component_failed";
 pub const KNOWLEDGE_WIRE_INVALID_PREFIX: &str = "actor_knowledge_wire_invalid";
 pub const KNOWLEDGE_INSERT_FAILED_PREFIX: &str = "actor_knowledge_insert_failed";
 
@@ -93,11 +92,8 @@ impl ActorKnowledgeViewService {
     pub fn resolve_limit(raw: Option<i64>) -> CoreResult<u32> {
         match raw {
             None => Ok(DEFAULT_LIMIT),
-            Some(n) if n > 0 && n <= i64::from(MAX_LIMIT) => {
-                u32::try_from(n).map_err(|_| {
-                    CoreError::ActorInput("limit is out of range".to_string())
-                })
-            }
+            Some(n) if n > 0 && n <= i64::from(MAX_LIMIT) => u32::try_from(n)
+                .map_err(|_| CoreError::ActorInput("limit is out of range".to_string())),
             Some(_) => Err(CoreError::ActorInput(format!(
                 "limit must be between 1 and {MAX_LIMIT}"
             ))),
@@ -110,15 +106,11 @@ impl ActorKnowledgeViewService {
     ///
     /// Returns [`CoreError::ActorInput`] when the token is present but not a
     /// `k2:` pair.
-    pub fn decode_cursor(
-        cursor: &Option<String>,
-    ) -> CoreResult<Option<(String, String)>> {
+    pub fn decode_cursor(cursor: &Option<String>) -> CoreResult<Option<(String, String)>> {
         match cursor {
             None => Ok(None),
             Some(raw) => {
-                let rest = raw
-                    .strip_prefix(CURSOR_PREFIX)
-                    .ok_or_else(invalid_cursor)?;
+                let rest = raw.strip_prefix(CURSOR_PREFIX).ok_or_else(invalid_cursor)?;
                 let parts: Vec<&str> = rest.split(CURSOR_SEP).collect();
                 if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
                     return Err(invalid_cursor());
@@ -148,14 +140,13 @@ impl ActorKnowledgeViewService {
     ) -> CoreResult<ActorKnowledgePage> {
         let mut keyed = Vec::with_capacity(items.len());
         for row in items {
-            let millis =
-                stored_created_at_order_millis(&row.created_at).map_err(timestamp_err)?;
+            let millis = stored_created_at_order_millis(&row.created_at).map_err(timestamp_err)?;
             keyed.push((millis, row.entry_id.clone(), row));
         }
         keyed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
         if let Some((created_at, entry_id)) = cursor {
-            let cursor_ms = stored_created_at_order_millis(&created_at)
-                .map_err(|_| invalid_cursor())?;
+            let cursor_ms =
+                stored_created_at_order_millis(&created_at).map_err(|_| invalid_cursor())?;
             keyed.retain(|(ms, id, _)| (*ms, id.as_str()) > (cursor_ms, entry_id.as_str()));
         }
         let limit_us = usize::try_from(limit).unwrap_or(usize::MAX);
@@ -289,16 +280,16 @@ impl ActorKnowledgeViewService {
 
         let mut seen_characters = std::collections::BTreeSet::new();
         for row in bindings {
-            let character_id: String = row
-                .try_get("character_id")
-                .map_err(|err| CoreError::Internal {
-                    category: format!("{KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX}: {err}"),
-                })?;
-            let binding_id: String = row.try_get("binding_id").map_err(|err| {
-                CoreError::Internal {
-                    category: format!("{KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX}: {err}"),
-                }
-            })?;
+            let character_id: String =
+                row.try_get("character_id")
+                    .map_err(|err| CoreError::Internal {
+                        category: format!("{KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX}: {err}"),
+                    })?;
+            let binding_id: String =
+                row.try_get("binding_id")
+                    .map_err(|err| CoreError::Internal {
+                        category: format!("{KNOWLEDGE_VIEW_COMPONENT_FAILED_PREFIX}: {err}"),
+                    })?;
             if seen_characters.insert(character_id.clone()) {
                 items.extend(
                     self.component(
@@ -387,11 +378,7 @@ impl ActorKnowledgeViewService {
     }
 
     /// Owned World with no status requirement (retained reads, durable §11.2).
-    pub async fn require_owned_world(
-        &self,
-        creator_id: &str,
-        world_id: &str,
-    ) -> CoreResult<()> {
+    pub async fn require_owned_world(&self, creator_id: &str, world_id: &str) -> CoreResult<()> {
         require_owned_world(&self.pool, creator_id, world_id).await
     }
 
@@ -446,9 +433,7 @@ pub(crate) async fn require_owned_world(
         .map_err(|e| db_err(&e))?;
     match row {
         Some(stored) => {
-            let owner: String = stored
-                .try_get("owner_creator_id")
-                .map_err(|e| db_err(&e))?;
+            let owner: String = stored.try_get("owner_creator_id").map_err(|e| db_err(&e))?;
             if owner == creator_id {
                 Ok(())
             } else {
@@ -486,13 +471,12 @@ pub(crate) async fn require_stored_binding_tuple(
     binding_id: &str,
     world_id: &str,
 ) -> CoreResult<()> {
-    let row = sqlx::query(
-        "SELECT character_id, world_id FROM actor_world_bindings WHERE binding_id = ?",
-    )
-    .bind(binding_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| db_err(&e))?;
+    let row =
+        sqlx::query("SELECT character_id, world_id FROM actor_world_bindings WHERE binding_id = ?")
+            .bind(binding_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| db_err(&e))?;
     match row {
         Some(stored) => {
             let stored_character: String =
@@ -665,11 +649,7 @@ impl CoreService {
                 KnowledgeEntryRecord::for_character(id, block_type, request.canonical_name.as_str())
             }
             KnowledgeOwnerRef::ActorWorldBinding(id) => {
-                KnowledgeEntryRecord::for_binding(
-                    id,
-                    block_type,
-                    request.canonical_name.as_str(),
-                )
+                KnowledgeEntryRecord::for_binding(id, block_type, request.canonical_name.as_str())
             }
         };
         record.creator_only = creator_only;
@@ -909,9 +889,9 @@ fn view_incomplete() -> CoreError {
 /// are plain `invalid_input`, everything else is the insert-failed carrier.
 fn kb_insert_err(err: KbStoreError) -> CoreError {
     match err {
-        KbStoreError::Duplicate { .. } | KbStoreError::Validation(_) | KbStoreError::ValidationLegacy(_) => {
-            CoreError::ActorInput(err.to_string())
-        }
+        KbStoreError::Duplicate { .. }
+        | KbStoreError::Validation(_)
+        | KbStoreError::ValidationLegacy(_) => CoreError::ActorInput(err.to_string()),
         other => CoreError::Internal {
             category: format!("{KNOWLEDGE_INSERT_FAILED_PREFIX}: {other}"),
         },
@@ -999,8 +979,7 @@ mod tests {
             "k2:ts\u{1f}id\u{1f}unexpected",
             "k2:ts\u{1f}id\u{1f}",
         ] {
-            let err = ActorKnowledgeViewService::decode_cursor(&Some(bad.into()))
-                .expect_err(bad);
+            let err = ActorKnowledgeViewService::decode_cursor(&Some(bad.into())).expect_err(bad);
             match err {
                 CoreError::ActorInput(_) => {}
                 other => panic!("unexpected {other:?}"),

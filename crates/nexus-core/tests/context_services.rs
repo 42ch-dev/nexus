@@ -7,12 +7,15 @@
 
 use nexus_contracts::daemon_api::inspector::moment_directive_request::MomentDirectiveRequest;
 use nexus_contracts::generated::daemon_api::inspector::moment_inspect_request::MomentInspectRequest;
-use nexus_core::{CoreAccess, CoreError, CoreOpenOptions, CoreService, LocalDirectiveStore, ReadOnlyDirectiveStore};
-use nexus_moment_context_assembly::directive::DirectiveStore;
+use nexus_core::{
+    CoreAccess, CoreError, CoreOpenOptions, CoreService, LocalDirectiveStore,
+    ReadOnlyDirectiveStore,
+};
 use nexus_local_db::writer_protocol::{init_engine_pool, GuardedPoolOptions};
 use nexus_local_db::{
     create_character_with_initial_binding, ensure_creator_row, CreateCharacterParams, WorkRecord,
 };
+use nexus_moment_context_assembly::directive::DirectiveStore;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
@@ -194,7 +197,12 @@ fn dto<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> T {
     serde_json::from_value(value).expect("wire-valid request DTO")
 }
 
-fn directive_request(action: &str, kind: &str, id: &str, body: Option<&str>) -> MomentDirectiveRequest {
+fn directive_request(
+    action: &str,
+    kind: &str,
+    id: &str,
+    body: Option<&str>,
+) -> MomentDirectiveRequest {
     dto(serde_json::json!({
         "action": action,
         "scope": { "kind": kind, "id": id },
@@ -269,7 +277,10 @@ async fn work_world_binding_rejects_cross_context() {
         .expect("show work scope");
     let shown = serde_json::to_string(&shown).unwrap();
     assert!(shown.contains(WORK_DIRECTIVE_BODY), "work wins: {shown}");
-    assert!(!shown.contains(WORLD_DIRECTIVE_BODY), "no world leak: {shown}");
+    assert!(
+        !shown.contains(WORLD_DIRECTIVE_BODY),
+        "no world leak: {shown}"
+    );
 
     // 3. Clearing the Work directive inherits the bound World's override.
     core.moment_directive(
@@ -286,7 +297,10 @@ async fn work_world_binding_rejects_cross_context() {
         .await
         .expect("show work scope after clear");
     let inherited = serde_json::to_string(&inherited).unwrap();
-    assert!(inherited.contains(WORLD_DIRECTIVE_BODY), "inherit: {inherited}");
+    assert!(
+        inherited.contains(WORLD_DIRECTIVE_BODY),
+        "inherit: {inherited}"
+    );
 
     // 4. The rejected cross-context pairing still rejects afterwards —
     //    precedence never routes World B's override into World A's assembly.
@@ -342,10 +356,7 @@ async fn inspect_and_directives_stay_owner_scoped() {
 
     // An owned World assembles a bounded inspector packet.
     let packet = core
-        .inspect_moment(
-            &principal,
-            dto(serde_json::json!({ "world_id": WORLD_A })),
-        )
+        .inspect_moment(&principal, dto(serde_json::json!({ "world_id": WORLD_A })))
         .await
         .expect("owned world assembly");
     let packet = serde_json::to_string(&packet).unwrap();
@@ -361,7 +372,10 @@ async fn inspect_and_directives_stay_owner_scoped() {
         )
         .await
         .expect_err("unowned scope show");
-    assert!(matches!(err, CoreError::ForbiddenReason { .. }), "got {err:?}");
+    assert!(
+        matches!(err, CoreError::ForbiddenReason { .. }),
+        "got {err:?}"
+    );
 }
 
 /// Read-only inspect invariant: with an active directive in scope, the packet
@@ -394,10 +408,7 @@ async fn inspect_is_read_only_and_never_renders_the_directive_body() {
         .await
         .expect("active directive row");
     let packet = core
-        .inspect_moment(
-            &principal,
-            dto(serde_json::json!({ "world_id": WORLD_A })),
-        )
+        .inspect_moment(&principal, dto(serde_json::json!({ "world_id": WORLD_A })))
         .await
         .expect("inspect owned world");
     let packet = serde_json::to_string(&packet).unwrap();

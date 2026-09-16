@@ -15,7 +15,9 @@ use nexus_contracts::generated::daemon_api::workspace::{
     SetActiveWorkspaceRequest, SetActiveWorkspaceResponse,
 };
 use nexus_core::CoreHomeService;
-use nexus_home_layout::{operational_workspace_dir, validate_creator_id_safe, workspace_state_db_path};
+use nexus_home_layout::{
+    operational_workspace_dir, validate_creator_id_safe, workspace_state_db_path,
+};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
@@ -57,7 +59,6 @@ const WORKSPACE_CACHE_TTL_SECS: u64 = 60;
 
 /// Cached workspace list with a timestamp.
 type WorkspaceCache = (std::time::Instant, Vec<NexusWorkspaceSummary>);
-
 
 /// Module-level workspace list cache.
 /// Stores unfiltered list + timestamp; invalidated on create/delete.
@@ -111,7 +112,6 @@ pub(crate) fn validate_slug(label: &str, value: &str) -> Result<(), NexusApiErro
     Ok(())
 }
 
-
 /// Read `creative_root` from operational `meta.json`.
 fn read_meta_creative_root(op_dir: &std::path::Path) -> Option<String> {
     let meta_path = op_dir.join("meta.json");
@@ -121,7 +121,6 @@ fn read_meta_creative_root(op_dir: &std::path::Path) -> Option<String> {
         .and_then(|v| v.as_str())
         .map(std::string::ToString::to_string)
 }
-
 
 /// Default creative root: `~/Documents/nexus/<creator_id>/<workspace_slug>`
 fn default_creative_root(creator_id: &str, workspace_slug: &str) -> Result<PathBuf, NexusApiError> {
@@ -249,8 +248,7 @@ pub async fn list_workspaces(
 
     let limit = query.limit.unwrap_or(50).clamp(1, MAX_LIMIT as i64) as usize;
 
-    let home = CoreHomeService::open(user_home_of(&state)?)
-        .map_err(NexusApiError::from)?;
+    let home = CoreHomeService::open(user_home_of(&state)?).map_err(NexusApiError::from)?;
     let all_items = match get_cached_workspaces() {
         Some(items) => items,
         None => {
@@ -378,9 +376,12 @@ pub async fn get_active_workspace(
     let home = CoreHomeService::open(user_home_of(&state)?)?;
     let config = home.configuration().await?;
 
-    let creator_id = config.active_creator_id.ok_or(NexusApiError::Uninitialized)?;
-    let workspace_slug =
-        config.active_workspace_slug.unwrap_or_else(|| "default".to_string());
+    let creator_id = config
+        .active_creator_id
+        .ok_or(NexusApiError::Uninitialized)?;
+    let workspace_slug = config
+        .active_workspace_slug
+        .unwrap_or_else(|| "default".to_string());
 
     let user_home = user_home_of(&state)?;
     let op_dir = operational_workspace_dir(&user_home, &creator_id, &workspace_slug);
@@ -413,12 +414,15 @@ pub async fn set_active_workspace(
 /// raw-user-home precedent). Fails honestly when the nexus home has no
 /// parent.
 fn user_home_of(state: &WorkspaceState) -> Result<PathBuf, NexusApiError> {
-    state.nexus_home().parent().map(Path::to_path_buf).ok_or_else(|| NexusApiError::Internal {
-        code: "HOME_DIR_ERROR".into(),
-        message: "Cannot determine home directory".to_string(),
-    })
+    state
+        .nexus_home()
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| NexusApiError::Internal {
+            code: "HOME_DIR_ERROR".into(),
+            message: "Cannot determine home directory".to_string(),
+        })
 }
-
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
 

@@ -88,7 +88,10 @@ pub async fn create_session(
         .map_err(|e| {
             // QC2 F-004: the live-ring capacity refusal keeps its typed,
             // retryable envelope instead of collapsing into a generic 500.
-            if matches!(e, nexus_core::execution::RunControlError::RunEventCapacity(_)) {
+            if matches!(
+                e,
+                nexus_core::execution::RunControlError::RunEventCapacity(_)
+            ) {
                 return NexusApiError::from(e);
             }
             let msg = e.to_string();
@@ -1169,12 +1172,14 @@ mod tests {
         // the production coordinator over the SAME engine/store.
         let engine = Arc::new(engine);
         state.set_engine(engine.clone());
-        state.set_run_coordinator(Arc::new(nexus_core::execution::WorkflowRunCoordinator::new(
-            engine,
-            storage.clone(),
-            Arc::new(pool.clone()),
-            session_cancels,
-        )));
+        state.set_run_coordinator(Arc::new(
+            nexus_core::execution::WorkflowRunCoordinator::new(
+                engine,
+                storage.clone(),
+                Arc::new(pool.clone()),
+                session_cancels,
+            ),
+        ));
 
         // Start a real v1 session.
         let engine = state.engine().expect("engine set");

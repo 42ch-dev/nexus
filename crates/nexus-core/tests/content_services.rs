@@ -71,8 +71,10 @@ async fn setup() -> Fixture {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path();
     std::fs::create_dir_all(home.join(".nexus42")).unwrap();
-    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(home, "author", "default"))
-        .unwrap();
+    std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
+        home, "author", "default",
+    ))
+    .unwrap();
     select_creator(home, "author", "default");
     let db = nexus_home_layout::workspace_state_db_path(home, "author", "default");
     {
@@ -133,7 +135,14 @@ async fn setup() -> Fixture {
         .await
         .unwrap();
 
-    Fixture { _temp: temp, core, principal, pool, work_id, creative_root }
+    Fixture {
+        _temp: temp,
+        core,
+        principal,
+        pool,
+        work_id,
+        creative_root,
+    }
 }
 
 /// AC-P1-T2 selector: the chapter body path guard denies `..` traversal into a
@@ -143,14 +152,23 @@ async fn setup() -> Fixture {
 async fn get_body_rejects_escaped_body_path() {
     let fx = setup().await;
     fx.write_body(1, "body content");
-    let evil_target = fx.creative_root.parent().unwrap().join("creative-evil/evil.md");
+    let evil_target = fx
+        .creative_root
+        .parent()
+        .unwrap()
+        .join("creative-evil/evil.md");
     std::fs::create_dir_all(evil_target.parent().unwrap()).unwrap();
     std::fs::write(&evil_target, "stolen").unwrap();
 
     // Sanity: the inside-root body reads normally.
     let body = fx
         .core
-        .chapter_body(&fx.principal, fx.work_id.clone(), "1".into(), content_query())
+        .chapter_body(
+            &fx.principal,
+            fx.work_id.clone(),
+            "1".into(),
+            content_query(),
+        )
         .await
         .unwrap();
     assert_eq!(body.content, "body content");
@@ -165,7 +183,12 @@ async fn get_body_rejects_escaped_body_path() {
         .unwrap();
     let Err(CoreError::InvalidInput { field, .. }) = fx
         .core
-        .chapter_body(&fx.principal, fx.work_id.clone(), "1".into(), content_query())
+        .chapter_body(
+            &fx.principal,
+            fx.work_id.clone(),
+            "1".into(),
+            content_query(),
+        )
         .await
     else {
         panic!("sibling traversal must be denied");
@@ -184,7 +207,12 @@ async fn get_body_rejects_escaped_body_path() {
         .unwrap();
     let Err(CoreError::InvalidInput { field, .. }) = fx
         .core
-        .chapter_body(&fx.principal, fx.work_id.clone(), "1".into(), content_query())
+        .chapter_body(
+            &fx.principal,
+            fx.work_id.clone(),
+            "1".into(),
+            content_query(),
+        )
         .await
     else {
         panic!("symlink escape must be denied before read");
@@ -201,7 +229,12 @@ async fn get_body_rejects_escaped_body_path() {
         .unwrap();
     let detail = fx
         .core
-        .chapter_detail(&fx.principal, fx.work_id.clone(), "1".into(), content_query())
+        .chapter_detail(
+            &fx.principal,
+            fx.work_id.clone(),
+            "1".into(),
+            content_query(),
+        )
         .await
         .unwrap();
     assert!(!detail.can_edit_outline);
@@ -242,10 +275,18 @@ async fn published_chapter_mutation_blocked_and_content_survives() {
 
     let body = fx
         .core
-        .chapter_body(&fx.principal, fx.work_id.clone(), "1".into(), content_query())
+        .chapter_body(
+            &fx.principal,
+            fx.work_id.clone(),
+            "1".into(),
+            content_query(),
+        )
         .await
         .unwrap();
-    assert_eq!(body.content, "published prose", "content must survive the denial");
+    assert_eq!(
+        body.content, "published prose",
+        "content must survive the denial"
+    );
 
     // Canvas outline node edit on the published chapter is blocked as well.
     let err = fx
@@ -300,7 +341,12 @@ async fn published_chapter_mutation_blocked_and_content_survives() {
         panic!("expected legacy BadRequest carrier, got {err:?}");
     };
     assert_eq!(field, "chapter_path_forbidden");
-    assert!(!fx.creative_root.parent().unwrap().join("creative-evil/planted.md").exists());
+    assert!(!fx
+        .creative_root
+        .parent()
+        .unwrap()
+        .join("creative-evil/planted.md")
+        .exists());
     fx.pool.close().await;
     fx.core.close().await.unwrap();
 }
@@ -406,7 +452,11 @@ async fn chapter_list_keyset_pagination() {
 
     let all = fx
         .core
-        .list_chapters(&fx.principal, fx.work_id.clone(), chapters_query(serde_json::json!({})))
+        .list_chapters(
+            &fx.principal,
+            fx.work_id.clone(),
+            chapters_query(serde_json::json!({})),
+        )
         .await
         .unwrap();
     assert_eq!(all.items.len(), 3);
@@ -424,7 +474,10 @@ async fn chapter_list_keyset_pagination() {
     assert_eq!(first.items.len(), 2);
     assert!(first.pagination.has_more);
     let cursor = first.pagination.next_cursor.clone().unwrap();
-    assert!(cursor.starts_with("v2:"), "keyset cursor grammar changed: {cursor}");
+    assert!(
+        cursor.starts_with("v2:"),
+        "keyset cursor grammar changed: {cursor}"
+    );
 
     let second = fx
         .core
@@ -451,7 +504,10 @@ async fn chapter_list_keyset_pagination() {
         panic!("invalid cursor must be rejected");
     };
     assert_eq!(field, "invalid_input");
-    assert_eq!(reason, "invalid chapter_cursor; pass the next_cursor value unchanged");
+    assert_eq!(
+        reason,
+        "invalid chapter_cursor; pass the next_cursor value unchanged"
+    );
     fx.pool.close().await;
     fx.core.close().await.unwrap();
 }
@@ -489,7 +545,10 @@ async fn outline_patch_conflict_and_locked_reread() {
     };
     assert_eq!(details.current_revision, 0);
     assert_eq!(details.conflicting_path, "outline_revision");
-    assert_eq!(details.recovery_hint, "refetch the work outline and reapply");
+    assert_eq!(
+        details.recovery_hint,
+        "refetch the work outline and reapply"
+    );
 
     // A concurrent writer rewrites the body after our last read; the patch
     // must persist the fresh body observed at the locked re-read.
@@ -509,15 +568,24 @@ async fn outline_patch_conflict_and_locked_reread() {
         .unwrap();
 
     let final_content = std::fs::read_to_string(&outline_path).unwrap();
-    assert!(final_content.contains("fresh body\n"), "locked re-read body must win: {final_content}");
-    assert!(!final_content.contains("stale body"), "stale snapshot must not be persisted");
+    assert!(
+        final_content.contains("fresh body\n"),
+        "locked re-read body must win: {final_content}"
+    );
+    assert!(
+        !final_content.contains("stale body"),
+        "stale snapshot must not be persisted"
+    );
     let outline = fx
         .core
         .work_outline(&fx.principal, fx.work_id.clone())
         .await
         .unwrap();
     assert_eq!(outline.outline_revision, 1);
-    assert_eq!(outline.chapter_titles.get("1").map(String::as_str), Some("Renamed"));
+    assert_eq!(
+        outline.chapter_titles.get("1").map(String::as_str),
+        Some("Renamed")
+    );
     fx.pool.close().await;
     fx.core.close().await.unwrap();
 }
@@ -562,7 +630,11 @@ async fn timeline_patch_round_trip_and_guards() {
         .await
         .unwrap();
 
-    let outline = fx.core.work_outline(&fx.principal, fx.work_id.clone()).await.unwrap();
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .unwrap();
     assert_eq!(outline.timeline_events.len(), 2);
     assert_eq!(outline.outline_revision, 2);
     let (evt_a, evt_b) = (
@@ -585,7 +657,11 @@ async fn timeline_patch_round_trip_and_guards() {
         )
         .await
         .unwrap();
-    let outline = fx.core.work_outline(&fx.principal, fx.work_id.clone()).await.unwrap();
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .unwrap();
     assert_eq!(outline.foreshadows.len(), 1);
 
     // Self-referential foreshadow is nonsense and must be rejected.
@@ -650,7 +726,11 @@ async fn timeline_patch_round_trip_and_guards() {
         )
         .await
         .unwrap();
-    let outline = fx.core.work_outline(&fx.principal, fx.work_id.clone()).await.unwrap();
+    let outline = fx
+        .core
+        .work_outline(&fx.principal, fx.work_id.clone())
+        .await
+        .unwrap();
     assert!(outline.foreshadows.is_empty());
     fx.pool.close().await;
     fx.core.close().await.unwrap();
@@ -678,11 +758,19 @@ async fn outline_chapter_patch_writes_prose_and_seeds_path() {
     let prose_path = fx
         .creative_root
         .join("Works/test-novel/Outlines/chapters/ch01-outline.md");
-    assert_eq!(std::fs::read_to_string(&prose_path).unwrap(), "outline prose");
+    assert_eq!(
+        std::fs::read_to_string(&prose_path).unwrap(),
+        "outline prose"
+    );
 
     let detail = fx
         .core
-        .chapter_detail(&fx.principal, fx.work_id.clone(), "1".into(), content_query())
+        .chapter_detail(
+            &fx.principal,
+            fx.work_id.clone(),
+            "1".into(),
+            content_query(),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -693,7 +781,12 @@ async fn outline_chapter_patch_writes_prose_and_seeds_path() {
 
     let outline = fx
         .core
-        .chapter_outline(&fx.principal, fx.work_id.clone(), "1".into(), content_query())
+        .chapter_outline(
+            &fx.principal,
+            fx.work_id.clone(),
+            "1".into(),
+            content_query(),
+        )
         .await
         .unwrap();
     assert_eq!(outline.content, "outline prose");
@@ -735,7 +828,10 @@ async fn outline_frontmatter_delimiter_edges() {
         .unwrap();
 
     let final_content = std::fs::read_to_string(&outline_path).unwrap();
-    assert!(final_content.contains("actual body\n"), "body must survive: {final_content}");
+    assert!(
+        final_content.contains("actual body\n"),
+        "body must survive: {final_content}"
+    );
 
     // A bare `---more` line is not a delimiter: the split returns None and the
     // file falls back to a default frontmatter with the raw content preserved
@@ -785,7 +881,10 @@ async fn locked_work_reports_http_holder_in_reason() {
     )
     .await
     .unwrap();
-    assert!(matches!(acquired, nexus_local_db::AcquireResult::Acquired { .. }));
+    assert!(matches!(
+        acquired,
+        nexus_local_db::AcquireResult::Acquired { .. }
+    ));
 
     let err = fx
         .core
@@ -807,11 +906,16 @@ async fn locked_work_reports_http_holder_in_reason() {
         .strip_prefix("work_locked:")
         .expect("locked resource prefix");
     let marker = "'cli:http:";
-    let start = reason.find(marker).expect("legacy cli:http holder in reason");
+    let start = reason
+        .find(marker)
+        .expect("legacy cli:http holder in reason");
     let holder_tail = &reason[start + marker.len()..];
     let uuid = holder_tail.split('\'').next().expect("closing quote");
     assert_eq!(uuid.len(), 36, "holder uuid shape: {reason}");
-    assert!(uuid.chars().filter(|c| *c == '-').count() == 4, "uuid dashes");
+    assert!(
+        uuid.chars().filter(|c| *c == '-').count() == 4,
+        "uuid dashes"
+    );
     assert!(
         !reason.contains("cli:core:"),
         "core label must not leak into the HTTP surface: {reason}"
@@ -838,11 +942,18 @@ async fn locked_work_reports_http_holder_in_reason() {
 #[tokio::test]
 async fn work_lookup_db_fault_rides_lowercase_carrier() {
     let fx = setup().await;
-    sqlx::query("DROP TABLE works").execute(&fx.pool).await.unwrap();
+    sqlx::query("DROP TABLE works")
+        .execute(&fx.pool)
+        .await
+        .unwrap();
 
     let err = fx
         .core
-        .list_chapters(&fx.principal, fx.work_id.clone(), chapters_query(serde_json::json!({})))
+        .list_chapters(
+            &fx.principal,
+            fx.work_id.clone(),
+            chapters_query(serde_json::json!({})),
+        )
         .await
         .err()
         .expect("storage fault must fail the lookup");
@@ -866,16 +977,28 @@ async fn work_chronology_projects_flag_by_ref_or_id() {
     let now = chrono::Utc::now().to_rfc3339();
 
     // Default state reads false by both ref slug and work_id.
-    let by_ref = fx.core.work_chronology(&fx.principal, "test-novel").await.unwrap();
+    let by_ref = fx
+        .core
+        .work_chronology(&fx.principal, "test-novel")
+        .await
+        .unwrap();
     assert_eq!(by_ref.work_id, fx.work_id);
     assert!(!by_ref.auto_chronology);
-    let by_id = fx.core.work_chronology(&fx.principal, &fx.work_id).await.unwrap();
+    let by_id = fx
+        .core
+        .work_chronology(&fx.principal, &fx.work_id)
+        .await
+        .unwrap();
     assert_eq!(by_id, by_ref);
 
     nexus_local_db::works::set_auto_chronology(&fx.pool, &fx.work_id, true, &now)
         .await
         .unwrap();
-    let enabled = fx.core.work_chronology(&fx.principal, "test-novel").await.unwrap();
+    let enabled = fx
+        .core
+        .work_chronology(&fx.principal, "test-novel")
+        .await
+        .unwrap();
     assert!(enabled.auto_chronology);
 
     let err = fx

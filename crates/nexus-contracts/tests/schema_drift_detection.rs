@@ -1856,7 +1856,8 @@ fn make_dummy_value(
                 || Value::Array(vec![]),
                 |items| {
                     // Generate a single dummy item
-                    let item_val = make_dummy_value(items, schema_cache, current_dir, current_schema_path);
+                    let item_val =
+                        make_dummy_value(items, schema_cache, current_dir, current_schema_path);
                     Value::Array(vec![item_val])
                 },
             )
@@ -1880,11 +1881,18 @@ fn make_dummy_value(
                             .and_then(|a| a.as_array())
                             .and_then(|a| a.first())
                         {
-                            return make_dummy_value(first_arm, schema_cache, current_dir, current_schema_path);
+                            return make_dummy_value(
+                                first_arm,
+                                schema_cache,
+                                current_dir,
+                                current_schema_path,
+                            );
                         }
                         let val = prop_def.get("additionalProperties").map_or_else(
                             || Value::String("_".to_string()),
-                            |ap| make_dummy_value(ap, schema_cache, current_dir, current_schema_path),
+                            |ap| {
+                                make_dummy_value(ap, schema_cache, current_dir, current_schema_path)
+                            },
                         );
                         let mut m = serde_json::Map::new();
                         // `propertyNames.pattern` constrains the map keys:
@@ -1913,7 +1921,12 @@ fn make_dummy_value(
                         for (sub_name, sub_def) in sub_props {
                             map.insert(
                                 sub_name.clone(),
-                                make_dummy_value(sub_def, schema_cache, current_dir, current_schema_path),
+                                make_dummy_value(
+                                    sub_def,
+                                    schema_cache,
+                                    current_dir,
+                                    current_schema_path,
+                                ),
                             );
                         }
                         Value::Object(map)
@@ -1925,7 +1938,12 @@ fn make_dummy_value(
             for key in &["allOf", "oneOf", "anyOf"] {
                 if let Some(subs) = prop_def.get(*key).and_then(|a| a.as_array()) {
                     if let Some(first) = subs.first() {
-                        return make_dummy_value(first, schema_cache, current_dir, current_schema_path);
+                        return make_dummy_value(
+                            first,
+                            schema_cache,
+                            current_dir,
+                            current_schema_path,
+                        );
                     }
                 }
             }

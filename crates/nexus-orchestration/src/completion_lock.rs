@@ -125,7 +125,6 @@ pub fn read_completion_lock(
     Ok(Some(lock))
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

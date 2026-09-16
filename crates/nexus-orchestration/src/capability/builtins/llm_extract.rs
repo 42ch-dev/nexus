@@ -81,20 +81,21 @@ impl Default for LlmExtract {
 }
 
 #[async_trait]
-impl Capability for LlmExtract { fn name(&self) -> &'static str {
-    "nexus.llm.extract"
-}
+impl Capability for LlmExtract {
+    fn name(&self) -> &'static str {
+        "nexus.llm.extract"
+    }
 
-// Identity fields ("_creator_id", "_session_id") are injected by
-// orchestration context, NOT accepted from user input (security:
-// prevents cross-creator routing — SEC-V131-01, same rule as
-// judge.llm).
+    // Identity fields ("_creator_id", "_session_id") are injected by
+    // orchestration context, NOT accepted from user input (security:
+    // prevents cross-creator routing — SEC-V131-01, same rule as
+    // judge.llm).
     fn input_schema(&self) -> &'static str {
         nexus_preset::capability_catalog::NEXUS_LLM_EXTRACT_INPUT_SCHEMA
     }
 
     fn output_schema(&self) -> &'static str {
-    r#"{
+        r#"{
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "required": ["candidates"],
@@ -134,55 +135,55 @@ impl Capability for LlmExtract { fn name(&self) -> &'static str {
             }
         }
     }"#
-}
+    }
 
-async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-    let prompt_text = input
-        .get("prompt")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| CapabilityError::InputInvalid("missing 'prompt' field".into()))?;
-    let chapter_prose = input
-        .get("chapter_prose")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| CapabilityError::InputInvalid("missing 'chapter_prose' field".into()))?;
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        let prompt_text = input
+            .get("prompt")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| CapabilityError::InputInvalid("missing 'prompt' field".into()))?;
+        let chapter_prose = input
+            .get("chapter_prose")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| CapabilityError::InputInvalid("missing 'chapter_prose' field".into()))?;
 
-    // Security: only accept context-injected identity fields (prefixed _).
-    // Raw `creator_id`/`session_id` from user/preset input are ignored
-    // to prevent cross-creator routing (IDOR). See SEC-V131-01.
-    //
-    // M-002: a missing trusted `_session_id` refuses with a typed error
-    // — never a magic `default` run id. The orchestration engine seeds
-    // the trusted `_session_id` at run admission; its absence means the
-    // capability is being invoked outside a trusted run context.
-    let session_id = input
-        .get("_session_id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            CapabilityError::Forbidden(
+        // Security: only accept context-injected identity fields (prefixed _).
+        // Raw `creator_id`/`session_id` from user/preset input are ignored
+        // to prevent cross-creator routing (IDOR). See SEC-V131-01.
+        //
+        // M-002: a missing trusted `_session_id` refuses with a typed error
+        // — never a magic `default` run id. The orchestration engine seeds
+        // the trusted `_session_id` at run admission; its absence means the
+        // capability is being invoked outside a trusted run context.
+        let session_id = input
+            .get("_session_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                CapabilityError::Forbidden(
                 "missing trusted _session_id: orchestration context must inject the run identity"
                     .to_string(),
             )
-        })?;
+            })?;
 
-    let executor = self
-        .executor
-        .as_ref()
-        .ok_or(CapabilityError::WorkerUnavailable)?;
+        let executor = self
+            .executor
+            .as_ref()
+            .ok_or(CapabilityError::WorkerUnavailable)?;
 
-    // A1: resolve the coordinator cancellation token for this run from
-    // the shared per-run map. FAIL-CLOSED: a run with no registered
-    // token refuses with `CancellationUnavailable` — a fresh token would
-    // be uncancellable by any coordinator (never mint one here). The run
-    // admission path (engine start/spawn/recovery) registers the token.
-    let cancellation =
-        crate::capability::resolve_session_cancellation(&self.session_cancels, session_id)?;
+        // A1: resolve the coordinator cancellation token for this run from
+        // the shared per-run map. FAIL-CLOSED: a run with no registered
+        // token refuses with `CancellationUnavailable` — a fresh token would
+        // be uncancellable by any coordinator (never mint one here). The run
+        // admission path (engine start/spawn/recovery) registers the token.
+        let cancellation =
+            crate::capability::resolve_session_cancellation(&self.session_cancels, session_id)?;
 
-    // Build the extraction prompt: instruction + verbatim prose, framed so
-    // the agent returns a JSON object with a `candidates` array (entities)
-    // and an optional `relationships` array (V1.76). deny_all tool policy —
-    // extraction is read-only, no tools, no side-effect.
-    let extract_prompt = format!(
-        "{prompt_text}\n\n\
+        // Build the extraction prompt: instruction + verbatim prose, framed so
+        // the agent returns a JSON object with a `candidates` array (entities)
+        // and an optional `relationships` array (V1.76). deny_all tool policy —
+        // extraction is read-only, no tools, no side-effect.
+        let extract_prompt = format!(
+            "{prompt_text}\n\n\
          Return ONLY a JSON object of the form {{\"candidates\": [{{\"canonical_name\": \
          string, \"block_type\": one of [character, ability, scene, organization, item, \
          conflict, info_point, event], \"summary\": string|null, \"confidence\": number \
@@ -197,23 +198,24 @@ async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
          `source_quote` MUST be a verbatim excerpt from the chapter. The \
          `relationships` array MAY be empty when no relationships are evident.\n\n\
          CHAPTER PROSE:\n{chapter_prose}"
-    );
+        );
 
-    let result = executor
-        .execute(PromptRequest {
-            run_id: session_id.to_string(),
-            task_id: "nexus.llm.extract".to_string(),
-            agent_ref: None,
-            prompt: extract_prompt,
-            tool_policy: ToolPolicy::DenyAll,
-            cancellation,
-        })
-        .await?;
+        let result = executor
+            .execute(PromptRequest {
+                run_id: session_id.to_string(),
+                task_id: "nexus.llm.extract".to_string(),
+                agent_ref: None,
+                prompt: extract_prompt,
+                tool_policy: ToolPolicy::DenyAll,
+                cancellation,
+            })
+            .await?;
 
-    let candidates = parse_extract_response(&result.full_text);
-    let relationships = parse_relationships_response(&result.full_text);
-    Ok(json!({ "candidates": candidates, "relationships": relationships }))
-} }
+        let candidates = parse_extract_response(&result.full_text);
+        let relationships = parse_relationships_response(&result.full_text);
+        Ok(json!({ "candidates": candidates, "relationships": relationships }))
+    }
+}
 
 /// Parse the LLM extraction response text into a `candidates` JSON array.
 ///

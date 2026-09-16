@@ -5,9 +5,7 @@
 
 use nexus_orchestration::capability::CapabilityRegistry;
 use nexus_preset::manifest::PresetManifest;
-use nexus_preset::validation::{
-    validate_preset_semantic, DiagnosticCategory, DiagnosticSeverity,
-};
+use nexus_preset::validation::{validate_preset_semantic, DiagnosticCategory, DiagnosticSeverity};
 
 fn test_caps() -> CapabilityRegistry {
     CapabilityRegistry::with_builtins()

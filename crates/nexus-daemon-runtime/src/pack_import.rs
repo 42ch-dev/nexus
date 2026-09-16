@@ -89,9 +89,14 @@ pub async fn import_pack(
     dry_run: bool,
 ) -> Result<ImportSummary, PackImportError> {
     let value = build_pack(
-        &pack.entries, &pack.relations, pack.source_anchors.as_deref(),
-        &pack.pack_metadata.title, &pack.pack_metadata.version, &pack.pack_metadata.creator,
-        pack.pack_metadata.description.as_deref(), Some(&pack.extra_modules),
+        &pack.entries,
+        &pack.relations,
+        pack.source_anchors.as_deref(),
+        &pack.pack_metadata.title,
+        &pack.pack_metadata.version,
+        &pack.pack_metadata.creator,
+        pack.pack_metadata.description.as_deref(),
+        Some(&pack.extra_modules),
     );
     let serde_json::Value::Object(pack) = value else {
         unreachable!("build_pack always produces a JSON object")
@@ -107,35 +112,45 @@ pub async fn import_pack(
     };
     let response = nexus_core::CoreService::import_legacy_world_pack(
         pool, creator_id, world_id, request, dry_run,
-    ).await.map_err(|e| PackImportError::Storage(e.to_string()))?;
+    )
+    .await
+    .map_err(|e| PackImportError::Storage(e.to_string()))?;
     // Core counts are derived from the same bounded u32 algorithm as this
     // retained result shape; conversion cannot lose a count.
     let count = |n| u32::try_from(n).expect("core pack count fits legacy u32");
     Ok(ImportSummary {
         entries: AtomCounts {
-            created: count(response.entries.created), skipped: count(response.entries.skipped),
-            rejected: count(response.entries.rejected), renamed: count(response.entries.renamed),
+            created: count(response.entries.created),
+            skipped: count(response.entries.skipped),
+            rejected: count(response.entries.rejected),
+            renamed: count(response.entries.renamed),
             overwritten: count(response.entries.overwritten),
         },
         relations: AtomCounts {
-            created: count(response.relations.created), skipped: count(response.relations.skipped),
-            rejected: count(response.relations.rejected), renamed: count(response.relations.renamed),
+            created: count(response.relations.created),
+            skipped: count(response.relations.skipped),
+            rejected: count(response.relations.rejected),
+            renamed: count(response.relations.renamed),
             overwritten: count(response.relations.overwritten),
         },
-        details: response.details.into_iter().map(|detail| ImportDetail {
-            kind: match detail.kind {
-                PackImportResponseDetailsItemKind::Entry => ImportAtomKind::Entry,
-                PackImportResponseDetailsItemKind::Relation => ImportAtomKind::Relation,
-            },
-            id: detail.id,
-            outcome: match detail.outcome {
-                PackImportResponseDetailsItemOutcome::Created => ImportOutcome::Created,
-                PackImportResponseDetailsItemOutcome::Skipped => ImportOutcome::Skipped,
-                PackImportResponseDetailsItemOutcome::Rejected => ImportOutcome::Rejected,
-                PackImportResponseDetailsItemOutcome::Renamed => ImportOutcome::Renamed,
-                PackImportResponseDetailsItemOutcome::Overwritten => ImportOutcome::Overwritten,
-            },
-            reason: detail.reason,
-        }).collect(),
+        details: response
+            .details
+            .into_iter()
+            .map(|detail| ImportDetail {
+                kind: match detail.kind {
+                    PackImportResponseDetailsItemKind::Entry => ImportAtomKind::Entry,
+                    PackImportResponseDetailsItemKind::Relation => ImportAtomKind::Relation,
+                },
+                id: detail.id,
+                outcome: match detail.outcome {
+                    PackImportResponseDetailsItemOutcome::Created => ImportOutcome::Created,
+                    PackImportResponseDetailsItemOutcome::Skipped => ImportOutcome::Skipped,
+                    PackImportResponseDetailsItemOutcome::Rejected => ImportOutcome::Rejected,
+                    PackImportResponseDetailsItemOutcome::Renamed => ImportOutcome::Renamed,
+                    PackImportResponseDetailsItemOutcome::Overwritten => ImportOutcome::Overwritten,
+                },
+                reason: detail.reason,
+            })
+            .collect(),
     })
 }

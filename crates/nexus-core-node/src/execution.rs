@@ -25,13 +25,13 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use nexus_contracts::generated::daemon_api::compute::run_accept_request::RunAcceptRequest;
 use nexus_contracts::generated::daemon_api::compute::run_request::RunRequest;
+use nexus_contracts::local::schedule::http::{
+    AddScheduleRequest, AddScheduleResponse, SignalScheduleRequest, SignalScheduleResponse,
+};
 use nexus_contracts::{
     CoreStrategyPatchResponse, GetPresetResponse, ScaffoldPresetRequest, ScaffoldPresetResponse,
     StrategyPatchPromptTemplateRequest, StrategyPatchStateRequest, StrategyPatchTransitionRequest,
     UpdatePresetRequest, UpdatePresetResponse, ValidatePresetRequest, ValidatePresetResponse,
-};
-use nexus_contracts::local::schedule::http::{
-    AddScheduleRequest, AddScheduleResponse, SignalScheduleRequest, SignalScheduleResponse,
 };
 use nexus_core::execution::RunnerDeps;
 
@@ -44,7 +44,6 @@ fn decode<T: serde::de::DeserializeOwned>(payload: Buffer, label: &str) -> Resul
 
 #[napi]
 impl NativeCore {
-
     /// Establish the single execution owner for this engine-owner core,
     /// building `RunnerDeps` from core-side defaults and wiring the env's
     /// JS-provider port. Refuses when the core is not the execution owner
@@ -122,8 +121,9 @@ impl NativeCore {
         let handle = self.execution_handle()?;
         self.json_call(principal_handle, async move |core, principal| {
             let _ = &core;
-            let response: SignalScheduleResponse =
-                handle.signal_schedule(&principal, schedule_id, request).await?;
+            let response: SignalScheduleResponse = handle
+                .signal_schedule(&principal, schedule_id, request)
+                .await?;
             Ok(response)
         })
         .await
@@ -199,7 +199,11 @@ impl NativeCore {
 
     /// `DELETE /v1/daemon/presets/{id}` — 204 at the adapter.
     #[napi]
-    pub async fn delete_preset(&self, principal_handle: String, preset_id: String) -> Result<Buffer> {
+    pub async fn delete_preset(
+        &self,
+        principal_handle: String,
+        preset_id: String,
+    ) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
             core.delete_preset(&principal, preset_id).await?;
             Ok(serde_json::Value::Null)
@@ -286,7 +290,4 @@ impl NativeCore {
         })
         .await
     }
-
-
-
 }

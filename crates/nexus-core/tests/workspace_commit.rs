@@ -19,7 +19,7 @@ use nexus_core::execution::session::{
     ChangeEntry, ChangeOp, SessionError, SessionId, WorkspaceSessionManager,
 };
 use nexus_core::execution::test_hooks::{
-    OwnerGate, set_after_delete_capture_hook, set_crash_point, set_owner_gate,
+    set_after_delete_capture_hook, set_crash_point, set_owner_gate, OwnerGate,
 };
 use nexus_orchestration::capability::WorkspaceExecutor;
 use serial_test::serial;
@@ -237,7 +237,10 @@ async fn retained_owner_survives_caller_drop() {
     gate.settled.notified().await;
     set_owner_gate(None);
 
-    assert_eq!(std::fs::read(ws.path().join("owner.txt")).unwrap(), b"owned");
+    assert_eq!(
+        std::fs::read(ws.path().join("owner.txt")).unwrap(),
+        b"owned"
+    );
     let state: String = sqlx::query_scalar(
         "SELECT state FROM workspace_commit_intents WHERE session_id = ? ORDER BY revision DESC LIMIT 1",
     )
@@ -266,7 +269,11 @@ async fn occ_hash_conflict_on_stale_preimage() {
     let session2 = mgr.open_session(&root, "", true).await.expect("open2");
     let changed = "deadbeef".repeat(8);
     let err = mgr
-        .commit_session_durable(&session2, &[modify_change("occ.txt", &changed, b"v2")], &root)
+        .commit_session_durable(
+            &session2,
+            &[modify_change("occ.txt", &changed, b"v2")],
+            &root,
+        )
         .await
         .unwrap_err();
     assert!(matches!(err, SessionError::HashConflict { .. }));
@@ -324,10 +331,10 @@ async fn delete_detects_target_recreated_after_capture() {
 #[tokio::test]
 #[serial]
 async fn executor_matches_manager_authority() {
-    use nexus_core::execution::executor::WorkspaceCommitExecutor;
     use nexus_contracts::local::orchestration::{
         WorkspaceChangeEntry, WorkspaceChangeOp, WorkspaceCommitInput, WorkspaceOpenInput,
     };
+    use nexus_core::execution::executor::WorkspaceCommitExecutor;
 
     let (pool, db_dir) = fresh_pool().await;
     let mgr = recoverable_mgr(pool, &db_dir);

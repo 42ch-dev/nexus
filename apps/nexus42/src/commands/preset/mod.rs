@@ -370,12 +370,12 @@ fn print_validate_verdict(resp: &serde_json::Value) {
 /// Moved from `system` (V1.153 P3) — the shared validator core, not
 /// re-implemented (AR-24).
 fn validate_preset_offline(path: &str) -> Result<serde_json::Value> {
+    use nexus_orchestration::CapabilityRegistry;
     use nexus_preset::{
         loader_validate_manifest_compat, validate_assets_in_bundle, validate_path_safety,
         validate_preset_semantic, yaml_value_depth, DiagnosticSeverity,
         ValidationResult as PresetValidationResult, DEFAULT_MAX_YAML_DEPTH, DEFAULT_MAX_YAML_SIZE,
     };
-    use nexus_orchestration::CapabilityRegistry;
 
     // Resolve the target file + optional bundle root (mirrors the daemon's
     // `infer_bundle_root`: only a file literally named `preset.yaml` has a

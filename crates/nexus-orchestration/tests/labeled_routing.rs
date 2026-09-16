@@ -211,11 +211,13 @@ fn all_embedded_presets_still_parse_regression() {
     for preset_id in &preset_ids {
         match nexus_preset::load_embedded_preset(preset_id, &caps) {
             Ok(loaded) => {
-                let result = nexus_preset::validation::validate_preset_semantic(&loaded.manifest, &caps);
+                let result =
+                    nexus_preset::validation::validate_preset_semantic(&loaded.manifest, &caps);
                 for d in &result.diagnostics {
                     if d.severity == nexus_preset::validation::DiagnosticSeverity::Error {
                         // Known false positive: capability arg drift for creator.inject_prompt.
-                        if d.category == nexus_preset::validation::DiagnosticCategory::CapabilityArgDrift
+                        if d.category
+                            == nexus_preset::validation::DiagnosticCategory::CapabilityArgDrift
                             && d.message.contains("capability 'creator.inject_prompt'")
                         {
                             continue; // known false positive, not a regression
@@ -244,7 +246,8 @@ fn all_embedded_presets_still_parse_regression() {
 async fn labeled_no_match_does_not_stall_session() {
     let yaml = labeled_preset_yaml(&[("outline", "good_branch")]);
     let caps = Arc::new(test_capability_registry());
-    let loaded = nexus_preset::load_preset_from_str(&yaml, &caps).expect("labeled preset should load");
+    let loaded =
+        nexus_preset::load_preset_from_str(&yaml, &caps).expect("labeled preset should load");
 
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let engine = GraphFlowEngine::new_with_storage(

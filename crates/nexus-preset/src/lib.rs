@@ -6,13 +6,13 @@ use include_dir::Dir;
 use std::path::Path;
 
 pub mod capability_catalog;
-pub mod source_identity;
-pub mod preset_ids;
-pub mod user_preset_dir;
-pub mod system_preset_dir;
 pub mod expr;
 pub mod loader;
 pub mod manifest;
+pub mod preset_ids;
+pub mod source_identity;
+pub mod system_preset_dir;
+pub mod user_preset_dir;
 pub mod validation;
 
 pub use loader::{
@@ -100,7 +100,9 @@ pub fn load_embedded_preset(
 /// embedded (directory presets are resolved by the caller with a bundle
 /// root).
 #[must_use]
-pub fn embedded_source_identity(preset_id: &str) -> Option<crate::source_identity::PresetSourceIdentity> {
+pub fn embedded_source_identity(
+    preset_id: &str,
+) -> Option<crate::source_identity::PresetSourceIdentity> {
     let caps = BuiltinCapabilityCatalog;
     load_embedded_preset(preset_id, &caps)
         .ok()
@@ -361,17 +363,15 @@ mod tests {
 
         // V1.36 P3: inner graphs removed; chapter-scoped states instead.
         assert!(
-            loaded.manifest.inner_graphs.as_ref().is_none_or(std::collections::BTreeMap::is_empty),
+            loaded
+                .manifest
+                .inner_graphs
+                .as_ref()
+                .is_none_or(std::collections::BTreeMap::is_empty),
             "P3 novel-writing should not have inner graphs"
         );
 
         // Verify outer graph has 6 states (outline_chapter, outline_review, draft_chapter, finalize, finalize_commit, done).
-
-
-
-
-
-
 
         // Verify source hash is non-trivial.
         assert!(!loaded.source_hash.is_empty());
@@ -708,8 +708,6 @@ states:
 
         // Verify it has an outer graph.
 
-
-
         // Verify source hash is valid.
         assert!(!loaded.source_hash.is_empty());
         assert_ne!(loaded.source_hash, [0u8; 32]);
@@ -760,9 +758,6 @@ states:
         assert_eq!(loaded.version, 1);
 
         // Linear state machine: load_chapter → review → done
-
-
-
 
         // Source hash is non-trivial
         assert!(!loaded.source_hash.is_empty());
@@ -868,16 +863,15 @@ states:
 
         // Linear state machine: recall → generate → persist → done
 
-
-
-
-
         // One inner graph: generate_graph
         assert!(
-            loaded.manifest.inner_graphs.as_ref().is_some_and(|graphs| graphs.contains_key("generate_graph")),
+            loaded
+                .manifest
+                .inner_graphs
+                .as_ref()
+                .is_some_and(|graphs| graphs.contains_key("generate_graph")),
             "expected generate_graph inner graph"
         );
-
 
         // Output binding
         assert_eq!(
@@ -1326,9 +1320,6 @@ states:
         // State machine: gather → synthesize → done
         assert_eq!(loaded.manifest.preset.initial, "gather");
 
-
-
-
         // Verify linear transitions
         assert!(loaded.manifest.states.iter().any(|s| {
             s.id == "gather" && s.next == Some(manifest::NextTarget::Linear("synthesize".into()))
@@ -1376,10 +1367,6 @@ states:
 
         // State machine: present → await_decision → sync_world_kb → done
         assert_eq!(loaded.manifest.preset.initial, "present");
-
-
-
-
 
         // Verify linear transitions
         assert!(loaded.manifest.states.iter().any(|s| {

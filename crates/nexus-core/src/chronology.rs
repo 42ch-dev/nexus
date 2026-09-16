@@ -50,6 +50,9 @@ impl CoreService {
             nexus_local_db::works::get_auto_chronology(&self.inner.pool, &work_id)
                 .await
                 .map_err(crate::error::local_db_err)?;
-        Ok(CoreWorkChronology { work_id, auto_chronology })
+        Ok(CoreWorkChronology {
+            work_id,
+            auto_chronology,
+        })
     }
 }

@@ -24,7 +24,9 @@ pub struct CoreChapterContentQuery {
 
 impl From<ChapterContentQuery> for CoreChapterContentQuery {
     fn from(query: ChapterContentQuery) -> Self {
-        Self { volume: query.volume }
+        Self {
+            volume: query.volume,
+        }
     }
 }
 
@@ -45,16 +47,17 @@ enum ContentFault {
 impl From<ContentFault> for CoreError {
     fn from(error: ContentFault) -> Self {
         match error {
-            ContentFault::BadRequest { code, message } => {
-                Self::InvalidInput { field: code, reason: message }
-            }
+            ContentFault::BadRequest { code, message } => Self::InvalidInput {
+                field: code,
+                reason: message,
+            },
             // The legacy internal classification (DATABASE_ERROR, CONTRACT_ERROR,
             // FILE_READ_ERROR, …) rides verbatim as `<CODE>: <message>`; the
             // daemon content adapter re-emits the code instead of collapsing it
             // to the shared `CORE_ERROR` shape.
-            ContentFault::Internal { code, message } => {
-                Self::Internal { category: format!("{code}: {message}") }
-            }
+            ContentFault::Internal { code, message } => Self::Internal {
+                category: format!("{code}: {message}"),
+            },
             ContentFault::NotFound(resource) => Self::NotFound { resource },
             ContentFault::Core(error) => error,
         }
@@ -271,14 +274,14 @@ impl WorkLock {
                 work_id: work_id.into(),
                 holder,
             }),
-            nexus_local_db::AcquireResult::Locked { holder: existing, .. } => {
-                Err(CoreError::Forbidden {
-                    resource: format!(
-                        "work_locked:work {work_id} is locked by '{existing}'; \
+            nexus_local_db::AcquireResult::Locked {
+                holder: existing, ..
+            } => Err(CoreError::Forbidden {
+                resource: format!(
+                    "work_locked:work {work_id} is locked by '{existing}'; \
                          wait for release or check 'creator works status'"
-                    ),
-                })
-            }
+                ),
+            }),
         }
     }
 
@@ -419,10 +422,7 @@ fn to_detail(
         .outline_path
         .as_deref()
         .filter(|s| !s.is_empty())
-        .and_then(|path| {
-            workspace_root
-                .map(|root| resolve_guarded_path(root, path, false).is_ok())
-        })
+        .and_then(|path| workspace_root.map(|root| resolve_guarded_path(root, path, false).is_ok()))
         .unwrap_or(false);
 
     Ok(ChapterDetail {
@@ -461,21 +461,17 @@ async fn read_guarded_file(
 ) -> Result<String, ContentFault> {
     const CHAPTER_BODY_MAX_BYTES: usize = 10 * 1024 * 1024;
 
-    let path = resolve_guarded_path_async(
-        workspace_root.to_path_buf(),
-        rel_path.to_string(),
-        true,
-    )
-    .await
-    .map_err(|e| match &e {
-        CoreError::InvalidInput { field, .. } if field == "chapter_path_forbidden" => {
-            ContentFault::BadRequest {
-                code: forbidden_code.to_string(),
-                message: format!("chapter path '{rel_path}' escapes workspace root"),
+    let path = resolve_guarded_path_async(workspace_root.to_path_buf(), rel_path.to_string(), true)
+        .await
+        .map_err(|e| match &e {
+            CoreError::InvalidInput { field, .. } if field == "chapter_path_forbidden" => {
+                ContentFault::BadRequest {
+                    code: forbidden_code.to_string(),
+                    message: format!("chapter path '{rel_path}' escapes workspace root"),
+                }
             }
-        }
-        _ => ContentFault::Core(e),
-    })?;
+            _ => ContentFault::Core(e),
+        })?;
 
     let metadata = tokio::fs::metadata(&path).await.map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
@@ -502,9 +498,9 @@ async fn read_guarded_file(
 
     match tokio::fs::read_to_string(&path).await {
         Ok(content) => Ok(content),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(ContentFault::NotFound(
-            format!("{not_found_code}: file not found at '{rel_path}'"),
-        )),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(ContentFault::NotFound(format!(
+            "{not_found_code}: file not found at '{rel_path}'"
+        ))),
         Err(e) => Err(ContentFault::Internal {
             code: "FILE_READ_ERROR".to_string(),
             message: format!("failed to read '{rel_path}': {e}"),
@@ -527,18 +523,20 @@ pub(crate) async fn atomic_write_text(
             .await?;
 
     if let Some(parent) = target.parent() {
-        create_parent_dirs(parent).await.map_err(|e| CoreError::Internal {
-            category: format!(
+        create_parent_dirs(parent)
+            .await
+            .map_err(|e| CoreError::Internal {
+                category: format!(
                 "DIRECTORY_CREATE_ERROR: failed to create parent directories for '{rel_path}': {e}"
             ),
-        })?;
+            })?;
     }
 
-    fsync_write_atomic(target, content).await.map_err(|e| {
-        CoreError::Internal {
+    fsync_write_atomic(target, content)
+        .await
+        .map_err(|e| CoreError::Internal {
             category: format!("OUTLINE_WRITE_ERROR: failed to write outline to '{rel_path}': {e}"),
-        }
-    })
+        })
 }
 
 /// Validate that a requested chapter status transition is allowed.
@@ -592,7 +590,9 @@ impl CoreService {
     ) -> CoreResult<ListChaptersResponse> {
         self.verify_principal(principal)?;
         self.resolve_owned_work(principal, &work_id).await?;
-        let response = list_chapters(self, &work_id, query).await.map_err(CoreError::from)?;
+        let response = list_chapters(self, &work_id, query)
+            .await
+            .map_err(CoreError::from)?;
         self.verify_principal(principal)?;
         Ok(response)
     }
@@ -693,10 +693,18 @@ impl CoreService {
         self.resolve_owned_work(principal, &work_id).await?;
         self.require_work_write()?;
         let root = self.optional_workspace_root(principal)?;
-        let detail =
-            patch_chapter(self, principal, holder, &work_id, &chapter_id, query, request, root.as_deref())
-                .await
-                .map_err(CoreError::from)?;
+        let detail = patch_chapter(
+            self,
+            principal,
+            holder,
+            &work_id,
+            &chapter_id,
+            query,
+            request,
+            root.as_deref(),
+        )
+        .await
+        .map_err(CoreError::from)?;
         self.verify_principal(principal)?;
         Ok(detail)
     }
@@ -738,7 +746,10 @@ async fn list_chapters(
 
     let (next_cursor, has_more) = chapter_page_meta(&records, limit);
     let mut items = Vec::new();
-    for r in records.iter().take(usize::try_from(limit).unwrap_or(usize::MAX)) {
+    for r in records
+        .iter()
+        .take(usize::try_from(limit).unwrap_or(usize::MAX))
+    {
         items.push(to_summary(r)?);
     }
 
@@ -786,7 +797,6 @@ async fn chapter_detail(
     let record = load_chapter(service, work_id, chapter, volume).await?;
     Ok(to_detail(&record, root)?)
 }
-
 
 async fn chapter_outline(
     service: &CoreService,

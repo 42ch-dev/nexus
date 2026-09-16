@@ -103,7 +103,6 @@ inner_graphs:
     );
 }
 
-
 #[test]
 fn reject_unknown_inner_graph_reference() {
     let yaml = r"
@@ -290,7 +289,6 @@ inner_graphs:
         err.problems()
     );
 }
-
 
 #[test]
 fn source_hash_is_stable() {

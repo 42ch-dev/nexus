@@ -150,10 +150,11 @@ pub struct CreateWorkResponse {
     pub work_id: String,
     pub status: String,
 }
-fn deserialize_nullable<'de, T: Deserialize<'de>, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<Option<T>>, D::Error> {
+fn deserialize_nullable<'de, T: Deserialize<'de>, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Option<T>>, D::Error> {
     Option::<T>::deserialize(deserializer).map(Some)
 }
-
 
 #[derive(Debug, Deserialize)]
 pub struct PatchWorkRequest {
@@ -356,17 +357,37 @@ pub struct ArchiveInspirationRequest {
 
 pub(crate) fn work_error(error: nexus_core::CoreError) -> NexusApiError {
     match error {
-        nexus_core::CoreError::InvalidInput { field, reason } => NexusApiError::BadRequest { code: field, message: reason },
-        nexus_core::CoreError::Forbidden { resource } if resource.starts_with("work_conflict:") => NexusApiError::Conflict(resource[14..].to_owned()),
-        nexus_core::CoreError::Forbidden { resource } if resource.starts_with("work_locked:") => NexusApiError::Locked { resource: "work".into(), reason: resource[12..].to_owned() },
-        nexus_core::CoreError::Forbidden { resource } if resource.starts_with("work_pool_forbidden:") => NexusApiError::Forbidden { resource: "pool".into(), reason: resource[20..].to_owned() },
+        nexus_core::CoreError::InvalidInput { field, reason } => NexusApiError::BadRequest {
+            code: field,
+            message: reason,
+        },
+        nexus_core::CoreError::Forbidden { resource } if resource.starts_with("work_conflict:") => {
+            NexusApiError::Conflict(resource[14..].to_owned())
+        }
+        nexus_core::CoreError::Forbidden { resource } if resource.starts_with("work_locked:") => {
+            NexusApiError::Locked {
+                resource: "work".into(),
+                reason: resource[12..].to_owned(),
+            }
+        }
+        nexus_core::CoreError::Forbidden { resource }
+            if resource.starts_with("work_pool_forbidden:") =>
+        {
+            NexusApiError::Forbidden {
+                resource: "pool".into(),
+                reason: resource[20..].to_owned(),
+            }
+        }
         // Core works carries the legacy internal classification verbatim as
         // `<CODE>: <message>` (DATABASE_ERROR, CONTRACT_ERROR — the codes the
         // pre-extraction handlers emitted). Re-emit the code unchanged; every
         // other internal category keeps the shared CORE_ERROR shape.
         nexus_core::CoreError::Internal { category } => match category.split_once(": ") {
             Some((code, message)) if code == "DATABASE_ERROR" || code == "CONTRACT_ERROR" => {
-                NexusApiError::Internal { code: code.to_owned(), message: message.to_owned() }
+                NexusApiError::Internal {
+                    code: code.to_owned(),
+                    message: message.to_owned(),
+                }
             }
             _ => nexus_core::CoreError::Internal { category }.into(),
         },
@@ -374,34 +395,105 @@ pub(crate) fn work_error(error: nexus_core::CoreError) -> NexusApiError {
     }
 }
 
-pub async fn create_work(State(state): State<WorkspaceState>, Json(req): Json<CreateWorkRequest>) -> Result<(StatusCode, Json<CreateWorkResponse>), NexusApiError> {
+pub async fn create_work(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<CreateWorkRequest>,
+) -> Result<(StatusCode, Json<CreateWorkResponse>), NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let result = core.create_work_with_outcome(&principal, nexus_contracts::CreateWorkRequest { title: req.title, long_term_goal: req.long_term_goal, initial_idea: req.initial_idea, world_id: req.world_id, story_ref: req.story_ref, primary_preset_id: req.primary_preset_id, client_request_id: req.client_request_id, lineage_from_work_id: req.lineage_from_work_id, set_pool_active: req.set_pool_active, work_profile: req.work_profile }).await.map_err(work_error)?;
+    let result = core
+        .create_work_with_outcome(
+            &principal,
+            nexus_contracts::CreateWorkRequest {
+                title: req.title,
+                long_term_goal: req.long_term_goal,
+                initial_idea: req.initial_idea,
+                world_id: req.world_id,
+                story_ref: req.story_ref,
+                primary_preset_id: req.primary_preset_id,
+                client_request_id: req.client_request_id,
+                lineage_from_work_id: req.lineage_from_work_id,
+                set_pool_active: req.set_pool_active,
+                work_profile: req.work_profile,
+            },
+        )
+        .await
+        .map_err(work_error)?;
     let (created, result) = result;
-    Ok((if created { StatusCode::CREATED } else { StatusCode::OK }, Json(CreateWorkResponse { work_id: result.work_id, status: result.status })))
+    Ok((
+        if created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        Json(CreateWorkResponse {
+            work_id: result.work_id,
+            status: result.status,
+        }),
+    ))
 }
 
-pub async fn list_works(State(state): State<WorkspaceState>, Query(query): Query<ListWorksQuery>) -> Result<Json<ListWorksResponse>, NexusApiError> {
+pub async fn list_works(
+    State(state): State<WorkspaceState>,
+    Query(query): Query<ListWorksQuery>,
+) -> Result<Json<ListWorksResponse>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let result = core.list_works(&principal, query).await.map_err(work_error)?;
+    let result = core
+        .list_works(&principal, query)
+        .await
+        .map_err(work_error)?;
     Ok(Json(result))
 }
 
-pub async fn get_work(State(state): State<WorkspaceState>, Path(work_id): Path<String>) -> Result<Json<WorkApiDto>, NexusApiError> {
+pub async fn get_work(
+    State(state): State<WorkspaceState>,
+    Path(work_id): Path<String>,
+) -> Result<Json<WorkApiDto>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let result = core.get_work(&principal, work_id).await.map_err(work_error)?;
+    let result = core
+        .get_work(&principal, work_id)
+        .await
+        .map_err(work_error)?;
     Ok(Json(result.into()))
 }
 
-pub async fn patch_work(State(state): State<WorkspaceState>, Path(work_id): Path<String>, Json(req): Json<PatchWorkRequest>) -> Result<Json<WorkApiDto>, NexusApiError> {
+pub async fn patch_work(
+    State(state): State<WorkspaceState>,
+    Path(work_id): Path<String>,
+    Json(req): Json<PatchWorkRequest>,
+) -> Result<Json<WorkApiDto>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
     let resume_auto_chain = req.auto_chain_interrupted == Some(false)
-        && req.current_stage.is_none() && req.stage_status.is_none();
-    let result = core.patch_work(&principal, work_id, "http", nexus_core::WorkPatchRequest { title: req.title, long_term_goal: req.long_term_goal, creative_brief: req.creative_brief, intake_status: req.intake_status, status: req.status, world_id: req.world_id, story_ref: req.story_ref, primary_preset_id: req.primary_preset_id, current_stage: req.current_stage, stage_status: req.stage_status, force: req.force, auto_review_master_on_timeout: req.auto_review_master_on_timeout, auto_chain_interrupted: req.auto_chain_interrupted, work_profile: req.work_profile, schedule_ids: None }).await.map_err(work_error)?;
+        && req.current_stage.is_none()
+        && req.stage_status.is_none();
+    let result = core
+        .patch_work(
+            &principal,
+            work_id,
+            "http",
+            nexus_core::WorkPatchRequest {
+                title: req.title,
+                long_term_goal: req.long_term_goal,
+                creative_brief: req.creative_brief,
+                intake_status: req.intake_status,
+                status: req.status,
+                world_id: req.world_id,
+                story_ref: req.story_ref,
+                primary_preset_id: req.primary_preset_id,
+                current_stage: req.current_stage,
+                stage_status: req.stage_status,
+                force: req.force,
+                auto_review_master_on_timeout: req.auto_review_master_on_timeout,
+                auto_chain_interrupted: req.auto_chain_interrupted,
+                work_profile: req.work_profile,
+                schedule_ids: None,
+            },
+        )
+        .await
+        .map_err(work_error)?;
     // Legacy daemon composition only; scheduling remains outside the core Work service.
     if resume_auto_chain {
         if let Some(supervisor) = state.schedule_supervisor() {
@@ -413,97 +505,268 @@ pub async fn patch_work(State(state): State<WorkspaceState>, Path(work_id): Path
     Ok(Json(result.into()))
 }
 
-pub async fn append_inspiration(State(state): State<WorkspaceState>, Path(work_id): Path<String>, Json(req): Json<AppendInspirationRequest>) -> Result<Json<AppendInspirationResponse>, NexusApiError> {
+pub async fn append_inspiration(
+    State(state): State<WorkspaceState>,
+    Path(work_id): Path<String>,
+    Json(req): Json<AppendInspirationRequest>,
+) -> Result<Json<AppendInspirationResponse>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let result = core.append_work_inspiration(&principal, work_id, "http", nexus_contracts::AppendInspirationRequest { note: req.note }).await.map_err(work_error)?;
-    Ok(Json(AppendInspirationResponse { work_id: result.work_id, inspiration_count: usize::try_from(result.inspiration_count).unwrap_or(usize::MAX) }))
+    let result = core
+        .append_work_inspiration(
+            &principal,
+            work_id,
+            "http",
+            nexus_contracts::AppendInspirationRequest { note: req.note },
+        )
+        .await
+        .map_err(work_error)?;
+    Ok(Json(AppendInspirationResponse {
+        work_id: result.work_id,
+        inspiration_count: usize::try_from(result.inspiration_count).unwrap_or(usize::MAX),
+    }))
 }
 
-pub async fn set_pool_active(State(state): State<WorkspaceState>, Json(req): Json<SetPoolActiveRequest>) -> Result<Json<PoolEntryDto>, NexusApiError> {
+pub async fn set_pool_active(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<SetPoolActiveRequest>,
+) -> Result<Json<PoolEntryDto>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let result = core.set_work_pool_active(&principal, nexus_core::SetPoolActiveRequest { action: req.action, work_id: req.work_id, creator_id: req.creator_id }).await.map_err(work_error)?;
+    let result = core
+        .set_work_pool_active(
+            &principal,
+            nexus_core::SetPoolActiveRequest {
+                action: req.action,
+                work_id: req.work_id,
+                creator_id: req.creator_id,
+            },
+        )
+        .await
+        .map_err(work_error)?;
     Ok(Json(result.into()))
 }
 
-pub async fn release_completion_lock_handler(State(state): State<WorkspaceState>, Path(work_id): Path<String>, Json(req): Json<ReleaseCompletionLockRequest>) -> Result<Json<WorkApiDto>, NexusApiError> {
+pub async fn release_completion_lock_handler(
+    State(state): State<WorkspaceState>,
+    Path(work_id): Path<String>,
+    Json(req): Json<ReleaseCompletionLockRequest>,
+) -> Result<Json<WorkApiDto>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let result = core.release_work_completion_lock(&principal, work_id, nexus_contracts::ReleaseCompletionLockRequest { reason: req.reason }).await.map_err(work_error)?;
+    let result = core
+        .release_work_completion_lock(
+            &principal,
+            work_id,
+            nexus_contracts::ReleaseCompletionLockRequest { reason: req.reason },
+        )
+        .await
+        .map_err(work_error)?;
     Ok(Json(result.into()))
 }
 
-pub async fn delete_work(State(state): State<WorkspaceState>, Path(work_id): Path<String>) -> Result<StatusCode, NexusApiError> {
+pub async fn delete_work(
+    State(state): State<WorkspaceState>,
+    Path(work_id): Path<String>,
+) -> Result<StatusCode, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    core.delete_work(&principal, work_id, "http").await.map_err(work_error)?;
+    core.delete_work(&principal, work_id, "http")
+        .await
+        .map_err(work_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-pub async fn reconcile_chapters(State(state): State<WorkspaceState>, Path(work_id): Path<String>, Query(query): Query<ReconcileDryRunQuery>) -> Result<(StatusCode, Json<nexus_local_db::work_chapters::ReconcileReport>), NexusApiError> {
+pub async fn reconcile_chapters(
+    State(state): State<WorkspaceState>,
+    Path(work_id): Path<String>,
+    Query(query): Query<ReconcileDryRunQuery>,
+) -> Result<
+    (
+        StatusCode,
+        Json<nexus_local_db::work_chapters::ReconcileReport>,
+    ),
+    NexusApiError,
+> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let result = core.reconcile_work_chapters(&principal, work_id, "http", nexus_core::ReconcileDryRunQuery { dry_run: query.dry_run }).await.map_err(work_error)?;
-    Ok((StatusCode::OK, Json(nexus_local_db::work_chapters::ReconcileReport {
-        created: result.created, updated: result.updated, resynced: result.resynced, preserved: result.preserved,
-    })))
+    let result = core
+        .reconcile_work_chapters(
+            &principal,
+            work_id,
+            "http",
+            nexus_core::ReconcileDryRunQuery {
+                dry_run: query.dry_run,
+            },
+        )
+        .await
+        .map_err(work_error)?;
+    Ok((
+        StatusCode::OK,
+        Json(nexus_local_db::work_chapters::ReconcileReport {
+            created: result.created,
+            updated: result.updated,
+            resynced: result.resynced,
+            preserved: result.preserved,
+        }),
+    ))
 }
 
-pub async fn list_pool(State(state): State<WorkspaceState>, Query(query): Query<ListPoolQuery>) -> Result<Json<ListPoolResponse>, NexusApiError> {
+pub async fn list_pool(
+    State(state): State<WorkspaceState>,
+    Query(query): Query<ListPoolQuery>,
+) -> Result<Json<ListPoolResponse>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let result = core.list_work_pool(&principal, nexus_core::ListPoolQuery { status: query.status, limit: query.limit, offset: query.offset }).await.map_err(work_error)?;
-    Ok(Json(ListPoolResponse { entries: result.entries.into_iter().map(Into::into).collect(), total: result.total, limit: result.limit, offset: result.offset }))
+    let result = core
+        .list_work_pool(
+            &principal,
+            nexus_core::ListPoolQuery {
+                status: query.status,
+                limit: query.limit,
+                offset: query.offset,
+            },
+        )
+        .await
+        .map_err(work_error)?;
+    Ok(Json(ListPoolResponse {
+        entries: result.entries.into_iter().map(Into::into).collect(),
+        total: result.total,
+        limit: result.limit,
+        offset: result.offset,
+    }))
 }
 
-pub async fn promote_pool_entry(State(state): State<WorkspaceState>, Json(req): Json<PromotePoolRequest>) -> Result<Json<PoolEntryDto>, NexusApiError> {
+pub async fn promote_pool_entry(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<PromotePoolRequest>,
+) -> Result<Json<PoolEntryDto>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let result = core.promote_work_pool_entry(&principal, nexus_core::PromotePoolRequest { work_id: req.work_id, set_default: req.set_default }).await.map_err(work_error)?;
+    let result = core
+        .promote_work_pool_entry(
+            &principal,
+            nexus_core::PromotePoolRequest {
+                work_id: req.work_id,
+                set_default: req.set_default,
+            },
+        )
+        .await
+        .map_err(work_error)?;
     Ok(Json(result.into()))
 }
 
-pub async fn archive_pool_entry_handler(State(state): State<WorkspaceState>, Json(req): Json<ArchivePoolRequest>) -> Result<Json<PoolEntryDto>, NexusApiError> {
+pub async fn archive_pool_entry_handler(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<ArchivePoolRequest>,
+) -> Result<Json<PoolEntryDto>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let result = core.archive_work_pool_entry(&principal, nexus_core::ArchivePoolRequest { entry_id: req.entry_id }).await.map_err(work_error)?;
+    let result = core
+        .archive_work_pool_entry(
+            &principal,
+            nexus_core::ArchivePoolRequest {
+                entry_id: req.entry_id,
+            },
+        )
+        .await
+        .map_err(work_error)?;
     Ok(Json(result.into()))
 }
 
-pub async fn add_inspiration(State(state): State<WorkspaceState>, Json(req): Json<AddInspirationRequest>) -> Result<(StatusCode, Json<AddInspirationResponse>), NexusApiError> {
+pub async fn add_inspiration(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<AddInspirationRequest>,
+) -> Result<(StatusCode, Json<AddInspirationResponse>), NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let result = core.add_work_inspiration(&principal, nexus_core::AddInspirationRequest { title: req.title }).await.map_err(work_error)?;
-    Ok((StatusCode::CREATED, Json(AddInspirationResponse { item_id: result.item_id, rel_path: result.rel_path })))
+    let result = core
+        .add_work_inspiration(
+            &principal,
+            nexus_core::AddInspirationRequest { title: req.title },
+        )
+        .await
+        .map_err(work_error)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(AddInspirationResponse {
+            item_id: result.item_id,
+            rel_path: result.rel_path,
+        }),
+    ))
 }
 
-pub async fn list_inspiration(State(state): State<WorkspaceState>, Query(query): Query<ListInspirationQuery>) -> Result<Json<ListInspirationResponse>, NexusApiError> {
+pub async fn list_inspiration(
+    State(state): State<WorkspaceState>,
+    Query(query): Query<ListInspirationQuery>,
+) -> Result<Json<ListInspirationResponse>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let result = core.list_work_inspiration(&principal, nexus_core::ListInspirationQuery { status: query.status, limit: query.limit, offset: query.offset }).await.map_err(work_error)?;
-    Ok(Json(ListInspirationResponse { items: result.items.into_iter().map(Into::into).collect(), total: result.total, limit: result.limit, offset: result.offset }))
+    let result = core
+        .list_work_inspiration(
+            &principal,
+            nexus_core::ListInspirationQuery {
+                status: query.status,
+                limit: query.limit,
+                offset: query.offset,
+            },
+        )
+        .await
+        .map_err(work_error)?;
+    Ok(Json(ListInspirationResponse {
+        items: result.items.into_iter().map(Into::into).collect(),
+        total: result.total,
+        limit: result.limit,
+        offset: result.offset,
+    }))
 }
 
-pub async fn promote_inspiration_handler(State(state): State<WorkspaceState>, Json(req): Json<PromoteInspirationRequest>) -> Result<Json<PromoteInspirationResponse>, NexusApiError> {
+pub async fn promote_inspiration_handler(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<PromoteInspirationRequest>,
+) -> Result<Json<PromoteInspirationResponse>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let result = core.promote_work_inspiration(&principal, nexus_core::PromoteInspirationRequest { item_id: req.item_id, idea: req.idea, set_default: req.set_default }).await.map_err(work_error)?;
-    Ok(Json(PromoteInspirationResponse { work_id: result.work_id, pool_entry_id: result.pool_entry_id }))
+    let result = core
+        .promote_work_inspiration(
+            &principal,
+            nexus_core::PromoteInspirationRequest {
+                item_id: req.item_id,
+                idea: req.idea,
+                set_default: req.set_default,
+            },
+        )
+        .await
+        .map_err(work_error)?;
+    Ok(Json(PromoteInspirationResponse {
+        work_id: result.work_id,
+        pool_entry_id: result.pool_entry_id,
+    }))
 }
 
-pub async fn archive_inspiration_handler(State(state): State<WorkspaceState>, Json(req): Json<ArchiveInspirationRequest>) -> Result<Json<InspirationItemDto>, NexusApiError> {
+pub async fn archive_inspiration_handler(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<ArchiveInspirationRequest>,
+) -> Result<Json<InspirationItemDto>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let result = core.archive_work_inspiration(&principal, nexus_core::ArchiveInspirationRequest { item_id: req.item_id }).await.map_err(work_error)?;
+    let result = core
+        .archive_work_inspiration(
+            &principal,
+            nexus_core::ArchiveInspirationRequest {
+                item_id: req.item_id,
+            },
+        )
+        .await
+        .map_err(work_error)?;
     Ok(Json(result.into()))
 }
 
 #[cfg(test)]
 mod tests_fix_d {
     use super::*;
-    use nexus_local_db::works;
     use crate::config::read_active_workspace_slug;
+    use nexus_local_db::works;
     #[tokio::test]
     async fn create_work_without_world_id_returns_error() {
         let (_tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
@@ -872,23 +1135,41 @@ mod tests_fix_d {
         // Body JSON alone cannot distinguish them — the body always reports
         // `error.code = "internal"` — so the carrier `code` field is asserted too.
         for (category, legacy_code, legacy_message) in [
-            ("DATABASE_ERROR: INSERT failed: no such table: works", "DATABASE_ERROR", "INSERT failed: no such table: works"),
-            ("CONTRACT_ERROR: invalid type: string, expected u32 at line 1 column 5", "CONTRACT_ERROR", "invalid type: string, expected u32 at line 1 column 5"),
+            (
+                "DATABASE_ERROR: INSERT failed: no such table: works",
+                "DATABASE_ERROR",
+                "INSERT failed: no such table: works",
+            ),
+            (
+                "CONTRACT_ERROR: invalid type: string, expected u32 at line 1 column 5",
+                "CONTRACT_ERROR",
+                "invalid type: string, expected u32 at line 1 column 5",
+            ),
         ] {
-            let migrated = work_error(nexus_core::CoreError::Internal { category: category.into() });
+            let migrated = work_error(nexus_core::CoreError::Internal {
+                category: category.into(),
+            });
             let NexusApiError::Internal { code, message } = &migrated else {
                 panic!("internal category must stay Internal, got {:?}", migrated);
             };
-            assert_eq!((code.as_str(), message.as_str()), (legacy_code, legacy_message));
+            assert_eq!(
+                (code.as_str(), message.as_str()),
+                (legacy_code, legacy_message)
+            );
             assert_eq!(migrated.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
-            let old_error = NexusApiError::Internal { code: legacy_code.into(), message: legacy_message.into() };
+            let old_error = NexusApiError::Internal {
+                code: legacy_code.into(),
+                message: legacy_message.into(),
+            };
             assert_eq!(
                 serde_json::to_string(&migrated.to_response_body()).unwrap(),
                 serde_json::to_string(&old_error.to_response_body()).unwrap(),
             );
         }
         // Non-legacy internal categories keep the shared CORE_ERROR fallback.
-        let fallback = work_error(nexus_core::CoreError::Internal { category: "workspace metadata: boom".into() });
+        let fallback = work_error(nexus_core::CoreError::Internal {
+            category: "workspace metadata: boom".into(),
+        });
         let NexusApiError::Internal { code, .. } = &fallback else {
             panic!("fallback must stay Internal, got {:?}", fallback);
         };
@@ -899,16 +1180,32 @@ mod tests_fix_d {
     #[test]
     fn nullable_patch_and_ignored_reopen_fields_remain_distinct() {
         let omitted: PatchWorkRequest = serde_json::from_value(serde_json::json!({})).unwrap();
-        let cleared: PatchWorkRequest = serde_json::from_value(serde_json::json!({"story_ref": null, "world_id": null})).unwrap();
-        let set: PatchWorkRequest = serde_json::from_value(serde_json::json!({"story_ref": "story", "world_id": "world"})).unwrap();
+        let cleared: PatchWorkRequest =
+            serde_json::from_value(serde_json::json!({"story_ref": null, "world_id": null}))
+                .unwrap();
+        let set: PatchWorkRequest =
+            serde_json::from_value(serde_json::json!({"story_ref": "story", "world_id": "world"}))
+                .unwrap();
         assert_eq!((omitted.story_ref, omitted.world_id), (None, None));
-        assert_eq!((cleared.story_ref, cleared.world_id), (Some(None), Some(None)));
-        assert_eq!((set.story_ref, set.world_id), (Some(Some("story".into())), Some(Some("world".into()))));
+        assert_eq!(
+            (cleared.story_ref, cleared.world_id),
+            (Some(None), Some(None))
+        );
+        assert_eq!(
+            (set.story_ref, set.world_id),
+            (Some(Some("story".into())), Some(Some("world".into())))
+        );
         let ignored: PatchWorkRequest = serde_json::from_value(serde_json::json!({
             "novel_completion_status": "reopened", "completion_locked_at": null,
             "total_planned_chapters": 99,
-        })).unwrap();
-        assert!(ignored.status.is_none() && ignored.current_stage.is_none() && ignored.world_id.is_none() && ignored.story_ref.is_none());
+        }))
+        .unwrap();
+        assert!(
+            ignored.status.is_none()
+                && ignored.current_stage.is_none()
+                && ignored.world_id.is_none()
+                && ignored.story_ref.is_none()
+        );
     }
     #[tokio::test]
     async fn retained_reopen_is_ignored_and_completion_lock_remains_conflict() {
@@ -919,21 +1216,45 @@ mod tests_fix_d {
         let request = serde_json::from_value(serde_json::json!({
             "title": "Locked work", "long_term_goal": "write", "initial_idea": "idea",
             "world_id": "wld_test_world",
-        })).unwrap();
-        let (_, Json(created)) = create_work(State(state.clone()), Json(request)).await.unwrap();
-        let ignored_request = || serde_json::from_value(serde_json::json!({
-            "novel_completion_status": "reopened", "completion_locked_at": null,
-            "total_planned_chapters": 99,
-        })).unwrap();
-        let Json(unchanged) = patch_work(State(state.clone()), Path(created.work_id.clone()), Json(ignored_request())).await.unwrap();
+        }))
+        .unwrap();
+        let (_, Json(created)) = create_work(State(state.clone()), Json(request))
+            .await
+            .unwrap();
+        let ignored_request = || {
+            serde_json::from_value(serde_json::json!({
+                "novel_completion_status": "reopened", "completion_locked_at": null,
+                "total_planned_chapters": 99,
+            }))
+            .unwrap()
+        };
+        let Json(unchanged) = patch_work(
+            State(state.clone()),
+            Path(created.work_id.clone()),
+            Json(ignored_request()),
+        )
+        .await
+        .unwrap();
         assert_eq!(unchanged.novel_completion_status, None);
         assert_eq!(unchanged.total_planned_chapters, None);
         sqlx::query("UPDATE works SET completion_locked_at = '2026-09-15', novel_completion_status = 'completed', total_planned_chapters = 3 WHERE work_id = ?").bind(&created.work_id).execute(pool).await.unwrap();
-        let error = patch_work(State(state.clone()), Path(created.work_id.clone()), Json(ignored_request())).await.unwrap_err();
+        let error = patch_work(
+            State(state.clone()),
+            Path(created.work_id.clone()),
+            Json(ignored_request()),
+        )
+        .await
+        .unwrap_err();
         let expected = NexusApiError::Conflict(format!("work {} is completion-locked since 2026-09-15; use 'creator works completion-lock release' first", created.work_id));
         assert_eq!(error.status_code(), StatusCode::CONFLICT);
-        assert_eq!(serde_json::to_string(&error.to_response_body()).unwrap(), serde_json::to_string(&expected.to_response_body()).unwrap());
-        let record = works::get_work(pool, "test_creator", &created.work_id).await.unwrap().unwrap();
+        assert_eq!(
+            serde_json::to_string(&error.to_response_body()).unwrap(),
+            serde_json::to_string(&expected.to_response_body()).unwrap()
+        );
+        let record = works::get_work(pool, "test_creator", &created.work_id)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(record.completion_locked_at.as_deref(), Some("2026-09-15"));
         assert_eq!(record.total_planned_chapters, Some(3));
     }
@@ -947,13 +1268,20 @@ mod tests_fix_d {
         let request = serde_json::from_value(serde_json::json!({
             "title": "Broken", "long_term_goal": "write", "initial_idea": "idea",
             "world_id": "wld_test_world",
-        })).unwrap();
+        }))
+        .unwrap();
         let error = create_work(State(state), Json(request)).await.unwrap_err();
         let NexusApiError::Internal { code, message } = &error else {
-            panic!("dropped works table must surface as Internal, got {:?}", error);
+            panic!(
+                "dropped works table must surface as Internal, got {:?}",
+                error
+            );
         };
         assert_eq!(code, "DATABASE_ERROR");
-        assert!(message.contains("works"), "message must carry the sqlite failure, got: {message}");
+        assert!(
+            message.contains("works"),
+            "message must carry the sqlite failure, got: {message}"
+        );
         assert_eq!(error.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(error.to_response_body().error.code, "internal");
     }

@@ -244,213 +244,80 @@ impl Default for ReferenceRefresh {
 }
 
 #[async_trait]
-impl Capability for ReferenceRefresh { fn name(&self) -> &'static str {
-    "nexus.reference.refresh"
-} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::NEXUS_REFERENCE_REFRESH_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
-    r#"{"type":"object","properties":{"reference_source_id":{"type":"string"},"refreshed":{"type":"boolean"},"content_changed":{"type":"boolean"},"new_content_hash":{"type":"string"},"refreshed_at":{"type":"string","format":"date-time"},"status":{"type":"string","enum":["fresh","stale","not_modified","policy_blocked","error"]},"bytes_fetched":{"type":"integer","minimum":0}},"required":["reference_source_id","refreshed","content_changed","status"],"additionalProperties":false}"#
-}
-
-#[allow(clippy::too_many_lines)]
-async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-    let parsed: ReferenceRefreshInput = serde_json::from_value(input).map_err(|e| {
-        CapabilityError::InputInvalid(format!("nexus.reference.refresh input: {e}"))
-    })?;
-
-    let pool = self
-        .pool
-        .as_ref()
-        .ok_or(CapabilityError::WorkerUnavailable)?;
-
-    // Step 1: Look up the reference source — scoped by creator when available (H-002).
-    let source = if let Some(ref creator_id) = self.creator_id {
-        nexus_local_db::reference_source::find_by_id_for_creator(
-            pool,
-            &parsed.reference_source_id,
-            creator_id,
-        )
-        .await
-    } else {
-        nexus_local_db::reference_source::get_by_id(pool, &parsed.reference_source_id).await
+impl Capability for ReferenceRefresh {
+    fn name(&self) -> &'static str {
+        "nexus.reference.refresh"
     }
-    .map_err(|e| CapabilityError::Internal(format!("DB error: {e}")))?;
-
-    let source = source.ok_or_else(|| {
-        CapabilityError::InputInvalid(format!(
-            "reference source not found: {}",
-            parsed.reference_source_id
-        ))
-    })?;
-
-    // Step 2: Check refresh policy.
-    if source.refresh_policy == "offline" {
-        tracing::info!(
-            reference_source_id = %parsed.reference_source_id,
-            "nx.reference.refresh: source has offline policy; refresh blocked"
-        );
-        return Ok(json!({
-            "reference_source_id": parsed.reference_source_id,
-            "refreshed": false,
-            "content_changed": false,
-            "status": "policy_blocked",
-            "new_content_hash": source.content_hash.unwrap_or_default(),
-            "refreshed_at": null,
-            "bytes_fetched": 0,
-        }));
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::NEXUS_REFERENCE_REFRESH_INPUT_SCHEMA
+    }
+    fn output_schema(&self) -> &'static str {
+        r#"{"type":"object","properties":{"reference_source_id":{"type":"string"},"refreshed":{"type":"boolean"},"content_changed":{"type":"boolean"},"new_content_hash":{"type":"string"},"refreshed_at":{"type":"string","format":"date-time"},"status":{"type":"string","enum":["fresh","stale","not_modified","policy_blocked","error"]},"bytes_fetched":{"type":"integer","minimum":0}},"required":["reference_source_id","refreshed","content_changed","status"],"additionalProperties":false}"#
     }
 
-    // Step 3: Mark as refreshing.
-    let _ =
-        nexus_local_db::reference_source::mark_refreshing(pool, &parsed.reference_source_id)
-            .await;
+    #[allow(clippy::too_many_lines)]
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        let parsed: ReferenceRefreshInput = serde_json::from_value(input).map_err(|e| {
+            CapabilityError::InputInvalid(format!("nexus.reference.refresh input: {e}"))
+        })?;
 
-    // Step 4: Resolve fetch URL.
-    let fetch_url = parsed.url.as_deref().unwrap_or(&source.uri);
-    if fetch_url.is_empty() {
-        let _ = nexus_local_db::reference_source::mark_refresh_error(
-            pool,
-            &parsed.reference_source_id,
-            "empty URL",
-        )
-        .await;
-        return Ok(json!({
-            "reference_source_id": parsed.reference_source_id,
-            "refreshed": false,
-            "content_changed": false,
-            "status": "error",
-            "new_content_hash": source.content_hash.unwrap_or_default(),
-            "refreshed_at": null,
-            "bytes_fetched": 0,
-        }));
-    }
+        let pool = self
+            .pool
+            .as_ref()
+            .ok_or(CapabilityError::WorkerUnavailable)?;
 
-    // Step 5: Validate URL (H-001: HTTPS-only + private-IP blocking).
-    validate_reference_url(fetch_url)?;
-
-    // Step 6: Fetch content.
-    let fetch_result = HTTP_CLIENT.get(fetch_url).send().await;
-
-    match fetch_result {
-        Ok(response) => {
-            let status_code = response.status().as_u16();
-            if !response.status().is_success() {
-                let _ = nexus_local_db::reference_source::mark_refresh_error(
-                    pool,
-                    &parsed.reference_source_id,
-                    &format!("HTTP {status_code}"),
-                )
-                .await;
-                return Ok(json!({
-                    "reference_source_id": parsed.reference_source_id,
-                    "refreshed": false,
-                    "content_changed": false,
-                    "status": "error",
-                    "new_content_hash": source.content_hash.unwrap_or_default(),
-                    "refreshed_at": null,
-                    "bytes_fetched": 0,
-                }));
-            }
-
-            // Stream the response body and compute blake3 hash incrementally
-            // (F-001: QC3 fix — avoids loading entire body into memory).
-            let mut hasher = blake3::Hasher::new();
-            let mut body_bytes: Vec<u8> = Vec::new();
-            let mut stream = response.bytes_stream();
-            let mut total_bytes: usize = 0;
-
-            while let Some(chunk_result) = stream.next().await {
-                let chunk = chunk_result.map_err(|e| {
-                    CapabilityError::TransientExternal(format!("fetch body: {e}"))
-                })?;
-                if total_bytes + chunk.len() > MAX_REFERENCE_BODY_BYTES {
-                    return Err(CapabilityError::TransientExternal(format!(
-                        "reference body exceeds {MAX_REFERENCE_BODY_BYTES} bytes limit"
-                    )));
-                }
-                hasher.update(&chunk);
-                body_bytes.extend_from_slice(&chunk);
-                total_bytes += chunk.len();
-            }
-
-            let new_hash = hasher.finalize().to_hex().to_string();
-            let old_hash = source.content_hash.clone();
-            let content_changed = old_hash.as_deref() != Some(&new_hash);
-
-            if content_changed {
-                // V1.58 P3: write the refreshed body to the on-disk body.md
-                // when creator context is available (CLI path). The scheduler
-                // path (no creator context) only updates the DB.
-                if let (Some(ref home), Some(ref creator_id)) =
-                    (&self.creator_home, &self.creator_id)
-                {
-                    let body_path = nexus_home_layout::reference_body_path(
-                        home,
-                        creator_id,
-                        &parsed.reference_source_id,
-                    );
-                    // Atomic write: temp file + rename.
-                    if let Err(e) = atomic_write_body(&body_path, &body_bytes).await {
-                        tracing::warn!(
-                            reference_source_id = %parsed.reference_source_id,
-                            body_path = %body_path.display(),
-                            error = %e,
-                            "nx.reference.refresh: body.md write failed — DB updated, disk stale"
-                        );
-                    }
-                }
-
-                // Update the DB with new hash + refreshed timestamp.
-                let _ = nexus_local_db::reference_source::mark_refreshed(
-                    pool,
-                    &parsed.reference_source_id,
-                    &new_hash,
-                )
-                .await;
-
-                let now = chrono::Utc::now().to_rfc3339();
-                Ok(json!({
-                    "reference_source_id": parsed.reference_source_id,
-                    "refreshed": true,
-                    "content_changed": true,
-                    "status": "fresh",
-                    "new_content_hash": new_hash,
-                    "refreshed_at": now,
-                    "bytes_fetched": total_bytes,
-                }))
-            } else {
-                // Content unchanged — mark as fresh (not stale).
-                let _ = nexus_local_db::reference_source::mark_refreshed(
-                    pool,
-                    &parsed.reference_source_id,
-                    &new_hash,
-                )
-                .await;
-
-                let now = chrono::Utc::now().to_rfc3339();
-                Ok(json!({
-                    "reference_source_id": parsed.reference_source_id,
-                    "refreshed": true,
-                    "content_changed": false,
-                    "status": "not_modified",
-                    "new_content_hash": new_hash,
-                    "refreshed_at": now,
-                    "bytes_fetched": total_bytes,
-                }))
-            }
+        // Step 1: Look up the reference source — scoped by creator when available (H-002).
+        let source = if let Some(ref creator_id) = self.creator_id {
+            nexus_local_db::reference_source::find_by_id_for_creator(
+                pool,
+                &parsed.reference_source_id,
+                creator_id,
+            )
+            .await
+        } else {
+            nexus_local_db::reference_source::get_by_id(pool, &parsed.reference_source_id).await
         }
-        Err(e) => {
-            tracing::warn!(
+        .map_err(|e| CapabilityError::Internal(format!("DB error: {e}")))?;
+
+        let source = source.ok_or_else(|| {
+            CapabilityError::InputInvalid(format!(
+                "reference source not found: {}",
+                parsed.reference_source_id
+            ))
+        })?;
+
+        // Step 2: Check refresh policy.
+        if source.refresh_policy == "offline" {
+            tracing::info!(
                 reference_source_id = %parsed.reference_source_id,
-                url = %fetch_url,
-                error = %e,
-                "nx.reference.refresh: fetch failed"
+                "nx.reference.refresh: source has offline policy; refresh blocked"
             );
+            return Ok(json!({
+                "reference_source_id": parsed.reference_source_id,
+                "refreshed": false,
+                "content_changed": false,
+                "status": "policy_blocked",
+                "new_content_hash": source.content_hash.unwrap_or_default(),
+                "refreshed_at": null,
+                "bytes_fetched": 0,
+            }));
+        }
+
+        // Step 3: Mark as refreshing.
+        let _ =
+            nexus_local_db::reference_source::mark_refreshing(pool, &parsed.reference_source_id)
+                .await;
+
+        // Step 4: Resolve fetch URL.
+        let fetch_url = parsed.url.as_deref().unwrap_or(&source.uri);
+        if fetch_url.is_empty() {
             let _ = nexus_local_db::reference_source::mark_refresh_error(
                 pool,
                 &parsed.reference_source_id,
-                &e.to_string(),
+                "empty URL",
             )
             .await;
-            Ok(json!({
+            return Ok(json!({
                 "reference_source_id": parsed.reference_source_id,
                 "refreshed": false,
                 "content_changed": false,
@@ -458,10 +325,149 @@ async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
                 "new_content_hash": source.content_hash.unwrap_or_default(),
                 "refreshed_at": null,
                 "bytes_fetched": 0,
-            }))
+            }));
+        }
+
+        // Step 5: Validate URL (H-001: HTTPS-only + private-IP blocking).
+        validate_reference_url(fetch_url)?;
+
+        // Step 6: Fetch content.
+        let fetch_result = HTTP_CLIENT.get(fetch_url).send().await;
+
+        match fetch_result {
+            Ok(response) => {
+                let status_code = response.status().as_u16();
+                if !response.status().is_success() {
+                    let _ = nexus_local_db::reference_source::mark_refresh_error(
+                        pool,
+                        &parsed.reference_source_id,
+                        &format!("HTTP {status_code}"),
+                    )
+                    .await;
+                    return Ok(json!({
+                        "reference_source_id": parsed.reference_source_id,
+                        "refreshed": false,
+                        "content_changed": false,
+                        "status": "error",
+                        "new_content_hash": source.content_hash.unwrap_or_default(),
+                        "refreshed_at": null,
+                        "bytes_fetched": 0,
+                    }));
+                }
+
+                // Stream the response body and compute blake3 hash incrementally
+                // (F-001: QC3 fix — avoids loading entire body into memory).
+                let mut hasher = blake3::Hasher::new();
+                let mut body_bytes: Vec<u8> = Vec::new();
+                let mut stream = response.bytes_stream();
+                let mut total_bytes: usize = 0;
+
+                while let Some(chunk_result) = stream.next().await {
+                    let chunk = chunk_result.map_err(|e| {
+                        CapabilityError::TransientExternal(format!("fetch body: {e}"))
+                    })?;
+                    if total_bytes + chunk.len() > MAX_REFERENCE_BODY_BYTES {
+                        return Err(CapabilityError::TransientExternal(format!(
+                            "reference body exceeds {MAX_REFERENCE_BODY_BYTES} bytes limit"
+                        )));
+                    }
+                    hasher.update(&chunk);
+                    body_bytes.extend_from_slice(&chunk);
+                    total_bytes += chunk.len();
+                }
+
+                let new_hash = hasher.finalize().to_hex().to_string();
+                let old_hash = source.content_hash.clone();
+                let content_changed = old_hash.as_deref() != Some(&new_hash);
+
+                if content_changed {
+                    // V1.58 P3: write the refreshed body to the on-disk body.md
+                    // when creator context is available (CLI path). The scheduler
+                    // path (no creator context) only updates the DB.
+                    if let (Some(ref home), Some(ref creator_id)) =
+                        (&self.creator_home, &self.creator_id)
+                    {
+                        let body_path = nexus_home_layout::reference_body_path(
+                            home,
+                            creator_id,
+                            &parsed.reference_source_id,
+                        );
+                        // Atomic write: temp file + rename.
+                        if let Err(e) = atomic_write_body(&body_path, &body_bytes).await {
+                            tracing::warn!(
+                                reference_source_id = %parsed.reference_source_id,
+                                body_path = %body_path.display(),
+                                error = %e,
+                                "nx.reference.refresh: body.md write failed — DB updated, disk stale"
+                            );
+                        }
+                    }
+
+                    // Update the DB with new hash + refreshed timestamp.
+                    let _ = nexus_local_db::reference_source::mark_refreshed(
+                        pool,
+                        &parsed.reference_source_id,
+                        &new_hash,
+                    )
+                    .await;
+
+                    let now = chrono::Utc::now().to_rfc3339();
+                    Ok(json!({
+                        "reference_source_id": parsed.reference_source_id,
+                        "refreshed": true,
+                        "content_changed": true,
+                        "status": "fresh",
+                        "new_content_hash": new_hash,
+                        "refreshed_at": now,
+                        "bytes_fetched": total_bytes,
+                    }))
+                } else {
+                    // Content unchanged — mark as fresh (not stale).
+                    let _ = nexus_local_db::reference_source::mark_refreshed(
+                        pool,
+                        &parsed.reference_source_id,
+                        &new_hash,
+                    )
+                    .await;
+
+                    let now = chrono::Utc::now().to_rfc3339();
+                    Ok(json!({
+                        "reference_source_id": parsed.reference_source_id,
+                        "refreshed": true,
+                        "content_changed": false,
+                        "status": "not_modified",
+                        "new_content_hash": new_hash,
+                        "refreshed_at": now,
+                        "bytes_fetched": total_bytes,
+                    }))
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    reference_source_id = %parsed.reference_source_id,
+                    url = %fetch_url,
+                    error = %e,
+                    "nx.reference.refresh: fetch failed"
+                );
+                let _ = nexus_local_db::reference_source::mark_refresh_error(
+                    pool,
+                    &parsed.reference_source_id,
+                    &e.to_string(),
+                )
+                .await;
+                Ok(json!({
+                    "reference_source_id": parsed.reference_source_id,
+                    "refreshed": false,
+                    "content_changed": false,
+                    "status": "error",
+                    "new_content_hash": source.content_hash.unwrap_or_default(),
+                    "refreshed_at": null,
+                    "bytes_fetched": 0,
+                }))
+            }
         }
     }
-} }
+}
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
 

@@ -536,10 +536,10 @@ async fn apply_reload(
 mod tests {
     use super::*;
     use nexus_home_layout::{connect_daemon_config_path, connect_peer_keys_path};
+    use nexus_spoke_adapter::HostCapabilityManifest;
     use spoke_connect::remote::{
         connect_responder, loopback_transport_pair, ConnectResponderOptions, RemoteIdentity,
     };
-    use nexus_spoke_adapter::HostCapabilityManifest;
     use std::collections::{HashSet, VecDeque};
     use std::sync::atomic::{AtomicUsize, Ordering};
 

@@ -35,11 +35,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use nexus_spoke_adapter::HostCapabilityManifest;
 use spoke_connect::remote::{
     connect_responder, ConnectResponder, ConnectResponderOptions, ConnectResponderState,
     RemoteIdentity, Transport, TransportError,
 };
-use nexus_spoke_adapter::HostCapabilityManifest;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
@@ -184,7 +184,6 @@ pub fn ensure_remote_bind_allowed(host: &str) -> CoreResult<()> {
 /// the shape is fixed at authoring time).
 #[must_use]
 pub fn daemon_manifest(host_id: &str, tool_ids: &[String]) -> HostCapabilityManifest {
-
     let mut capabilities = vec!["spoke-baseline".to_owned()];
     capabilities.extend(tool_ids.iter().cloned());
     // Tool grammar is exactly `tools.<ns>.<id>` (3 segments), so `nth(1)`
@@ -519,9 +518,11 @@ pub async fn start_peer_tools_lane(
     // the first poll reloads (never absorbed; the capability watcher's
     // W-B rule).
     let boot_digest = peer_config_digest(home);
-    let config = Arc::new(PeerToolsConfig::load(home).map_err(|e| CoreError::Internal {
-        category: format!("peer-tools config load: {e}"),
-    })?);
+    let config = Arc::new(
+        PeerToolsConfig::load(home).map_err(|e| CoreError::Internal {
+            category: format!("peer-tools config load: {e}"),
+        })?,
+    );
     // DF-91: wire the live config snapshot into the process-global table
     // so admission reads `collision_policy` + `peer_priority` at
     // admission time (live-derivation precedent: `live_reserved_tool_ids`
@@ -550,14 +551,14 @@ pub async fn start_peer_tools_lane(
     }
     ensure_remote_bind_allowed(&config.host)?;
     let identity_seed =
-        identity::load_or_create_identity(home)
-            .map_err(|e| CoreError::Internal {
-                category: format!("peer-tools identity: {e}"),
-            })?;
-    let device_id = nexus_home_layout::device_id::get_or_create_device_id(home)
-        .map_err(|e| CoreError::Internal {
-            category: format!("peer-tools device id resolution: {e}"),
+        identity::load_or_create_identity(home).map_err(|e| CoreError::Internal {
+            category: format!("peer-tools identity: {e}"),
         })?;
+    let device_id = nexus_home_layout::device_id::get_or_create_device_id(home).map_err(|e| {
+        CoreError::Internal {
+            category: format!("peer-tools device id resolution: {e}"),
+        }
+    })?;
     // DF-92: the live config holder is seeded with the boot generation;
     // the watcher (below) swaps validated reloads into it and every
     // connection reads it (see `handle_connection`) — handshake
@@ -566,11 +567,11 @@ pub async fn start_peer_tools_lane(
     // source for every boot-scoped field (GC #7).
     let config_holder = PeerConfigHolder::new(PeerConfigSnapshot {
         config: Arc::clone(&config),
-        peer_keys: Arc::new(crate::connect::config::load_peer_keys(home).map_err(
-            |e| CoreError::Internal {
+        peer_keys: Arc::new(crate::connect::config::load_peer_keys(home).map_err(|e| {
+            CoreError::Internal {
                 category: format!("peer-tools key load: {e}"),
-            },
-        )?),
+            }
+        })?),
     });
     let listener = TcpListener::bind((config.host.as_str(), config.port))
         .await

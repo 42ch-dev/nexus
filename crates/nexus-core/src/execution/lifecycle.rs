@@ -28,10 +28,8 @@ use nexus_provider_ports::ProviderPort;
 use sqlx::SqlitePool;
 
 use crate::error::CoreResult;
+use crate::execution::workflow::{ProviderCatalogPort, RunEventPort, WorkflowRunCoordinator};
 use crate::service::{CoreAccess, CoreService};
-use crate::execution::workflow::{
-    ProviderCatalogPort, RunEventPort, WorkflowRunCoordinator,
-};
 
 /// Why an execution handle could not be established.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -221,9 +219,7 @@ pub struct ExecutionHandle {
     /// The peer-control lane this execution owner admits (v1.190 P4-T3).
     /// Empty until `start_peer_control` succeeds; closed with the owner.
     #[cfg(feature = "connect-client")]
-    pub(crate) peer_control: std::sync::Mutex<
-        Option<Arc<crate::connect::PeerControlLane>>,
-    >,
+    pub(crate) peer_control: std::sync::Mutex<Option<Arc<crate::connect::PeerControlLane>>>,
 }
 
 impl ExecutionHandle {
@@ -554,7 +550,8 @@ impl CoreService {
         _providers: Arc<dyn ProviderPort>,
         mut deps: RunnerDeps,
     ) -> Result<Arc<ExecutionHandle>, ExecutionOpenError> {
-        self.ensure_open().map_err(|_| ExecutionOpenError::Closing)?;
+        self.ensure_open()
+            .map_err(|_| ExecutionOpenError::Closing)?;
         if self.inner.access != CoreAccess::EngineOwner {
             return Err(ExecutionOpenError::NotEngineOwner(self.inner.access));
         }

@@ -229,135 +229,140 @@ impl Default for NovelProjectScaffold {
 }
 
 #[async_trait]
-impl Capability for NovelProjectScaffold { fn name(&self) -> &'static str {
-    "novel.project_scaffold"
-} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::NOVEL_PROJECT_SCAFFOLD_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
-    r#"{"type":"object","properties":{"scaffold_root":{"type":"string"},"chapters_seeded":{"type":"integer"},"files_created":{"type":"array","items":{"type":"string"}},"dirs_created":{"type":"array","items":{"type":"string"}}},"required":["scaffold_root","chapters_seeded","files_created","dirs_created"],"additionalProperties":false}"#
-}
+impl Capability for NovelProjectScaffold {
+    fn name(&self) -> &'static str {
+        "novel.project_scaffold"
+    }
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::NOVEL_PROJECT_SCAFFOLD_INPUT_SCHEMA
+    }
+    fn output_schema(&self) -> &'static str {
+        r#"{"type":"object","properties":{"scaffold_root":{"type":"string"},"chapters_seeded":{"type":"integer"},"files_created":{"type":"array","items":{"type":"string"}},"dirs_created":{"type":"array","items":{"type":"string"}}},"required":["scaffold_root","chapters_seeded","files_created","dirs_created"],"additionalProperties":false}"#
+    }
 
-// SAFETY: The run method handles 9 file/dir operations + DB seed + DB patch.
-// Line count is inherent to the multi-step scaffold protocol.
-#[allow(clippy::too_many_lines)]
-async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-    let inp: ScaffoldInput = serde_json::from_value(input).map_err(|e| {
-        CapabilityError::InputInvalid(format!("novel.project_scaffold input: {e}"))
-    })?;
+    // SAFETY: The run method handles 9 file/dir operations + DB seed + DB patch.
+    // Line count is inherent to the multi-step scaffold protocol.
+    #[allow(clippy::too_many_lines)]
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        let inp: ScaffoldInput = serde_json::from_value(input).map_err(|e| {
+            CapabilityError::InputInvalid(format!("novel.project_scaffold input: {e}"))
+        })?;
 
-    // F8 (W-4): structured lifecycle logging for novel.project_scaffold.
-    info!(
-        work_id = %inp.work_id,
-        work_ref = %inp.work_ref,
-        total_planned_chapters = inp.total_planned_chapters,
-        world_id = ?inp.world_id,
-        partial = %inp.fields_changed.is_some(),
-        "novel.project_scaffold: start"
-    );
-    if self.pool.is_none() {
-        tracing::warn!(
+        // F8 (W-4): structured lifecycle logging for novel.project_scaffold.
+        info!(
             work_id = %inp.work_id,
-            "novel.project_scaffold: no DB pool bound — running FS-only (test/dry-run mode)"
+            work_ref = %inp.work_ref,
+            total_planned_chapters = inp.total_planned_chapters,
+            world_id = ?inp.world_id,
+            partial = %inp.fields_changed.is_some(),
+            "novel.project_scaffold: start"
         );
-    }
+        if self.pool.is_none() {
+            tracing::warn!(
+                work_id = %inp.work_id,
+                "novel.project_scaffold: no DB pool bound — running FS-only (test/dry-run mode)"
+            );
+        }
 
-    // ── F1 — sanitize untrusted grill-me values (C-1, C-4, W-2) ────
-    // Reject path-traversal, separators, uppercase, oversize, control
-    // characters; bound chapter count to 1..=100 (matches prompt range).
-    let work_ref = validate_work_ref(&inp.work_ref)?;
-    let total_chapters_bounded = validate_total_chapters(inp.total_planned_chapters)?;
-    // V1.42: validate total_volumes
-    if inp.total_volumes < 1 {
-        return Err(CapabilityError::InputInvalid(
-            "total_volumes must be >= 1".to_string(),
-        ));
-    }
-    if inp.total_volumes > inp.total_planned_chapters {
-        return Err(CapabilityError::InputInvalid(format!(
-            "total_volumes ({}) cannot exceed total_planned_chapters ({})",
-            inp.total_volumes, inp.total_planned_chapters
-        )));
-    }
-    // Re-bind to the validated values so downstream code cannot accidentally
-    // use the raw input fields.
-    let inp = ScaffoldInput {
-        creator_id: inp.creator_id,
-        work_id: inp.work_id,
-        work_ref,
-        title: inp.title,
-        world_id: inp.world_id,
-        create_world: inp.create_world,
-        world_title: inp.world_title,
-        world_slug: inp.world_slug,
-        total_planned_chapters: inp.total_planned_chapters,
-        total_volumes: inp.total_volumes,
-        fields_changed: inp.fields_changed,
-    };
-    let _ = total_chapters_bounded; // kept for documentation; bounded i32 reused below
+        // ── F1 — sanitize untrusted grill-me values (C-1, C-4, W-2) ────
+        // Reject path-traversal, separators, uppercase, oversize, control
+        // characters; bound chapter count to 1..=100 (matches prompt range).
+        let work_ref = validate_work_ref(&inp.work_ref)?;
+        let total_chapters_bounded = validate_total_chapters(inp.total_planned_chapters)?;
+        // V1.42: validate total_volumes
+        if inp.total_volumes < 1 {
+            return Err(CapabilityError::InputInvalid(
+                "total_volumes must be >= 1".to_string(),
+            ));
+        }
+        if inp.total_volumes > inp.total_planned_chapters {
+            return Err(CapabilityError::InputInvalid(format!(
+                "total_volumes ({}) cannot exceed total_planned_chapters ({})",
+                inp.total_volumes, inp.total_planned_chapters
+            )));
+        }
+        // Re-bind to the validated values so downstream code cannot accidentally
+        // use the raw input fields.
+        let inp = ScaffoldInput {
+            creator_id: inp.creator_id,
+            work_id: inp.work_id,
+            work_ref,
+            title: inp.title,
+            world_id: inp.world_id,
+            create_world: inp.create_world,
+            world_title: inp.world_title,
+            world_slug: inp.world_slug,
+            total_planned_chapters: inp.total_planned_chapters,
+            total_volumes: inp.total_volumes,
+            fields_changed: inp.fields_changed,
+        };
+        let _ = total_chapters_bounded; // kept for documentation; bounded i32 reused below
 
-    // ── T0.2: V1.40 mandatory world binding ──────────────────────
-    // Every new Work MUST have either an existing `world_id` or
-    // `create_world == true`. Worldless Works cannot be created in V1.40.
-    if !inp.create_world.unwrap_or(false) && inp.world_id.is_none() {
-        return Err(CapabilityError::InputInvalid(
-            "V1.40 requires world_id at Work creation. \
+        // ── T0.2: V1.40 mandatory world binding ──────────────────────
+        // Every new Work MUST have either an existing `world_id` or
+        // `create_world == true`. Worldless Works cannot be created in V1.40.
+        if !inp.create_world.unwrap_or(false) && inp.world_id.is_none() {
+            return Err(CapabilityError::InputInvalid(
+                "V1.40 requires world_id at Work creation. \
              Either provide world_id from 'nexus42 creator world list' \
              or set create_world=true with world_title \
              (equivalent to 'nexus42 creator world create --title \"...\")"
-                .to_string(),
-        ));
-    }
+                    .to_string(),
+            ));
+        }
 
-    // ── T3: resolve world_id from create_world or existing binding ──
-    // When `create_world == true`, invoke `nexus_local_db::create_world_tx`
-    // inside the same DB transaction as seed_chapters + patch_work to
-    // guarantee atomicity (spec §3.5.1.1: "no partial scaffold").
-    //
-    // Phase 1: validate inputs and decide whether to create a world.
-    // Phase 2 (below, inside the DB transaction): execute the world creation
-    // and FK check atomically with chapter seeding and work patching.
-    let should_create_world = inp.create_world.unwrap_or(false);
-    if should_create_world {
-        if inp.world_id.is_some() {
+        // ── T3: resolve world_id from create_world or existing binding ──
+        // When `create_world == true`, invoke `nexus_local_db::create_world_tx`
+        // inside the same DB transaction as seed_chapters + patch_work to
+        // guarantee atomicity (spec §3.5.1.1: "no partial scaffold").
+        //
+        // Phase 1: validate inputs and decide whether to create a world.
+        // Phase 2 (below, inside the DB transaction): execute the world creation
+        // and FK check atomically with chapter seeding and work patching.
+        let should_create_world = inp.create_world.unwrap_or(false);
+        if should_create_world {
+            if inp.world_id.is_some() {
+                return Err(CapabilityError::InputInvalid(
+                    "cannot set both world_id and create_world".to_string(),
+                ));
+            }
+            if self.pool.is_none() {
+                return Err(CapabilityError::Internal(
+                    "cannot create_world without DB pool (test/dry-run mode)".to_string(),
+                ));
+            }
+        }
+
+        let world_title_for_create = inp.world_title.as_deref().map(|t| {
+            let slug = inp
+                .world_slug
+                .as_deref()
+                .map_or_else(|| slug_from_title(t), std::string::ToString::to_string);
+            (t.to_string(), slug)
+        });
+        if should_create_world && world_title_for_create.is_none() {
             return Err(CapabilityError::InputInvalid(
-                "cannot set both world_id and create_world".to_string(),
+                "world_title is required when create_world is true".to_string(),
             ));
         }
-        if self.pool.is_none() {
-            return Err(CapabilityError::Internal(
-                "cannot create_world without DB pool (test/dry-run mode)".to_string(),
-            ));
-        }
-    }
 
-    let world_title_for_create = inp.world_title.as_deref().map(|t| {
-        let slug = inp
-            .world_slug
-            .as_deref()
-            .map_or_else(|| slug_from_title(t), std::string::ToString::to_string);
-        (t.to_string(), slug)
-    });
-    if should_create_world && world_title_for_create.is_none() {
-        return Err(CapabilityError::InputInvalid(
-            "world_title is required when create_world is true".to_string(),
-        ));
-    }
+        // For the existing-world-id path, resolve here (outside tx).
+        let pre_existing_world_id = if should_create_world {
+            None
+        } else {
+            inp.world_id.clone()
+        };
 
-    // For the existing-world-id path, resolve here (outside tx).
-    let pre_existing_world_id = if should_create_world {
-        None
-    } else {
-        inp.world_id.clone()
-    };
-
-    // ── F5 — verify pre-existing world_id FK exists before any side effect ─
-    // When using create_world, the FK check happens inside the tx (below).
-    // When using a pre-existing world_id, validate now (outside tx) for early
-    // rejection, then re-verify inside the tx for atomicity.
-    if let (Some(world_id), Some(pool)) = (pre_existing_world_id.as_deref(), self.pool.as_ref())
-    {
-        // SAFETY: simple SELECT against known narrative_worlds schema.
-        // Also verifies owner_creator_id matches the scaffold's creator
-        // to prevent cross-creator world binding (QC2 W-02).
-        let exists: i64 = sqlx::query_scalar(
+        // ── F5 — verify pre-existing world_id FK exists before any side effect ─
+        // When using create_world, the FK check happens inside the tx (below).
+        // When using a pre-existing world_id, validate now (outside tx) for early
+        // rejection, then re-verify inside the tx for atomicity.
+        if let (Some(world_id), Some(pool)) = (pre_existing_world_id.as_deref(), self.pool.as_ref())
+        {
+            // SAFETY: simple SELECT against known narrative_worlds schema.
+            // Also verifies owner_creator_id matches the scaffold's creator
+            // to prevent cross-creator world binding (QC2 W-02).
+            let exists: i64 = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?)",
         )
         .bind(world_id)
@@ -365,356 +370,357 @@ async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
         .fetch_one(pool)
         .await
         .map_err(|e| CapabilityError::Internal(format!("world_id existence check: {e}")))?;
-        if exists == 0 {
-            return Err(CapabilityError::InputInvalid(format!(
+            if exists == 0 {
+                return Err(CapabilityError::InputInvalid(format!(
                 "world_id {world_id:?} not found in narrative_worlds or not owned by creator {:?}.\n  \
                  ↳ Create a new World:  nexus42 creator world create --title \"...\"\n  \
                  ↳ List your Worlds:    nexus42 creator world list",
                 inp.creator_id
             )));
+            }
         }
-    }
 
-    let root = self.works_root.join(&inp.work_ref);
+        let root = self.works_root.join(&inp.work_ref);
 
-    // ── T2a: root directory ────────────────────────────────────────
-    // F2 (C-002, C-2, W-3): all subsequent FS writes register with
-    // `txn`. On any `?` propagation before `txn.commit()`, the Drop
-    // impl removes only the files/dirs THIS invocation created.
-    let mut txn = ScaffoldTransaction::new();
+        // ── T2a: root directory ────────────────────────────────────────
+        // F2 (C-002, C-2, W-3): all subsequent FS writes register with
+        // `txn`. On any `?` propagation before `txn.commit()`, the Drop
+        // impl removes only the files/dirs THIS invocation created.
+        let mut txn = ScaffoldTransaction::new();
 
-    if create_dir_all_idem(&root)? {
-        txn.dirs_created.push(root.clone());
-    }
+        if create_dir_all_idem(&root)? {
+            txn.dirs_created.push(root.clone());
+        }
 
-    // ── T2b: README.md ─────────────────────────────────────────────
-    if let Some(tmpl) = load_template("README.md") {
-        // V1.40: resolved_world_id is always Some (mandatory binding check above).
-        // For the create_world path, the world_id is generated inside the
-        // DB transaction below; the README renders a placeholder instead.
-        let world_section = if should_create_world {
-            "**Binding:** world_id will be assigned during scaffold\n".to_string()
-        } else {
-            pre_existing_world_id
+        // ── T2b: README.md ─────────────────────────────────────────────
+        if let Some(tmpl) = load_template("README.md") {
+            // V1.40: resolved_world_id is always Some (mandatory binding check above).
+            // For the create_world path, the world_id is generated inside the
+            // DB transaction below; the README renders a placeholder instead.
+            let world_section = if should_create_world {
+                "**Binding:** world_id will be assigned during scaffold\n".to_string()
+            } else {
+                pre_existing_world_id
                 .as_ref()
                 .map(|id| format!("**Binding:** `world_id: {id}`\n\nWorld details live in the World KB; see World Browser for the full setting."))
                 .expect("world_id must be resolved at this point — mandatory binding check at line ~284 guarantees Some")
-        };
-        // Description placeholder — collected during grill-me; left empty in V1.36.
-        let description = format!("Long-term goal and initial creative direction for **{}** (work_ref: `{}`). Fill in as grill-me captures intent.", inp.title, inp.work_ref);
-        let total = inp.total_planned_chapters.to_string();
-        let rendered = render_template(
-            &tmpl,
-            &[
-                ("work_ref", &inp.work_ref),
-                ("title", &inp.title),
-                ("world_section", &world_section),
-                ("description", &description),
-                ("total_planned_chapters", &total),
-            ],
-        )?;
-        write_file_idem(&root.join("README.md"), &rendered, &mut txn.files_created)?;
-    }
+            };
+            // Description placeholder — collected during grill-me; left empty in V1.36.
+            let description = format!("Long-term goal and initial creative direction for **{}** (work_ref: `{}`). Fill in as grill-me captures intent.", inp.title, inp.work_ref);
+            let total = inp.total_planned_chapters.to_string();
+            let rendered = render_template(
+                &tmpl,
+                &[
+                    ("work_ref", &inp.work_ref),
+                    ("title", &inp.title),
+                    ("world_section", &world_section),
+                    ("description", &description),
+                    ("total_planned_chapters", &total),
+                ],
+            )?;
+            write_file_idem(&root.join("README.md"), &rendered, &mut txn.files_created)?;
+        }
 
-    // ── T2c–T2g: Outlines/ subtree ────────────────────────────────
-    let outlines = root.join("Outlines");
-    if create_dir_all_idem(&outlines)? {
-        txn.dirs_created.push(outlines.clone());
-    }
+        // ── T2c–T2g: Outlines/ subtree ────────────────────────────────
+        let outlines = root.join("Outlines");
+        if create_dir_all_idem(&outlines)? {
+            txn.dirs_created.push(outlines.clone());
+        }
 
-    // T2d: Outlines/chapters/
-    let outlines_chapters = outlines.join("chapters");
-    if create_dir_all_idem(&outlines_chapters)? {
-        txn.dirs_created.push(outlines_chapters);
-    }
+        // T2d: Outlines/chapters/
+        let outlines_chapters = outlines.join("chapters");
+        if create_dir_all_idem(&outlines_chapters)? {
+            txn.dirs_created.push(outlines_chapters);
+        }
 
-    // T2e: volume-outline.md
-    // V1.42: render multi-volume structure when total_volumes > 1
-    if inp.total_volumes > 1 {
-        // Generate multi-volume outline per spec §4.5.5
-        let chapters_per_volume = inp.total_planned_chapters / inp.total_volumes;
-        let mut volume_entries: Vec<String> = Vec::new();
-        let mut ch_start = 1;
-        for vol in 1..=inp.total_volumes {
-            // Distribute remainder chapters across early volumes
-            let extra = i32::from(vol <= (inp.total_planned_chapters % inp.total_volumes));
-            let ch_end = ch_start + chapters_per_volume + extra - 1;
-            volume_entries.push(format!(
+        // T2e: volume-outline.md
+        // V1.42: render multi-volume structure when total_volumes > 1
+        if inp.total_volumes > 1 {
+            // Generate multi-volume outline per spec §4.5.5
+            let chapters_per_volume = inp.total_planned_chapters / inp.total_volumes;
+            let mut volume_entries: Vec<String> = Vec::new();
+            let mut ch_start = 1;
+            for vol in 1..=inp.total_volumes {
+                // Distribute remainder chapters across early volumes
+                let extra = i32::from(vol <= (inp.total_planned_chapters % inp.total_volumes));
+                let ch_end = ch_start + chapters_per_volume + extra - 1;
+                volume_entries.push(format!(
                 "  - volume: {vol}\n    title: \"Volume {vol}\"\n    chapter_range: [{ch_start}, {ch_end}]"
             ));
-            ch_start = ch_end + 1;
-        }
-        let volumes_yaml = volume_entries.join("\n");
-        let content = format!(
-            "---\nwork_id: {work_id}\nvolumes:\n{volumes_yaml}---\n\n\
+                ch_start = ch_end + 1;
+            }
+            let volumes_yaml = volume_entries.join("\n");
+            let content = format!(
+                "---\nwork_id: {work_id}\nvolumes:\n{volumes_yaml}---\n\n\
              *Generated by novel-project-init preset (V1.42 multi-volume)*\n",
-            work_id = inp.work_id,
-        );
-        write_file_idem(
-            &outlines.join("volume-outline.md"),
-            &content,
-            &mut txn.files_created,
-        )?;
-    } else if let Some(tmpl) = load_template("volume-outline.md") {
-        let total = inp.total_planned_chapters.to_string();
-        let rendered = render_template(
-            &tmpl,
-            &[
-                ("work_ref", &inp.work_ref),
-                ("title", &inp.title),
-                ("total_planned_chapters", &total),
-            ],
-        )?;
-        write_file_idem(
-            &outlines.join("volume-outline.md"),
-            &rendered,
-            &mut txn.files_created,
-        )?;
-    }
-
-    // T2f: foreshadowing.md
-    if let Some(tmpl) = load_template("foreshadowing.md") {
-        let rendered = render_template(&tmpl, &[("work_ref", &inp.work_ref)])?;
-        write_file_idem(
-            &outlines.join("foreshadowing.md"),
-            &rendered,
-            &mut txn.files_created,
-        )?;
-    }
-
-    // T2g: event-index.md
-    if let Some(tmpl) = load_template("event-index.md") {
-        let rendered = render_template(&tmpl, &[("work_ref", &inp.work_ref)])?;
-        write_file_idem(
-            &outlines.join("event-index.md"),
-            &rendered,
-            &mut txn.files_created,
-        )?;
-    }
-
-    // ── T2h: Stories/ ──────────────────────────────────────────────
-    let stories = root.join("Stories");
-    if create_dir_all_idem(&stories)? {
-        txn.dirs_created.push(stories);
-    }
-
-    // ── T2i: Logs/ ─────────────────────────────────────────────────
-    let logs = root.join("Logs");
-    if create_dir_all_idem(&logs)? {
-        txn.dirs_created.push(logs.clone());
-    }
-
-    // V1.39 P3 (DF-66): Logs subdirectories for write discipline.
-    for subdir in &["brainstorm", "write", "review", "publish"] {
-        let sd = logs.join(subdir);
-        if create_dir_all_idem(&sd)? {
-            txn.dirs_created.push(sd);
-        }
-    }
-
-    // ── T2j: Layer 2 AGENTS.md (V1.48 P2, overlay §3.1 #4) ─────────
-    // V1.47 normative (novel-writing/workflow-profile.md §5.5.4) declares
-    // `Works/<work_ref>/AGENTS.md` as Layer 2. V1.48 P2 migrates the
-    // scaffold away from the legacy `Rules/novel-rules.md`. The
-    // `Rules/` directory is no longer created for new Works; existing
-    // Works keep their legacy file and the read path falls back to it
-    // (see stage_gates::read_rules_layers).
-    //
-    // The scaffold content comes from the shared
-    // `rules_layers::render_default_agents_md` so that `novel-project-init`
-    // and the `rules reset` CLI (T4) stay in sync.
-    let agents_md_rendered = crate::rules_layers::render_default_agents_md(&inp.work_ref);
-    write_file_idem(
-        &root.join("AGENTS.md"),
-        &agents_md_rendered,
-        &mut txn.files_created,
-    )?;
-
-    // ── T3: seed work_chapters rows + T4: PATCH works ─────────────
-    // V1.37 (R-V136P1-02): T3 + T4 now run inside a single DB
-    // transaction. If either step fails, both roll back atomically.
-    // V1.40 (QC2 W-01 / QC3 W-1): create_world is also inside this
-    // transaction, so no orphan world rows can remain on failure.
-    // The FS-side ScaffoldTransaction still handles filesystem rollback
-    // independently (FS and DB rollback are separate concerns).
-    let chapters_seeded = if let Some(pool) = &self.pool {
-        let now = chrono::Utc::now().to_rfc3339();
-        let mut tx = pool
-            .begin()
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("begin transaction: {e}")))?;
-
-        // ── Resolve world_id inside the transaction ──
-        let resolved_world_id: String = if should_create_world {
-            // Create a new World inside the transaction
-            let (title, slug) = world_title_for_create
-                .as_ref()
-                .expect("validated above: should_create_world → world_title is Some");
-            let result = nexus_local_db::create_world_tx(
-                &mut tx,
-                &inp.creator_id,
-                title,
-                slug,
-                "private",
-                "manual",
-            )
-            .await
-            .map_err(|e| {
-                CapabilityError::Internal(format!("create_world_tx in scaffold: {e}"))
-            })?;
-            info!(
-                world_id = %result.world_id,
-                "novel.project_scaffold: created World atomically (inside tx)"
+                work_id = inp.work_id,
             );
-            result.world_id
-        } else {
-            // Pre-existing world_id — already validated outside, re-verify inside tx.
-            pre_existing_world_id
-                .clone()
-                .expect("one of should_create_world or pre_existing_world_id must be set")
-        };
-
-        // V1.42: use multi-volume seeding when total_volumes > 1
-        if inp.total_volumes > 1 {
-            let chapters_per_volume = inp.total_planned_chapters / inp.total_volumes;
-            work_chapters::seed_chapters_multi_volume_tx(
-                &mut tx,
-                &inp.work_id,
-                &inp.work_ref,
-                inp.total_volumes,
-                chapters_per_volume,
-                &now,
-            )
-            .await
-            .map_err(|e| {
-                CapabilityError::Internal(format!("seed_chapters_multi_volume_tx: {e}"))
-            })?;
-        } else {
-            work_chapters::seed_chapters_tx(
-                &mut tx,
-                &inp.work_id,
-                &inp.work_ref,
-                inp.total_planned_chapters,
-                &now,
-            )
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("seed_chapters_tx: {e}")))?;
+            write_file_idem(
+                &outlines.join("volume-outline.md"),
+                &content,
+                &mut txn.files_created,
+            )?;
+        } else if let Some(tmpl) = load_template("volume-outline.md") {
+            let total = inp.total_planned_chapters.to_string();
+            let rendered = render_template(
+                &tmpl,
+                &[
+                    ("work_ref", &inp.work_ref),
+                    ("title", &inp.title),
+                    ("total_planned_chapters", &total),
+                ],
+            )?;
+            write_file_idem(
+                &outlines.join("volume-outline.md"),
+                &rendered,
+                &mut txn.files_created,
+            )?;
         }
 
-        // F4 (W-2-qc2): when `fields_changed` is provided, PATCH only
-        // those columns (re-init). When absent, PATCH all (initial
-        // bootstrap). The `current_chapter = 0` reset is part of the
-        // initial bootstrap shape and is suppressed on partial re-init.
-        let changed: Option<std::collections::HashSet<&str>> =
-            inp.fields_changed.as_ref().map(|v| {
-                v.iter()
-                    .map(String::as_str)
-                    .collect::<std::collections::HashSet<_>>()
-            });
-        let want = |field: &str| changed.as_ref().is_none_or(|set| set.contains(field));
+        // T2f: foreshadowing.md
+        if let Some(tmpl) = load_template("foreshadowing.md") {
+            let rendered = render_template(&tmpl, &[("work_ref", &inp.work_ref)])?;
+            write_file_idem(
+                &outlines.join("foreshadowing.md"),
+                &rendered,
+                &mut txn.files_created,
+            )?;
+        }
 
-        let patch = works::WorkPatch {
-            work_profile: if changed.is_none() {
-                Some(Some("novel".to_string()))
+        // T2g: event-index.md
+        if let Some(tmpl) = load_template("event-index.md") {
+            let rendered = render_template(&tmpl, &[("work_ref", &inp.work_ref)])?;
+            write_file_idem(
+                &outlines.join("event-index.md"),
+                &rendered,
+                &mut txn.files_created,
+            )?;
+        }
+
+        // ── T2h: Stories/ ──────────────────────────────────────────────
+        let stories = root.join("Stories");
+        if create_dir_all_idem(&stories)? {
+            txn.dirs_created.push(stories);
+        }
+
+        // ── T2i: Logs/ ─────────────────────────────────────────────────
+        let logs = root.join("Logs");
+        if create_dir_all_idem(&logs)? {
+            txn.dirs_created.push(logs.clone());
+        }
+
+        // V1.39 P3 (DF-66): Logs subdirectories for write discipline.
+        for subdir in &["brainstorm", "write", "review", "publish"] {
+            let sd = logs.join(subdir);
+            if create_dir_all_idem(&sd)? {
+                txn.dirs_created.push(sd);
+            }
+        }
+
+        // ── T2j: Layer 2 AGENTS.md (V1.48 P2, overlay §3.1 #4) ─────────
+        // V1.47 normative (novel-writing/workflow-profile.md §5.5.4) declares
+        // `Works/<work_ref>/AGENTS.md` as Layer 2. V1.48 P2 migrates the
+        // scaffold away from the legacy `Rules/novel-rules.md`. The
+        // `Rules/` directory is no longer created for new Works; existing
+        // Works keep their legacy file and the read path falls back to it
+        // (see stage_gates::read_rules_layers).
+        //
+        // The scaffold content comes from the shared
+        // `rules_layers::render_default_agents_md` so that `novel-project-init`
+        // and the `rules reset` CLI (T4) stay in sync.
+        let agents_md_rendered = crate::rules_layers::render_default_agents_md(&inp.work_ref);
+        write_file_idem(
+            &root.join("AGENTS.md"),
+            &agents_md_rendered,
+            &mut txn.files_created,
+        )?;
+
+        // ── T3: seed work_chapters rows + T4: PATCH works ─────────────
+        // V1.37 (R-V136P1-02): T3 + T4 now run inside a single DB
+        // transaction. If either step fails, both roll back atomically.
+        // V1.40 (QC2 W-01 / QC3 W-1): create_world is also inside this
+        // transaction, so no orphan world rows can remain on failure.
+        // The FS-side ScaffoldTransaction still handles filesystem rollback
+        // independently (FS and DB rollback are separate concerns).
+        let chapters_seeded = if let Some(pool) = &self.pool {
+            let now = chrono::Utc::now().to_rfc3339();
+            let mut tx = pool
+                .begin()
+                .await
+                .map_err(|e| CapabilityError::Internal(format!("begin transaction: {e}")))?;
+
+            // ── Resolve world_id inside the transaction ──
+            let resolved_world_id: String = if should_create_world {
+                // Create a new World inside the transaction
+                let (title, slug) = world_title_for_create
+                    .as_ref()
+                    .expect("validated above: should_create_world → world_title is Some");
+                let result = nexus_local_db::create_world_tx(
+                    &mut tx,
+                    &inp.creator_id,
+                    title,
+                    slug,
+                    "private",
+                    "manual",
+                )
+                .await
+                .map_err(|e| {
+                    CapabilityError::Internal(format!("create_world_tx in scaffold: {e}"))
+                })?;
+                info!(
+                    world_id = %result.world_id,
+                    "novel.project_scaffold: created World atomically (inside tx)"
+                );
+                result.world_id
             } else {
-                None
-            },
-            work_ref: if want("work_ref") {
-                Some(Some(inp.work_ref.clone()))
+                // Pre-existing world_id — already validated outside, re-verify inside tx.
+                pre_existing_world_id
+                    .clone()
+                    .expect("one of should_create_world or pre_existing_world_id must be set")
+            };
+
+            // V1.42: use multi-volume seeding when total_volumes > 1
+            if inp.total_volumes > 1 {
+                let chapters_per_volume = inp.total_planned_chapters / inp.total_volumes;
+                work_chapters::seed_chapters_multi_volume_tx(
+                    &mut tx,
+                    &inp.work_id,
+                    &inp.work_ref,
+                    inp.total_volumes,
+                    chapters_per_volume,
+                    &now,
+                )
+                .await
+                .map_err(|e| {
+                    CapabilityError::Internal(format!("seed_chapters_multi_volume_tx: {e}"))
+                })?;
             } else {
-                None
-            },
-            total_planned_chapters: if want("total_planned_chapters") {
-                Some(Some(inp.total_planned_chapters))
-            } else {
-                None
-            },
-            current_chapter: if changed.is_none() { Some(0) } else { None },
-            world_id: if want("world_id") {
-                Some(Some(resolved_world_id.clone()))
-            } else {
-                None
-            },
-            title: if want("title") && changed.is_some() {
-                Some(inp.title.clone())
-            } else {
-                None
-            },
-            long_term_goal: None,
-            creative_brief: None,
-            intake_status: None,
-            status: None,
-            story_ref: None,
-            primary_preset_id: None,
-            schedule_ids: None,
-            current_stage: None,
-            stage_status: None,
-            auto_chain_enabled: None,
-            driver_schedule_id: None,
-            auto_chain_interrupted: None,
-            auto_review_master_on_timeout: None,
-            runtime_lock_holder: None,
-            runtime_lock_acquired_at: None,
-            completion_locked_at: None,
-            novel_completion_status: None,
-            lineage_from_work_id: None,
+                work_chapters::seed_chapters_tx(
+                    &mut tx,
+                    &inp.work_id,
+                    &inp.work_ref,
+                    inp.total_planned_chapters,
+                    &now,
+                )
+                .await
+                .map_err(|e| CapabilityError::Internal(format!("seed_chapters_tx: {e}")))?;
+            }
+
+            // F4 (W-2-qc2): when `fields_changed` is provided, PATCH only
+            // those columns (re-init). When absent, PATCH all (initial
+            // bootstrap). The `current_chapter = 0` reset is part of the
+            // initial bootstrap shape and is suppressed on partial re-init.
+            let changed: Option<std::collections::HashSet<&str>> =
+                inp.fields_changed.as_ref().map(|v| {
+                    v.iter()
+                        .map(String::as_str)
+                        .collect::<std::collections::HashSet<_>>()
+                });
+            let want = |field: &str| changed.as_ref().is_none_or(|set| set.contains(field));
+
+            let patch = works::WorkPatch {
+                work_profile: if changed.is_none() {
+                    Some(Some("novel".to_string()))
+                } else {
+                    None
+                },
+                work_ref: if want("work_ref") {
+                    Some(Some(inp.work_ref.clone()))
+                } else {
+                    None
+                },
+                total_planned_chapters: if want("total_planned_chapters") {
+                    Some(Some(inp.total_planned_chapters))
+                } else {
+                    None
+                },
+                current_chapter: if changed.is_none() { Some(0) } else { None },
+                world_id: if want("world_id") {
+                    Some(Some(resolved_world_id.clone()))
+                } else {
+                    None
+                },
+                title: if want("title") && changed.is_some() {
+                    Some(inp.title.clone())
+                } else {
+                    None
+                },
+                long_term_goal: None,
+                creative_brief: None,
+                intake_status: None,
+                status: None,
+                story_ref: None,
+                primary_preset_id: None,
+                schedule_ids: None,
+                current_stage: None,
+                stage_status: None,
+                auto_chain_enabled: None,
+                driver_schedule_id: None,
+                auto_chain_interrupted: None,
+                auto_review_master_on_timeout: None,
+                runtime_lock_holder: None,
+                runtime_lock_acquired_at: None,
+                completion_locked_at: None,
+                novel_completion_status: None,
+                lineage_from_work_id: None,
+            };
+            works::patch_work_tx(&mut tx, &inp.creator_id, &inp.work_id, &patch, &now)
+                .await
+                .map_err(|e| CapabilityError::Internal(format!("patch_work_tx: {e}")))?;
+
+            // Both seed + patch succeeded — commit the transaction.
+            tx.commit()
+                .await
+                .map_err(|e| CapabilityError::Internal(format!("commit transaction: {e}")))?;
+
+            usize::try_from(inp.total_planned_chapters).unwrap_or(0)
+        } else {
+            0
         };
-        works::patch_work_tx(&mut tx, &inp.creator_id, &inp.work_id, &patch, &now)
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("patch_work_tx: {e}")))?;
+        info!(
+            work_id = %inp.work_id,
+            chapters_seeded,
+            "novel.project_scaffold: chapters seeded + works patched (atomic with world creation)"
+        );
 
-        // Both seed + patch succeeded — commit the transaction.
-        tx.commit()
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("commit transaction: {e}")))?;
+        // ── F2: scaffold succeeded — project the txn-owned paths into
+        //        the output shape, then commit to suppress Drop rollback.
+        let files_created: Vec<String> = txn
+            .files_created
+            .iter()
+            .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(String::from))
+            .collect();
+        let dirs_created: Vec<String> = txn
+            .dirs_created
+            .iter()
+            .map(|p| {
+                p.strip_prefix(&root)
+                    .map(|rel| rel.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            })
+            .collect();
+        txn.commit();
 
-        usize::try_from(inp.total_planned_chapters).unwrap_or(0)
-    } else {
-        0
-    };
-    info!(
-        work_id = %inp.work_id,
-        chapters_seeded,
-        "novel.project_scaffold: chapters seeded + works patched (atomic with world creation)"
-    );
+        // F8 (W-4): success — DB+FS committed.
+        info!(
+            work_id = %inp.work_id,
+            work_ref = %inp.work_ref,
+            files_created = files_created.len(),
+            dirs_created = dirs_created.len(),
+            chapters_seeded,
+            "novel.project_scaffold: commit ok"
+        );
 
-    // ── F2: scaffold succeeded — project the txn-owned paths into
-    //        the output shape, then commit to suppress Drop rollback.
-    let files_created: Vec<String> = txn
-        .files_created
-        .iter()
-        .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(String::from))
-        .collect();
-    let dirs_created: Vec<String> = txn
-        .dirs_created
-        .iter()
-        .map(|p| {
-            p.strip_prefix(&root)
-                .map(|rel| rel.to_string_lossy().to_string())
-                .unwrap_or_default()
-        })
-        .collect();
-    txn.commit();
-
-    // F8 (W-4): success — DB+FS committed.
-    info!(
-        work_id = %inp.work_id,
-        work_ref = %inp.work_ref,
-        files_created = files_created.len(),
-        dirs_created = dirs_created.len(),
-        chapters_seeded,
-        "novel.project_scaffold: commit ok"
-    );
-
-    let output = ScaffoldOutput {
-        scaffold_root: root.to_string_lossy().to_string(),
-        chapters_seeded,
-        files_created,
-        dirs_created,
-    };
-    serde_json::to_value(output)
-        .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
-} }
+        let output = ScaffoldOutput {
+            scaffold_root: root.to_string_lossy().to_string(),
+            chapters_seeded,
+            files_created,
+            dirs_created,
+        };
+        serde_json::to_value(output)
+            .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
+    }
+}
 
 // ---------------------------------------------------------------------------
 // FS helpers (idempotent — T6 compliance)

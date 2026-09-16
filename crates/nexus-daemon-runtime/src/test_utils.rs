@@ -100,8 +100,7 @@ pub async fn materialize_workspace_for(
     );
     std::fs::write(nexus_home.join("config.toml"), toml_str).expect("config.toml");
 
-    let db_path =
-        nexus_home_layout::workspace_state_db_path(user_home, creator_id, workspace_slug);
+    let db_path = nexus_home_layout::workspace_state_db_path(user_home, creator_id, workspace_slug);
 
     // Admitted engine-owner fixture: same admission path the daemon uses in
     // production (`init_engine_pool` migrates and seeds versions), so the

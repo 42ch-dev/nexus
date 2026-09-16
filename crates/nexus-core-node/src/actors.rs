@@ -57,8 +57,7 @@ use nexus_contracts::daemon_api::characters::{
 };
 use nexus_contracts::daemon_api::creators::{
     active_creator_response::ActiveCreatorResponse, list_creators_query::ListCreatorsQuery,
-    logout_response::LogoutResponse,
-    set_active_creator_request::SetActiveCreatorRequest,
+    logout_response::LogoutResponse, set_active_creator_request::SetActiveCreatorRequest,
     set_active_creator_response::SetActiveCreatorResponse,
 };
 use nexus_contracts::daemon_api::inspector::{
@@ -72,8 +71,7 @@ use nexus_contracts::daemon_api::memory::{
     delete_pending_review_query::DeletePendingReviewQuery,
     delete_pending_review_response::DeletePendingReviewResponse,
     list_memory_fragments_query::ListMemoryFragmentsQuery,
-    list_pending_reviews_query::ListPendingReviewsQuery,
-    review_request::ReviewRequest,
+    list_pending_reviews_query::ListPendingReviewsQuery, review_request::ReviewRequest,
     review_response::ReviewResponse, soul_narrative_request::SoulNarrativeRequest,
 };
 use nexus_contracts::generated::core::CoreCharacterTransitionRequest;
@@ -1132,9 +1130,8 @@ impl NativeCore {
             if !valid_creator_id(query.creator_id.as_str()) {
                 return Err(CoreError::InvalidInput {
                     field: "creator_id".to_string(),
-                    reason:
-                        "creator_id must start with 'ctr_' followed by alphanumeric characters"
-                            .to_string(),
+                    reason: "creator_id must start with 'ctr_' followed by alphanumeric characters"
+                        .to_string(),
                 });
             }
             let response: CountPendingReviewsResponse =
@@ -1164,9 +1161,8 @@ impl NativeCore {
             if !valid_creator_id(query.creator_id.as_str()) {
                 return Err(CoreError::InvalidInput {
                     field: "creator_id".to_string(),
-                    reason:
-                        "creator_id must start with 'ctr_' followed by alphanumeric characters"
-                            .to_string(),
+                    reason: "creator_id must start with 'ctr_' followed by alphanumeric characters"
+                        .to_string(),
                 });
             }
             let response: DeletePendingReviewResponse =

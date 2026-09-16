@@ -21,7 +21,9 @@ use nexus_contracts::daemon_api::kb::{
 };
 use nexus_contracts::PaginationInfo;
 use nexus_home_layout::validate_entry_id_safe;
-use nexus_knowledge::knowledge::{KnowledgeQuery, KnowledgeResult, KnowledgeTag, UserKnowledgeEntry};
+use nexus_knowledge::knowledge::{
+    KnowledgeQuery, KnowledgeResult, KnowledgeTag, UserKnowledgeEntry,
+};
 use nexus_knowledge::store::KnowledgeStore;
 use nexus_local_db::SqliteKnowledgeStore;
 
@@ -65,16 +67,19 @@ impl From<KnowledgeFault> for CoreError {
             KnowledgeFault::InvalidInput { field, reason } => Self::InvalidInput { field, reason },
             KnowledgeFault::NotFound(resource) => Self::NotFound { resource },
             KnowledgeFault::ForeignEntry(resource) => Self::Forbidden { resource },
-            KnowledgeFault::Internal { code, message } => {
-                Self::Internal { category: format!("{code}: {message}") }
-            }
+            KnowledgeFault::Internal { code, message } => Self::Internal {
+                category: format!("{code}: {message}"),
+            },
             KnowledgeFault::Core(error) => error,
         }
     }
 }
 
 fn invalid_input(field: &str, reason: impl Into<String>) -> KnowledgeFault {
-    KnowledgeFault::InvalidInput { field: field.to_string(), reason: reason.into() }
+    KnowledgeFault::InvalidInput {
+        field: field.to_string(),
+        reason: reason.into(),
+    }
 }
 
 /// Validate KB scope — only `work` is supported by this surface (H3
@@ -98,12 +103,19 @@ fn validate_scope(scope: Option<&str>) -> Result<(), KnowledgeFault> {
 /// so a separator/`..`/absolute form would escape the workspace root.
 fn validate_workspace_slug(slug: Option<&str>) -> Result<(), KnowledgeFault> {
     let valid = slug.is_none_or(|slug| {
-        !slug.is_empty() && !slug.contains('/') && !slug.contains('\\') && slug != "." && slug != ".."
+        !slug.is_empty()
+            && !slug.contains('/')
+            && !slug.contains('\\')
+            && slug != "."
+            && slug != ".."
     });
     if valid {
         Ok(())
     } else {
-        Err(invalid_input("workspace_slug", "must be a single path segment"))
+        Err(invalid_input(
+            "workspace_slug",
+            "must be a single path segment",
+        ))
     }
 }
 
@@ -128,9 +140,17 @@ struct KbIndexEntry {
 
 /// Resolve KB directory paths under the nexus root.
 /// `<nexus-root>/creators/<creator>/workspaces/<slug>/kb/` and its `entries/`.
-fn resolve_kb_paths(nexus_root: &std::path::Path, creator_id: &str, workspace_slug: Option<&str>) -> (PathBuf, PathBuf) {
+fn resolve_kb_paths(
+    nexus_root: &std::path::Path,
+    creator_id: &str,
+    workspace_slug: Option<&str>,
+) -> (PathBuf, PathBuf) {
     let slug = workspace_slug.unwrap_or(DEFAULT_WORKSPACE_SLUG);
-    let ws_root = nexus_root.join("creators").join(creator_id).join("workspaces").join(slug);
+    let ws_root = nexus_root
+        .join("creators")
+        .join(creator_id)
+        .join("workspaces")
+        .join(slug);
     let kb_dir = ws_root.join("kb");
     (kb_dir.clone(), kb_dir.join("entries"))
 }
@@ -358,7 +378,10 @@ fn knowledge_err(error: nexus_knowledge::errors::KnowledgeError) -> KnowledgeFau
             invalid_input("knowledge", message)
         }
         other @ nexus_knowledge::errors::KnowledgeError::InvalidUri { .. } => {
-            KnowledgeFault::Internal { code: "DATABASE_ERROR".into(), message: other.to_string() }
+            KnowledgeFault::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: other.to_string(),
+            }
         }
     }
 }
@@ -398,14 +421,19 @@ impl CoreService {
             return Err(KnowledgeFault::ForeignEntry(format!("kb_owner:{creator_id}")).into());
         }
 
-        let (kb_dir, _entries_dir) =
-            resolve_kb_paths(&self.inner.nexus_home, creator_id, query.workspace_slug.as_deref());
+        let (kb_dir, _entries_dir) = resolve_kb_paths(
+            &self.inner.nexus_home,
+            creator_id,
+            query.workspace_slug.as_deref(),
+        );
         let index_path = kb_dir.join("index.json");
 
         let index = read_kb_index(&index_path);
         let limit = query
             .limit
-            .map_or(DEFAULT_LIMIT, |value| usize::try_from(value).unwrap_or(DEFAULT_LIMIT))
+            .map_or(DEFAULT_LIMIT, |value| {
+                usize::try_from(value).unwrap_or(DEFAULT_LIMIT)
+            })
             .min(MAX_LIMIT);
 
         let mut items: Vec<KbEntrySummary> = index
@@ -486,7 +514,9 @@ impl CoreService {
             .map_err(|reason| invalid_input("creator_id", reason))?;
         validate_workspace_slug(request.workspace_slug.as_deref())?;
         if request.creator_id != principal.creator_id() {
-            return Err(KnowledgeFault::ForeignEntry(format!("kb_owner:{}", request.creator_id)).into());
+            return Err(
+                KnowledgeFault::ForeignEntry(format!("kb_owner:{}", request.creator_id)).into(),
+            );
         }
 
         tracing::info!(creator_id = %request.creator_id, "Adding KB entry");
@@ -588,7 +618,10 @@ impl CoreService {
         add_to_kb_entry_index(&entry_id, &request.creator_id, workspace_slug);
 
         self.verify_principal(principal)?;
-        Ok(AddKbEntryResponse { entry_id, title: entry_title })
+        Ok(AddKbEntryResponse {
+            entry_id,
+            title: entry_title,
+        })
     }
 
     /// Get a single work-scope entry, via the O(1) entry index (QC3 W-005)
@@ -606,16 +639,16 @@ impl CoreService {
         entry_id: String,
     ) -> CoreResult<GetKbEntryResponse> {
         self.verify_principal(principal)?;
-        validate_entry_id_safe(&entry_id)
-            .map_err(|reason| invalid_input("entry_id", reason))?;
+        validate_entry_id_safe(&entry_id).map_err(|reason| invalid_input("entry_id", reason))?;
 
         let nexus_root = self.inner.nexus_home.clone();
 
         // Try index lookup first (O(1)), fall back to filesystem scan.
         if let Some((creator_id, workspace_slug)) = lookup_entry_location(&entry_id, &nexus_root) {
             if creator_id != principal.creator_id() {
-                return Err(KnowledgeFault::ForeignEntry(format!("kb_owner:KB entry {entry_id}"))
-                    .into());
+                return Err(
+                    KnowledgeFault::ForeignEntry(format!("kb_owner:KB entry {entry_id}")).into(),
+                );
             }
             // Fast path: read entry from known location.
             let (_, entries_dir) =
@@ -638,7 +671,12 @@ impl CoreService {
                     |ie| (ie.title.clone(), ie.created_at.clone()),
                 );
 
-                return Ok(GetKbEntryResponse { entry_id, title, created_at, content });
+                return Ok(GetKbEntryResponse {
+                    entry_id,
+                    title,
+                    created_at,
+                    content,
+                });
             }
             // Entry was in index but file missing — stale index, fall through.
             invalidate_kb_entry_index();
@@ -647,9 +685,7 @@ impl CoreService {
         // Slow path: filesystem scan (used when index is stale or on first access).
         let creators_root = nexus_root.join("creators");
         if !creators_root.is_dir() {
-            return Err(
-                KnowledgeFault::NotFound(format!("KB entry {entry_id} not found")).into(),
-            );
+            return Err(KnowledgeFault::NotFound(format!("KB entry {entry_id} not found")).into());
         }
 
         let entry_file = format!("{entry_id}.md");
@@ -676,7 +712,12 @@ impl CoreService {
                 |ie| (ie.title.clone(), ie.created_at.clone()),
             );
 
-            return Ok(GetKbEntryResponse { entry_id, title, created_at, content });
+            return Ok(GetKbEntryResponse {
+                entry_id,
+                title,
+                created_at,
+                content,
+            });
         }
         if foreign_creator_holds_entry(&creators_root, principal.creator_id(), &entry_file) {
             return Err(
@@ -701,16 +742,16 @@ impl CoreService {
     ) -> CoreResult<DeleteKbEntryResponse> {
         self.verify_principal(principal)?;
         self.require_work_write()?;
-        validate_entry_id_safe(&entry_id)
-            .map_err(|reason| invalid_input("entry_id", reason))?;
+        validate_entry_id_safe(&entry_id).map_err(|reason| invalid_input("entry_id", reason))?;
 
         let nexus_root = self.inner.nexus_home.clone();
 
         // Try index lookup first (O(1)).
         if let Some((creator_id, workspace_slug)) = lookup_entry_location(&entry_id, &nexus_root) {
             if creator_id != principal.creator_id() {
-                return Err(KnowledgeFault::ForeignEntry(format!("kb_owner:KB entry {entry_id}"))
-                    .into());
+                return Err(
+                    KnowledgeFault::ForeignEntry(format!("kb_owner:KB entry {entry_id}")).into(),
+                );
             }
             let (_, entries_dir) =
                 resolve_kb_paths(&nexus_root, &creator_id, Some(&workspace_slug));
@@ -734,7 +775,10 @@ impl CoreService {
                 remove_from_kb_entry_index(&entry_id);
 
                 self.verify_principal(principal)?;
-                return Ok(DeleteKbEntryResponse { entry_id, deleted: true });
+                return Ok(DeleteKbEntryResponse {
+                    entry_id,
+                    deleted: true,
+                });
             }
             // Stale index — invalidate and fall through.
             invalidate_kb_entry_index();
@@ -743,9 +787,7 @@ impl CoreService {
         // Slow path: filesystem scan.
         let creators_root = nexus_root.join("creators");
         if !creators_root.is_dir() {
-            return Err(
-                KnowledgeFault::NotFound(format!("KB entry {entry_id} not found")).into(),
-            );
+            return Err(KnowledgeFault::NotFound(format!("KB entry {entry_id} not found")).into());
         }
 
         let entry_file = format!("{entry_id}.md");
@@ -776,7 +818,10 @@ impl CoreService {
             remove_from_kb_entry_index(&entry_id);
 
             self.verify_principal(principal)?;
-            return Ok(DeleteKbEntryResponse { entry_id, deleted: true });
+            return Ok(DeleteKbEntryResponse {
+                entry_id,
+                deleted: true,
+            });
         }
         if foreign_creator_holds_entry(&creators_root, principal.creator_id(), &entry_file) {
             return Err(
@@ -837,8 +882,10 @@ impl CoreService {
             .with_limit(limit)
             .with_offset(offset);
         if let Some(tag_strs) = tags {
-            let tag_list: Vec<KnowledgeTag> =
-                tag_strs.into_iter().map(|s| KnowledgeTag::new(&s)).collect();
+            let tag_list: Vec<KnowledgeTag> = tag_strs
+                .into_iter()
+                .map(|s| KnowledgeTag::new(&s))
+                .collect();
             query = query.with_tags(tag_list);
         }
         let result = SqliteKnowledgeStore::new(self.inner.pool.clone())
@@ -865,7 +912,13 @@ impl CoreService {
         let tag_refs: Option<Vec<KnowledgeTag>> =
             tags.map(|ts| ts.into_iter().map(|s| KnowledgeTag::new(&s)).collect());
         let result = SqliteKnowledgeStore::new(self.inner.pool.clone())
-            .search(DEFAULT_USER_ID, query_text, tag_refs.as_deref(), limit, offset)
+            .search(
+                DEFAULT_USER_ID,
+                query_text,
+                tag_refs.as_deref(),
+                limit,
+                offset,
+            )
             .await
             .map_err(knowledge_err)?;
         self.verify_principal(principal)?;
@@ -880,9 +933,7 @@ mod kb_ownership_tests {
     async fn kb_service(home: &std::path::Path) -> (CoreService, Principal) {
         std::fs::create_dir_all(home.join(".nexus42")).unwrap();
         std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
-            home,
-            "author",
-            "default",
+            home, "author", "default",
         ))
         .unwrap();
         std::fs::write(
@@ -918,8 +969,11 @@ mod kb_ownership_tests {
             .join("default")
             .join("kb");
         std::fs::create_dir_all(kb_dir.join("entries")).unwrap();
-        std::fs::write(kb_dir.join("entries").join(format!("{entry_id}.md")), "foreign body")
-            .unwrap();
+        std::fs::write(
+            kb_dir.join("entries").join(format!("{entry_id}.md")),
+            "foreign body",
+        )
+        .unwrap();
         if registered {
             let index = KbIndex {
                 entries: vec![KbIndexEntry {

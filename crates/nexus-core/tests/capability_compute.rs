@@ -21,9 +21,7 @@
 use nexus_contracts::generated::daemon_api::compute::{
     run_accept_request::RunAcceptRequest, run_request::RunRequest,
 };
-use nexus_core::execution::capabilities::{
-    ToolContext, ToolExecuteRequest, ToolRuntimeFacts,
-};
+use nexus_core::execution::capabilities::{ToolContext, ToolExecuteRequest, ToolRuntimeFacts};
 use nexus_core::execution::compute::ComputeContext;
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService};
 use nexus_wasm_host::{CachedModule, ModuleCache, ModuleManifest, WasmEngine};
@@ -35,7 +33,6 @@ const CREATOR: &str = "test_creator";
 const SLUG: &str = "default";
 const WORLD: &str = "wld_combat";
 const MODULE: &str = "basic-combat";
-
 
 struct Fixture {
     _tmp: TempDir,
@@ -193,14 +190,13 @@ async fn seed_character(
 
 /// Read a character's `current_hp`.
 async fn defender_hp(pool: &sqlx::SqlitePool, entry_id: &str) -> i64 {
-    let raw: Option<String> = sqlx::query_scalar(
-        "SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?",
-    )
-    .bind(entry_id)
-    .fetch_optional(pool)
-    .await
-    .unwrap()
-    .flatten();
+    let raw: Option<String> =
+        sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(entry_id)
+            .fetch_optional(pool)
+            .await
+            .unwrap()
+            .flatten();
     let body: serde_json::Value = serde_json::from_str(&raw.expect("body present")).unwrap();
     body["state"]["character"]["current_hp"].as_i64().unwrap()
 }
@@ -276,14 +272,10 @@ async fn accept_happy_path_applies_atomically_and_creates_events() {
     assert_eq!(timeline_event_count(f.core.pool()).await, 0);
 
     let request: RunAcceptRequest = serde_json::from_value(json!({})).unwrap();
-    let response = nexus_core::execution::compute::accept_compute_run(
-        &f.core,
-        &principal,
-        &run_id,
-        request,
-    )
-    .await
-    .expect("accept succeeds");
+    let response =
+        nexus_core::execution::compute::accept_compute_run(&f.core, &principal, &run_id, request)
+            .await
+            .expect("accept succeeds");
 
     // The typed response reports exactly what the transaction did.
     assert_eq!(response.applied.state_delta_count, 1);
@@ -306,9 +298,14 @@ async fn accept_is_refused_twice_and_double_apply_is_impossible() {
     let principal = f.core.active_principal().await.unwrap();
 
     let request: RunAcceptRequest = serde_json::from_value(json!({})).unwrap();
-    nexus_core::execution::compute::accept_compute_run(&f.core, &principal, &run_id, request.clone())
-        .await
-        .expect("first accept succeeds");
+    nexus_core::execution::compute::accept_compute_run(
+        &f.core,
+        &principal,
+        &run_id,
+        request.clone(),
+    )
+    .await
+    .expect("first accept succeeds");
     let hp_after_first = defender_hp(f.core.pool(), "kb_def").await;
     let events_after_first = timeline_event_count(f.core.pool()).await;
 
@@ -323,7 +320,10 @@ async fn accept_is_refused_twice_and_double_apply_is_impossible() {
 
     // The domain is untouched by the refused accept.
     assert_eq!(defender_hp(f.core.pool(), "kb_def").await, hp_after_first);
-    assert_eq!(timeline_event_count(f.core.pool()).await, events_after_first);
+    assert_eq!(
+        timeline_event_count(f.core.pool()).await,
+        events_after_first
+    );
 }
 
 /// An unknown tool is refused with the retained code and ZERO domain effect.
@@ -428,7 +428,8 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
         cdn_config: None,
         workspace_executor: None,
     };
-    let (registry, outcome) = CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &scan_root);
+    let (registry, outcome) =
+        CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &scan_root);
     {
         use nexus_orchestration::capability::Capability as _;
         assert!(
@@ -530,7 +531,9 @@ async fn execute_tool_refuses_a_principal_from_another_core() {
     let other_nexus = other_home.join(".nexus42");
     std::fs::create_dir_all(&other_nexus).unwrap();
     std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
-        &other_home, "intruder", SLUG,
+        &other_home,
+        "intruder",
+        SLUG,
     ))
     .unwrap();
     std::fs::write(
@@ -566,10 +569,7 @@ async fn execute_tool_refuses_a_principal_from_another_core() {
         request_id: None,
         caller_kind: None,
     };
-    let err = handle
-        .execute_tool(&foreign, request)
-        .await
-        .unwrap_err();
+    let err = handle.execute_tool(&foreign, request).await.unwrap_err();
     assert!(
         matches!(err, nexus_core::CoreError::AuthRequired),
         "a foreign principal must be refused as AuthRequired, got {err:?}"

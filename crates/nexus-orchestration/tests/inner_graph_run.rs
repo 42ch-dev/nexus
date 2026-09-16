@@ -70,8 +70,8 @@ inner_graphs:
 #[tokio::test]
 async fn inner_graph_runs_to_completion_and_exports_output() {
     let caps = CapabilityRegistry::with_builtins();
-    let loaded = nexus_preset::load_preset_from_str(INNER_GRAPH_PRESET_YAML, &caps)
-        .expect("load preset");
+    let loaded =
+        nexus_preset::load_preset_from_str(INNER_GRAPH_PRESET_YAML, &caps).expect("load preset");
 
     assert_eq!(loaded.id, "inner-graph-test");
     assert_eq!(loaded.output_bindings.get("my_graph").unwrap(), "n3.text");
@@ -205,4 +205,3 @@ async fn spawn_child_and_get_context() {
         "child should have produced output: {output}"
     );
 }
-

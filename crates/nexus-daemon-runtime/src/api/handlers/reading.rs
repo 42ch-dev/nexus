@@ -28,12 +28,15 @@ use nexus_contracts::daemon_api::reading::{
 /// `CORE_ERROR` shape.
 fn reading_error(error: nexus_core::CoreError) -> NexusApiError {
     match error {
-        nexus_core::CoreError::InvalidInput { field, reason } => {
-            NexusApiError::BadRequest { code: field, message: reason }
-        }
+        nexus_core::CoreError::InvalidInput { field, reason } => NexusApiError::BadRequest {
+            code: field,
+            message: reason,
+        },
         nexus_core::CoreError::NotFound { resource } => NexusApiError::NotFound(resource),
         nexus_core::CoreError::Forbidden { resource } => {
-            let foreign = resource.strip_prefix("annotation_owner:").map(str::to_owned);
+            let foreign = resource
+                .strip_prefix("annotation_owner:")
+                .map(str::to_owned);
             NexusApiError::Forbidden {
                 resource: foreign.clone().unwrap_or(resource),
                 reason: foreign.map_or_else(
@@ -60,7 +63,10 @@ pub async fn get_reading_progress(
 ) -> Result<Json<ReadingProgressResponse>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let response = core.get_reading_progress(&principal, query).await.map_err(reading_error)?;
+    let response = core
+        .get_reading_progress(&principal, query)
+        .await
+        .map_err(reading_error)?;
     Ok(Json(response))
 }
 
@@ -85,7 +91,9 @@ pub async fn delete_reading_progress(
 ) -> Result<axum::http::StatusCode, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    core.delete_reading_progress(&principal, query).await.map_err(reading_error)?;
+    core.delete_reading_progress(&principal, query)
+        .await
+        .map_err(reading_error)?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
@@ -96,7 +104,10 @@ pub async fn list_annotations(
 ) -> Result<Json<ReadingAnnotationListResponse>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let response = core.list_annotations(&principal, query).await.map_err(reading_error)?;
+    let response = core
+        .list_annotations(&principal, query)
+        .await
+        .map_err(reading_error)?;
     Ok(Json(response))
 }
 
@@ -107,7 +118,10 @@ pub async fn create_annotation(
 ) -> Result<Json<ReadingAnnotation>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let annotation = core.create_annotation(&principal, body).await.map_err(reading_error)?;
+    let annotation = core
+        .create_annotation(&principal, body)
+        .await
+        .map_err(reading_error)?;
     Ok(Json(annotation))
 }
 
@@ -133,6 +147,8 @@ pub async fn delete_annotation(
 ) -> Result<axum::http::StatusCode, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    core.delete_annotation(&principal, annotation_id).await.map_err(reading_error)?;
+    core.delete_annotation(&principal, annotation_id)
+        .await
+        .map_err(reading_error)?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }

@@ -41,9 +41,10 @@ enum ReadingFault {
 impl From<ReadingFault> for CoreError {
     fn from(error: ReadingFault) -> Self {
         match error {
-            ReadingFault::BadRequest { message } => {
-                Self::InvalidInput { field: "invalid_input".into(), reason: message }
-            }
+            ReadingFault::BadRequest { message } => Self::InvalidInput {
+                field: "invalid_input".into(),
+                reason: message,
+            },
             ReadingFault::NotFound(resource) => Self::NotFound { resource },
             ReadingFault::ForeignAnnotation(resource) => Self::Forbidden { resource },
             ReadingFault::Core(error) => error,
@@ -84,7 +85,10 @@ fn validate_color(color: &str) -> Result<(), ReadingFault> {
         Ok(())
     } else {
         Err(ReadingFault::BadRequest {
-            message: format!("color must be one of {}, got '{color}'", VALID_COLORS.join(", ")),
+            message: format!(
+                "color must be one of {}, got '{color}'",
+                VALID_COLORS.join(", ")
+            ),
         })
     }
 }
@@ -154,9 +158,7 @@ impl CoreService {
             work_id: query.work_id,
             chapter: query.chapter,
             scroll_progress,
-            updated_at: updated_at
-                .unwrap_or_else(chrono::Utc::now)
-                .to_rfc3339(),
+            updated_at: updated_at.unwrap_or_else(chrono::Utc::now).to_rfc3339(),
         })
     }
 
@@ -325,7 +327,11 @@ impl CoreService {
         let row = reading::update_annotation(
             &self.inner.pool,
             &annotation_id,
-            request.color.as_ref().map(std::string::ToString::to_string).as_deref(),
+            request
+                .color
+                .as_ref()
+                .map(std::string::ToString::to_string)
+                .as_deref(),
             note_change,
         )
         .await

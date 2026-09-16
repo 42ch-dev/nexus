@@ -12,31 +12,31 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use nexus_contracts::{
     AddKbEntryRequest, AddKbEntryResponse, AppendInspirationRequest, AppendInspirationResponse,
-    WorkPoolArchiveRequest as WirePoolArchiveRequest, BatchUpdateFindingsRequest,
-    BatchUpdateFindingsResponse, ChapterBody, ChapterDetail, ChapterOutline,
-    CoreChapterContentQuery as WireChapterContentQuery, CoreTimelineEventsQuery as WireTimelineEventsQuery,
-    CoreTimelineOverviewQuery as WireTimelineOverviewQuery, CoreWorkSelection,
-    CreateForkRequest, CreateForkResponse, CreateWorkRequest, CreateWorkResponse,
-    DeleteKbEntryResponse, FindingDetailResponse, GetKbEntryResponse,
-    ListChaptersQuery, ListKbEntriesQuery, ListWorksQuery, ListWorksResponse,
-    PackExportRequest, PackImportRequest, PatchChapterRequest, ReadingAnnotation,
-    ReadingAnnotationCreateRequest, ReadingAnnotationListQuery, ReadingAnnotationListResponse,
-    ReadingAnnotationPatchRequest, ReadingProgressQuery, ReadingProgressRequest,
-    ReadingProgressResponse, TimelineOverviewResponse, WorkDetailResponse,
-    WorkPoolArchiveRequest, WorkPoolEntry, WorkPoolListQuery, WorkPoolListResponse,
-    WorkPoolPromoteRequest, WorkPoolSetActiveRequest, WorkReconcileReport,
+    BatchUpdateFindingsRequest, BatchUpdateFindingsResponse, ChapterBody, ChapterDetail,
+    ChapterOutline, CoreChapterContentQuery as WireChapterContentQuery,
+    CoreTimelineEventsQuery as WireTimelineEventsQuery,
+    CoreTimelineOverviewQuery as WireTimelineOverviewQuery, CoreWorkSelection, CreateForkRequest,
+    CreateForkResponse, CreateWorkRequest, CreateWorkResponse, DeleteKbEntryResponse,
+    FindingDetailResponse, GetKbEntryResponse, ListChaptersQuery, ListKbEntriesQuery,
+    ListWorksQuery, ListWorksResponse, PackExportRequest, PackImportRequest, PatchChapterRequest,
+    ReadingAnnotation, ReadingAnnotationCreateRequest, ReadingAnnotationListQuery,
+    ReadingAnnotationListResponse, ReadingAnnotationPatchRequest, ReadingProgressQuery,
+    ReadingProgressRequest, ReadingProgressResponse, TimelineOverviewResponse, WorkDetailResponse,
     WorkInspirationAddRequest, WorkInspirationAddResponse, WorkInspirationArchiveRequest,
     WorkInspirationItem, WorkInspirationListQuery, WorkInspirationListResponse,
     WorkInspirationPromoteRequest, WorkInspirationPromoteResponse,
+    WorkPoolArchiveRequest as WirePoolArchiveRequest, WorkPoolArchiveRequest, WorkPoolEntry,
+    WorkPoolListQuery, WorkPoolListResponse, WorkPoolPromoteRequest, WorkPoolSetActiveRequest,
+    WorkReconcileReport,
 };
 use nexus_core::{
-    CoreError, CoreService, Principal,
-    AddInspirationRequest, ArchiveInspirationRequest, ArchivePoolRequest,
-    CoreChapterContentQuery, CoreTimelineEventsQuery, CoreTimelineOverviewQuery,
-    CreateFindingRequest as DomainCreateFindingRequest, ListFindingsQuery as DomainListFindingsQuery,
-    ListInspirationQuery, ListPoolQuery, PromoteInspirationRequest, PromotePoolRequest,
-    ReconcileDryRunQuery, SetPoolActiveRequest, WorkPatchRequest, WorkReconcileReport as DomainWorkReconcileReport,
-    UpdateFindingRequest as DomainUpdateFindingRequest,
+    AddInspirationRequest, ArchiveInspirationRequest, ArchivePoolRequest, CoreChapterContentQuery,
+    CoreError, CoreService, CoreTimelineEventsQuery, CoreTimelineOverviewQuery,
+    CreateFindingRequest as DomainCreateFindingRequest,
+    ListFindingsQuery as DomainListFindingsQuery, ListInspirationQuery, ListPoolQuery, Principal,
+    PromoteInspirationRequest, PromotePoolRequest, ReconcileDryRunQuery, SetPoolActiveRequest,
+    UpdateFindingRequest as DomainUpdateFindingRequest, WorkPatchRequest,
+    WorkReconcileReport as DomainWorkReconcileReport,
 };
 
 use crate::NativeCore;
@@ -259,7 +259,11 @@ impl NativeCore {
 
     /// `GET /v1/daemon/worlds/{world_id}/rules`.
     #[napi]
-    pub async fn list_world_rules(&self, principal_handle: String, world_id: String) -> Result<Buffer> {
+    pub async fn list_world_rules(
+        &self,
+        principal_handle: String,
+        world_id: String,
+    ) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
             core.list_world_rules(&principal, world_id).await
         })
@@ -354,7 +358,8 @@ impl NativeCore {
             cursor: query.cursor.map(|cursor| cursor.to_string()),
         };
         self.json_call(principal_handle, async move |core, principal| {
-            core.list_timeline_events(&principal, world_id, domain).await
+            core.list_timeline_events(&principal, world_id, domain)
+                .await
         })
         .await
     }
@@ -363,11 +368,7 @@ impl NativeCore {
 
     /// `GET /v1/daemon/works` — generated list envelope straight through.
     #[napi]
-    pub async fn list_works(
-        &self,
-        principal_handle: String,
-        query_json: Buffer,
-    ) -> Result<Buffer> {
+    pub async fn list_works(&self, principal_handle: String, query_json: Buffer) -> Result<Buffer> {
         let query: ListWorksQuery = decode(query_json, "query")?;
         self.json_call(principal_handle, async move |core, principal| {
             let response: ListWorksResponse = core.list_works(&principal, query).await?;
@@ -504,7 +505,9 @@ impl NativeCore {
             dry_run: Option<bool>,
         }
         let query: ReconcileQuery = decode(query_json, "query")?;
-        let domain = ReconcileDryRunQuery { dry_run: query.dry_run };
+        let domain = ReconcileDryRunQuery {
+            dry_run: query.dry_run,
+        };
         self.json_call(principal_handle, async move |core, principal| {
             let report: DomainWorkReconcileReport = core
                 .reconcile_work_chapters(&principal, work_id, HTTP_HOLDER, domain)
@@ -849,7 +852,11 @@ impl NativeCore {
 
     /// `GET /v1/daemon/works/{work_id}/outline`.
     #[napi]
-    pub async fn get_work_outline(&self, principal_handle: String, work_id: String) -> Result<Buffer> {
+    pub async fn get_work_outline(
+        &self,
+        principal_handle: String,
+        work_id: String,
+    ) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
             core.work_outline(&principal, work_id).await
         })
@@ -972,7 +979,9 @@ impl NativeCore {
             severity: request.severity,
             title: request.title,
             description: request.description.unwrap_or_default(),
-            target_executor: request.target_executor.unwrap_or_else(|| "none".to_string()),
+            target_executor: request
+                .target_executor
+                .unwrap_or_else(|| "none".to_string()),
             kind: request.kind.unwrap_or_else(|| "craft".to_string()),
             rule_suggestion: request.rule_suggestion,
         })
@@ -1007,8 +1016,9 @@ impl NativeCore {
         let request: nexus_contracts::CreateFindingRequest = decode(request_json, "request")?;
         let domain = Self::finding_create(request)?;
         self.json_call(principal_handle, async move |core, principal| {
-            let finding: FindingDetailResponse =
-                core.create_finding_from_review(&principal, work_id, domain).await?;
+            let finding: FindingDetailResponse = core
+                .create_finding_from_review(&principal, work_id, domain)
+                .await?;
             Ok(finding)
         })
         .await
@@ -1051,8 +1061,9 @@ impl NativeCore {
         finding_id: String,
     ) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
-            let finding: FindingDetailResponse =
-                core.get_work_finding(&principal, work_id, finding_id).await?;
+            let finding: FindingDetailResponse = core
+                .get_work_finding(&principal, work_id, finding_id)
+                .await?;
             Ok(finding)
         })
         .await
@@ -1060,7 +1071,11 @@ impl NativeCore {
 
     /// `GET /v1/daemon/findings/{finding_id}` — creator-scoped lookup.
     #[napi]
-    pub async fn get_finding(&self, principal_handle: String, finding_id: String) -> Result<Buffer> {
+    pub async fn get_finding(
+        &self,
+        principal_handle: String,
+        finding_id: String,
+    ) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
             let finding: FindingDetailResponse = core.get_finding(&principal, finding_id).await?;
             Ok(finding)
@@ -1136,7 +1151,9 @@ impl NativeCore {
         threshold_seconds: i64,
     ) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
-            let report = core.list_stale_findings(&principal, threshold_seconds).await?;
+            let report = core
+                .list_stale_findings(&principal, threshold_seconds)
+                .await?;
             // StaleFindingEntry carries no Serialize: map field-wise.
             let findings: Vec<serde_json::Value> = report
                 .findings
@@ -1170,7 +1187,9 @@ impl NativeCore {
         dry_run: bool,
     ) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
-            let outcome = core.prune_findings(&principal, older_than_days, dry_run).await?;
+            let outcome = core
+                .prune_findings(&principal, older_than_days, dry_run)
+                .await?;
             Ok(serde_json::json!({
                 "count": outcome.count,
                 "older_than_days": outcome.older_than_days,
@@ -1209,8 +1228,9 @@ impl NativeCore {
     ) -> Result<Buffer> {
         let request: ReadingProgressRequest = decode(request_json, "request")?;
         self.json_call(principal_handle, async move |core, principal| {
-            let response: ReadingProgressResponse =
-                core.put_reading_progress(&principal, work_id, request).await?;
+            let response: ReadingProgressResponse = core
+                .put_reading_progress(&principal, work_id, request)
+                .await?;
             Ok(response)
         })
         .await
@@ -1256,8 +1276,7 @@ impl NativeCore {
     ) -> Result<Buffer> {
         let request: ReadingAnnotationCreateRequest = decode(request_json, "request")?;
         self.json_call(principal_handle, async move |core, principal| {
-            let annotation: ReadingAnnotation =
-                core.create_annotation(&principal, request).await?;
+            let annotation: ReadingAnnotation = core.create_annotation(&principal, request).await?;
             Ok(annotation)
         })
         .await
@@ -1274,8 +1293,9 @@ impl NativeCore {
     ) -> Result<Buffer> {
         let request: ReadingAnnotationPatchRequest = decode(request_json, "request")?;
         self.json_call(principal_handle, async move |core, principal| {
-            let annotation: ReadingAnnotation =
-                core.patch_annotation(&principal, annotation_id, request).await?;
+            let annotation: ReadingAnnotation = core
+                .patch_annotation(&principal, annotation_id, request)
+                .await?;
             Ok(annotation)
         })
         .await

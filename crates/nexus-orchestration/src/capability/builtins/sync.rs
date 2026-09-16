@@ -25,17 +25,23 @@ const CLOUD_LINE_DISABLED: &str =
 pub struct SyncPull;
 
 #[async_trait]
-impl Capability for SyncPull { fn name(&self) -> &'static str {
-    "sync.pull"
-} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::SYNC_PULL_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
-    r#"{"type":"object","properties":{"deltasPulled":{"type":"integer","minimum":0},"conflicts":{"type":"boolean"}},"required":["deltasPulled","conflicts"],"additionalProperties":false}"#
-}
+impl Capability for SyncPull {
+    fn name(&self) -> &'static str {
+        "sync.pull"
+    }
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::SYNC_PULL_INPUT_SCHEMA
+    }
+    fn output_schema(&self) -> &'static str {
+        r#"{"type":"object","properties":{"deltasPulled":{"type":"integer","minimum":0},"conflicts":{"type":"boolean"}},"required":["deltasPulled","conflicts"],"additionalProperties":false}"#
+    }
 
-async fn run(&self, _input: Value) -> Result<Value, CapabilityError> {
-    Err(CapabilityError::PermanentExternal(
-        CLOUD_LINE_DISABLED.to_string(),
-    ))
-} }
+    async fn run(&self, _input: Value) -> Result<Value, CapabilityError> {
+        Err(CapabilityError::PermanentExternal(
+            CLOUD_LINE_DISABLED.to_string(),
+        ))
+    }
+}
 
 // ---------------------------------------------------------------------------
 // sync.push
@@ -48,17 +54,23 @@ async fn run(&self, _input: Value) -> Result<Value, CapabilityError> {
 pub struct SyncPush;
 
 #[async_trait]
-impl Capability for SyncPush { fn name(&self) -> &'static str {
-    "sync.push"
-} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::SYNC_PUSH_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
-    r#"{"type":"object","properties":{"entriesPushed":{"type":"integer","minimum":0}},"required":["entriesPushed"],"additionalProperties":false}"#
-}
+impl Capability for SyncPush {
+    fn name(&self) -> &'static str {
+        "sync.push"
+    }
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::SYNC_PUSH_INPUT_SCHEMA
+    }
+    fn output_schema(&self) -> &'static str {
+        r#"{"type":"object","properties":{"entriesPushed":{"type":"integer","minimum":0}},"required":["entriesPushed"],"additionalProperties":false}"#
+    }
 
-async fn run(&self, _input: Value) -> Result<Value, CapabilityError> {
-    Err(CapabilityError::PermanentExternal(
-        CLOUD_LINE_DISABLED.to_string(),
-    ))
-} }
+    async fn run(&self, _input: Value) -> Result<Value, CapabilityError> {
+        Err(CapabilityError::PermanentExternal(
+            CLOUD_LINE_DISABLED.to_string(),
+        ))
+    }
+}
 
 #[cfg(test)]
 mod tests {

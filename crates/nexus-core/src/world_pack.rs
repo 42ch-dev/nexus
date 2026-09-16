@@ -3,6 +3,9 @@
 //! per-atom CAS/provenance writes and skip/reject outcomes (not whole-pack
 //! atomicity). Pack-level source anchors remain an accepted no-op on import.
 
+use crate::error::db_err;
+use crate::world_kb::guards;
+use crate::{CoreAccess, CoreError, CoreResult, CoreService, Principal};
 use nexus_contracts::daemon_api::kb::{
     PackExportRequest, PackExportResponse, PackImportRequest, PackImportRequestConflict,
     PackImportResponse, PackImportResponseDetailsItem, PackImportResponseDetailsItemKind,
@@ -11,9 +14,6 @@ use nexus_contracts::daemon_api::kb::{
 use nexus_local_db::kb_relationships::list_relationships_for_world;
 use nexus_spoke_adapter::conversion::{kb_relationship_row_to_spoke, knowledge_record_to_spoke};
 use nexus_spoke_adapter::pack::{build_pack, parse_pack};
-use crate::error::db_err;
-use crate::world_kb::guards;
-use crate::{CoreAccess, CoreError, CoreResult, CoreService, Principal};
 
 const DEFAULT_PACK_VERSION: &str = "0.1.0";
 
@@ -22,26 +22,57 @@ impl CoreService {
     /// # Errors
     /// Rejects invalid principals, read-only access, foreign/missing Worlds,
     /// invalid pack input and fatal storage errors. Per-atom rejects are reported.
-    pub async fn import_world_pack(&self, principal: &Principal, world_id: String, request: PackImportRequest) -> CoreResult<PackImportResponse> {
+    pub async fn import_world_pack(
+        &self,
+        principal: &Principal,
+        world_id: String,
+        request: PackImportRequest,
+    ) -> CoreResult<PackImportResponse> {
         self.verify_principal(principal)?;
         if self.inner.access == CoreAccess::ReadOnly {
-            return Err(CoreError::Forbidden { resource: "world_pack_import: read-only core access".to_string() });
+            return Err(CoreError::Forbidden {
+                resource: "world_pack_import: read-only core access".to_string(),
+            });
         }
-        run_world_pack_import(&self.inner.pool, principal.creator_id(), &world_id, request, false).await
+        run_world_pack_import(
+            &self.inner.pool,
+            principal.creator_id(),
+            &world_id,
+            request,
+            false,
+        )
+        .await
     }
 
     /// Evaluate import outcomes without writing atoms, for the retained CLI dry-run.
     /// # Errors
     /// Returns principal, World ownership, pack parse or storage errors.
-    pub async fn preview_world_pack_import(&self, principal: &Principal, world_id: String, request: PackImportRequest) -> CoreResult<PackImportResponse> {
+    pub async fn preview_world_pack_import(
+        &self,
+        principal: &Principal,
+        world_id: String,
+        request: PackImportRequest,
+    ) -> CoreResult<PackImportResponse> {
         self.verify_principal(principal)?;
-        run_world_pack_import(&self.inner.pool, principal.creator_id(), &world_id, request, true).await
+        run_world_pack_import(
+            &self.inner.pool,
+            principal.creator_id(),
+            &world_id,
+            request,
+            true,
+        )
+        .await
     }
 
     /// Export the owned World's lore as the existing handbook pack DTO.
     /// # Errors
     /// Returns principal, World ownership, storage or pack projection errors.
-    pub async fn export_world_pack(&self, principal: &Principal, world_id: String, request: PackExportRequest) -> CoreResult<PackExportResponse> {
+    pub async fn export_world_pack(
+        &self,
+        principal: &Principal,
+        world_id: String,
+        request: PackExportRequest,
+    ) -> CoreResult<PackExportResponse> {
         self.verify_principal(principal)?;
         guards::require_world_owner(&self.inner.pool, &world_id, principal.creator_id()).await?;
         export_pack(&self.inner.pool, principal.creator_id(), world_id, request).await
@@ -70,11 +101,12 @@ impl CoreService {
         // longer required to equal the caller; forged/unknown creators are
         // still rejected here. Persistence stays fenced by the writer
         // protocol triggers.
-        let known_creator: i64 = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM creators WHERE creator_id = ?)",
-        )
-        .bind(creator_id)
-        .fetch_one(pool).await.map_err(|e| db_err(&e))?;
+        let known_creator: i64 =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM creators WHERE creator_id = ?)")
+                .bind(creator_id)
+                .fetch_one(pool)
+                .await
+                .map_err(|e| db_err(&e))?;
         if known_creator == 0 {
             return Err(CoreError::AuthRequired);
         }
@@ -84,7 +116,9 @@ impl CoreService {
         // promoted to a writer.
         let mut connection = pool.acquire().await.map_err(|e| db_err(&e))?;
         let query_only: i64 = sqlx::query_scalar("PRAGMA query_only")
-            .fetch_one(&mut *connection).await.map_err(|e| db_err(&e))?;
+            .fetch_one(&mut *connection)
+            .await
+            .map_err(|e| db_err(&e))?;
         if query_only != 0 {
             return Err(CoreError::Forbidden {
                 resource: "world_pack_import: read-only legacy pool".to_string(),
@@ -103,7 +137,9 @@ impl CoreService {
              AND (r.mode = 'direct' OR \
                   (r.engine_epoch = g.engine_epoch AND r.engine_epoch = nexus_engine_epoch())))",
         )
-        .fetch_one(&mut *connection).await.map_err(|e| db_err(&e))?;
+        .fetch_one(&mut *connection)
+        .await
+        .map_err(|e| db_err(&e))?;
         if live_writer == 0 {
             return Err(CoreError::WriterFenced);
         }
@@ -112,13 +148,32 @@ impl CoreService {
     }
 }
 
-async fn run_world_pack_import(pool: &SqlitePool, creator_id: &str, world_id: &str, request: PackImportRequest, dry_run: bool) -> CoreResult<PackImportResponse> {
+async fn run_world_pack_import(
+    pool: &SqlitePool,
+    creator_id: &str,
+    world_id: &str,
+    request: PackImportRequest,
+    dry_run: bool,
+) -> CoreResult<PackImportResponse> {
     guards::require_world_owner(pool, world_id, creator_id).await?;
-    let parsed = parse_pack(&serde_json::Value::Object(request.pack)).map_err(|e| CoreError::InvalidInput {
-        field: "pack".to_string(), reason: e.to_string(),
+    let parsed = parse_pack(&serde_json::Value::Object(request.pack)).map_err(|e| {
+        CoreError::InvalidInput {
+            field: "pack".to_string(),
+            reason: e.to_string(),
+        }
     })?;
-    let summary = import_pack(pool, world_id, parsed, conflict_policy_from_request(request.conflict), request.include_anchors, dry_run)
-        .await.map_err(|e| CoreError::Internal { category: e.to_string() })?;
+    let summary = import_pack(
+        pool,
+        world_id,
+        parsed,
+        conflict_policy_from_request(request.conflict),
+        request.include_anchors,
+        dry_run,
+    )
+    .await
+    .map_err(|e| CoreError::Internal {
+        category: e.to_string(),
+    })?;
     Ok(import_summary_to_response(summary))
 }
 
@@ -1243,10 +1298,7 @@ fn import_summary_to_response(summary: ImportSummary) -> PackImportResponse {
     }
 }
 
-async fn resolve_world_title(
-    pool: &sqlx::SqlitePool,
-    world_id: &str,
-) -> CoreResult<String> {
+async fn resolve_world_title(pool: &sqlx::SqlitePool, world_id: &str) -> CoreResult<String> {
     // Runtime query: mirrors `world_kb.rs` pattern; table schema is stable.
     let title: Option<String> =
         sqlx::query_scalar("SELECT title FROM narrative_worlds WHERE world_id = ?")
@@ -1256,13 +1308,12 @@ async fn resolve_world_title(
             .map_err(|e| db_err(&e))?
             .flatten();
 
-    title.ok_or_else(|| CoreError::NotFound { resource: format!("world {world_id}") })
+    title.ok_or_else(|| CoreError::NotFound {
+        resource: format!("world {world_id}"),
+    })
 }
 
-async fn resolve_creator_string(
-    pool: &sqlx::SqlitePool,
-    creator_id: &str,
-) -> CoreResult<String> {
+async fn resolve_creator_string(pool: &sqlx::SqlitePool, creator_id: &str) -> CoreResult<String> {
     // Runtime query: mirrors `world_kb.rs` pattern; table schema is stable.
     let display_name: Option<String> =
         sqlx::query_scalar("SELECT display_name FROM creators WHERE creator_id = ?")
@@ -1306,7 +1357,6 @@ async fn export_pack(
     world_id: String,
     req: PackExportRequest,
 ) -> CoreResult<PackExportResponse> {
-
     let world_title = resolve_world_title(pool, &world_id).await?;
     let creator = resolve_creator_string(pool, &creator_id).await?;
 
@@ -1315,13 +1365,15 @@ async fn export_pack(
         store
             .list_by_world_including_deprecated(&world_id)
             .await
-            .map_err(|e| CoreError::Internal { category: format!("World KB list failed for {world_id}: {e}"),
+            .map_err(|e| CoreError::Internal {
+                category: format!("World KB list failed for {world_id}: {e}"),
             })?
     } else {
         store
             .list_by_world(&world_id)
             .await
-            .map_err(|e| CoreError::Internal { category: format!("World KB list failed for {world_id}: {e}"),
+            .map_err(|e| CoreError::Internal {
+                category: format!("World KB list failed for {world_id}: {e}"),
             })?
     };
 
@@ -1330,7 +1382,8 @@ async fn export_pack(
 
     let relation_rows = list_relationships_for_world(pool, &world_id, false, i64::MAX)
         .await
-        .map_err(|e| CoreError::Internal { category: format!("Failed to list relations for {world_id}: {e}"),
+        .map_err(|e| CoreError::Internal {
+            category: format!("Failed to list relations for {world_id}: {e}"),
         })?;
 
     let mut relations: Vec<nexus_spoke_adapter::Relation> = relation_rows
@@ -1374,7 +1427,8 @@ async fn export_pack(
     );
 
     let resp: PackExportResponse =
-        serde_json::from_value(pack_value).map_err(|e| CoreError::Internal { category: format!(
+        serde_json::from_value(pack_value).map_err(|e| CoreError::Internal {
+            category: format!(
                 "build_pack output did not match the PackExportResponse wire shape: {e}"
             ),
         })?;

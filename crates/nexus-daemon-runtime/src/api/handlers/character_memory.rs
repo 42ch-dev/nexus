@@ -18,9 +18,9 @@ use crate::api::handlers::soul_narrative_synthesizer::AcpSoulNarrativeSynthesize
 use crate::api::handlers::world_kb_guards::resolve_core_principal;
 use crate::api::pagination::decode_offset_cursor;
 use crate::workspace::WorkspaceState;
-use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
+use axum::Json;
 use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_request::CaptureCharacterPendingReviewRequest;
 use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_response::CaptureCharacterPendingReviewResponse;
 use nexus_contracts::daemon_api::characters::memory::count_character_pending_reviews_query::CountCharacterPendingReviewsQuery;
@@ -199,7 +199,9 @@ pub async fn reflect_soul(
     // after authorization succeeds.
     let response = core
         .reflect_character_soul(&principal, character_id, req, || {
-            state.capability_registry().map(AcpSoulNarrativeSynthesizer::new)
+            state
+                .capability_registry()
+                .map(AcpSoulNarrativeSynthesizer::new)
         })
         .await?;
     Ok(Json(response))

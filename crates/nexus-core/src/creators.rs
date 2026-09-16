@@ -26,14 +26,12 @@ use nexus_contracts::generated::daemon_api::creators::{
     set_active_creator_response::SetActiveCreatorResponse,
 };
 use nexus_contracts::CreatorDetail;
-use nexus_home_layout::active_context::{
-    read_active_creator_id, try_resolve_state_db_path,
-};
+use nexus_home_layout::active_context::{read_active_creator_id, try_resolve_state_db_path};
 use nexus_home_layout::validate_creator_id_safe;
 
 use crate::error::{db_err, CoreError, CoreResult};
-use sqlx::Row;
 use crate::home::CoreHomeService;
+use sqlx::Row;
 
 /// Maximum creator display name length accepted by this family — parity with
 /// the daemon handler rule (char count, so CJK / emoji count once).
@@ -78,7 +76,10 @@ impl CoreHomeService {
     /// be read, the mapped internal carriers when the identity cache or the
     /// workspace enrichment fails, and [`CoreError::Uninitialized`] when the
     /// SQL enrichment path cannot resolve its store.
-    pub async fn list_creators(&self, query: ListCreatorsQuery) -> CoreResult<ListCreatorsResponse> {
+    pub async fn list_creators(
+        &self,
+        query: ListCreatorsQuery,
+    ) -> CoreResult<ListCreatorsResponse> {
         let limit = query.limit.unwrap_or(50).clamp(1, 250) as usize;
 
         // Membership SSOT: on-disk Profile homes only.
@@ -103,8 +104,7 @@ impl CoreHomeService {
                         if sql_by_id.contains_key(creator_id) {
                             continue;
                         }
-                        let enriched =
-                            enrich_profile(creator_id, &sql_by_id, &identity_cache);
+                        let enriched = enrich_profile(creator_id, &sql_by_id, &identity_cache);
                         if let Err(err) =
                             upsert_creator_display_name(&pool, creator_id, &enriched.display_name)
                                 .await
@@ -187,10 +187,9 @@ impl CoreHomeService {
         // Defensive: the generated id always matches the safe-id check, but
         // run it anyway so future id-shape changes cannot bypass the
         // path-traversal guard.
-        validate_creator_id_safe(&creator_id)
-            .map_err(|reason| CoreError::Internal {
-                category: format!("CREATOR_ID_GENERATION_ERROR: {reason}"),
-            })?;
+        validate_creator_id_safe(&creator_id).map_err(|reason| CoreError::Internal {
+            category: format!("CREATOR_ID_GENERATION_ERROR: {reason}"),
+        })?;
 
         // Membership SSOT write — Profile is real only when the home dir exists.
         ensure_profile_home_ssot(&self.nexus_home, &creator_id)?;
@@ -299,7 +298,10 @@ impl CoreHomeService {
         };
 
         if !cache.is_object() {
-            return Err(internal("CACHE_FORMAT_ERROR", "Identity cache root is not an object"));
+            return Err(internal(
+                "CACHE_FORMAT_ERROR",
+                "Identity cache root is not an object",
+            ));
         }
         if cache.get("creators").is_none_or(|v| !v.is_object()) {
             return Err(internal(
@@ -315,8 +317,7 @@ impl CoreHomeService {
             let pool = nexus_local_db::init_pool(&db_path)
                 .await
                 .map_err(crate::error::local_db_err)?;
-            let upsert =
-                upsert_creator_display_name(&pool, creator_id, display_name).await;
+            let upsert = upsert_creator_display_name(&pool, creator_id, display_name).await;
             if let Err(err) = upsert {
                 pool.close().await;
                 return Err(err);
@@ -337,10 +338,7 @@ impl CoreHomeService {
                 }
             } else {
                 // Ensure a minimal entry exists before inserting the name.
-                if let Some(creators) = cache
-                    .get_mut("creators")
-                    .and_then(|v| v.as_object_mut())
-                {
+                if let Some(creators) = cache.get_mut("creators").and_then(|v| v.as_object_mut()) {
                     let entry = creators
                         .entry(creator_id.to_string())
                         .or_insert_with(|| serde_json::json!({}));
@@ -378,7 +376,10 @@ impl CoreHomeService {
     /// Returns [`CoreError::InvalidInput`] for unsafe ids,
     /// [`CoreError::NotFound`] when the creator is unknown, and the mapped
     /// internal carriers when the config write fails.
-    pub fn use_creator(&self, request: SetActiveCreatorRequest) -> CoreResult<SetActiveCreatorResponse> {
+    pub fn use_creator(
+        &self,
+        request: SetActiveCreatorRequest,
+    ) -> CoreResult<SetActiveCreatorResponse> {
         validate_creator_id_safe(&request.creator_id).map_err(|reason| {
             CoreError::InvalidInput {
                 field: "creator_id".to_string(),
@@ -396,10 +397,7 @@ impl CoreHomeService {
         let in_cache = get_identity_entry(&cache, &request.creator_id).is_some();
         if !in_auth && !in_cache {
             return Err(CoreError::NotFound {
-                resource: format!(
-                    "Creator {} not found. Register first.",
-                    request.creator_id
-                ),
+                resource: format!("Creator {} not found. Register first.", request.creator_id),
             });
         }
 
@@ -438,11 +436,10 @@ impl CoreHomeService {
     /// # Errors
     /// Returns [`CoreError::NotFound`] when no active creator is selected.
     pub fn active_creator(&self) -> CoreResult<ActiveCreatorResponse> {
-        let creator_id = read_active_creator_id(&self.nexus_home).ok_or_else(|| {
-            CoreError::NotFound {
+        let creator_id =
+            read_active_creator_id(&self.nexus_home).ok_or_else(|| CoreError::NotFound {
                 resource: "No active creator selected".to_string(),
-            }
-        })?;
+            })?;
         let cache = load_identity_cache(&self.nexus_home);
         let entry = get_identity_entry(&cache, &creator_id);
         Ok(ActiveCreatorResponse {
@@ -614,7 +611,6 @@ fn enrich_profile(
         .expect("core-minted creator info is wire-valid")
 }
 
-
 #[derive(Clone)]
 pub(crate) struct IdentityEntry {
     pub(crate) handle: Option<String>,
@@ -675,9 +671,7 @@ pub(crate) fn load_identity_cache(nexus_home: &Path) -> serde_json::Value {
 
 /// Load the identity cache from disk, reporting parse/read errors instead of
 /// treating them as a missing cache.
-pub(crate) fn load_identity_cache_strict(
-    cache_path: &Path,
-) -> CoreResult<serde_json::Value> {
+pub(crate) fn load_identity_cache_strict(cache_path: &Path) -> CoreResult<serde_json::Value> {
     let content =
         std::fs::read_to_string(cache_path).map_err(|e| internal("CACHE_READ_ERROR", e))?;
     serde_json::from_str(&content).map_err(|e| internal("CACHE_PARSE_ERROR", e))
@@ -709,15 +703,14 @@ async fn upsert_creator_display_name(
     display_name: &str,
 ) -> CoreResult<()> {
     let now = chrono::Utc::now().to_rfc3339();
-    let rows = sqlx::query(
-        "UPDATE creators SET display_name = ?, cached_at = ? WHERE creator_id = ?",
-    )
-    .bind(display_name)
-    .bind(&now)
-    .bind(creator_id)
-    .execute(pool)
-    .await
-    .map_err(|e| db_err(&e))?;
+    let rows =
+        sqlx::query("UPDATE creators SET display_name = ?, cached_at = ? WHERE creator_id = ?")
+            .bind(display_name)
+            .bind(&now)
+            .bind(creator_id)
+            .execute(pool)
+            .await
+            .map_err(|e| db_err(&e))?;
     if rows.rows_affected() == 0 {
         sqlx::query(
             "INSERT INTO creators (creator_id, display_name, status, cached_at, data) \
@@ -735,9 +728,7 @@ async fn upsert_creator_display_name(
 
 /// Active-workspace `creators` rows ordered by recency (retained list order
 /// input). Failures surface as the retained `DATABASE_ERROR` carrier.
-async fn sql_creator_rows(
-    pool: &sqlx::SqlitePool,
-) -> CoreResult<Vec<NexusCreatorInfo>> {
+async fn sql_creator_rows(pool: &sqlx::SqlitePool) -> CoreResult<Vec<NexusCreatorInfo>> {
     let rows = sqlx::query(
         "SELECT creator_id, display_name, status, cached_at FROM creators \
          ORDER BY cached_at DESC",
@@ -772,7 +763,10 @@ pub(crate) fn get_identity_entry(
     let creators = cache.get("creators")?.as_object()?;
     let entry = creators.get(creator_id)?;
     Some(IdentityEntry {
-        handle: entry.get("handle").and_then(|v| v.as_str()).map(String::from),
+        handle: entry
+            .get("handle")
+            .and_then(|v| v.as_str())
+            .map(String::from),
         display_name: entry
             .get("display_name")
             .and_then(|v| v.as_str())
@@ -821,8 +815,8 @@ fn clear_creator_credentials(nexus_home: &Path, creator_id: &str) -> CoreResult<
     }
     let content =
         std::fs::read_to_string(&auth_path).map_err(|e| internal("AUTH_READ_ERROR", e))?;
-    let mut store: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| internal("AUTH_PARSE_ERROR", e))?;
+    let mut store: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| internal("AUTH_PARSE_ERROR", e))?;
 
     let removed = store
         .get_mut("creators")

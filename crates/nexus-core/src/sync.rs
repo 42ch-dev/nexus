@@ -47,7 +47,10 @@ impl CoreService {
     pub async fn outbox_status(&self, principal: &Principal) -> CoreResult<CoreOutboxStatus> {
         self.verify_principal(principal)?;
         let outbox = self.open_outbox().await?;
-        let entries = outbox.list_page(OUTBOX_STATUS_PAGE).await.map_err(sync_err)?;
+        let entries = outbox
+            .list_page(OUTBOX_STATUS_PAGE)
+            .await
+            .map_err(sync_err)?;
         let entries = entries
             .into_iter()
             .map(map_entry)
@@ -83,8 +86,8 @@ impl CoreService {
             .await
             .map_err(sync_err)?;
         match entry.delivery_state {
-            nexus_contracts::DeliveryState::Conflicted
-            | nexus_contracts::DeliveryState::Failed => {}
+            nexus_contracts::DeliveryState::Conflicted | nexus_contracts::DeliveryState::Failed => {
+            }
             other => {
                 return Err(CoreError::InvalidInput {
                     field: "outbox_entry_id".to_string(),

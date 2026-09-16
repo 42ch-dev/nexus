@@ -12,7 +12,9 @@
 #![cfg(feature = "execution")]
 
 use async_trait::async_trait;
-use nexus_contracts::{CoreError as WireCoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply};
+use nexus_contracts::{
+    CoreError as WireCoreError, CoreErrorCode, ProviderCall, ProviderEventBatch, ProviderReply,
+};
 use nexus_core::execution::RunControlError;
 use nexus_core::{CoreAccess, CoreOpenOptions, CoreService, ExecutionBuildObserver, RunnerDeps};
 use nexus_orchestration::capability::{
@@ -130,10 +132,7 @@ async fn fixture() -> Fixture {
     guarded.pool().close().await;
     nexus_local_db::writer_protocol::release_retained_writer_guards(&db_path);
 
-    Fixture {
-        tmp,
-        db_path,
-    }
+    Fixture { tmp, db_path }
 }
 
 fn open_options(f: &Fixture, access: CoreAccess) -> CoreOpenOptions {
@@ -278,7 +277,10 @@ async fn second_owner_and_restart_are_fenced() {
     let owner_a = open_engine_owner(&f).await;
     let providers = NullProvider::new();
     let handle = owner_a
-        .start_execution(Arc::clone(&providers) as Arc<dyn ProviderPort>, RunnerDeps::default())
+        .start_execution(
+            Arc::clone(&providers) as Arc<dyn ProviderPort>,
+            RunnerDeps::default(),
+        )
         .await
         .expect("first execution owner starts");
     assert!(
@@ -298,7 +300,9 @@ async fn second_owner_and_restart_are_fenced() {
         owner_a.pool().clone(),
     ));
     let uncertain = store
-        .load_run(&nexus_orchestration::SessionId("test-preset:uncertain".into()))
+        .load_run(&nexus_orchestration::SessionId(
+            "test-preset:uncertain".into(),
+        ))
         .await
         .expect("load uncertain run")
         .expect("uncertain run row");
@@ -317,7 +321,10 @@ async fn second_owner_and_restart_are_fenced() {
     let competitor = CoreService::open(open_options(&f, CoreAccess::EngineOwner)).await;
     let refused = match competitor {
         Ok(core) => core
-            .start_execution(Arc::clone(&providers) as Arc<dyn ProviderPort>, RunnerDeps::default())
+            .start_execution(
+                Arc::clone(&providers) as Arc<dyn ProviderPort>,
+                RunnerDeps::default(),
+            )
             .await
             .is_err(),
         // The OS admission lock itself refusing the live owner is the same
@@ -332,7 +339,10 @@ async fn second_owner_and_restart_are_fenced() {
     // ── 4. A duplicate start on the SAME owner also refuses. ──
     assert!(
         owner_a
-            .start_execution(Arc::clone(&providers) as Arc<dyn ProviderPort>, RunnerDeps::default())
+            .start_execution(
+                Arc::clone(&providers) as Arc<dyn ProviderPort>,
+                RunnerDeps::default()
+            )
             .await
             .is_err(),
         "duplicate start must not create a second engine"

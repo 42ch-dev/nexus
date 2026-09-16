@@ -17,7 +17,8 @@ pub async fn patch_state(
 ) -> Result<Json<StrategyPatchResponse>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let response = core.patch_strategy_state(&principal, strategy_id, state_id, request)
+    let response = core
+        .patch_strategy_state(&principal, strategy_id, state_id, request)
         .await?;
     Ok(Json(super::wire_cast(response)))
 }
@@ -30,7 +31,8 @@ pub async fn patch_transition(
 ) -> Result<Json<StrategyPatchResponse>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let response = core.patch_strategy_transition(&principal, strategy_id, request)
+    let response = core
+        .patch_strategy_transition(&principal, strategy_id, request)
         .await?;
     Ok(Json(super::wire_cast(response)))
 }
@@ -43,7 +45,8 @@ pub async fn patch_prompt_template(
 ) -> Result<Json<StrategyPatchResponse>, NexusApiError> {
     let core = state.core_or_uninit().await?;
     let principal = core.active_principal().await?;
-    let response = core.patch_strategy_prompt_template(&principal, strategy_id, state_id, request)
+    let response = core
+        .patch_strategy_prompt_template(&principal, strategy_id, state_id, request)
         .await?;
     Ok(Json(super::wire_cast(response)))
 }

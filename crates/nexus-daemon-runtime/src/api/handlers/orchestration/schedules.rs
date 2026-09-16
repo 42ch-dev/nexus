@@ -809,15 +809,14 @@ fn build_execution_descriptor(
             code: "CAPABILITY_REGISTRY_UNAVAILABLE".into(),
             message: "capability registry unavailable; cannot freeze preset source identity".into(),
         })?;
-    let loaded =
-        nexus_preset::resolve_preset(&body.preset_id, state.nexus_home(), &registry)
-            .map_err(|e| NexusApiError::Internal {
-                code: "PRESET_LOAD_ERROR".into(),
-                message: format!(
-                    "failed to resolve preset '{}' for descriptor freeze: {e}",
-                    body.preset_id
-                ),
-            })?;
+    let loaded = nexus_preset::resolve_preset(&body.preset_id, state.nexus_home(), &registry)
+        .map_err(|e| NexusApiError::Internal {
+            code: "PRESET_LOAD_ERROR".into(),
+            message: format!(
+                "failed to resolve preset '{}' for descriptor freeze: {e}",
+                body.preset_id
+            ),
+        })?;
     let source = loaded
         .source_identity
         .ok_or_else(|| NexusApiError::Internal {
@@ -937,7 +936,10 @@ async fn admit_new_schedule(
     {
         Ok(_sid) => Ok("running".to_string()),
         Err(e) => {
-            if matches!(e, nexus_core::execution::RunControlError::RunEventCapacity(_)) {
+            if matches!(
+                e,
+                nexus_core::execution::RunControlError::RunEventCapacity(_)
+            ) {
                 return Err(NexusApiError::from(e));
             }
             let msg = e.to_string();
@@ -1422,7 +1424,10 @@ pub async fn signal_schedule(
                 .await
                 .map_err(|e| {
                     // QC2 F-004: typed capacity refusal (retryable), not 500.
-                    if matches!(e, nexus_core::execution::RunControlError::RunEventCapacity(_)) {
+                    if matches!(
+                        e,
+                        nexus_core::execution::RunControlError::RunEventCapacity(_)
+                    ) {
                         return NexusApiError::from(e);
                     }
                     let msg = e.to_string();

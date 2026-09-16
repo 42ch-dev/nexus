@@ -1,10 +1,14 @@
 //! Work lifecycle and authoring operations over the guarded core workspace.
 //! HTTP envelopes stay in adapters; these projections are owned domain values.
 
-use nexus_contracts::{CoreWorkSelection, CreateWorkRequest, CreateWorkResponse, AppendInspirationRequest, AppendInspirationResponse, ReleaseCompletionLockRequest, ListWorksQuery, ListWorksResponse, WorkSummary, PaginationInfo};
+use crate::{CoreAccess, CoreError, CoreResult, CoreService, Principal};
+use nexus_contracts::{
+    AppendInspirationRequest, AppendInspirationResponse, CoreWorkSelection, CreateWorkRequest,
+    CreateWorkResponse, ListWorksQuery, ListWorksResponse, PaginationInfo,
+    ReleaseCompletionLockRequest, WorkSummary,
+};
 use nexus_local_db::works::{self, WorkListFilters, WorkPatch, WorkRecord};
 use uuid::Uuid;
-use crate::{CoreService, CoreAccess, CoreError, CoreResult, Principal};
 
 /// Serializes as the retained tool/Work wire shape.
 ///
@@ -291,7 +295,6 @@ pub struct WorkReconcileReport {
     pub preserved: u32,
 }
 
-
 #[derive(Debug, thiserror::Error)]
 enum WorkFault {
     #[error("{message}")]
@@ -312,171 +315,345 @@ enum WorkFault {
 impl From<WorkFault> for CoreError {
     fn from(error: WorkFault) -> Self {
         match error {
-            WorkFault::BadRequest { code, message } => Self::InvalidInput { field: code, reason: message },
+            WorkFault::BadRequest { code, message } => Self::InvalidInput {
+                field: code,
+                reason: message,
+            },
             // The legacy internal classification (DATABASE_ERROR, CONTRACT_ERROR) rides
             // verbatim as `<CODE>: <message>`; the daemon `work_error` adapter re-emits
             // the code instead of collapsing it to the shared `CORE_ERROR` shape.
-            WorkFault::Internal { code, message } => Self::Internal { category: format!("{code}: {message}") },
-            WorkFault::Conflict(message) => Self::Forbidden { resource: format!("work_conflict:{message}") },
-            WorkFault::Locked { reason, .. } => Self::Forbidden { resource: format!("work_locked:{reason}") },
-            WorkFault::Forbidden { reason, .. } => Self::Forbidden { resource: format!("work_pool_forbidden:{reason}") },
+            WorkFault::Internal { code, message } => Self::Internal {
+                category: format!("{code}: {message}"),
+            },
+            WorkFault::Conflict(message) => Self::Forbidden {
+                resource: format!("work_conflict:{message}"),
+            },
+            WorkFault::Locked { reason, .. } => Self::Forbidden {
+                resource: format!("work_locked:{reason}"),
+            },
+            WorkFault::Forbidden { reason, .. } => Self::Forbidden {
+                resource: format!("work_pool_forbidden:{reason}"),
+            },
             WorkFault::NotFound(resource) => Self::NotFound { resource },
             WorkFault::Core(error) => error,
         }
     }
 }
 
-fn wire_cast<T: serde::Serialize, U: serde::de::DeserializeOwned>(value: T) -> Result<U, WorkFault> {
-    serde_json::to_value(value).and_then(serde_json::from_value).map_err(|error| WorkFault::Internal { code: "CONTRACT_ERROR".into(), message: error.to_string() })
+fn wire_cast<T: serde::Serialize, U: serde::de::DeserializeOwned>(
+    value: T,
+) -> Result<U, WorkFault> {
+    serde_json::to_value(value)
+        .and_then(serde_json::from_value)
+        .map_err(|error| WorkFault::Internal {
+            code: "CONTRACT_ERROR".into(),
+            message: error.to_string(),
+        })
 }
 impl CoreService {
-    pub async fn create_work_with_outcome(&self, principal: &Principal, req: CreateWorkRequest) -> CoreResult<(bool, CreateWorkResponse)> {
+    pub async fn create_work_with_outcome(
+        &self,
+        principal: &Principal,
+        req: CreateWorkRequest,
+    ) -> CoreResult<(bool, CreateWorkResponse)> {
         self.verify_principal(principal)?;
         self.require_work_write()?;
-        create_work(self, principal, req).await.map_err(CoreError::from)
+        create_work(self, principal, req)
+            .await
+            .map_err(CoreError::from)
     }
-    pub async fn list_works(&self, principal: &Principal, query: ListWorksQuery) -> CoreResult<ListWorksResponse> {
+    pub async fn list_works(
+        &self,
+        principal: &Principal,
+        query: ListWorksQuery,
+    ) -> CoreResult<ListWorksResponse> {
         self.verify_principal(principal)?;
-        let response = list_works(self, principal, query).await.map_err(CoreError::from)?;
+        let response = list_works(self, principal, query)
+            .await
+            .map_err(CoreError::from)?;
         self.verify_principal(principal)?;
         Ok(response)
     }
-    pub async fn get_work(&self, principal: &Principal, work_id: String) -> CoreResult<WorkDetails> {
+    pub async fn get_work(
+        &self,
+        principal: &Principal,
+        work_id: String,
+    ) -> CoreResult<WorkDetails> {
         self.verify_principal(principal)?;
-        let response = get_work(self, principal, work_id).await.map_err(CoreError::from)?;
+        let response = get_work(self, principal, work_id)
+            .await
+            .map_err(CoreError::from)?;
         self.verify_principal(principal)?;
         Ok(response)
     }
-    pub async fn patch_work(&self, principal: &Principal, work_id: String, holder_kind: &str, req: WorkPatchRequest) -> CoreResult<WorkDetails> {
+    pub async fn patch_work(
+        &self,
+        principal: &Principal,
+        work_id: String,
+        holder_kind: &str,
+        req: WorkPatchRequest,
+    ) -> CoreResult<WorkDetails> {
         self.verify_principal(principal)?;
         self.require_work_write()?;
-        patch_work(self, principal, work_id, holder_kind, req).await.map_err(CoreError::from)
+        patch_work(self, principal, work_id, holder_kind, req)
+            .await
+            .map_err(CoreError::from)
     }
-    pub async fn append_work_inspiration(&self, principal: &Principal, work_id: String, holder_kind: &str, req: AppendInspirationRequest) -> CoreResult<AppendInspirationResponse> {
+    pub async fn append_work_inspiration(
+        &self,
+        principal: &Principal,
+        work_id: String,
+        holder_kind: &str,
+        req: AppendInspirationRequest,
+    ) -> CoreResult<AppendInspirationResponse> {
         self.verify_principal(principal)?;
         self.resolve_owned_work(principal, &work_id).await?;
         self.require_work_write()?;
-        append_inspiration(self, principal, work_id, holder_kind, req).await.map_err(CoreError::from)
-    }
-    pub async fn set_work_pool_active(&self, principal: &Principal, req: SetPoolActiveRequest) -> CoreResult<WorkPoolEntry> {
-        self.verify_principal(principal)?;
-        self.require_work_write()?;
-        set_pool_active(self, principal, req).await.map_err(CoreError::from)
-    }
-    pub async fn release_work_completion_lock(&self, principal: &Principal, work_id: String, req: ReleaseCompletionLockRequest) -> CoreResult<WorkDetails> {
-        self.verify_principal(principal)?;
-        self.require_work_write()?;
-        release_completion_lock_handler(self, principal, work_id, req).await.map_err(CoreError::from)
-    }
-    pub async fn delete_work(&self, principal: &Principal, work_id: String, holder_kind: &str) -> CoreResult<()> {
-        self.verify_principal(principal)?;
-        self.require_work_write()?;
-        delete_work(self, principal, work_id, holder_kind).await.map_err(CoreError::from)
-    }
-    pub async fn reconcile_work_chapters(&self, principal: &Principal, work_id: String, holder_kind: &str, dry_run_query: ReconcileDryRunQuery) -> CoreResult<WorkReconcileReport> {
-        self.verify_principal(principal)?;
-        if !dry_run_query.dry_run.unwrap_or(false) { self.require_work_write()?; }
-        reconcile_chapters(self, principal, work_id, holder_kind, dry_run_query).await
-            .map(|report| WorkReconcileReport { created: report.created, updated: report.updated, resynced: report.resynced, preserved: report.preserved })
+        append_inspiration(self, principal, work_id, holder_kind, req)
+            .await
             .map_err(CoreError::from)
     }
-    pub async fn list_work_pool(&self, principal: &Principal, query: ListPoolQuery) -> CoreResult<ListPoolResponse> {
+    pub async fn set_work_pool_active(
+        &self,
+        principal: &Principal,
+        req: SetPoolActiveRequest,
+    ) -> CoreResult<WorkPoolEntry> {
         self.verify_principal(principal)?;
-        let response = list_pool(self, principal, query).await.map_err(CoreError::from)?;
+        self.require_work_write()?;
+        set_pool_active(self, principal, req)
+            .await
+            .map_err(CoreError::from)
+    }
+    pub async fn release_work_completion_lock(
+        &self,
+        principal: &Principal,
+        work_id: String,
+        req: ReleaseCompletionLockRequest,
+    ) -> CoreResult<WorkDetails> {
+        self.verify_principal(principal)?;
+        self.require_work_write()?;
+        release_completion_lock_handler(self, principal, work_id, req)
+            .await
+            .map_err(CoreError::from)
+    }
+    pub async fn delete_work(
+        &self,
+        principal: &Principal,
+        work_id: String,
+        holder_kind: &str,
+    ) -> CoreResult<()> {
+        self.verify_principal(principal)?;
+        self.require_work_write()?;
+        delete_work(self, principal, work_id, holder_kind)
+            .await
+            .map_err(CoreError::from)
+    }
+    pub async fn reconcile_work_chapters(
+        &self,
+        principal: &Principal,
+        work_id: String,
+        holder_kind: &str,
+        dry_run_query: ReconcileDryRunQuery,
+    ) -> CoreResult<WorkReconcileReport> {
+        self.verify_principal(principal)?;
+        if !dry_run_query.dry_run.unwrap_or(false) {
+            self.require_work_write()?;
+        }
+        reconcile_chapters(self, principal, work_id, holder_kind, dry_run_query)
+            .await
+            .map(|report| WorkReconcileReport {
+                created: report.created,
+                updated: report.updated,
+                resynced: report.resynced,
+                preserved: report.preserved,
+            })
+            .map_err(CoreError::from)
+    }
+    pub async fn list_work_pool(
+        &self,
+        principal: &Principal,
+        query: ListPoolQuery,
+    ) -> CoreResult<ListPoolResponse> {
+        self.verify_principal(principal)?;
+        let response = list_pool(self, principal, query)
+            .await
+            .map_err(CoreError::from)?;
         self.verify_principal(principal)?;
         Ok(response)
     }
-    pub async fn promote_work_pool_entry(&self, principal: &Principal, req: PromotePoolRequest) -> CoreResult<WorkPoolEntry> {
+    pub async fn promote_work_pool_entry(
+        &self,
+        principal: &Principal,
+        req: PromotePoolRequest,
+    ) -> CoreResult<WorkPoolEntry> {
         self.verify_principal(principal)?;
         self.require_work_write()?;
-        promote_pool_entry(self, principal, req).await.map_err(CoreError::from)
+        promote_pool_entry(self, principal, req)
+            .await
+            .map_err(CoreError::from)
     }
-    pub async fn archive_work_pool_entry(&self, principal: &Principal, req: ArchivePoolRequest) -> CoreResult<WorkPoolEntry> {
+    pub async fn archive_work_pool_entry(
+        &self,
+        principal: &Principal,
+        req: ArchivePoolRequest,
+    ) -> CoreResult<WorkPoolEntry> {
         self.verify_principal(principal)?;
         self.require_work_write()?;
-        archive_pool_entry_handler(self, principal, req).await.map_err(CoreError::from)
+        archive_pool_entry_handler(self, principal, req)
+            .await
+            .map_err(CoreError::from)
     }
-    pub async fn add_work_inspiration(&self, principal: &Principal, req: AddInspirationRequest) -> CoreResult<AddInspirationResponse> {
+    pub async fn add_work_inspiration(
+        &self,
+        principal: &Principal,
+        req: AddInspirationRequest,
+    ) -> CoreResult<AddInspirationResponse> {
         self.verify_principal(principal)?;
         self.require_work_write()?;
-        add_inspiration(self, principal, req).await.map_err(CoreError::from)
+        add_inspiration(self, principal, req)
+            .await
+            .map_err(CoreError::from)
     }
-    pub async fn list_work_inspiration(&self, principal: &Principal, query: ListInspirationQuery) -> CoreResult<ListInspirationResponse> {
+    pub async fn list_work_inspiration(
+        &self,
+        principal: &Principal,
+        query: ListInspirationQuery,
+    ) -> CoreResult<ListInspirationResponse> {
         self.verify_principal(principal)?;
-        let response = list_inspiration(self, principal, query).await.map_err(CoreError::from)?;
+        let response = list_inspiration(self, principal, query)
+            .await
+            .map_err(CoreError::from)?;
         self.verify_principal(principal)?;
         Ok(response)
     }
-    pub async fn promote_work_inspiration(&self, principal: &Principal, req: PromoteInspirationRequest) -> CoreResult<PromoteInspirationResponse> {
+    pub async fn promote_work_inspiration(
+        &self,
+        principal: &Principal,
+        req: PromoteInspirationRequest,
+    ) -> CoreResult<PromoteInspirationResponse> {
         self.verify_principal(principal)?;
         self.require_work_write()?;
-        promote_inspiration_handler(self, principal, req).await.map_err(CoreError::from)
+        promote_inspiration_handler(self, principal, req)
+            .await
+            .map_err(CoreError::from)
     }
-    pub async fn archive_work_inspiration(&self, principal: &Principal, req: ArchiveInspirationRequest) -> CoreResult<WorkInspirationItem> {
+    pub async fn archive_work_inspiration(
+        &self,
+        principal: &Principal,
+        req: ArchiveInspirationRequest,
+    ) -> CoreResult<WorkInspirationItem> {
         self.verify_principal(principal)?;
         self.require_work_write()?;
-        archive_inspiration_handler(self, principal, req).await.map_err(CoreError::from)
+        archive_inspiration_handler(self, principal, req)
+            .await
+            .map_err(CoreError::from)
     }
 
-    pub async fn create_work(&self, principal: &Principal, request: CreateWorkRequest) -> CoreResult<CreateWorkResponse> {
-        self.create_work_with_outcome(principal, request).await.map(|(_, response)| response)
+    pub async fn create_work(
+        &self,
+        principal: &Principal,
+        request: CreateWorkRequest,
+    ) -> CoreResult<CreateWorkResponse> {
+        self.create_work_with_outcome(principal, request)
+            .await
+            .map(|(_, response)| response)
     }
 
-    pub async fn select_work(&self, principal: &Principal, work_id: String) -> CoreResult<CoreWorkSelection> {
+    pub async fn select_work(
+        &self,
+        principal: &Principal,
+        work_id: String,
+    ) -> CoreResult<CoreWorkSelection> {
         self.verify_principal(principal)?;
         self.require_work_write()?;
         self.get_work(principal, work_id.clone()).await?;
         self.verify_principal(principal)?;
-        nexus_local_db::novel_pool_entries::promote_to_active(&self.inner.pool, principal.creator_id(), &work_id)
-            .await.map_err(crate::error::local_db_err)?;
+        nexus_local_db::novel_pool_entries::promote_to_active(
+            &self.inner.pool,
+            principal.creator_id(),
+            &work_id,
+        )
+        .await
+        .map_err(crate::error::local_db_err)?;
         Ok(CoreWorkSelection {
             work_id: work_id.try_into().map_err(|_| CoreError::InvalidInput {
-                field: "work_id".into(), reason: "must not be empty".into(),
+                field: "work_id".into(),
+                reason: "must not be empty".into(),
             })?,
             active: true,
         })
     }
 
-    pub(crate) async fn resolve_owned_work(&self, principal: &Principal, work_id: &str) -> CoreResult<WorkRecord> {
+    pub(crate) async fn resolve_owned_work(
+        &self,
+        principal: &Principal,
+        work_id: &str,
+    ) -> CoreResult<WorkRecord> {
         self.verify_principal(principal)?;
         let work = works::get_work(&self.inner.pool, principal.creator_id(), work_id)
-            .await.map_err(crate::error::local_db_err)?
+            .await
+            .map_err(crate::error::local_db_err)?
             .filter(|work| work.workspace_slug == principal.workspace_slug())
-            .ok_or_else(|| CoreError::NotFound { resource: format!("work {work_id}") })?;
+            .ok_or_else(|| CoreError::NotFound {
+                resource: format!("work {work_id}"),
+            })?;
         self.verify_principal(principal)?;
         Ok(work)
     }
 
     pub(crate) fn require_work_write(&self) -> CoreResult<()> {
         if self.inner.access == CoreAccess::ReadOnly {
-            return Err(CoreError::Forbidden { resource: "work: read-only core access".into() });
+            return Err(CoreError::Forbidden {
+                resource: "work: read-only core access".into(),
+            });
         }
         Ok(())
     }
 
     pub(crate) fn work_workspace_path(&self, principal: &Principal) -> CoreResult<Option<String>> {
         self.verify_principal(principal)?;
-        let meta = self.inner.nexus_home.join("creators").join(principal.creator_id())
-            .join("workspaces").join(principal.workspace_slug()).join("meta.json");
+        let meta = self
+            .inner
+            .nexus_home
+            .join("creators")
+            .join(principal.creator_id())
+            .join("workspaces")
+            .join(principal.workspace_slug())
+            .join("meta.json");
         let text = match std::fs::read_to_string(&meta) {
             Ok(text) => text,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(CoreError::Internal { category: format!("workspace metadata: {error}") }),
+            Err(error) => {
+                return Err(CoreError::Internal {
+                    category: format!("workspace metadata: {error}"),
+                })
+            }
         };
-        let metadata: serde_json::Value = serde_json::from_str(&text)
-            .map_err(|error| CoreError::Internal { category: format!("workspace metadata: {error}") })?;
+        let metadata: serde_json::Value =
+            serde_json::from_str(&text).map_err(|error| CoreError::Internal {
+                category: format!("workspace metadata: {error}"),
+            })?;
         // The operational meta.json key written by the daemon and CLI
         // workspace registration (`local_root`; handlers/workspaces.rs and
         // the CLI legacy_impl both emit it). There is no `creative_root`
         // writer anywhere — reading it resolved every core filesystem path
         // against an empty root.
-        Ok(metadata.get("local_root").and_then(serde_json::Value::as_str).map(str::to_owned))
+        Ok(metadata
+            .get("local_root")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned))
     }
 }
 
-fn checked_work_directory(workspace: &std::path::Path, work_ref: &str) -> std::io::Result<std::path::PathBuf> {
+fn checked_work_directory(
+    workspace: &std::path::Path,
+    work_ref: &str,
+) -> std::io::Result<std::path::PathBuf> {
     if !is_valid_work_ref(work_ref) {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid Work directory reference"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid Work directory reference",
+        ));
     }
     let root = workspace.canonicalize()?;
     let works = root.join("Works");
@@ -484,7 +661,10 @@ fn checked_work_directory(workspace: &std::path::Path, work_ref: &str) -> std::i
     for candidate in [&works, &path] {
         match candidate.canonicalize() {
             Ok(resolved) if !resolved.starts_with(&works) => {
-                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "Work directory escapes workspace"));
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "Work directory escapes workspace",
+                ));
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -494,10 +674,13 @@ fn checked_work_directory(workspace: &std::path::Path, work_ref: &str) -> std::i
     Ok(path)
 }
 
-async fn create_work(service: &CoreService, principal: &Principal, req: CreateWorkRequest) -> Result<(bool, CreateWorkResponse), WorkFault> {
+async fn create_work(
+    service: &CoreService,
+    principal: &Principal,
+    req: CreateWorkRequest,
+) -> Result<(bool, CreateWorkResponse), WorkFault> {
     let pool = &service.inner.pool;
-    let creator_id =
-        principal.creator_id().to_string();
+    let creator_id = principal.creator_id().to_string();
     let workspace_slug = principal.workspace_slug().to_string();
 
     // T0.4: V1.40 mandatory world_id — reject Work creation without a World binding.
@@ -651,9 +834,12 @@ async fn create_work(service: &CoreService, principal: &Principal, req: CreateWo
     }
 }
 
-async fn list_works(service: &CoreService, principal: &Principal, query: ListWorksQuery) -> Result<ListWorksResponse, WorkFault> {
-    let creator_id =
-        principal.creator_id().to_string();
+async fn list_works(
+    service: &CoreService,
+    principal: &Principal,
+    query: ListWorksQuery,
+) -> Result<ListWorksResponse, WorkFault> {
+    let creator_id = principal.creator_id().to_string();
     let workspace_slug = principal.workspace_slug().to_string();
 
     // F-F1 (V1.67): parse requested sort; default is empty (DB layer falls back
@@ -677,23 +863,19 @@ async fn list_works(service: &CoreService, principal: &Principal, query: ListWor
         order_by: sort_terms,
     };
 
-    let (records, total) = works::list_and_count_works(
-        &service.inner.pool,
-        &creator_id,
-        &workspace_slug,
-        &filters,
-    )
-    .await
-    .map_err(|e| {
-        tracing::warn!(
-            error = %e,
-            "list_works failed for creator {creator_id} — pagination unavailable"
-        );
-        WorkFault::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        }
-    })?;
+    let (records, total) =
+        works::list_and_count_works(&service.inner.pool, &creator_id, &workspace_slug, &filters)
+            .await
+            .map_err(|e| {
+                tracing::warn!(
+                    error = %e,
+                    "list_works failed for creator {creator_id} — pagination unavailable"
+                );
+                WorkFault::Internal {
+                    code: "DATABASE_ERROR".to_string(),
+                    message: e.to_string(),
+                }
+            })?;
 
     let has_more = u64::from(total) > u64::from(offset).saturating_add(u64::from(limit));
     let next_cursor = if has_more {
@@ -725,16 +907,22 @@ async fn list_works(service: &CoreService, principal: &Principal, query: ListWor
     })
 }
 
-async fn get_work(service: &CoreService, principal: &Principal, work_id: String) -> Result<WorkDetails, WorkFault> {
+async fn get_work(
+    service: &CoreService,
+    principal: &Principal,
+    work_id: String,
+) -> Result<WorkDetails, WorkFault> {
     let pool = &service.inner.pool;
-    let creator_id =
-        principal.creator_id().to_string();
+    let creator_id = principal.creator_id().to_string();
 
     let mut record = service.resolve_owned_work(principal, &work_id).await?;
 
     // V1.36 P4 (T1): auto-promote works.status to 'completed' when all
     // chapters are finalized per novel-workflow-profile §6.1.
-    if service.inner.access != CoreAccess::ReadOnly && record.status != "completed" && record.work_profile.as_deref() == Some("novel") {
+    if service.inner.access != CoreAccess::ReadOnly
+        && record.status != "completed"
+        && record.work_profile.as_deref() == Some("novel")
+    {
         match nexus_local_db::work_chapters::is_work_completed(pool, &work_id).await {
             Ok(true) => {
                 let now = chrono::Utc::now().to_rfc3339();
@@ -782,7 +970,10 @@ async fn get_work(service: &CoreService, principal: &Principal, work_id: String)
 
     // V1.55 P2: auto-promote game-bible works.status to 'completed' when all
     // critical Design/*.md sections are accepted per game-bible-profile.md §8.
-    if service.inner.access != CoreAccess::ReadOnly && record.status != "completed" && record.work_profile.as_deref() == Some("game_bible") {
+    if service.inner.access != CoreAccess::ReadOnly
+        && record.status != "completed"
+        && record.work_profile.as_deref() == Some("game_bible")
+    {
         let workspace_path = service.work_workspace_path(principal)?.unwrap_or_default();
         if !workspace_path.is_empty() {
             let workspace_dir = std::path::Path::new(&workspace_path);
@@ -837,7 +1028,10 @@ async fn get_work(service: &CoreService, principal: &Principal, work_id: String)
 
     // V1.60 P1: auto-promote script works.status to 'completed' when all
     // critical script sections are accepted per script-profile.md §8.
-    if service.inner.access != CoreAccess::ReadOnly && record.status != "completed" && record.work_profile.as_deref() == Some("script") {
+    if service.inner.access != CoreAccess::ReadOnly
+        && record.status != "completed"
+        && record.work_profile.as_deref() == Some("script")
+    {
         let workspace_path = service.work_workspace_path(principal)?.unwrap_or_default();
         if !workspace_path.is_empty() {
             let workspace_dir = std::path::Path::new(&workspace_path);
@@ -888,7 +1082,10 @@ async fn get_work(service: &CoreService, principal: &Principal, work_id: String)
 
     // V1.63 P0: auto-promote essay works.status to 'completed' when
     // Drafts/draft.md frontmatter status == finalized AND intake complete.
-    if service.inner.access != CoreAccess::ReadOnly && record.status != "completed" && record.work_profile.as_deref() == Some("essay") {
+    if service.inner.access != CoreAccess::ReadOnly
+        && record.status != "completed"
+        && record.work_profile.as_deref() == Some("essay")
+    {
         let workspace_path = service.work_workspace_path(principal)?.unwrap_or_default();
         if !workspace_path.is_empty() {
             let workspace_dir = std::path::Path::new(&workspace_path);
@@ -940,10 +1137,15 @@ async fn get_work(service: &CoreService, principal: &Principal, work_id: String)
     Ok(enrich_with_chapters(pool, record).await)
 }
 
-async fn patch_work(service: &CoreService, principal: &Principal, work_id: String, holder_kind: &str, req: WorkPatchRequest) -> Result<WorkDetails, WorkFault> {
+async fn patch_work(
+    service: &CoreService,
+    principal: &Principal,
+    work_id: String,
+    holder_kind: &str,
+    req: WorkPatchRequest,
+) -> Result<WorkDetails, WorkFault> {
     let pool = &service.inner.pool;
-    let creator_id =
-        principal.creator_id().to_string();
+    let creator_id = principal.creator_id().to_string();
     let now = chrono::Utc::now().to_rfc3339();
 
     // DF-60 §4: guard mutating operations against completion-lock and runtime-lock
@@ -983,18 +1185,25 @@ async fn patch_work(service: &CoreService, principal: &Principal, work_id: Strin
             patch_work_stage(service, principal, &creator_id, &work_id, &req, &now).await
         } else {
             apply_non_stage_fields(pool, &creator_id, &work_id, &req, &now).await?;
-            works::get_work(pool, &creator_id, &work_id).await
+            works::get_work(pool, &creator_id, &work_id)
+                .await
                 .map_err(crate::error::local_db_err)?
                 .ok_or_else(|| WorkFault::NotFound(format!("work {work_id}")))
         }
-    }.await;
+    }
+    .await;
     lock.release().await;
     result.map(WorkDetails::from)
 }
 
-async fn append_inspiration(service: &CoreService, principal: &Principal, work_id: String, holder_kind: &str, req: AppendInspirationRequest) -> Result<AppendInspirationResponse, WorkFault> {
-    let creator_id =
-        principal.creator_id().to_string();
+async fn append_inspiration(
+    service: &CoreService,
+    principal: &Principal,
+    work_id: String,
+    holder_kind: &str,
+    req: AppendInspirationRequest,
+) -> Result<AppendInspirationResponse, WorkFault> {
+    let creator_id = principal.creator_id().to_string();
     let now = chrono::Utc::now().to_rfc3339();
 
     // V1.42.1 (R-V142-MERGE-CI-001): Verify work exists BEFORE acquiring the
@@ -1027,7 +1236,8 @@ async fn append_inspiration(service: &CoreService, principal: &Principal, work_i
 
     // V1.42 P0 (T2): Acquire runtime lock for this mutating operation.
     service.verify_principal(principal)?;
-    let lock = RuntimeLockGuard::acquire(&service.inner.pool, &creator_id, &work_id, holder_kind).await?;
+    let lock =
+        RuntimeLockGuard::acquire(&service.inner.pool, &creator_id, &work_id, holder_kind).await?;
 
     // Build JSON for inspiration entry
     let entry = serde_json::json!({
@@ -1081,10 +1291,13 @@ async fn append_inspiration(service: &CoreService, principal: &Principal, work_i
     })
 }
 
-async fn set_pool_active(service: &CoreService, principal: &Principal, req: SetPoolActiveRequest) -> Result<WorkPoolEntry, WorkFault> {
+async fn set_pool_active(
+    service: &CoreService,
+    principal: &Principal,
+    req: SetPoolActiveRequest,
+) -> Result<WorkPoolEntry, WorkFault> {
     // IDOR fix: read active creator from config, reject body mismatch.
-    let active_creator =
-        principal.creator_id().to_string();
+    let active_creator = principal.creator_id().to_string();
     if req.creator_id.is_some() && req.creator_id != Some(active_creator.clone()) {
         return Err(WorkFault::Forbidden {
             resource: "pool".into(),
@@ -1119,9 +1332,13 @@ async fn set_pool_active(service: &CoreService, principal: &Principal, req: SetP
     Ok(entry)
 }
 
-async fn release_completion_lock_handler(service: &CoreService, principal: &Principal, work_id: String, req: ReleaseCompletionLockRequest) -> Result<WorkDetails, WorkFault> {
-    let creator_id =
-        principal.creator_id().to_string();
+async fn release_completion_lock_handler(
+    service: &CoreService,
+    principal: &Principal,
+    work_id: String,
+    req: ReleaseCompletionLockRequest,
+) -> Result<WorkDetails, WorkFault> {
+    let creator_id = principal.creator_id().to_string();
 
     // Step 1: Look up the Work record
     let work = service.resolve_owned_work(principal, &work_id).await?;
@@ -1179,10 +1396,14 @@ async fn release_completion_lock_handler(service: &CoreService, principal: &Prin
     Ok(WorkDetails::from(updated))
 }
 
-async fn delete_work(service: &CoreService, principal: &Principal, work_id: String, holder_kind: &str) -> Result<(), WorkFault> {
+async fn delete_work(
+    service: &CoreService,
+    principal: &Principal,
+    work_id: String,
+    holder_kind: &str,
+) -> Result<(), WorkFault> {
     let pool = &service.inner.pool;
-    let creator_id =
-        principal.creator_id().to_string();
+    let creator_id = principal.creator_id().to_string();
 
     // Rule 1: existence check BEFORE lock acquire (V1.42.1 hotfix rule).
     let work = service.resolve_owned_work(principal, &work_id).await?;
@@ -1281,9 +1502,14 @@ async fn delete_work(service: &CoreService, principal: &Principal, work_id: Stri
     Ok(())
 }
 
-async fn reconcile_chapters(service: &CoreService, principal: &Principal, work_id: String, holder_kind: &str, dry_run_query: ReconcileDryRunQuery) -> Result<nexus_local_db::work_chapters::ReconcileReport, WorkFault> {
-    let creator_id =
-        principal.creator_id().to_string();
+async fn reconcile_chapters(
+    service: &CoreService,
+    principal: &Principal,
+    work_id: String,
+    holder_kind: &str,
+    dry_run_query: ReconcileDryRunQuery,
+) -> Result<nexus_local_db::work_chapters::ReconcileReport, WorkFault> {
+    let creator_id = principal.creator_id().to_string();
     let pool = &service.inner.pool;
     let dry_run = dry_run_query.dry_run.unwrap_or(false);
 
@@ -1410,9 +1636,12 @@ async fn reconcile_chapters(service: &CoreService, principal: &Principal, work_i
     Ok(report)
 }
 
-async fn list_pool(service: &CoreService, principal: &Principal, query: ListPoolQuery) -> Result<ListPoolResponse, WorkFault> {
-    let creator_id =
-        principal.creator_id().to_string();
+async fn list_pool(
+    service: &CoreService,
+    principal: &Principal,
+    query: ListPoolQuery,
+) -> Result<ListPoolResponse, WorkFault> {
+    let creator_id = principal.creator_id().to_string();
 
     let limit = query.limit;
     let offset = query.offset;
@@ -1451,9 +1680,12 @@ async fn list_pool(service: &CoreService, principal: &Principal, query: ListPool
     })
 }
 
-async fn promote_pool_entry(service: &CoreService, principal: &Principal, req: PromotePoolRequest) -> Result<WorkPoolEntry, WorkFault> {
-    let creator_id =
-        principal.creator_id().to_string();
+async fn promote_pool_entry(
+    service: &CoreService,
+    principal: &Principal,
+    req: PromotePoolRequest,
+) -> Result<WorkPoolEntry, WorkFault> {
+    let creator_id = principal.creator_id().to_string();
 
     // Verify the work exists and belongs to this creator
     service.resolve_owned_work(principal, &req.work_id).await?;
@@ -1472,9 +1704,12 @@ async fn promote_pool_entry(service: &CoreService, principal: &Principal, req: P
     Ok(WorkPoolEntry::from(entry))
 }
 
-async fn archive_pool_entry_handler(service: &CoreService, principal: &Principal, req: ArchivePoolRequest) -> Result<WorkPoolEntry, WorkFault> {
-    let creator_id =
-        principal.creator_id().to_string();
+async fn archive_pool_entry_handler(
+    service: &CoreService,
+    principal: &Principal,
+    req: ArchivePoolRequest,
+) -> Result<WorkPoolEntry, WorkFault> {
+    let creator_id = principal.creator_id().to_string();
 
     let entry = nexus_local_db::novel_pool_entries::archive_pool_entry(
         &service.inner.pool,
@@ -1490,9 +1725,12 @@ async fn archive_pool_entry_handler(service: &CoreService, principal: &Principal
     Ok(WorkPoolEntry::from(entry))
 }
 
-async fn add_inspiration(service: &CoreService, principal: &Principal, req: AddInspirationRequest) -> Result<AddInspirationResponse, WorkFault> {
-    let creator_id =
-        principal.creator_id().to_string();
+async fn add_inspiration(
+    service: &CoreService,
+    principal: &Principal,
+    req: AddInspirationRequest,
+) -> Result<AddInspirationResponse, WorkFault> {
+    let creator_id = principal.creator_id().to_string();
     let workspace_slug = principal.workspace_slug().to_string();
 
     let item_id = format!("npi_{}", Uuid::new_v4());
@@ -1500,7 +1738,9 @@ async fn add_inspiration(service: &CoreService, principal: &Principal, req: AddI
 
     // Route through nexus-home-layout — resolve operational workspace dir
     // from nexus_home (~/.nexus42), not user home directly.
-    let workspace_dir = service.inner.nexus_home
+    let workspace_dir = service
+        .inner
+        .nexus_home
         .join("creators")
         .join(&creator_id)
         .join("workspaces")
@@ -1516,9 +1756,9 @@ async fn add_inspiration(service: &CoreService, principal: &Principal, req: AddI
     )
     .await
     .map_err(|e| match &e {
-        nexus_local_db::LocalDbError::ConstraintViolation { .. } => WorkFault::Conflict(
-            format!("inspiration item with this path already exists: {e}"),
-        ),
+        nexus_local_db::LocalDbError::ConstraintViolation { .. } => WorkFault::Conflict(format!(
+            "inspiration item with this path already exists: {e}"
+        )),
         _ => WorkFault::Internal {
             code: "DATABASE_ERROR".to_string(),
             message: e.to_string(),
@@ -1531,9 +1771,12 @@ async fn add_inspiration(service: &CoreService, principal: &Principal, req: AddI
     })
 }
 
-async fn list_inspiration(service: &CoreService, principal: &Principal, query: ListInspirationQuery) -> Result<ListInspirationResponse, WorkFault> {
-    let creator_id =
-        principal.creator_id().to_string();
+async fn list_inspiration(
+    service: &CoreService,
+    principal: &Principal,
+    query: ListInspirationQuery,
+) -> Result<ListInspirationResponse, WorkFault> {
+    let creator_id = principal.creator_id().to_string();
 
     let limit = query.limit;
     let offset = query.offset;
@@ -1572,9 +1815,12 @@ async fn list_inspiration(service: &CoreService, principal: &Principal, query: L
     })
 }
 
-async fn promote_inspiration_handler(service: &CoreService, principal: &Principal, req: PromoteInspirationRequest) -> Result<PromoteInspirationResponse, WorkFault> {
-    let creator_id =
-        principal.creator_id().to_string();
+async fn promote_inspiration_handler(
+    service: &CoreService,
+    principal: &Principal,
+    req: PromoteInspirationRequest,
+) -> Result<PromoteInspirationResponse, WorkFault> {
+    let creator_id = principal.creator_id().to_string();
 
     // Look up the inspiration item
     let item =
@@ -1670,9 +1916,12 @@ async fn promote_inspiration_handler(service: &CoreService, principal: &Principa
     })
 }
 
-async fn archive_inspiration_handler(service: &CoreService, principal: &Principal, req: ArchiveInspirationRequest) -> Result<WorkInspirationItem, WorkFault> {
-    let creator_id =
-        principal.creator_id().to_string();
+async fn archive_inspiration_handler(
+    service: &CoreService,
+    principal: &Principal,
+    req: ArchiveInspirationRequest,
+) -> Result<WorkInspirationItem, WorkFault> {
+    let creator_id = principal.creator_id().to_string();
 
     let item = nexus_local_db::inspiration_items::archive_inspiration(
         &service.inner.pool,
@@ -1791,7 +2040,10 @@ async fn apply_non_stage_fields(
         world_id: req.world_id.clone(),
         story_ref: req.story_ref.clone(),
         primary_preset_id: req.primary_preset_id.clone(),
-        schedule_ids: req.schedule_ids.as_ref().map(|ids| serde_json::to_string(ids).unwrap_or_default()),
+        schedule_ids: req
+            .schedule_ids
+            .as_ref()
+            .map(|ids| serde_json::to_string(ids).unwrap_or_default()),
         current_stage: None,
         stage_status: None,
         work_profile: req.work_profile.clone().map(Some),
@@ -1906,11 +2158,12 @@ async fn patch_work_stage(
             stage_status: current.stage_status.clone(),
             intake_status: current.intake_status.clone(),
         };
-        nexus_local_db::work_stage::check_stage_advance(&work_state, target_stage, force)
-            .map_err(|e| WorkFault::BadRequest {
+        nexus_local_db::work_stage::check_stage_advance(&work_state, target_stage, force).map_err(
+            |e| WorkFault::BadRequest {
                 code: "invalid_stage".to_string(),
                 message: e.message,
-            })?;
+            },
+        )?;
     }
 
     let target_status = req.stage_status.as_deref().unwrap_or(&current.stage_status);
@@ -2035,21 +2288,46 @@ fn is_valid_work_ref(s: &str) -> bool {
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
-struct RuntimeLockGuard { pool: sqlx::SqlitePool, creator_id: String, work_id: String, holder: String }
+struct RuntimeLockGuard {
+    pool: sqlx::SqlitePool,
+    creator_id: String,
+    work_id: String,
+    holder: String,
+}
 impl RuntimeLockGuard {
     /// `holder_kind` labels the minted `cli:<kind>:<uuid>` holder; the daemon
     /// HTTP surface passes `http` so 423 reasons keep the legacy label.
-    async fn acquire(pool: &sqlx::SqlitePool, creator_id: &str, work_id: &str, holder_kind: &str) -> Result<Self, WorkFault> {
+    async fn acquire(
+        pool: &sqlx::SqlitePool,
+        creator_id: &str,
+        work_id: &str,
+        holder_kind: &str,
+    ) -> Result<Self, WorkFault> {
         let holder = nexus_local_db::cli_holder(holder_kind);
-        let acquired = nexus_local_db::acquire_runtime_lock(pool, creator_id, work_id, &holder, nexus_local_db::ttl_from_env(), true)
-            .await.map_err(crate::error::local_db_err)?;
+        let acquired = nexus_local_db::acquire_runtime_lock(
+            pool,
+            creator_id,
+            work_id,
+            &holder,
+            nexus_local_db::ttl_from_env(),
+            true,
+        )
+        .await
+        .map_err(crate::error::local_db_err)?;
         match acquired {
             nexus_local_db::AcquireResult::Acquired { .. } => Ok(Self { pool: pool.clone(), creator_id: creator_id.into(), work_id: work_id.into(), holder }),
             nexus_local_db::AcquireResult::Locked { holder, .. } => Err(WorkFault::Locked { resource: "work".into(), reason: format!("work {work_id} is locked by '{holder}'; wait for release or check 'creator works status'") }),
         }
     }
     async fn release(self) {
-        if let Err(error) = nexus_local_db::release_runtime_lock(&self.pool, &self.creator_id, &self.work_id, &self.holder).await {
+        if let Err(error) = nexus_local_db::release_runtime_lock(
+            &self.pool,
+            &self.creator_id,
+            &self.work_id,
+            &self.holder,
+        )
+        .await
+        {
             tracing::warn!(work_id = %self.work_id, %error, "runtime lock release failed");
         }
     }
@@ -2062,22 +2340,42 @@ impl RuntimeLockGuard {
 // Work route forwards the query unchanged and never re-parses. Daemon `api::pagination`
 // / `api::sort` remain separate helpers for other handler families — not for Work.
 fn decode_offset_cursor(cursor: &Option<String>) -> Result<u32, WorkFault> {
-    let Some(raw) = cursor else { return Ok(0); };
+    let Some(raw) = cursor else {
+        return Ok(0);
+    };
     raw.strip_prefix("v1:").and_then(|offset| offset.parse::<u32>().ok()).ok_or_else(|| WorkFault::BadRequest {
         code: "invalid_input".into(),
         message: "invalid pagination cursor; pass the `next_cursor` value returned by the previous response unchanged".into(),
     })
 }
-fn encode_offset_cursor(offset: u32) -> String { format!("v1:{offset}") }
-fn parse_sort_terms(input: Option<&str>, allowed_keys: &[&str], resource: &str) -> Result<Vec<(String, bool)>, WorkFault> {
-    let Some(input) = input else { return Ok(Vec::new()); };
+fn encode_offset_cursor(offset: u32) -> String {
+    format!("v1:{offset}")
+}
+fn parse_sort_terms(
+    input: Option<&str>,
+    allowed_keys: &[&str],
+    resource: &str,
+) -> Result<Vec<(String, bool)>, WorkFault> {
+    let Some(input) = input else {
+        return Ok(Vec::new());
+    };
     let mut terms = Vec::new();
     for raw in input.split(',') {
         let raw = raw.trim();
-        if raw.is_empty() { continue; }
-        let (ascending, key) = raw.strip_prefix('-').map_or((true, raw), |stripped| (false, stripped));
+        if raw.is_empty() {
+            continue;
+        }
+        let (ascending, key) = raw
+            .strip_prefix('-')
+            .map_or((true, raw), |stripped| (false, stripped));
         if !allowed_keys.contains(&key) {
-            return Err(WorkFault::BadRequest { code: format!("{resource}_sort_invalid"), message: format!("unsupported sort key '{key}'; allowed: {}", allowed_keys.join(", ")) });
+            return Err(WorkFault::BadRequest {
+                code: format!("{resource}_sort_invalid"),
+                message: format!(
+                    "unsupported sort key '{key}'; allowed: {}",
+                    allowed_keys.join(", ")
+                ),
+            });
         }
         terms.push((key.to_owned(), ascending));
     }

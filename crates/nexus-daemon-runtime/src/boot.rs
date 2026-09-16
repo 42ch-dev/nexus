@@ -10,9 +10,9 @@ use std::time::Duration;
 
 use crate::api;
 use crate::lifecycle::{Event, Lifecycle, StatigLifecycle, SubsystemKind};
-use nexus_core::execution::WorkflowRunCoordinator;
 use crate::tls;
 use crate::workspace::WorkspaceState;
+use nexus_core::execution::WorkflowRunCoordinator;
 
 /// Return true if `host` resolves to a loopback address.
 ///
@@ -64,8 +64,7 @@ use nexus_orchestration::{
     run_state::WorkflowStateStore,
     schedule::supervisor::{ScheduleRunStarter, ScheduleSupervisor, SupervisorError},
     storage::sqlite::SqliteSessionStorage,
-    CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps,
-    GraphFlowEngine,
+    CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps, GraphFlowEngine,
 };
 use nexus_preset::system_preset_dir;
 use tracing_subscriber::EnvFilter;
@@ -608,9 +607,9 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         std::sync::Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>,
     > = state.session_manager().and_then(|mgr| {
         state.workspace_path().map(|root| {
-            std::sync::Arc::new(nexus_core::execution::executor::WorkspaceCommitExecutor::new(
-                mgr, root,
-            )) as std::sync::Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>
+            std::sync::Arc::new(
+                nexus_core::execution::executor::WorkspaceCommitExecutor::new(mgr, root),
+            ) as std::sync::Arc<dyn nexus_orchestration::capability::WorkspaceExecutor>
         })
     });
 
@@ -706,18 +705,17 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     let mut tier0_engine: Option<Arc<GraphFlowEngine>> = None;
     let execution_handle: Option<Arc<nexus_core::execution::ExecutionHandle>> =
         if sqlite_boot_storage.is_some() {
-            let core = state.core_or_uninit().await.map_err(|e| {
-                anyhow::anyhow!("execution core service unavailable at boot: {e}")
-            })?;
+            let core = state
+                .core_or_uninit()
+                .await
+                .map_err(|e| anyhow::anyhow!("execution core service unavailable at boot: {e}"))?;
             // N-4: the Host plane reaches the coordinator as a catalog port so
             // admission validates provider references in agent bindings before
             // enqueue; execution never names the host.
-            let provider_catalog = state
-                .agent_host()
-                .map(|host| {
-                    Arc::new(crate::execution_ports::DaemonProviderCatalogPort::new(host))
-                        as Arc<dyn nexus_core::execution::workflow::ProviderCatalogPort>
-                });
+            let provider_catalog = state.agent_host().map(|host| {
+                Arc::new(crate::execution_ports::DaemonProviderCatalogPort::new(host))
+                    as Arc<dyn nexus_core::execution::workflow::ProviderCatalogPort>
+            });
             // C-3: the sanctioned default binding provider for explicit legacy
             // starts — the same config source the supervisor's internal
             // insertion paths use.
@@ -732,11 +730,15 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             let run_events = Arc::new(crate::execution_ports::DaemonRunEventPort::new(
                 state.run_event_registry(),
                 state.run_event_sinks(),
-            )) as Arc<dyn nexus_core::execution::workflow::RunEventPort>;
+            ))
+                as Arc<dyn nexus_core::execution::workflow::RunEventPort>;
             let workspace_state_provider = match (state.session_manager(), state.workspace_path()) {
                 (Some(mgr), Some(root)) => Some(Arc::new(
-                    nexus_core::execution::state_provider::CoreWorkspaceStateProvider::new(mgr, root),
-                ) as Arc<dyn nexus_orchestration::capability::WorkspaceStateProvider>),
+                    nexus_core::execution::state_provider::CoreWorkspaceStateProvider::new(
+                        mgr, root,
+                    ),
+                )
+                    as Arc<dyn nexus_orchestration::capability::WorkspaceStateProvider>),
                 _ => None,
             };
             // The provider port is the P4 seam; the handle is established with
@@ -751,9 +753,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             // attach) the handle simply has no commit authority.
             let workspace_commit = match (state.session_manager(), state.workspace_path()) {
                 (Some(mgr), Some(root)) => {
-                    Some(nexus_core::execution::workspace::WorkspaceCommitAuthority::new(
-                        mgr, root,
-                    ))
+                    Some(nexus_core::execution::workspace::WorkspaceCommitAuthority::new(mgr, root))
                 }
                 _ => None,
             };
@@ -836,14 +836,11 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         if let Some(executor) = &prompt_executor {
             state.set_prompt_executor(executor.clone());
         }
-        tracing::info!(
-            "Orchestration engine + run coordinator wired from the execution owner"
-        );
+        tracing::info!("Orchestration engine + run coordinator wired from the execution owner");
     }
 
-    let run_coordinator: Option<Arc<WorkflowRunCoordinator>> = execution_handle
-        .as_ref()
-        .map(|handle| handle.coordinator());
+    let run_coordinator: Option<Arc<WorkflowRunCoordinator>> =
+        execution_handle.as_ref().map(|handle| handle.coordinator());
 
     // --- WS-D: Discover and start system presets from directory ---
     let system_presets_dir = state.nexus_home().clone();
@@ -1207,18 +1204,19 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             let watcher_shutdown = state.shutdown_notify();
             let watcher_config =
                 nexus_core::execution::schedules::stale_findings::StaleFindingsWatcherConfig::from_env();
-            let _watcher_handle = nexus_core::execution::schedules::stale_findings::spawn_stale_findings_watcher(
-                watcher_pool,
-                watcher_shutdown,
-                watcher_config,
-                binding_provider.clone(),
-                // N-11: the review-master rows the watcher enqueues get the
-                // SAME guaranteed post-commit starter handoff as every other
-                // production insertion branch.
-                state
-                    .schedule_supervisor()
-                    .and_then(|s| s.schedule_starter_clone()),
-            );
+            let _watcher_handle =
+                nexus_core::execution::schedules::stale_findings::spawn_stale_findings_watcher(
+                    watcher_pool,
+                    watcher_shutdown,
+                    watcher_config,
+                    binding_provider.clone(),
+                    // N-11: the review-master rows the watcher enqueues get the
+                    // SAME guaranteed post-commit starter handoff as every other
+                    // production insertion branch.
+                    state
+                        .schedule_supervisor()
+                        .and_then(|s| s.schedule_starter_clone()),
+                );
         }
 
         // --- Section 4c: Cron supervisor (V1.50 T-A P1) ---
@@ -1234,7 +1232,8 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             let cron_workspace = state.workspace_path().map(std::path::PathBuf::from);
             let cron_supervisor = schedule_supervisor.clone();
             let cron_shutdown = state.shutdown_notify();
-            let cron_config = nexus_core::execution::schedules::cron::CronSupervisorConfig::from_env();
+            let cron_config =
+                nexus_core::execution::schedules::cron::CronSupervisorConfig::from_env();
             // V1.51 T-B P0: pass workspace_dir for file-lock path construction.
             // If workspace_path is unset, use an empty path (defensive — a daemon
             // without a workspace should not have schedule_json-bearing Works).
@@ -1260,13 +1259,15 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             let chron_pool = schedule_pool.clone();
             let chron_workspace = state.workspace_path().map(std::path::PathBuf::from);
             let chron_shutdown = state.shutdown_notify();
-            let chron_config = nexus_core::execution::schedules::chronology::AutoChronologyConfig::from_env();
-            let _chron_handle = nexus_core::execution::schedules::chronology::spawn_auto_chronology_tick(
-                chron_pool,
-                chron_workspace,
-                chron_shutdown,
-                chron_config,
-            );
+            let chron_config =
+                nexus_core::execution::schedules::chronology::AutoChronologyConfig::from_env();
+            let _chron_handle =
+                nexus_core::execution::schedules::chronology::spawn_auto_chronology_tick(
+                    chron_pool,
+                    chron_workspace,
+                    chron_shutdown,
+                    chron_config,
+                );
         }
 
         // --- Section 4e: Reference refresh scheduler (V1.58 P1 DF-44) ---
@@ -1279,12 +1280,14 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         {
             let refresh_pool = schedule_pool.clone();
             let refresh_shutdown = state.shutdown_notify();
-            let refresh_config = nexus_core::execution::schedules::refresh::RefreshSchedulerConfig::from_env();
-            let _refresh_handle = nexus_core::execution::schedules::refresh::spawn_refresh_scheduler(
-                refresh_pool,
-                refresh_shutdown,
-                refresh_config,
-            );
+            let refresh_config =
+                nexus_core::execution::schedules::refresh::RefreshSchedulerConfig::from_env();
+            let _refresh_handle =
+                nexus_core::execution::schedules::refresh::spawn_refresh_scheduler(
+                    refresh_pool,
+                    refresh_shutdown,
+                    refresh_config,
+                );
         }
     } else {
         tracing::info!(
@@ -1805,7 +1808,10 @@ async fn resume_auto_chain_work(
         return Err(format!("no preset mapping for stage '{stage}'"));
     };
     let bindings = if let Some(provider_id) = binding_provider {
-        match nexus_orchestration::preset_runtime::default_bindings_for_preset(preset_id, provider_id) {
+        match nexus_orchestration::preset_runtime::default_bindings_for_preset(
+            preset_id,
+            provider_id,
+        ) {
             Some(bindings) => bindings,
             None => {
                 return Err(format!(

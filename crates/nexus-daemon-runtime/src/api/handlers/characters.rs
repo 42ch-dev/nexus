@@ -219,13 +219,12 @@ async fn execute_character_lifecycle(
             .acquire_character_transition(&principal, character_id.to_string())
             .await?;
         let pre_epoch = lease.epoch();
-        let request: CoreCharacterTransitionRequest =
-            CoreCharacterTransitionRequest::builder()
-                .character_id(character_id.to_string())
-                .expected_revision(expected_revision)
-                .target_status(target)
-                .try_into()
-                .map_err(wire_err)?;
+        let request: CoreCharacterTransitionRequest = CoreCharacterTransitionRequest::builder()
+            .character_id(character_id.to_string())
+            .expected_revision(expected_revision)
+            .target_status(target)
+            .try_into()
+            .map_err(wire_err)?;
         let committed = core
             .commit_character_transition(&principal, &mut lease, request)
             .await?;

@@ -31,23 +31,29 @@ impl WorkspaceOpen {
 }
 
 #[async_trait]
-impl Capability for WorkspaceOpen { fn name(&self) -> &'static str {
-    "workspace.open"
-} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::WORKSPACE_OPEN_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
-    r#"{"type":"object","properties":{"sessionId":{"type":"string"},"snapshot":{"type":"object","properties":{"workspaceRoot":{"type":"string"},"path":{"type":"string"},"existed":{"type":"boolean"},"fileHashes":{"type":"object","additionalProperties":{"type":"string"}}},"required":["workspaceRoot","path","existed","fileHashes"],"additionalProperties":false}},"required":["sessionId","snapshot"],"additionalProperties":false}"#
-}
+impl Capability for WorkspaceOpen {
+    fn name(&self) -> &'static str {
+        "workspace.open"
+    }
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::WORKSPACE_OPEN_INPUT_SCHEMA
+    }
+    fn output_schema(&self) -> &'static str {
+        r#"{"type":"object","properties":{"sessionId":{"type":"string"},"snapshot":{"type":"object","properties":{"workspaceRoot":{"type":"string"},"path":{"type":"string"},"existed":{"type":"boolean"},"fileHashes":{"type":"object","additionalProperties":{"type":"string"}}},"required":["workspaceRoot","path","existed","fileHashes"],"additionalProperties":false}},"required":["sessionId","snapshot"],"additionalProperties":false}"#
+    }
 
-async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-    let parsed: WorkspaceOpenInput = serde_json::from_value(input)
-        .map_err(|e| CapabilityError::InputInvalid(format!("workspace.open input: {e}")))?;
-    let executor = self
-        .executor
-        .as_ref()
-        .ok_or(CapabilityError::WorkerUnavailable)?;
-    let output = executor.open(parsed).await?;
-    serde_json::to_value(output)
-        .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
-} }
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        let parsed: WorkspaceOpenInput = serde_json::from_value(input)
+            .map_err(|e| CapabilityError::InputInvalid(format!("workspace.open input: {e}")))?;
+        let executor = self
+            .executor
+            .as_ref()
+            .ok_or(CapabilityError::WorkerUnavailable)?;
+        let output = executor.open(parsed).await?;
+        serde_json::to_value(output)
+            .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
+    }
+}
 
 pub struct WorkspaceCommit {
     executor: Option<Arc<dyn WorkspaceExecutor>>,
@@ -74,23 +80,29 @@ impl WorkspaceCommit {
 }
 
 #[async_trait]
-impl Capability for WorkspaceCommit { fn name(&self) -> &'static str {
-    "workspace.commit"
-} fn input_schema(&self) -> &'static str { nexus_preset::capability_catalog::WORKSPACE_COMMIT_INPUT_SCHEMA } fn output_schema(&self) -> &'static str {
-    r#"{"type":"object","properties":{"revision":{"type":"string"},"committed":{"type":"boolean"}},"required":["revision","committed"],"additionalProperties":false}"#
-}
+impl Capability for WorkspaceCommit {
+    fn name(&self) -> &'static str {
+        "workspace.commit"
+    }
+    fn input_schema(&self) -> &'static str {
+        nexus_preset::capability_catalog::WORKSPACE_COMMIT_INPUT_SCHEMA
+    }
+    fn output_schema(&self) -> &'static str {
+        r#"{"type":"object","properties":{"revision":{"type":"string"},"committed":{"type":"boolean"}},"required":["revision","committed"],"additionalProperties":false}"#
+    }
 
-async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-    let parsed: WorkspaceCommitInput = serde_json::from_value(input)
-        .map_err(|e| CapabilityError::InputInvalid(format!("workspace.commit input: {e}")))?;
-    let executor = self
-        .executor
-        .as_ref()
-        .ok_or(CapabilityError::WorkerUnavailable)?;
-    let output = executor.commit(parsed).await?;
-    serde_json::to_value(output)
-        .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
-} }
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        let parsed: WorkspaceCommitInput = serde_json::from_value(input)
+            .map_err(|e| CapabilityError::InputInvalid(format!("workspace.commit input: {e}")))?;
+        let executor = self
+            .executor
+            .as_ref()
+            .ok_or(CapabilityError::WorkerUnavailable)?;
+        let output = executor.commit(parsed).await?;
+        serde_json::to_value(output)
+            .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")))
+    }
+}
 
 #[cfg(test)]
 mod tests {

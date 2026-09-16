@@ -14,8 +14,8 @@ use crate::api::handlers::soul_narrative_synthesizer::AcpSoulNarrativeSynthesize
 use crate::api::handlers::world_kb_guards::resolve_core_principal;
 use crate::config::read_active_creator_id;
 use crate::workspace::WorkspaceState;
-use axum::Json;
 use axum::extract::{Path, Query, State};
+use axum::Json;
 use nexus_contracts::daemon_api::memory::{
     CountPendingReviewsQuery, CountPendingReviewsResponse, DeletePendingReviewQuery,
     DeletePendingReviewResponse, ListMemoryFragmentsQuery, ListMemoryFragmentsResponse,
@@ -314,7 +314,9 @@ pub async fn reflect_soul(
     let (core, principal) = resolve_core_principal(&state).await?;
     let response = core
         .reflect_creator_soul(&principal, req, || {
-            state.capability_registry().map(AcpSoulNarrativeSynthesizer::new)
+            state
+                .capability_registry()
+                .map(AcpSoulNarrativeSynthesizer::new)
         })
         .await?;
     Ok(Json(response))

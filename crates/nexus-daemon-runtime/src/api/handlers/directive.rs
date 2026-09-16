@@ -10,7 +10,7 @@
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::world_kb_guards::resolve_core_principal;
 use crate::workspace::WorkspaceState;
-use axum::{Json, extract::State};
+use axum::{extract::State, Json};
 use nexus_contracts::generated::daemon_api::inspector::moment_directive_request::MomentDirectiveRequest;
 use nexus_contracts::generated::daemon_api::inspector::moment_directive_response::MomentDirectiveResponse;
 

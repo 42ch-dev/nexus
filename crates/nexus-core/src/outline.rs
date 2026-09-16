@@ -48,16 +48,20 @@ enum OutlineFault {
 impl From<OutlineFault> for CoreError {
     fn from(error: OutlineFault) -> Self {
         match error {
-            OutlineFault::BadRequest { code, message } => {
-                Self::InvalidInput { field: code, reason: message }
-            }
-            OutlineFault::Internal { code, message } => {
-                Self::Internal { category: format!("{code}: {message}") }
-            }
+            OutlineFault::BadRequest { code, message } => Self::InvalidInput {
+                field: code,
+                reason: message,
+            },
+            OutlineFault::Internal { code, message } => Self::Internal {
+                category: format!("{code}: {message}"),
+            },
             OutlineFault::NotFound(resource) => Self::NotFound { resource },
-            OutlineFault::Conflict { current_revision, node_id, conflicting_path, recovery_hint } => {
-                Self::outline_conflict(current_revision, node_id, conflicting_path, recovery_hint)
-            }
+            OutlineFault::Conflict {
+                current_revision,
+                node_id,
+                conflicting_path,
+                recovery_hint,
+            } => Self::outline_conflict(current_revision, node_id, conflicting_path, recovery_hint),
             OutlineFault::Validation { errors, warnings } => {
                 Self::outline_validation_failed(&errors, &warnings)
             }
@@ -168,21 +172,18 @@ async fn read_outline_file(
     // Use must_exist=false so a missing outline file is treated as a default
     // frontmatter rather than a path-guard error. The guard still verifies the
     // resolved path would live inside the workspace root.
-    let path = resolve_guarded_path_async(
-        workspace_root.to_path_buf(),
-        rel_path.to_string(),
-        false,
-    )
-    .await
-    .map_err(|e| match &e {
-        CoreError::InvalidInput { field, .. } if field == "chapter_path_forbidden" => {
-            OutlineFault::BadRequest {
-                code: "outline_path_forbidden".to_string(),
-                message: format!("outline path '{rel_path}' escapes workspace root"),
-            }
-        }
-        _ => OutlineFault::Core(e),
-    })?;
+    let path =
+        resolve_guarded_path_async(workspace_root.to_path_buf(), rel_path.to_string(), false)
+            .await
+            .map_err(|e| match &e {
+                CoreError::InvalidInput { field, .. } if field == "chapter_path_forbidden" => {
+                    OutlineFault::BadRequest {
+                        code: "outline_path_forbidden".to_string(),
+                        message: format!("outline path '{rel_path}' escapes workspace root"),
+                    }
+                }
+                _ => OutlineFault::Core(e),
+            })?;
 
     let content = match tokio::fs::read_to_string(&path).await {
         Ok(c) => c,
@@ -277,12 +278,12 @@ async fn atomic_write_outline(
     })?;
     let content = format!("---\n{yaml}---\n{body}");
 
-    fsync_write_atomic(target, &content).await.map_err(|e| {
-        OutlineFault::Internal {
+    fsync_write_atomic(target, &content)
+        .await
+        .map_err(|e| OutlineFault::Internal {
             code: "OUTLINE_WRITE_ERROR".to_string(),
             message: format!("failed to write outline '{rel_path}': {e}"),
-        }
-    })
+        })
 }
 
 /// Validate a chapter status transition using the V1.65 lifecycle vocabulary.
@@ -523,7 +524,14 @@ impl CoreService {
         self.require_work_write()?;
         let root = self.workspace_root(principal)?;
         let response = patch_outline_chapter(
-            self, principal, holder, &work_id, &work, &root, &chapter_id, request,
+            self,
+            principal,
+            holder,
+            &work_id,
+            &work,
+            &root,
+            &chapter_id,
+            request,
         )
         .await
         .map_err(CoreError::from)?;
@@ -609,11 +617,10 @@ async fn patch_outline_structure(
         .await?
         .0;
 
-    let base_revision =
-        i64::try_from(req.base_revision).map_err(|_| OutlineFault::BadRequest {
-            code: "base_revision_out_of_range".to_string(),
-            message: "base_revision exceeds i64 range".to_string(),
-        })?;
+    let base_revision = i64::try_from(req.base_revision).map_err(|_| OutlineFault::BadRequest {
+        code: "base_revision_out_of_range".to_string(),
+        message: "base_revision exceeds i64 range".to_string(),
+    })?;
     if base_revision != initial_frontmatter.outline_revision {
         return Err(OutlineFault::Conflict {
             current_revision: initial_frontmatter.outline_revision_u64()?,
@@ -624,7 +631,8 @@ async fn patch_outline_structure(
             recovery_hint: "refetch the work outline and reapply".to_string(),
         });
     }
-    let lock = WorkLock::acquire(&service.inner.pool, principal.creator_id(), work_id, holder).await?;
+    let lock =
+        WorkLock::acquire(&service.inner.pool, principal.creator_id(), work_id, holder).await?;
 
     // Re-read both frontmatter and body under lock to close the TOCTOU window
     // for concurrent writers and avoid persisting a stale body snapshot.
@@ -712,11 +720,10 @@ async fn patch_outline_chapter(
         .await?
         .0;
 
-    let base_revision =
-        i64::try_from(req.base_revision).map_err(|_| OutlineFault::BadRequest {
-            code: "base_revision_out_of_range".to_string(),
-            message: "base_revision exceeds i64 range".to_string(),
-        })?;
+    let base_revision = i64::try_from(req.base_revision).map_err(|_| OutlineFault::BadRequest {
+        code: "base_revision_out_of_range".to_string(),
+        message: "base_revision exceeds i64 range".to_string(),
+    })?;
     if base_revision != initial_frontmatter.outline_revision {
         return Err(OutlineFault::Conflict {
             current_revision: initial_frontmatter.outline_revision_u64()?,
@@ -735,7 +742,8 @@ async fn patch_outline_chapter(
         });
     }
 
-    let lock = WorkLock::acquire(&service.inner.pool, principal.creator_id(), work_id, holder).await?;
+    let lock =
+        WorkLock::acquire(&service.inner.pool, principal.creator_id(), work_id, holder).await?;
 
     // Re-read both frontmatter and body under lock to close the TOCTOU window
     // for concurrent writers and avoid persisting a stale body snapshot.
@@ -805,11 +813,10 @@ async fn patch_timeline_event(
         .await?
         .0;
 
-    let base_revision =
-        i64::try_from(req.base_revision).map_err(|_| OutlineFault::BadRequest {
-            code: "base_revision_out_of_range".to_string(),
-            message: "base_revision exceeds i64 range".to_string(),
-        })?;
+    let base_revision = i64::try_from(req.base_revision).map_err(|_| OutlineFault::BadRequest {
+        code: "base_revision_out_of_range".to_string(),
+        message: "base_revision exceeds i64 range".to_string(),
+    })?;
     if base_revision != initial_frontmatter.outline_revision {
         return Err(OutlineFault::Conflict {
             current_revision: initial_frontmatter.outline_revision_u64()?,
@@ -819,7 +826,8 @@ async fn patch_timeline_event(
         });
     }
 
-    let lock = WorkLock::acquire(&service.inner.pool, principal.creator_id(), work_id, holder).await?;
+    let lock =
+        WorkLock::acquire(&service.inner.pool, principal.creator_id(), work_id, holder).await?;
 
     // Re-read both frontmatter and body under lock to close the TOCTOU window
     // for concurrent writers and avoid persisting a stale body snapshot.

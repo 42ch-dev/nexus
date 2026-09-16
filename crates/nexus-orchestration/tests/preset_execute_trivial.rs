@@ -36,8 +36,7 @@ states:
 #[tokio::test]
 async fn linear_two_state_preset_executes_to_terminal() {
     let caps = CapabilityRegistry::with_builtins();
-    let loaded =
-        nexus_preset::load_preset_from_str(TWO_STATE_MANUAL_YAML, &caps).unwrap();
+    let loaded = nexus_preset::load_preset_from_str(TWO_STATE_MANUAL_YAML, &caps).unwrap();
 
     assert_eq!(loaded.id, "trivial");
 
@@ -48,7 +47,12 @@ async fn linear_two_state_preset_executes_to_terminal() {
     );
 
     let sid = engine
-        .start_session_with_graph("trivial", Arc::new(nexus_orchestration::preset_runtime::build_outer_graph(&loaded.manifest).unwrap()))
+        .start_session_with_graph(
+            "trivial",
+            Arc::new(
+                nexus_orchestration::preset_runtime::build_outer_graph(&loaded.manifest).unwrap(),
+            ),
+        )
         .await
         .expect("start_session_with_graph");
 
@@ -110,8 +114,7 @@ states:
 #[tokio::test]
 async fn capability_enter_state_composites_correctly() {
     let caps = CapabilityRegistry::with_builtins();
-    let loaded =
-        nexus_preset::load_preset_from_str(CAPABILITY_ENTER_YAML, &caps).unwrap();
+    let loaded = nexus_preset::load_preset_from_str(CAPABILITY_ENTER_YAML, &caps).unwrap();
 
     assert_eq!(loaded.id, "cap-enter");
 
@@ -122,7 +125,12 @@ async fn capability_enter_state_composites_correctly() {
     );
 
     let sid = engine
-        .start_session_with_graph("cap-enter", Arc::new(nexus_orchestration::preset_runtime::build_outer_graph(&loaded.manifest).unwrap()))
+        .start_session_with_graph(
+            "cap-enter",
+            Arc::new(
+                nexus_orchestration::preset_runtime::build_outer_graph(&loaded.manifest).unwrap(),
+            ),
+        )
         .await
         .expect("start_session_with_graph");
 
@@ -153,4 +161,3 @@ async fn capability_enter_state_composites_correctly() {
         "capability-enter preset should complete: {final_status:?}"
     );
 }
-

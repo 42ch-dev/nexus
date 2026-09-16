@@ -8,9 +8,9 @@
 //! Design: v1.6 WS-D — replace hardcoded `_system.maintenance` with
 //! configurable directory scanning.
 
-use crate::capability_catalog::CapabilityCatalog;
 #[cfg(test)]
 use crate::capability_catalog::BuiltinCapabilityCatalog;
+use crate::capability_catalog::CapabilityCatalog;
 use crate::loader::{load_preset_from_str, LoadedPreset, PresetLoadError};
 use std::path::{Path, PathBuf};
 
@@ -71,7 +71,10 @@ pub struct SystemPresetWarning {
 /// - If the directory doesn't exist at all, return empty results (no error).
 ///
 /// The `nexus_home` parameter is typically `$HOME/.nexus42`.
-pub fn scan_system_presets(nexus_home: &Path, caps: &dyn CapabilityCatalog) -> SystemPresetScanResult {
+pub fn scan_system_presets(
+    nexus_home: &Path,
+    caps: &dyn CapabilityCatalog,
+) -> SystemPresetScanResult {
     let system_dir = system_preset_base_dir(nexus_home);
 
     // T4: missing directory = no system presets (not an error).
@@ -212,11 +215,12 @@ pub fn load_system_preset_from_dir(
     // (A2/A7) — content hash over the manifest + every referenced asset.
     let mut loaded = loaded;
     loaded.source_identity = Some(
-        crate::loader::preset_source_identity(&loaded.manifest, Some(bundle_dir), None)
-            .map_err(|e| SystemPresetWarning {
+        crate::loader::preset_source_identity(&loaded.manifest, Some(bundle_dir), None).map_err(
+            |e| SystemPresetWarning {
                 dir_name: dir_name.to_string(),
                 message: format!("failed to compute source identity: {e}"),
-            })?,
+            },
+        )?,
     );
 
     Ok(SystemPresetEntry {

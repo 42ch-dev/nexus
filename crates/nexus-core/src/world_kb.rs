@@ -202,9 +202,9 @@ pub(crate) mod guards {
         /// Timeline-events family rendering of a pure denial.
         fn into_timeline_error(self) -> CoreError {
             match self {
-                Self::Missing { world_id } => {
-                    CoreError::NotFound { resource: format!("world {world_id} not found") }
-                }
+                Self::Missing { world_id } => CoreError::NotFound {
+                    resource: format!("world {world_id} not found"),
+                },
                 Self::Foreign { world_id } | Self::Unowned { world_id } => {
                     CoreError::WorldOwnerDenied {
                         world_id,
@@ -924,13 +924,8 @@ impl CoreService {
                 resource: "world_kb_promote: read-only core access".to_string(),
             });
         }
-        promote::promote_candidate(
-            &self.inner.pool,
-            principal.creator_id(),
-            &world_id,
-            request,
-        )
-        .await
+        promote::promote_candidate(&self.inner.pool, principal.creator_id(), &world_id, request)
+            .await
     }
 
     /// Add/update/remove a typed relationship between two World KB entities.
@@ -1094,11 +1089,12 @@ pub mod promote {
         candidate: &nexus_local_db::kb_extract_job::KbExtractPromotion,
         req: &WorldKbPromoteCandidateRequest,
     ) -> CoreResult<AdoptPlan> {
-        let mut body: KnowledgeEntryBody =
-            serde_json::from_str(candidate.proposed_payload.as_deref().unwrap_or("{}"))
-                .map_err(|e| CoreError::Internal {
-                    category: format!("proposed_payload is not a valid KnowledgeEntryBody: {e}"),
-                })?;
+        let mut body: KnowledgeEntryBody = serde_json::from_str(
+            candidate.proposed_payload.as_deref().unwrap_or("{}"),
+        )
+        .map_err(|e| CoreError::Internal {
+            category: format!("proposed_payload is not a valid KnowledgeEntryBody: {e}"),
+        })?;
         let block_type = req.patch.as_ref().and_then(|p| p.block_type).map_or_else(
             || parse_block_type(candidate.block_type_guess.as_deref().unwrap_or("character")),
             wire_cast::<nexus_contracts::BlockType, _>,
@@ -1127,11 +1123,12 @@ pub mod promote {
                 });
             }
             if !p.body.is_empty() {
-                body = serde_json::from_value(serde_json::Value::Object(p.body.clone()))
-                    .map_err(|e| CoreError::InvalidInput {
+                body = serde_json::from_value(serde_json::Value::Object(p.body.clone())).map_err(
+                    |e| CoreError::InvalidInput {
                         field: "patch.body".to_string(),
                         reason: format!("not a valid KnowledgeEntryBody: {e}"),
-                    })?;
+                    },
+                )?;
             }
             if !p.aliases.is_empty() {
                 merge_aliases_into_body(&mut body, &p.aliases);
@@ -1213,8 +1210,13 @@ pub mod promote {
                 if let Some(tx) = tx_cell.lock().ok().and_then(|mut guard| guard.take()) {
                     let _ = tx.rollback().await;
                 }
-                return build_promote_adopt_response(pool, &knowledge_entry, candidate, &req.job_id)
-                    .await;
+                return build_promote_adopt_response(
+                    pool,
+                    &knowledge_entry,
+                    candidate,
+                    &req.job_id,
+                )
+                .await;
             }
             Ok(PromoteAdoptOrchestrateOutcome::Fresh(entry)) => entry,
             Err(e) => {
@@ -1460,9 +1462,7 @@ pub mod promote {
     /// Panics if the round-trip fails — the candidate has already been through
     /// nexus validation, so a failure here indicates a wire-shape drift, not a
     /// runtime input error.
-    fn build_spoke_promote_request(
-        candidate: &KnowledgeEntryRecord,
-    ) -> PromoteRequest {
+    fn build_spoke_promote_request(candidate: &KnowledgeEntryRecord) -> PromoteRequest {
         let spoke_entry: SpokeKnowledgeEntry = knowledge_record_to_spoke(candidate);
         let wire = serde_json::to_value(&spoke_entry).unwrap_or_else(|_| serde_json::json!({}));
         serde_json::from_value(serde_json::json!({ "candidate": wire }))
@@ -1702,12 +1702,13 @@ pub mod promote {
         candidate: &nexus_local_db::kb_extract_job::KbExtractPromotion,
         req: &WorldKbPromoteCandidateRequest,
     ) -> CoreResult<WorldKbPromoteCandidateResponse> {
-        let target_id = req.merge_target_id.as_deref().ok_or_else(|| {
-            CoreError::InvalidInput {
+        let target_id = req
+            .merge_target_id
+            .as_deref()
+            .ok_or_else(|| CoreError::InvalidInput {
                 field: "merge_target_id".to_string(),
                 reason: "merge requires merge_target_id".to_string(),
-            }
-        })?;
+            })?;
         let store = SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
         let target = store
             .get_knowledge_entry(target_id)
@@ -1837,10 +1838,7 @@ pub mod promote {
 
     /// Re-read the actual current `kb_extract_jobs.version` after a
     /// promote-path CAS miss, normalized like the outer OCC precondition.
-    async fn reread_promotion_version(
-        pool: &sqlx::SqlitePool,
-        job_id: &str,
-    ) -> CoreResult<u64> {
+    async fn reread_promotion_version(pool: &sqlx::SqlitePool, job_id: &str) -> CoreResult<u64> {
         Ok(get_promotion(pool, job_id)
             .await
             .map_err(|e| local_db_err(nexus_local_db::LocalDbError::Sqlx(e)))?
@@ -1863,14 +1861,12 @@ pub mod promote {
                     "refetch the World KB graph and reapply",
                 )
             }
-            nexus_local_db::LocalDbError::WorldConflict { .. } => {
-                RootCoreError::world_kb_conflict(
-                    0,
-                    entity_id,
-                    "world",
-                    "the target moved to another world; refetch it in its stored world and reapply",
-                )
-            }
+            nexus_local_db::LocalDbError::WorldConflict { .. } => RootCoreError::world_kb_conflict(
+                0,
+                entity_id,
+                "world",
+                "the target moved to another world; refetch it in its stored world and reapply",
+            ),
             other => local_db_err(other),
         }
     }
@@ -1878,10 +1874,10 @@ pub mod promote {
     mod internal_tests {
         use super::{
             promote_adopt_commit_ambiguity_action,
-            resolve_promote_adopt_commit_ambiguity_after_reread,
-            PromoteAdoptCommitAmbiguityAction, PromoteAdoptCommitAmbiguityResolution,
+            resolve_promote_adopt_commit_ambiguity_after_reread, PromoteAdoptCommitAmbiguityAction,
+            PromoteAdoptCommitAmbiguityResolution,
         };
-    
+
         #[test]
         fn confirmed_job_treats_commit_error_as_success() {
             assert_eq!(
@@ -1893,7 +1889,7 @@ pub mod promote {
                 PromoteAdoptCommitAmbiguityResolution::TreatAsSuccess
             );
         }
-    
+
         #[test]
         fn pending_job_fails_on_commit_error() {
             assert_eq!(
@@ -1905,7 +1901,7 @@ pub mod promote {
                 PromoteAdoptCommitAmbiguityResolution::Fail
             );
         }
-    
+
         #[test]
         fn missing_job_fails_on_commit_error() {
             assert_eq!(
@@ -1917,7 +1913,7 @@ pub mod promote {
                 PromoteAdoptCommitAmbiguityResolution::Fail
             );
         }
-    
+
         #[test]
         fn rejected_job_fails_on_commit_error() {
             assert_eq!(
@@ -1929,7 +1925,7 @@ pub mod promote {
                 PromoteAdoptCommitAmbiguityResolution::Fail
             );
         }
-    
+
         #[test]
         fn reread_failed_fails() {
             assert_eq!(
@@ -1940,7 +1936,6 @@ pub mod promote {
     }
 }
 
-
 pub mod relationship {
     //! Typed relationship add/update/remove, ported from the daemon handler.
     //! Add/update route through `orchestrate_relate` (Surface B); remove keeps
@@ -1949,9 +1944,7 @@ pub mod relationship {
     use nexus_contracts::world_kb_patch_relationship_request::{
         NexusWorldKbRelationshipInput, NexusWorldKbRelationshipKind,
     };
-    use nexus_contracts::{
-        WorldKbPatchRelationshipRequest, WorldKbPatchRelationshipResponse,
-    };
+    use nexus_contracts::{WorldKbPatchRelationshipRequest, WorldKbPatchRelationshipResponse};
     use nexus_local_db::kb_relationships::{
         delete_relationship_in_tx, generate_relationship_id, get_relationship, SOURCE_MANUAL,
     };
@@ -2041,7 +2034,9 @@ pub mod relationship {
         let row = map_relate_response(result, pool, &relationship_id).await?;
 
         Ok(WorldKbPatchRelationshipResponse {
-            relationship: Some(wire_cast(super::graph::project_relationship(&row, "stored"))),
+            relationship: Some(wire_cast(super::graph::project_relationship(
+                &row, "stored",
+            ))),
             version: u64::try_from(row.revision).unwrap_or(0),
             validation_summary: wire_cast(validation_summary(&[], &[])),
         })
@@ -2162,7 +2157,9 @@ pub mod relationship {
         let row = map_relate_response(result, pool, relationship_id).await?;
 
         Ok(WorldKbPatchRelationshipResponse {
-            relationship: Some(wire_cast(super::graph::project_relationship(&row, "stored"))),
+            relationship: Some(wire_cast(super::graph::project_relationship(
+                &row, "stored",
+            ))),
             version: u64::try_from(row.revision).unwrap_or(0),
             validation_summary: wire_cast(validation_summary(&[], &[])),
         })
@@ -2219,9 +2216,7 @@ pub mod relationship {
     }
 
     /// Domain validation for a relationship payload.
-    fn validate_relationship_input(
-        input: &NexusWorldKbRelationshipInput,
-    ) -> CoreResult<()> {
+    fn validate_relationship_input(input: &NexusWorldKbRelationshipInput) -> CoreResult<()> {
         if input.source_entity_id == input.target_entity_id {
             return Err(CoreError::world_kb_validation_failed(
                 &["source_entity_id and target_entity_id must be different".to_string()],
@@ -2546,10 +2541,7 @@ pub mod relationship {
 
     /// Re-read the current `kb_relationships.revision` (fallback when a CAS
     /// reject's details omit the store revision).
-    async fn reread_relation_revision_sync(
-        pool: &sqlx::SqlitePool,
-        relationship_id: &str,
-    ) -> u64 {
+    async fn reread_relation_revision_sync(pool: &sqlx::SqlitePool, relationship_id: &str) -> u64 {
         get_relationship(pool, relationship_id)
             .await
             .ok()
@@ -2561,14 +2553,12 @@ pub mod relationship {
     /// not-found; other DB errors to the storage mapping.
     fn map_relationship_cas_err(e: LocalDbError, relationship_id: &str) -> CoreError {
         match e {
-            LocalDbError::VersionMismatch { actual, .. } => {
-                CoreError::world_kb_conflict(
-                    actual.unwrap_or(0).max(0).cast_unsigned(),
-                    relationship_id,
-                    "version",
-                    "refetch the World KB graph and reapply",
-                )
-            }
+            LocalDbError::VersionMismatch { actual, .. } => CoreError::world_kb_conflict(
+                actual.unwrap_or(0).max(0).cast_unsigned(),
+                relationship_id,
+                "version",
+                "refetch the World KB graph and reapply",
+            ),
             LocalDbError::Sqlx(sqlx::Error::RowNotFound) => CoreError::NotFound {
                 resource: format!("relationship {relationship_id}"),
             },

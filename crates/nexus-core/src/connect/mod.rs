@@ -48,14 +48,14 @@ pub use mcp_bridge::{
 // Embedded MCP server shell re-exports (feature-gated).
 #[cfg(feature = "embedded-mcp")]
 pub use mcp_embedded::{
-    start_embedded_mcp_server, EmbeddedMcpError, EmbeddedMcpServer, EmbeddedSession, EmbeddedShutdown,
-    EMBEDDED_MCP_MAX_SESSIONS,
+    start_embedded_mcp_server, EmbeddedMcpError, EmbeddedMcpServer, EmbeddedSession,
+    EmbeddedShutdown, EMBEDDED_MCP_MAX_SESSIONS,
 };
+pub use peer_control::PeerControlLane;
 pub use session::{PeerSessionManager, SessionRecord, DEFAULT_MAX_SESSIONS};
 pub use table::{
     mcp_catalog_admission, mcp_catalog_output_root_object, peer_tool_table, AdmissionOutcome,
     McpCatalogRefusal, PeerSessionTools, PeerToolEntry, PeerToolTable, ToolRefusal,
 };
 pub use visibility::VisibilityPolicy;
-pub use peer_control::PeerControlLane;
 pub use ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};

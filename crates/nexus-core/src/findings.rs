@@ -34,13 +34,14 @@ enum FindingsFault {
 impl From<FindingsFault> for CoreError {
     fn from(error: FindingsFault) -> Self {
         match error {
-            FindingsFault::BadRequest { code, message } => {
-                Self::InvalidInput { field: code, reason: message }
-            }
+            FindingsFault::BadRequest { code, message } => Self::InvalidInput {
+                field: code,
+                reason: message,
+            },
             FindingsFault::NotFound(resource) => Self::NotFound { resource },
-            FindingsFault::Internal { code, message } => {
-                Self::Internal { category: format!("{code}: {message}") }
-            }
+            FindingsFault::Internal { code, message } => Self::Internal {
+                category: format!("{code}: {message}"),
+            },
             FindingsFault::Core(error) => error,
         }
     }
@@ -53,21 +54,25 @@ impl From<FindingsFault> for CoreError {
 /// to `DATABASE_ERROR` by the daemon adapter).
 fn findings_db_err(error: nexus_local_db::LocalDbError) -> FindingsFault {
     match error {
-        nexus_local_db::LocalDbError::IllegalTransition { from, to } => {
-            FindingsFault::BadRequest {
-                code: "invalid_transition".to_string(),
-                message: format!("invalid status transition '{from}' → '{to}'"),
-            }
-        }
-        nexus_local_db::LocalDbError::InvalidEnum { field, value, allowed } => {
-            FindingsFault::BadRequest {
-                code: "invalid_input".to_string(),
-                message: format!("invalid {field} value '{value}'; allowed: {}", allowed.join(", ")),
-            }
-        }
-        nexus_local_db::LocalDbError::ValidationError(message) => {
-            FindingsFault::BadRequest { code: "invalid_input".to_string(), message }
-        }
+        nexus_local_db::LocalDbError::IllegalTransition { from, to } => FindingsFault::BadRequest {
+            code: "invalid_transition".to_string(),
+            message: format!("invalid status transition '{from}' → '{to}'"),
+        },
+        nexus_local_db::LocalDbError::InvalidEnum {
+            field,
+            value,
+            allowed,
+        } => FindingsFault::BadRequest {
+            code: "invalid_input".to_string(),
+            message: format!(
+                "invalid {field} value '{value}'; allowed: {}",
+                allowed.join(", ")
+            ),
+        },
+        nexus_local_db::LocalDbError::ValidationError(message) => FindingsFault::BadRequest {
+            code: "invalid_input".to_string(),
+            message,
+        },
         other => FindingsFault::Core(local_db_err(other)),
     }
 }
@@ -185,7 +190,10 @@ fn decode_offset_cursor(cursor: Option<&String>) -> Result<u32, FindingsFault> {
 fn offset_page_meta(fetched: usize, limit: u32, offset: u32) -> (Option<String>, bool) {
     let limit_us = usize::try_from(limit).unwrap_or(usize::MAX);
     if fetched > limit_us {
-        (Some(format!("{CURSOR_PREFIX}{}", offset.saturating_add(limit))), true)
+        (
+            Some(format!("{CURSOR_PREFIX}{}", offset.saturating_add(limit))),
+            true,
+        )
     } else {
         (None, false)
     }
@@ -367,7 +375,11 @@ impl CoreService {
         let mut rows = findings::list_findings(&self.inner.pool, principal.creator_id(), &filters)
             .await
             .map_err(|err| match err {
-                nexus_local_db::LocalDbError::InvalidEnum { field, value, allowed } => {
+                nexus_local_db::LocalDbError::InvalidEnum {
+                    field,
+                    value,
+                    allowed,
+                } => {
                     tracing::warn!(
                         creator_id = %principal.creator_id(),
                         work_id = %filters.work_id.as_deref().unwrap_or(""),
@@ -375,7 +387,11 @@ impl CoreService {
                         value = %value,
                         "findings LIST: invalid enum value in query filter"
                     );
-                    findings_db_err(nexus_local_db::LocalDbError::InvalidEnum { field, value, allowed })
+                    findings_db_err(nexus_local_db::LocalDbError::InvalidEnum {
+                        field,
+                        value,
+                        allowed,
+                    })
                 }
                 other => findings_db_err(other),
             })?;
@@ -385,11 +401,14 @@ impl CoreService {
 
         let items = rows.into_iter().map(to_finding_detail).collect();
         self.verify_principal(principal)?;
-        Ok(ListFindingsResponse { items, pagination: PaginationInfo {
-            limit: i64::from(limit),
-            next_cursor,
-            has_more,
-        } })
+        Ok(ListFindingsResponse {
+            items,
+            pagination: PaginationInfo {
+                limit: i64::from(limit),
+                next_cursor,
+                has_more,
+            },
+        })
     }
 
     /// One finding, Work-ownership verified first.
@@ -488,7 +507,11 @@ impl CoreService {
                 );
                 findings_db_err(nexus_local_db::LocalDbError::IllegalTransition { from, to })
             }
-            nexus_local_db::LocalDbError::InvalidEnum { field, value, allowed } => {
+            nexus_local_db::LocalDbError::InvalidEnum {
+                field,
+                value,
+                allowed,
+            } => {
                 tracing::warn!(
                     creator_id = %principal.creator_id(),
                     finding_id = %finding_id,
@@ -496,12 +519,18 @@ impl CoreService {
                     value = %value,
                     "findings PATCH: invalid enum value"
                 );
-                findings_db_err(nexus_local_db::LocalDbError::InvalidEnum { field, value, allowed })
+                findings_db_err(nexus_local_db::LocalDbError::InvalidEnum {
+                    field,
+                    value,
+                    allowed,
+                })
             }
             other => findings_db_err(other),
         })?;
         if !updated {
-            return Err(CoreError::NotFound { resource: format!("finding {finding_id}") });
+            return Err(CoreError::NotFound {
+                resource: format!("finding {finding_id}"),
+            });
         }
         let f = findings::get_finding(&self.inner.pool, principal.creator_id(), &finding_id)
             .await
@@ -525,11 +554,14 @@ impl CoreService {
     ) -> CoreResult<()> {
         self.verify_principal(principal)?;
         self.require_work_write()?;
-        let deleted = findings::delete_finding(&self.inner.pool, principal.creator_id(), &finding_id)
-            .await
-            .map_err(findings_db_err)?;
+        let deleted =
+            findings::delete_finding(&self.inner.pool, principal.creator_id(), &finding_id)
+                .await
+                .map_err(findings_db_err)?;
         if !deleted {
-            return Err(CoreError::NotFound { resource: format!("finding {finding_id}") });
+            return Err(CoreError::NotFound {
+                resource: format!("finding {finding_id}"),
+            });
         }
         self.verify_principal(principal)
     }
@@ -576,7 +608,11 @@ impl CoreService {
         }
 
         let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
-        if !request.finding_ids.iter().all(|id| seen.insert(id.as_str())) {
+        if !request
+            .finding_ids
+            .iter()
+            .all(|id| seen.insert(id.as_str()))
+        {
             return Err(FindingsFault::BadRequest {
                 code: "invalid_input".to_string(),
                 message: "finding_ids must not contain duplicates".to_string(),
@@ -649,7 +685,11 @@ impl CoreService {
         }
 
         self.verify_principal(principal)?;
-        Ok(BatchUpdateFindingsResponse { updated, not_found, conflict })
+        Ok(BatchUpdateFindingsResponse {
+            updated,
+            not_found,
+            conflict,
+        })
     }
 
     /// Stale open-findings report for the active creator. `threshold_seconds`
@@ -735,6 +775,11 @@ impl CoreService {
             )
         };
         self.verify_principal(principal)?;
-        Ok(PruneFindingsOutcome { count, older_than_days, dry_run, now_epoch })
+        Ok(PruneFindingsOutcome {
+            count,
+            older_than_days,
+            dry_run,
+            now_epoch,
+        })
     }
 }
