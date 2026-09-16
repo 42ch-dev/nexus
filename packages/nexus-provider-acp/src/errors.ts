@@ -16,7 +16,7 @@ export class CleanupUnconfirmedError extends Error {
   constructor(
     message: string,
     owner: import('./process-owner.js').OwnedConnection | null = null,
-    cause: unknown = undefined,
+    cause?: unknown,
   ) {
     super(message);
     this.name = 'CleanupUnconfirmedError';

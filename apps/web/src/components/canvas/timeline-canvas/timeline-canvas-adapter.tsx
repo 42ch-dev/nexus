@@ -822,7 +822,7 @@ export function projectBriefLayer(graph: TimelineGraph): {
         startHint,
         endHint,
         eraId,
-        eraLabel: entity.canonical_name || startHint,
+        eraLabel: entity.canonical_name ?? startHint,
       };
     });
     const briefSpineData: DirectedAxisSpineNodeData = {

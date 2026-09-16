@@ -174,7 +174,7 @@ export function ChapterInspector({
             <option value="">{t('chapterInspector.volume.unassigned')}</option>
             {outline.volumes.map((v) => (
               <option key={v.volume_id} value={v.volume_id}>
-                {v.label || t('chapter.volume', { volume: v.volume_id })}
+                {v.label ?? t('chapter.volume', { volume: v.volume_id })}
               </option>
             ))}
           </select>

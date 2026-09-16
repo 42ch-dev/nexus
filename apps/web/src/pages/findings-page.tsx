@@ -186,7 +186,7 @@ export function FindingsPage() {
               <option value="">{works.isLoading ? t('page.loadingWorks') : t('page.selectWork')}</option>
               {workOptions.map((w) => (
                 <option key={w.work_id} value={w.work_id}>
-                  {w.title || shortId(w.work_id)}
+                  {w.title ?? shortId(w.work_id)}
                 </option>
               ))}
             </Select>
@@ -344,7 +344,7 @@ export function FindingsPage() {
                         <TableCell>
                           <FindingStatusBadge status={f.status} />
                         </TableCell>
-                        <TableCell className="text-gray-1000">{f.title || t('page.untitledFinding')}</TableCell>
+                        <TableCell className="text-gray-1000">{f.title ?? t('page.untitledFinding')}</TableCell>
                         <TableCell className="text-gray-900">{t(`kind.${f.kind}` as const)}</TableCell>
                         <TableCell className="tabular-nums text-gray-900">{f.chapter ?? '—'}</TableCell>
                         <TableCell onClick={(e) => e.stopPropagation()}>

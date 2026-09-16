@@ -122,7 +122,7 @@ export function WorksPage() {
                           to={`/works/${encodeURIComponent(w.work_id)}/outline`}
                           className="font-medium text-brand-deep-blue hover:underline dark:text-blue-700 dark:hover:text-blue-800"
                         >
-                          {w.title || t('untitled')}
+                          {w.title ?? t('untitled')}
                         </Link>
                         <div className="text-copy-13-mono text-gray-700">{shortId(w.work_id)}</div>
                       </TableCell>

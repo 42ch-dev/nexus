@@ -4,12 +4,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { createRequire } from 'node:module';
 import { after, before, describe, test } from 'node:test';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const serviceRoot = join(__dirname, '..');
-const require = createRequire(import.meta.url);
 
 /**
  * P5-T1 bounded integration target: the World / Work / content / knowledge

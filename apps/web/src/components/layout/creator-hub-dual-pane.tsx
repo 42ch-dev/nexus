@@ -32,7 +32,7 @@ export function CreatorHubDualPane() {
     () =>
       worlds.map((world) => ({
         id: world.world_id,
-        label: world.title || world.world_id,
+        label: world.title ?? world.world_id,
       })),
     [worlds],
   );

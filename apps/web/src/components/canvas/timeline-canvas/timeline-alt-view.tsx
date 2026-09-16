@@ -176,7 +176,7 @@ export function TimelineAltView({
                       className="truncate px-3 py-2 text-gray-1000"
                       title={data.canonical_name}
                     >
-                      {data.canonical_name || t('timeline.altView.unnamed')}
+                      {data.canonical_name ?? t('timeline.altView.unnamed')}
                     </td>
                     <td className="px-3 py-2 text-gray-900">
                       {/* V1.147 P2 T3 — compute rows show the compute kind

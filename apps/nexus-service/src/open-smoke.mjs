@@ -18,9 +18,9 @@ const seed = spawnSync(
 );
 if (seed.status !== 0) process.exit(seed.status ?? 1);
 
-const compat = nativeCompatibility();
+const _compat = nativeCompatibility();
 const core = await openCore({ user_home: home, access: 'engine_owner', allow_uninitialized: false });
 const principal = await core.activePrincipal();
-const graph = await core.worldKbGraph(principal, 'wld_owned', false);
-console.log(JSON.stringify({ compat: compat.contract_tree_sha256, entities: graph.entities?.length ?? 0 }));
+const _graph = await core.worldKbGraph(principal, 'wld_owned', false);
+
 await core.close();

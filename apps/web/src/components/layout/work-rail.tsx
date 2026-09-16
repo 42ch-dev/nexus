@@ -54,7 +54,7 @@ export function WorkRail({ onWorkSelect, showHeader = true }: WorkRailProps) {
               <WorkRailListItem
                 key={work.work_id}
                 workId={work.work_id}
-                title={work.title || t('workShell.untitled')}
+                title={work.title ?? t('workShell.untitled')}
                 currentWorkId={workId}
                 onWorkSelect={onWorkSelect}
               />
@@ -125,7 +125,7 @@ function WorkRailPreview({ workId }: { workId: string }) {
       ) : (
         <Card className="shadow-card">
           <CardHeader className="gap-2 p-4 pb-2">
-            <CardTitle className="text-heading-16">{work.data.title || t('workShell.untitled')}</CardTitle>
+            <CardTitle className="text-heading-16">{work.data.title ?? t('workShell.untitled')}</CardTitle>
             <CardDescription>
               <span className="text-copy-13-mono">{shortId(work.data.work_id)}</span>
             </CardDescription>

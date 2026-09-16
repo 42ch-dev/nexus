@@ -24,7 +24,6 @@ import type {
   ReferenceListResponse,
   ReadingAnnotation,
   ReadingAnnotationCreateRequest,
-  ReadingAnnotationListQuery,
   ReadingAnnotationListResponse,
   ReadingAnnotationPatchRequest,
   ReadingProgressQuery,

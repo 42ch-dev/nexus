@@ -140,7 +140,7 @@ export function PromotionInspector({
       <p className="text-copy-13 text-gray-700">{t('worldKb.promotionInspector.description')}</p>
 
       <dl className="grid grid-cols-1 gap-2 rounded-card border border-gray-alpha-300 bg-background-100 p-3">
-        <Row label={t('worldKb.promotionInspector.field.name')} value={candidate.canonical_name || t('worldKb.promotionInspector.unnamed')} />
+        <Row label={t('worldKb.promotionInspector.field.name')} value={candidate.canonical_name ?? t('worldKb.promotionInspector.unnamed')} />
         <Row label={t('worldKb.promotionInspector.field.blockType')} value={BLOCK_TYPE_LABELS[candidate.block_type]} />
         <Row label={t('worldKb.promotionInspector.field.job')} value={<span className="font-mono text-copy-13-mono">{shortId(candidate.job_id)}</span>} />
       </dl>

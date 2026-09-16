@@ -147,7 +147,7 @@ export function SettingsAgentSection() {
 
       const name = agent?.name ?? 'custom';
       const launchCommand =
-        (agent?.launch_command ?? customCommand.trim()) || undefined;
+        (agent?.launch_command ?? customCommand.trim()) ?? undefined;
       try {
         await desktop.setAgentProfile(name, launchCommand);
         void qc.invalidateQueries({ queryKey: queryKeys.agentProfile.detail() });

@@ -1,9 +1,5 @@
 import type { ServerResponse } from 'node:http';
-import type {
-  WorldKbPatchEntityRequest,
-  WorldKbPatchRelationshipRequest,
-  WorldKbPromoteCandidateRequest,
-} from '@42ch/nexus-contracts';
+import type { WorldKbPatchEntityRequest } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
 import { HttpError, mapNativeError, routeNotMigrated } from './errors.js';
 import {
@@ -23,14 +19,11 @@ import {
   getCoreChanges,
   getWorldKbCandidates,
   getWorldKbGraph,
-  getWorldKbKeyBlockState,
   hostQuery,
   parseBoundedLimit,
   parseClampedLimit,
   parseIncludeSuggested,
   patchWorldKbEntity,
-  patchWorldKbRelationship as patchWorldKbRelationshipRoute,
-  promoteWorldKbCandidate as promoteWorldKbCandidateRoute,
 } from './world-kb.js';
 import { ACTOR_ROUTES } from './actors.js';
 import { MEMORY_ROUTES } from './memory.js';
@@ -178,14 +171,6 @@ export async function handleRoute(
 
 /** A legacy-branch route's success payload (family entries only). */
 type LegacyBody = unknown;
-
-/** Assert a request body is a JSON object and type it as the wire DTO. */
-function wireReq<T extends object>(body: unknown): T {
-  if (body === undefined || body === null || typeof body !== 'object' || Array.isArray(body)) {
-    throw new HttpError(400, 'invalid_input', 'request must be a JSON object');
-  }
-  return body as T;
-}
 
 /** Truthful unguarded runtime liveness/status surface (no API key). */
 function runtimeUnguarded(service: ServiceCore, pathname: string): LegacyBody {

@@ -2180,9 +2180,7 @@ function ensurePrerequisites() {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
-    console.log(
-      'Usage: node apps/nexus-service/scripts/proof-browser.mjs --samples 30 --port 18421 --out <dir>',
-    );
+    
     return;
   }
   const outDir = resolve(repoRoot, args.out);
@@ -2463,12 +2461,12 @@ async function main() {
 
     evidence.pass = Object.values(evidence.criteria).every((c) => c.pass === true);
     evidence.timestamps.utcEnd = new Date().toISOString();
-    const evidencePath = writeEvidence(
+    const _evidencePath = writeEvidence(
       outDir,
       `browser-vertical-${evidence.pass ? 'pass' : 'fail'}.json`,
       evidence,
     );
-    console.log(`proof-browser: ${evidence.pass ? 'PASS' : 'FAIL'} → ${evidencePath}`);
+    
     if (!evidence.pass) process.exitCode = 1;
   } catch (err) {
     evidence.errors.push(err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err));

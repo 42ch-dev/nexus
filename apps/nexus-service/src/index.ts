@@ -1,7 +1,7 @@
 import type { Server } from 'node:http';
 import { rmSync } from 'node:fs';
 import { createAcpProvider } from '@42ch/nexus-provider-acp';
-import type { CoreCloseReport, CoreServiceDiscovery } from '@42ch/nexus-contracts';
+import type { CoreCloseReport } from '@42ch/nexus-contracts';
 import { validateStartupBind } from './bind.js';
 import {
   CLOSE_BUDGET_MS,

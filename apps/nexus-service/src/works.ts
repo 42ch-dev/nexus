@@ -36,7 +36,6 @@ import type {
 } from '@42ch/nexus-contracts';
 import type { ServiceCore } from './lifecycle.js';
 import type { DomainRoute } from './routes.js';
-import { HttpError } from './errors.js';
 import {
   parseOptionalBoolean,
   parseOptionalInteger,

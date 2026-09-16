@@ -20,8 +20,8 @@ export function worldOptionLabel(
 ): string {
   // NarrativeWorldState.title is a required wire field; fall back to the id
   // only for the degenerate empty-string case.
-  const countText = fragmentCount > 0 ? t('soul.fragmentCount', { count: fragmentCount, keyword: world.title || world.world_id }) : t('soul.noFragments');
-  return `${world.title || world.world_id} (${countText})`;
+  const countText = fragmentCount > 0 ? t('soul.fragmentCount', { count: fragmentCount, keyword: world.title ?? world.world_id }) : t('soul.noFragments');
+  return `${world.title ?? world.world_id} (${countText})`;
 }
 
 export function WorldSelector({
