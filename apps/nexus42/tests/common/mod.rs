@@ -103,7 +103,6 @@ impl LiveDaemon {
         Self::start_with_workspace_identity(creator_id, workspace_slug, Some(host)).await
     }
 
-
     /// Boot the daemon with a deterministic `HostFacade` (Character run E2E).
     pub async fn start_with_agent_host(host: Arc<dyn HostFacade>) -> Self {
         Self::start_with_optional_host(Some(host)).await

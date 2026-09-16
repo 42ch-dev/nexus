@@ -37,7 +37,6 @@ async fn seed_owner_worlds(d: &LiveDaemon) {
         .await
         .unwrap();
     }
-
 }
 
 #[tokio::test]

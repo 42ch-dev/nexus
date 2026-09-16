@@ -589,7 +589,12 @@ async fn character_memory_fail_closed_no_mutation() {
 #[allow(clippy::too_many_lines)] // single admitted-projection proof
 async fn character_run_projects_only_admitted_soul_and_memory() {
     let host = MockHost::new();
-    let d = LiveDaemon::start_for_creator_with_agent_host(common::rn_act4::FIXTURE_CREATOR, "default", host.clone()).await;
+    let d = LiveDaemon::start_for_creator_with_agent_host(
+        common::rn_act4::FIXTURE_CREATOR,
+        "default",
+        host.clone(),
+    )
+    .await;
     let g = seed(&d).await;
     let chr = g.character_a.as_str();
 
@@ -791,7 +796,12 @@ async fn run_remember_json(d: &LiveDaemon, g: &common::rn_act4::RnAct4Graph, chr
 #[allow(clippy::too_many_lines)]
 async fn character_run_remember_review_promote_journey() {
     let host = MockHost::new();
-    let d = LiveDaemon::start_for_creator_with_agent_host(common::rn_act4::FIXTURE_CREATOR, "default", host.clone()).await;
+    let d = LiveDaemon::start_for_creator_with_agent_host(
+        common::rn_act4::FIXTURE_CREATOR,
+        "default",
+        host.clone(),
+    )
+    .await;
     let g = seed(&d).await;
     let chr = g.character_a.as_str();
 

@@ -29,7 +29,6 @@ async fn seed_memory_creator(d: &LiveDaemon) {
     .execute(&d.pool)
     .await
     .expect("seed memory creator");
-
 }
 
 /// Seed `n` pending-review rows for [`MEMORY_CREATOR`].
