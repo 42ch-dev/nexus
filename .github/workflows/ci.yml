@@ -580,6 +580,10 @@ jobs:
           rust-toolchain: ""
       - name: Build nexus-provider-acp test peer
         if: matrix.group == 'cli-hosts'
-        run: pnpm --filter @42ch/nexus-provider-acp build
+        # The peer imports `@42ch/nexus-contracts` from its built `dist`, so the
+        # contracts package is built first (same order as the web job).
+        run: |
+          pnpm --filter @42ch/nexus-contracts run build
+          pnpm --filter @42ch/nexus-provider-acp build
       - name: Run tests
         run: cargo test ${{ matrix.packages }}
