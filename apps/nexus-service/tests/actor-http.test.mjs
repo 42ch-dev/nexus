@@ -137,9 +137,12 @@ describe('actor-http (P5-T2)', () => {
       );
     }
     // Tier parity (daemon mod.rs authority): the Creator home family is
-    // tier1 (API-key only, no active creator); every other family route is
-    // tier2 (creator-tier). None is unguarded.
+    // tier1 (API-key only, no active creator); every P5-T2 family route is
+    // tier2 (creator-tier). (Runtime liveness reconciled unguarded in P5-T5
+    // is out of this task's scope.)
+    const OWN_FAMILIES = new Set(['actors', 'memory', 'context']);
     for (const route of inventory) {
+      if (!OWN_FAMILIES.has(route.family)) continue;
       if (route.path.startsWith('/v1/daemon/creators')) {
         assert.equal(route.tier, 'tier1', `${route.method} ${route.path} must stay tier1`);
       } else {
