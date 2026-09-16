@@ -476,7 +476,7 @@ pub async fn accept_compute_run(
             &run.world_id,
             &branch_id,
             "compute_result",
-            evt.title.as_deref(),
+            evt.title.as_deref().map(String::as_str),
             evt.summary.as_deref(),
             &provenance,
             affected_json.as_deref(),
@@ -699,8 +699,8 @@ async fn ensure_world_owned(
 ) -> CoreResult<()> {
     match nexus_local_db::narrative_write::is_world_owned(pool, creator_id, world_id).await {
         Ok(true) => Ok(()),
-        Ok(false) => Err(CoreError::Forbidden {
-            resource: format!("world {world_id}"),
+        Ok(false) => Err(CoreError::WorldOwnerDenied {
+            world_id: world_id.to_string(),
             reason: "you do not own this world".to_string(),
         }),
         Err(e) => Err(CoreError::Internal {

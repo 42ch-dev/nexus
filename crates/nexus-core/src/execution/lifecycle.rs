@@ -349,7 +349,7 @@ impl ExecutionHandle {
     pub fn linked_core(&self) -> crate::CoreResult<Arc<crate::service::CoreService>> {
         self.service
             .upgrade()
-            .map(|inner| crate::service::CoreService { inner })
+            .map(|inner| std::sync::Arc::new(crate::service::CoreService { inner }))
             .ok_or_else(|| crate::CoreError::NotFound {
                 resource: "execution owner's service (already released)".into(),
             })

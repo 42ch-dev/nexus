@@ -85,13 +85,10 @@ pub enum PeerInvokeError {
 /// Deliberately two methods: the registry needs to invoke a tool and to
 /// identify the owning session. Anything else (framing, reconnection,
 /// negotiation) belongs to the transport, not here.
+#[async_trait::async_trait]
 pub trait PeerResponder: Send + Sync {
     /// Invoke `tool_id` with `arguments` on this peer's session.
-    fn invoke_tool(
-        &self,
-        tool_id: &str,
-        arguments: serde_json::Value,
-    ) -> impl std::future::Future<Output = PeerInvokeResult> + Send;
+    async fn invoke_tool(&self, tool_id: &str, arguments: serde_json::Value) -> PeerInvokeResult;
 
     /// The authenticated peer id this responder serves.
     fn peer_id(&self) -> &str;

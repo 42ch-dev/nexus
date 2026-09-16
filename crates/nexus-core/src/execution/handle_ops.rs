@@ -325,10 +325,13 @@ impl ExecutionHandle {
     /// `Internal` when the owner was established without a nexus home, which
     /// the tool surface requires to resolve the active creator.
     fn tool_context(&self) -> CoreResult<ToolContext> {
-        let nexus_home = self.nexus_home().ok_or_else(|| CoreError::Internal {
-            category: "tool dispatch requires a nexus home (owner was established without one)"
-                .to_string(),
-        })?;
+        let nexus_home = self
+            .nexus_home()
+            .ok_or_else(|| CoreError::Internal {
+                category: "tool dispatch requires a nexus home (owner was established without one)"
+                    .to_string(),
+            })?
+            .to_path_buf();
         Ok(ToolContext {
             pool: (*self.coordinator().pool()).clone(),
             nexus_home,

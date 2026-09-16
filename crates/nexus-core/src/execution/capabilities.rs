@@ -55,8 +55,15 @@ use crate::error::{CoreError, CoreResult};
 use crate::error::CoreError as NexusApiError;
 use crate::principal::Principal;
 use crate::service::CoreService;
-use crate::works::WorkDetails;
-use nexus_home_layout::{read_active_creator_id, read_active_workspace_slug};
+use crate::works::{
+    ArchivePoolRequest, PromotePoolRequest, UpdateFindingRequest, WorkDetails, WorkPatchRequest,
+};
+use nexus_home_layout::active_context::{read_active_creator_id, read_active_workspace_slug};
+use nexus_spoke_adapter::{SpokeResult, parse_tool_capability_id};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::LazyLock;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::works;
 use nexus_narrative::NarrativeGateway;
@@ -391,15 +398,9 @@ pub(crate) async fn admission_pipeline(
 
     // Gate 2: active creator (for nexus.* tools)
     if is_nexus_tool {
-        let creator_id = creator_id.ok_or_else(|| NexusApiError::Forbidden {
-            resource: "tool_execution".to_string(),
-            reason: "active creator required for nexus.* tools".to_string(),
-        })?;
+        let creator_id = creator_id.ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "tool_execution".to_string(), "active creator required for nexus.* tools".to_string(),) })?;
         let workspace_slug = read_active_workspace_slug(&context.nexus_home, &creator_id)
-            .ok_or_else(|| NexusApiError::Forbidden {
-                resource: "tool_execution".to_string(),
-                reason: "active workspace required for nexus.* tools".to_string(),
-            })?;
+            .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "tool_execution".to_string(), "active workspace required for nexus.* tools".to_string(),) })?;
 
         // Gate 3: workspace bounds — verified per-handler for entity lookups
         // (Work, schedule, etc. include creator/workspace predicates in SQL).
@@ -420,10 +421,7 @@ pub(crate) async fn admission_pipeline(
     let workspace_path = context.workspace_path();
     let workspace_path_str = workspace_path.unwrap_or_default();
     if workspace_path_str.is_empty() {
-        return Err(NexusApiError::Forbidden {
-            resource: "tool_execution".to_string(),
-            reason: "fs/* tools require an active workspace with defined bounds".to_string(),
-        });
+        return Err(NexusApiError::Forbidden { resource: format!("{}: {}", "tool_execution".to_string(), "fs/* tools require an active workspace with defined bounds".to_string(),) });
     }
 
     // Gate 4: permissions
@@ -552,10 +550,7 @@ async fn execute_work_get(
         .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
         .ok_or_else(|| {
             // Could be not found OR cross-creator — return FORBIDDEN for safety
-            NexusApiError::Forbidden {
-                resource: "work".to_string(),
-                reason: "work not found or cross-creator access denied".to_string(),
-            }
+            NexusApiError::Forbidden { resource: format!("{}: {}", "work".to_string(), "work not found or cross-creator access denied".to_string(),) }
         })?;
 
     let dto = WorkDetails::from(record);
@@ -727,10 +722,7 @@ async fn execute_schedule_status(
     let record = works::get_work(context.pool(), creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
-        .ok_or_else(|| NexusApiError::Forbidden {
-            resource: "work".into(),
-            reason: "work not found or cross-creator access denied".to_string(),
-        })?;
+        .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "work".into(), "work not found or cross-creator access denied".to_string(),) })?;
 
     let schedule_ids: Vec<serde_json::Value> =
         serde_json::from_str(&record.schedule_ids).unwrap_or_default();
@@ -768,10 +760,7 @@ async fn execute_context_assemble(
         let _record = works::get_work(context.pool(), creator_id, work_id)
             .await
             .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
-            .ok_or_else(|| NexusApiError::Forbidden {
-                resource: "work".into(),
-                reason: "work not found or cross-creator access denied".to_string(),
-            })?;
+            .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "work".into(), "work not found or cross-creator access denied".to_string(),) })?;
     }
 
     // Local-only assembly subset
@@ -800,20 +789,16 @@ async fn execute_read_file(
         })?
         .to_string();
 
-    let workspace_path_str = state
+    let workspace_path_str = context
         .workspace_path()
-        .ok_or_else(|| NexusApiError::Forbidden {
-            resource: "tool_execution".into(),
-            reason: "fs/* tools require an active workspace".into(),
-        })?;
+        .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "tool_execution".into(), "fs/* tools require an active workspace".into(),) })?;
 
     let workspace_path = Path::new(&workspace_path_str).to_path_buf();
     let resolved = resolve_guarded_path_async(workspace_path, path_str.clone(), true)
         .await
         .map_err(|e| match e {
-            NexusApiError::BadRequest { .. } => NexusApiError::Forbidden {
-                resource: "file".into(),
-                reason: format!("path '{path_str}' is outside the workspace root"),
+            NexusApiError::InvalidInput { .. } => NexusApiError::Forbidden {
+                resource: format!("file: path '{path_str}' is outside the workspace root"),
             },
             other => other,
         })?;
@@ -855,20 +840,16 @@ async fn execute_write_file(
         })?
         .to_string();
 
-    let workspace_path_str = state
+    let workspace_path_str = context
         .workspace_path()
-        .ok_or_else(|| NexusApiError::Forbidden {
-            resource: "tool_execution".into(),
-            reason: "fs/* tools require an active workspace".into(),
-        })?;
+        .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "tool_execution".into(), "fs/* tools require an active workspace".into(),) })?;
 
     let workspace_path = Path::new(&workspace_path_str).to_path_buf();
     let resolved = resolve_guarded_path_async(workspace_path, path_str.clone(), false)
         .await
         .map_err(|e| match e {
-            NexusApiError::BadRequest { .. } => NexusApiError::Forbidden {
-                resource: "file".into(),
-                reason: format!("path '{path_str}' is outside the workspace root"),
+            NexusApiError::InvalidInput { .. } => NexusApiError::Forbidden {
+                resource: format!("file: path '{path_str}' is outside the workspace root"),
             },
             other => other,
         })?;
@@ -1060,10 +1041,7 @@ async fn ensure_world_accessible_for_creator(
 ) -> Result<(), NexusApiError> {
     match nexus_local_db::narrative_write::is_world_owned(pool, creator_id, world_id).await {
         Ok(true) => Ok(()),
-        Ok(false) => Err(NexusApiError::Forbidden {
-            resource: "world".to_string(),
-            reason: "world not found or cross-creator access denied".to_string(),
-        }),
+        Ok(false) => Err(NexusApiError::Forbidden { resource: format!("{}: {}", "world".to_string(), "world not found or cross-creator access denied".to_string(),) }),
         Err(e) => Err(NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", format!("world ownership check: {e}")) }),
     }
 }
@@ -1084,15 +1062,15 @@ async fn execute_world_snapshot_get(
 
     ensure_world_accessible_for_creator(context.pool(), creator_id, world_id).await?;
 
-    let gw = state
-        .narrative_gateway()
-        .ok_or_else(|| NexusApiError::Internal { category: format!("NARRATIVE_GATEWAY_UNAVAILABLE: {}", "narrative gateway not initialized".to_string()) })?;
+    // The gateway is a thin projection over the same pool this context carries,
+    // so the core composes its own rather than reaching into a transport.
+    let gw = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(context.pool().clone());
     let world_state =
         gw.get_world_state(world_id)
             .await
             .map_err(|e: nexus_narrative::NarrativeError| {
                 if e.to_string().contains("not found") {
-                    NexusApiError::NotFound(format!("world {world_id}"))
+                    NexusApiError::NotFound { resource: world_id.to_string() }
                 } else {
                     NexusApiError::Internal { category: format!("NARRATIVE_ERROR: {}", e.to_string()) }
                 }
@@ -1124,9 +1102,9 @@ async fn execute_timeline_recent_get(
         .unwrap_or(100)
         .min(500);
 
-    let gw = state
-        .narrative_gateway()
-        .ok_or_else(|| NexusApiError::Internal { category: format!("NARRATIVE_GATEWAY_UNAVAILABLE: {}", "narrative gateway not initialized".to_string()) })?;
+    // The gateway is a thin projection over the same pool this context carries,
+    // so the core composes its own rather than reaching into a transport.
+    let gw = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(context.pool().clone());
     let mut events = gw.get_timeline(world_id, None, Some(limit)).await.map_err(
         |e: nexus_narrative::NarrativeError| NexusApiError::Internal { category: format!("NARRATIVE_ERROR: {}", e.to_string()) },
     )?;
@@ -1198,17 +1176,18 @@ async fn execute_manuscript_chapter_get(
     let _record = works::get_work(pool, creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
-        .ok_or_else(|| NexusApiError::Forbidden {
-            resource: "work".to_string(),
-            reason: "work not found or cross-creator access denied".to_string(),
-        })?;
+        .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "work".to_string(), "work not found or cross-creator access denied".to_string(),) })?;
 
     let chapter_record = nexus_local_db::work_chapters::get_chapter(pool, work_id, chapter, volume)
         .await
         .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?;
 
     chapter_record.map_or_else(
-        || Err(NexusApiError::NotFound(format!("{work_id}/ch{chapter}"))),
+        || {
+            Err(NexusApiError::NotFound {
+                resource: format!("{work_id}/ch{chapter}"),
+            })
+        },
         |ch| Ok(serde_json::to_value(&ch).unwrap_or_else(|_| serde_json::json!({}))),
     )
 }
@@ -1230,7 +1209,7 @@ fn execute_daemon_health(
     let reg = host_tool_registry();
     serde_json::json!({
         "uptime_seconds": context.runtime_facts.uptime_seconds,
-        "started_at": context.runtime_facts.started_at.to_rfc3339(),
+        "started_at": &context.runtime_facts.started_at,
         "runtime_mode": context.runtime_facts.runtime_mode_as_str(),
         "lifecycle_state": context.runtime_facts.lifecycle_state.to_string(),
         "registry_size": reg.len(),
@@ -1311,7 +1290,7 @@ pub(crate) fn registry_read_file<'a>(
     context: &'a ToolContext,
     _creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
-    Box::pin(execute_read_file(req, state))
+    Box::pin(execute_read_file(req, context))
 }
 
 /// Registry wrapper: `fs/write_text_file` — async passthrough (ignores `creator_id`).
@@ -1320,7 +1299,7 @@ pub(crate) fn registry_write_file<'a>(
     context: &'a ToolContext,
     _creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
-    Box::pin(execute_write_file(req, state))
+    Box::pin(execute_write_file(req, context))
 }
 
 // ─── V1.53 P1: Registry wrappers for DF-46 read-heavy tools ───────────────
@@ -1467,15 +1446,12 @@ async fn execute_kb_snapshot_write(
         // C-001: reject blocks whose embedded world_id does not match the
         // request-level world_id (prevents cross-world block payload bypass).
         if kb.world_id() != Some(world_id) {
-            return Err(NexusApiError::Forbidden {
-                resource: "knowledge_entry.world_id".to_string(),
-                reason: format!(
+            return Err(NexusApiError::Forbidden { resource: format!("{}: {}", "knowledge_entry.world_id".to_string(), format!(
                     "block {} targets world '{}' but request targets world '{}'",
                     kb.entry_id,
                     kb.world_id().unwrap_or_default(),
                     world_id
-                ),
-            });
+                ),) });
         }
         kb_store
             .insert_key_block_in_tx(&mut tx, kb)
@@ -1528,10 +1504,7 @@ async fn execute_manuscript_chapter_update(
     let work_record = works::get_work(pool, creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
-        .ok_or_else(|| NexusApiError::Forbidden {
-            resource: "work".to_string(),
-            reason: "work not found or cross-creator access denied".to_string(),
-        })?;
+        .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "work".to_string(), "work not found or cross-creator access denied".to_string(),) })?;
 
     // Check chapter exists
     let chapter_exists = nexus_local_db::work_chapters::get_chapter(pool, work_id, chapter, volume)
@@ -1539,15 +1512,15 @@ async fn execute_manuscript_chapter_update(
         .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?;
 
     if chapter_exists.is_none() {
-        return Err(NexusApiError::NotFound(format!(
-            "{work_id}/ch{chapter}/v{volume}"
-        )));
+        return Err(NexusApiError::NotFound {
+            resource: format!("{work_id}/ch{chapter}/v{volume}"),
+        });
     }
 
     // Update body content if provided
     let now = chrono::Utc::now().to_rfc3339();
     let body_path: Option<String> = if let Some(content) = req.parameters["content"].as_str() {
-        let workspace_root = state
+        let workspace_root = context
             .workspace_path()
             .ok_or_else(|| NexusApiError::Internal { category: format!("WORKSPACE_PATH_ERROR: {}", "workspace path not available".to_string()) })?;
         // W-003: use the canonical body_path from the existing chapter record
@@ -1572,7 +1545,7 @@ async fn execute_manuscript_chapter_update(
         )
         .await
         .map_err(|e| match e {
-            NexusApiError::BadRequest { code, .. } if code == "chapter_path_forbidden" => {
+            NexusApiError::InvalidInput { field, .. } if field == "chapter_path_forbidden" => {
                 NexusApiError::InvalidInput {
                     field: "body_path".into(),
                     reason: "body path outside workspace root".into(),
@@ -1618,14 +1591,14 @@ async fn execute_manuscript_chapter_update(
         // W-002: re-apply the path guard before the FS rename so the tx block
         // cannot be reached with an escaped path even if the earlier guard were
         // bypassed.
-        let workspace_root = state
+        let workspace_root = context
             .workspace_path()
             .ok_or_else(|| NexusApiError::Internal { category: format!("WORKSPACE_PATH_ERROR: {}", "workspace path not available".to_string()) })?;
         let abs_body =
             resolve_guarded_path_async(Path::new(&workspace_root).to_path_buf(), bp.clone(), false)
                 .await
                 .map_err(|e| match e {
-                    NexusApiError::BadRequest { code, .. } if code == "chapter_path_forbidden" => {
+                    NexusApiError::InvalidInput { field, .. } if field == "chapter_path_forbidden" => {
                         NexusApiError::InvalidInput {
                             field: "body_path".into(),
                             reason: "body path outside workspace root".into(),
@@ -1687,7 +1660,11 @@ async fn execute_manuscript_chapter_update(
         .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?;
 
     updated.map_or_else(
-        || Err(NexusApiError::NotFound(format!("{work_id}/ch{chapter}"))),
+        || {
+            Err(NexusApiError::NotFound {
+                resource: format!("{work_id}/ch{chapter}"),
+            })
+        },
         |ch| Ok(serde_json::to_value(&ch).unwrap_or_else(|_| serde_json::json!({}))),
     )
 }
@@ -1933,7 +1910,7 @@ async fn execute_pool_entry_manage(
             )
             .await
             .map_err(|e| NexusApiError::Internal { category: format!("POOL_ERROR: {}", e.to_string()) })?
-            .ok_or_else(|| NexusApiError::NotFound(format!("pool entry for {work_id}")))?;
+            .ok_or_else(|| NexusApiError::NotFound { resource: work_id.to_string() })?;
 
             core.archive_work_pool_entry(
                 &principal,
@@ -2040,10 +2017,7 @@ async fn execute_manuscript_list(
 ) -> Result<serde_json::Value, NexusApiError> {
     let workspace_slug =
         read_active_workspace_slug(&context.nexus_home, creator_id).ok_or_else(|| {
-            NexusApiError::Forbidden {
-                resource: "manuscript.list".to_string(),
-                reason: "active workspace required".to_string(),
-            }
+            NexusApiError::Forbidden { resource: format!("{}: {}", "manuscript.list".to_string(), "active workspace required".to_string(),) }
         })?;
 
     let filters = works::WorkListFilters::default();
@@ -2113,21 +2087,22 @@ async fn execute_manuscript_read_range(
     let _work = works::get_work(pool, creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
-        .ok_or_else(|| NexusApiError::Forbidden {
-            resource: "work".to_string(),
-            reason: "work not found or cross-creator access denied".to_string(),
-        })?;
+        .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "work".to_string(), "work not found or cross-creator access denied".to_string(),) })?;
 
     let chapter_record = nexus_local_db::work_chapters::get_chapter(pool, work_id, chapter, volume)
         .await
         .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
-        .ok_or_else(|| NexusApiError::NotFound(format!("{work_id}/ch{chapter}")))?;
+        .ok_or_else(|| NexusApiError::NotFound {
+            resource: format!("{work_id}/ch{chapter}"),
+        })?;
 
     let body_path = chapter_record
         .body_path
-        .ok_or_else(|| NexusApiError::NotFound(format!("{work_id}/ch{chapter}/body")))?;
+        .ok_or_else(|| NexusApiError::NotFound {
+            resource: format!("{work_id}/ch{chapter}/body"),
+        })?;
 
-    let workspace_root = state
+    let workspace_root = context
         .workspace_path()
         .ok_or_else(|| NexusApiError::Internal { category: format!("WORKSPACE_PATH_ERROR: {}", "workspace path not available".to_string()) })?;
     let workspace_root_path = Path::new(&workspace_root);
@@ -2147,7 +2122,9 @@ async fn execute_manuscript_read_range(
     )
     .await
     .map_err(|e| match e {
-        NexusApiError::BadRequest { message, .. } => NexusApiError::InvalidInput {
+        // The core names the refusal; the chapter lane reports it as a
+        // body-path validation failure.
+        NexusApiError::Coded { message, .. } => NexusApiError::InvalidInput {
             field: "body_path".into(),
             reason: message,
         },
@@ -2251,22 +2228,21 @@ async fn execute_manuscript_write(
     let _work = works::get_work(pool, creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
-        .ok_or_else(|| NexusApiError::Forbidden {
-            resource: "work".to_string(),
-            reason: "work not found or cross-creator access denied".to_string(),
-        })?;
+        .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "work".to_string(), "work not found or cross-creator access denied".to_string(),) })?;
 
     // Chapter must exist (manuscript.write does not create chapters).
     let chapter_record = nexus_local_db::work_chapters::get_chapter(pool, work_id, chapter, volume)
         .await
         .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
-        .ok_or_else(|| NexusApiError::NotFound(format!("{work_id}/ch{chapter}")))?;
+        .ok_or_else(|| NexusApiError::NotFound {
+            resource: format!("{work_id}/ch{chapter}"),
+        })?;
 
     let body_path = chapter_record
         .body_path
         .ok_or_else(|| NexusApiError::Internal { category: format!("CHAPTER_BODY_MISSING: {}", format!("chapter {work_id}/ch{chapter} has no body_path")) })?;
 
-    let workspace_root = state
+    let workspace_root = context
         .workspace_path()
         .ok_or_else(|| NexusApiError::Internal { category: format!("WORKSPACE_PATH_ERROR: {}", "workspace path not available".to_string()) })?;
     let workspace_root_path = Path::new(&workspace_root);
@@ -2278,7 +2254,7 @@ async fn execute_manuscript_write(
         resolve_guarded_path_async(workspace_root_path.to_path_buf(), body_path.clone(), false)
             .await
             .map_err(|e| match e {
-                NexusApiError::BadRequest { code, .. } if code == "chapter_path_forbidden" => {
+                NexusApiError::InvalidInput { field, .. } if field == "chapter_path_forbidden" => {
                     NexusApiError::InvalidInput {
                         field: "body_path".into(),
                         reason: "body path outside workspace root".into(),
@@ -2387,10 +2363,7 @@ async fn execute_manuscript_phase_get(
         works::get_work_stage(context.pool(), creator_id, work_id)
             .await
             .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
-            .ok_or_else(|| NexusApiError::Forbidden {
-                resource: "work".to_string(),
-                reason: "work not found or cross-creator access denied".to_string(),
-            })?;
+            .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "work".to_string(), "work not found or cross-creator access denied".to_string(),) })?;
 
     Ok(serde_json::json!({
         "work_id": work_id,
@@ -2434,10 +2407,7 @@ async fn execute_manuscript_phase_set(
     let (current_stage, _stage_status) = works::get_work_stage(pool, creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
-        .ok_or_else(|| NexusApiError::Forbidden {
-            resource: "work".to_string(),
-            reason: "work not found or cross-creator access denied".to_string(),
-        })?;
+        .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "work".to_string(), "work not found or cross-creator access denied".to_string(),) })?;
 
     let previous_phase = current_stage.clone();
 
@@ -2473,7 +2443,7 @@ fn execute_workspace_paths(
     context: &ToolContext,
     _creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
-    let workspace_root = state
+    let workspace_root = context
         .workspace_path()
         .ok_or_else(|| NexusApiError::InvalidInput {
             field: "workspace".into(),
@@ -2507,7 +2477,7 @@ async fn execute_research_query(
         let row = nexus_local_db::reference_source::get_by_id(pool, id)
             .await
             .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
-            .ok_or_else(|| NexusApiError::NotFound(format!("reference_source/{id}")))?;
+            .ok_or_else(|| NexusApiError::NotFound { resource: id.to_string() })?;
 
         return Ok(serde_json::json!({
             "results": [serde_json::json!({
@@ -2721,7 +2691,7 @@ pub(crate) fn registry_trace_correlation<'a>(
 /// returns a boxed future resolving to `Result<serde_json::Value, NexusApiError>`.
 pub type RegistryHandlerFn = for<'a> fn(
     &'a ToolExecuteRequest,
-    &'a WorkspaceState,
+    &'a ToolContext,
     &'a str,
 ) -> Pin<
     Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>,
@@ -3126,26 +3096,20 @@ async fn dispatch_user_cap(
     // AR-76 #2/#4 (W-A): the structural gate fires before any adapter I/O —
     // same refusal vocabulary as the peer arm.
     if let Err(message) = validate_user_cap_arguments(cap.input_schema(), &req.parameters) {
-        return Err(NexusApiError::BadRequest {
+        return Err(NexusApiError::Coded {
             code: "invalid_input".to_string(),
             message,
         });
     }
     cap.run(req.parameters.clone()).await.map_err(|e| match e {
-        CapabilityError::InputInvalid(msg) => NexusApiError::BadRequest {
+        CapabilityError::InputInvalid(msg) => NexusApiError::Coded {
             code: "invalid_input".to_string(),
             message: msg,
         },
-        CapabilityError::Forbidden(msg) => NexusApiError::Forbidden {
-            resource: "tool_execution".to_string(),
-            reason: msg,
-        },
-        CapabilityError::WorkerUnavailable => NexusApiError::ServiceUnavailable {
-            message: format!("capability '{}' has no executor wired", cap.name()),
-        },
+        CapabilityError::Forbidden(msg) => NexusApiError::Forbidden { resource: format!("{}: {}", "tool_execution".to_string(), msg,) },
+        CapabilityError::WorkerUnavailable => NexusApiError::Internal { category: format!("SERVICE_UNAVAILABLE: {}", format!("capability '{}' has no executor wired", cap.name()),) },
         other => NexusApiError::Internal {
-            code: "CAPABILITY_RUN_FAILED".to_string(),
-            message: format!("capability '{}' failed: {other}", cap.name()),
+            category: format!("CAPABILITY_RUN_FAILED: capability '{}' failed: {other}", cap.name()),
         },
     })
 }
