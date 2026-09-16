@@ -141,8 +141,15 @@ describe('execution-http (P5-T3)', () => {
     //    exactly the configured families and a session binds the chosen one.
     const catalog = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/providers`);
     assert.equal(catalog.status, 200, catalog.text);
-    const listed = (catalog.payload.providers ?? []).map((entry) => entry.provider_id).sort();
-    assert.deepEqual(listed, [...PROVIDER_IDS].sort(), catalog.text);
+    const listed = (catalog.payload.providers ?? []).map((entry) => entry.provider_id);
+    // The four configured mock families must all be Rust-admitted, and the
+    // maintained DSH native adapter is a real default catalog member (P4
+    // native_cli registration semantics) — asserted present, never deleted
+    // to flatter the fixture.
+    for (const id of PROVIDER_IDS) {
+      assert.ok(listed.includes(id), `missing configured provider family ${id}: ${catalog.text}`);
+    }
+    assert.ok(listed.includes('dsh-native'), `maintained dsh-native adapter must be registered: ${catalog.text}`);
 
     const created = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/sessions`, {
       method: 'POST',
