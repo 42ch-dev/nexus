@@ -18,8 +18,9 @@ use nexus_contracts::generated::daemon_api::agent_host as _;
 use nexus_core::connect::mcp_bridge::{
     is_unroutable, CatalogRow, McpBackend, ToolCallOutcome,
 };
+pub use nexus_core::connect::mcp_embedded::EmbeddedMcpError;
 use nexus_core::connect::mcp_embedded::{
-    start_embedded_mcp_server as core_start_embedded_mcp_server, EmbeddedMcpError,
+    start_embedded_mcp_server as core_start_embedded_mcp_server,
     EmbeddedMcpServer as CoreEmbeddedMcpServer, EmbeddedShutdown,
 };
 use nexus_core::connect::visibility::VisibilityPolicy;

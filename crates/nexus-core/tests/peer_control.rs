@@ -101,12 +101,18 @@ async fn visible_peer_tool_still_requires_authorization() {
     let responder = CountingResponder::new();
 
     // Admission: the peer tool enters the dispatchable surface.
+    // The operator allowlist is default-deny: admitting the anchor tool
+    // requires naming it (the AR-68 #2(iii) contract).
+    let allowlist: std::collections::HashSet<String> = [TOOL.to_string()].into_iter().collect();
+    // The hello-negotiated capabilities must carry the id (Layer-1 refusal
+    // `not_negotiated` otherwise).
+    let negotiated: std::collections::HashSet<String> = [TOOL.to_string()].into_iter().collect();
     let outcome = registry.admit_and_register(
         PEER,
         &manifest_with_tools(&[TOOL]),
         &(Arc::clone(&responder) as Arc<dyn PeerResponder>),
-        &empty_set(),
-        &empty_set(),
+        &negotiated,
+        &allowlist,
         &empty_set(),
     );
     let AdmissionOutcome::Admitted { tool_ids } = outcome else {
@@ -165,8 +171,8 @@ async fn visible_peer_tool_still_requires_authorization() {
         PEER,
         &manifest_with_tools(&[TOOL]),
         &(Arc::clone(&replacement) as Arc<dyn PeerResponder>),
-        &empty_set(),
-        &empty_set(),
+        &negotiated,
+        &allowlist,
         &empty_set(),
     );
     let AdmissionOutcome::Admitted { .. } = outcome else {

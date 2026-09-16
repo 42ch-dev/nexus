@@ -49,12 +49,15 @@ connect-client = [
     "dep:spoke-connect",
     "dep:tokio-tungstenite",
     "dep:nexus-orchestration",
+    "dep:futures-util",
     # mcp_bridge's rmcp server surface compiles with connect-client; only
     # the embedded server (Model B) additionally needs embedded-mcp.
     "dep:rmcp",
     "dep:getrandom",
 ]
-embedded-mcp = ["dep:rmcp"]
+# Model B's sink/stream session channels (futures_channel::mpsc) ride the
+# same rmcp transport module; the shell compiles only under embedded-mcp.
+embedded-mcp = ["connect-client", "dep:rmcp", "dep:futures-channel"]
 
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
@@ -77,6 +80,8 @@ spoke-connect = { workspace = true, features = ["remote-adapter"], optional = tr
 tokio-tungstenite = { workspace = true, optional = true }
 # identity.rs seeds the per-peer device identity from the OS CSPRNG.
 getrandom = { version = "0.4", optional = true }
+# Model B session transport channels (embedded-mcp edge only).
+futures-channel = { version = "0.3", optional = true }
 nexus-provider-ports = { path = "../nexus-provider-ports", optional = true }
 # graph-flow is the engine's session backend: the execution layer names
 # `SessionStorage` directly (the engine trait surface does not re-export it).
