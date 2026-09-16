@@ -185,3 +185,38 @@ The native CLI `--mcp-config` story is **documented-only** (PL-10) — see
 user-side JSON; nexus does not own native CLI spawn configuration. A
 document-only native face is **not** an AC-V174-1 miss: the acceptance
 journey closes on the wired ACP path above.
+
+## Implementation ownership (v1.190 P4-T3)
+
+The MCP/peer serving implementation moved behind transport-neutral ownership
+in `nexus-core`; the daemon keeps only host compositions. Current facts:
+
+- **Peer tool registry.** The process-level registry of admitted peer tools
+  is `nexus_core::execution::peer_tools::peer_tool_registry()` (P3). The
+  connect stack admits into it and never keeps a second registry; collision
+  policy, reserved tool ids and evictions are registry semantics.
+- **Peer/MCP sessions, transport, watchers.** The WS transport
+  (`WsTransport`, tokio-tungstenite, bounded envelope), the accept loop +
+  `PeerSessionManager`, the config snapshot/watcher chain, peer identity
+  loading, and the shared rmcp bridge core live in
+  `nexus_core::connect` behind the `connect-client` feature. The daemon
+  modules under `crates/nexus-daemon-runtime/src/connect/` are retirement
+  shims that re-export the core surface.
+- **Embedded MCP server (Model B).** The generic shell (process-global
+  session budget `EMBEDDED_MCP_MAX_SESSIONS`, server-side budget-slot
+  lifetime, watch-based shutdown gate) is
+  `nexus_core::connect::mcp_embedded` behind the nested `embedded-mcp`
+  feature; the daemon's `WorkspaceState`-backed backend (the same catalog
+  builder and tool dispatch path the HTTP routes use) is a thin adapter in
+  the daemon. The fail-closed invalid-`mcp_visibility` construction refusal
+  is unchanged.
+- **Visibility policy.** `VisibilityPolicy` (V1.180 P1, RN-OGA-2) is
+  evaluated at the shared MCP serving seam before `tools/list` filtering and
+  before `tools/call` dispatch. Visibility is never an authorization grant:
+  an absent policy stays byte-identical to the pre-seam behavior, and a
+  hidden-tool call is refused at the seam before any peer invocation.
+- **Peer control.** The execution owner admits one peer-control lane
+  (`ExecutionHandle::start_peer_control` / `peer_control`): explicit
+  enablement plus a named operation allowlist; operations off the allowlist
+  are refused before any effect. Child stdio CLI composition remains the
+  operator surface (P6-T2).
