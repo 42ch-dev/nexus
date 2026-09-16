@@ -463,6 +463,10 @@ fn check_nexus_tool_permission(
         // on-disk `body.md`, and performs a network fetch — a read-policy
         // grant must not authorize it.
         "nexus.reference.refresh",
+        // Writes the chapter body to disk (temp file + fsync + atomic rename).
+        "nexus.manuscript.write",
+        // Mutates the Work's persisted stage/stage_status.
+        "nexus.manuscript.phase.set",
     ];
 
     let allowed = if NEXUS_WRITE_TOOLS.contains(&tool_name) {
