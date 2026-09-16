@@ -527,7 +527,7 @@ async fn apply_reload(
     // — an admission landing between them could read the new table
     // config against the old holder snapshot; keeping the pair adjacent
     // bounds that skew to a few pointer writes.
-    table.set_config(Some(Arc::clone(&snapshot.config)));
+    table.set_config(Some(Arc::new(snapshot.config.registry_config())));
     holder.swap(snapshot);
     Ok(ConfigEvent::Changed)
 }
@@ -1033,7 +1033,7 @@ mod tests {
             peer_keys: Arc::new(HashMap::new()),
         });
         let table = PeerToolTable::new();
-        table.set_config(Some(Arc::clone(&holder.get().config)));
+        table.set_config(Some(Arc::new(holder.get().config.registry_config())));
 
         // Boot posture: peer-a registers tools.t3.echo; peer-b's later
         // same-id registration is refused (first_stays — the row stays

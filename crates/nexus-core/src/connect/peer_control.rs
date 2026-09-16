@@ -89,7 +89,7 @@ impl ExecutionHandle {
         principal: &crate::principal::Principal,
         request: CorePeerControlOptions,
     ) -> CoreResult<CorePeerControlState> {
-        let core = self.service.upgrade().ok_or(CoreError::Closing)?;
+        let core = self.linked_core()?;
         core.verify_principal(principal)?;
         let allowed: HashSet<String> = request
             .allowed_operations
@@ -134,7 +134,7 @@ impl ExecutionHandle {
         principal: &crate::principal::Principal,
         request: CorePeerControlRequest,
     ) -> CoreResult<CorePeerControlState> {
-        let core = self.service.upgrade().ok_or(CoreError::Closing)?;
+        let core = self.linked_core()?;
         core.verify_principal(principal)?;
         let lane = {
             let slot = self

@@ -528,7 +528,7 @@ pub async fn start_peer_tools_lane(
     // reads the capability holder the same way — p1's reload swaps the
     // Arc and NEW registrations pick up the new policy without further
     // table mutation).
-    crate::connect::peer_tool_table().set_config(Some(Arc::clone(&config)));
+    crate::connect::peer_tool_table().set_config(Some(Arc::new(config.registry_config())));
     // PR #229 F-2 (Cursor Security HIGH): the peer lane binds PLAINTEXT
     // (no WSS — `accept_async_with_config`), so a non-loopback bind must
     // FAIL CLOSED — mirroring the V1.92 daemon HTTP API posture
@@ -554,12 +554,10 @@ pub async fn start_peer_tools_lane(
             .map_err(|e| CoreError::Internal {
                 category: format!("peer-tools identity: {e}"),
             })?;
-    let device_id = nexus_home_layout::device_id::get_or_create_device_id(home).map_err(|e| {
-        IdentityError::Io {
-            path: home.display().to_string(),
-            source: std::io::Error::other(format!("device id resolution failed: {e}")),
-        }
-    })?;
+    let device_id = nexus_home_layout::device_id::get_or_create_device_id(home)
+        .map_err(|e| CoreError::Internal {
+            category: format!("peer-tools device id resolution: {e}"),
+        })?;
     // DF-92: the live config holder is seeded with the boot generation;
     // the watcher (below) swaps validated reloads into it and every
     // connection reads it (see `handle_connection`) — handshake
