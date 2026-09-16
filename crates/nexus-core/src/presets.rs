@@ -181,6 +181,10 @@ impl CoreService {
         })?
     }
 
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the preset is unknown
+    /// or fails validation, or the guarded home read/write fails.
     pub async fn patch_strategy_state(
         &self,
         principal: &Principal,
@@ -198,6 +202,10 @@ impl CoreService {
         .await
     }
 
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the preset is unknown
+    /// or fails validation, or the guarded home read/write fails.
     pub async fn patch_strategy_transition(
         &self,
         principal: &Principal,
@@ -213,6 +221,10 @@ impl CoreService {
         .await
     }
 
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the preset is unknown
+    /// or fails validation, or the guarded home read/write fails.
     pub async fn patch_strategy_prompt_template(
         &self,
         principal: &Principal,
@@ -230,6 +242,10 @@ impl CoreService {
         .await
     }
 
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the preset is unknown
+    /// or fails validation, or the guarded home read/write fails.
     pub async fn scaffold_preset(
         &self,
         principal: &Principal,
@@ -247,6 +263,10 @@ impl CoreService {
             .await
     }
 
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the preset is unknown
+    /// or fails validation, or the guarded home read/write fails.
     pub async fn delete_preset(&self, principal: &Principal, preset_id: String) -> CoreResult<()> {
         self.preset_write(principal, preset_id, |home, id| {
             let (source, path) = locate_preset(home, id)?;
@@ -262,6 +282,10 @@ impl CoreService {
         .await
     }
 
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the preset is unknown
+    /// or fails validation, or the guarded home read/write fails.
     pub async fn get_preset(
         &self,
         principal: &Principal,
@@ -282,6 +306,10 @@ impl CoreService {
         })
     }
 
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the preset is unknown
+    /// or fails validation, or the guarded home read/write fails.
     pub async fn list_presets(&self, principal: &Principal) -> CoreResult<ListPresetsResponse> {
         self.verify_principal(principal)?;
         let caps = BuiltinCapabilityCatalog;
@@ -343,6 +371,10 @@ impl CoreService {
         })
     }
 
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the preset is unknown
+    /// or fails validation, or the guarded home read/write fails.
     pub async fn validate_preset(
         &self,
         principal: &Principal,
@@ -352,6 +384,10 @@ impl CoreService {
         validate_preset_file(&request).map_err(CoreError::from)
     }
 
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the preset is unknown
+    /// or fails validation, or the guarded home read/write fails.
     /// Replace user YAML without changing the retained request or revision policy.
     pub async fn update_preset(
         &self,
@@ -381,6 +417,10 @@ impl CoreService {
         .await
     }
 
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the preset is unknown
+    /// or fails validation, or the guarded home read/write fails.
     /// Retained orchestration listing: embedded IDs followed by unique system IDs.
     pub async fn list_orchestration_presets(
         &self,
@@ -400,6 +440,10 @@ impl CoreService {
         Ok(OrchestrationPresetListResponse { presets })
     }
 
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the preset is unknown
+    /// or fails validation, or the guarded home read/write fails.
     /// Read the profile using the retained user/system/embedded resolution order.
     pub async fn get_preset_profile(
         &self,

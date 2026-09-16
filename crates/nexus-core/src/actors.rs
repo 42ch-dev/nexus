@@ -160,9 +160,7 @@ where
     raw.map(str::parse).transpose().map_err(wire_err)
 }
 
-pub fn nexus_character_from_record(
-    record: &CharacterRecord,
-) -> CoreResult<DetailCharacterWire> {
+pub fn nexus_character_from_record(record: &CharacterRecord) -> CoreResult<DetailCharacterWire> {
     let persona: serde_json::Map<String, serde_json::Value> =
         serde_json::from_str(&record.persona_json).map_err(wire_err)?;
     build_wire(

@@ -179,7 +179,7 @@ pub async fn tool_context(state: &WorkspaceState) -> Result<ToolContext, NexusAp
         state.nexus_home().clone(),
         state.workspace_path(),
         ToolRuntimeFacts {
-            runtime_mode: state.runtime_mode().clone(),
+            runtime_mode: *state.runtime_mode(),
             is_initialized: state.is_initialized(),
             lifecycle_state: state.lifecycle_state().to_string(),
             started_at: state.started_at().to_rfc3339(),

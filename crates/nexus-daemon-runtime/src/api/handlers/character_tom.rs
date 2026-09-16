@@ -2,7 +2,7 @@
 //! the core Character `ToM` carrier family (v1.190 P2-T2). The bounded
 //! carrier probes, atomic CAS + derivative `MindState` and keyset pagination
 //! live in [`nexus_core`]; the handlers keep only auth resolution, wire
-//! parsing and status/envelope translation. ToM record is a mutation and
+//! parsing and status/envelope translation. `ToM` record is a mutation and
 //! holds the core per-Character activity lease inside the core call.
 
 #![allow(clippy::missing_errors_doc)]

@@ -233,11 +233,12 @@ impl CoreService {
     /// seed and inspect the same guarded store the service writes. It is not a
     /// second business truth and must not acquire production callers.
     #[cfg(any(test, feature = "test-hooks"))]
-    #[must_use]
+
     pub fn pool(&self) -> &SqlitePool {
         &self.inner.pool
     }
 
+    #[must_use]
     pub fn nexus_home(&self) -> &std::path::Path {
         &self.inner.nexus_home
     }

@@ -1,4 +1,4 @@
-//! ExecutionHandle peer-control operations (v1.190 P4-T3).
+//! `ExecutionHandle` peer-control operations (v1.190 P4-T3).
 //!
 //! The typed entry points the transport calls for peer-control state; the
 //! handle owns at most one [`PeerControlLane`]. Capability dispatch itself
@@ -26,7 +26,7 @@ pub struct PeerControlLane {
 }
 
 impl PeerControlLane {
-    fn new(enabled: bool, allowed_operations: HashSet<String>) -> Self {
+    const fn new(enabled: bool, allowed_operations: HashSet<String>) -> Self {
         Self {
             enabled: AtomicBool::new(enabled),
             allowed_operations: Mutex::new(allowed_operations),
@@ -45,7 +45,7 @@ impl PeerControlLane {
     pub fn allows(&self, operation: &str) -> bool {
         self.allowed_operations
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .contains(operation)
     }
 
@@ -56,7 +56,7 @@ impl PeerControlLane {
     fn allow(&self, operation: &str) {
         self.allowed_operations
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(operation.to_owned());
     }
 
@@ -101,14 +101,13 @@ impl ExecutionHandle {
         let mut slot = self
             .peer_control
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let lane = match slot.as_ref() {
-            Some(lane) => Arc::clone(lane),
-            None => {
-                let lane = Arc::new(PeerControlLane::new(false, HashSet::new()));
-                *slot = Some(Arc::clone(&lane));
-                lane
-            }
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let lane = if let Some(lane) = slot.as_ref() {
+            Arc::clone(lane)
+        } else {
+            let lane = Arc::new(PeerControlLane::new(false, HashSet::new()));
+            *slot = Some(Arc::clone(&lane));
+            lane
         };
         drop(slot);
         lane.set_enabled(request.enabled);
@@ -142,7 +141,7 @@ impl ExecutionHandle {
             let slot = self
                 .peer_control
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             slot.as_ref().map(Arc::clone)
         }
         .ok_or_else(|| CoreError::InvalidInput {
@@ -167,7 +166,7 @@ impl ExecutionHandle {
                     .evict_peer(&request.peer_id, None);
                 if !evicted {
                     return Err(CoreError::NotFound {
-                        resource: format!("peer {}", &*request.peer_id),
+                        resource: format!("peer {}", *request.peer_id),
                     });
                 }
             }

@@ -754,10 +754,7 @@ async fn sql_creator_rows(pool: &sqlx::SqlitePool) -> CoreResult<Vec<NexusCreato
 }
 
 /// Get the identity cache entry for a creator.
-pub fn get_identity_entry(
-    cache: &serde_json::Value,
-    creator_id: &str,
-) -> Option<IdentityEntry> {
+pub fn get_identity_entry(cache: &serde_json::Value, creator_id: &str) -> Option<IdentityEntry> {
     let creators = cache.get("creators")?.as_object()?;
     let entry = creators.get(creator_id)?;
     Some(IdentityEntry {

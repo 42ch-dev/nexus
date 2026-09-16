@@ -18,9 +18,9 @@ use nexus_contracts::{
 /// Map a core content/outline fault onto the legacy HTTP classification.
 ///
 /// `BadRequest` codes and `NotFound` resources round-trip verbatim; the
-/// legacy internal codes (DATABASE_ERROR, CONTRACT_ERROR, FILE_READ_ERROR,
-/// DIRECTORY_CREATE_ERROR, OUTLINE_WRITE_ERROR, OUTLINE_SERIALIZE_ERROR,
-/// OUTLINE_REVISION_NEGATIVE, WORK_REF_MISSING, PATH_GUARD_PANIC) are carried
+/// legacy internal codes (`DATABASE_ERROR`, `CONTRACT_ERROR`, `FILE_READ_ERROR`,
+/// `DIRECTORY_CREATE_ERROR`, `OUTLINE_WRITE_ERROR`, `OUTLINE_SERIALIZE_ERROR`,
+/// `OUTLINE_REVISION_NEGATIVE`, `WORK_REF_MISSING`, `PATH_GUARD_PANIC`) are carried
 /// verbatim as `<CODE>: <message>` and re-emitted with the original code; the
 /// core `local_db_err` lowercase `database_error: …` carrier (Work-lookup
 /// storage faults) is re-classified as the legacy `DATABASE_ERROR`; every

@@ -217,7 +217,7 @@ fn knowledge_item_from_record(record: &KnowledgeEntryRecord) -> CoreWire<Knowled
         "id": record.owner.id(),
     });
     let block_type =
-        serde_json::to_value(&record.block_type).map_err(|error| CoreError::Internal {
+        serde_json::to_value(record.block_type).map_err(|error| CoreError::Internal {
             category: format!("{CHARACTER_WIRE_INVALID_PREFIX}: {error}"),
         })?;
     let value = serde_json::json!({
@@ -715,7 +715,7 @@ impl NativeCore {
             let record = core
                 .actor_knowledge_entry(&principal, character_id, entry_id)
                 .await?;
-            Ok(knowledge_detail_from_record(&record)?)
+            knowledge_detail_from_record(&record)
         })
         .await
     }
@@ -762,7 +762,7 @@ impl NativeCore {
                     summary_patch,
                 )
                 .await?;
-            Ok(knowledge_detail_from_record(&record)?)
+            knowledge_detail_from_record(&record)
         })
         .await
     }

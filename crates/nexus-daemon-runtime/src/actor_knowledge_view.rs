@@ -1,4 +1,4 @@
-//! Thin daemon translation over the core KnowledgeView service (v1.190 P2-T1).
+//! Thin daemon translation over the core `KnowledgeView` service (v1.190 P2-T1).
 //!
 //! The stored-owner composition, keyset pagination, cursor codec and
 //! admission predicates live in [`nexus_core`]; this wrapper only re-sends

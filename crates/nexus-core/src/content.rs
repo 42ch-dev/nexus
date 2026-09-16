@@ -78,6 +78,10 @@ pub fn wire_cast<T: serde::de::DeserializeOwned, S: serde::Serialize>(
 
 // ─── Guarded filesystem primitives (shared by content + outline) ───────────
 
+/// # Errors
+///
+/// Returns `CoreError` when the principal is rejected, the work/chapter is
+/// unknown, or the guarded file read fails.
 /// Resolve a relative path under the workspace root and enforce the
 /// W-002-style path guard: the resolved absolute path must remain inside
 /// the canonical workspace root.
@@ -169,6 +173,10 @@ pub fn resolve_guarded_path(
     }
 }
 
+/// # Errors
+///
+/// Returns `CoreError` when the principal is rejected, the work/chapter is
+/// unknown, or the guarded file read fails.
 /// Async wrapper around [`resolve_guarded_path`] that runs the blocking
 /// `std::fs::canonicalize` syscalls on the tokio blocking pool. Shared by the
 /// core content/outline services and the daemon surface (single W-002

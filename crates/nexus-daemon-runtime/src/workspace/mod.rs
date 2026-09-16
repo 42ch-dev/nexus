@@ -939,7 +939,7 @@ impl WorkspaceState {
                     // and the same engine/cache the boot path registered, so
                     // the owner reports them here too (see the boot site).
                     runtime_facts: Some(nexus_core::execution::capabilities::ToolRuntimeFacts {
-                        runtime_mode: self.runtime_mode().clone(),
+                        runtime_mode: *self.runtime_mode(),
                         is_initialized: self.is_initialized(),
                         lifecycle_state: self.lifecycle_state().to_string(),
                         started_at: self.started_at().to_rfc3339(),

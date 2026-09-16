@@ -5,7 +5,7 @@
 //! `CoreService::open_host` composes the authority once per open; the
 //! transport layers (napi addon, daemon HTTP handlers, TS service) route
 //! session create/execute/query/close through [`HostHandle`] instead of
-//! speaking to the HostManager or the provider port directly. Valid
+//! speaking to the `HostManager` or the provider port directly. Valid
 //! Actor/viewpoint creates and `set_model`/`set_mode` operations route into
 //! the real Host authority here — there is no `not_migrated` fallback.
 
@@ -105,7 +105,7 @@ impl CoreService {
                 .inner
                 .host_authority_established
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if *established {
                 return Err(CoreError::OwnerBusy);
             }
@@ -118,7 +118,7 @@ impl CoreService {
                 .inner
                 .host_authority_established
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()) = false;
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = false;
         }
         started
     }
@@ -435,12 +435,12 @@ impl HostHandle {
                 } else {
                     tokio::spawn(drain_plain(stream, _lease));
                 }
-                return Ok(OperationResponse {
+                Ok(OperationResponse {
                     operation_id: op_id.to_string(),
                     session_id: sid.to_string(),
                     status: "started".to_string(),
                     capture: None,
-                });
+                })
             }
             ExecuteOperationRequest::SetModel { model } => {
                 self.exec_non_prompt(sid, HostOperation::SetModel { model }, op_id)
@@ -559,7 +559,7 @@ impl HostHandle {
                                     name: entry.display_name,
                                     installed: entry.health.available,
                                     launch_command,
-                                    description: entry.health.message.clone(),
+                                    description: entry.health.message,
                                     icon_url: None,
                                     registry_agent_id: None,
                                     version: None,
@@ -579,7 +579,10 @@ impl HostHandle {
             }
             CoreHostQueryQuery::ListSessions => {
                 let native = self.sorted_sessions().await?;
-                let limit = request.limit.map(|n| n.get()).unwrap_or(50).clamp(1, 250);
+                let limit = request
+                    .limit
+                    .map_or(50, std::num::NonZero::get)
+                    .clamp(1, 250);
                 let limit_us = usize::try_from(limit).unwrap_or(250);
                 let items_all: Vec<NexusAgentHostSessionResponse> = native
                     .iter()
@@ -589,9 +592,9 @@ impl HostHandle {
                     .filter(|s| {
                         self.registry
                             .stored_session_owner(&s.id)
-                            .map_or(true, |(owner, _, _)| owner == principal.creator_id())
+                            .is_none_or(|(owner, _, _)| owner == principal.creator_id())
                     })
-                    .map(|s| session_response_wire(s))
+                    .map(session_response_wire)
                     .collect();
                 let items: Vec<NexusAgentHostSessionResponse> = items_all
                     .into_iter()
@@ -637,7 +640,7 @@ impl HostHandle {
                             && self
                                 .registry
                                 .stored_session_owner(&s.id)
-                                .map_or(true, |(owner, _, _)| owner == principal.creator_id())
+                                .is_none_or(|(owner, _, _)| owner == principal.creator_id())
                     }) {
                         return Ok(CoreHostQueryResponse {
                             session: Some(session_response_wire(session)),
@@ -665,7 +668,7 @@ impl HostHandle {
                             && self
                                 .registry
                                 .stored_session_owner(&s.id)
-                                .map_or(true, |(owner, _, _)| owner == principal.creator_id())
+                                .is_none_or(|(owner, _, _)| owner == principal.creator_id())
                     }) {
                         return Ok(CoreHostQueryResponse {
                             operation: Some(NexusAgentHostOperationResponse {
@@ -709,6 +712,10 @@ impl HostHandle {
         }
     }
 
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the Host is not opened, the port rejects the
+    /// request, or the session handle is stale.
     /// Close the authority. Retired Actor sessions get one bounded shutdown
     /// attempt each; the registry maps close (in-flight creates cannot
     /// repopulate). Cleanup ownership is only released on a confirmed close:
@@ -733,7 +740,7 @@ impl HostHandle {
                 .inner
                 .host_authority_established
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()) = false;
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = false;
             Ok(CoreCloseReport {
                 state: CoreCloseReportState::Closed,
                 cleanup_confirmed: true,
@@ -878,7 +885,10 @@ fn session_response_wire(session: &RegistryHostSession) -> NexusAgentHostSession
         session_id: session.id.to_string(),
         provider_id: session.provider_id.to_string(),
         state: format!("{:?}", session.state),
-        active_op_id: session.active_op_id.as_ref().map(|op| op.to_string()),
+        active_op_id: session
+            .active_op_id
+            .as_ref()
+            .map(std::string::ToString::to_string),
         model: None,
         actor_ref: None,
         viewpoint: None,
@@ -918,7 +928,7 @@ async fn drain_character_operation(
 }
 
 /// Server-owned drain for non-capture operations; events are broadcast by the
-/// HostManager, draining drives the state machine.
+/// `HostManager`, draining drives the state machine.
 async fn drain_plain(
     mut stream: impl futures_util::Stream<
             Item = Result<
@@ -939,7 +949,7 @@ impl ActorSessionKey {
         model: Option<String>,
         mode: Option<String>,
         ctx: &crate::actors::AdmittedActorContext,
-    ) -> CoreResult<ActorSessionKey> {
+    ) -> CoreResult<Self> {
         crate::actor_sessions::ActorSessionRegistry::key_for(provider_id, cwd, model, mode, ctx)
     }
 }

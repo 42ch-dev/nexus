@@ -715,27 +715,28 @@ pub async fn close_core(state: Arc<EnvState>) -> CoreCloseReport {
             .await;
     }
 
-    let report = match tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
-        let drain_budget = CLOSE_CANCEL_PHASE.min(CLOSE_BUDGET.saturating_sub(started.elapsed()));
-        if !drain_budget.is_zero() {
-            tokio::time::sleep(Duration::from_millis(25).min(drain_budget)).await;
-        }
-        let (_, report) = cleanup_owners(state.clone(), None, None, None, deadline).await;
-        report
-    })
-    .await
-    {
-        Ok(report) => report,
-        Err(_) => {
-            state.mark_interrupted();
-            let pending = state.pending_operations_snapshot().await;
-            let owners_present = state.owner_slots_present();
-            let mut pending = pending;
-            if owners_present {
-                pending.push("cleanup-owners-retained".to_string());
+    let report = if let Ok(report) =
+        tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
+            let drain_budget =
+                CLOSE_CANCEL_PHASE.min(CLOSE_BUDGET.saturating_sub(started.elapsed()));
+            if !drain_budget.is_zero() {
+                tokio::time::sleep(Duration::from_millis(25).min(drain_budget)).await;
             }
-            interrupted_report(pending)
+            let (_, report) = cleanup_owners(state.clone(), None, None, None, deadline).await;
+            report
+        })
+        .await
+    {
+        report
+    } else {
+        state.mark_interrupted();
+        let pending = state.pending_operations_snapshot().await;
+        let owners_present = state.owner_slots_present();
+        let mut pending = pending;
+        if owners_present {
+            pending.push("cleanup-owners-retained".to_string());
         }
+        interrupted_report(pending)
     };
 
     *state.settled_close.lock().await = Some(report.clone());

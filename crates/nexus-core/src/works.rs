@@ -351,6 +351,10 @@ fn wire_cast<T: serde::Serialize, U: serde::de::DeserializeOwned>(
         })
 }
 impl CoreService {
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn create_work_with_outcome(
         &self,
         principal: &Principal,
@@ -362,6 +366,10 @@ impl CoreService {
             .await
             .map_err(CoreError::from)
     }
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn list_works(
         &self,
         principal: &Principal,
@@ -374,6 +382,10 @@ impl CoreService {
         self.verify_principal(principal)?;
         Ok(response)
     }
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn get_work(
         &self,
         principal: &Principal,
@@ -386,6 +398,10 @@ impl CoreService {
         self.verify_principal(principal)?;
         Ok(response)
     }
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn patch_work(
         &self,
         principal: &Principal,
@@ -399,6 +415,10 @@ impl CoreService {
             .await
             .map_err(CoreError::from)
     }
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn append_work_inspiration(
         &self,
         principal: &Principal,
@@ -413,6 +433,10 @@ impl CoreService {
             .await
             .map_err(CoreError::from)
     }
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn set_work_pool_active(
         &self,
         principal: &Principal,
@@ -424,6 +448,10 @@ impl CoreService {
             .await
             .map_err(CoreError::from)
     }
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn release_work_completion_lock(
         &self,
         principal: &Principal,
@@ -436,6 +464,10 @@ impl CoreService {
             .await
             .map_err(CoreError::from)
     }
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn delete_work(
         &self,
         principal: &Principal,
@@ -448,6 +480,10 @@ impl CoreService {
             .await
             .map_err(CoreError::from)
     }
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn reconcile_work_chapters(
         &self,
         principal: &Principal,
@@ -469,6 +505,10 @@ impl CoreService {
             })
             .map_err(CoreError::from)
     }
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn list_work_pool(
         &self,
         principal: &Principal,
@@ -481,6 +521,10 @@ impl CoreService {
         self.verify_principal(principal)?;
         Ok(response)
     }
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn promote_work_pool_entry(
         &self,
         principal: &Principal,
@@ -492,6 +536,10 @@ impl CoreService {
             .await
             .map_err(CoreError::from)
     }
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn archive_work_pool_entry(
         &self,
         principal: &Principal,
@@ -503,6 +551,10 @@ impl CoreService {
             .await
             .map_err(CoreError::from)
     }
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn add_work_inspiration(
         &self,
         principal: &Principal,
@@ -514,6 +566,10 @@ impl CoreService {
             .await
             .map_err(CoreError::from)
     }
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn list_work_inspiration(
         &self,
         principal: &Principal,
@@ -526,6 +582,10 @@ impl CoreService {
         self.verify_principal(principal)?;
         Ok(response)
     }
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn promote_work_inspiration(
         &self,
         principal: &Principal,
@@ -537,6 +597,10 @@ impl CoreService {
             .await
             .map_err(CoreError::from)
     }
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn archive_work_inspiration(
         &self,
         principal: &Principal,
@@ -549,6 +613,10 @@ impl CoreService {
             .map_err(CoreError::from)
     }
 
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn create_work(
         &self,
         principal: &Principal,
@@ -559,6 +627,10 @@ impl CoreService {
             .map(|(_, response)| response)
     }
 
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the Works write scope
+    /// is not granted, the Work is unknown, or the guarded store query fails.
     pub async fn select_work(
         &self,
         principal: &Principal,

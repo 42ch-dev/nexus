@@ -49,7 +49,8 @@ impl CoreService {
 
         let branch_id = format!("fbk_{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
         let label = request
-            .label.map_or_else(|| "fork".to_string(), String::from);
+            .label
+            .map_or_else(|| "fork".to_string(), String::from);
         let summary = format!(
             "forked from {}/{} ({label})",
             request.parent_branch_id, request.forked_from_event_id

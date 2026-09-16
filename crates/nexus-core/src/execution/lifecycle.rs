@@ -668,7 +668,9 @@ impl CoreService {
         // The daemon owns the live holder (WASM singleton, user-cap scan,
         // hot-reload watcher). A core-only caller gets a bare builtin
         // registry so the engine still has a capability surface.
-        let capability_holder = if let Some(holder) = deps.capability_holder { holder } else {
+        let capability_holder = if let Some(holder) = deps.capability_holder {
+            holder
+        } else {
             let capabilities = Arc::new(CapabilityRegistry::with_runtime_deps(
                 &CapabilityRuntimeDeps {
                     pool: Some(pool.clone()),

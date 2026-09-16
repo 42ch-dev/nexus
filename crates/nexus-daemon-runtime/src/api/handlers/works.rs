@@ -1150,7 +1150,7 @@ mod tests_fix_d {
                 category: category.into(),
             });
             let NexusApiError::Internal { code, message } = &migrated else {
-                panic!("internal category must stay Internal, got {:?}", migrated);
+                panic!("internal category must stay Internal, got {migrated:?}");
             };
             assert_eq!(
                 (code.as_str(), message.as_str()),
@@ -1171,7 +1171,7 @@ mod tests_fix_d {
             category: "workspace metadata: boom".into(),
         });
         let NexusApiError::Internal { code, .. } = &fallback else {
-            panic!("fallback must stay Internal, got {:?}", fallback);
+            panic!("fallback must stay Internal, got {fallback:?}");
         };
         assert_eq!(code, "CORE_ERROR");
         assert_eq!(fallback.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
@@ -1272,10 +1272,7 @@ mod tests_fix_d {
         .unwrap();
         let error = create_work(State(state), Json(request)).await.unwrap_err();
         let NexusApiError::Internal { code, message } = &error else {
-            panic!(
-                "dropped works table must surface as Internal, got {:?}",
-                error
-            );
+            panic!("dropped works table must surface as Internal, got {error:?}");
         };
         assert_eq!(code, "DATABASE_ERROR");
         assert!(

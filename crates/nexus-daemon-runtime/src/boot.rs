@@ -778,7 +778,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                 // surface claim `Starting` forever and would leave the
                 // handle's compute entry points permanently unavailable.
                 runtime_facts: Some(nexus_core::execution::capabilities::ToolRuntimeFacts {
-                    runtime_mode: state.runtime_mode().clone(),
+                    runtime_mode: *state.runtime_mode(),
                     is_initialized: state.is_initialized(),
                     lifecycle_state: state.lifecycle_state().to_string(),
                     started_at: state.started_at().to_rfc3339(),

@@ -364,6 +364,10 @@ impl ActorKnowledgeViewService {
             .map_err(|e| component_err(&e))
     }
 
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the actor/KB read is
+    /// refused, or the guarded store query fails.
     /// The P1 bounded admission view: keyset pages merged into one
     /// hard-capped 200-item page (`actor_knowledge_view_incomplete` when the
     /// cap cannot be satisfied).
@@ -377,11 +381,19 @@ impl ActorKnowledgeViewService {
         complete_view(self, caller_creator_id, actor, world_id, binding_id).await
     }
 
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the actor/KB read is
+    /// refused, or the guarded store query fails.
     /// Owned World with no status requirement (retained reads, durable §11.2).
     pub async fn require_owned_world(&self, creator_id: &str, world_id: &str) -> CoreResult<()> {
         require_owned_world(&self.pool, creator_id, world_id).await
     }
 
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the actor/KB read is
+    /// refused, or the guarded store query fails.
     /// Owned Character with no status requirement (retained reads).
     pub async fn require_owned_character(
         &self,
@@ -391,6 +403,10 @@ impl ActorKnowledgeViewService {
         require_owned_character(&self.pool, creator_id, character_id).await
     }
 
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the actor/KB read is
+    /// refused, or the guarded store query fails.
     /// Stored binding tuple with no status requirement (retained reads).
     pub async fn require_stored_binding_tuple(
         &self,
@@ -401,6 +417,10 @@ impl ActorKnowledgeViewService {
         require_stored_binding_tuple(&self.pool, character_id, binding_id, world_id).await
     }
 
+    /// # Errors
+    ///
+    /// Returns `CoreError` when the principal is rejected, the actor/KB read is
+    /// refused, or the guarded store query fails.
     /// Active stored binding tuple (write admission).
     pub async fn require_active_binding(
         &self,

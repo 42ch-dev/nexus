@@ -82,7 +82,7 @@ async fn run_one_tick_enqueues_and_admits() {
 
     let supervisor = Arc::new(ScheduleSupervisor::new(pool.clone()));
     let workspace_tmp = tempfile::tempdir().unwrap();
-    cron_supervisor::run_one_tick(
+    cron::run_one_tick(
         &pool,
         workspace_tmp.path(),
         &supervisor,
@@ -124,7 +124,7 @@ async fn run_one_tick_no_match_is_noop() {
 
     let supervisor = Arc::new(ScheduleSupervisor::new(pool.clone()));
     let workspace_tmp = tempfile::tempdir().unwrap();
-    cron_supervisor::run_one_tick(
+    cron::run_one_tick(
         &pool,
         workspace_tmp.path(),
         &supervisor,

@@ -471,7 +471,7 @@ async fn pending_review_delete_returns_401_without_creator() {
         State(state),
         Path("pending_noauth".to_string()),
         Query(
-            nexus_daemon_runtime::api::handlers::memory::DeletePendingReviewQuery {
+            nexus_contracts::daemon_api::memory::DeletePendingReviewQuery {
                 creator_id: "ctr_testuser".to_string(),
             },
         ),

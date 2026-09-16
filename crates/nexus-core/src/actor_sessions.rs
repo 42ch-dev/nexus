@@ -157,7 +157,7 @@ impl Default for ActorSessionRegistry {
     }
 }
 
-fn shutting_down() -> CoreError {
+const fn shutting_down() -> CoreError {
     CoreError::Interrupted
 }
 
@@ -671,7 +671,7 @@ impl ActorSessionRegistry {
         }
     }
 
-    fn reject_if_closed(maps: &RegistryMaps) -> CoreResult<()> {
+    const fn reject_if_closed(maps: &RegistryMaps) -> CoreResult<()> {
         if maps.closed {
             Err(shutting_down())
         } else {

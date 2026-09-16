@@ -98,8 +98,12 @@ impl CoreHomeService {
         &self,
         request: CoreRegisterCreatorRequest,
     ) -> CoreResult<CreatorDetail> {
-        let display_name =
-            validated_display_name(request.display_name.as_deref().map(std::string::String::as_str))?;
+        let display_name = validated_display_name(
+            request
+                .display_name
+                .as_deref()
+                .map(std::string::String::as_str),
+        )?;
         if let Some(platform_id) = request.platform_creator_id.as_deref() {
             validate_creator_id_safe(platform_id).map_err(|reason| CoreError::InvalidInput {
                 field: "platform_creator_id".to_string(),

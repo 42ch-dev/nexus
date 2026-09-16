@@ -16,11 +16,15 @@ use crate::config::read_active_creator_id;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
-use nexus_contracts::daemon_api::memory::{
-    CountPendingReviewsQuery, CountPendingReviewsResponse, DeletePendingReviewQuery,
-    DeletePendingReviewResponse, ListMemoryFragmentsQuery, ListMemoryFragmentsResponse,
-    ListPendingReviewsQuery, ListPendingReviewsResponse, ReviewRequest, ReviewResponse,
-    SoulNarrativeRequest, SoulNarrativeResponse,
+// Re-exported so the DTO-identity integration target can assert that each
+// handler response is the SAME generated type the contracts expose (no
+// parallel handwritten shape); the handler body still imports them by name.
+pub use nexus_contracts::daemon_api::memory::{
+    CountPendingReviewsQuery, CountPendingReviewsResponse, CreatePendingReviewResponse,
+    DeletePendingReviewQuery, DeletePendingReviewResponse, ListMemoryFragmentsQuery,
+    ListMemoryFragmentsResponse, ListPendingReviewsQuery, ListPendingReviewsResponse,
+    MemoryFragmentInfo, PendingReviewInfo, ReviewRequest, ReviewResponse, SoulNarrativeRequest,
+    SoulNarrativeResponse,
 };
 use tracing::{debug, info};
 

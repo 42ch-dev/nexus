@@ -45,7 +45,7 @@ use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
 use crate::connect::config::PeerToolsConfig;
-use crate::connect::identity::{self, IdentityError};
+use crate::connect::identity::{self};
 use crate::connect::session::PeerSessionManager;
 use crate::connect::table::live_reserved_tool_ids;
 use crate::connect::watch::{
@@ -133,6 +133,7 @@ impl Transport for ObservedTransport {
 }
 
 /// Whether `host` is a loopback bind target (`localhost` or a loopback IP).
+///
 /// Semantics verbatim from the daemon boot gate (P4-T3 moved into the core
 /// lane so the refusal lives with the lane that enforces it).
 #[must_use]

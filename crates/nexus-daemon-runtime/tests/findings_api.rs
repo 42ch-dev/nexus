@@ -16,11 +16,14 @@
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use nexus_contracts::BatchUpdateFindingsRequest;
+// `UpdateFindingRequest` is a generated wire DTO; the other request/query
+// shapes are handler-local and stay with the handlers.
+use nexus_contracts::UpdateFindingRequest;
 use nexus_daemon_runtime::api::handlers::findings::{
     batch_update_findings_handler, create_finding_handler, create_from_review_handler,
     delete_finding_handler, get_finding_handler, list_findings_handler, prune_findings_handler,
     update_finding_handler, CreateFindingRequest, FindingApiDto, ListFindingsQuery,
-    PruneFindingsQuery, UpdateFindingRequest,
+    PruneFindingsQuery,
 };
 use nexus_daemon_runtime::api::handlers::works::CreateWorkRequest;
 use nexus_daemon_runtime::test_utils;

@@ -249,13 +249,12 @@ pub async fn list_workspaces(
     let limit = query.limit.unwrap_or(50).clamp(1, MAX_LIMIT as i64) as usize;
 
     let home = CoreHomeService::open(user_home_of(&state)?).map_err(NexusApiError::from)?;
-    let all_items = match get_cached_workspaces() {
-        Some(items) => items,
-        None => {
-            let items = home.list_workspaces().await?.items;
-            cache_workspaces(items.clone());
-            items
-        }
+    let all_items = if let Some(items) = get_cached_workspaces() {
+        items
+    } else {
+        let items = home.list_workspaces().await?.items;
+        cache_workspaces(items.clone());
+        items
     };
 
     // Apply creator_id filter to the full list.

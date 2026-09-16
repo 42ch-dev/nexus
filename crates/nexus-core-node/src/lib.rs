@@ -263,13 +263,12 @@ pub fn force_unconfirmed_cleanup(enable: bool) {
 #[napi]
 pub fn open(env: Env, options_json: String, callbacks: Option<Object<'_>>) -> Result<NativeCore> {
     let options: NativeOpenOptions = serde_json::from_str(&options_json)?;
-    let state = match EnvInstance::get(&env) {
-        Ok(existing) => existing,
-        Err(_) => {
-            let fresh = Arc::new(EnvState::new());
-            EnvInstance::install(&env, fresh.clone())?;
-            fresh
-        }
+    let state = if let Ok(existing) = EnvInstance::get(&env) {
+        existing
+    } else {
+        let fresh = Arc::new(EnvState::new());
+        EnvInstance::install(&env, fresh.clone())?;
+        fresh
     };
     let js_port = if let Some(callbacks) = callbacks {
         Some(callbacks::install_js_provider(

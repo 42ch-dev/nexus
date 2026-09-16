@@ -415,16 +415,14 @@ pub(crate) async fn admission_pipeline(
         let creator_id = creator_id.ok_or_else(|| NexusApiError::Forbidden {
             resource: format!(
                 "{}: {}",
-                "tool_execution",
-                "active creator required for nexus.* tools",
+                "tool_execution", "active creator required for nexus.* tools",
             ),
         })?;
         let workspace_slug = read_active_workspace_slug(&context.nexus_home, &creator_id)
             .ok_or_else(|| NexusApiError::Forbidden {
                 resource: format!(
                     "{}: {}",
-                    "tool_execution",
-                    "active workspace required for nexus.* tools",
+                    "tool_execution", "active workspace required for nexus.* tools",
                 ),
             })?;
 
@@ -450,8 +448,7 @@ pub(crate) async fn admission_pipeline(
         return Err(NexusApiError::Forbidden {
             resource: format!(
                 "{}: {}",
-                "tool_execution",
-                "fs/* tools require an active workspace with defined bounds",
+                "tool_execution", "fs/* tools require an active workspace with defined bounds",
             ),
         });
     }
@@ -601,8 +598,7 @@ async fn execute_work_get(
             NexusApiError::Forbidden {
                 resource: format!(
                     "{}: {}",
-                    "work",
-                    "work not found or cross-creator access denied",
+                    "work", "work not found or cross-creator access denied",
                 ),
             }
         })?;
@@ -1163,12 +1159,14 @@ async fn ensure_world_accessible_for_creator(
         Ok(false) => Err(NexusApiError::Forbidden {
             resource: format!(
                 "{}: {}",
-                "world",
-                "world not found or cross-creator access denied",
+                "world", "world not found or cross-creator access denied",
             ),
         }),
         Err(e) => Err(NexusApiError::Internal {
-            category: format!("DATABASE_ERROR: {}", format_args!("world ownership check: {e}")),
+            category: format!(
+                "DATABASE_ERROR: {}",
+                format_args!("world ownership check: {e}")
+            ),
         }),
     }
 }
@@ -1316,8 +1314,7 @@ async fn execute_manuscript_chapter_get(
         .ok_or_else(|| NexusApiError::Forbidden {
             resource: format!(
                 "{}: {}",
-                "work",
-                "work not found or cross-creator access denied",
+                "work", "work not found or cross-creator access denied",
             ),
         })?;
 
@@ -1676,8 +1673,7 @@ async fn execute_manuscript_chapter_update(
         .ok_or_else(|| NexusApiError::Forbidden {
             resource: format!(
                 "{}: {}",
-                "work",
-                "work not found or cross-creator access denied",
+                "work", "work not found or cross-creator access denied",
             ),
         })?;
 
@@ -1700,10 +1696,7 @@ async fn execute_manuscript_chapter_update(
         let workspace_root = context
             .workspace_path()
             .ok_or_else(|| NexusApiError::Internal {
-                category: format!(
-                    "WORKSPACE_PATH_ERROR: {}",
-                    "workspace path not available"
-                ),
+                category: format!("WORKSPACE_PATH_ERROR: {}", "workspace path not available"),
             })?;
         // W-003: use the canonical body_path from the existing chapter record
         // (set by seed_chapters), which follows Works/{work_ref}/Stories/{slug}.md.
@@ -1796,10 +1789,7 @@ async fn execute_manuscript_chapter_update(
         let workspace_root = context
             .workspace_path()
             .ok_or_else(|| NexusApiError::Internal {
-                category: format!(
-                    "WORKSPACE_PATH_ERROR: {}",
-                    "workspace path not available"
-                ),
+                category: format!("WORKSPACE_PATH_ERROR: {}", "workspace path not available"),
             })?;
         let abs_body =
             resolve_guarded_path_async(Path::new(&workspace_root).to_path_buf(), bp.clone(), false)
@@ -1960,7 +1950,10 @@ async fn execute_world_configure(
             .execute(pool)
             .await
             .map_err(|e| NexusApiError::Internal {
-                category: format!("DATABASE_ERROR: {}", format_args!("world title update: {e}")),
+                category: format!(
+                    "DATABASE_ERROR: {}",
+                    format_args!("world title update: {e}")
+                ),
             })?;
         updated = true;
     }
@@ -2285,11 +2278,7 @@ async fn execute_manuscript_list(
     let workspace_slug =
         read_active_workspace_slug(&context.nexus_home, creator_id).ok_or_else(|| {
             NexusApiError::Forbidden {
-                resource: format!(
-                    "{}: {}",
-                    "manuscript.list",
-                    "active workspace required",
-                ),
+                resource: format!("{}: {}", "manuscript.list", "active workspace required",),
             }
         })?;
 
@@ -2362,8 +2351,7 @@ async fn execute_manuscript_read_range(
         .ok_or_else(|| NexusApiError::Forbidden {
             resource: format!(
                 "{}: {}",
-                "work",
-                "work not found or cross-creator access denied",
+                "work", "work not found or cross-creator access denied",
             ),
         })?;
 
@@ -2385,10 +2373,7 @@ async fn execute_manuscript_read_range(
     let workspace_root = context
         .workspace_path()
         .ok_or_else(|| NexusApiError::Internal {
-            category: format!(
-                "WORKSPACE_PATH_ERROR: {}",
-                "workspace path not available"
-            ),
+            category: format!("WORKSPACE_PATH_ERROR: {}", "workspace path not available"),
         })?;
     let workspace_root_path = Path::new(&workspace_root);
     let abs_body = workspace_root_path.join(&body_path);
@@ -2523,8 +2508,7 @@ async fn execute_manuscript_write(
         .ok_or_else(|| NexusApiError::Forbidden {
             resource: format!(
                 "{}: {}",
-                "work",
-                "work not found or cross-creator access denied",
+                "work", "work not found or cross-creator access denied",
             ),
         })?;
 
@@ -2550,10 +2534,7 @@ async fn execute_manuscript_write(
     let workspace_root = context
         .workspace_path()
         .ok_or_else(|| NexusApiError::Internal {
-            category: format!(
-                "WORKSPACE_PATH_ERROR: {}",
-                "workspace path not available"
-            ),
+            category: format!("WORKSPACE_PATH_ERROR: {}", "workspace path not available"),
         })?;
     let workspace_root_path = Path::new(&workspace_root);
 
@@ -2742,8 +2723,7 @@ async fn execute_manuscript_phase_get(
         .ok_or_else(|| NexusApiError::Forbidden {
             resource: format!(
                 "{}: {}",
-                "work",
-                "work not found or cross-creator access denied",
+                "work", "work not found or cross-creator access denied",
             ),
         })?;
 
@@ -2794,8 +2774,7 @@ async fn execute_manuscript_phase_set(
         .ok_or_else(|| NexusApiError::Forbidden {
             resource: format!(
                 "{}: {}",
-                "work",
-                "work not found or cross-creator access denied",
+                "work", "work not found or cross-creator access denied",
             ),
         })?;
 

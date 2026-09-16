@@ -1216,7 +1216,7 @@ mod tests {
         })
         .await
         .expect("core open");
-        let state = EnvState::new();
+        let state = Arc::new(EnvState::new());
         state
             .core
             .lock()

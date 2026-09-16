@@ -39,6 +39,10 @@ pub type PeerToolTable = crate::execution::peer_tools::PeerToolRegistry;
 
 /// MCP catalog admission: the peer descriptor's input must be a root object.
 #[must_use]
+/// # Errors
+///
+/// Returns `CoreError` when the manifest is malformed or the peer is not
+/// admitted by the catalog.
 pub fn mcp_catalog_admission(
     descriptor: &nexus_spoke_adapter::ToolDescriptor,
 ) -> Result<(), McpCatalogRefusal> {
@@ -74,13 +78,13 @@ pub struct ConnectResponderAdapter {
 impl ConnectResponderAdapter {
     /// Wrap a wire responder, binding it to `peer_id`.
     #[must_use]
-    pub fn new(inner: Arc<ConnectResponder>, peer_id: String) -> Self {
+    pub const fn new(inner: Arc<ConnectResponder>, peer_id: String) -> Self {
         Self { inner, peer_id }
     }
 
     /// The wrapped wire responder.
     #[must_use]
-    pub fn inner(&self) -> &Arc<ConnectResponder> {
+    pub const fn inner(&self) -> &Arc<ConnectResponder> {
         &self.inner
     }
 }

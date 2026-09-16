@@ -23,13 +23,11 @@
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use nexus_contracts::generated::daemon_api::compute::run_accept_request::RunAcceptRequest;
-use nexus_contracts::generated::daemon_api::compute::run_request::RunRequest;
 use nexus_contracts::local::schedule::http::{
     AddScheduleRequest, AddScheduleResponse, SignalScheduleRequest, SignalScheduleResponse,
 };
 use nexus_contracts::{
-    CoreStrategyPatchResponse, GetPresetResponse, ScaffoldPresetRequest, ScaffoldPresetResponse,
+    CoreStrategyPatchResponse, GetPresetResponse, ScaffoldPresetRequest,
     StrategyPatchPromptTemplateRequest, StrategyPatchStateRequest, StrategyPatchTransitionRequest,
     UpdatePresetRequest, UpdatePresetResponse, ValidatePresetRequest, ValidatePresetResponse,
 };

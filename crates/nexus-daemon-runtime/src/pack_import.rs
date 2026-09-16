@@ -1,4 +1,5 @@
 //! Retained CLI parameter/result translation over the core pack owner.
+//!
 //! No conflict detection, remapping, SQL, provenance write or persistence lives here.
 //! P6-T1 removes this module together with the CLI callsite migration.
 

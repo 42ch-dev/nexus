@@ -1,7 +1,7 @@
 //! Stored-data Actor admission for agent-host session and prompt paths,
 //! now a thin translation over the core admission service (v1.190 P2-T1).
 //!
-//! Stored ownership validation and the bounded KnowledgeView live in
+//! Stored ownership validation and the bounded `KnowledgeView` live in
 //! [`nexus_core::CoreActorAdmission`]; this shim only re-sends errors at the
 //! HTTP boundary. Callers never treat request-body ownership claims as
 //! trusted context: any deny returns before MCA, `HostFacade` session work,
