@@ -217,17 +217,17 @@ describe('execution-http (P5-T3)', () => {
       `an unsettled journal orphan must be classified interrupted: ${afterReopen.text}`,
     );
 
-    // 4. Cancellation semantics stay truthful: an unknown session is a real
-    //    404 from the host registry, and DSH cancellation is not offered as
-    //    a fake success anywhere on this surface.
+    // 4. Cancellation semantics stay truthful: a DELETE against an unknown
+    //    session id is a real 404 from the host registry — never a fake
+    //    success — and DSH cancellation is not offered as a fake success
+    //    anywhere on this surface.
+    const unknownSessionId = randomUUID();
     const missing = await jsonFetch(
-      `${baseUrl}/v1/daemon/agent-host/sessions/${sessionId}`,
+      `${baseUrl}/v1/daemon/agent-host/sessions/${unknownSessionId}`,
       { method: 'DELETE' },
     );
-    assert.ok(
-      missing.status === 404 || missing.status === 200,
-      `unexpected cancellation status: ${missing.status} ${missing.text}`,
-    );
+    assert.equal(missing.status, 404, missing.text);
+    assert.equal(missing.payload.error.code, 'not_found', missing.text);
   });
 
   test('migrated preset and strategy routes answer from the core authority, not 501', async () => {

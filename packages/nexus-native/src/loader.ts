@@ -308,7 +308,7 @@ export interface NativeCoreBinding {
   scaffoldPreset(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
   validatePreset(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
   updatePreset(principal: string, presetId: string, requestJson: Uint8Array): Promise<Uint8Array>;
-  deletePreset(principal: string, presetId: string): Promise<void>;
+  deletePreset(principal: string, presetId: string): Promise<Uint8Array>;
   listOrchestrationPresets(principal: string): Promise<Uint8Array>;
   getPresetProfile(principal: string, presetId: string): Promise<Uint8Array>;
   patchStrategyState(
