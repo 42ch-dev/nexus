@@ -132,19 +132,6 @@ impl Transport for ObservedTransport {
     }
 }
 
-/// Daemon hello manifest: baseline capabilities (+ any tool ids the test /
-/// T4 wiring chooses to advertise). `host_id` is the installation device id.
-///
-/// AR-69 derivation lock: the tool `capabilities[]` derive ONLY from the
-/// operator allowlist (the `tool_ids` argument — connections pass the live
-/// config allowlist, DF-92; tests pass ids directly). No runtime discovery
-/// ever feeds this manifest. `namespaces[]` is derived from the tool ids
-/// (`tools.<ns>.<id>` ⇒ `ns`), deduplicated and order-stable.
-///
-/// # Panics
-/// Panics if the static JSON shape fails to deserialize (programmer error —
-/// the shape is fixed at authoring time).
-#[must_use]
 /// Whether `host` is a loopback bind target (`localhost` or a loopback IP).
 /// Semantics verbatim from the daemon boot gate (P4-T3 moved into the core
 /// lane so the refusal lives with the lane that enforces it).
@@ -183,7 +170,21 @@ pub fn ensure_remote_bind_allowed(host: &str) -> CoreResult<()> {
     Ok(())
 }
 
+/// Daemon hello manifest: baseline capabilities (+ any tool ids the test /
+/// T4 wiring chooses to advertise). `host_id` is the installation device id.
+///
+/// AR-69 derivation lock: the tool `capabilities[]` derive ONLY from the
+/// operator allowlist (the `tool_ids` argument — connections pass the live
+/// config allowlist, DF-92; tests pass ids directly). No runtime discovery
+/// ever feeds this manifest. `namespaces[]` is derived from the tool ids
+/// (`tools.<ns>.<id>` ⇒ `ns`), deduplicated and order-stable.
+///
+/// # Panics
+/// Panics if the static JSON shape fails to deserialize (programmer error —
+/// the shape is fixed at authoring time).
+#[must_use]
 pub fn daemon_manifest(host_id: &str, tool_ids: &[String]) -> HostCapabilityManifest {
+
     let mut capabilities = vec!["spoke-baseline".to_owned()];
     capabilities.extend(tool_ids.iter().cloned());
     // Tool grammar is exactly `tools.<ns>.<id>` (3 segments), so `nth(1)`
