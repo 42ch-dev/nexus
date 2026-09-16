@@ -218,7 +218,8 @@ async fn run_succeeded(f: &Fixture, context: &ComputeContext) -> String {
     let response = nexus_core::execution::compute::compute_run(&f.core, context, request)
         .await
         .expect("compute run succeeds");
-    assert_eq!(response.status.as_str(), "succeeded");
+    // The generated status enum carries Display but not PartialEq.
+    assert_eq!(response.status.to_string(), "succeeded");
     response.run_id.to_string()
 }
 

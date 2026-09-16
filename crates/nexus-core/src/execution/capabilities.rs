@@ -193,6 +193,7 @@ impl ToolRuntimeFacts {
 /// collaborator — never a transport aggregate. This is what makes the
 /// dispatch path usable outside the daemon without either naming
 /// `WorkspaceState` or falling back to a universal `Value` RPC.
+#[derive(Clone)]
 pub struct ToolContext {
     /// The Creator DB pool.
     pub(crate) pool: sqlx::SqlitePool,
