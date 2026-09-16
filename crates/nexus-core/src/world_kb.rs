@@ -2398,6 +2398,16 @@ pub mod relationship {
                     .collect(),
             ),
         );
+        // V1.76 extraction-suggestion gate: the caller resolves the tri-state
+        // (`patch_relationship_update` defaults an omitted flag to the stored
+        // one), and the relation must carry the resolved value — the store
+        // reads it back out of `extensions.nexus`. Dropping it here persisted
+        // every update as `needs_review = 0`, silently promoting a suggestion
+        // the caller never confirmed.
+        nexus_ns.insert(
+            "needs_review".to_string(),
+            serde_json::Value::Bool(input.needs_review.unwrap_or(false)),
+        );
         if let Some(src) = source {
             nexus_ns.insert(
                 "source".to_string(),
