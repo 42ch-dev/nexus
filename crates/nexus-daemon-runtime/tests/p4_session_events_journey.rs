@@ -33,7 +33,7 @@ fn production_agent_host_config() -> AgentHostConfig {
     AgentHostConfig {
         providers: vec![ProviderConfig {
             id: TEST_BINDING_PROVIDER.to_string(),
-            protocol: "native_cli".to_string(),
+            protocol: "acp".to_string(),
             command: Some("mock".to_string()),
             args: vec![],
             env: HashMap::new(),
@@ -60,6 +60,10 @@ async fn new_events_test_ctx() -> EventsTestCtx {
         WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
     test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
     state.set_agent_host_config(production_agent_host_config());
+    // The bundle publish composes the Host prompt executor and provider
+    // port over the Agent Host facade the daemon boot always wires before
+    // serving, so the fixture must supply one too.
+    nexus_daemon_runtime::test_utils::wire_test_agent_host_started(&mut state).await;
     publish_production_bundle(&state).await;
     let pool = state.pool().expect("workspace pool").clone();
     EventsTestCtx {
@@ -85,6 +89,10 @@ async fn restart_workspace_state(
         WorkspaceState::new_for_testing(nexus_home.to_path_buf(), db_path.to_path_buf(), None)
             .await;
     state.set_agent_host_config(production_agent_host_config());
+    // The bundle publish composes the Host prompt executor and provider
+    // port over the Agent Host facade the daemon boot always wires before
+    // serving, so the fixture must supply one too.
+    nexus_daemon_runtime::test_utils::wire_test_agent_host_started(&mut state).await;
     publish_production_bundle(&state).await;
     state
 }

@@ -55,7 +55,7 @@ async fn sessions_ctx() -> TestCtx {
     state.set_agent_host_config(AgentHostConfig {
         providers: vec![ProviderConfig {
             id: TEST_BINDING_PROVIDER.to_string(),
-            protocol: "native_cli".to_string(),
+            protocol: "acp".to_string(),
             command: Some("mock".to_string()),
             args: vec![],
             env: HashMap::new(),
@@ -63,6 +63,10 @@ async fn sessions_ctx() -> TestCtx {
         }],
         ..AgentHostConfig::default()
     });
+    // The bundle publish composes the Host prompt executor and provider
+    // port over the Agent Host facade the daemon boot always wires before
+    // serving, so the fixture must supply one too.
+    nexus_daemon_runtime::test_utils::wire_test_agent_host_started(&mut state).await;
     state
         .publish_creator_runtime_bundle()
         .await

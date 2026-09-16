@@ -34,10 +34,12 @@ struct TestCtx {
 }
 
 async fn test_ctx() -> TestCtx {
-    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
-    let config_content = format!("active_creator_id = \"{ACTIVE_CREATOR}\"\n");
-    std::fs::write(nexus_home.join("config.toml"), config_content)
-        .expect("failed to write config.toml");
+    // `ACTIVE_CREATOR` is selected through the constructor that materializes
+    // the Profile home AND the admitted `state.db` for that same identity; a
+    // post-hoc `config.toml` rewrite would name a creator the bound database
+    // does not belong to, which the core refuses as a binding mismatch.
+    let (tmp, nexus_home, db_path) =
+        test_utils::create_test_workspace_for(ACTIVE_CREATOR, "default").await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
     let pool = state.pool().unwrap().clone();
     let auth_config = DaemonApiConfig::keyless();
