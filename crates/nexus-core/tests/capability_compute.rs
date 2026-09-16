@@ -66,20 +66,27 @@ async fn fixture() -> Fixture {
     .unwrap();
 
     let db_path = nexus_home_layout::workspace_state_db_path(&user_home, CREATOR, SLUG);
-    let guarded = nexus_local_db::init_engine_pool(&db_path)
+    // The seeding guard must be fully DROPPED before the owner opens: the
+    // writer protocol's engine admission is a process-wide registry keyed by
+    // DB path, so opening a second engine while this pool still holds the
+    // guard is an `OwnerBusy` refusal (the fixture is not racing another
+    // test — it is racing its own seeding pool).
+    {
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
+            .await
+            .expect("engine pool init");
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, \
+             cached_at, data) VALUES (?, 'Test', 'active', datetime('now'), '{}')",
+        )
+        .bind(CREATOR)
+        .execute(guarded.pool())
         .await
-        .expect("engine pool init");
-    sqlx::query(
-        "INSERT OR IGNORE INTO creators (creator_id, display_name, status, \
-         cached_at, data) VALUES (?, 'Test', 'active', datetime('now'), '{}')",
-    )
-    .bind(CREATOR)
-    .execute(guarded.pool())
-    .await
-    .expect("seed creator row");
-    seed_world(guarded.pool()).await;
-    guarded.pool().close().await;
-    nexus_local_db::writer_protocol::release_retained_writer_guards(&db_path);
+        .expect("seed creator row");
+        seed_world(guarded.pool()).await;
+        guarded.pool().close().await;
+        nexus_local_db::writer_protocol::release_retained_writer_guards(&db_path);
+    }
 
     let core = CoreService::open(CoreOpenOptions {
         user_home: user_home.clone(),
