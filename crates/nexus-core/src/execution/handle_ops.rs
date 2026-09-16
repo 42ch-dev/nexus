@@ -288,7 +288,7 @@ impl ExecutionHandle {
     {
         self.ensure_admitting()?;
         let context = self.compute_context(principal)?;
-        crate::execution::compute::compute_run(&self.linked_core()?, &context, request).await
+        crate::execution::compute::compute_run(self.linked_core()?.as_ref(), &context, request).await
     }
 
     /// Accept a succeeded compute run's proposals, atomically.
@@ -305,7 +305,7 @@ impl ExecutionHandle {
     {
         self.ensure_admitting()?;
         crate::execution::compute::accept_compute_run(
-            &self.linked_core()?,
+            self.linked_core()?.as_ref(),
             principal,
             &run_id,
             request,

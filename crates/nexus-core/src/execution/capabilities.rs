@@ -53,9 +53,9 @@ use crate::error::{CoreError, CoreResult};
 // adapter renders the HTTP envelope — so the alias keeps the extracted bodies
 // readable without a 200-site rename that would obscure the diff.
 use crate::error::CoreError as NexusApiError;
-use crate::principal::Principal;
 use crate::service::CoreService;
-use crate::works::{
+// The request DTOs live at the crate root, not in `works`.
+use crate::{
     ArchivePoolRequest, PromotePoolRequest, UpdateFindingRequest, WorkDetails, WorkPatchRequest,
 };
 use nexus_home_layout::active_context::{read_active_creator_id, read_active_workspace_slug};
@@ -722,7 +722,7 @@ async fn execute_schedule_status(
     let record = works::get_work(context.pool(), creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
-        .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "work".into(), "work not found or cross-creator access denied".to_string(),) })?;
+        .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "work", "work not found or cross-creator access denied") })?;
 
     let schedule_ids: Vec<serde_json::Value> =
         serde_json::from_str(&record.schedule_ids).unwrap_or_default();
@@ -760,7 +760,7 @@ async fn execute_context_assemble(
         let _record = works::get_work(context.pool(), creator_id, work_id)
             .await
             .map_err(|e| NexusApiError::Internal { category: format!("DATABASE_ERROR: {}", e.to_string()) })?
-            .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "work".into(), "work not found or cross-creator access denied".to_string(),) })?;
+            .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "work", "work not found or cross-creator access denied") })?;
     }
 
     // Local-only assembly subset
@@ -791,7 +791,7 @@ async fn execute_read_file(
 
     let workspace_path_str = context
         .workspace_path()
-        .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "tool_execution".into(), "fs/* tools require an active workspace".into(),) })?;
+        .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "tool_execution", "fs/* tools require an active workspace") })?;
 
     let workspace_path = Path::new(&workspace_path_str).to_path_buf();
     let resolved = resolve_guarded_path_async(workspace_path, path_str.clone(), true)
@@ -842,7 +842,7 @@ async fn execute_write_file(
 
     let workspace_path_str = context
         .workspace_path()
-        .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "tool_execution".into(), "fs/* tools require an active workspace".into(),) })?;
+        .ok_or_else(|| NexusApiError::Forbidden { resource: format!("{}: {}", "tool_execution", "fs/* tools require an active workspace") })?;
 
     let workspace_path = Path::new(&workspace_path_str).to_path_buf();
     let resolved = resolve_guarded_path_async(workspace_path, path_str.clone(), false)

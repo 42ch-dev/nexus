@@ -347,10 +347,17 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
         workspace_executor: None,
     };
     let (registry, outcome) = CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &scan_root);
-    assert!(
-        outcome.admitted.iter().any(|n| n == "t3.requires.thing"),
-        "the fixture capability must be admitted: {outcome:?}"
-    );
+    {
+        use nexus_orchestration::capability::Capability as _;
+        assert!(
+            outcome
+                .admitted
+                .iter()
+                .any(|c| c.name() == "t3.requires.thing"),
+            "the fixture capability must be admitted: {} skipped",
+            outcome.skipped.len()
+        );
+    }
 
     let mut context = f.context.clone();
     context.set_user_capabilities(Some(
